@@ -101,6 +101,11 @@ export function RegisterScreen({ navigation }: Props) {
           <Text style={[styles.successBody, { color: isDark ? colors.mutedDark : colors.muted }]}>
             Sua conta foi criada e está aguardando aprovação da nossa equipe.
           </Text>
+          <PrimaryButton
+            label="Ir para o Login"
+            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Login' }] })}
+            style={styles.submitButton}
+          />
         </View>
       </SafeAreaView>
     );
@@ -217,10 +222,10 @@ export function RegisterScreen({ navigation }: Props) {
         />
 
         <Text
-          style={[styles.homeLink, { color: colors.primary }]}
-          onPress={() => navigation.navigate('Home')}
+          style={[styles.homeLink, { color: isDark ? colors.primaryDark : colors.primary }]}
+          onPress={() => navigation.navigate('Login')}
         >
-          Ver telas do app (demonstração)
+          Já tem conta? Entrar
         </Text>
       </ScrollView>
     </SafeAreaView>
