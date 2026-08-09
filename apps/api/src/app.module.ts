@@ -16,6 +16,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { PricingModule } from './pricing/pricing.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { ServiceTypesModule } from './service-types/service-types.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     GoogleMapsModule,
     CompanyAddressModule,
     DeliveriesModule,
+    ServiceTypesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

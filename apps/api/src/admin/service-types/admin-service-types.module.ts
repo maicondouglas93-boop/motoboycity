@@ -5,5 +5,6 @@ import { AdminServiceTypesService } from './admin-service-types.service';
 @Module({
   controllers: [AdminServiceTypesController],
   providers: [AdminServiceTypesService],
+  exports: [AdminServiceTypesService],
 })
 export class AdminServiceTypesModule {}

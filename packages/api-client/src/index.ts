@@ -5,3 +5,5 @@ export * from './admin-drivers';
 export * from './admin-service-types';
 export * from './admin-pricing-tables';
 export * from './admin-platform-settings';
+export * from './deliveries';
+export * from './company-address';
