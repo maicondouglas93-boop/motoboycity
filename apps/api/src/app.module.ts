@@ -10,6 +10,7 @@ import { AdminServiceTypesModule } from './admin/service-types/admin-service-typ
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PricingModule } from './pricing/pricing.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 
@@ -27,6 +28,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     AdminServiceTypesModule,
     AdminPricingTablesModule,
     AdminPlatformSettingsModule,
+    PricingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
