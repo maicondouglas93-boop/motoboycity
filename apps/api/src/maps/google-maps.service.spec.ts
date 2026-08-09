@@ -44,51 +44,47 @@ describe('GoogleMapsService', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('retorna distância em km e duração em minutos numa resposta OK', async () => {
+  it('retorna distância em km e duração em minutos numa resposta válida', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(
-      jsonResponse({
-        status: 'OK',
-        routes: [{ legs: [{ distance: { value: 5200 }, duration: { value: 630 } }] }],
-      }),
-    );
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 5200, duration: '630s' }] }));
 
     const result = await service.getDistance(request);
 
     expect(result).toEqual({ distanceKm: 5.2, durationMinutes: 11 });
   });
 
-  it('inclui a chave e as coordenadas na URL da requisição', async () => {
+  it('envia a chave no header X-Goog-Api-Key e as coordenadas no corpo da requisição', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(
-      jsonResponse({ status: 'OK', routes: [{ legs: [{ distance: { value: 1000 }, duration: { value: 60 } }] }] }),
-    );
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 1000, duration: '60s' }] }));
 
     await service.getDistance(request);
 
-    const calledUrl = fetchSpy.mock.calls[0][0] as URL;
-    expect(calledUrl.searchParams.get('key')).toBe('fake-api-key');
-    expect(calledUrl.searchParams.get('origin')).toBe('-23.55,-46.63');
-    expect(calledUrl.searchParams.get('destination')).toBe('-23.56,-46.64');
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://routes.googleapis.com/directions/v2:computeRoutes');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)['X-Goog-Api-Key']).toBe('fake-api-key');
+    expect((init.headers as Record<string, string>)['X-Goog-FieldMask']).toBe(
+      'routes.distanceMeters,routes.duration',
+    );
+
+    const body = JSON.parse(init.body as string);
+    expect(body.origin.location.latLng).toEqual({ latitude: -23.55, longitude: -46.63 });
+    expect(body.destination.location.latLng).toEqual({ latitude: -23.56, longitude: -46.64 });
+    expect(body.travelMode).toBe('DRIVE');
   });
 
-  it('lança GoogleMapsApiError quando o HTTP não é ok', async () => {
+  it('lança GoogleMapsApiError com a mensagem do Google quando o HTTP não é ok', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({}, false, 500));
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ error: { code: 403, message: 'API key not valid.', status: 'PERMISSION_DENIED' } }, false, 403),
+    );
 
-    await expect(service.getDistance(request)).rejects.toBeInstanceOf(GoogleMapsApiError);
+    await expect(service.getDistance(request)).rejects.toThrow('API key not valid.');
   });
 
-  it('lança GoogleMapsApiError quando o status do corpo não é OK (ex.: REQUEST_DENIED)', async () => {
+  it('lança GoogleMapsApiError quando a resposta não tem rota (routes vazio)', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({ status: 'REQUEST_DENIED' }));
-
-    await expect(service.getDistance(request)).rejects.toThrow('REQUEST_DENIED');
-  });
-
-  it('lança GoogleMapsApiError quando a resposta não tem rota (ex.: ZERO_RESULTS)', async () => {
-    config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({ status: 'OK', routes: [] }));
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [] }));
 
     await expect(service.getDistance(request)).rejects.toBeInstanceOf(GoogleMapsApiError);
   });
