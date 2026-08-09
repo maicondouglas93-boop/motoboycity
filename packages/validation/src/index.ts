@@ -7,4 +7,5 @@ export * from './admin/list-service-types-query.schema';
 export * from './admin/create-service-type.schema';
 export * from './admin/update-service-type.schema';
 export * from './admin/create-pricing-table.schema';
+export * from './admin/list-pricing-tables-query.schema';
 export * from './admin/update-platform-settings.schema';
