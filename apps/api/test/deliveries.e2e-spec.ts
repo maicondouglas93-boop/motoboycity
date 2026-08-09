@@ -1,0 +1,284 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { AppModule } from './../src/app.module';
+import { GoogleMapsService } from './../src/maps/google-maps.service';
+import { PrismaService } from './../src/prisma/prisma.service';
+
+const uniqueSuffix = Date.now();
+const password = 'senhaSegura123';
+
+const companyAEmail = `teste.deliveries.a.${uniqueSuffix}@example.com`;
+const companyADocument = `4001234${String(uniqueSuffix).slice(-4)}`;
+const companyBEmail = `teste.deliveries.b.${uniqueSuffix}@example.com`;
+const companyBDocument = `4001235${String(uniqueSuffix).slice(-4)}`;
+const companyCEmail = `teste.deliveries.c.${uniqueSuffix}@example.com`;
+const companyCDocument = `4001236${String(uniqueSuffix).slice(-4)}`;
+const driverEmail = `teste.deliveries.driver.${uniqueSuffix}@example.com`;
+const driverCpf = `666${String(uniqueSuffix).slice(-8)}`;
+const serviceTypeCode = `TEST_DLV_${uniqueSuffix}`;
+
+const adminEmail = process.env['ADMIN_SEED_EMAIL'] ?? 'admin@motoboycity.local';
+const adminPassword = process.env['ADMIN_SEED_PASSWORD'] ?? 'admin_dev_only_change_me';
+
+const validDropoff = {
+  street: 'Rua do Cliente',
+  number: '200',
+  city: 'Lajinha',
+  state: 'MG',
+  zip: '36930000',
+};
+
+describe('DeliveriesController (e2e)', () => {
+  let app: INestApplication<App>;
+  let prisma: PrismaService;
+
+  let adminToken: string;
+  let companyAToken: string;
+  let companyBToken: string;
+  let companyCToken: string;
+  let driverToken: string;
+  let serviceTypeId: string;
+  let deliveryId: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(GoogleMapsService)
+      .useValue({ getDistance: async () => ({ distanceKm: 5, durationMinutes: 20 }) })
+      .compile();
+
+    app = moduleFixture.createNestApplication();
+    prisma = moduleFixture.get(PrismaService);
+    await app.init();
+
+    const server = app.getHttpServer();
+
+    const adminLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: adminEmail, password: adminPassword });
+    adminToken = adminLogin.body.accessToken;
+
+    async function registerLoginAndApproveCompany(email: string, document: string) {
+      const register = await request(server)
+        .post('/auth/register/company')
+        .send({
+          name: 'Dono Teste E2E',
+          email,
+          phone: '33999887766',
+          document,
+          legalName: `${email} LTDA`,
+          tradeName: email,
+          password,
+        });
+      await request(server)
+        .patch(`/admin/companies/${register.body.companyId}/approve`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      const login = await request(server).post('/auth/login').send({ email, password });
+      return login.body.accessToken as string;
+    }
+
+    companyAToken = await registerLoginAndApproveCompany(companyAEmail, companyADocument);
+    companyBToken = await registerLoginAndApproveCompany(companyBEmail, companyBDocument);
+    companyCToken = await registerLoginAndApproveCompany(companyCEmail, companyCDocument);
+
+    await request(server)
+      .put('/company/address')
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .send({ street: 'Rua da Loja A', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+    await request(server)
+      .put('/company/address')
+      .set('Authorization', `Bearer ${companyBToken}`)
+      .send({ street: 'Rua da Loja B', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+    // Empresa C fica sem endereço de propósito, pra testar o erro.
+
+    await request(server).post('/auth/register/driver').send({
+      name: 'Driver Teste E2E',
+      email: driverEmail,
+      phone: '33999887799',
+      cpf: driverCpf,
+      birthDate: '1990-05-20',
+      pixKey: driverEmail,
+      pixKeyType: 'EMAIL',
+      hasCnpj: false,
+      password,
+    });
+    const driverLogin = await request(server).post('/auth/login').send({ email: driverEmail, password });
+    driverToken = driverLogin.body.accessToken;
+
+    const serviceTypeResponse = await request(server)
+      .post('/admin/service-types')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ code: serviceTypeCode, name: 'Serviço Teste Deliveries E2E' });
+    serviceTypeId = serviceTypeResponse.body.id;
+
+    await request(server)
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceTypeId, baseFee: 5, perKmFee: 1.5, returnFee: 3 });
+
+    await request(server)
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ driverCommissionPercentage: 80 });
+  });
+
+  afterAll(async () => {
+    await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
+    await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
+    await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+
+    for (const document of [companyADocument, companyBDocument, companyCDocument]) {
+      await prisma.companyAddress.deleteMany({ where: { company: { document } } });
+      await prisma.companyTeamMember.deleteMany({ where: { company: { document } } });
+      await prisma.company.deleteMany({ where: { document } });
+    }
+    for (const email of [companyAEmail, companyBEmail, companyCEmail]) {
+      await prisma.user.deleteMany({ where: { email } });
+    }
+    await prisma.driver.deleteMany({ where: { user: { email: driverEmail } } });
+    await prisma.user.deleteMany({ where: { email: driverEmail } });
+    await app.close();
+  });
+
+  it('rejeita criação sem token com 401', async () => {
+    await request(app.getHttpServer())
+      .post('/deliveries')
+      .send({ serviceTypeId, dropoffAddress: validDropoff })
+      .expect(401);
+  });
+
+  it('rejeita criação por motoboy com 403', async () => {
+    await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${driverToken}`)
+      .send({ serviceTypeId, dropoffAddress: validDropoff })
+      .expect(403);
+  });
+
+  it('rejeita criação por admin com 403 (CompanyOnlyGuard)', async () => {
+    await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceTypeId, dropoffAddress: validDropoff })
+      .expect(403);
+  });
+
+  it('rejeita criação de empresa sem endereço de coleta cadastrado com 409', async () => {
+    await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${companyCToken}`)
+      .send({ serviceTypeId, dropoffAddress: validDropoff })
+      .expect(409);
+  });
+
+  it('empresa A cria um pedido, com valores calculados corretamente', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .send({ serviceTypeId, dropoffAddress: validDropoff })
+      .expect(201);
+
+    deliveryId = response.body.id;
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        status: 'AWAITING_DRIVER',
+        distanceKm: 5,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+        requiresReturn: false,
+        returnValue: null,
+      }),
+    );
+    expect(response.body.addresses).toHaveLength(2);
+  });
+
+  it('empresa A cria um segundo pedido com requiresReturn, valor de retorno é somado sem comissão da plataforma', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .send({ serviceTypeId, dropoffAddress: validDropoff, requiresReturn: true })
+      .expect(201);
+
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        totalValue: 15.5,
+        driverValue: 13,
+        platformValue: 2.5,
+        requiresReturn: true,
+        returnValue: 3,
+      }),
+    );
+  });
+
+  it('empresa A lista e vê o próprio pedido', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/deliveries')
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .expect(200);
+
+    expect(
+      (response.body as Array<{ id: string }>).some((delivery) => delivery.id === deliveryId),
+    ).toBe(true);
+  });
+
+  it('empresa B não vê o pedido da empresa A na listagem', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/deliveries')
+      .set('Authorization', `Bearer ${companyBToken}`)
+      .expect(200);
+
+    expect(
+      (response.body as Array<{ id: string }>).some((delivery) => delivery.id === deliveryId),
+    ).toBe(false);
+  });
+
+  it('empresa B não consegue ver o detalhe do pedido da empresa A (403)', async () => {
+    await request(app.getHttpServer())
+      .get(`/deliveries/${deliveryId}`)
+      .set('Authorization', `Bearer ${companyBToken}`)
+      .expect(403);
+  });
+
+  it('empresa B não consegue cancelar o pedido da empresa A (403)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/deliveries/${deliveryId}/cancel`)
+      .set('Authorization', `Bearer ${companyBToken}`)
+      .expect(403);
+  });
+
+  it('admin vê o pedido da empresa A no detalhe', async () => {
+    await request(app.getHttpServer())
+      .get(`/deliveries/${deliveryId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+  });
+
+  it('empresa A cancela o próprio pedido enquanto ainda está AWAITING_DRIVER', async () => {
+    const response = await request(app.getHttpServer())
+      .patch(`/deliveries/${deliveryId}/cancel`)
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .expect(200);
+
+    expect(response.body.status).toBe('CANCELLED');
+  });
+
+  it('rejeita cancelar de novo um pedido já CANCELLED (409)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/deliveries/${deliveryId}/cancel`)
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .expect(409);
+  });
+
+  it('retorna 404 para pedido inexistente', async () => {
+    await request(app.getHttpServer())
+      .get('/deliveries/00000000-0000-0000-0000-000000000000')
+      .set('Authorization', `Bearer ${companyAToken}`)
+      .expect(404);
+  });
+});

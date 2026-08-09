@@ -8,6 +8,8 @@ import { AdminPlatformSettingsModule } from './admin/platform-settings/admin-pla
 import { AdminPricingTablesModule } from './admin/pricing-tables/admin-pricing-tables.module';
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
+import { CompanyAddressModule } from './company/company-address.module';
+import { DeliveriesModule } from './deliveries/deliveries.module';
 import { HealthModule } from './health/health.module';
 import { GoogleMapsModule } from './maps/google-maps.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -31,6 +33,8 @@ import { RealtimeModule } from './realtime/realtime.module';
     AdminPlatformSettingsModule,
     PricingModule,
     GoogleMapsModule,
+    CompanyAddressModule,
+    DeliveriesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
