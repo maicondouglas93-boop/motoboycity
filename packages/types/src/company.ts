@@ -12,9 +12,13 @@ export interface AdminCompanyListItem {
     email: string;
     phone: string;
   } | null;
+  approvedBy: { id: string; name: string } | null;
+  approvedAt: string | null;
 }
 
 export interface ApproveCompanyResult {
   companyId: string;
   status: CompanyStatus;
+  approvedByUserId: string;
+  approvedAt: string;
 }

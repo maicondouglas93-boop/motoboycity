@@ -5,6 +5,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 export interface ApproveCompanyResult {
   companyId: string;
   status: string;
+  approvedByUserId: string;
+  approvedAt: string;
 }
 
 export interface AdminCompanyListItem {
@@ -15,6 +17,8 @@ export interface AdminCompanyListItem {
   status: string;
   createdAt: string;
   owner: { name: string; email: string; phone: string } | null;
+  approvedBy: { id: string; name: string } | null;
+  approvedAt: string | null;
 }
 
 @Injectable()
@@ -31,6 +35,7 @@ export class AdminCompaniesService {
           include: { user: true },
           take: 1,
         },
+        approvedBy: true,
       },
     });
 
@@ -44,11 +49,15 @@ export class AdminCompaniesService {
         status: company.status,
         createdAt: company.createdAt.toISOString(),
         owner: owner ? { name: owner.name, email: owner.email, phone: owner.phone } : null,
+        approvedBy: company.approvedBy
+          ? { id: company.approvedBy.id, name: company.approvedBy.name }
+          : null,
+        approvedAt: company.approvedAt?.toISOString() ?? null,
       };
     });
   }
 
-  async approve(companyId: string): Promise<ApproveCompanyResult> {
+  async approve(companyId: string, approvedByUserId: string): Promise<ApproveCompanyResult> {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) {
       throw new NotFoundException('Empresa não encontrada.');
@@ -60,11 +69,17 @@ export class AdminCompaniesService {
       );
     }
 
+    const approvedAt = new Date();
     const updated = await this.prisma.company.update({
       where: { id: companyId },
-      data: { status: 'ACTIVE' },
+      data: { status: 'ACTIVE', approvedByUserId, approvedAt },
     });
 
-    return { companyId: updated.id, status: updated.status };
+    return {
+      companyId: updated.id,
+      status: updated.status,
+      approvedByUserId,
+      approvedAt: approvedAt.toISOString(),
+    };
   }
 }

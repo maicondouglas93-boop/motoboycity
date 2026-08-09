@@ -1,6 +1,8 @@
 import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { listCompaniesQuerySchema, type ListCompaniesQuery } from '@motoboycity/validation';
+import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
+import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import {
@@ -22,7 +24,7 @@ export class AdminCompaniesController {
   }
 
   @Patch(':id/approve')
-  approve(@Param('id') id: string): Promise<ApproveCompanyResult> {
-    return this.adminCompaniesService.approve(id);
+  approve(@Param('id') id: string, @CurrentUser() admin: User): Promise<ApproveCompanyResult> {
+    return this.adminCompaniesService.approve(id, admin.id);
   }
 }

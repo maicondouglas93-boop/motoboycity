@@ -18,6 +18,7 @@ describe('AdminCompaniesController (e2e)', () => {
   let prisma: PrismaService;
   let companyId: string;
   let adminToken: string;
+  let adminUserId: string;
   let companyOwnerToken: string;
 
   beforeAll(async () => {
@@ -46,6 +47,7 @@ describe('AdminCompaniesController (e2e)', () => {
       .post('/auth/login')
       .send({ email: adminEmail, password: adminPassword });
     adminToken = adminLogin.body.accessToken;
+    adminUserId = adminLogin.body.user.id;
 
     const ownerLogin = await request(app.getHttpServer())
       .post('/auth/login')
@@ -117,16 +119,34 @@ describe('AdminCompaniesController (e2e)', () => {
       .expect(403);
   });
 
-  it('admin aprova a empresa PENDING_APPROVAL com sucesso', async () => {
+  it('admin aprova a empresa PENDING_APPROVAL com sucesso, gravando quem e quando', async () => {
     const response = await request(app.getHttpServer())
       .patch(`/admin/companies/${companyId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200);
 
-    expect(response.body).toEqual({ companyId, status: 'ACTIVE' });
+    expect(response.body).toEqual({
+      companyId,
+      status: 'ACTIVE',
+      approvedByUserId: adminUserId,
+      approvedAt: expect.any(String),
+    });
 
     const company = await prisma.company.findUnique({ where: { id: companyId } });
     expect(company?.status).toBe('ACTIVE');
+    expect(company?.approvedByUserId).toBe(adminUserId);
+    expect(company?.approvedAt).toBeInstanceOf(Date);
+
+    const listResponse = await request(app.getHttpServer())
+      .get('/admin/companies')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const approvedCompany = (
+      listResponse.body as Array<{ id: string; approvedBy: { id: string; name: string } | null }>
+    ).find((c) => c.id === companyId);
+    expect(approvedCompany?.approvedBy).toEqual(
+      expect.objectContaining({ id: adminUserId }),
+    );
   });
 
   it('rejeita aprovar novamente uma empresa já ACTIVE com 409', async () => {
