@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminCompaniesModule } from './admin/companies/admin-companies.module';
 import { AdminDriversModule } from './admin/drivers/admin-drivers.module';
+import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -21,6 +22,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     AuthModule,
     AdminCompaniesModule,
     AdminDriversModule,
+    AdminServiceTypesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

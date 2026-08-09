@@ -212,6 +212,7 @@ model User {
   deliveryStatusChanges DeliveryStatusHistory[]
   companiesApproved     Company[]                @relation("CompanyApprovedBy")
   driversReviewed       Driver[]                 @relation("DriverReviewedBy")
+  platformSettingsEdits PlatformSettings[]       @relation("PlatformSettingsUpdatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -768,13 +769,41 @@ model PricingTable {
   perKmFee      Decimal  @db.Decimal(10, 2)
   minimumFee    Decimal? @db.Decimal(10, 2)
 
+  /// Acréscimo fixo de "retorno ao local de coleta" (não proporcional à
+  /// distância). Null = este serviço não tem retorno pago configurado nesta
+  /// região; requiresReturn não pode ser usado em Delivery até isso existir.
+  returnFee Decimal? @db.Decimal(10, 2)
+
+  /// Só uma PricingTable por (regionId, serviceTypeId) fica active=true por
+  /// vez — valores são congelados no Delivery na criação, então mudar preço
+  /// é criar uma nova linha e desativar a anterior, nunca editar em lugar.
+  active Boolean @default(true)
+
   region      Region      @relation(fields: [regionId], references: [id])
   serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
 
   createdAt DateTime @default(now())
 
   @@index([regionId, serviceTypeId])
+  @@index([regionId, serviceTypeId, active])
   @@map("pricing_tables")
+}
+
+model PlatformSettings {
+  id String @id @default("global")
+
+  /// Percentual do valor base+distância repassado ao entregador (ex.: 80.00
+  /// = entregador fica com 80%, plataforma com 20%). Não cobre o valor de
+  /// retorno, que é sempre 100% do entregador. Null = ainda não configurado
+  /// pelo admin — nenhum cálculo de preço pode assumir um valor default.
+  driverCommissionPercentage Decimal? @db.Decimal(5, 2)
+
+  updatedByUserId String?
+  updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
 }
 
 /// Sobretaxa configurável (chuva, horário de pico, etc.) — generalização
