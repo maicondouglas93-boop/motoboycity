@@ -9,6 +9,7 @@ import { AdminPricingTablesModule } from './admin/pricing-tables/admin-pricing-t
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
+import { GoogleMapsModule } from './maps/google-maps.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PricingModule } from './pricing/pricing.module';
 import { QueueModule } from './queue/queue.module';
@@ -29,6 +30,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     AdminPricingTablesModule,
     AdminPlatformSettingsModule,
     PricingModule,
+    GoogleMapsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
