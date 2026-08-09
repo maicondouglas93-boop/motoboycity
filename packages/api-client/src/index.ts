@@ -7,3 +7,4 @@ export * from './admin-pricing-tables';
 export * from './admin-platform-settings';
 export * from './deliveries';
 export * from './company-address';
+export * from './service-types';

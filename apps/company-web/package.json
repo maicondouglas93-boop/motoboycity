@@ -13,6 +13,7 @@
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@motoboycity/api-client": "workspace:*",
+    "@motoboycity/types": "workspace:*",
     "@motoboycity/validation": "workspace:*",
     "@tanstack/react-query": "^5.65.1",
     "class-variance-authority": "^0.7.1",
