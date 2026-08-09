@@ -6,6 +6,7 @@ const SETTINGS_ID = 'global';
 
 export interface PlatformSettingsItem {
   driverCommissionPercentage: number | null;
+  dispatchOfferTimeoutSeconds: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -21,19 +22,15 @@ export class AdminPlatformSettingsService {
     });
 
     if (!settings) {
-      return { driverCommissionPercentage: null, updatedBy: null, updatedAt: null };
+      return {
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: null,
+        updatedBy: null,
+        updatedAt: null,
+      };
     }
 
-    return {
-      driverCommissionPercentage:
-        settings.driverCommissionPercentage === null
-          ? null
-          : Number(settings.driverCommissionPercentage),
-      updatedBy: settings.updatedBy
-        ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
-        : null,
-      updatedAt: settings.updatedAt.toISOString(),
-    };
+    return this.toItem(settings);
   }
 
   async update(
@@ -42,17 +39,39 @@ export class AdminPlatformSettingsService {
   ): Promise<PlatformSettingsItem> {
     const settings = await this.prisma.platformSettings.upsert({
       where: { id: SETTINGS_ID },
-      update: { driverCommissionPercentage: payload.driverCommissionPercentage, updatedByUserId },
+      update: {
+        ...(payload.driverCommissionPercentage !== undefined && {
+          driverCommissionPercentage: payload.driverCommissionPercentage,
+        }),
+        ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
+          dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
+        }),
+        updatedByUserId,
+      },
       create: {
         id: SETTINGS_ID,
         driverCommissionPercentage: payload.driverCommissionPercentage,
+        dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
         updatedByUserId,
       },
       include: { updatedBy: true },
     });
 
+    return this.toItem(settings);
+  }
+
+  private toItem(settings: {
+    driverCommissionPercentage: { toString(): string } | null;
+    dispatchOfferTimeoutSeconds: number | null;
+    updatedBy: { id: string; name: string } | null;
+    updatedAt: Date;
+  }): PlatformSettingsItem {
     return {
-      driverCommissionPercentage: Number(settings.driverCommissionPercentage),
+      driverCommissionPercentage:
+        settings.driverCommissionPercentage === null
+          ? null
+          : Number(settings.driverCommissionPercentage),
+      dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

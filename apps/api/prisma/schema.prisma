@@ -804,6 +804,12 @@ model PlatformSettings {
   /// pelo admin — nenhum cálculo de preço pode assumir um valor default.
   driverCommissionPercentage Decimal? @db.Decimal(5, 2)
 
+  /// Tempo (segundos) que o motoboy tem pra responder uma oferta de
+  /// despacho antes de expirar e passar pro próximo da fila. Null =
+  /// ainda não configurado — criação de pedido AWAITING_DRIVER falha com
+  /// erro claro em vez de usar um valor inventado.
+  dispatchOfferTimeoutSeconds Int?
+
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
 

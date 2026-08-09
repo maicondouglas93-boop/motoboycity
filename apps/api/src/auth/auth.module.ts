@@ -22,5 +22,6 @@ const JWT_EXPIRES_IN = '7d';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
+  exports: [JwtModule],
 })
 export class AuthModule {}
