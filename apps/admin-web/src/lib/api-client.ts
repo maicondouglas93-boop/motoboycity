@@ -5,6 +5,7 @@ import {
   createAdminPricingTablesApi,
   createAdminServiceTypesApi,
   createAuthApi,
+  createDeliveriesApi,
 } from '@motoboycity/api-client';
 
 const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
@@ -15,3 +16,4 @@ export const adminDriversApi = createAdminDriversApi({ baseUrl });
 export const adminServiceTypesApi = createAdminServiceTypesApi({ baseUrl });
 export const adminPricingTablesApi = createAdminPricingTablesApi({ baseUrl });
 export const adminPlatformSettingsApi = createAdminPlatformSettingsApi({ baseUrl });
+export const deliveriesApi = createDeliveriesApi({ baseUrl });
