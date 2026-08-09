@@ -5,11 +5,11 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 const FIELD_MASK = 'routes.distanceMeters,routes.duration';
 
+export type MapsWaypoint = { lat: number; lng: number } | { address: string };
+
 export interface DistanceRequest {
-  originLat: number;
-  originLng: number;
-  destinationLat: number;
-  destinationLng: number;
+  origin: MapsWaypoint;
+  destination: MapsWaypoint;
 }
 
 export interface DistanceResult {
@@ -48,6 +48,13 @@ interface RoutesApiResponse {
   error?: { code: number; message: string; status: string };
 }
 
+function toWaypointPayload(point: MapsWaypoint): Record<string, unknown> {
+  if ('address' in point) {
+    return { address: point.address };
+  }
+  return { location: { latLng: { latitude: point.lat, longitude: point.lng } } };
+}
+
 /**
  * Wrapper fino sobre a Routes API do Google Maps (computeRoutes) — não a
  * Directions API legada, que o Google não habilita mais por padrão em
@@ -80,10 +87,8 @@ export class GoogleMapsService {
           'X-Goog-FieldMask': FIELD_MASK,
         },
         body: JSON.stringify({
-          origin: { location: { latLng: { latitude: request.originLat, longitude: request.originLng } } },
-          destination: {
-            location: { latLng: { latitude: request.destinationLat, longitude: request.destinationLng } },
-          },
+          origin: toWaypointPayload(request.origin),
+          destination: toWaypointPayload(request.destination),
           travelMode: 'DRIVE',
         }),
       });

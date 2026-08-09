@@ -20,7 +20,10 @@ describe('GoogleMapsService', () => {
   let config: { get: jest.Mock };
   let fetchSpy: jest.SpyInstance;
 
-  const request = { originLat: -23.55, originLng: -46.63, destinationLat: -23.56, destinationLng: -46.64 };
+  const request = {
+    origin: { lat: -23.55, lng: -46.63 },
+    destination: { lat: -23.56, lng: -46.64 },
+  };
 
   beforeEach(async () => {
     config = { get: jest.fn() };
@@ -71,6 +74,21 @@ describe('GoogleMapsService', () => {
     expect(body.origin.location.latLng).toEqual({ latitude: -23.55, longitude: -46.63 });
     expect(body.destination.location.latLng).toEqual({ latitude: -23.56, longitude: -46.64 });
     expect(body.travelMode).toBe('DRIVE');
+  });
+
+  it('aceita endereço em texto em vez de coordenadas (origem e destino independentes)', async () => {
+    config.get.mockReturnValue('fake-api-key');
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 3000, duration: '300s' }] }));
+
+    await service.getDistance({
+      origin: { address: 'Av. Paulista, 1000, São Paulo - SP' },
+      destination: { lat: -23.56, lng: -46.64 },
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.origin).toEqual({ address: 'Av. Paulista, 1000, São Paulo - SP' });
+    expect(body.destination.location.latLng).toEqual({ latitude: -23.56, longitude: -46.64 });
   });
 
   it('lança GoogleMapsApiError com a mensagem do Google quando o HTTP não é ok', async () => {

@@ -487,6 +487,12 @@ model Delivery {
   requiresCollectionRecipient    Boolean @default(false)
   pickupSurchargeChargedToDriver Boolean @default(false)
 
+  /// Retorno ao local de coleta: flag marcada pela empresa na criação +
+  /// valor congelado (de PricingTable.returnFee no momento da criação).
+  /// Não é um DeliveryStatus novo — acontece entre DELIVERED e COMPLETED.
+  requiresReturn Boolean  @default(false)
+  returnValue    Decimal? @db.Decimal(10, 2)
+
   company     Company     @relation(fields: [companyId], references: [id])
   driver      Driver?     @relation(fields: [driverId], references: [id])
   serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
