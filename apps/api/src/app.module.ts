@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DispatchModule } from './dispatch/dispatch.module';
+import { DriverPresenceModule } from './driver-presence/driver-presence.module';
 import { HealthModule } from './health/health.module';
 import { GoogleMapsModule } from './maps/google-maps.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -37,6 +38,7 @@ import { ServiceTypesModule } from './service-types/service-types.module';
     GoogleMapsModule,
     CompanyAddressModule,
     DispatchModule,
+    DriverPresenceModule,
     DeliveriesModule,
     ServiceTypesModule,
   ],

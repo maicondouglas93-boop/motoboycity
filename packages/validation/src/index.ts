@@ -10,5 +10,6 @@ export * from './admin/create-pricing-table.schema';
 export * from './admin/list-pricing-tables-query.schema';
 export * from './admin/update-platform-settings.schema';
 export * from './company/upsert-company-address.schema';
+export * from './driver/set-driver-presence.schema';
 export * from './deliveries/create-delivery.schema';
 export * from './deliveries/list-deliveries-query.schema';
