@@ -1,0 +1,75 @@
+import type {
+  AdminDriverListItem,
+  DriverAccountStatus,
+  DriverAccountStatusResult,
+  DriverApprovalStatus,
+  DriverReviewResult,
+} from '@motoboycity/types';
+import { parseJsonOrThrow } from './api-error';
+
+export interface AdminDriversApiConfig {
+  baseUrl: string;
+}
+
+export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
+  function withAuth(accessToken: string) {
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  return {
+    async list(
+      accessToken: string,
+      filters?: { approvalStatus?: DriverApprovalStatus; accountStatus?: DriverAccountStatus },
+    ): Promise<AdminDriverListItem[]> {
+      const params = new URLSearchParams();
+      if (filters?.approvalStatus) params.set('approvalStatus', filters.approvalStatus);
+      if (filters?.accountStatus) params.set('accountStatus', filters.accountStatus);
+      const query = params.toString() ? `?${params.toString()}` : '';
+
+      const response = await fetch(`${baseUrl}/admin/drivers${query}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverListItem[]>(response);
+    },
+
+    async approve(accessToken: string, driverId: string): Promise<DriverReviewResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/approve`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverReviewResult>(response);
+    },
+
+    async reject(accessToken: string, driverId: string): Promise<DriverReviewResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/reject`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverReviewResult>(response);
+    },
+
+    async suspend(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/suspend`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverAccountStatusResult>(response);
+    },
+
+    async block(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/block`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverAccountStatusResult>(response);
+    },
+
+    async reactivate(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/reactivate`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverAccountStatusResult>(response);
+    },
+  };
+}

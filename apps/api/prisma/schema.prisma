@@ -211,6 +211,7 @@ model User {
   notifications         Notification[]
   deliveryStatusChanges DeliveryStatusHistory[]
   companiesApproved     Company[]                @relation("CompanyApprovedBy")
+  driversReviewed       Driver[]                 @relation("DriverReviewedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -328,6 +329,10 @@ model Driver {
   accountStatus  DriverAccountStatus  @default(ACTIVE)
   availability   DriverAvailability   @default(UNAVAILABLE)
   appVersion     String?
+
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewedBy       User?     @relation("DriverReviewedBy", fields: [reviewedByUserId], references: [id])
 
   /// Última posição conhecida — CACHE de conveniência (ex.: mapa do admin),
   /// não um histórico de GPS. Ver docs/architecture/phase-2a-domain-model.md
