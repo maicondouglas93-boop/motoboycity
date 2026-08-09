@@ -253,5 +253,87 @@ describe('AuthService', () => {
 
       await expect(service.login(loginPayload)).rejects.toBeInstanceOf(ForbiddenException);
     });
+
+    const driverLoginPayload = { email: 'joao@motoboycity.com.br', password: 'senhaSegura123' };
+
+    it('permite login de motoboy com aprovação PENDING e devolve driver no resultado', async () => {
+      const passwordHash = await bcrypt.hash(driverLoginPayload.password, 4);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        name: 'João Motoboy',
+        email: driverLoginPayload.email,
+        type: 'DRIVER',
+        passwordHash,
+      });
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        approvalStatus: 'PENDING',
+        accountStatus: 'ACTIVE',
+      });
+
+      const result = await service.login(driverLoginPayload);
+
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(result.driver).toEqual({ id: 'driver-1', approvalStatus: 'PENDING' });
+    });
+
+    it('permite login de motoboy aprovado e ativo', async () => {
+      const passwordHash = await bcrypt.hash(driverLoginPayload.password, 4);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        name: 'João Motoboy',
+        email: driverLoginPayload.email,
+        type: 'DRIVER',
+        passwordHash,
+      });
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+
+      const result = await service.login(driverLoginPayload);
+
+      expect(result.driver).toEqual({ id: 'driver-1', approvalStatus: 'APPROVED' });
+    });
+
+    it('rejeita login de motoboy com cadastro REJECTED', async () => {
+      const passwordHash = await bcrypt.hash(driverLoginPayload.password, 4);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        name: 'João Motoboy',
+        email: driverLoginPayload.email,
+        type: 'DRIVER',
+        passwordHash,
+      });
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        approvalStatus: 'REJECTED',
+        accountStatus: 'ACTIVE',
+      });
+
+      await expect(service.login(driverLoginPayload)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it.each(['SUSPENDED', 'BLOCKED'])(
+      'rejeita login de motoboy com accountStatus %s',
+      async (accountStatus) => {
+        const passwordHash = await bcrypt.hash(driverLoginPayload.password, 4);
+        prisma.user.findUnique.mockResolvedValue({
+          id: 'user-1',
+          name: 'João Motoboy',
+          email: driverLoginPayload.email,
+          type: 'DRIVER',
+          passwordHash,
+        });
+        prisma.driver.findUnique.mockResolvedValue({
+          id: 'driver-1',
+          approvalStatus: 'APPROVED',
+          accountStatus,
+        });
+
+        await expect(service.login(driverLoginPayload)).rejects.toBeInstanceOf(ForbiddenException);
+      },
+    );
   });
 });

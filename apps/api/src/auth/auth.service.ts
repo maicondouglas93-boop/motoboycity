@@ -32,6 +32,7 @@ export interface LoginResult {
   accessToken: string;
   user: { id: string; name: string; email: string; type: string };
   company?: { id: string; status: string };
+  driver?: { id: string; approvalStatus: string };
 }
 
 @Injectable()
@@ -160,12 +161,25 @@ export class AuthService {
       throw new ForbiddenException('Sua empresa está suspensa. Entre em contato com o suporte.');
     }
 
+    const driver = await this.findDriverForUser(user);
+    if (driver?.approvalStatus === 'REJECTED') {
+      throw new ForbiddenException(
+        'Seu cadastro de entregador foi rejeitado. Entre em contato com o suporte.',
+      );
+    }
+    if (driver?.accountStatus === 'SUSPENDED' || driver?.accountStatus === 'BLOCKED') {
+      throw new ForbiddenException(
+        'Sua conta de entregador está suspensa. Entre em contato com o suporte.',
+      );
+    }
+
     const accessToken = await this.jwtService.signAsync({ sub: user.id });
 
     return {
       accessToken,
       user: { id: user.id, name: user.name, email: user.email, type: user.type },
       ...(company && { company }),
+      ...(driver && { driver: { id: driver.id, approvalStatus: driver.approvalStatus } }),
     };
   }
 
@@ -186,5 +200,24 @@ export class AuthService {
     }
 
     return { id: membership.company.id, status: membership.company.status };
+  }
+
+  private async findDriverForUser(
+    user: User,
+  ): Promise<{ id: string; approvalStatus: string; accountStatus: string } | undefined> {
+    if (user.type !== 'DRIVER') {
+      return undefined;
+    }
+
+    const driver = await this.prisma.driver.findUnique({ where: { userId: user.id } });
+    if (!driver) {
+      return undefined;
+    }
+
+    return {
+      id: driver.id,
+      approvalStatus: driver.approvalStatus,
+      accountStatus: driver.accountStatus,
+    };
   }
 }
