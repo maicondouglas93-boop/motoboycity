@@ -1,104 +1,231 @@
-import Link from 'next/link';
-import { Copy, ExternalLink } from 'lucide-react';
+'use client';
+
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AdminDriverListItem } from '@motoboycity/types';
+import { ApiError } from '@motoboycity/api-client';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { StatCard } from '@/components/stat-card';
-import {
-  mockBlockedDrivers,
-  mockDriverSignupLink,
-  mockDriverStats,
-  mockDrivers,
-  mockPendingDrivers,
-} from '@/lib/mock-data';
+import { adminDriversApi } from '@/lib/api-client';
+import { session } from '@/lib/session';
+
+const approvalStatusLabel: Record<AdminDriverListItem['approvalStatus'], string> = {
+  PENDING: 'Pendente',
+  APPROVED: 'Aprovado',
+  REJECTED: 'Rejeitado',
+};
+
+const approvalStatusVariant: Record<
+  AdminDriverListItem['approvalStatus'],
+  'outline' | 'default' | 'destructive'
+> = {
+  PENDING: 'outline',
+  APPROVED: 'default',
+  REJECTED: 'destructive',
+};
+
+const accountStatusLabel: Record<AdminDriverListItem['accountStatus'], string> = {
+  ACTIVE: 'Ativo',
+  SUSPENDED: 'Suspenso',
+  BLOCKED: 'Bloqueado',
+};
+
+type DriverAction = 'approve' | 'reject' | 'suspend' | 'block' | 'reactivate';
 
 export default function DriversPage() {
+  const [search, setSearch] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const token = session.getToken();
+
+  const driversQuery = useQuery({
+    queryKey: ['admin', 'drivers'],
+    queryFn: () => adminDriversApi.list(token as string),
+    enabled: Boolean(token),
+  });
+
+  const actionFn: Record<DriverAction, (accessToken: string, driverId: string) => Promise<unknown>> =
+    {
+      approve: adminDriversApi.approve,
+      reject: adminDriversApi.reject,
+      suspend: adminDriversApi.suspend,
+      block: adminDriversApi.block,
+      reactivate: adminDriversApi.reactivate,
+    };
+
+  const actionMutation = useMutation({
+    mutationFn: ({ action, driverId }: { action: DriverAction; driverId: string }) =>
+      actionFn[action](token as string, driverId),
+    onSuccess: () => {
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+    },
+    onError: (error) => {
+      setActionError(error instanceof ApiError ? error.message : 'Não foi possível concluir a ação.');
+    },
+  });
+
+  if (!token) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Faça login como administrador para ver os entregadores.
+      </p>
+    );
+  }
+
+  const drivers = driversQuery.data ?? [];
+  const pendingCount = drivers.filter((d) => d.approvalStatus === 'PENDING').length;
+  const blockedCount = drivers.filter((d) => d.accountStatus !== 'ACTIVE').length;
+  const filteredDrivers = drivers.filter((driver) =>
+    `${driver.name} ${driver.email} ${driver.cpf}`.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  function isPending(driverId: string, action: DriverAction) {
+    return (
+      actionMutation.isPending &&
+      actionMutation.variables?.driverId === driverId &&
+      actionMutation.variables?.action === action
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/20">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-          <div>
-            <p className="text-sm font-medium">{mockPendingDrivers} Entregadores Pendentes</p>
-            <p className="text-xs text-muted-foreground">
-              Entregadores aguardando aprovação para começar a trabalhar
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline">Ver Pendentes</Button>
-            <div className="flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs">
-              {mockDriverSignupLink}
-              <Copy className="size-3.5 cursor-pointer" />
-              <ExternalLink className="size-3.5 cursor-pointer" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-red-300 bg-red-50 dark:bg-red-950/20">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-          <div>
-            <p className="text-sm font-medium">
-              {mockBlockedDrivers} Entregadores Suspensos/Bloqueados
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Entregadores bloqueados ou suspensos que precisam de atenção
-            </p>
-          </div>
-          <Button variant="destructive">Ver Bloqueados</Button>
-        </CardContent>
-      </Card>
-
-      <div className="flex items-center justify-between">
-        <div className="grid grid-cols-2 gap-4">
-          <StatCard label="Total de Entregas" value={mockDriverStats.totalDeliveries} />
-          <StatCard label="Online Agora" value={mockDriverStats.onlineNow} />
-        </div>
-        <Button>Novo Entregador</Button>
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard label="Total de Entregadores" value={drivers.length} />
+        <StatCard label="Entregadores Pendentes" value={pendingCount} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Entregadores Cadastrados</CardTitle>
-          </CardHeader>
-          <CardContent className="h-32 rounded bg-muted/40" />
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Ranking de Entregadores</CardTitle>
-          </CardHeader>
-          <CardContent className="h-32 rounded bg-muted/40" />
-        </Card>
-      </div>
+      <Input
+        placeholder="Buscar entregador..."
+        className="max-w-xs"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
 
-      <Input placeholder="Buscar entregador..." className="max-w-xs" />
+      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+
+      {driversQuery.isLoading && (
+        <p className="text-sm text-muted-foreground">Carregando entregadores...</p>
+      )}
+
+      {driversQuery.isError && (
+        <p className="text-sm text-destructive">Não foi possível carregar os entregadores.</p>
+      )}
+
+      {driversQuery.isSuccess && filteredDrivers.length === 0 && (
+        <p className="text-sm text-muted-foreground">Nenhum entregador encontrado.</p>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {mockDrivers.map((driver) => (
-          <Card key={driver.name}>
-            <CardContent className="space-y-2 py-4">
-              <div className="flex items-start justify-between">
+        {filteredDrivers.map((driver) => (
+          <Card key={driver.id}>
+            <CardContent className="space-y-3 py-4">
+              <div className="flex items-start justify-between gap-2">
                 <p className="font-medium">{driver.name}</p>
-                {driver.status === 'Suspenso' && <Badge variant="destructive">Suspenso</Badge>}
+                <div className="flex flex-wrap justify-end gap-1">
+                  <Badge variant={approvalStatusVariant[driver.approvalStatus]}>
+                    {approvalStatusLabel[driver.approvalStatus]}
+                  </Badge>
+                  {driver.approvalStatus === 'APPROVED' && driver.accountStatus !== 'ACTIVE' && (
+                    <Badge variant="destructive">{accountStatusLabel[driver.accountStatus]}</Badge>
+                  )}
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground">{driver.phone}</p>
-              <p className="text-xs text-muted-foreground">
-                Versão do App: {driver.appVersion} · Tipo de serviço: {driver.serviceType}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Ativo Agora: {driver.active ? 'Sim' : 'Não'} · Último local: {driver.lastSeen}
-              </p>
-              <Link
-                href={`/entregadores/${encodeURIComponent(driver.name)}`}
-                className={buttonVariants({ variant: 'outline', className: 'w-full' })}
-              >
-                Abrir Entregador
-              </Link>
+              <div className="space-y-0.5">
+                <p className="text-sm text-muted-foreground">{driver.email}</p>
+                <p className="text-sm text-muted-foreground">{driver.phone}</p>
+                <p className="text-xs text-muted-foreground">CPF: {driver.cpf}</p>
+              </div>
+              {driver.reviewedBy && (
+                <p className="text-xs text-muted-foreground">
+                  Revisado por {driver.reviewedBy.name}
+                </p>
+              )}
+
+              {driver.approvalStatus === 'PENDING' && (
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={() => actionMutation.mutate({ action: 'approve', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'approve') ? 'Aprovando...' : 'Aprovar'}
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    variant="outline"
+                    onClick={() => actionMutation.mutate({ action: 'reject', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'reject') ? 'Rejeitando...' : 'Rejeitar'}
+                  </Button>
+                </div>
+              )}
+
+              {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'ACTIVE' && (
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    variant="outline"
+                    onClick={() => actionMutation.mutate({ action: 'suspend', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'suspend') ? 'Suspendendo...' : 'Suspender'}
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    variant="destructive"
+                    onClick={() => actionMutation.mutate({ action: 'block', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'block') ? 'Bloqueando...' : 'Bloquear'}
+                  </Button>
+                </div>
+              )}
+
+              {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'SUSPENDED' && (
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={() => actionMutation.mutate({ action: 'reactivate', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    variant="destructive"
+                    onClick={() => actionMutation.mutate({ action: 'block', driverId: driver.id })}
+                    disabled={actionMutation.isPending}
+                  >
+                    {isPending(driver.id, 'block') ? 'Bloqueando...' : 'Bloquear'}
+                  </Button>
+                </div>
+              )}
+
+              {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'BLOCKED' && (
+                <Button
+                  className="w-full"
+                  onClick={() => actionMutation.mutate({ action: 'reactivate', driverId: driver.id })}
+                  disabled={actionMutation.isPending}
+                >
+                  {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {blockedCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {blockedCount} entregador(es) suspenso(s) ou bloqueado(s) na lista acima.
+        </p>
+      )}
     </div>
   );
 }
