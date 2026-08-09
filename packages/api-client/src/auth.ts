@@ -1,0 +1,54 @@
+import type {
+  LoginPayload,
+  RegisterCompanyPayload,
+  RegisterDriverPayload,
+} from '@motoboycity/validation';
+import type {
+  AuthUser,
+  LoginResult,
+  RegisterCompanyResult,
+  RegisterDriverResult,
+} from '@motoboycity/types';
+import { parseJsonOrThrow } from './api-error';
+
+export interface AuthApiConfig {
+  baseUrl: string;
+}
+
+export function createAuthApi({ baseUrl }: AuthApiConfig) {
+  return {
+    async registerCompany(payload: RegisterCompanyPayload): Promise<RegisterCompanyResult> {
+      const response = await fetch(`${baseUrl}/auth/register/company`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<RegisterCompanyResult>(response);
+    },
+
+    async registerDriver(payload: RegisterDriverPayload): Promise<RegisterDriverResult> {
+      const response = await fetch(`${baseUrl}/auth/register/driver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<RegisterDriverResult>(response);
+    },
+
+    async login(payload: LoginPayload): Promise<LoginResult> {
+      const response = await fetch(`${baseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<LoginResult>(response);
+    },
+
+    async me(accessToken: string): Promise<AuthUser> {
+      const response = await fetch(`${baseUrl}/auth/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return parseJsonOrThrow<AuthUser>(response);
+    },
+  };
+}

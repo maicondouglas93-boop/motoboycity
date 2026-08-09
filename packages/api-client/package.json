@@ -1,0 +1,25 @@
+{
+  "name": "@motoboycity/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cliente HTTP tipado compartilhado para consumo da API MOTOboyCity pelos apps front-end.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@motoboycity/types": "workspace:*",
+    "@motoboycity/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "@motoboycity/config": "workspace:*",
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.3"
+  }
+}

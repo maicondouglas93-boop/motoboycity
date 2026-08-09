@@ -1,0 +1,832 @@
+// Schema Prisma — Fase 2A (estrutura de domínio conceitual).
+//
+// Baseado em docs/architecture/phase-2a-domain-model.md.
+// Decisões provisórias aplicadas nesta fase (ver relatório da Fase 2A):
+//   - DeliveryStatus NÃO inclui RETURNING ainda (decisão funcional pendente).
+//   - Fila de despacho/presença ao vivo NÃO é modelada aqui (fica para Redis).
+//   - Nenhuma regra de negócio, endpoint ou autenticação funcional é implementada.
+//
+// Convenções aplicadas (decisão de estilo, não de negócio):
+//   - Nomes de modelo em PascalCase (Prisma) mapeados para tabelas snake_case
+//     via @@map/@map, seguindo convenção usual de PostgreSQL.
+//   - Valores monetários usam Decimal(10,2); coordenadas usam Decimal(10,7).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserType {
+  COMPANY_MEMBER
+  DRIVER
+  ADMIN
+}
+
+enum CompanyMemberRole {
+  OWNER
+  OPERATOR
+}
+
+enum CompanyStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+}
+
+enum DriverApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DriverAccountStatus {
+  ACTIVE
+  SUSPENDED
+  BLOCKED
+}
+
+enum DriverAvailability {
+  AVAILABLE
+  UNAVAILABLE
+}
+
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DriverDocumentType {
+  SELFIE
+  RG
+  CNH_FRONT
+  CNH_BACK
+  PROOF_OF_ADDRESS
+}
+
+enum VehicleDocumentType {
+  CRLV
+  VEHICLE_BACK_PHOTO
+}
+
+enum DocumentReviewStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+// NOTA: "RETURNING" (Retorno ao Local de Coleta) foi deliberadamente omitido.
+// Ver docs/architecture/phase-2a-domain-model.md, seção 15, questão 1.
+enum DeliveryStatus {
+  SCHEDULED
+  AWAITING_DRIVER
+  ACCEPTED
+  COLLECTED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  AWAITING_PAYMENT
+}
+
+enum DeliveryAddressType {
+  PICKUP
+  DROPOFF
+}
+
+enum PaymentMethod {
+  BILLED
+  ONLINE
+}
+
+enum DeliveryOfferResponse {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum WalletTransactionType {
+  CREDIT_REPASSE
+  DEBIT_WITHDRAWAL
+  DEBIT_FEE
+  CREDIT_ADVANCE_RELEASE
+  CREDIT_ADJUSTMENT
+  DEBIT_ADJUSTMENT
+  CREDIT_REFUND
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  RELEASED
+  CANCELLED
+}
+
+enum WithdrawalRequestStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum AdvanceRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum IntegrationProvider {
+  IFOOD
+  ANYFONE
+  PDV_INTEGRADO
+  DELIVERY_MUCH
+  JA_DELIVERY
+  CARDAPIO_WEB
+  ANOTA_AI
+  AIQFOME
+}
+
+enum IntegrationStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+}
+
+enum NotificationType {
+  NEW_DELIVERY_OFFER
+  DELIVERY_STATUS_CHANGED
+  INVOICE_DUE
+  WITHDRAWAL_APPROVED
+  ADVANCE_APPROVED
+  ADMIN_ALERT
+  ACCOUNT_APPROVED
+  ACCOUNT_REJECTED
+}
+
+enum NotificationChannel {
+  PUSH
+  REALTIME
+  EMAIL
+}
+
+enum SurchargeType {
+  RAIN
+  PEAK_HOUR
+  OTHER
+}
+
+// ============================================================================
+// 1. IDENTIDADE / ACESSO
+// ============================================================================
+
+/// Identidade de autenticação genérica, compartilhada pelos três perfis
+/// (empresa, entregador, admin). Nunca armazenar senha em texto puro.
+model User {
+  id           String   @id @default(uuid())
+  type         UserType
+  name         String
+  email        String   @unique
+  phone        String
+  passwordHash String
+
+  avatarExternalFileId String?
+  avatarUrl            String?
+
+  driver                Driver?
+  adminUser             AdminUser?
+  companyMemberships    CompanyTeamMember[]
+  notifications         Notification[]
+  deliveryStatusChanges DeliveryStatusHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@map("users")
+}
+
+/// Perfil de um funcionário da plataforma com acesso ao admin-web.
+/// Sem tela de permissões granulares capturada na Fase 0 — "level" é um
+/// placeholder livre, não um enum, até essa necessidade ser confirmada.
+model AdminUser {
+  id     String  @id @default(uuid())
+  userId String  @unique
+  level  String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  reviewedDriverDocuments  DriverDocument[]
+  reviewedVehicleDocuments VehicleDocument[]
+
+  createdAt DateTime @default(now())
+
+  @@map("admin_users")
+}
+
+/// Vínculo entre um User e uma Company, com papel dentro da empresa.
+model CompanyTeamMember {
+  id        String            @id @default(uuid())
+  companyId String
+  userId    String
+  role      CompanyMemberRole
+  active    Boolean           @default(true)
+
+  company Company @relation(fields: [companyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  joinedAt DateTime @default(now())
+
+  @@unique([companyId, userId])
+  @@map("company_team_members")
+}
+
+// ============================================================================
+// 2. EMPRESA
+// ============================================================================
+
+model Company {
+  id        String        @id @default(uuid())
+  legalName String
+  tradeName String
+  document  String        @unique
+  status    CompanyStatus @default(PENDING_APPROVAL)
+  regionId  String
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  teamMembers  CompanyTeamMember[]
+  addresses    CompanyAddress[]
+  deliveries   Delivery[]
+  wallet       Wallet?
+  invoices     Invoice[]
+  integrations Integration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([regionId])
+  @@map("companies")
+}
+
+/// Endereços da empresa — inclui o endereço principal de coleta
+/// (isPrimary = true) e os endereços favoritos.
+model CompanyAddress {
+  id         String   @id @default(uuid())
+  companyId  String
+  label      String?
+  street     String
+  number     String
+  complement String?
+  city       String
+  state      String
+  zip        String
+  lat        Decimal? @db.Decimal(10, 7)
+  lng        Decimal? @db.Decimal(10, 7)
+  isPrimary  Boolean  @default(false)
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@map("company_addresses")
+}
+
+// ============================================================================
+// 3. ENTREGADOR
+// ============================================================================
+
+model Driver {
+  id             String               @id @default(uuid())
+  userId         String               @unique
+  cpf            String               @unique
+  birthDate      DateTime             @db.Date
+  pixKey         String
+  pixKeyType     String
+  hasCnpj        Boolean              @default(false)
+  regionId       String
+  approvalStatus DriverApprovalStatus @default(PENDING)
+  accountStatus  DriverAccountStatus  @default(ACTIVE)
+  availability   DriverAvailability   @default(UNAVAILABLE)
+  appVersion     String?
+
+  /// Última posição conhecida — CACHE de conveniência (ex.: mapa do admin),
+  /// não um histórico de GPS. Ver docs/architecture/phase-2a-domain-model.md
+  /// seção 4 ("GPS"). Alta frequência de localização fica em Redis/realtime.
+  lastKnownLat Decimal?  @db.Decimal(10, 7)
+  lastKnownLng Decimal?  @db.Decimal(10, 7)
+  lastSeenAt   DateTime?
+
+  user   User   @relation(fields: [userId], references: [id])
+  region Region @relation(fields: [regionId], references: [id])
+
+  vehicles     Vehicle[]
+  documents    DriverDocument[]
+  wallet       Wallet?
+  serviceTypes DriverServiceType[]
+  deliveries   Delivery[]
+  offers       DeliveryOffer[]
+  presenceLogs DriverPresenceLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([approvalStatus])
+  @@index([accountStatus])
+  @@index([regionId, availability])
+  @@map("drivers")
+}
+
+/// Histórico de veículos do entregador. Regra de aplicação (não expressa
+/// como constraint de banco nesta fase): no máximo 1 veículo com
+/// status=ACTIVE por entregador. Ver questão em aberto na Fase 2A.
+model Vehicle {
+  id            String        @id @default(uuid())
+  driverId      String
+  plate         String
+  city          String
+  color         String
+  hasBagOrTrunk Boolean       @default(false)
+  status        VehicleStatus @default(ACTIVE)
+
+  driver    Driver            @relation(fields: [driverId], references: [id])
+  documents VehicleDocument[]
+
+  createdAt DateTime @default(now())
+
+  @@index([driverId, status])
+  @@map("vehicles")
+}
+
+/// Documentos pessoais do entregador. Campos condicionais (rgIssuer,
+/// cnh*) só se aplicam conforme "type" — ver nota sobre DriverIdentityInfo
+/// no relatório da Fase 2A: mantido como está por não haver exigência
+/// técnica do Prisma que force a separação; decisão sinalizada, não oculta.
+model DriverDocument {
+  id                    String               @id @default(uuid())
+  driverId              String
+  type                  DriverDocumentType
+  externalFileId        String
+  url                   String
+  reviewStatus          DocumentReviewStatus @default(PENDING_REVIEW)
+  reviewedByAdminUserId String?
+
+  rgIssuer          String?
+  cnhNumber         String?
+  cnhExpiresAt      DateTime? @db.Date
+  cnhIsPaidActivity Boolean?
+
+  driver          Driver     @relation(fields: [driverId], references: [id])
+  reviewedByAdmin AdminUser? @relation(fields: [reviewedByAdminUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([driverId, type])
+  @@map("driver_documents")
+}
+
+/// Documentos do veículo (CRLV, foto traseira) — separados de
+/// DriverDocument porque pertencem ao veículo, não à pessoa.
+model VehicleDocument {
+  id                    String               @id @default(uuid())
+  vehicleId             String
+  type                  VehicleDocumentType
+  externalFileId        String
+  url                   String
+  reviewStatus          DocumentReviewStatus @default(PENDING_REVIEW)
+  reviewedByAdminUserId String?
+
+  vehicle         Vehicle    @relation(fields: [vehicleId], references: [id])
+  reviewedByAdmin AdminUser? @relation(fields: [reviewedByAdminUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, type])
+  @@map("vehicle_documents")
+}
+
+/// Sessões de presença online/offline, para relatórios (ex.: horas online).
+/// NÃO é a fila ao vivo — isso fica em Redis, fora do Postgres.
+model DriverPresenceLog {
+  id            String    @id @default(uuid())
+  driverId      String
+  wentOnlineAt  DateTime
+  wentOfflineAt DateTime?
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@map("driver_presence_logs")
+}
+
+/// Junção N:N explícita entre Driver e ServiceType, permitindo que um
+/// entregador atenda mais de uma modalidade de serviço no futuro.
+model DriverServiceType {
+  id            String  @id @default(uuid())
+  driverId      String
+  serviceTypeId String
+  isPrimary     Boolean @default(true)
+
+  driver      Driver      @relation(fields: [driverId], references: [id])
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+
+  @@unique([driverId, serviceTypeId])
+  @@map("driver_service_types")
+}
+
+// ============================================================================
+// 4. PEDIDO
+// ============================================================================
+
+model Delivery {
+  id            String         @id @default(uuid())
+  displayNumber Int            @unique @default(autoincrement())
+  companyId     String
+  driverId      String?
+  serviceTypeId String
+  status        DeliveryStatus @default(SCHEDULED)
+
+  /// Carimbo do status atual — denormalizado para leitura rápida;
+  /// a trilha completa vive em DeliveryStatusHistory.
+  statusChangedAt DateTime  @default(now())
+  scheduledAt     DateTime?
+  distanceKm      Decimal?  @db.Decimal(6, 2)
+
+  totalValue    Decimal       @db.Decimal(10, 2)
+  driverValue   Decimal       @db.Decimal(10, 2)
+  platformValue Decimal       @db.Decimal(10, 2)
+  paymentMethod PaymentMethod
+  invoiceId     String?
+
+  requiresDeliveryProof          Boolean @default(false)
+  requiresCollectionRecipient    Boolean @default(false)
+  pickupSurchargeChargedToDriver Boolean @default(false)
+
+  company     Company     @relation(fields: [companyId], references: [id])
+  driver      Driver?     @relation(fields: [driverId], references: [id])
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+  invoice     Invoice?    @relation(fields: [invoiceId], references: [id])
+
+  addresses          DeliveryAddress[]
+  statusHistory      DeliveryStatusHistory[]
+  offers             DeliveryOffer[]
+  walletTransactions WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([driverId, status])
+  @@index([status, createdAt])
+  @@index([companyId, createdAt])
+  @@index([invoiceId])
+  @@map("deliveries")
+}
+
+/// Endereço de coleta ou de entrega de um pedido — é um snapshot
+/// (copiado no momento do pedido), não uma referência mutável a
+/// CompanyAddress.
+model DeliveryAddress {
+  id            String              @id @default(uuid())
+  deliveryId    String
+  type          DeliveryAddressType
+  street        String
+  number        String
+  complement    String?
+  city          String
+  state         String
+  zip           String
+  lat           Decimal?            @db.Decimal(10, 7)
+  lng           Decimal?            @db.Decimal(10, 7)
+  referenceNote String?
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+
+  @@index([deliveryId])
+  @@map("delivery_addresses")
+}
+
+/// Trilha de auditoria de mudança de status — fonte de verdade para
+/// cálculo de tempos médios (aceite, coleta, entrega). Append-only.
+model DeliveryStatusHistory {
+  id              String          @id @default(uuid())
+  deliveryId      String
+  fromStatus      DeliveryStatus?
+  toStatus        DeliveryStatus
+  changedAt       DateTime        @default(now())
+  changedByUserId String?
+  note            String?
+
+  delivery      Delivery @relation(fields: [deliveryId], references: [id])
+  changedByUser User?    @relation(fields: [changedByUserId], references: [id])
+
+  @@index([deliveryId])
+  @@map("delivery_status_history")
+}
+
+/// Cada oferta de um pedido a um entregador específico. Existe para
+/// permitir métricas reais de aceite/recusa sem depender da fila ao vivo
+/// (que é efêmera, em Redis).
+model DeliveryOffer {
+  id          String                @id @default(uuid())
+  deliveryId  String
+  driverId    String
+  offeredAt   DateTime              @default(now())
+  respondedAt DateTime?
+  response    DeliveryOfferResponse @default(PENDING)
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+  driver   Driver   @relation(fields: [driverId], references: [id])
+
+  @@index([driverId, response])
+  @@index([deliveryId])
+  @@map("delivery_offers")
+}
+
+// ============================================================================
+// 5. FINANCEIRO
+// ============================================================================
+
+/// Carteira de uma empresa OU de um entregador (nunca ambos, nunca
+/// nenhum). O saldo NÃO é um campo livremente editável: os campos
+/// "cached*" são cache derivado de WalletTransaction, nunca a fonte da
+/// verdade. Invariante companyId XOR driverId é validada na aplicação —
+/// Prisma não oferece suporte estável a CHECK constraints nesta versão.
+model Wallet {
+  id String @id @default(uuid())
+
+  companyId String? @unique
+  driverId  String? @unique
+
+  cachedAvailableBalance Decimal @default(0) @db.Decimal(10, 2)
+  cachedBlockedBalance   Decimal @default(0) @db.Decimal(10, 2)
+
+  company Company? @relation(fields: [companyId], references: [id])
+  driver  Driver?  @relation(fields: [driverId], references: [id])
+
+  transactions       WalletTransaction[]
+  withdrawalRequests WithdrawalRequest[]
+  advanceRequests    AdvanceRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wallets")
+}
+
+/// Lançamento financeiro — ledger append-only, fonte de verdade do saldo.
+/// Nenhuma lógica deve alterar o saldo de uma Wallet sem criar uma linha
+/// aqui.
+model WalletTransaction {
+  id       String                  @id @default(uuid())
+  walletId String
+  type     WalletTransactionType
+  status   WalletTransactionStatus @default(PENDING)
+  amount   Decimal                 @db.Decimal(10, 2)
+
+  relatedDeliveryId String?
+
+  /// Referências informativas (IDs simples, não relações Prisma) para
+  /// evitar uma segunda relação duplicada com WithdrawalRequest/
+  /// AdvanceRequest. O vínculo autoritativo saque↔transação é
+  /// WithdrawalRequest.walletTransactionId (abaixo).
+  relatedWithdrawalRequestId String?
+  relatedAdvanceRequestId    String?
+
+  releaseAt  DateTime?
+  notaFiscal String?
+
+  wallet            Wallet             @relation(fields: [walletId], references: [id])
+  delivery          Delivery?          @relation(fields: [relatedDeliveryId], references: [id])
+  withdrawalRequest WithdrawalRequest?
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId, status])
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model WithdrawalRequest {
+  id              String  @id @default(uuid())
+  walletId        String
+  requestedAmount Decimal @db.Decimal(10, 2)
+  feeAmount       Decimal @db.Decimal(10, 2)
+  netAmount       Decimal @db.Decimal(10, 2)
+
+  /// Snapshot dos dados de recebimento no momento da solicitação — ver
+  /// questão em aberto na Fase 2A sobre reaproveitar dados padrão do Driver.
+  bankName          String?
+  bankAgency        String?
+  bankAccount       String?
+  accountHolderName String?
+  pixKey            String?
+  pixKeyType        String?
+
+  status              WithdrawalRequestStatus @default(PENDING)
+  walletTransactionId String                  @unique
+
+  wallet               Wallet            @relation(fields: [walletId], references: [id])
+  walletTransaction    WalletTransaction @relation(fields: [walletTransactionId], references: [id])
+  advanceRequestOrigin AdvanceRequest?
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([walletId, status])
+  @@map("withdrawal_requests")
+}
+
+/// Ao ser aprovada, uma antecipação libera o saldo bloqueado na hora
+/// (transação CREDIT_ADVANCE_RELEASE) e o valor líquido é enviado como
+/// uma WithdrawalRequest automática (resultingWithdrawalRequestId).
+model AdvanceRequest {
+  id                           String               @id @default(uuid())
+  walletId                     String
+  blockedAmountAntecipado      Decimal              @db.Decimal(10, 2)
+  feeAmount                    Decimal              @db.Decimal(10, 2)
+  netAmount                    Decimal              @db.Decimal(10, 2)
+  status                       AdvanceRequestStatus @default(PENDING)
+  resultingWithdrawalRequestId String?              @unique
+
+  wallet                     Wallet             @relation(fields: [walletId], references: [id])
+  resultingWithdrawalRequest WithdrawalRequest? @relation(fields: [resultingWithdrawalRequestId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("advance_requests")
+}
+
+/// Agrupa pedidos faturados de uma empresa. Valores são CONGELADOS na
+/// emissão — nunca recalculados a partir dos Deliveries depois de emitida.
+model Invoice {
+  id               String         @id @default(uuid())
+  companyId        String
+  number           String         @unique
+  issueDate        DateTime       @db.Date
+  dueDate          DateTime       @db.Date
+  paymentDate      DateTime?      @db.Date
+  paymentMethod    PaymentMethod?
+  status           InvoiceStatus  @default(PENDING)
+  totalValue       Decimal        @db.Decimal(10, 2)
+  driverValueSum   Decimal        @db.Decimal(10, 2)
+  platformValueSum Decimal        @db.Decimal(10, 2)
+
+  company    Company    @relation(fields: [companyId], references: [id])
+  deliveries Delivery[]
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, status])
+  @@index([dueDate, status])
+  @@map("invoices")
+}
+
+// ============================================================================
+// 6. CONFIGURAÇÃO / PLATAFORMA
+// ============================================================================
+
+/// Tipos de serviço oferecidos (ex.: "motoboy") — evita fixar strings soltas
+/// em várias tabelas e permite o produto crescer para outras modalidades.
+model ServiceType {
+  id     String  @id @default(uuid())
+  code   String  @unique
+  name   String
+  active Boolean @default(true)
+
+  driverServiceTypes DriverServiceType[]
+  deliveries         Delivery[]
+  pricingTables      PricingTable[]
+
+  createdAt DateTime @default(now())
+
+  @@map("service_types")
+}
+
+/// Praça/região de operação da plataforma.
+model Region {
+  id                    String   @id @default(uuid())
+  name                  String   @unique
+  maxDeliveryDistanceKm Decimal? @db.Decimal(6, 2)
+  active                Boolean  @default(true)
+
+  companies      Company[]
+  drivers        Driver[]
+  operatingHours OperatingHours[]
+  pricingTables  PricingTable[]
+  surcharges     Surcharge[]
+
+  createdAt DateTime @default(now())
+
+  @@map("regions")
+}
+
+model OperatingHours {
+  id       String   @id @default(uuid())
+  regionId String
+  weekday  Int
+  opensAt  DateTime @db.Time
+  closesAt DateTime @db.Time
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@index([regionId])
+  @@map("operating_hours")
+}
+
+/// Tabela de preços base por região + tipo de serviço. Sem motor de
+/// cálculo implementado nesta fase — apenas persistência da configuração.
+model PricingTable {
+  id            String   @id @default(uuid())
+  regionId      String
+  serviceTypeId String
+  baseFee       Decimal  @db.Decimal(10, 2)
+  perKmFee      Decimal  @db.Decimal(10, 2)
+  minimumFee    Decimal? @db.Decimal(10, 2)
+
+  region      Region      @relation(fields: [regionId], references: [id])
+  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([regionId, serviceTypeId])
+  @@map("pricing_tables")
+}
+
+/// Sobretaxa configurável (chuva, horário de pico, etc.) — generalização
+/// de "Tarifa Dinâmica" + "Taxa de Chuva" da Fase 0.
+model Surcharge {
+  id       String        @id @default(uuid())
+  regionId String
+  type     SurchargeType
+  value    Decimal       @db.Decimal(10, 2)
+  active   Boolean       @default(true)
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([regionId, type])
+  @@map("surcharges")
+}
+
+// ============================================================================
+// 7. INTEGRAÇÕES / NOTIFICAÇÕES
+// ============================================================================
+
+/// Estrutura para integrações futuras (iFood, AnyFone, etc.) — nenhuma
+/// integração real é implementada nesta fase. credentialsRef é uma
+/// REFERÊNCIA a um cofre de segredos externo, nunca o token em si.
+model Integration {
+  id             String              @id @default(uuid())
+  companyId      String?
+  provider       IntegrationProvider
+  status         IntegrationStatus   @default(DISCONNECTED)
+  config         Json?
+  credentialsRef String?
+  connectedAt    DateTime?
+  lastSyncAt     DateTime?
+
+  company Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@map("integrations")
+}
+
+/// Notificação persistida (independente do canal de envio). O disparo
+/// funcional (FCM, Socket.IO) não é implementado nesta fase.
+model Notification {
+  id                String              @id @default(uuid())
+  userId            String
+  type              NotificationType
+  channel           NotificationChannel
+  title             String
+  body              String
+  relatedEntityType String?
+  relatedEntityId   String?
+  readAt            DateTime?
+  sentAt            DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}

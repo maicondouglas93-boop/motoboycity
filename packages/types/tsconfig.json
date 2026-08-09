@@ -1,0 +1,7 @@
+{
+  "extends": "@motoboycity/config/typescript/base",
+  "compilerOptions": {
+    "outDir": "./dist"
+  },
+  "include": ["src"]
+}

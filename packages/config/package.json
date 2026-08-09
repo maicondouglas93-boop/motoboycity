@@ -1,0 +1,30 @@
+{
+  "name": "@motoboycity/config",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Configurações compartilhadas (TypeScript, ESLint, Prettier) do monorepo MOTOboyCity.",
+  "files": [
+    "typescript",
+    "eslint",
+    "prettier"
+  ],
+  "exports": {
+    "./typescript/base": "./typescript/base.json",
+    "./typescript/nextjs": "./typescript/nextjs.json",
+    "./typescript/nestjs": "./typescript/nestjs.json",
+    "./eslint/base": "./eslint/base.mjs",
+    "./prettier": "./prettier/index.mjs"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "typescript-eslint": "^8.20.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "eslint": "^9.18.0"
+  }
+}

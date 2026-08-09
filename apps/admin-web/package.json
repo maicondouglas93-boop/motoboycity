@@ -1,0 +1,43 @@
+{
+  "name": "@motoboycity/admin-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MOTOboyCity — Painel Web Administrativo.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "@motoboycity/api-client": "workspace:*",
+    "@motoboycity/types": "workspace:*",
+    "@motoboycity/validation": "workspace:*",
+    "@tanstack/react-query": "^5.65.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.469.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "shadcn": "^4.16.2",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@motoboycity/config": "workspace:*",
+    "@tailwindcss/postcss": "^4",
+    "@tanstack/eslint-plugin-query": "^5.65.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "eslint-config-prettier": "^9.1.0",
+    "tailwindcss": "^4",
+    "tw-animate-css": "^1.2.3",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@11.20.0"
+}
