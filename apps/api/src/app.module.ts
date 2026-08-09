@@ -10,6 +10,7 @@ import { AdminServiceTypesModule } from './admin/service-types/admin-service-typ
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
+import { DispatchModule } from './dispatch/dispatch.module';
 import { HealthModule } from './health/health.module';
 import { GoogleMapsModule } from './maps/google-maps.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -35,6 +36,7 @@ import { ServiceTypesModule } from './service-types/service-types.module';
     PricingModule,
     GoogleMapsModule,
     CompanyAddressModule,
+    DispatchModule,
     DeliveriesModule,
     ServiceTypesModule,
   ],
