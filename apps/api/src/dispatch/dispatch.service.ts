@@ -162,6 +162,33 @@ export class DispatchService {
     await this.dispatchQueue.remove(expireJobId(offerId));
   }
 
+  async cancelScheduledActivation(deliveryId: string): Promise<void> {
+    await this.dispatchQueue.remove(activateJobId(deliveryId));
+  }
+
+  /** Chamado quando um pedido é cancelado (empresa/admin) — se havia uma
+   * oferta pendente pra algum motoboy, ela deixa de valer: marca EXPIRED
+   * (reaproveitando o enum, não é uma "expiração por timeout" de verdade,
+   * mas semanticamente é o mesmo "essa oferta não vale mais"), cancela o
+   * timeout agendado e avisa o motoboy. */
+  async cancelPendingOfferForDelivery(deliveryId: string): Promise<void> {
+    const pendingOffer = await this.prisma.deliveryOffer.findFirst({
+      where: { deliveryId, response: 'PENDING' },
+    });
+    if (!pendingOffer) {
+      return;
+    }
+
+    await this.prisma.deliveryOffer.update({
+      where: { id: pendingOffer.id },
+      data: { response: 'EXPIRED', respondedAt: new Date() },
+    });
+    await this.cancelOfferTimeout(pendingOffer.id);
+    this.realtimeGateway.emitToDriver(pendingOffer.driverId, 'delivery:offer-cancelled', {
+      offerId: pendingOffer.id,
+    });
+  }
+
   private async findNextEligibleDriverId(excludeDriverIds: string[]): Promise<string | null> {
     const busyOffers = await this.prisma.deliveryOffer.findMany({
       where: { response: 'PENDING' },

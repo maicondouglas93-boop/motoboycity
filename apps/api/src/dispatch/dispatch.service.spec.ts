@@ -294,4 +294,43 @@ describe('DispatchService', () => {
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
     });
   });
+
+  describe('cancelScheduledActivation', () => {
+    it('remove o job de ativação pelo jobId derivado do pedido', async () => {
+      await service.cancelScheduledActivation('delivery-1');
+
+      expect(queue.remove).toHaveBeenCalledWith('activate-delivery-1');
+    });
+  });
+
+  describe('cancelPendingOfferForDelivery', () => {
+    it('não faz nada se não há oferta pendente pro pedido', async () => {
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+
+      await service.cancelPendingOfferForDelivery('delivery-1');
+
+      expect(prisma.deliveryOffer.update).not.toHaveBeenCalled();
+      expect(queue.remove).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+    });
+
+    it('marca a oferta pendente como EXPIRED, cancela o timeout e avisa o motoboy', async () => {
+      prisma.deliveryOffer.findFirst.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+
+      await service.cancelPendingOfferForDelivery('delivery-1');
+
+      expect(prisma.deliveryOffer.update).toHaveBeenCalledWith({
+        where: { id: 'offer-1' },
+        data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
+      });
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:offer-cancelled', {
+        offerId: 'offer-1',
+      });
+    });
+  });
 });

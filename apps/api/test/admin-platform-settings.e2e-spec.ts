@@ -28,6 +28,12 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       .send({ email: adminEmail, password: adminPassword });
     adminToken = adminLogin.body.accessToken;
     adminUserId = adminLogin.body.user.id;
+
+    // PlatformSettings é uma linha global única (id: 'global'), compartilhada
+    // por toda a suíte e2e. Este arquivo assume um estado "nunca configurado"
+    // pra testar o fluxo de primeira configuração, então precisa garantir
+    // isso mesmo se outro arquivo e2e já rodou antes na mesma sessão.
+    await prisma.platformSettings.deleteMany({ where: { id: 'global' } });
   });
 
   afterAll(async () => {

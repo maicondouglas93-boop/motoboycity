@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { GoogleMapsApiError, GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -94,6 +95,13 @@ describe('DeliveriesService', () => {
   };
   let pricingService: { quote: jest.Mock };
   let googleMapsService: { getDistance: jest.Mock };
+  let dispatchService: {
+    assertConfigured: jest.Mock;
+    dispatchDelivery: jest.Mock;
+    scheduleActivation: jest.Mock;
+    cancelPendingOfferForDelivery: jest.Mock;
+    cancelScheduledActivation: jest.Mock;
+  };
   let tx: {
     delivery: { create: jest.Mock; update: jest.Mock };
     deliveryAddress: { createMany: jest.Mock };
@@ -114,6 +122,13 @@ describe('DeliveriesService', () => {
     };
     pricingService = { quote: jest.fn() };
     googleMapsService = { getDistance: jest.fn() };
+    dispatchService = {
+      assertConfigured: jest.fn().mockResolvedValue(undefined),
+      dispatchDelivery: jest.fn().mockResolvedValue(undefined),
+      scheduleActivation: jest.fn().mockResolvedValue(undefined),
+      cancelPendingOfferForDelivery: jest.fn().mockResolvedValue(undefined),
+      cancelScheduledActivation: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -121,6 +136,7 @@ describe('DeliveriesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: PricingService, useValue: pricingService },
         { provide: GoogleMapsService, useValue: googleMapsService },
+        { provide: DispatchService, useValue: dispatchService },
       ],
     }).compile();
 
@@ -187,13 +203,22 @@ describe('DeliveriesService', () => {
         data: { deliveryId: 'delivery-1', fromStatus: null, toStatus: 'AWAITING_DRIVER', changedByUserId: companyUser.id },
       });
       expect(result.id).toBe('delivery-1');
+      expect(dispatchService.assertConfigured).toHaveBeenCalled();
+      expect(dispatchService.dispatchDelivery).toHaveBeenCalledWith('delivery-1');
+      expect(dispatchService.scheduleActivation).not.toHaveBeenCalled();
     });
 
-    it('usa status SCHEDULED quando scheduledAt é informado', async () => {
+    it('usa status SCHEDULED quando scheduledAt é informado e agenda a ativação em vez de despachar', async () => {
       await service.create(companyUser, { ...payload, scheduledAt: '2026-12-01T10:00:00.000Z' });
 
       expect(tx.delivery.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'SCHEDULED' }) }),
+      );
+      expect(dispatchService.assertConfigured).not.toHaveBeenCalled();
+      expect(dispatchService.dispatchDelivery).not.toHaveBeenCalled();
+      expect(dispatchService.scheduleActivation).toHaveBeenCalledWith(
+        'delivery-1',
+        new Date('2026-12-01T10:00:00.000Z'),
       );
     });
 
@@ -248,6 +273,13 @@ describe('DeliveriesService', () => {
       await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
+    });
+
+    it('propaga o erro quando o despacho ainda não está configurado', async () => {
+      dispatchService.assertConfigured.mockRejectedValue(new ConflictException('não configurado'));
+
+      await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.delivery.create).not.toHaveBeenCalled();
     });
   });
 
@@ -374,6 +406,20 @@ describe('DeliveriesService', () => {
         },
       });
       expect(result.status).toBe('CANCELLED');
+      expect(dispatchService.cancelPendingOfferForDelivery).toHaveBeenCalledWith('delivery-1');
+      expect(dispatchService.cancelScheduledActivation).not.toHaveBeenCalled();
+    });
+
+    it('cancelar um pedido SCHEDULED cancela a ativação agendada em vez da oferta', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'SCHEDULED' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'CANCELLED' }));
+
+      await service.cancel(companyUser, 'delivery-1');
+
+      expect(dispatchService.cancelScheduledActivation).toHaveBeenCalledWith('delivery-1');
+      expect(dispatchService.cancelPendingOfferForDelivery).not.toHaveBeenCalled();
     });
 
     it('empresa não pode cancelar um pedido já ACCEPTED', async () => {

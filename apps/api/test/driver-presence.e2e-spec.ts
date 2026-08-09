@@ -85,6 +85,7 @@ describe('DriverPresenceController (e2e)', () => {
   });
 
   afterAll(async () => {
+    await prisma.deliveryOffer.deleteMany({ where: { driver: { user: { email: approvedEmail } } } });
     await prisma.driverPresenceLog.deleteMany({ where: { driver: { user: { email: approvedEmail } } } });
     await prisma.driver.deleteMany({ where: { user: { email: { in: [approvedEmail, pendingEmail] } } } });
     await prisma.user.deleteMany({ where: { email: { in: [approvedEmail, pendingEmail] } } });

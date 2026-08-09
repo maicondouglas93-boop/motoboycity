@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { CreateDeliveryPayload } from '@motoboycity/validation';
 import type { Delivery, DeliveryStatus, User } from '@prisma/client';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { PricingService } from '../pricing/pricing.service';
 import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
@@ -53,6 +54,7 @@ export class DeliveriesService {
     private readonly prisma: PrismaService,
     private readonly pricingService: PricingService,
     private readonly googleMapsService: GoogleMapsService,
+    private readonly dispatchService: DispatchService,
   ) {}
 
   async create(user: User, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {
@@ -99,6 +101,9 @@ export class DeliveriesService {
     });
 
     const initialStatus: DeliveryStatus = payload.scheduledAt ? 'SCHEDULED' : 'AWAITING_DRIVER';
+    if (initialStatus === 'AWAITING_DRIVER') {
+      await this.dispatchService.assertConfigured();
+    }
 
     const created = await this.prisma.$transaction(async (tx) => {
       const delivery = await tx.delivery.create({
@@ -159,6 +164,12 @@ export class DeliveriesService {
 
       return delivery;
     });
+
+    if (initialStatus === 'AWAITING_DRIVER') {
+      await this.dispatchService.dispatchDelivery(created.id);
+    } else {
+      await this.dispatchService.scheduleActivation(created.id, new Date(payload.scheduledAt!));
+    }
 
     return this.detail(user, created.id);
   }
@@ -241,6 +252,12 @@ export class DeliveriesService {
         },
       });
     });
+
+    if (delivery.status === 'SCHEDULED') {
+      await this.dispatchService.cancelScheduledActivation(id);
+    } else {
+      await this.dispatchService.cancelPendingOfferForDelivery(id);
+    }
 
     return this.detail(user, id);
   }

@@ -122,10 +122,11 @@ describe('DeliveriesController (e2e)', () => {
     await request(server)
       .patch('/admin/platform-settings')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ driverCommissionPercentage: 80 });
+      .send({ driverCommissionPercentage: 80, dispatchOfferTimeoutSeconds: 60 });
   });
 
   afterAll(async () => {
+    await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.delivery.deleteMany({ where: { serviceTypeId } });
