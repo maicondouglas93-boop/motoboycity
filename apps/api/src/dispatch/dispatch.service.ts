@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
@@ -187,6 +193,87 @@ export class DispatchService {
     this.realtimeGateway.emitToDriver(pendingOffer.driverId, 'delivery:offer-cancelled', {
       offerId: pendingOffer.id,
     });
+  }
+
+  /** Motoboy aceita a oferta. As duas atualizações condicionais (oferta
+   * PENDING->ACCEPTED, pedido AWAITING_DRIVER->ACCEPTED) rodam na mesma
+   * transação e QUALQUER uma delas afetando 0 linhas lança e reverte tudo —
+   * essa é a defesa contra corrida real (ex.: oferta expirando no exato
+   * instante do aceite, ou o pedido sendo cancelado nesse meio-tempo). */
+  async acceptOffer(
+    offerId: string,
+    driverId: string,
+    respondingUserId: string,
+  ): Promise<{ deliveryId: string; displayNumber: number }> {
+    const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
+    if (!offer) {
+      throw new NotFoundException('Oferta não encontrada.');
+    }
+    if (offer.driverId !== driverId) {
+      throw new ForbiddenException('Esta oferta não pertence a este motoboy.');
+    }
+
+    const delivery = await this.prisma.$transaction(async (tx) => {
+      const offerUpdate = await tx.deliveryOffer.updateMany({
+        where: { id: offerId, response: 'PENDING' },
+        data: { response: 'ACCEPTED', respondedAt: new Date() },
+      });
+      if (offerUpdate.count === 0) {
+        throw new ConflictException('Esta oferta não está mais disponível.');
+      }
+
+      const deliveryUpdate = await tx.delivery.updateMany({
+        where: { id: offer.deliveryId, status: 'AWAITING_DRIVER' },
+        data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+      });
+      if (deliveryUpdate.count === 0) {
+        throw new ConflictException('Este pedido já não está mais disponível.');
+      }
+
+      await tx.deliveryStatusHistory.create({
+        data: {
+          deliveryId: offer.deliveryId,
+          fromStatus: 'AWAITING_DRIVER',
+          toStatus: 'ACCEPTED',
+          changedByUserId: respondingUserId,
+        },
+      });
+
+      return tx.delivery.findUniqueOrThrow({ where: { id: offer.deliveryId } });
+    });
+
+    await this.cancelOfferTimeout(offerId);
+    this.realtimeGateway.emitAdminActivity(
+      `Pedido #${delivery.displayNumber} foi aceito por um motoboy.`,
+    );
+
+    return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+  }
+
+  /** Motoboy recusa a oferta — mesma lógica de "não vale mais mais" do
+   * timeout (handleOfferExpired), só que disparada pelo motoboy em vez do
+   * job de expiração, então já cancela o job de expiração que não é mais
+   * necessário e tenta despachar pro próximo da fila imediatamente. */
+  async declineOffer(offerId: string, driverId: string): Promise<void> {
+    const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
+    if (!offer) {
+      throw new NotFoundException('Oferta não encontrada.');
+    }
+    if (offer.driverId !== driverId) {
+      throw new ForbiddenException('Esta oferta não pertence a este motoboy.');
+    }
+
+    const offerUpdate = await this.prisma.deliveryOffer.updateMany({
+      where: { id: offerId, response: 'PENDING' },
+      data: { response: 'DECLINED', respondedAt: new Date() },
+    });
+    if (offerUpdate.count === 0) {
+      throw new ConflictException('Esta oferta não está mais pendente.');
+    }
+
+    await this.cancelOfferTimeout(offerId);
+    this.realtimeGateway.emitAdminActivity('Motoboy recusou uma oferta, buscando o próximo da fila.');
+    await this.dispatchDelivery(offer.deliveryId);
   }
 
   private async findNextEligibleDriverId(excludeDriverIds: string[]): Promise<string | null> {

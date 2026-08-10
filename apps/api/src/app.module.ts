@@ -10,6 +10,7 @@ import { AdminServiceTypesModule } from './admin/service-types/admin-service-typ
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
+import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { DriverPresenceModule } from './driver-presence/driver-presence.module';
 import { HealthModule } from './health/health.module';
@@ -40,6 +41,7 @@ import { ServiceTypesModule } from './service-types/service-types.module';
     DispatchModule,
     DriverPresenceModule,
     DeliveriesModule,
+    DeliveryOffersModule,
     ServiceTypesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

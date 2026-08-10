@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
@@ -10,17 +10,32 @@ describe('DispatchService', () => {
   let service: DispatchService;
   let prisma: {
     delivery: { findUnique: jest.Mock; findMany: jest.Mock };
-    deliveryOffer: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; update: jest.Mock; findUnique: jest.Mock };
+    deliveryOffer: {
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+      findUnique: jest.Mock;
+    };
     driverPresenceLog: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
   let realtimeGateway: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
-  let tx: { delivery: { update: jest.Mock }; deliveryStatusHistory: { create: jest.Mock } };
+  let tx: {
+    delivery: { update: jest.Mock; updateMany: jest.Mock; findUniqueOrThrow: jest.Mock };
+    deliveryOffer: { updateMany: jest.Mock };
+    deliveryStatusHistory: { create: jest.Mock };
+  };
 
   beforeEach(async () => {
-    tx = { delivery: { update: jest.fn() }, deliveryStatusHistory: { create: jest.fn() } };
+    tx = {
+      delivery: { update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+      deliveryOffer: { updateMany: jest.fn() },
+      deliveryStatusHistory: { create: jest.fn() },
+    };
     prisma = {
       delivery: { findUnique: jest.fn(), findMany: jest.fn() },
       deliveryOffer: {
@@ -28,6 +43,7 @@ describe('DispatchService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findUnique: jest.fn(),
       },
       driverPresenceLog: { findMany: jest.fn() },
@@ -292,6 +308,149 @@ describe('DispatchService', () => {
       await service.cancelOfferTimeout('offer-1');
 
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+    });
+  });
+
+  describe('acceptOffer', () => {
+    it('lança NotFoundException se a oferta não existe', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue(null);
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lança ForbiddenException se a oferta pertence a outro motoboy', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'outro-motoboy',
+        deliveryId: 'delivery-1',
+      });
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lança ConflictException e reverte tudo se a oferta já não está mais PENDING (corrida com expiração)', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(queue.remove).not.toHaveBeenCalled();
+    });
+
+    it('lança ConflictException se o pedido já não está mais AWAITING_DRIVER (corrida com cancelamento)', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita com sucesso: atualiza oferta e pedido, grava histórico, cancela timeout e avisa admin', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({ id: 'delivery-1', displayNumber: 9 });
+
+      const result = await service.acceptOffer('offer-1', 'driver-1', 'user-1');
+
+      expect(tx.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: 'offer-1', response: 'PENDING' },
+        data: { response: 'ACCEPTED', respondedAt: expect.any(Date) },
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'AWAITING_DRIVER' },
+        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'AWAITING_DRIVER',
+          toStatus: 'ACCEPTED',
+          changedByUserId: 'user-1',
+        },
+      });
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        expect.stringContaining('#9'),
+      );
+      expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
+    });
+  });
+
+  describe('declineOffer', () => {
+    it('lança NotFoundException se a oferta não existe', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue(null);
+
+      await expect(service.declineOffer('offer-1', 'driver-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('lança ForbiddenException se a oferta pertence a outro motoboy', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'outro-motoboy',
+        deliveryId: 'delivery-1',
+      });
+
+      await expect(service.declineOffer('offer-1', 'driver-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('lança ConflictException se a oferta já não está mais PENDING', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.declineOffer('offer-1', 'driver-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('recusa com sucesso: marca DECLINED, cancela timeout e tenta despachar o próximo', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      prisma.delivery.findUnique.mockResolvedValue(null); // curto-circuita o dispatchDelivery interno
+
+      await service.declineOffer('offer-1', 'driver-1');
+
+      expect(prisma.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: 'offer-1', response: 'PENDING' },
+        data: { response: 'DECLINED', respondedAt: expect.any(Date) },
+      });
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(prisma.delivery.findUnique).toHaveBeenCalledWith({ where: { id: 'delivery-1' } });
     });
   });
 
