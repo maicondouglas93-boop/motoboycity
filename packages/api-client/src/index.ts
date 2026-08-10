@@ -8,3 +8,5 @@ export * from './admin-platform-settings';
 export * from './deliveries';
 export * from './company-address';
 export * from './service-types';
+export * from './driver-presence';
+export * from './delivery-offers';

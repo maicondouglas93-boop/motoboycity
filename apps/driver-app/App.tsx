@@ -14,6 +14,7 @@ import { AvailableOrdersScreen } from './src/screens/AvailableOrdersScreen';
 import { ChallengesScreen } from './src/screens/ChallengesScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { IncomingOfferScreen } from './src/screens/IncomingOfferScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MyShiftsScreen } from './src/screens/MyShiftsScreen';
 import { OrderDetailScreen } from './src/screens/OrderDetailScreen';
@@ -77,6 +78,11 @@ function App() {
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
           <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen
+            name="IncomingOffer"
+            component={IncomingOfferScreen}
+            options={{ presentation: 'modal', gestureEnabled: false }}
+          />
           <Stack.Screen name="Wallet" component={WalletScreen} />
           <Stack.Screen name="WalletWithdraw" component={WalletWithdrawScreen} />
           <Stack.Screen name="WalletAdvance" component={WalletAdvanceScreen} />

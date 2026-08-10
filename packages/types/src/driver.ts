@@ -1,5 +1,11 @@
 export type DriverApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DriverAccountStatus = 'ACTIVE' | 'SUSPENDED' | 'BLOCKED';
+export type DriverAvailability = 'AVAILABLE' | 'UNAVAILABLE';
+
+export interface DriverPresenceItem {
+  availability: DriverAvailability;
+  since: string | null;
+}
 
 export interface RegisterDriverResult {
   driverId: string;

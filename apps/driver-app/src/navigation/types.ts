@@ -10,6 +10,7 @@ export type RootStackParamList = {
   ScheduledOrders: undefined;
   MyShifts: undefined;
   OrderDetail: { orderId: string };
+  IncomingOffer: undefined;
   Settings: undefined;
   Profile: undefined;
   Challenges: undefined;
