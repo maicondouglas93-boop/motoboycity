@@ -114,13 +114,6 @@ export const mockOnlineDrivers = [
   { name: 'Edinho', ongoingCount: 4 },
 ];
 
-export const mockLiveActivity = [
-  { message: 'Pedido #23301 tocando — Lá na Vita Delivery', time: 'agora' },
-  { message: 'Edinho entregou #23298 — Lilimodas', time: 'há 2 min' },
-  { message: 'Fernandinho entregou #23299 — Bar do Adelaide', time: 'há 3 min' },
-  { message: 'Edinho coletou #23297 — Drogaria Ideal', time: 'há 5 min' },
-];
-
 export const mockClientDetailStats = {
   walletBalance: 'R$ 0,00',
   lastOrder: 'há 1 hora',
