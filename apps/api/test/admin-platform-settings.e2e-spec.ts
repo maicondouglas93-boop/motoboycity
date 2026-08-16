@@ -79,6 +79,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: null,
+      returnProximityRadiusMeters: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -94,6 +95,31 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
+      returnProximityRadiusMeters: null,
+      updatedBy: { id: adminUserId, name: expect.any(String) },
+      updatedAt: expect.any(String),
+    });
+  });
+
+  it('rejeita raio de retorno fora do intervalo 10-2000 com 400', async () => {
+    await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ returnProximityRadiusMeters: 5000 })
+      .expect(400);
+  });
+
+  it('admin configura o raio de retorno separadamente, sem mexer nos outros campos', async () => {
+    const response = await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ returnProximityRadiusMeters: 150 })
+      .expect(200);
+
+    expect(response.body).toEqual({
+      driverCommissionPercentage: 80,
+      dispatchOfferTimeoutSeconds: 60,
+      returnProximityRadiusMeters: 150,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });

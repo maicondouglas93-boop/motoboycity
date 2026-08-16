@@ -150,6 +150,14 @@ describe('DeliveryOffersController (e2e)', () => {
       .patch('/admin/platform-settings')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ driverCommissionPercentage: 80, dispatchOfferTimeoutSeconds: 120 });
+
+    // Elegibilidade de despacho (P1-02) exige um DriverServiceType explícito
+    // — sem isto o motoboy nunca fica elegível e nenhuma oferta é criada.
+    await request(server)
+      .put(`/admin/drivers/${driverId}/service-types`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceTypeIds: [serviceTypeId] })
+      .expect(200);
   });
 
   afterAll(async () => {
@@ -158,6 +166,7 @@ describe('DeliveryOffersController (e2e)', () => {
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.delivery.deleteMany({ where: { serviceTypeId } });
     await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+    await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
     await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
     await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
@@ -225,10 +234,18 @@ describe('DeliveryOffersController (e2e)', () => {
 
     const offer = await prisma.deliveryOffer.findUniqueOrThrow({ where: { id: offerId } });
     expect(offer.response).toBe('ACCEPTED');
+
+    // P1-02: motoboy com entrega ACCEPTED fica inelegível pra novas ofertas.
+    // Admin cancela (permitido em qualquer status) pra devolver o único
+    // motoboy disponível ao pool antes dos próximos testes.
+    await request(app.getHttpServer())
+      .patch(`/deliveries/${deliveryId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
   });
 
   it('rejeita aceitar de novo uma oferta já respondida (409)', async () => {
-    const { offerId } = await createAwaitingDeliveryAndGetOffer();
+    const { deliveryId, offerId } = await createAwaitingDeliveryAndGetOffer();
 
     await request(app.getHttpServer())
       .patch(`/delivery-offers/${offerId}/accept`)
@@ -239,6 +256,11 @@ describe('DeliveryOffersController (e2e)', () => {
       .patch(`/delivery-offers/${offerId}/accept`)
       .set('Authorization', `Bearer ${driverToken}`)
       .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/deliveries/${deliveryId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
   });
 
   it('motoboy recusa a oferta: fica DECLINED e o pedido segue AWAITING_DRIVER (sem outro motoboy elegível)', async () => {

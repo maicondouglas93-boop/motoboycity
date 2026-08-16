@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
+import { Prisma } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,16 +26,24 @@ describe('DispatchService', () => {
   let realtimeGateway: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
   let tx: {
+    $queryRaw: jest.Mock;
+    driver: { findFirst: jest.Mock };
     delivery: { update: jest.Mock; updateMany: jest.Mock; findUniqueOrThrow: jest.Mock };
-    deliveryOffer: { updateMany: jest.Mock };
-    deliveryStatusHistory: { create: jest.Mock };
+    deliveryOffer: { create: jest.Mock; findFirst: jest.Mock; updateMany: jest.Mock };
+    deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'delivery-1' }]),
+      driver: { findFirst: jest.fn().mockResolvedValue({ id: 'driver-1' }) },
       delivery: { update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
-      deliveryOffer: { updateMany: jest.fn() },
-      deliveryStatusHistory: { create: jest.fn() },
+      deliveryOffer: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn(),
+      },
+      deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
     };
     prisma = {
       delivery: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -122,7 +131,12 @@ describe('DispatchService', () => {
     });
 
     it('não faz nada se já existe oferta pendente', async () => {
-      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'AWAITING_DRIVER' });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
       prisma.deliveryOffer.findFirst.mockResolvedValue({ id: 'offer-existing' });
 
       await service.dispatchDelivery('delivery-1');
@@ -131,7 +145,12 @@ describe('DispatchService', () => {
     });
 
     it('não faz nada (sem lançar) se o timeout não está configurado', async () => {
-      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'AWAITING_DRIVER' });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: null });
 
@@ -140,7 +159,12 @@ describe('DispatchService', () => {
     });
 
     it('não faz nada se não há motoboy elegível (fila esgotada)', async () => {
-      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'AWAITING_DRIVER' });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
       prisma.deliveryOffer.findMany.mockResolvedValue([]);
@@ -156,9 +180,12 @@ describe('DispatchService', () => {
         id: 'delivery-1',
         status: 'AWAITING_DRIVER',
         displayNumber: 7,
+        destinationKnownAtCreation: true,
         driverValue: { toString: () => '13.52' },
         distanceKm: { toString: () => '5.43' },
         requiresReturn: true,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 90 });
@@ -166,11 +193,15 @@ describe('DispatchService', () => {
         .mockResolvedValueOnce([]) // ofertas já feitas pra esse pedido
         .mockResolvedValueOnce([]); // motoboys ocupados (busyOffers) dentro de findNextEligibleDriverId
       prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
-      prisma.deliveryOffer.create.mockResolvedValue({ id: 'offer-1', deliveryId: 'delivery-1', driverId: 'driver-1' });
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-1',
+      });
 
       await service.dispatchDelivery('delivery-1');
 
-      expect(prisma.deliveryOffer.create).toHaveBeenCalledWith({
+      expect(tx.deliveryOffer.create).toHaveBeenCalledWith({
         data: { deliveryId: 'delivery-1', driverId: 'driver-1', response: 'PENDING' },
       });
       expect(queue.add).toHaveBeenCalledWith(
@@ -188,6 +219,57 @@ describe('DispatchService', () => {
         expiresInSeconds: 90,
       });
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalled();
+      expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            driver: {
+              regionId: 'region-1',
+              approvalStatus: 'APPROVED',
+              accountStatus: 'ACTIVE',
+              availability: 'AVAILABLE',
+              deliveries: { none: { status: { in: ['ACCEPTED', 'COLLECTED', 'DELIVERED'] } } },
+              AND: [
+                {
+                  serviceTypes: {
+                    some: { serviceTypeId: 'service-1', serviceType: { active: true } },
+                  },
+                },
+              ],
+            },
+          }),
+        }),
+      );
+    });
+
+    it('sem destino conhecido: emite driverValue/distanceKm null em vez de 0 (Number(null) seria 0)', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        destinationKnownAtCreation: false,
+        driverValue: null,
+        distanceKm: null,
+        requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 90 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-1',
+      });
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:offer',
+        expect.objectContaining({ driverValue: null, distanceKm: null }),
+      );
     });
 
     it('exclui motoboys já ofertados pra esse pedido e motoboys ocupados com outra oferta pendente', async () => {
@@ -198,6 +280,8 @@ describe('DispatchService', () => {
         driverValue: { toString: () => '10' },
         distanceKm: null,
         requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
@@ -205,7 +289,7 @@ describe('DispatchService', () => {
         .mockResolvedValueOnce([{ driverId: 'driver-already-tried' }])
         .mockResolvedValueOnce([{ driverId: 'driver-busy' }]);
       prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-2' }]);
-      prisma.deliveryOffer.create.mockResolvedValue({ id: 'offer-2' });
+      tx.deliveryOffer.create.mockResolvedValue({ id: 'offer-2' });
 
       await service.dispatchDelivery('delivery-1');
 
@@ -213,6 +297,177 @@ describe('DispatchService', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             driverId: { notIn: ['driver-already-tried', 'driver-busy'] },
+          }),
+        }),
+      );
+    });
+
+    it('revalida o pedido sob lock e não cria oferta se o status mudou', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        driverValue: { toString: () => '10' },
+        distanceKm: null,
+        requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.$queryRaw.mockResolvedValue([]);
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+    });
+
+    it('trata a violação do índice único como corrida idempotente', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        driverValue: { toString: () => '10' },
+        distanceKm: null,
+        requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.deliveryOffer.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Oferta pendente já existe.', {
+          code: 'P2002',
+          clientVersion: '6.19.3',
+        }),
+      );
+
+      await expect(service.dispatchDelivery('delivery-1')).resolves.toBeUndefined();
+
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('eligibility revalidation', () => {
+    it('does not create an offer when the candidate becomes ineligible before commit', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        driverValue: { toString: () => '10' },
+        distanceKm: null,
+        requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.driver.findFirst.mockResolvedValue(null);
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(tx.driver.findFirst).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'driver-1', regionId: 'region-1' }),
+        select: { id: true },
+      });
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('batch dispatch', () => {
+    it('oferta todas as entregas de um lote ao mesmo motoboy e emite um único evento agregado', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        batchId: 'batch-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        destinationKnownAtCreation: true,
+        driverValue: { toString: () => '10' },
+        distanceKm: { toString: () => '2' },
+        requiresReturn: false,
+        company: { regionId: 'region-1' },
+        serviceTypeId: 'service-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        {
+          id: 'delivery-1',
+          status: 'AWAITING_DRIVER',
+          displayNumber: 7,
+          driverValue: { toString: () => '10' },
+          distanceKm: { toString: () => '2' },
+          requiresReturn: false,
+          serviceTypeId: 'service-1',
+        },
+        {
+          id: 'delivery-2',
+          status: 'AWAITING_DRIVER',
+          displayNumber: 8,
+          driverValue: { toString: () => '12' },
+          distanceKm: { toString: () => '3' },
+          requiresReturn: true,
+          serviceTypeId: 'service-2',
+        },
+      ]);
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.$queryRaw.mockResolvedValue([{ id: 'delivery-1' }, { id: 'delivery-2' }]);
+      tx.deliveryOffer.create
+        .mockResolvedValueOnce({ id: 'offer-1' })
+        .mockResolvedValueOnce({ id: 'offer-2' });
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(tx.deliveryOffer.create).toHaveBeenCalledTimes(2);
+      expect(tx.deliveryOffer.create).toHaveBeenNthCalledWith(1, {
+        data: { deliveryId: 'delivery-1', driverId: 'driver-1', response: 'PENDING' },
+      });
+      expect(tx.deliveryOffer.create).toHaveBeenNthCalledWith(2, {
+        data: { deliveryId: 'delivery-2', driverId: 'driver-1', response: 'PENDING' },
+      });
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:offer', {
+        offerId: 'offer-1',
+        deliveryId: 'delivery-1',
+        displayNumber: 7,
+        driverValue: 22,
+        distanceKm: 5,
+        requiresReturn: true,
+        expiresInSeconds: 60,
+        batchId: 'batch-1',
+        deliveryCount: 2,
+      });
+      expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            driver: expect.objectContaining({
+              regionId: 'region-1',
+              AND: [
+                {
+                  serviceTypes: {
+                    some: { serviceTypeId: 'service-1', serviceType: { active: true } },
+                  },
+                },
+                {
+                  serviceTypes: {
+                    some: { serviceTypeId: 'service-2', serviceType: { active: true } },
+                  },
+                },
+              ],
+            }),
           }),
         }),
       );
@@ -262,9 +517,13 @@ describe('DispatchService', () => {
         where: { id: 'offer-1' },
         data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
       });
-      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:offer-expired', {
-        offerId: 'offer-1',
-      });
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:offer-expired',
+        {
+          offerId: 'offer-1',
+        },
+      );
       expect(prisma.delivery.findUnique).toHaveBeenCalledWith({ where: { id: 'delivery-1' } });
     });
   });
@@ -393,10 +652,52 @@ describe('DispatchService', () => {
         },
       });
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
-      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
-        expect.stringContaining('#9'),
-      );
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(expect.stringContaining('#9'));
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
+    });
+  });
+
+  describe('batch offer responses', () => {
+    it('aceita todas as ofertas e entregas do lote em uma única transação', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', batchId: 'batch-1' });
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', displayNumber: 7 },
+        { id: 'delivery-2', displayNumber: 8 },
+      ]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }, { id: 'offer-2' }]);
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 2 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.acceptOffer('offer-1', 'driver-1', 'user-1');
+
+      expect(tx.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['offer-1', 'offer-2'] }, response: 'PENDING' },
+        data: { response: 'ACCEPTED', respondedAt: expect.any(Date) },
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['delivery-1', 'delivery-2'] }, status: 'AWAITING_DRIVER' },
+        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.createMany).toHaveBeenCalledWith({
+        data: expect.arrayContaining([
+          expect.objectContaining({ deliveryId: 'delivery-1', changedByUserId: 'user-1' }),
+          expect.objectContaining({ deliveryId: 'delivery-2', changedByUserId: 'user-1' }),
+        ]),
+      });
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-2');
+      expect(result).toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 7,
+        batchId: 'batch-1',
+        deliveryIds: ['delivery-1', 'delivery-2'],
+        displayNumbers: [7, 8],
+      });
     });
   });
 
@@ -487,9 +788,13 @@ describe('DispatchService', () => {
         data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
       });
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
-      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:offer-cancelled', {
-        offerId: 'offer-1',
-      });
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:offer-cancelled',
+        {
+          offerId: 'offer-1',
+        },
+      );
     });
   });
 });

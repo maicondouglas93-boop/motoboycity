@@ -7,6 +7,7 @@ const SETTINGS_ID = 'global';
 export interface PlatformSettingsItem {
   driverCommissionPercentage: number | null;
   dispatchOfferTimeoutSeconds: number | null;
+  returnProximityRadiusMeters: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -25,6 +26,7 @@ export class AdminPlatformSettingsService {
       return {
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        returnProximityRadiusMeters: null,
         updatedBy: null,
         updatedAt: null,
       };
@@ -46,12 +48,16 @@ export class AdminPlatformSettingsService {
         ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
           dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
         }),
+        ...(payload.returnProximityRadiusMeters !== undefined && {
+          returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
+        }),
         updatedByUserId,
       },
       create: {
         id: SETTINGS_ID,
         driverCommissionPercentage: payload.driverCommissionPercentage,
         dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
+        returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
         updatedByUserId,
       },
       include: { updatedBy: true },
@@ -63,6 +69,7 @@ export class AdminPlatformSettingsService {
   private toItem(settings: {
     driverCommissionPercentage: { toString(): string } | null;
     dispatchOfferTimeoutSeconds: number | null;
+    returnProximityRadiusMeters: number | null;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -72,6 +79,7 @@ export class AdminPlatformSettingsService {
           ? null
           : Number(settings.driverCommissionPercentage),
       dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
+      returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

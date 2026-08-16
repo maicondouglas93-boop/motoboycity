@@ -62,9 +62,11 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       }),
     onSuccess: (delivery) => {
       setFormError(null);
-      setSuccessMessage(
-        `Pedido #${delivery.displayNumber} criado — total ${delivery.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
-      );
+      const totalValueLabel =
+        delivery.totalValue === null
+          ? 'a calcular na entrega'
+          : delivery.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      setSuccessMessage(`Pedido #${delivery.displayNumber} criado — total ${totalValueLabel}.`);
       setStreet('');
       setNumber('');
       setComplement('');

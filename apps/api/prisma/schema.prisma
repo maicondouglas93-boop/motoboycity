@@ -210,9 +210,9 @@ model User {
   companyMemberships    CompanyTeamMember[]
   notifications         Notification[]
   deliveryStatusChanges DeliveryStatusHistory[]
-  companiesApproved     Company[]                @relation("CompanyApprovedBy")
-  driversReviewed       Driver[]                 @relation("DriverReviewedBy")
-  platformSettingsEdits PlatformSettings[]       @relation("PlatformSettingsUpdatedBy")
+  companiesApproved     Company[]               @relation("CompanyApprovedBy")
+  driversReviewed       Driver[]                @relation("DriverReviewedBy")
+  platformSettingsEdits PlatformSettings[]      @relation("PlatformSettingsUpdatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -471,15 +471,31 @@ model Delivery {
   serviceTypeId String
   status        DeliveryStatus @default(SCHEDULED)
 
+  /// Agrupa pedidos criados juntos numa chamada de despacho em lote.
+  /// Nulo representa um pedido avulso. O lote não tem entidade própria:
+  /// todas as entregas com o mesmo ID compartilham oferta, aceite, recusa e
+  /// cancelamento como uma unidade, mantendo uma DeliveryOffer auditável por
+  /// entrega.
+  batchId String?
+
   /// Carimbo do status atual — denormalizado para leitura rápida;
   /// a trilha completa vive em DeliveryStatusHistory.
   statusChangedAt DateTime  @default(now())
   scheduledAt     DateTime?
   distanceKm      Decimal?  @db.Decimal(6, 2)
 
-  totalValue    Decimal       @db.Decimal(10, 2)
-  driverValue   Decimal       @db.Decimal(10, 2)
-  platformValue Decimal       @db.Decimal(10, 2)
+  /// true (padrão): destino informado e preço calculado/congelado na
+  /// criação, como sempre foi. false: pedido nasce sem DROPOFF — distanceKm/
+  /// totalValue/driverValue/platformValue ficam nulos até markDelivered()
+  /// capturar lat/lng do motoboy na entrega e calcular retroativamente.
+  /// Mesmo valor obrigatório em todos os itens de um lote (validado em Zod).
+  destinationKnownAtCreation Boolean @default(true)
+
+  /// Nulos enquanto destinationKnownAtCreation=false e a entrega não foi
+  /// concluída; congelados na criação quando destinationKnownAtCreation=true.
+  totalValue    Decimal?      @db.Decimal(10, 2)
+  driverValue   Decimal?      @db.Decimal(10, 2)
+  platformValue Decimal?      @db.Decimal(10, 2)
   paymentMethod PaymentMethod
   invoiceId     String?
 
@@ -511,6 +527,7 @@ model Delivery {
   @@index([status, createdAt])
   @@index([companyId, createdAt])
   @@index([invoiceId])
+  @@index([batchId])
   @@map("deliveries")
 }
 
@@ -518,17 +535,23 @@ model Delivery {
 /// (copiado no momento do pedido), não uma referência mutável a
 /// CompanyAddress.
 model DeliveryAddress {
-  id            String              @id @default(uuid())
-  deliveryId    String
-  type          DeliveryAddressType
-  street        String
-  number        String
-  complement    String?
-  city          String
-  state         String
-  zip           String
-  lat           Decimal?            @db.Decimal(10, 7)
-  lng           Decimal?            @db.Decimal(10, 7)
+  id         String              @id @default(uuid())
+  deliveryId String
+  type       DeliveryAddressType
+
+  /// Estruturado quando o destino é conhecido na criação (o caso comum) ou
+  /// quando é PICKUP. Nulo apenas para um DROPOFF capturado por GPS na
+  /// entrega (Delivery.destinationKnownAtCreation=false) — sem geocodificação
+  /// reversa, só lat/lng ficam preenchidos nesse caso.
+  street     String?
+  number     String?
+  complement String?
+  city       String?
+  state      String?
+  zip        String?
+
+  lat           Decimal? @db.Decimal(10, 7)
+  lng           Decimal? @db.Decimal(10, 7)
   referenceNote String?
 
   delivery Delivery @relation(fields: [deliveryId], references: [id])
@@ -809,6 +832,12 @@ model PlatformSettings {
   /// ainda não configurado — criação de pedido AWAITING_DRIVER falha com
   /// erro claro em vez de usar um valor inventado.
   dispatchOfferTimeoutSeconds Int?
+
+  /// Raio (metros) de tolerância pra fechar "retorno ao local de coleta" —
+  /// distância em linha reta (Haversine) entre o motoboy e o endereço de
+  /// coleta da empresa. Null = ainda não configurado — completeReturn falha
+  /// com erro claro em vez de usar um raio inventado.
+  returnProximityRadiusMeters Int?
 
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])

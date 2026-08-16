@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
+import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { GoogleMapsApiError, GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
@@ -18,6 +19,8 @@ const companyUser = { id: 'user-company-1', type: 'COMPANY_MEMBER' } as User;
 const otherCompanyUser = { id: 'user-company-2', type: 'COMPANY_MEMBER' } as User;
 const adminUser = { id: 'user-admin-1', type: 'ADMIN' } as User;
 const driverUser = { id: 'user-driver-1', type: 'DRIVER' } as User;
+
+const driverRow = { id: 'driver-1', userId: driverUser.id };
 
 const pickupAddress = {
   id: 'addr-1',
@@ -48,9 +51,11 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: 'delivery-1',
     displayNumber: 1,
     companyId: 'company-1',
+    driverId: null,
     company: { tradeName: 'Loja Teste' },
     serviceType: { name: 'Moto' },
     status: 'AWAITING_DRIVER',
+    destinationKnownAtCreation: true,
     distanceKm: { toString: () => '5.00' },
     totalValue: { toString: () => '12.50' },
     driverValue: { toString: () => '10.00' },
@@ -68,6 +73,8 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
         city: pickupAddress.city,
         state: pickupAddress.state,
         zip: pickupAddress.zip,
+        lat: null,
+        lng: null,
         referenceNote: null,
       },
       {
@@ -78,6 +85,8 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
         city: dropoffPayload.city,
         state: dropoffPayload.state,
         zip: dropoffPayload.zip,
+        lat: null,
+        lng: null,
         referenceNote: null,
       },
     ],
@@ -91,6 +100,7 @@ describe('DeliveriesService', () => {
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
     delivery: { findMany: jest.Mock; findUnique: jest.Mock; update: jest.Mock };
+    driver: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let pricingService: { quote: jest.Mock };
@@ -102,22 +112,24 @@ describe('DeliveriesService', () => {
     cancelPendingOfferForDelivery: jest.Mock;
     cancelScheduledActivation: jest.Mock;
   };
+  let platformSettingsService: { get: jest.Mock };
   let tx: {
     delivery: { create: jest.Mock; update: jest.Mock };
-    deliveryAddress: { createMany: jest.Mock };
+    deliveryAddress: { createMany: jest.Mock; create: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
       delivery: { create: jest.fn(), update: jest.fn() },
-      deliveryAddress: { createMany: jest.fn() },
+      deliveryAddress: { createMany: jest.fn(), create: jest.fn() },
       deliveryStatusHistory: { create: jest.fn() },
     };
     prisma = {
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
       delivery: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+      driver: { findUnique: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     pricingService = { quote: jest.fn() };
@@ -129,6 +141,7 @@ describe('DeliveriesService', () => {
       cancelPendingOfferForDelivery: jest.fn().mockResolvedValue(undefined),
       cancelScheduledActivation: jest.fn().mockResolvedValue(undefined),
     };
+    platformSettingsService = { get: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -137,6 +150,7 @@ describe('DeliveriesService', () => {
         { provide: PricingService, useValue: pricingService },
         { provide: GoogleMapsService, useValue: googleMapsService },
         { provide: DispatchService, useValue: dispatchService },
+        { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
       ],
     }).compile();
 
@@ -152,6 +166,7 @@ describe('DeliveriesService', () => {
   describe('create', () => {
     const payload = {
       serviceTypeId: 'st-1',
+      destinationKnownAtCreation: true,
       dropoffAddress: dropoffPayload,
       requiresReturn: false,
       requiresDeliveryProof: false,
@@ -280,6 +295,124 @@ describe('DeliveriesService', () => {
 
       await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(ConflictException);
       expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('sem destino conhecido: não calcula distância/preço e cria só o endereço PICKUP', async () => {
+      const noAddressPayload = {
+        serviceTypeId: 'st-1',
+        destinationKnownAtCreation: false,
+        requiresReturn: false,
+        requiresDeliveryProof: false,
+        requiresCollectionRecipient: false,
+        pickupSurchargeChargedToDriver: false,
+      };
+
+      await service.create(companyUser, noAddressPayload);
+
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+      expect(pricingService.quote).not.toHaveBeenCalled();
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            destinationKnownAtCreation: false,
+            distanceKm: null,
+            totalValue: null,
+            driverValue: null,
+            platformValue: null,
+            returnValue: null,
+          }),
+        }),
+      );
+      expect(tx.deliveryAddress.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ type: 'PICKUP' })],
+      });
+    });
+  });
+
+  describe('createBatch', () => {
+    const payload = {
+      deliveries: [
+        {
+          serviceTypeId: 'st-1',
+          destinationKnownAtCreation: true,
+          dropoffAddress: dropoffPayload,
+          requiresReturn: false,
+          requiresDeliveryProof: false,
+          requiresCollectionRecipient: false,
+          pickupSurchargeChargedToDriver: false,
+        },
+        {
+          serviceTypeId: 'st-1',
+          destinationKnownAtCreation: true,
+          dropoffAddress: { ...dropoffPayload, number: '201' },
+          requiresReturn: true,
+          requiresDeliveryProof: false,
+          requiresCollectionRecipient: false,
+          pickupSurchargeChargedToDriver: false,
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 7.5,
+        subtotal: 12.5,
+        returnValue: 0,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+      });
+      tx.delivery.create
+        .mockResolvedValueOnce({ id: 'delivery-1' })
+        .mockResolvedValueOnce({ id: 'delivery-2' });
+      prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve(fullDeliveryRow({ id: where.id, batchId: 'batch-id' })),
+      );
+    });
+
+    it('cria todas as entregas no mesmo batchId e dispara uma única chamada de despacho', async () => {
+      const result = await service.createBatch(companyUser, payload);
+
+      expect(result.deliveries).toHaveLength(2);
+      expect(result.batchId).toEqual(expect.any(String));
+      expect(tx.delivery.create).toHaveBeenCalledTimes(2);
+      const firstBatchId = tx.delivery.create.mock.calls[0][0].data.batchId;
+      const secondBatchId = tx.delivery.create.mock.calls[1][0].data.batchId;
+      expect(firstBatchId).toBe(result.batchId);
+      expect(secondBatchId).toBe(result.batchId);
+      expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(1);
+      expect(dispatchService.dispatchDelivery).toHaveBeenCalledWith('delivery-1');
+    });
+
+    it('sem destino conhecido: nenhum item calcula distância/preço na criação', async () => {
+      const noAddressItem = {
+        serviceTypeId: 'st-1',
+        destinationKnownAtCreation: false,
+        requiresReturn: false,
+        requiresDeliveryProof: false,
+        requiresCollectionRecipient: false,
+        pickupSurchargeChargedToDriver: false,
+      };
+      const noAddressPayload = { deliveries: [noAddressItem, noAddressItem] };
+
+      await service.createBatch(companyUser, noAddressPayload);
+
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+      expect(pricingService.quote).not.toHaveBeenCalled();
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            destinationKnownAtCreation: false,
+            distanceKm: null,
+            totalValue: null,
+            driverValue: null,
+            platformValue: null,
+          }),
+        }),
+      );
     });
   });
 
@@ -448,6 +581,342 @@ describe('DeliveriesService', () => {
       await expect(service.cancel(otherCompanyUser, 'delivery-1')).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+    });
+
+    it('cancelar um pedido de lote cancela todos os pedidos e suas ofertas', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'CANCELLED' }));
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1' }),
+        fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1' }),
+      ]);
+
+      await service.cancel(companyUser, 'delivery-1');
+
+      expect(tx.delivery.update).toHaveBeenCalledTimes(2);
+      expect(tx.delivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'delivery-2' } }),
+      );
+      expect(dispatchService.cancelPendingOfferForDelivery).toHaveBeenCalledWith('delivery-1');
+      expect(dispatchService.cancelPendingOfferForDelivery).toHaveBeenCalledWith('delivery-2');
+    });
+
+    it('lote com um item já COMPLETED: cancela só os itens ainda ativos, sem travar o lote inteiro', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'AWAITING_DRIVER' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'CANCELLED' }));
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'COMPLETED' }),
+        fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'AWAITING_DRIVER' }),
+      ]);
+
+      await service.cancel(companyUser, 'delivery-2');
+
+      expect(tx.delivery.update).toHaveBeenCalledTimes(1);
+      expect(tx.delivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'delivery-2' } }),
+      );
+      expect(dispatchService.cancelPendingOfferForDelivery).toHaveBeenCalledWith('delivery-2');
+      expect(dispatchService.cancelPendingOfferForDelivery).not.toHaveBeenCalledWith('delivery-1');
+    });
+
+    it('lote onde todos os itens já estão CANCELLED/COMPLETED: rejeita (nada pra cancelar)', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'COMPLETED' }),
+      );
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'COMPLETED' }),
+        fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'CANCELLED' }),
+      ]);
+
+      await expect(service.cancel(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.delivery.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('collect', () => {
+    it('rejeita quem não é motoboy', async () => {
+      await expect(service.collect(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('retorna 404 quando o pedido não existe', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await expect(service.collect(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('rejeita quando o pedido não está atribuído a este motoboy', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'outro-driver' }));
+
+      await expect(service.collect(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('rejeita se algum item do lote ainda não está ACCEPTED', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
+      );
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
+        fullDeliveryRow({ id: 'delivery-2', driverId: 'driver-1', batchId: 'batch-1', status: 'AWAITING_DRIVER' }),
+      ]);
+
+      await expect(service.collect(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('transição atômica ACCEPTED -> COLLECTED pra todos os itens do lote', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          fullDeliveryRow({ id: where.id, driverId: 'driver-1', batchId: 'batch-1', status: 'COLLECTED' }),
+        ),
+      );
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
+        fullDeliveryRow({ id: 'delivery-2', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
+      ]);
+
+      const result = await service.collect(driverUser, 'delivery-1');
+
+      expect(tx.delivery.update).toHaveBeenCalledTimes(2);
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { status: 'COLLECTED', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'ACCEPTED',
+          toStatus: 'COLLECTED',
+          changedByUserId: driverUser.id,
+        },
+      });
+      expect(result.deliveries).toHaveLength(2);
+    });
+  });
+
+  describe('markDelivered', () => {
+    it('rejeita se o pedido não está COLLECTED', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'ACCEPTED' }),
+      );
+
+      await expect(service.markDelivered(driverUser, 'delivery-1', {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('destino conhecido, sem retorno: fecha sozinho (COMPLETED) e registra as duas transições', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: true,
+          requiresReturn: false,
+        }),
+      );
+
+      await service.markDelivered(driverUser, 'delivery-1', {});
+
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+      expect(tx.deliveryAddress.create).not.toHaveBeenCalled();
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: expect.objectContaining({ status: 'COMPLETED' }),
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'COLLECTED',
+          toStatus: 'DELIVERED',
+          changedByUserId: driverUser.id,
+        },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'DELIVERED',
+          toStatus: 'COMPLETED',
+          changedByUserId: driverUser.id,
+        },
+      });
+    });
+
+    it('destino conhecido, com retorno: fica em DELIVERED, só uma transição', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: true,
+          requiresReturn: true,
+        }),
+      );
+
+      await service.markDelivered(driverUser, 'delivery-1', {});
+
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: expect.objectContaining({ status: 'DELIVERED' }),
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('sem destino conhecido: exige lat/lng no corpo', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'COLLECTED', destinationKnownAtCreation: false }),
+      );
+
+      await expect(service.markDelivered(driverUser, 'delivery-1', {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('sem destino conhecido: calcula distância/preço a partir do lat/lng informado e cria o DROPOFF', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          serviceType: { name: 'Moto' },
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 8, durationMinutes: 25 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 12,
+        subtotal: 17,
+        returnValue: 0,
+        totalValue: 17,
+        driverValue: 14,
+        platformValue: 3,
+      });
+
+      await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+      expect(googleMapsService.getDistance).toHaveBeenCalledWith({
+        origin: { address: expect.stringContaining('Rua da Loja') },
+        destination: { lat: -20.15, lng: -41.74 },
+      });
+      expect(tx.deliveryAddress.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          type: 'DROPOFF',
+          street: null,
+          city: null,
+          lat: -20.15,
+          lng: -41.74,
+        }),
+      });
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: expect.objectContaining({
+          distanceKm: 8,
+          totalValue: 17,
+          driverValue: 14,
+          platformValue: 3,
+        }),
+      });
+    });
+  });
+
+  describe('completeReturn', () => {
+    const nearPickup = { lat: -20.15, lng: -41.74 };
+
+    it('rejeita quando o raio de retorno ainda não foi configurado', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: null });
+
+      await expect(
+        service.completeReturn(driverUser, 'delivery-1', nearPickup),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejeita quando a empresa não tem coordenadas cadastradas', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: null, lng: null });
+
+      await expect(
+        service.completeReturn(driverUser, 'delivery-1', nearPickup),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejeita quando o motoboy está fora do raio configurado', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+
+      await expect(
+        service.completeReturn(driverUser, 'delivery-1', { lat: -21, lng: -42 }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejeita quando não há entregas aguardando retorno', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
+      );
+      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
+      ]);
+
+      await expect(
+        service.completeReturn(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('fecha só os itens DELIVERED+requiresReturn, dentro do raio, sem mexer nos demais', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1' }),
+      );
+      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: true }),
+        fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
+        fullDeliveryRow({ id: 'delivery-3', batchId: 'batch-1', status: 'COMPLETED', requiresReturn: true }),
+      ]);
+
+      const result = await service.completeReturn(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+      expect(tx.delivery.update).toHaveBeenCalledTimes(1);
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { status: 'COMPLETED', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ deliveryId: 'delivery-1', toStatus: 'COMPLETED' }),
+        }),
+      );
+      expect(result.deliveries).toHaveLength(1);
     });
   });
 });

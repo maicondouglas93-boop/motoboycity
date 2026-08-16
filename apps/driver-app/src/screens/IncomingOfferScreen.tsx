@@ -82,12 +82,16 @@ export function IncomingOfferScreen({ navigation }: Props) {
     <SafeAreaView style={[styles.container, { backgroundColor: background }]}>
       <View style={styles.content}>
         <Text style={[styles.countdown, { color: colors.primary }]}>{secondsLeft}s</Text>
-        <Text style={[styles.title, { color: text }]}>Novo pedido #{offer.displayNumber}</Text>
+        <Text style={[styles.title, { color: text }]}>
+          {offer.deliveryCount && offer.deliveryCount > 1
+            ? `Novo lote • ${offer.deliveryCount} pedidos`
+            : `Novo pedido #${offer.displayNumber}`}
+        </Text>
 
         <View style={styles.detailRow}>
           <Text style={{ color: muted }}>Valor</Text>
           <Text style={[styles.value, { color: text }]}>
-            {currencyFormatter.format(offer.driverValue)}
+            {offer.driverValue !== null ? currencyFormatter.format(offer.driverValue) : 'A calcular'}
           </Text>
         </View>
         <View style={styles.detailRow}>

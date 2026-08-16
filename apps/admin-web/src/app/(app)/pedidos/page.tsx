@@ -53,7 +53,10 @@ const CANCELLABLE_STATUSES: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
 ];
 
-function formatCurrency(value: number): string {
+function formatCurrency(value: number | null): string {
+  if (value === null) {
+    return 'A calcular na entrega';
+  }
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 

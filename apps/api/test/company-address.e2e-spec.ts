@@ -105,7 +105,28 @@ describe('CompanyAddressController (e2e)', () => {
       city: 'Lajinha',
       state: 'MG',
       zip: '36930000',
+      lat: null,
+      lng: null,
     });
+  });
+
+  it('aceita e devolve lat/lng opcionais', async () => {
+    const response = await request(app.getHttpServer())
+      .put('/company/address')
+      .set('Authorization', `Bearer ${companyToken}`)
+      .send({
+        street: 'Rua da Loja',
+        number: '100',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+        lat: -20.15,
+        lng: -41.74,
+      })
+      .expect(200);
+
+    expect(response.body.address.lat).toBe(-20.15);
+    expect(response.body.address.lng).toBe(-41.74);
   });
 
   it('GET reflete o endereço cadastrado', async () => {

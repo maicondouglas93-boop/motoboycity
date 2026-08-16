@@ -12,6 +12,8 @@ export interface CompanyAddressItem {
   city: string;
   state: string;
   zip: string;
+  lat: number | null;
+  lng: number | null;
 }
 
 @Injectable()
@@ -64,6 +66,8 @@ export class CompanyAddressService {
     city: string;
     state: string;
     zip: string;
+    lat: { toString(): string } | null;
+    lng: { toString(): string } | null;
   }): CompanyAddressItem {
     return {
       id: address.id,
@@ -74,6 +78,8 @@ export class CompanyAddressService {
       city: address.city,
       state: address.state,
       zip: address.zip,
+      lat: address.lat === null ? null : Number(address.lat),
+      lng: address.lng === null ? null : Number(address.lng),
     };
   }
 }

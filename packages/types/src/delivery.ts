@@ -10,12 +10,14 @@ export type DeliveryStatus =
 
 export interface DeliveryAddressItem {
   type: string;
-  street: string;
-  number: string;
+  street: string | null;
+  number: string | null;
   complement: string | null;
-  city: string;
-  state: string;
-  zip: string;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
   referenceNote: string | null;
 }
 
@@ -24,12 +26,14 @@ export interface DeliveryListItem {
   displayNumber: number;
   companyId: string;
   companyName: string;
+  batchId: string | null;
   serviceTypeName: string;
   status: DeliveryStatus;
+  destinationKnownAtCreation: boolean;
   distanceKm: number | null;
-  totalValue: number;
-  driverValue: number;
-  platformValue: number;
+  totalValue: number | null;
+  driverValue: number | null;
+  platformValue: number | null;
   requiresReturn: boolean;
   returnValue: number | null;
   scheduledAt: string | null;
@@ -52,12 +56,37 @@ export interface DeliveryAddressInput {
 
 export interface CreateDeliveryPayload {
   serviceTypeId: string;
-  dropoffAddress: DeliveryAddressInput;
+  destinationKnownAtCreation?: boolean;
+  dropoffAddress?: DeliveryAddressInput;
   requiresReturn?: boolean;
   requiresDeliveryProof?: boolean;
   requiresCollectionRecipient?: boolean;
   pickupSurchargeChargedToDriver?: boolean;
   scheduledAt?: string;
+}
+
+export interface CreateDeliveryBatchPayload {
+  deliveries: CreateDeliveryPayload[];
+}
+
+export interface DeliveryBatchDetail {
+  batchId: string;
+  deliveries: DeliveryDetail[];
+}
+
+export interface DeliveryGroupResult {
+  batchId: string | null;
+  deliveries: DeliveryDetail[];
+}
+
+export interface MarkDeliveredPayload {
+  lat?: number;
+  lng?: number;
+}
+
+export interface CompleteReturnPayload {
+  lat: number;
+  lng: number;
 }
 
 export interface CompanyAddressItem {
@@ -69,6 +98,8 @@ export interface CompanyAddressItem {
   city: string;
   state: string;
   zip: string;
+  lat: number | null;
+  lng: number | null;
 }
 
 export interface UpsertCompanyAddressPayload {
@@ -79,4 +110,6 @@ export interface UpsertCompanyAddressPayload {
   city: string;
   state: string;
   zip: string;
+  lat?: number;
+  lng?: number;
 }

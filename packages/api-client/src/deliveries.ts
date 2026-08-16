@@ -1,4 +1,14 @@
-import type { CreateDeliveryPayload, DeliveryDetail, DeliveryListItem, DeliveryStatus } from '@motoboycity/types';
+import type {
+  CompleteReturnPayload,
+  CreateDeliveryBatchPayload,
+  CreateDeliveryPayload,
+  DeliveryBatchDetail,
+  DeliveryDetail,
+  DeliveryGroupResult,
+  DeliveryListItem,
+  DeliveryStatus,
+  MarkDeliveredPayload,
+} from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
 export interface DeliveriesApiConfig {
@@ -38,12 +48,54 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryDetail>(response);
     },
 
+    async createBatch(
+      accessToken: string,
+      payload: CreateDeliveryBatchPayload,
+    ): Promise<DeliveryBatchDetail> {
+      const response = await fetch(`${baseUrl}/deliveries/batch`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryBatchDetail>(response);
+    },
+
     async cancel(accessToken: string, id: string): Promise<DeliveryDetail> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/cancel`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
+    async collect(accessToken: string, id: string): Promise<DeliveryGroupResult> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/collect`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryGroupResult>(response);
+    },
+
+    async deliver(accessToken: string, id: string, payload: MarkDeliveredPayload): Promise<DeliveryDetail> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/deliver`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
+    async completeReturn(
+      accessToken: string,
+      id: string,
+      payload: CompleteReturnPayload,
+    ): Promise<DeliveryGroupResult> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/complete-return`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
   };
 }

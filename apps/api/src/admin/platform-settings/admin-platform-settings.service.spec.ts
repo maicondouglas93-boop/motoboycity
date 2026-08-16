@@ -29,15 +29,17 @@ describe('AdminPlatformSettingsService', () => {
       expect(result).toEqual({
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        returnProximityRadiusMeters: null,
         updatedBy: null,
         updatedAt: null,
       });
     });
 
-    it('converte Decimal para number, repassa o timeout e inclui quem atualizou', async () => {
+    it('converte Decimal para number, repassa o timeout/raio e inclui quem atualizou', async () => {
       prisma.platformSettings.findUnique.mockResolvedValue({
         driverCommissionPercentage: { toString: () => '80.00' },
         dispatchOfferTimeoutSeconds: 60,
+        returnProximityRadiusMeters: 200,
         updatedBy: { id: 'admin-1', name: 'Admin Um' },
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
       });
@@ -47,6 +49,7 @@ describe('AdminPlatformSettingsService', () => {
       expect(result).toEqual({
         driverCommissionPercentage: 80,
         dispatchOfferTimeoutSeconds: 60,
+        returnProximityRadiusMeters: 200,
         updatedBy: { id: 'admin-1', name: 'Admin Um' },
         updatedAt: '2026-01-01T00:00:00.000Z',
       });
@@ -103,10 +106,37 @@ describe('AdminPlatformSettingsService', () => {
           id: 'global',
           driverCommissionPercentage: undefined,
           dispatchOfferTimeoutSeconds: 45,
+          returnProximityRadiusMeters: undefined,
           updatedByUserId: 'admin-1',
         },
         include: { updatedBy: true },
       });
+    });
+
+    it('atualiza só o raio de retorno (partial update)', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: null,
+        returnProximityRadiusMeters: 150,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const result = await service.update({ returnProximityRadiusMeters: 150 }, 'admin-1');
+
+      expect(prisma.platformSettings.upsert).toHaveBeenCalledWith({
+        where: { id: 'global' },
+        update: { returnProximityRadiusMeters: 150, updatedByUserId: 'admin-1' },
+        create: {
+          id: 'global',
+          driverCommissionPercentage: undefined,
+          dispatchOfferTimeoutSeconds: undefined,
+          returnProximityRadiusMeters: 150,
+          updatedByUserId: 'admin-1',
+        },
+        include: { updatedBy: true },
+      });
+      expect(result.returnProximityRadiusMeters).toBe(150);
     });
   });
 });
