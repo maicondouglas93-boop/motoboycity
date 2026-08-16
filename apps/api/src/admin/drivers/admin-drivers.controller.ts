@@ -1,5 +1,10 @@
-import { Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
-import { listDriversQuerySchema, type ListDriversQuery } from '@motoboycity/validation';
+import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  listDriversQuerySchema,
+  replaceDriverServiceTypesSchema,
+  type ListDriversQuery,
+  type ReplaceDriverServiceTypesPayload,
+} from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -10,6 +15,7 @@ import {
   type AdminDriverListItem,
   type DriverAccountStatusResult,
   type DriverReviewResult,
+  type DriverServiceTypesResult,
 } from './admin-drivers.service';
 
 @Controller('admin/drivers')
@@ -47,5 +53,14 @@ export class AdminDriversController {
   @Patch(':id/reactivate')
   reactivate(@Param('id') id: string): Promise<DriverAccountStatusResult> {
     return this.adminDriversService.reactivate(id);
+  }
+
+  @Put(':id/service-types')
+  replaceServiceTypes(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(replaceDriverServiceTypesSchema))
+    body: ReplaceDriverServiceTypesPayload,
+  ): Promise<DriverServiceTypesResult> {
+    return this.adminDriversService.replaceServiceTypes(id, body);
   }
 }

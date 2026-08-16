@@ -23,6 +23,23 @@ export interface AdminDriverListItem {
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;
+  serviceTypes: DriverServiceTypeItem[];
+}
+
+export interface DriverServiceTypeItem {
+  id: string;
+  code: string;
+  name: string;
+  isPrimary: boolean;
+}
+
+export interface ReplaceDriverServiceTypesPayload {
+  serviceTypeIds: string[];
+}
+
+export interface DriverServiceTypesResult {
+  driverId: string;
+  serviceTypes: DriverServiceTypeItem[];
 }
 
 export interface DriverReviewResult {

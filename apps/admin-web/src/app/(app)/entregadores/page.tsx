@@ -7,9 +7,10 @@ import { ApiError } from '@motoboycity/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { StatCard } from '@/components/stat-card';
-import { adminDriversApi } from '@/lib/api-client';
+import { adminDriversApi, adminServiceTypesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 const approvalStatusLabel: Record<AdminDriverListItem['approvalStatus'], string> = {
@@ -38,6 +39,7 @@ type DriverAction = 'approve' | 'reject' | 'suspend' | 'block' | 'reactivate';
 export default function DriversPage() {
   const [search, setSearch] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingServiceTypeIds, setPendingServiceTypeIds] = useState<Record<string, string[]>>({});
   const queryClient = useQueryClient();
 
   const token = session.getToken();
@@ -48,14 +50,22 @@ export default function DriversPage() {
     enabled: Boolean(token),
   });
 
-  const actionFn: Record<DriverAction, (accessToken: string, driverId: string) => Promise<unknown>> =
-    {
-      approve: adminDriversApi.approve,
-      reject: adminDriversApi.reject,
-      suspend: adminDriversApi.suspend,
-      block: adminDriversApi.block,
-      reactivate: adminDriversApi.reactivate,
-    };
+  const serviceTypesQuery = useQuery({
+    queryKey: ['admin', 'service-types', 'active'],
+    queryFn: () => adminServiceTypesApi.list(token as string, { active: true }),
+    enabled: Boolean(token),
+  });
+
+  const actionFn: Record<
+    DriverAction,
+    (accessToken: string, driverId: string) => Promise<unknown>
+  > = {
+    approve: adminDriversApi.approve,
+    reject: adminDriversApi.reject,
+    suspend: adminDriversApi.suspend,
+    block: adminDriversApi.block,
+    reactivate: adminDriversApi.reactivate,
+  };
 
   const actionMutation = useMutation({
     mutationFn: ({ action, driverId }: { action: DriverAction; driverId: string }) =>
@@ -65,7 +75,28 @@ export default function DriversPage() {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
     },
     onError: (error) => {
-      setActionError(error instanceof ApiError ? error.message : 'Não foi possível concluir a ação.');
+      setActionError(
+        error instanceof ApiError ? error.message : 'Não foi possível concluir a ação.',
+      );
+    },
+  });
+
+  const serviceTypesMutation = useMutation({
+    mutationFn: ({ driverId, serviceTypeIds }: { driverId: string; serviceTypeIds: string[] }) =>
+      adminDriversApi.replaceServiceTypes(token as string, driverId, { serviceTypeIds }),
+    onSuccess: (_, variables) => {
+      setActionError(null);
+      setPendingServiceTypeIds((current) => {
+        const remaining = { ...current };
+        delete remaining[variables.driverId];
+        return remaining;
+      });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+    },
+    onError: (error) => {
+      setActionError(
+        error instanceof ApiError ? error.message : 'Não foi possível salvar as modalidades.',
+      );
     },
   });
 
@@ -90,6 +121,27 @@ export default function DriversPage() {
       actionMutation.variables?.driverId === driverId &&
       actionMutation.variables?.action === action
     );
+  }
+
+  function selectedServiceTypeIds(driver: AdminDriverListItem): string[] {
+    return (
+      pendingServiceTypeIds[driver.id] ?? driver.serviceTypes.map((serviceType) => serviceType.id)
+    );
+  }
+
+  function toggleServiceType(driver: AdminDriverListItem, serviceTypeId: string) {
+    setPendingServiceTypeIds((current) => {
+      const selected =
+        current[driver.id] ?? driver.serviceTypes.map((serviceType) => serviceType.id);
+      const next = selected.includes(serviceTypeId)
+        ? selected.filter((id) => id !== serviceTypeId)
+        : [...selected, serviceTypeId];
+      return { ...current, [driver.id]: next };
+    });
+  }
+
+  function isSavingServiceTypes(driverId: string) {
+    return serviceTypesMutation.isPending && serviceTypesMutation.variables?.driverId === driverId;
   }
 
   return (
@@ -146,11 +198,71 @@ export default function DriversPage() {
                 </p>
               )}
 
+              <div className="space-y-2 rounded-md border p-3">
+                <div>
+                  <p className="text-sm font-medium">Modalidades</p>
+                  {driver.serviceTypes.length === 0 && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Sem modalidade: este entregador não receberá ofertas.
+                    </p>
+                  )}
+                </div>
+                {serviceTypesQuery.isLoading && (
+                  <p className="text-xs text-muted-foreground">Carregando modalidades...</p>
+                )}
+                {serviceTypesQuery.isError && (
+                  <p className="text-xs text-destructive">
+                    Não foi possível carregar as modalidades.
+                  </p>
+                )}
+                {serviceTypesQuery.data?.map((serviceType) => {
+                  const selected = selectedServiceTypeIds(driver).includes(serviceType.id);
+                  return (
+                    <label
+                      key={serviceType.id}
+                      className="flex cursor-pointer items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={() => toggleServiceType(driver, serviceType.id)}
+                        aria-label={`Modalidade ${serviceType.name}`}
+                      />
+                      <span>{serviceType.name}</span>
+                      <span className="text-xs text-muted-foreground">({serviceType.code})</span>
+                    </label>
+                  );
+                })}
+                {serviceTypesQuery.isSuccess && serviceTypesQuery.data.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Cadastre e ative uma modalidade antes de qualificar entregadores.
+                  </p>
+                )}
+                <Button
+                  className="w-full"
+                  variant="secondary"
+                  onClick={() =>
+                    serviceTypesMutation.mutate({
+                      driverId: driver.id,
+                      serviceTypeIds: selectedServiceTypeIds(driver),
+                    })
+                  }
+                  disabled={
+                    serviceTypesMutation.isPending ||
+                    serviceTypesQuery.isLoading ||
+                    selectedServiceTypeIds(driver).length === 0
+                  }
+                >
+                  {isSavingServiceTypes(driver.id) ? 'Salvando...' : 'Salvar modalidades'}
+                </Button>
+              </div>
+
               {driver.approvalStatus === 'PENDING' && (
                 <div className="flex gap-2">
                   <Button
                     className="flex-1"
-                    onClick={() => actionMutation.mutate({ action: 'approve', driverId: driver.id })}
+                    onClick={() =>
+                      actionMutation.mutate({ action: 'approve', driverId: driver.id })
+                    }
                     disabled={actionMutation.isPending}
                   >
                     {isPending(driver.id, 'approve') ? 'Aprovando...' : 'Aprovar'}
@@ -171,7 +283,9 @@ export default function DriversPage() {
                   <Button
                     className="flex-1"
                     variant="outline"
-                    onClick={() => actionMutation.mutate({ action: 'suspend', driverId: driver.id })}
+                    onClick={() =>
+                      actionMutation.mutate({ action: 'suspend', driverId: driver.id })
+                    }
                     disabled={actionMutation.isPending}
                   >
                     {isPending(driver.id, 'suspend') ? 'Suspendendo...' : 'Suspender'}
@@ -191,7 +305,9 @@ export default function DriversPage() {
                 <div className="flex gap-2">
                   <Button
                     className="flex-1"
-                    onClick={() => actionMutation.mutate({ action: 'reactivate', driverId: driver.id })}
+                    onClick={() =>
+                      actionMutation.mutate({ action: 'reactivate', driverId: driver.id })
+                    }
                     disabled={actionMutation.isPending}
                   >
                     {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}
@@ -210,7 +326,9 @@ export default function DriversPage() {
               {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'BLOCKED' && (
                 <Button
                   className="w-full"
-                  onClick={() => actionMutation.mutate({ action: 'reactivate', driverId: driver.id })}
+                  onClick={() =>
+                    actionMutation.mutate({ action: 'reactivate', driverId: driver.id })
+                  }
                   disabled={actionMutation.isPending}
                 >
                   {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}

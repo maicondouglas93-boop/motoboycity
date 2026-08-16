@@ -7,11 +7,19 @@ describe('AdminDriversService', () => {
   let service: AdminDriversService;
   let prisma: {
     driver: { findUnique: jest.Mock; update: jest.Mock; findMany: jest.Mock };
+    serviceType: { findMany: jest.Mock };
+    driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
+    $transaction: jest.Mock;
   };
 
   beforeEach(async () => {
     prisma = {
       driver: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
+      serviceType: { findMany: jest.fn() },
+      driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
+      $transaction: jest
+        .fn()
+        .mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -33,6 +41,7 @@ describe('AdminDriversService', () => {
           user: { name: 'Motoboy Um', email: 'motoboy1@example.com', phone: '33999990000' },
           reviewedBy: null,
           reviewedAt: null,
+          serviceTypes: [],
         },
         {
           id: 'driver-2',
@@ -43,6 +52,12 @@ describe('AdminDriversService', () => {
           user: { name: 'Motoboy Dois', email: 'motoboy2@example.com', phone: '33999991111' },
           reviewedBy: { id: 'admin-1', name: 'Admin Um' },
           reviewedAt: new Date('2026-01-02T12:00:00.000Z'),
+          serviceTypes: [
+            {
+              isPrimary: true,
+              serviceType: { id: 'service-1', code: 'MOTO', name: 'Moto' },
+            },
+          ],
         },
       ]);
 
@@ -60,6 +75,7 @@ describe('AdminDriversService', () => {
           createdAt: '2026-01-01T00:00:00.000Z',
           reviewedBy: null,
           reviewedAt: null,
+          serviceTypes: [],
         },
         {
           id: 'driver-2',
@@ -72,6 +88,7 @@ describe('AdminDriversService', () => {
           createdAt: '2026-01-02T00:00:00.000Z',
           reviewedBy: { id: 'admin-1', name: 'Admin Um' },
           reviewedAt: '2026-01-02T12:00:00.000Z',
+          serviceTypes: [{ id: 'service-1', code: 'MOTO', name: 'Moto', isPrimary: true }],
         },
       ]);
     });
@@ -104,7 +121,11 @@ describe('AdminDriversService', () => {
       });
       expect(prisma.driver.update).toHaveBeenCalledWith({
         where: { id: 'driver-1' },
-        data: { approvalStatus: 'APPROVED', reviewedByUserId: 'admin-1', reviewedAt: expect.any(Date) },
+        data: {
+          approvalStatus: 'APPROVED',
+          reviewedByUserId: 'admin-1',
+          reviewedAt: expect.any(Date),
+        },
       });
     });
 
@@ -136,16 +157,18 @@ describe('AdminDriversService', () => {
       expect(result.approvalStatus).toBe('REJECTED');
       expect(prisma.driver.update).toHaveBeenCalledWith({
         where: { id: 'driver-1' },
-        data: { approvalStatus: 'REJECTED', reviewedByUserId: 'admin-1', reviewedAt: expect.any(Date) },
+        data: {
+          approvalStatus: 'REJECTED',
+          reviewedByUserId: 'admin-1',
+          reviewedAt: expect.any(Date),
+        },
       });
     });
 
     it('rejeita a ação quando o motoboy não está PENDING', async () => {
       prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', approvalStatus: 'REJECTED' });
 
-      await expect(service.reject('driver-1', 'admin-1')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(service.reject('driver-1', 'admin-1')).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -212,6 +235,64 @@ describe('AdminDriversService', () => {
       const result = await service.reactivate('driver-1');
 
       expect(result).toEqual({ driverId: 'driver-1', accountStatus: 'ACTIVE' });
+    });
+  });
+
+  describe('replaceServiceTypes', () => {
+    it('substitui as modalidades de forma atômica e preserva a ordem escolhida', async () => {
+      prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
+      prisma.serviceType.findMany.mockResolvedValue([
+        { id: 'service-1', code: 'MOTO', name: 'Moto' },
+        { id: 'service-2', code: 'CARRO', name: 'Carro' },
+      ]);
+
+      const result = await service.replaceServiceTypes('driver-1', {
+        serviceTypeIds: ['service-2', 'service-1'],
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+      expect(prisma.driverServiceType.deleteMany).toHaveBeenCalledWith({
+        where: { driverId: 'driver-1' },
+      });
+      expect(prisma.driverServiceType.createMany).toHaveBeenCalledWith({
+        data: [
+          { driverId: 'driver-1', serviceTypeId: 'service-2', isPrimary: true },
+          { driverId: 'driver-1', serviceTypeId: 'service-1', isPrimary: false },
+        ],
+      });
+      expect(result).toEqual({
+        driverId: 'driver-1',
+        serviceTypes: [
+          { id: 'service-2', code: 'CARRO', name: 'Carro', isPrimary: true },
+          { id: 'service-1', code: 'MOTO', name: 'Moto', isPrimary: false },
+        ],
+      });
+    });
+
+    it('rejeita a substituição se qualquer modalidade não existe ou está inativa', async () => {
+      prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
+      prisma.serviceType.findMany.mockResolvedValue([
+        { id: 'service-1', code: 'MOTO', name: 'Moto' },
+      ]);
+
+      await expect(
+        service.replaceServiceTypes('driver-1', {
+          serviceTypeIds: ['service-1', 'service-inactive'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.driverServiceType.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.driverServiceType.createMany).not.toHaveBeenCalled();
+    });
+
+    it('retorna 404 sem alterar as modalidades quando o motoboy não existe', async () => {
+      prisma.driver.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.replaceServiceTypes('missing', { serviceTypeIds: ['service-1'] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.driverServiceType.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

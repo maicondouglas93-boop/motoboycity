@@ -1,6 +1,14 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { ReplaceDriverServiceTypesPayload } from '@motoboycity/validation';
 import type { Driver, DriverAccountStatus, DriverApprovalStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+
+export interface DriverServiceTypeItem {
+  id: string;
+  code: string;
+  name: string;
+  isPrimary: boolean;
+}
 
 export interface AdminDriverListItem {
   id: string;
@@ -13,6 +21,7 @@ export interface AdminDriverListItem {
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;
+  serviceTypes: DriverServiceTypeItem[];
 }
 
 export interface DriverReviewResult {
@@ -25,6 +34,11 @@ export interface DriverReviewResult {
 export interface DriverAccountStatusResult {
   driverId: string;
   accountStatus: string;
+}
+
+export interface DriverServiceTypesResult {
+  driverId: string;
+  serviceTypes: DriverServiceTypeItem[];
 }
 
 export interface ListDriversFilters {
@@ -43,7 +57,11 @@ export class AdminDriversService {
         ...(filters.accountStatus && { accountStatus: filters.accountStatus }),
       },
       orderBy: { createdAt: 'desc' },
-      include: { user: true, reviewedBy: true },
+      include: {
+        user: true,
+        reviewedBy: true,
+        serviceTypes: { include: { serviceType: true }, orderBy: { serviceType: { name: 'asc' } } },
+      },
     });
 
     return drivers.map((driver) => ({
@@ -59,6 +77,9 @@ export class AdminDriversService {
         ? { id: driver.reviewedBy.id, name: driver.reviewedBy.name }
         : null,
       reviewedAt: driver.reviewedAt?.toISOString() ?? null,
+      serviceTypes: driver.serviceTypes.map((assignment) =>
+        this.toServiceTypeItem(assignment.serviceType, assignment.isPrimary),
+      ),
     }));
   }
 
@@ -94,6 +115,46 @@ export class AdminDriversService {
     return this.setAccountStatus(driverId, 'ACTIVE');
   }
 
+  async replaceServiceTypes(
+    driverId: string,
+    payload: ReplaceDriverServiceTypesPayload,
+  ): Promise<DriverServiceTypesResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      if (!driver) {
+        throw new NotFoundException('Motoboy não encontrado.');
+      }
+
+      const serviceTypes = await tx.serviceType.findMany({
+        where: { id: { in: payload.serviceTypeIds }, active: true },
+      });
+      if (serviceTypes.length !== payload.serviceTypeIds.length) {
+        throw new ConflictException(
+          'Todas as modalidades devem existir e estar ativas para serem atribuídas.',
+        );
+      }
+
+      const byId = new Map(serviceTypes.map((serviceType) => [serviceType.id, serviceType]));
+      const orderedServiceTypes = payload.serviceTypeIds.map((id) => byId.get(id)!);
+
+      await tx.driverServiceType.deleteMany({ where: { driverId } });
+      await tx.driverServiceType.createMany({
+        data: orderedServiceTypes.map((serviceType, index) => ({
+          driverId,
+          serviceTypeId: serviceType.id,
+          isPrimary: index === 0,
+        })),
+      });
+
+      return {
+        driverId,
+        serviceTypes: orderedServiceTypes.map((serviceType, index) =>
+          this.toServiceTypeItem(serviceType, index === 0),
+        ),
+      };
+    });
+  }
+
   private async review(
     driverId: string,
     approvalStatus: 'APPROVED' | 'REJECTED',
@@ -123,9 +184,7 @@ export class AdminDriversService {
       throw new ConflictException('Só é possível suspender ou bloquear um motoboy aprovado.');
     }
     if (driver.accountStatus === accountStatus) {
-      throw new ConflictException(
-        `Este motoboy já está com status de conta "${accountStatus}".`,
-      );
+      throw new ConflictException(`Este motoboy já está com status de conta "${accountStatus}".`);
     }
 
     const updated = await this.prisma.driver.update({
@@ -142,5 +201,12 @@ export class AdminDriversService {
       throw new NotFoundException('Motoboy não encontrado.');
     }
     return driver;
+  }
+
+  private toServiceTypeItem(
+    serviceType: { id: string; code: string; name: string },
+    isPrimary: boolean,
+  ): DriverServiceTypeItem {
+    return { id: serviceType.id, code: serviceType.code, name: serviceType.name, isPrimary };
   }
 }

@@ -4,6 +4,8 @@ import type {
   DriverAccountStatusResult,
   DriverApprovalStatus,
   DriverReviewResult,
+  DriverServiceTypesResult,
+  ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -70,6 +72,19 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DriverAccountStatusResult>(response);
+    },
+
+    async replaceServiceTypes(
+      accessToken: string,
+      driverId: string,
+      payload: ReplaceDriverServiceTypesPayload,
+    ): Promise<DriverServiceTypesResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/service-types`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DriverServiceTypesResult>(response);
     },
   };
 }
