@@ -34,6 +34,17 @@ export class DeliveryOffersService {
     if (!driver) {
       throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
     }
+    // P1-03: presença e despacho já barravam quem não está aprovado/ativo, mas o aceite
+    // não olhava nada disso. Quem fosse bloqueado segurando uma oferta ainda conseguia
+    // aceitá-la e assumir o pedido — a janela era pequena, e é exatamente a que a decisão
+    // do admin precisa fechar. Vale para recusar também, para o motoboy impedido não
+    // continuar operando a fila de nenhum lado.
+    if (driver.approvalStatus !== 'APPROVED') {
+      throw new ForbiddenException('Cadastro de motoboy ainda não aprovado.');
+    }
+    if (driver.accountStatus !== 'ACTIVE') {
+      throw new ForbiddenException('Conta de motoboy suspensa ou bloqueada. Contate o suporte.');
+    }
     return driver;
   }
 }
