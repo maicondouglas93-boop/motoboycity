@@ -82,11 +82,15 @@ export interface DeliveryGroupResult {
 export interface MarkDeliveredPayload {
   lat?: number;
   lng?: number;
+  /** Raio de erro do fix em metros — ver mark-delivered.schema.ts. */
+  accuracy?: number;
 }
 
 export interface CompleteReturnPayload {
   lat: number;
   lng: number;
+  /** Raio de erro do fix em metros — ver complete-return.schema.ts. */
+  accuracy?: number;
 }
 
 export interface CompanyAddressItem {
