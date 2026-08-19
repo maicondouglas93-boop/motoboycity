@@ -189,6 +189,49 @@ Arquivos de contrato:
 
 ## Historico de mudancas
 
+### 2026-08-19 — Bloqueio/suspensao com efeito real (P1-03)
+
+`setAccountStatus` so trocava o enum. Na pratica o motoboy suspenso ou bloqueado
+seguia marcado como `AVAILABLE`, com o log de presenca aberto contando tempo
+online, e as ofertas que ja estavam na mao dele ficavam paradas ate expirar
+sozinhas — durante esse tempo o pedido nao ia para mais ninguem, mesmo havendo
+motoboy livre. E o aceite nao olhava `accountStatus`: quem fosse bloqueado
+segurando uma oferta ainda conseguia assumir o pedido.
+
+O que passou a acontecer ao suspender/bloquear:
+
+1. `availability` cai para `UNAVAILABLE` e o `DriverPresenceLog` aberto e
+   fechado, na mesma transacao da troca de status (mesmo caminho de ficar
+   offline);
+2. as ofertas pendentes voltam para a fila via
+   `DispatchService.releasePendingOffersForDriver()`, que reaproveita
+   `handleOfferExpired` — ela ja trata lote, cancela o job de timeout, avisa o
+   app e redespacha, entao nao existe um segundo fluxo para manter em acordo;
+3. o app do motoboy recebe `driver:account-status-changed`, para nao continuar
+   exibindo uma oferta que ja nao e dele.
+
+Reativar devolve o direito de trabalhar, mas **nao** a disponibilidade: ficar
+online e escolha do motoboy, e reativar sozinho o colocaria para receber pedido
+sem ter pedido.
+
+A guarda de aceite entrou em `DeliveryOffersService.findDriverForUser()`, ponto
+unico de aceite e recusa; recusar tambem fica bloqueado, para o motoboy impedido
+nao operar a fila de nenhum lado.
+
+Sem mudanca de schema e sem migration. `AdminDriversModule` passou a importar
+`DispatchModule` e `RealtimeModule`.
+
+Arquivos: `apps/api/src/dispatch/dispatch.service.ts`,
+`apps/api/src/delivery-offers/delivery-offers.service.ts` (+spec),
+`apps/api/src/admin/drivers/admin-drivers.service.ts` (+spec e module).
+
+Validacao: `npx tsc --noEmit` limpo; `npx jest --runInBand` 217/217;
+`npx jest --config test/jest-e2e.json --runInBand` 126/126. Removendo a guarda
+de aceite, os tres testes novos de conta impedida falham (conferido).
+
+**Pendente:** nao ha cobertura e2e do bloqueio ponta a ponta (admin bloqueia →
+oferta volta para a fila → aceite recusado). Os testes acima sao unitarios.
+
 ### 2026-08-19 — Preco por regiao da empresa (P1-06)
 
 `PricingService.quote()` escolhia a praca sozinho, com
@@ -464,9 +507,10 @@ staging real daqui pra frente. `DATABASE_URL` do dev local nao foi alterado.
    habilita capacidades automaticamente. O vinculo ainda nao registra quem o
    alterou nem quando; se auditoria administrativa for requisito, adicionar
    esses campos por migration aditiva antes de depender deles em suporte.
-4. **Bloqueio/suspensao (P1-03).** Retirar disponibilidade, cancelar oferta
-   pendente, impedir aceite e emitir evento adequado ainda precisa ser
-   implementado e testado.
+4. ~~Bloqueio/suspensao (P1-03).~~ — feito em 2026-08-19: retira
+   disponibilidade e fecha a presenca, devolve as ofertas pendentes para a fila,
+   impede aceite/recusa e emite `driver:account-status-changed`. Ver Historico
+   de mudancas. **Falta** cobertura e2e ponta a ponta desse fluxo.
 5. **Presenca multi-sessao (P1-04)** e **timeout configuravel no contrato
    admin (P1-05)** continuam pendentes de confirmacao/validacao ponta a ponta.
 6. ~~Preco regional (P1-06).~~ — feito em 2026-08-19: `PricingService.quote()`
