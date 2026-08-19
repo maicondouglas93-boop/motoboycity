@@ -1,6 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { DispatchService } from '../../dispatch/dispatch.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AdminDriversService } from './admin-drivers.service';
 
 describe('AdminDriversService', () => {
@@ -9,21 +11,33 @@ describe('AdminDriversService', () => {
     driver: { findUnique: jest.Mock; update: jest.Mock; findMany: jest.Mock };
     serviceType: { findMany: jest.Mock };
     driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
+    driverPresenceLog: { updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
+  let dispatchService: { releasePendingOffersForDriver: jest.Mock };
+  let realtimeGateway: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       driver: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
       serviceType: { findMany: jest.fn() },
       driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
+      driverPresenceLog: { updateMany: jest.fn() },
       $transaction: jest
         .fn()
         .mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma)),
     };
 
+    dispatchService = { releasePendingOffersForDriver: jest.fn().mockResolvedValue(0) };
+    realtimeGateway = { emitToDriver: jest.fn(), emitAdminActivity: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AdminDriversService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AdminDriversService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: DispatchService, useValue: dispatchService },
+        { provide: RealtimeGateway, useValue: realtimeGateway },
+      ],
     }).compile();
 
     service = module.get(AdminDriversService);
@@ -173,7 +187,10 @@ describe('AdminDriversService', () => {
   });
 
   describe('suspend / block / reactivate', () => {
-    it('suspende um motoboy APPROVED e ACTIVE', async () => {
+    // P1-03: suspender/bloquear nao pode ser so trocar o enum. Antes disto o motoboy
+    // seguia marcado como AVAILABLE, com log de presenca aberto contando tempo online, e
+    // as ofertas na mao dele ficavam paradas ate expirar sozinhas.
+    it('suspende, tira da disponibilidade e fecha a sessao de presenca', async () => {
       prisma.driver.findUnique.mockResolvedValue({
         id: 'driver-1',
         approvalStatus: 'APPROVED',
@@ -186,8 +203,51 @@ describe('AdminDriversService', () => {
       expect(result).toEqual({ driverId: 'driver-1', accountStatus: 'SUSPENDED' });
       expect(prisma.driver.update).toHaveBeenCalledWith({
         where: { id: 'driver-1' },
-        data: { accountStatus: 'SUSPENDED' },
+        data: { accountStatus: 'SUSPENDED', availability: 'UNAVAILABLE' },
       });
+      expect(prisma.driverPresenceLog.updateMany).toHaveBeenCalledWith({
+        where: { driverId: 'driver-1', wentOfflineAt: null },
+        data: { wentOfflineAt: expect.any(Date) },
+      });
+    });
+
+    it('devolve as ofertas pendentes para a fila e avisa o aplicativo do motoboy', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'BLOCKED' });
+      dispatchService.releasePendingOffersForDriver.mockResolvedValue(2);
+
+      await service.block('driver-1');
+
+      expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledWith('driver-1');
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'driver:account-status-changed',
+        { accountStatus: 'BLOCKED' },
+      );
+    });
+
+    // Reativar devolve o direito de trabalhar, nao a disponibilidade: ficar online e
+    // escolha do motoboy. Reativar sozinho o colocaria para receber pedido sem ter pedido.
+    it('reativar nao devolve a disponibilidade nem mexe nas ofertas', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'BLOCKED',
+      });
+      prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'ACTIVE' });
+
+      await service.reactivate('driver-1');
+
+      expect(prisma.driver.update).toHaveBeenCalledWith({
+        where: { id: 'driver-1' },
+        data: { accountStatus: 'ACTIVE' },
+      });
+      expect(prisma.driverPresenceLog.updateMany).not.toHaveBeenCalled();
+      expect(dispatchService.releasePendingOffersForDriver).not.toHaveBeenCalled();
     });
 
     it('bloqueia um motoboy APPROVED mesmo que já esteja SUSPENDED', async () => {

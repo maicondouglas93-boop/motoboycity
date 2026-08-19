@@ -1,7 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { ReplaceDriverServiceTypesPayload } from '@motoboycity/validation';
 import type { Driver, DriverAccountStatus, DriverApprovalStatus } from '@prisma/client';
+import { DispatchService } from '../../dispatch/dispatch.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
 export interface DriverServiceTypeItem {
   id: string;
@@ -48,7 +50,11 @@ export interface ListDriversFilters {
 
 @Injectable()
 export class AdminDriversService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dispatchService: DispatchService,
+    private readonly realtimeGateway: RealtimeGateway,
+  ) {}
 
   async list(filters: ListDriversFilters): Promise<AdminDriverListItem[]> {
     const drivers = await this.prisma.driver.findMany({
@@ -187,10 +193,48 @@ export class AdminDriversService {
       throw new ConflictException(`Este motoboy já está com status de conta "${accountStatus}".`);
     }
 
-    const updated = await this.prisma.driver.update({
-      where: { id: driverId },
-      data: { accountStatus },
+    // Suspender/bloquear nao pode ser so trocar o enum (P1-03). Antes disto, o motoboy
+    // continuava marcado como AVAILABLE com o log de presenca aberto, e as ofertas que ja
+    // estavam na mao dele ficavam paradas ate expirar sozinhas — o pedido nao ia pra
+    // ninguem durante esse tempo, mesmo com outro motoboy livre. E ele ainda conseguia
+    // aceitar, porque o aceite nao olhava accountStatus.
+    const deveEncerrarOperacao = accountStatus !== 'ACTIVE';
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const driverAtualizado = await tx.driver.update({
+        where: { id: driverId },
+        data: {
+          accountStatus,
+          // Voltar a ACTIVE nao devolve a disponibilidade: quem decide ficar online e o
+          // motoboy, pelo app. Reativar sozinho colocaria alguem para receber corrida sem
+          // ele ter escolhido.
+          ...(deveEncerrarOperacao && { availability: 'UNAVAILABLE' as const }),
+        },
+      });
+
+      if (deveEncerrarOperacao) {
+        // Mesmo fechamento que ficar offline faz — sem isto a sessao seguiria aberta e o
+        // tempo online contaria enquanto ele esta impedido de trabalhar.
+        await tx.driverPresenceLog.updateMany({
+          where: { driverId, wentOfflineAt: null },
+          data: { wentOfflineAt: new Date() },
+        });
+      }
+
+      return driverAtualizado;
     });
+
+    if (deveEncerrarOperacao) {
+      const soltas = await this.dispatchService.releasePendingOffersForDriver(driverId);
+      this.realtimeGateway.emitToDriver(driverId, 'driver:account-status-changed', {
+        accountStatus,
+      });
+      this.realtimeGateway.emitAdminActivity(
+        soltas > 0
+          ? `Motoboy ${accountStatus === 'BLOCKED' ? 'bloqueado' : 'suspenso'}: ${soltas} oferta(s) devolvida(s) para a fila.`
+          : `Motoboy ${accountStatus === 'BLOCKED' ? 'bloqueado' : 'suspenso'}.`,
+      );
+    }
 
     return { driverId: updated.id, accountStatus: updated.accountStatus };
   }
