@@ -216,6 +216,33 @@ export class DispatchService {
     await this.dispatchDelivery(offer.deliveryId);
   }
 
+  /**
+   * Solta as ofertas pendentes de um motoboy que deixou de poder atender
+   * (bloqueio/suspensao pelo admin) e devolve os pedidos para a fila.
+   *
+   * Reaproveita `handleOfferExpired` de proposito, em vez de escrever uma segunda
+   * versao desse fluxo: ela ja trata lote, cancela o job de timeout, avisa o app e
+   * redespacha. Duplicar isso significaria manter dois caminhos que precisam
+   * concordar para sempre — e o de bloqueio, sendo raro, seria o que envelheceria.
+   *
+   * Sem isto, o pedido ficava parado ate a oferta expirar sozinha: ninguem mais era
+   * chamado durante esse tempo, mesmo havendo motoboy livre.
+   */
+  async releasePendingOffersForDriver(driverId: string): Promise<number> {
+    const pending = await this.prisma.deliveryOffer.findMany({
+      where: { driverId, response: 'PENDING' },
+      select: { id: true },
+    });
+
+    for (const offer of pending) {
+      await this.cancelOfferTimeout(offer.id);
+      // Idempotente: se a oferta saiu de PENDING nesse meio-tempo, ela nao faz nada.
+      await this.handleOfferExpired(offer.id);
+    }
+
+    return pending.length;
+  }
+
   async handleScheduledActivation(deliveryId: string): Promise<void> {
     const delivery = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
     if (!delivery || delivery.status !== 'SCHEDULED') {
