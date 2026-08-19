@@ -124,6 +124,7 @@ export class DeliveriesService {
       }
 
       const quote = await this.pricingService.quote({
+        regionId: company.regionId,
         serviceTypeId: payload.serviceTypeId,
         distanceKm,
         requiresReturn: payload.requiresReturn ?? false,
@@ -253,6 +254,7 @@ export class DeliveriesService {
           );
         }
         const quote = await this.pricingService.quote({
+          regionId: company.regionId,
           serviceTypeId: item.serviceTypeId,
           distanceKm,
           requiresReturn: item.requiresReturn ?? false,
@@ -489,7 +491,12 @@ export class DeliveriesService {
    * DELIVERED até completeReturn(). */
   async markDelivered(user: User, id: string, payload: MarkDeliveredPayload): Promise<DeliveryDetail> {
     const driver = await this.findDriverForUser(user);
-    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    // `company` entra junto porque a cotação por GPS acontece aqui, e o preço depende da
+    // praça da EMPRESA — não de quem está entregando nem da primeira região do banco.
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      include: { company: { select: { regionId: true } } },
+    });
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
     }
@@ -539,6 +546,7 @@ export class DeliveriesService {
       }
 
       const quote = await this.pricingService.quote({
+        regionId: delivery.company.regionId,
         serviceTypeId: delivery.serviceTypeId,
         distanceKm: distance.distanceKm,
         requiresReturn: delivery.requiresReturn,
@@ -717,7 +725,9 @@ export class DeliveriesService {
     throw new ForbiddenException('Acesso restrito a empresas e administradores.');
   }
 
-  private async findCompanyForUser(user: User): Promise<{ id: string; status: string } | null> {
+  private async findCompanyForUser(
+    user: User,
+  ): Promise<{ id: string; status: string; regionId: string } | null> {
     if (user.type !== 'COMPANY_MEMBER') {
       return null;
     }
@@ -728,7 +738,13 @@ export class DeliveriesService {
     if (!membership) {
       return null;
     }
-    return { id: membership.company.id, status: membership.company.status };
+    // regionId acompanha a empresa porque o preço depende da praça dela — ver o
+    // comentário de `PricingQuoteInput.regionId`.
+    return {
+      id: membership.company.id,
+      status: membership.company.status,
+      regionId: membership.company.regionId,
+    };
   }
 
   private async findDriverForUser(user: User) {
