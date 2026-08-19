@@ -312,6 +312,60 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  // O formulario do company-web cria pedido INDIVIDUAL, nao lote. Ate aqui so o lote sem
+  // destino tinha prova ponta a ponta; o caminho que a tela realmente dispara so tinha
+  // cobertura dos dois casos de recusa (endereco faltando / endereco indevido).
+  describe('pedido individual sem destino conhecido', () => {
+    it('nasce sem endereco e sem valor, e o preco aparece na entrega por GPS', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, destinationKnownAtCreation: false })
+        .expect(201);
+
+      const deliveryId = criado.body.id;
+      expect(criado.body.totalValue).toBeNull();
+      expect(criado.body.driverValue).toBeNull();
+      expect(criado.body.distanceKm).toBeNull();
+
+      // Nenhum DROPOFF ate a entrega: o pedido nao nasce meio definido.
+      const semDropoff = await prisma.deliveryAddress.findFirst({
+        where: { deliveryId, type: 'DROPOFF' },
+      });
+      expect(semDropoff).toBeNull();
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const entregue = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75 })
+        .expect(200);
+
+      expect(entregue.body.status).toBe('COMPLETED');
+      expect(entregue.body.totalValue).toBe(12.5);
+      expect(entregue.body.distanceKm).toBe(5);
+
+      const dropoff = await prisma.deliveryAddress.findFirstOrThrow({
+        where: { deliveryId, type: 'DROPOFF' },
+      });
+      expect(dropoff.street).toBeNull();
+      expect(Number(dropoff.lat)).toBeCloseTo(-20.16);
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
   describe('lote sem destino conhecido', () => {
     it('nasce com valores nulos, despacha oferta com driverValue/distanceKm nulos, e cada item calcula o preço na entrega via GPS', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
