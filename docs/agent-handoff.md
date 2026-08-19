@@ -189,6 +189,39 @@ Arquivos de contrato:
 
 ## Historico de mudancas
 
+### 2026-08-19 — Preco por regiao da empresa (P1-06)
+
+`PricingService.quote()` escolhia a praca sozinho, com
+`region.findFirst({ active: true })` — a primeira regiao ativa numa ordem que o
+Postgres nao garante. Com uma praca cadastrada isso acertava por acidente; na
+segunda, uma empresa passaria a ser cobrada pela tabela de outra cidade,
+silenciosamente e sem erro nenhum. `Company.regionId` ja existia, obrigatorio, e
+era simplesmente ignorado.
+
+Decisao: `regionId` virou parametro **obrigatorio** de `PricingQuoteInput`, e
+nao opcional com fallback. Quem cota precisa dizer de qual praca esta falando;
+assim nao sobra caminho de volta ao palpite e o compilador cobra isso em
+qualquer chamada nova. A regiao informada e conferida (`id` + `active`): praca
+desativada interrompe a cotacao com 409 proprio, em vez de cair para outra —
+cair seria cobrar o cliente por uma tabela que nao e a dele. O erro anterior era
+500 "nenhuma regiao configurada", que descrevia um problema de plataforma.
+
+Os tres pontos de cotacao passaram a informar a praca da empresa dona do pedido:
+criacao individual e em lote via `company.regionId` (que `findCompanyForUser`
+passou a carregar), e `markDelivered` — onde o preco nasce na entrega, no modo
+GPS — via `delivery.company.regionId`, incluido na consulta. Ali importa a praca
+da EMPRESA, nao a de quem entrega: o motoboy pode atender fora da regiao dela.
+
+Sem mudanca de schema e sem migration.
+
+Arquivos: `apps/api/src/pricing/pricing.service.ts`,
+`apps/api/src/pricing/pricing.service.spec.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`.
+
+Validacao: `npx tsc --noEmit` limpo; `npx jest --runInBand` 211/211;
+`npx jest --config test/jest-e2e.json --runInBand` 126/126. Revertendo a selecao
+para a antiga, o teste novo falha (conferido).
+
 ### 2026-08-16 — Ciclo de entrega (backend) + destino capturado por GPS
 
 Implementado o ciclo pos-aceite completo (item 7 da lista de prioridades) e a
@@ -436,8 +469,10 @@ staging real daqui pra frente. `DATABASE_URL` do dev local nao foi alterado.
    implementado e testado.
 5. **Presenca multi-sessao (P1-04)** e **timeout configuravel no contrato
    admin (P1-05)** continuam pendentes de confirmacao/validacao ponta a ponta.
-6. **Preco regional (P1-06).** Confirmar e corrigir a selecao explicita pela
-   `company.regionId`; nao assumir a primeira regiao ativa.
+6. ~~Preco regional (P1-06).~~ — feito em 2026-08-19: `PricingService.quote()`
+   passou a exigir `regionId` (parametro obrigatorio, sem fallback) e os tres
+   pontos de cotacao informam a praca da empresa dona do pedido. Ver Historico
+   de mudancas.
 7. ~~Ciclo de entrega (Fase 2) — backend.~~ — feito em 2026-08-16: maquina de
    estados `ACCEPTED → COLLECTED → DELIVERED → COMPLETED` implementada, com
    destino capturado por GPS na entrega como modo opcional por pedido/lote.
