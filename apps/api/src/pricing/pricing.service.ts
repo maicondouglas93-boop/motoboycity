@@ -1,9 +1,22 @@
-import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { calculatePricing, type PricingCalculatorResult } from './pricing-calculator';
 
 export interface PricingQuoteInput {
+  /**
+   * Região da EMPRESA dona do pedido (`Company.regionId`), obrigatória.
+   *
+   * Antes o preço resolvia a região sozinho, com `findFirst({ active: true })` — a
+   * primeira região ativa numa ordem que o banco não garante. Com uma praça só isso
+   * acertava por acidente; na segunda, uma empresa passaria a ser cobrada pela tabela
+   * de outra cidade, sem erro nenhum aparecendo.
+   *
+   * Por isso o parâmetro é exigido em vez de opcional com fallback: quem cota precisa
+   * dizer de qual praça está falando, e não existe caminho silencioso de volta ao
+   * palpite.
+   */
+  regionId: string;
   serviceTypeId: string;
   distanceKm: number;
   requiresReturn: boolean;
@@ -17,10 +30,15 @@ export class PricingService {
   ) {}
 
   async quote(input: PricingQuoteInput): Promise<PricingCalculatorResult> {
-    const region = await this.prisma.region.findFirst({ where: { active: true } });
+    // A região vem de quem cota e é conferida aqui. Uma praça desativada precisa
+    // interromper a cotação com mensagem própria: cair para outra região seria cobrar
+    // o cliente por uma tabela que não é a dele.
+    const region = await this.prisma.region.findFirst({
+      where: { id: input.regionId, active: true },
+    });
     if (!region) {
-      throw new InternalServerErrorException(
-        'Nenhuma região configurada na plataforma. Contate o suporte.',
+      throw new ConflictException(
+        'A região desta empresa não está ativa. Contate o suporte antes de criar pedidos.',
       );
     }
 

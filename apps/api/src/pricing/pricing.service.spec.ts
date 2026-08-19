@@ -1,4 +1,4 @@
-import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -30,7 +30,7 @@ describe('PricingService', () => {
     service = module.get(PricingService);
   });
 
-  const input = { serviceTypeId: 'st-1', distanceKm: 5, requiresReturn: false };
+  const input = { regionId: 'region-1', serviceTypeId: 'st-1', distanceKm: 5, requiresReturn: false };
 
   it('calcula o preço usando a tabela ativa e a comissão configurada', async () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
@@ -50,10 +50,33 @@ describe('PricingService', () => {
     expect(result.totalValue).toBe(12.5);
   });
 
-  it('rejeita quando não há região configurada', async () => {
+  // A cotação passou a exigir a região da empresa (P1-06). Antes ela escolhia sozinha a
+  // primeira região ativa: com duas praças, uma empresa seria cobrada pela tabela da
+  // outra, sem erro nenhum aparecendo.
+  it('cota pela região informada, e não pela primeira região ativa do banco', async () => {
+    prisma.region.findFirst.mockResolvedValue({ id: 'region-2' });
+    prisma.pricingTable.findFirst.mockResolvedValue({
+      baseFee: { toString: () => '5' } as unknown as number,
+      perKmFee: { toString: () => '1.5' } as unknown as number,
+      minimumFee: null,
+      returnFee: null,
+    });
+    platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
+
+    await service.quote({ ...input, regionId: 'region-2' });
+
+    expect(prisma.region.findFirst).toHaveBeenCalledWith({
+      where: { id: 'region-2', active: true },
+    });
+    expect(prisma.pricingTable.findFirst).toHaveBeenCalledWith({
+      where: { regionId: 'region-2', serviceTypeId: 'st-1', active: true },
+    });
+  });
+
+  it('rejeita quando a região da empresa não existe ou está inativa', async () => {
     prisma.region.findFirst.mockResolvedValue(null);
 
-    await expect(service.quote(input)).rejects.toBeInstanceOf(InternalServerErrorException);
+    await expect(service.quote(input)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rejeita quando não há tabela de preços ativa pro tipo de serviço (tarifa não configurada)', async () => {
