@@ -24,6 +24,20 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 
+/**
+ * Erro maximo aceito no fix que DEFINE o destino de uma entrega sem endereco.
+ *
+ * Nao e configuracao de negocio, e por isso e constante e nao campo de PlatformSettings:
+ * e um piso tecnico de qualidade do dado. Deixar ajustavel pelo painel convidaria alguem
+ * a subir para 5 km no dia em que o GPS estiver ruim — e o efeito seria cobrar preco de
+ * uma rota inventada, sem ninguem perceber.
+ *
+ * 100 m e a mesma ordem de grandeza usada em produtos parecidos para separar "GPS travado"
+ * de "triangulacao de antena". O retorno tem regra propria: a precisao e comparada com o
+ * raio configurado, porque ali o que importa e a checagem nao virar ruido.
+ */
+const MAX_LOCATION_ACCURACY_METERS = 100;
+
 export interface DeliveryAddressItem {
   type: string;
   street: string | null;
@@ -521,6 +535,16 @@ export class DeliveriesService {
           'É necessário informar a localização atual para concluir esta entrega.',
         );
       }
+      // Aqui a coordenada vira destino, distância e preço — dinheiro cobrado da empresa e
+      // pago ao motoboy. Um fix impreciso nao "erra um pouco": ele grava um destino que
+      // nunca existiu e um valor que ninguem consegue contestar depois, porque o pedido
+      // fecha COMPLETED com esse numero.
+      if (payload.accuracy !== undefined && payload.accuracy > MAX_LOCATION_ACCURACY_METERS) {
+        throw new ConflictException(
+          `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é baixa demais para definir ` +
+            `o destino desta entrega. Aguarde o sinal melhorar e tente de novo.`,
+        );
+      }
       const pickupAddress = await this.prisma.companyAddress.findFirst({
         where: { companyId: delivery.companyId, isPrimary: true },
       });
@@ -643,6 +667,16 @@ export class DeliveriesService {
     });
     if (!pickupAddress || pickupAddress.lat === null || pickupAddress.lng === null) {
       throw new ConflictException('O endereço de coleta da empresa não tem coordenadas cadastradas.');
+    }
+
+    // Precisao maior que o proprio raio torna a checagem vazia: com raio de 200 m e um
+    // fix de 800 m, "voltei na loja" fica verdadeiro em qualquer lugar do bairro. Recusar
+    // e melhor que aprovar por ruido — o motoboy tenta de novo com o GPS estabilizado.
+    if (payload.accuracy !== undefined && payload.accuracy > settings.returnProximityRadiusMeters) {
+      throw new ConflictException(
+        `A precisao do GPS agora (${Math.round(payload.accuracy)}m) e maior que o raio aceito ` +
+          `(${settings.returnProximityRadiusMeters}m). Aguarde o sinal melhorar e tente de novo.`,
+      );
     }
 
     const distanceMeters = haversineDistanceMeters(
