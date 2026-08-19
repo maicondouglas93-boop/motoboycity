@@ -189,6 +189,46 @@ Arquivos de contrato:
 
 ## Historico de mudancas
 
+### 2026-08-19 — Precisao do GPS nas acoes que valem dinheiro
+
+Preparacao para as telas do driver-app, feita ANTES delas de proposito: o
+contrato aceitava `lat`/`lng` e nada mais, e nesses dois fluxos a coordenada nao e
+informativa. Na entrega sem endereco ela DEFINE destino, distancia e preco; no
+retorno ela decide se o motoboy esta de volta na loja. Sem saber a precisao, o
+servidor nao distinguia um GPS travado no satelite de uma triangulacao de antena
+com centenas de metros de erro — e as duas viravam valor cobrado.
+
+`accuracy` (metros, opcional) entrou nos dois schemas e payloads. O app manda o
+que o aparelho reportar; quem decide se serve e o servico.
+
+Dois criterios, porque protegem coisas diferentes:
+
+- **Entrega sem destino:** `MAX_LOCATION_ACCURACY_METERS` = 100 m, constante em
+  `deliveries.service.ts`. Nao virou campo de `PlatformSettings` de proposito —
+  e piso tecnico de qualidade do dado, nao politica comercial. Ajustavel pelo
+  painel, alguem subiria para 5 km no dia em que o GPS estivesse ruim, e o efeito
+  seria cobrar preco de uma rota inventada.
+- **Fechamento de retorno:** criterio RELATIVO — precisao maior que o proprio
+  `returnProximityRadiusMeters` torna a checagem vazia (raio de 200 m com fix de
+  800 m faz "voltei na loja" ser verdade em qualquer lugar do bairro).
+
+Nos dois casos a acao e recusada sem gravar nada; o motoboy repete com o sinal
+estabilizado.
+
+Arquivos: `packages/validation/src/deliveries/{mark-delivered,complete-return}.schema.ts`,
+`packages/types/src/delivery.ts`, `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: `tsc --noEmit` limpo; unit 217/217; e2e 129/129 (era 127). Removendo as
+duas travas, os dois testes novos falham (conferido).
+
+**Decidido para a proxima fase:** biblioteca de GPS do driver-app sera
+`@react-native-community/geolocation` — o app e RN CLI puro (0.86.2), essa e a
+oficial da comunidade, mantida, e usa o fused provider do Play Services. O fluxo
+precisa so de captura PONTUAL (marcar entregue, fechar retorno): sem rastreamento
+continuo, sem localizacao em segundo plano, sem foreground service. Permissao
+necessaria: `ACCESS_FINE_LOCATION` em uso.
+
 ### 2026-08-19 — Seletor de destino no company-web
 
 O modo "destino informado na entrega" existia na API desde 16/08 e nenhuma tela
