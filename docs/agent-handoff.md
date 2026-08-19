@@ -189,6 +189,38 @@ Arquivos de contrato:
 
 ## Historico de mudancas
 
+### 2026-08-19 — Seletor de destino no company-web
+
+O modo "destino informado na entrega" existia na API desde 16/08 e nenhuma tela
+alcancava: o formulario de pedido so sabia criar com endereco. A empresa agora
+escolhe entre informar o endereco na criacao (padrao, comportamento de sempre) ou
+deixar o motoboy definir na entrega.
+
+No modo sem destino os campos de endereco somem e o payload **nao** inclui
+`dropoffAddress` — o contrato recusa o pedido se ele vier junto de
+`destinationKnownAtCreation: false`, para nao existir pedido meio definido. A
+validacao do formulario tambem deixa de exigir endereco. Os rotulos dizem a
+consequencia (o pedido fica sem valor ate a entrega), nao o nome do campo.
+
+O padrao continua destino conhecido, para nao mudar sem aviso o que a empresa ja
+conhece.
+
+Cobertura: o modo GPS so tinha prova e2e no LOTE. O caminho que esta tela dispara
+e o pedido INDIVIDUAL, que tinha apenas os dois casos de recusa. Foi adicionado o
+ciclo completo do individual sem destino (nasce sem DROPOFF e sem valor; preco e
+distancia aparecem na entrega por GPS).
+
+Arquivos: `apps/company-web/src/components/orders/create-order-form.tsx`,
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: `tsc --noEmit` do company-web limpo; `next build` limpo; e2e da API
+127/127 (era 126).
+
+**Pendente:** a tela de LOTE no company-web continua nao existindo, entao o modo
+sem destino em lote segue sem interface. O aviso de "sem valor ate a entrega" nao
+aparece na lista de pedidos — la o valor nulo ja e exibido como "a calcular na
+entrega", texto que existia antes desta fase.
+
 ### 2026-08-19 — Bloqueio/suspensao com efeito real (P1-03)
 
 `setAccountStatus` so trocava o enum. Na pratica o motoboy suspenso ou bloqueado
@@ -526,10 +558,11 @@ staging real daqui pra frente. `DATABASE_URL` do dev local nao foi alterado.
    criacao do company-web (que hoje so cria pedido com endereco). Financeiro/
    credito em carteira tambem nao foi tocado — COMPLETED e so um status
    terminal por enquanto, sem nenhum movimento de dinheiro associado.
-8. **Clientes.** Criar a tela de lote no company-web, o seletor de destino
-   conhecido/desconhecido, e a tela de ciclo de entrega no driver-app
-   (coletar / marcar entregue com GPS / fechar retorno). Trocar mocks apenas
-   quando as respectivas APIs existirem e forem testadas.
+8. **Clientes.** Falta a tela de lote no company-web e a tela de ciclo de
+   entrega no driver-app (coletar / marcar entregue com GPS / fechar retorno).
+   ~~Seletor de destino conhecido/desconhecido~~ — feito em 2026-08-19 no
+   formulario de pedido individual. Trocar mocks apenas quando as respectivas
+   APIs existirem e forem testadas.
 9. **Release.** Criar CI, corrigir README/arquitetura operacional, configurar
    staging, backup/restore, logs e rollback.
 
