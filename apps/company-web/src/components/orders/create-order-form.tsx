@@ -28,6 +28,12 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
   const queryClient = useQueryClient();
 
   const [serviceTypeId, setServiceTypeId] = useState(serviceTypes[0]?.id ?? '');
+  // Modo do destino. `true` (padrão) é o comportamento de sempre: endereço agora, preço
+  // congelado na criação. `false` deixa o destino em aberto — quem define é a posição do
+  // motoboy ao marcar entregue, e só então distância e valor existem.
+  //
+  // Mantido como padrão para não mudar, sem aviso, o que a empresa já conhece.
+  const [destinationKnownAtCreation, setDestinationKnownAtCreation] = useState(true);
   const [street, setStreet] = useState('');
   const [number, setNumber] = useState('');
   const [complement, setComplement] = useState('');
@@ -47,14 +53,20 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
     mutationFn: () =>
       deliveriesApi.create(token, {
         serviceTypeId,
-        dropoffAddress: {
-          street,
-          number,
-          complement: complement || undefined,
-          city,
-          state,
-          zip,
-        },
+        destinationKnownAtCreation,
+        // Sem destino conhecido o endereço não pode ir NEM VAZIO: o contrato recusa o
+        // pedido se `dropoffAddress` vier junto de `destinationKnownAtCreation: false`
+        // (create-delivery.schema.ts), justamente para não existir pedido meio definido.
+        ...(destinationKnownAtCreation && {
+          dropoffAddress: {
+            street,
+            number,
+            complement: complement || undefined,
+            city,
+            state,
+            zip,
+          },
+        }),
         requiresReturn,
         pickupSurchargeChargedToDriver,
         requiresCollectionRecipient,
@@ -94,7 +106,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       setFormError('Selecione um tipo de serviço.');
       return;
     }
-    if (!street || !number || !city || !state || !zip) {
+    if (destinationKnownAtCreation && (!street || !number || !city || !state || !zip)) {
       setFormError('Preencha o endereço de entrega completo.');
       return;
     }
@@ -141,6 +153,53 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
 
       <Separator />
 
+      {/* O modo do destino muda o que a empresa vê e quando o valor existe, então precisa
+          ser uma escolha explícita — e o rótulo diz a consequência (o valor sai só na
+          entrega), não o nome técnico do campo. */}
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">Destino</legend>
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm has-checked:border-primary has-checked:bg-primary/5">
+          <input
+            type="radio"
+            name="destination-mode"
+            className="mt-0.5"
+            checked={destinationKnownAtCreation}
+            onChange={() => setDestinationKnownAtCreation(true)}
+          />
+          <span>
+            <span className="block font-medium">Sei o endereço agora</span>
+            <span className="block text-xs text-muted-foreground">
+              O valor do pedido é calculado e travado na criação.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm has-checked:border-primary has-checked:bg-primary/5">
+          <input
+            type="radio"
+            name="destination-mode"
+            className="mt-0.5"
+            checked={!destinationKnownAtCreation}
+            onChange={() => setDestinationKnownAtCreation(false)}
+          />
+          <span>
+            <span className="block font-medium">O motoboy informa na entrega</span>
+            <span className="block text-xs text-muted-foreground">
+              Para quando o cliente ainda não passou o endereço. A distância e o valor saem
+              da localização do motoboy no momento da entrega — o pedido fica sem valor até lá.
+            </span>
+          </span>
+        </label>
+      </fieldset>
+
+      {!destinationKnownAtCreation && (
+        <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Este pedido será criado sem endereço de entrega e sem valor. Os dois passam a
+          existir quando o motoboy marcar a entrega como concluída.
+        </p>
+      )}
+
+      {destinationKnownAtCreation && (
+      <>
       <div className="space-y-1.5">
         <Label htmlFor="dropoff-street">Endereço de entrega</Label>
         <Input
@@ -183,6 +242,8 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
         <Label htmlFor="dropoff-zip">CEP</Label>
         <Input id="dropoff-zip" value={zip} onChange={(e) => setZip(e.target.value)} />
       </div>
+      </>
+      )}
 
       <div className="space-y-2">
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
