@@ -525,6 +525,99 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  // A coordenada da entrega sem destino vira o destino E o preco. Um fix impreciso nao
+  // "erra um pouco": grava um destino que nunca existiu e um valor que ninguem contesta
+  // depois, porque o pedido fecha COMPLETED com esse numero.
+  describe('precisao do GPS', () => {
+    it('recusa marcar entregue com fix impreciso demais para definir o destino', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, destinationKnownAtCreation: false })
+        .expect(201);
+      const deliveryId = criado.body.id;
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 350 })
+        .expect(409);
+
+      // Nada foi gravado: sem destino, sem preco, e a entrega segue coletada.
+      const aindaColetada = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      expect(aindaColetada.status).toBe('COLLECTED');
+      expect(aindaColetada.totalValue).toBeNull();
+
+      // Com o sinal bom, a mesma entrega fecha normalmente.
+      const entregue = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 12 })
+        .expect(200);
+      expect(entregue.body.status).toBe('COMPLETED');
+      expect(entregue.body.totalValue).toBe(12.5);
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('recusa fechar retorno quando a precisao e maior que o raio aceito', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(9), requiresReturn: true })
+        .expect(201);
+      const deliveryId = criado.body.id;
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({})
+        .expect(200);
+
+      // Raio configurado no setup: 100 m. Precisao de 500 m tornaria a checagem vazia —
+      // "estou na loja" seria verdade em qualquer lugar do bairro.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ ...nearPickup, accuracy: 500 })
+        .expect(409);
+
+      const aindaEntregue = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      expect(aindaEntregue.status).toBe('DELIVERED');
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ ...nearPickup, accuracy: 15 })
+        .expect(200);
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
   describe('validações de criação (400)', () => {
     it('rejeita destinationKnownAtCreation padrão (true) sem dropoffAddress', async () => {
       await request(app.getHttpServer())
