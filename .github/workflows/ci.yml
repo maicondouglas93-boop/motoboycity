@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, tests and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: motoboycity_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d motoboycity_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/motoboycity_ci?schema=public
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      API_PORT: 3333
+      JWT_SECRET: ci-only-jwt-secret-with-at-least-32-characters
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      GOOGLE_MAPS_API_KEY: ci-google-maps-key-not-used
+      ADMIN_SEED_EMAIL: admin.ci@motoboycity.local
+      ADMIN_SEED_PASSWORD: ci_admin_password_123
+      NEXT_PUBLIC_API_URL: http://localhost:3333
+      API_URL: http://localhost:3333
+      NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ci-google-maps-browser-key-not-used
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v2
+        with:
+          runtime: node@22.18.0
+          cache: true
+
+      - name: Apply database migrations
+        run: pnpm --filter @motoboycity/api exec prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Seed isolated test database
+        run: pnpm --filter @motoboycity/api run prisma:seed
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: API unit tests
+        run: pnpm --filter @motoboycity/api test -- --runInBand
+
+      - name: Driver app tests
+        run: pnpm --filter @motoboycity/driver-app test -- --runInBand
+
+      - name: API end-to-end tests
+        run: pnpm --filter @motoboycity/api test:e2e
+
+      - name: Build API
+        run: pnpm --filter @motoboycity/api run build
+
+      - name: Build company panel
+        run: pnpm --filter @motoboycity/company-web run build
+
+      - name: Build admin panel
+        run: pnpm --filter @motoboycity/admin-web run build

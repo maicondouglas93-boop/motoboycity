@@ -12,6 +12,12 @@ import type {
 import type { User } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { FinancialClock } from './financial-clock.service';
+import {
+  dateInSaoPaulo,
+  invoiceClosingCutoff,
+  latestInvoiceClosingDateInSaoPaulo,
+} from './finance-release.utils';
 
 export interface InvoiceListItem {
   id: string;
@@ -53,7 +59,10 @@ function numberOrZero(value: { toString(): string } | null): number {
 
 @Injectable()
 export class InvoiceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clock: FinancialClock,
+  ) {}
 
   async closeOpenInvoices(admin: User, payload: CloseInvoicesPayload): Promise<InvoiceListItem[]> {
     const issueDate = this.dateOnly(payload.issueDate);
@@ -62,6 +71,38 @@ export class InvoiceService {
         'O fechamento de faturas só pode ser realizado em uma segunda-feira.',
       );
     }
+    const cutoff = invoiceClosingCutoff(payload.issueDate);
+    if (cutoff.getTime() > this.clock.now().getTime()) {
+      throw new ConflictException(
+        'O fechamento não pode ser antecipado; aguarde segunda-feira às 00:05.',
+      );
+    }
+
+    return this.closeInvoices({
+      issueDate: payload.issueDate,
+      cutoff,
+      changedByUserId: admin.id,
+      automatic: false,
+    });
+  }
+
+  async closeScheduledInvoices(now = this.clock.now()): Promise<InvoiceListItem[]> {
+    const issueDate = latestInvoiceClosingDateInSaoPaulo(now);
+    return this.closeInvoices({
+      issueDate,
+      cutoff: invoiceClosingCutoff(issueDate),
+      changedByUserId: null,
+      automatic: true,
+    });
+  }
+
+  private async closeInvoices(input: {
+    issueDate: string;
+    cutoff: Date;
+    changedByUserId: string | null;
+    automatic: boolean;
+  }): Promise<InvoiceListItem[]> {
+    const issueDate = this.dateOnly(input.issueDate);
 
     const dueDate = issueDate;
     const invoiceIds = await this.prisma.$transaction(async (tx) => {
@@ -70,7 +111,7 @@ export class InvoiceService {
           status: 'COMPLETED',
           paymentMethod: 'BILLED',
           invoiceId: null,
-          statusChangedAt: { lte: this.endOfDay(payload.issueDate) },
+          statusChangedAt: { lte: input.cutoff },
           totalValue: { not: null },
           driverValue: { not: null },
           platformValue: { not: null },
@@ -96,7 +137,7 @@ export class InvoiceService {
         const invoice = await tx.invoice.create({
           data: {
             companyId,
-            number: this.invoiceNumber(payload.issueDate),
+            number: this.invoiceNumber(input.issueDate),
             issueDate,
             dueDate,
             totalValue: companyDeliveries.reduce(
@@ -134,8 +175,10 @@ export class InvoiceService {
             invoiceId: invoice.id,
             fromStatus: null,
             toStatus: 'PENDING',
-            changedByUserId: admin.id,
-            note: `Fechamento financeiro de ${companyDeliveries.length} pedido(s).`,
+            changedByUserId: input.changedByUserId,
+            note: input.automatic
+              ? `Fechamento automático semanal de ${companyDeliveries.length} pedido(s).`
+              : `Fechamento financeiro manual de ${companyDeliveries.length} pedido(s).`,
           },
         });
         ids.push(invoice.id);
@@ -330,7 +373,7 @@ export class InvoiceService {
   }
 
   private async refreshOverdueInvoices(): Promise<void> {
-    const now = this.startOfToday();
+    const now = this.dateOnly(dateInSaoPaulo(this.clock.now()));
     const overdue = await this.prisma.invoice.findMany({
       where: { status: 'PENDING', dueDate: { lt: now } },
       select: { id: true },
@@ -376,10 +419,5 @@ export class InvoiceService {
 
   private endOfDay(value: string): Date {
     return new Date(`${value}T23:59:59.999Z`);
-  }
-
-  private startOfToday(): Date {
-    const today = new Date();
-    return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   }
 }

@@ -1301,3 +1301,128 @@ exigência de heartbeat/central administrativa. O código já exige GPS para
 `AVAILABLE`; portanto API e app incompatíveis não devem ser publicados em
 ordem invertida. `apps/driver-app/src/lib/appVersion.ts` acompanha por enquanto
 a versão `0.0.1` do pacote e precisa ser atualizado junto com cada release.
+
+## Atualização — 2026-08-20: corte financeiro automático e CI do caminho dourado
+
+Horário confirmado pelo responsável: o fechamento semanal das faturas ocorre
+na segunda-feira às **00:05 de `America/Sao_Paulo`**, cinco minutos após a
+liberação dos repasses. O pagamento da fatura e do saque continua manual e
+auditável, sem gateway.
+
+O scheduler da fila `finance` agora mantém dois jobs idempotentes: repasses às
+00:00 e faturas às 00:05. No boot, além de liberar créditos vencidos, a API
+recupera o último corte de faturas que já deveria ter ocorrido. Se iniciar na
+segunda antes de 00:05, usa o corte da semana anterior; se iniciar depois do
+horário ou em outro dia, recupera a segunda mais recente. O corte usa o
+instante exato de 00:05 no fuso operacional, portanto entregas concluídas
+depois dele ficam para a semana seguinte mesmo em uma recuperação tardia.
+
+`InvoiceService.closeScheduledInvoices()` registra `changedByUserId=null` e
+nota explícita de fechamento automático. O fechamento manual foi preservado,
+mas não aceita antecipação antes do corte. A atualização de `PENDING` para
+`OVERDUE` passou a usar a data civil de São Paulo, evitando vencimento
+antecipado por diferença entre UTC e o fuso operacional. Não houve alteração
+de schema Prisma nem migration nesta fase.
+
+O contrato Zod de faturas agora rejeita datas civis inexistentes, como
+`2026-02-30`, no fechamento, confirmação de pagamento e filtros. Isso impede
+que a normalização automática de `Date` gere número de fatura e auditoria com
+datas divergentes. Payloads e respostas não mudaram; somente entradas antes
+aceitas incorretamente passam a retornar 400.
+
+O E2E de ciclo de entrega foi estendido para provar o caminho dourado sem saldo
+artificial: empresa cria, motoboy aceita/coleta/conclui, o crédito nasce
+`PENDING`, o job o libera, o motoboy solicita o saque, o admin aprova e marca o
+PIX pago, o scheduler fecha a fatura da empresa e o admin confirma o pagamento
+de forma concorrente/idempotente. Ao final, saldos derivados conferem com o
+ledger e as trilhas de saque e fatura permanecem completas.
+
+Foi criado `.github/workflows/ci.yml` com permissão somente de leitura,
+cancelamento de execução obsoleta, PostgreSQL 17 e Redis 7 isolados. O workflow
+aplica as 14 migrations, executa seed de teste, typecheck, lint, testes da API
+e driver-app, E2E e builds da API/company-web/admin-web. Usa Node 22.18 e pnpm
+11.20. O README raiz foi atualizado do texto obsoleto de “Fase 0” para o estado
+real do MVP e seus portões de verificação.
+
+Arquivos principais: `apps/api/src/finance/{finance-release.utils,
+financial-release.scheduler,financial-payout.processor,invoice.service}.ts` e
+seus specs; `apps/api/test/delivery-lifecycle.e2e-spec.ts`;
+`packages/validation/src/finance/invoice.schema.ts`; `.github/workflows/ci.yml`;
+e `README.md`.
+
+Validações executadas:
+
+| Comando | Resultado |
+| --- | --- |
+| testes unitários focados do scheduler, processor, datas e faturas | 5 suítes / 12 testes aprovados |
+| `pnpm --filter @motoboycity/validation build` | aprovado |
+| `pnpm typecheck` | aprovado nos 8 workspaces |
+| `pnpm lint` | aprovado nos 8 workspaces |
+| `pnpm --filter @motoboycity/api test -- --runInBand` | 28 suítes / 244 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
+| E2E focado `delivery-lifecycle.e2e-spec.ts` | 1 suíte / 17 testes aprovados em PostgreSQL/Redis isolados |
+| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 133 testes aprovados no mesmo ambiente isolado |
+| builds de API, company-web e admin-web | aprovados |
+| `prettier --check .github/workflows/ci.yml` | aprovado |
+| `pnpm audit --audit-level high` | falhou por 3 alertas altos transitivos conhecidos: dois em `image-size@1.2.1` (Metro) e um em `deepmerge-ts@7.1.5` (Prisma CLI) |
+
+Limitações: o workflow foi validado localmente quanto a formato e todos os
+comandos que ele executa passaram, mas a execução dentro do GitHub Actions só
+ocorrerá depois de commit/push. Build nativo Android/iOS continua fora deste
+workflow e deve ganhar jobs próprios em fase posterior. Nenhum ambiente de
+staging/Neon foi alterado. Próximo passo concreto: publicar esta branch para
+exercitar o CI e, depois, homologar o caminho dourado em staging com aparelho
+real e conferência manual dos valores financeiros.
+
+Risco de dependências: os dois advisories de `image-size` indicam correção em
+`2.0.3`, mas essa versão ainda não está publicada; além disso, a linha 2.x
+removeu a API síncrona atualmente usada pelo Metro 0.84/React Native 0.86. O
+alerta de `deepmerge-ts` chega por `@prisma/config` 6.19.3 e a correção exige
+8.x; override de major não foi aplicado sem validação do Prisma. Os caminhos
+afetados são ferramentas de bundling/configuração, não entrada HTTP da API,
+mas o audit continua vermelho e deve ser acompanhado até existir atualização
+upstream compatível. Não adicionar `pnpm audit` como portão bloqueante do CI
+enquanto não houver versão corrigida instalável; registrar e revisar o risco a
+cada atualização de React Native/Metro e Prisma.
+
+## Atualização — 2026-08-20: auditoria do app de referência e roadmap mobile
+
+O aplicativo de referência instalado em aparelho Android foi navegado em modo
+somente leitura. Foram observados: mapa e lista na Home, disponibilidade
+destacada, modal de oferta, execução da entrega, carteira/extrato, histórico,
+agendamentos, escalas, desafios, suporte e perfil. Nenhum pedido, presença,
+saldo ou perfil da conta de referência foi alterado. Dados pessoais e valores
+vistos durante a análise não foram copiados para o repositório.
+
+A comparação confirmou que o núcleo do MOTOboyCity já está implementado, mas o
+driver-app ainda não é distribuível: `src/lib/config.ts` aponta para
+`http://localhost:3333`, a versão JavaScript `0.0.1` diverge do Android `1.0`,
+o release Android ainda usa assinatura debug, não há mapa móvel nem push nativo
+para ofertas em segundo plano, e a cobertura automatizada do app continua em
+um único smoke test. O build debug atual foi instalado e abriu com Metro em um
+aparelho Android; typecheck, lint e o smoke Jest do driver-app passaram nessa
+verificação. O fluxo autenticado do nosso app não foi executado porque a API
+local não estava ativa, e iOS não foi testado.
+
+Foi criado `docs/driver-app-roadmap.md` com a definição do caminho dourado,
+estado de partida, decisões extraídas da referência, fases, critérios de
+aceite, matriz de testes, rollout, rollback e instruções para retomada. O
+escopo prioritário é: preservar/publicar o checkpoint financeiro/CI atual;
+configurar ambiente, versão e assinatura; evoluir Home/oferta/operação; criar
+push seguro; polir carteira/histórico; homologar o ciclo completo; e publicar
+de forma controlada. Agendamentos, escalas, desafios, chat e antecipação sem
+regra permanecem fora desta versão.
+
+Validação final antes do checkpoint: build de `@motoboycity/validation`,
+`pnpm typecheck` e `pnpm lint` aprovados nos oito workspaces; cinco suítes
+financeiras focadas, com 12 testes, aprovadas; Prettier aprovado no novo roadmap
+e nos demais arquivos do recorte; `git diff --check` aprovado. O arquivo
+histórico `docs/agent-handoff.md` ainda não passa no Prettier quando verificado
+por inteiro por formatação antiga fora deste recorte; ele não foi reformatado
+em massa para evitar um diff não relacionado.
+
+Esta atualização é somente documentação; nenhum código, banco, ambiente ou
+conta foi modificado. Próximo passo concreto: revisar e, mediante pedido
+expresso, commitar/pushar separadamente o recorte financeiro/CI que já está no
+worktree; em seguida iniciar a Fase 1 do roadmap pela configuração de ambiente
+e versionamento do driver-app.

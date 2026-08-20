@@ -2,10 +2,11 @@
 
 Plataforma B2B de entregas para empresas.
 
-> **Status: Fase 0 — Fundação técnica.** Este repositório contém apenas a
-> infraestrutura do monorepo (aplicações, build, lint, banco, filas,
-> realtime). Nenhuma regra de negócio, entidade, autenticação ou fluxo de
-> entrega foi implementada ainda — isso acontece na Fase 1.
+> **Status: MVP operacional em homologação.** Cadastro e aprovação, criação
+> individual/em lote, despacho automático, aceite e ciclo da entrega,
+> rastreamento, centrais operacionais, faturamento, repasse e saque já estão
+> implementados. O produto ainda precisa de homologação em staging e aparelhos
+> reais antes de ser tratado como pronto para produção.
 
 ## Arquitetura
 
@@ -21,12 +22,11 @@ Native, bare) ───────────┘         └──► Socket.I
 ```
 
 - **Company Web** e **Admin Web** consomem a API via HTTP (TanStack Query).
-- **Driver App** consumirá a API via HTTP e, futuramente, eventos realtime
-  (Socket.IO) e push notifications (FCM) — infraestrutura ainda não
-  implementada nesta fase.
-- **API** centraliza toda a lógica de negócio (a partir da Fase 1), persiste
-  dados no PostgreSQL via Prisma, usa Redis/BullMQ para filas assíncronas e
-  Socket.IO para comunicação em tempo real.
+- **Driver App** consome a API via HTTP e Socket.IO, mantém presença com
+  heartbeat e envia localização em segundo plano durante a operação.
+- **API** centraliza autenticação, preço, pedidos, dispatch, presença,
+  rastreamento e financeiro; persiste no PostgreSQL e usa Redis/BullMQ e
+  Socket.IO para filas e comunicação em tempo real.
 
 ## Estrutura de pastas
 
@@ -169,13 +169,12 @@ pnpm --filter @motoboycity/driver-app run ios      # requer macOS + Xcode
 
 **Escolhido: React Native CLI / bare.**
 
-O Driver App terá, em fases futuras, requisitos nativos profundos e
-contínuos: GPS em segundo plano (foreground service dedicado no Android),
-FCM com mensagens data-only para acordar o app e disparar alarmes/vibração
-mesmo com o app fechado, wake locks customizados, e "eventual integração com
-recursos específicos do Android" (requisito explícito desta fase). Esse
-perfil é comparável ao de apps como iFood Entregador/Uber Driver, cujo valor
-central depende de controle fino sobre o sistema operacional.
+O Driver App tem requisitos nativos profundos e contínuos. O GPS em segundo
+plano já usa foreground service dedicado no Android e Core Location no iOS.
+Notificações FCM data-only, alarmes/vibração com o app encerrado e wake locks
+continuam como evolução futura. Esse perfil é comparável ao de apps como
+iFood Entregador/Uber Driver, cujo valor central depende de controle fino
+sobre o sistema operacional.
 
 O Expo com Development Build (via `expo prebuild`) evoluiu bastante e hoje
 permite código nativo customizado, mas ainda introduz uma camada de
@@ -190,23 +189,36 @@ Trade-off aceito: perdemos a conveniência do Expo Go/EAS Build gerenciado e
 OTA updates simplificados — nenhum dos dois é relevante para os requisitos
 deste produto.
 
-## Infraestrutura preparada (sem regras de negócio)
+## Estado funcional atual
 
-- **Prisma**: `apps/api/prisma/schema.prisma` contém apenas os blocos
-  `generator` e `datasource`. Nenhum model de negócio foi criado.
-- **BullMQ**: `apps/api/src/queue/queue.module.ts` registra a conexão com o
-  Redis (`BullModule.forRootAsync`). Nenhuma fila (`registerQueue`) foi
-  criada — isso não abre conexão com o Redis até que uma fila seja
-  registrada em uma fase futura.
-- **Socket.IO**: `apps/api/src/realtime/realtime.gateway.ts` expõe um
-  gateway vazio (apenas loga conexões/desconexões). Nenhum evento de
-  negócio foi definido.
-- **Prisma Client**: a conexão é preguiçosa (`PrismaService` não chama
-  `$connect()` no boot) — a API sobe e responde `/health` mesmo sem
-  PostgreSQL disponível.
+- **Pedidos**: criação individual e lotes de 2–50, preço regional por rota,
+  retorno opcional, despacho concorrente seguro e ciclo auditável até
+  `COMPLETED`.
+- **Motoboy**: aprovação, modalidades, presença Redis com heartbeat, ofertas,
+  GPS em segundo plano, histórico, carteira e solicitação de saque.
+- **Empresa**: central operacional, mapas, busca, acompanhamento em tempo real,
+  detalhes e faturas.
+- **Administrador**: mapa global, empresas, entregadores, cancelamento,
+  configurações, relatórios, auditoria de dispatch, faturas e saques.
+- **Financeiro**: ledger append-only, repasse semanal, fechamento automático
+  de faturas às segundas 00:05 (`America/Sao_Paulo`) e pagamento manual
+  auditado.
 
-## Único endpoint da API nesta fase
+## Verificação contínua
 
+O workflow `.github/workflows/ci.yml` sobe PostgreSQL e Redis isolados, aplica
+as migrations e executa typecheck, lint, testes unitários/E2E e builds da API
+e dos dois painéis. Localmente, os mesmos portões principais são:
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm --filter @motoboycity/api test -- --runInBand
+pnpm --filter @motoboycity/api test:e2e
+pnpm --filter @motoboycity/api run build
+pnpm --filter @motoboycity/company-web run build
+pnpm --filter @motoboycity/admin-web run build
 ```
-GET /health → { "status": "ok" }
-```
+
+Para decisões confirmadas e limitações atuais, consulte
+`docs/business-rules.md` e `docs/agent-handoff.md`.

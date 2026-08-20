@@ -3,6 +3,9 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { FinancialClock } from './../src/finance/financial-clock.service';
+import { FinancialPayoutService } from './../src/finance/financial-payout.service';
+import { InvoiceService } from './../src/finance/invoice.service';
 import { GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { RealtimeGateway } from './../src/realtime/realtime.gateway';
@@ -49,6 +52,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let realtime: RealtimeGatewayMock;
+  let financialClock: FinancialClock;
+  let financialPayoutService: FinancialPayoutService;
+  let invoiceService: InvoiceService;
 
   let adminToken: string;
   let companyToken: string;
@@ -113,6 +119,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     app = moduleFixture.createNestApplication();
     prisma = moduleFixture.get(PrismaService);
     realtime = moduleFixture.get(RealtimeGateway) as unknown as RealtimeGatewayMock;
+    financialClock = moduleFixture.get(FinancialClock);
+    financialPayoutService = moduleFixture.get(FinancialPayoutService);
+    invoiceService = moduleFixture.get(InvoiceService);
     await app.init();
 
     const server = app.getHttpServer();
@@ -221,6 +230,16 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       where: { invoice: { company: { document: companyDocument } } },
     });
     await prisma.invoice.deleteMany({ where: { company: { document: companyDocument } } });
+    await prisma.withdrawalRequestStatusHistory.deleteMany({
+      where: {
+        withdrawalRequest: {
+          wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+        },
+      },
+    });
+    await prisma.withdrawalRequest.deleteMany({
+      where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
+    });
     await prisma.walletTransaction.deleteMany({
       where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
     });
@@ -255,6 +274,10 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   beforeEach(() => {
     realtime.emitToDriver.mockClear();
     realtime.emitAdminActivity.mockClear();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('fluxo feliz completo, endereço conhecido', () => {
@@ -481,25 +504,77 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .set('Authorization', `Bearer ${companyToken}`)
         .expect(403);
 
-      const nextMonday = new Date();
-      nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7 || 7));
-      const closingDate = nextMonday.toISOString().slice(0, 10);
-      const closedInvoices = await request(app.getHttpServer())
+      const repasse = await prisma.walletTransaction.findUniqueOrThrow({
+        where: { idempotencyKey: `driver-repasse:${deliveryId}` },
+      });
+      expect(repasse.releaseAt).not.toBeNull();
+      const financialMonday = new Date(repasse.releaseAt!.getTime() + 5 * 60 * 1000);
+      jest.spyOn(financialClock, 'now').mockReturnValue(financialMonday);
+
+      await financialPayoutService.releaseDueRepasses(financialMonday);
+      const releasedWallet = await request(app.getHttpServer())
+        .get('/driver/wallet')
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      expect(releasedWallet.body).toMatchObject({
+        availableBalance: 10,
+        blockedBalance: 0,
+        cacheMatchesLedger: true,
+      });
+
+      const withdrawal = await request(app.getHttpServer())
+        .post('/driver/wallet/withdrawals')
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ amount: 10 })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/admin/financial/withdrawals/${withdrawal.body.id}/approve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ note: 'Chave PIX conferida no caminho dourado.' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/admin/financial/withdrawals/${withdrawal.body.id}/mark-paid`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ note: 'PIX confirmado no caminho dourado.', paymentReference: 'GOLDEN-PATH-PIX' })
+        .expect(201);
+
+      const paidWallet = await request(app.getHttpServer())
+        .get('/driver/wallet')
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      expect(paidWallet.body).toMatchObject({
+        availableBalance: 0,
+        blockedBalance: 0,
+        pendingWithdrawalAmount: 0,
+        cacheMatchesLedger: true,
+      });
+      expect(
+        paidWallet.body.withdrawalRequests[0].statusHistory.map(
+          (item: { toStatus: string }) => item.toStatus,
+        ),
+      ).toEqual(['PENDING', 'APPROVED', 'PAID']);
+
+      const closedInvoices = await invoiceService.closeScheduledInvoices(financialMonday);
+      const companyInvoice = closedInvoices.find(
+        (invoice) => invoice.companyId === created.body.companyId,
+      );
+      expect(companyInvoice).toEqual(
+        expect.objectContaining({ deliveryCount: 1, totalValue: 12.5, status: 'PENDING' }),
+      );
+      const closingDate = companyInvoice!.issueDate.slice(0, 10);
+
+      await request(app.getHttpServer())
         .post('/admin/financial/invoices/close')
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ issueDate: closingDate })
-        .expect(201);
-      expect(closedInvoices.body).toHaveLength(1);
-      expect(closedInvoices.body[0]).toEqual(
-        expect.objectContaining({ deliveryCount: 1, totalValue: 12.5, status: 'PENDING' }),
-      );
+        .expect(201, []);
 
       const companyInvoicesForAdmin = await request(app.getHttpServer())
         .get(`/admin/financial/invoices?companyId=${created.body.companyId}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
       expect(companyInvoicesForAdmin.body).toEqual(
-        expect.arrayContaining([expect.objectContaining({ id: closedInvoices.body[0].id })]),
+        expect.arrayContaining([expect.objectContaining({ id: companyInvoice!.id })]),
       );
 
       const companyInvoices = await request(app.getHttpServer())
@@ -508,31 +583,37 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .expect(200);
       expect(companyInvoices.body).toEqual([
         expect.objectContaining({
-          id: closedInvoices.body[0].id,
+          id: companyInvoice!.id,
           companyId: created.body.companyId,
         }),
       ]);
 
       const [firstPayment, duplicatePayment] = await Promise.all([
         request(app.getHttpServer())
-          .patch(`/admin/financial/invoices/${closedInvoices.body[0].id}/mark-paid`)
+          .patch(`/admin/financial/invoices/${companyInvoice!.id}/mark-paid`)
           .set('Authorization', `Bearer ${adminToken}`)
           .send({ paymentDate: closingDate, paymentMethod: 'BILLED' }),
         request(app.getHttpServer())
-          .patch(`/admin/financial/invoices/${closedInvoices.body[0].id}/mark-paid`)
+          .patch(`/admin/financial/invoices/${companyInvoice!.id}/mark-paid`)
           .set('Authorization', `Bearer ${adminToken}`)
           .send({ paymentDate: closingDate, paymentMethod: 'BILLED' }),
       ]);
       expect([firstPayment.status, duplicatePayment.status].sort()).toEqual([200, 409]);
 
       const paidInvoice = await request(app.getHttpServer())
-        .get(`/admin/financial/invoices/${closedInvoices.body[0].id}`)
+        .get(`/admin/financial/invoices/${companyInvoice!.id}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
       expect(paidInvoice.body.status).toBe('PAID');
       expect(
         paidInvoice.body.statusHistory.map((item: { toStatus: string }) => item.toStatus),
       ).toEqual(['PENDING', 'PAID']);
+      expect(paidInvoice.body.statusHistory[0]).toEqual(
+        expect.objectContaining({
+          changedBy: null,
+          note: 'Fechamento automático semanal de 1 pedido(s).',
+        }),
+      );
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
