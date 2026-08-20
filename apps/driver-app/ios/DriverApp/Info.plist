@@ -35,9 +35,9 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Usamos sua localização precisa somente durante entregas em andamento.</string>
+	<string>Usamos sua localização precisa enquanto você estiver online e durante as entregas.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Durante uma entrega ativa, sua localização continua sendo compartilhada mesmo com o aplicativo fechado para que a operação acompanhe o pedido.</string>
+	<string>Enquanto você estiver online, sua localização continua sendo compartilhada mesmo com o aplicativo fechado. O compartilhamento para ao ficar offline.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

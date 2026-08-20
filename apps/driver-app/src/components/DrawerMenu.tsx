@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 import type { AuthUser } from '@motoboycity/types';
 import { colors } from '../theme/colors';
-import { authApi } from '../lib/apiClient';
+import { authApi, driverPresenceApi } from '../lib/apiClient';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
 import { session } from '../lib/session';
 import type { RootStackParamList, ScreenNavigator } from '../navigation/types';
@@ -54,6 +54,12 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
   }
 
   async function handleSignOut() {
+    const token = await session.getToken();
+    if (token) {
+      await driverPresenceApi
+        .set(token, { availability: 'UNAVAILABLE' })
+        .catch(() => undefined);
+    }
     await stopDeliveryTracking();
     await session.clearToken();
     onClose();

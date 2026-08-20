@@ -71,6 +71,21 @@ function labelForStatus(status: DeliveryDetail['status']): string {
   }
 }
 
+function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): string {
+  switch (method) {
+    case 'PREPAID':
+      return 'Pré-pago';
+    case 'CARD':
+      return 'Cartão na entrega';
+    case 'CASH':
+      return 'Dinheiro na entrega';
+    case 'PIX':
+      return 'Pix na entrega';
+    default:
+      return 'Não informado';
+  }
+}
+
 export function DeliveryOperationScreen({ navigation, route }: Props) {
   const isDark = useColorScheme() === 'dark';
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
@@ -235,8 +250,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           <Card>
             <Text style={[styles.sectionTitle, { color: text }]}>Rastreamento da entrega</Text>
             <Text style={[styles.trackingNotice, { color: muted }]}>
-              Sua localização é compartilhada somente enquanto este pedido estiver em andamento,
-              inclusive com o aplicativo em segundo plano. Ela para automaticamente ao encerrar.
+              Sua localização é compartilhada enquanto você estiver online, inclusive com o
+              aplicativo em segundo plano. Ela para quando você ficar offline.
             </Text>
           </Card>
         )}
@@ -254,6 +269,27 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               ? formatAddress(dropoff)
               : 'Definido pelo GPS no momento da entrega'}
           </Text>
+        </Card>
+
+        <Card>
+          <Text style={[styles.sectionTitle, { color: text }]}>Dados da entrega</Text>
+          <Text style={[styles.address, { color: text }]}>
+            {delivery.recipientName || 'Destinatário não informado'}
+          </Text>
+          {delivery.recipientPhone && (
+            <Text style={[styles.metadata, { color: muted }]}>{delivery.recipientPhone}</Text>
+          )}
+          {delivery.externalOrderNumber && (
+            <Text style={[styles.metadata, { color: muted }]}>
+              Pedido externo: {delivery.externalOrderNumber}
+            </Text>
+          )}
+          <Text style={[styles.metadata, { color: muted }]}>
+            Pagamento do cliente: {customerPaymentLabel(delivery.customerPaymentMethod)}
+          </Text>
+          {delivery.driverNote && (
+            <Text style={[styles.driverNote, { color: text }]}>{delivery.driverNote}</Text>
+          )}
         </Card>
 
         <Card>
@@ -314,5 +350,7 @@ const styles = StyleSheet.create({
   value: { fontSize: 22, fontWeight: '700' },
   returnNotice: { fontSize: 13, fontWeight: '600', marginTop: 8 },
   trackingNotice: { fontSize: 13, lineHeight: 19 },
+  metadata: { fontSize: 13, marginTop: 4 },
+  driverNote: { fontSize: 13, lineHeight: 19, marginTop: 10 },
   actions: { padding: 16 },
 });

@@ -124,7 +124,12 @@ describe('DeliveryOffersController (e2e)', () => {
     await request(server)
       .put('/driver/presence')
       .set('Authorization', `Bearer ${driverToken}`)
-      .send({ availability: 'AVAILABLE' })
+      .send({
+        availability: 'AVAILABLE',
+        location: { lat: -20.153, lng: -41.622, accuracy: 8 },
+        appVersion: 'e2e',
+        trackingCapability: 'BACKGROUND_V1',
+      })
       .expect(200);
 
     const otherDriverRegister = await request(server).post('/auth/register/driver').send({

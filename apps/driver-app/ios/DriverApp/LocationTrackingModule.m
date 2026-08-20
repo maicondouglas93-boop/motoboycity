@@ -6,6 +6,7 @@
 @property(nonatomic, copy) NSArray<NSString *> *deliveryIds;
 @property(nonatomic, copy) NSString *baseUrl;
 @property(nonatomic, copy) NSString *accessToken;
+@property(nonatomic, copy) NSString *appVersion;
 @end
 
 @implementation LocationTrackingModule
@@ -21,6 +22,7 @@ RCT_REMAP_METHOD(start,
                  startWithDeliveryIds:(NSArray<NSString *> *)deliveryIds
                  baseUrl:(NSString *)baseUrl
                  accessToken:(NSString *)accessToken
+                 appVersion:(NSString *)appVersion
                  resolve:(RCTPromiseResolveBlock)resolve
                  reject:(RCTPromiseRejectBlock)reject)
 {
@@ -31,12 +33,6 @@ RCT_REMAP_METHOD(start,
         [validIds addObject:identifier];
       }
     }
-    if (validIds.count == 0) {
-      [self stopTracking];
-      resolve(nil);
-      return;
-    }
-
     if (![CLLocationManager locationServicesEnabled]) {
       reject(@"location_services_disabled", @"Ative os serviços de localização para iniciar o rastreamento.", nil);
       return;
@@ -45,7 +41,9 @@ RCT_REMAP_METHOD(start,
     self.deliveryIds = [validIds copy];
     self.baseUrl = baseUrl;
     self.accessToken = accessToken;
+    self.appVersion = appVersion;
     [self ensureLocationManager];
+    self.locationManager.distanceFilter = validIds.count > 0 ? 50.0 : 100.0;
 
     CLAuthorizationStatus authorization = self.locationManager.authorizationStatus;
     if (authorization == kCLAuthorizationStatusDenied || authorization == kCLAuthorizationStatusRestricted) {
@@ -93,7 +91,7 @@ RCT_REMAP_METHOD(stop,
     return;
   }
 
-  if (self.deliveryIds.count > 0 && manager.authorizationStatus != kCLAuthorizationStatusNotDetermined) {
+  if (self.accessToken.length > 0 && manager.authorizationStatus != kCLAuthorizationStatusNotDetermined) {
     [manager startUpdatingLocation];
   }
 }
@@ -101,14 +99,46 @@ RCT_REMAP_METHOD(stop,
 - (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations
 {
   CLLocation *location = locations.lastObject;
-  if (location == nil || self.deliveryIds.count == 0 || self.baseUrl.length == 0 || self.accessToken.length == 0) {
+  if (location == nil || self.baseUrl.length == 0 || self.accessToken.length == 0 || self.appVersion.length == 0) {
     return;
   }
 
+  [self reportPresence:location];
   NSArray<NSString *> *trackedDeliveries = [self.deliveryIds copy];
   for (NSString *deliveryId in trackedDeliveries) {
     [self reportLocation:location forDelivery:deliveryId];
   }
+}
+
+- (void)reportPresence:(CLLocation *)location
+{
+  NSString *normalizedBaseUrl = self.baseUrl;
+  while ([normalizedBaseUrl hasSuffix:@"/"]) {
+    normalizedBaseUrl = [normalizedBaseUrl substringToIndex:normalizedBaseUrl.length - 1];
+  }
+  NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/driver/presence/heartbeat", normalizedBaseUrl]];
+  if (url == nil) return;
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+  request.HTTPMethod = @"POST";
+  request.timeoutInterval = 15.0;
+  [request setValue:[NSString stringWithFormat:@"Bearer %@", self.accessToken] forHTTPHeaderField:@"Authorization"];
+  [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  NSMutableDictionary *payload = [@{
+    @"lat": @(location.coordinate.latitude),
+    @"lng": @(location.coordinate.longitude),
+    @"appVersion": self.appVersion,
+  } mutableCopy];
+  if (location.horizontalAccuracy >= 0) payload[@"accuracy"] = @(location.horizontalAccuracy);
+  request.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+
+  NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
+    NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
+    if (statusCode == 401 || statusCode == 403 || statusCode == 409) {
+      dispatch_async(dispatch_get_main_queue(), ^{ [self stopTracking]; });
+    }
+  }];
+  [task resume];
 }
 
 - (void)reportLocation:(CLLocation *)location forDelivery:(NSString *)deliveryId
@@ -150,9 +180,6 @@ RCT_REMAP_METHOD(stop,
         NSMutableArray<NSString *> *remaining = [self.deliveryIds mutableCopy];
         [remaining removeObject:deliveryId];
         self.deliveryIds = remaining;
-        if (self.deliveryIds.count == 0) {
-          [self stopTracking];
-        }
       });
     }
   }];
@@ -165,6 +192,7 @@ RCT_REMAP_METHOD(stop,
   self.deliveryIds = @[];
   self.baseUrl = nil;
   self.accessToken = nil;
+  self.appVersion = nil;
 }
 
 @end

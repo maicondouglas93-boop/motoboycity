@@ -1,6 +1,6 @@
-import type { CompanyStatus } from './company';
-import type { DriverApprovalStatus } from './driver';
-import type { AuthUser } from './user';
+import type { CompanyStatus } from './company.js';
+import type { DriverApprovalStatus } from './driver.js';
+import type { AuthUser } from './user.js';
 
 export interface RegisterCompanyResult {
   companyId: string;

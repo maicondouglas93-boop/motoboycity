@@ -29,7 +29,14 @@ describe('Saques do motoboy — reserva, aprovação e pagamento (e2e)', () => {
       imports: [AppModule],
     })
       .overrideProvider(RealtimeGateway)
-      .useValue({ emitToDriver: jest.fn(), emitAdminActivity: jest.fn() })
+      .useValue({
+        emitToDriver: jest.fn(),
+        emitAdminActivity: jest.fn(),
+        emitDeliveryUpdated: jest.fn(),
+        emitDriverPresence: jest.fn(),
+        emitDriverLocation: jest.fn(),
+        emitDeliveryLocation: jest.fn(),
+      })
       .compile();
 
     app = moduleFixture.createNestApplication();

@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
-import { deliveriesApi, trackingApi } from '@/lib/api-client';
+import { OrderDetailMap } from '@/components/operations/order-detail-map';
+import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -55,6 +56,15 @@ function mapsUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }
 
+function customerPaymentLabel(method: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null): string {
+  return method === 'PREPAID' ? 'Pré-pago' : method === 'CARD' ? 'Cartão' : method === 'CASH' ? 'Dinheiro' : method === 'PIX' ? 'Pix' : 'Não informado';
+}
+
+function durationLabel(from: string, to: string): string {
+  const minutes = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
+}
+
 export default function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const token = session.getToken();
@@ -74,6 +84,16 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       deliveryQuery.data?.status === 'DELIVERED'
         ? 30_000
         : false,
+  });
+  const groupQuery = useQuery({
+    queryKey: ['admin', 'delivery-group', id],
+    queryFn: () => deliveriesApi.group(token as string, id),
+    enabled: Boolean(token && deliveryQuery.data),
+  });
+  const dispatchAuditQuery = useQuery({
+    queryKey: ['admin', 'delivery-dispatch-audit', id],
+    queryFn: () => adminOperationsApi.dispatchAudit(token as string, id),
+    enabled: Boolean(token),
   });
   const cancelMutation = useMutation({
     mutationFn: () => deliveriesApi.cancel(token as string, id),
@@ -159,6 +179,16 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
+          <CardHeader><CardTitle>Destinatário e instruções</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p><span className="text-muted-foreground">Destinatário:</span> {delivery.recipientName ?? 'Não informado'}</p>
+            <p><span className="text-muted-foreground">Telefone:</span> {delivery.recipientPhone ?? 'Não informado'}</p>
+            <p><span className="text-muted-foreground">Número externo:</span> {delivery.externalOrderNumber ?? 'Não informado'}</p>
+            <p><span className="text-muted-foreground">Pagamento do cliente:</span> {customerPaymentLabel(delivery.customerPaymentMethod)}</p>
+            {delivery.driverNote && <p className="rounded-md bg-muted p-2">{delivery.driverNote}</p>}
+          </CardContent>
+        </Card>
+        <Card>
           <CardHeader>
             <CardTitle>Operação</CardTitle>
           </CardHeader>
@@ -222,7 +252,9 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             </div>
             <div>
               <p className="text-muted-foreground">Lote</p>
-              <p>{delivery.batchId ?? 'Pedido avulso'}</p>
+              {groupQuery.data && groupQuery.data.deliveries.length > 1 ? (
+                <div className="flex flex-wrap gap-2">{groupQuery.data.deliveries.map((item) => <Link key={item.id} className="text-primary hover:underline" href={`/pedidos/${item.id}`}>#{item.displayNumber}</Link>)}</div>
+              ) : <p>Pedido avulso</p>}
             </div>
           </CardContent>
         </Card>
@@ -261,6 +293,10 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             )}
           </CardContent>
         </Card>
+      </section>
+
+      <section>
+        <OrderDetailMap addresses={delivery.addresses} points={trackingQuery.data?.points ?? []} />
       </section>
 
       <section>
@@ -320,6 +356,22 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       </section>
 
       <section>
+        <Card>
+          <CardHeader><CardTitle>Auditoria do despacho</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {dispatchAuditQuery.data?.offers.map((offer) => (
+              <div key={offer.id} className="flex flex-wrap items-center justify-between gap-2 border-t py-2 first:border-0">
+                <Link className="text-primary hover:underline" href={`/entregadores/${offer.driver.id}`}>{offer.driver.name}</Link>
+                <span>{offer.response}</span>
+                <span className="text-muted-foreground">{formatDate(offer.offeredAt)}{offer.respondedAt ? ` → ${formatDate(offer.respondedAt)}` : ''}</span>
+              </div>
+            ))}
+            {dispatchAuditQuery.data?.offers.length === 0 && <p className="text-muted-foreground">Nenhuma oferta registrada.</p>}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
         <h2 className="mb-3 font-semibold">Histórico do pedido</h2>
         {delivery.statusHistory.length === 0 ? (
           <Card>
@@ -341,6 +393,7 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                   </div>
                   <div className="text-right text-muted-foreground">
                     <p>{formatDate(entry.changedAt)}</p>
+                    {index > 0 && <p>{durationLabel(delivery.statusHistory[index - 1]!.changedAt, entry.changedAt)} desde a etapa anterior</p>}
                     <p>{entry.changedBy?.name ?? 'Evento do sistema'}</p>
                   </div>
                 </CardContent>

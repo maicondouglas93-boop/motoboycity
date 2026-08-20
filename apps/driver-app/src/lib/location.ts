@@ -16,7 +16,7 @@ export async function ensurePreciseLocationPermission(): Promise<void> {
     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
     {
       title: 'Permitir localizacao precisa',
-      message: 'Usamos sua localizacao somente para concluir entregas e retornos.',
+      message: 'Usamos sua localizacao enquanto voce estiver online e durante as entregas.',
       buttonPositive: 'Permitir',
       buttonNegative: 'Agora nao',
     },
@@ -44,9 +44,9 @@ export async function ensureBackgroundTrackingPermission(): Promise<void> {
     const backgroundPermission = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
       {
-        title: 'Permitir rastreamento durante a entrega',
+        title: 'Permitir localizacao enquanto online',
         message:
-          'Com uma entrega ativa, precisamos da localização mesmo com o aplicativo fechado. O rastreamento para ao encerrar o pedido.',
+          'Enquanto você estiver online, precisamos da localização mesmo com o aplicativo fechado. O compartilhamento para ao ficar offline.',
         buttonPositive: 'Permitir',
         buttonNegative: 'Agora não',
       },
@@ -56,7 +56,7 @@ export async function ensureBackgroundTrackingPermission(): Promise<void> {
       throw new LocationError(
         backgroundPermission === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN
           ? 'A localização em segundo plano está bloqueada. Ative-a nas configurações do aplicativo.'
-          : 'A localização em segundo plano é necessária durante uma entrega ativa.',
+          : 'A localização em segundo plano é necessária para ficar online.',
       );
     }
   }

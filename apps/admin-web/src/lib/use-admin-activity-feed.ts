@@ -1,45 +1,37 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { OperationalActivityEvent } from '@motoboycity/types';
 import { io } from 'socket.io-client';
-import { baseUrl } from './api-client';
+import { adminOperationsApi, baseUrl } from './api-client';
 import { session } from './session';
 
-export interface ActivityEvent {
-  id: string;
-  message: string;
-  at: string;
-}
+const MAX_EVENTS = 40;
 
-const MAX_EVENTS = 20;
-
-/**
- * Conecta ao RealtimeGateway (sala "admin") e mantém uma lista rolante dos
- * últimos eventos de admin:activity. Um hook por widget é suficiente aqui —
- * só um lugar no admin-web consome isso hoje (LiveActivityWidget).
- */
 export function useAdminActivityFeed() {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [events, setEvents] = useState<OperationalActivityEvent[]>([]);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const token = session.getToken();
     if (!token) return;
+    let cancelled = false;
+    adminOperationsApi
+      .activity(token, { limit: 30 })
+      .then((history) => {
+        if (!cancelled) setEvents(history);
+      })
+      .catch(() => undefined);
 
     const socket = io(baseUrl, { auth: { token } });
-
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    socket.on('admin:activity', (payload: { message: string; at: string }) => {
-      setEvents((current) =>
-        [{ id: crypto.randomUUID(), message: payload.message, at: payload.at }, ...current].slice(
-          0,
-          MAX_EVENTS,
-        ),
-      );
+    socket.on('admin:activity', (event: OperationalActivityEvent) => {
+      setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, MAX_EVENTS));
     });
 
     return () => {
+      cancelled = true;
       socket.disconnect();
     };
   }, []);

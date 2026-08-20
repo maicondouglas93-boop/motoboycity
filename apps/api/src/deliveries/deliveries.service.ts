@@ -11,8 +11,16 @@ import type {
   CompleteReturnPayload,
   CreateDeliveryBatchPayload,
   CreateDeliveryPayload,
+  DeliveryOperationsQuery,
   MarkDeliveredPayload,
+  SearchDeliveriesQuery,
 } from '@motoboycity/validation';
+import type {
+  DeliveryOperationsResult,
+  DeliverySearchResult,
+  OperationalDeliveryItem,
+  OperationalActivityType,
+} from '@motoboycity/types';
 import { Prisma } from '@prisma/client';
 import type { Delivery, DeliveryStatus, User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
@@ -26,6 +34,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
+const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
+  'SCHEDULED',
+  'AWAITING_DRIVER',
+  'ACCEPTED',
+  'COLLECTED',
+  'DELIVERED',
+  'AWAITING_PAYMENT',
+];
+const RECENT_OPERATION_STATUSES: DeliveryStatus[] = ['COMPLETED', 'CANCELLED'];
+const OPERATIONAL_DELIVERY_INCLUDE = Prisma.validator<Prisma.DeliveryInclude>()({
+  company: true,
+  serviceType: true,
+  addresses: true,
+  driver: { include: { user: { select: { name: true, phone: true } } } },
+  trackingPoints: { orderBy: { capturedAt: 'desc' }, take: 1 },
+});
+type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
+  include: typeof OPERATIONAL_DELIVERY_INCLUDE;
+}>;
 
 /**
  * Erro maximo aceito no fix que DEFINE o destino de uma entrega sem endereco.
@@ -70,6 +97,11 @@ export interface DeliveryListItem {
   requiresReturn: boolean;
   returnValue: number | null;
   paymentMethod: 'BILLED' | 'ONLINE';
+  recipientName: string | null;
+  recipientPhone: string | null;
+  externalOrderNumber: string | null;
+  driverNote: string | null;
+  customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
   statusChangedAt: string;
   scheduledAt: string | null;
   createdAt: string;
@@ -187,6 +219,11 @@ export class DeliveriesService {
           driverValue,
           platformValue,
           paymentMethod: 'BILLED',
+          recipientName: payload.recipientName,
+          recipientPhone: payload.recipientPhone,
+          externalOrderNumber: payload.externalOrderNumber,
+          driverNote: payload.driverNote,
+          customerPaymentMethod: payload.customerPaymentMethod,
           requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
           requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
           pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
@@ -221,6 +258,8 @@ export class DeliveriesService {
           state: dropoffAddress.state,
           zip: dropoffAddress.zip,
           referenceNote: dropoffAddress.referenceNote,
+          lat: dropoffAddress.lat,
+          lng: dropoffAddress.lng,
         });
       }
       await tx.deliveryAddress.createMany({ data: addresses });
@@ -243,7 +282,9 @@ export class DeliveriesService {
       await this.dispatchService.scheduleActivation(created.id, new Date(payload.scheduledAt!));
     }
 
-    return this.detail(user, created.id);
+    const detail = await this.detail(user, created.id);
+    this.publishDeliveryUpdate(detail, 'DELIVERY_CREATED');
+    return detail;
   }
 
   async createBatch(user: User, payload: CreateDeliveryBatchPayload): Promise<DeliveryBatchDetail> {
@@ -313,6 +354,11 @@ export class DeliveriesService {
             driverValue: quote ? quote.driverValue : null,
             platformValue: quote ? quote.platformValue : null,
             paymentMethod: 'BILLED',
+            recipientName: item.recipientName,
+            recipientPhone: item.recipientPhone,
+            externalOrderNumber: item.externalOrderNumber,
+            driverNote: item.driverNote,
+            customerPaymentMethod: item.customerPaymentMethod,
             requiresDeliveryProof: item.requiresDeliveryProof ?? false,
             requiresCollectionRecipient: item.requiresCollectionRecipient ?? false,
             pickupSurchargeChargedToDriver: item.pickupSurchargeChargedToDriver ?? false,
@@ -347,6 +393,8 @@ export class DeliveriesService {
             state: dropoffAddress.state,
             zip: dropoffAddress.zip,
             referenceNote: dropoffAddress.referenceNote,
+            lat: dropoffAddress.lat,
+            lng: dropoffAddress.lng,
           });
         }
         await tx.deliveryAddress.createMany({ data: addresses });
@@ -369,9 +417,11 @@ export class DeliveriesService {
       throw new InternalServerErrorException('Não foi possível criar o lote.');
     }
     await this.dispatchService.dispatchDelivery(firstCreated.id);
+    const details = await Promise.all(created.map((delivery) => this.detail(user, delivery.id)));
+    details.forEach((detail) => this.publishDeliveryUpdate(detail, 'DELIVERY_CREATED'));
     return {
       batchId,
-      deliveries: await Promise.all(created.map((delivery) => this.detail(user, delivery.id))),
+      deliveries: details,
     };
   }
 
@@ -413,6 +463,100 @@ export class DeliveriesService {
     });
 
     return deliveries.map((delivery) => this.toListItem(delivery));
+  }
+
+  async operations(
+    user: User,
+    filters: DeliveryOperationsQuery,
+  ): Promise<DeliveryOperationsResult> {
+    if (user.type === 'DRIVER') {
+      throw new ForbiddenException('A central operacional é restrita a empresas e administradores.');
+    }
+    if ((filters.companyId || filters.driverId) && user.type !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Os filtros por entregador ou empresa são restritos a administradores.',
+      );
+    }
+
+    const scope = await this.resolveListScope(user);
+    const baseWhere = this.buildDeliveryWhere(scope, filters);
+    const requestedStatuses = filters.statuses?.length ? filters.statuses : null;
+    const activeStatuses = requestedStatuses
+      ? ACTIVE_OPERATION_STATUSES.filter((status) => requestedStatuses.includes(status))
+      : ACTIVE_OPERATION_STATUSES;
+    const recentStatuses = requestedStatuses
+      ? RECENT_OPERATION_STATUSES.filter((status) => requestedStatuses.includes(status))
+      : RECENT_OPERATION_STATUSES;
+    const [active, recent] = await this.prisma.$transaction([
+      this.prisma.delivery.findMany({
+        where: { ...baseWhere, status: { in: activeStatuses } },
+        orderBy: { statusChangedAt: 'asc' },
+        include: OPERATIONAL_DELIVERY_INCLUDE,
+      }),
+      this.prisma.delivery.findMany({
+        where: { ...baseWhere, status: { in: recentStatuses } },
+        orderBy: { statusChangedAt: 'desc' },
+        take: 20,
+        include: OPERATIONAL_DELIVERY_INCLUDE,
+      }),
+    ]);
+    const statuses = await this.prisma.delivery.findMany({
+      where: baseWhere,
+      select: { status: true },
+    });
+    const counts = statuses.reduce<Record<string, number>>((result, delivery) => {
+      result[delivery.status] = (result[delivery.status] ?? 0) + 1;
+      return result;
+    }, {});
+
+    return {
+      active: active.map((delivery) => this.toOperationalItem(delivery)),
+      recent: recent.map((delivery) => this.toOperationalItem(delivery)),
+      counts,
+    };
+  }
+
+  async search(user: User, filters: SearchDeliveriesQuery): Promise<DeliverySearchResult> {
+    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Os filtros por entregador ou empresa são restritos a administradores.',
+      );
+    }
+    const scope = await this.resolveListScope(user);
+    const where = this.buildDeliveryWhere(scope, filters);
+    const [total, deliveries] = await this.prisma.$transaction([
+      this.prisma.delivery.count({ where }),
+      this.prisma.delivery.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: { company: true, serviceType: true },
+      }),
+    ]);
+
+    return {
+      items: deliveries.map((delivery) => this.toListItem(delivery)),
+      page: filters.page,
+      pageSize: filters.pageSize,
+      total,
+    };
+  }
+
+  async group(user: User, id: string): Promise<DeliveryGroupResult> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    if (!delivery) throw new NotFoundException('Pedido não encontrado.');
+    await this.assertCanAccess(user, delivery);
+    const siblings = delivery.batchId
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: delivery.batchId },
+          orderBy: { displayNumber: 'asc' },
+        })
+      : [delivery];
+    return {
+      batchId: delivery.batchId,
+      deliveries: await Promise.all(siblings.map((item) => this.detail(user, item.id))),
+    };
   }
 
   async detail(user: User, id: string): Promise<DeliveryDetail> {
@@ -547,6 +691,23 @@ export class DeliveriesService {
       this.realtimeGateway.emitToDriver(driverId, 'delivery:cancelled', { deliveryIds });
     }
 
+    for (const item of cancellable) {
+      this.realtimeGateway.emitDeliveryUpdated(item.companyId, {
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        companyId: item.companyId,
+        batchId: item.batchId,
+        status: 'CANCELLED',
+      });
+      this.realtimeGateway.emitAdminActivity({
+        type: 'DELIVERY_CANCELLED',
+        message: `Pedido #${item.displayNumber}: CANCELLED.`,
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        companyId: item.companyId,
+        status: 'CANCELLED',
+      });
+    }
     return this.detail(user, id);
   }
 
@@ -587,9 +748,11 @@ export class DeliveriesService {
       }
     });
 
+    const details = await Promise.all(siblings.map((item) => this.detail(user, item.id)));
+    details.forEach((detail) => this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED'));
     return {
       batchId: delivery.batchId,
-      deliveries: await Promise.all(siblings.map((item) => this.detail(user, item.id))),
+      deliveries: details,
     };
   }
 
@@ -754,7 +917,9 @@ export class DeliveriesService {
       throw error;
     }
 
-    return this.detail(user, delivery.id);
+    const detail = await this.detail(user, delivery.id);
+    this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
   }
 
   /** Fecha os itens do lote que exigem retorno e já foram entregues —
@@ -860,9 +1025,11 @@ export class DeliveriesService {
       throw error;
     }
 
+    const details = await Promise.all(candidates.map((item) => this.detail(user, item.id)));
+    details.forEach((detail) => this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED'));
     return {
       batchId: delivery.batchId,
-      deliveries: await Promise.all(candidates.map((item) => this.detail(user, item.id))),
+      deliveries: details,
     };
   }
 
@@ -885,6 +1052,25 @@ export class DeliveriesService {
       return;
     }
     throw new ForbiddenException('Acesso restrito a empresas e administradores.');
+  }
+
+  private publishDeliveryUpdate(
+    delivery: DeliveryDetail,
+    type: OperationalActivityType,
+  ): void {
+    this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, delivery);
+    this.realtimeGateway.emitAdminActivity({
+      type,
+      message: `Pedido #${delivery.displayNumber}: ${delivery.status}.`,
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      companyId: delivery.companyId,
+      companyName: delivery.companyName,
+      status: delivery.status,
+      ...(delivery.driver
+        ? { driverId: delivery.driver.id, driverName: delivery.driver.name }
+        : {}),
+    });
   }
 
   private isRepasseIdempotencyConflict(error: unknown): boolean {
@@ -946,6 +1132,86 @@ export class DeliveriesService {
     return new Date(`${date}T00:00:00.000Z`);
   }
 
+  private buildDeliveryWhere(
+    scope: { companyId?: string; driverId?: string },
+    filters: {
+      q?: string;
+      status?: DeliveryStatus;
+      statuses?: DeliveryStatus[];
+      companyId?: string;
+      driverId?: string;
+      from?: string;
+      to?: string;
+    },
+  ): Prisma.DeliveryWhereInput {
+    const query = filters.q?.trim();
+    const parsedDisplayNumber = query && /^\d+$/.test(query) ? Number(query) : null;
+    const isUuid = Boolean(
+      query && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query),
+    );
+    const queryFilter: Prisma.DeliveryWhereInput = query
+      ? {
+          OR: [
+            { externalOrderNumber: { contains: query, mode: 'insensitive' } },
+            ...(parsedDisplayNumber === null ? [] : [{ displayNumber: parsedDisplayNumber }]),
+            ...(isUuid ? [{ id: query }] : []),
+          ],
+        }
+      : {};
+
+    return {
+      ...scope,
+      ...(filters.status && { status: filters.status }),
+      ...(filters.statuses?.length && { status: { in: filters.statuses } }),
+      ...(filters.driverId && { driverId: filters.driverId }),
+      ...(filters.companyId && { companyId: filters.companyId }),
+      ...(filters.from || filters.to
+        ? {
+            createdAt: {
+              ...(filters.from && { gte: this.startOfDay(filters.from) }),
+              ...(filters.to && { lte: this.endOfDay(filters.to) }),
+            },
+          }
+        : {}),
+      ...queryFilter,
+    };
+  }
+
+  private toOperationalItem(delivery: OperationalDeliveryRow): OperationalDeliveryItem {
+    const point = delivery.trackingPoints[0];
+    return {
+      ...this.toListItem(delivery),
+      addresses: delivery.addresses.map((address) => ({
+        type: address.type,
+        street: address.street,
+        number: address.number,
+        complement: address.complement,
+        city: address.city,
+        state: address.state,
+        zip: address.zip,
+        lat: address.lat === null ? null : Number(address.lat),
+        lng: address.lng === null ? null : Number(address.lng),
+        referenceNote: address.referenceNote,
+      })),
+      driver: delivery.driver
+        ? {
+            id: delivery.driver.id,
+            name: delivery.driver.user.name,
+            phone: delivery.driver.user.phone,
+          }
+        : null,
+      lastLocation: point
+        ? {
+            id: point.id,
+            lat: Number(point.lat),
+            lng: Number(point.lng),
+            accuracy: point.accuracy === null ? null : Number(point.accuracy),
+            capturedAt: point.capturedAt.toISOString(),
+          }
+        : null,
+    };
+  }
+
   private endOfDay(date: string): Date {
     return new Date(`${date}T23:59:59.999Z`);
   }
@@ -978,6 +1244,11 @@ export class DeliveriesService {
     requiresReturn: boolean;
     returnValue: { toString(): string } | null;
     paymentMethod: 'BILLED' | 'ONLINE';
+    recipientName: string | null;
+    recipientPhone: string | null;
+    externalOrderNumber: string | null;
+    driverNote: string | null;
+    customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
     statusChangedAt: Date;
     scheduledAt: Date | null;
     createdAt: Date;
@@ -998,6 +1269,11 @@ export class DeliveriesService {
       requiresReturn: delivery.requiresReturn,
       returnValue: delivery.returnValue === null ? null : Number(delivery.returnValue),
       paymentMethod: delivery.paymentMethod,
+      recipientName: delivery.recipientName,
+      recipientPhone: delivery.recipientPhone,
+      externalOrderNumber: delivery.externalOrderNumber,
+      driverNote: delivery.driverNote,
+      customerPaymentMethod: delivery.customerPaymentMethod,
       statusChangedAt: delivery.statusChangedAt.toISOString(),
       scheduledAt: delivery.scheduledAt?.toISOString() ?? null,
       createdAt: delivery.createdAt.toISOString(),

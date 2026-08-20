@@ -21,6 +21,8 @@ export interface AdminDriverListItem {
   approvalStatus: string;
   accountStatus: string;
   availability: string;
+  appVersion: string | null;
+  lastSeenAt: string | null;
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;
@@ -96,6 +98,8 @@ export class AdminDriversService {
     approvalStatus: string;
     accountStatus: string;
     availability: string;
+    appVersion: string | null;
+    lastSeenAt: Date | null;
     createdAt: Date;
     reviewedAt: Date | null;
     user: { name: string; email: string; phone: string };
@@ -111,6 +115,8 @@ export class AdminDriversService {
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
       availability: driver.availability,
+      appVersion: driver.appVersion,
+      lastSeenAt: driver.lastSeenAt?.toISOString() ?? null,
       createdAt: driver.createdAt.toISOString(),
       reviewedBy: driver.reviewedBy
         ? { id: driver.reviewedBy.id, name: driver.reviewedBy.name }

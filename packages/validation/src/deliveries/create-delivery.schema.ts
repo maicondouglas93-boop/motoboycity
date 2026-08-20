@@ -1,14 +1,26 @@
 import { z } from 'zod';
 
-export const deliveryAddressInputSchema = z.object({
-  street: z.string().trim().min(1, 'Rua é obrigatória.'),
-  number: z.string().trim().min(1, 'Número é obrigatório.'),
-  complement: z.string().trim().optional(),
-  city: z.string().trim().min(1, 'Cidade é obrigatória.'),
-  state: z.string().trim().length(2, 'UF deve ter 2 letras.'),
-  zip: z.string().trim().min(8, 'CEP inválido.').max(9, 'CEP inválido.'),
-  referenceNote: z.string().trim().optional(),
-});
+export const deliveryAddressInputSchema = z
+  .object({
+    street: z.string().trim().min(1, 'Rua é obrigatória.'),
+    number: z.string().trim().min(1, 'Número é obrigatório.'),
+    complement: z.string().trim().max(120).optional(),
+    city: z.string().trim().min(1, 'Cidade é obrigatória.'),
+    state: z.string().trim().length(2, 'UF deve ter 2 letras.'),
+    zip: z.string().trim().min(8, 'CEP inválido.').max(9, 'CEP inválido.'),
+    referenceNote: z.string().trim().max(300).optional(),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
+  })
+  .superRefine((address, context) => {
+    if ((address.lat === undefined) !== (address.lng === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: address.lat === undefined ? ['lat'] : ['lng'],
+        message: 'Latitude e longitude devem ser informadas juntas.',
+      });
+    }
+  });
 
 export const createDeliverySchema = z
   .object({
@@ -18,6 +30,11 @@ export const createDeliverySchema = z
     // destino por GPS ao marcar a entrega, preço calculado retroativamente.
     destinationKnownAtCreation: z.boolean().optional().default(true),
     dropoffAddress: deliveryAddressInputSchema.optional(),
+    recipientName: z.string().trim().min(1).max(120).optional(),
+    recipientPhone: z.string().trim().min(8).max(20).optional(),
+    externalOrderNumber: z.string().trim().min(1).max(80).optional(),
+    driverNote: z.string().trim().min(1).max(500).optional(),
+    customerPaymentMethod: z.enum(['PREPAID', 'CARD', 'CASH', 'PIX']).optional(),
     requiresReturn: z.boolean().optional().default(false),
     requiresDeliveryProof: z.boolean().optional().default(false),
     requiresCollectionRecipient: z.boolean().optional().default(false),

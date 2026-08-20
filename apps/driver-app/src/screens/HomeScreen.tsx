@@ -9,7 +9,13 @@ import { colors } from '../theme/colors';
 import { driverPresenceApi } from '../lib/apiClient';
 import { getActiveDeliveries } from '../lib/activeDeliveries';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
-import { LocationError } from '../lib/location';
+import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import {
+  captureCurrentLocation,
+  ensureBackgroundTrackingPermission,
+  LocationError,
+} from '../lib/location';
+import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { session } from '../lib/session';
 import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -56,8 +62,10 @@ export function HomeScreen({ navigation }: Props) {
       const presence = await driverPresenceApi.get(token);
       setPresence(presence.availability, presence.since);
       setPresenceError(null);
+      return presence;
     } catch {
       setPresenceError('Nao foi possivel confirmar sua disponibilidade. Verifique a conexao.');
+      return null;
     } finally {
       setPresenceLoading(false);
     }
@@ -73,7 +81,7 @@ export function HomeScreen({ navigation }: Props) {
         return;
       }
 
-      await syncPresence(token);
+      const presence = await syncPresence(token);
       if (cancelled) return;
 
       try {
@@ -84,6 +92,7 @@ export function HomeScreen({ navigation }: Props) {
             await syncDeliveryTracking(
               token,
               deliveries.map((delivery) => delivery.id),
+              presence?.availability === 'AVAILABLE',
             );
             if (!cancelled) setTrackingError(null);
           } catch (error) {
@@ -131,6 +140,7 @@ export function HomeScreen({ navigation }: Props) {
           syncDeliveryTracking(
             token,
             remainingDeliveries.map((delivery) => delivery.id),
+            useDispatchStore.getState().availability === 'AVAILABLE',
           ).catch(() => undefined);
           Alert.alert('Pedido cancelado', 'Este pedido foi cancelado pela administracao.');
           navigation.popToTop();
@@ -139,6 +149,7 @@ export function HomeScreen({ navigation }: Props) {
           if (accountStatus === 'ACTIVE') return;
           setIncomingOffer(null);
           setPresence('UNAVAILABLE', null);
+          stopDeliveryTracking().catch(() => undefined);
           Alert.alert(
             'Conta indisponivel',
             'Sua conta foi suspensa ou bloqueada. Entre em contato com o suporte.',
@@ -174,12 +185,38 @@ export function HomeScreen({ navigation }: Props) {
     const token = await session.getToken();
     if (!token) return;
 
-    const previous = { availability, since: useDispatchStore.getState().since };
-    const nextAvailability = value ? 'AVAILABLE' : 'UNAVAILABLE';
-    setPresence(nextAvailability, previous.since);
-
+    setPresenceLoading(true);
     try {
-      const result = await driverPresenceApi.set(token, nextAvailability);
+      if (!value) {
+        const result = await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' });
+        await stopDeliveryTracking();
+        setPresence(result.availability, result.since);
+        setPresenceError(null);
+        return;
+      }
+
+      await ensureBackgroundTrackingPermission();
+      const location = await captureCurrentLocation();
+      const result = await driverPresenceApi.set(token, {
+        availability: 'AVAILABLE',
+        location,
+        appVersion: DRIVER_APP_VERSION,
+        trackingCapability: 'BACKGROUND_V1',
+      });
+      try {
+        await syncDeliveryTracking(
+          token,
+          useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+          true,
+        );
+      } catch (trackingStartError) {
+        await driverPresenceApi
+          .set(token, { availability: 'UNAVAILABLE' })
+          .catch(() => undefined);
+        await stopDeliveryTracking();
+        setPresence('UNAVAILABLE', null);
+        throw trackingStartError;
+      }
       setPresence(result.availability, result.since);
       setPresenceError(null);
     } catch (error) {
@@ -190,6 +227,8 @@ export function HomeScreen({ navigation }: Props) {
           ? error.message
           : 'Nao foi possivel atualizar sua disponibilidade. Tente novamente.',
       );
+    } finally {
+      setPresenceLoading(false);
     }
   }
 
@@ -250,6 +289,7 @@ export function HomeScreen({ navigation }: Props) {
                 syncDeliveryTracking(
                   token,
                   useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+                  useDispatchStore.getState().availability === 'AVAILABLE',
                 )
                   .then(() => setTrackingError(null))
                   .catch((error: unknown) =>

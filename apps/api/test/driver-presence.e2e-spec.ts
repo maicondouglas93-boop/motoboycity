@@ -24,6 +24,12 @@ describe('DriverPresenceController (e2e)', () => {
   let approvedToken: string;
   let pendingToken: string;
   let companyToken: string;
+  const availablePayload = {
+    availability: 'AVAILABLE',
+    location: { lat: -20.153, lng: -41.622, accuracy: 8 },
+    appVersion: 'e2e',
+    trackingCapability: 'BACKGROUND_V1',
+  };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -119,7 +125,7 @@ describe('DriverPresenceController (e2e)', () => {
     await request(app.getHttpServer())
       .put('/driver/presence')
       .set('Authorization', `Bearer ${pendingToken}`)
-      .send({ availability: 'AVAILABLE' })
+      .send(availablePayload)
       .expect(403);
   });
 
@@ -127,19 +133,29 @@ describe('DriverPresenceController (e2e)', () => {
     const response = await request(app.getHttpServer())
       .put('/driver/presence')
       .set('Authorization', `Bearer ${approvedToken}`)
-      .send({ availability: 'AVAILABLE' })
+      .send(availablePayload)
       .expect(200);
 
     expect(response.body.availability).toBe('AVAILABLE');
     expect(response.body.since).toEqual(expect.any(String));
   });
 
-  it('rejeita ficar disponível de novo (409, idempotência)', async () => {
+  it('renova a sessão ao ficar disponível de novo', async () => {
     await request(app.getHttpServer())
       .put('/driver/presence')
       .set('Authorization', `Bearer ${approvedToken}`)
-      .send({ availability: 'AVAILABLE' })
-      .expect(409);
+      .send(availablePayload)
+      .expect(200);
+  });
+
+  it('aceita heartbeat enquanto disponível', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/driver/presence/heartbeat')
+      .set('Authorization', `Bearer ${approvedToken}`)
+      .send({ lat: -20.154, lng: -41.623, accuracy: 9, appVersion: 'e2e' })
+      .expect(201);
+
+    expect(response.body.availability).toBe('AVAILABLE');
   });
 
   it('fica indisponível de novo, since volta a null', async () => {

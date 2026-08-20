@@ -1211,3 +1211,93 @@ Não foi executado build nativo Android/iOS nesta sessão. Antes de publicar,
 validar em dispositivo físico as permissões, a notificação Android e o fluxo
 Core Location em segundo plano; em iOS, encerramento forçado pelo usuário é
 uma limitação do sistema operacional e não pode ser contornado pelo app.
+
+## Atualização — 2026-08-20: centrais operacionais, presença e GPS online
+
+Foram implementadas as centrais operacionais da empresa e do administrador,
+junto com o contrato de presença necessário para que o mapa administrativo
+mostre somente motoboys realmente online. A Home da empresa agora combina
+criação individual ou em lote (2–50 itens), destino conhecido ou capturado na
+entrega, busca, operação ativa/recente e mapa. A Home administrativa passou a
+ser um mapa global filtrável de pedidos e motoboys, com filas operacionais,
+atividade auditável, resumo do item selecionado e cancelamento dentro das
+regras existentes. As rotas reais de clientes, entregadores, financeiro,
+faturas, saques, relatórios e configurações foram preservadas.
+
+### Dados, contratos e segurança operacional
+
+- A migration aditiva `20260820211800_delivery_operational_metadata` cria o
+  enum `CustomerPaymentMethod`, adiciona a `Delivery` os campos opcionais
+  `recipientName`, `recipientPhone`, `externalOrderNumber`, `driverNote` e
+  `customerPaymentMethod`, e cria índice não único por empresa/número externo.
+  Não existe backfill, remoção de coluna ou alteração de migrations antigas.
+- Endereços de criação aceitam `lat/lng` somente em par e com limites
+  geográficos válidos. Dados antigos sem coordenadas continuam aceitos; o
+  formulário novo exige seleção válida do Google em destinos conhecidos.
+- Foram adicionados os contratos tipados `GET /deliveries/operations`,
+  `GET /deliveries/search`, `GET /deliveries/:id/group`,
+  `GET /admin/operations`, `GET /admin/operations/activity` e
+  `GET /admin/operations/deliveries/:id/dispatch-audit`, com escopo de empresa
+  aplicado no servidor. A busca administrativa aceita os filtros globais.
+- Os eventos `delivery:updated` e `admin:activity` agora são estruturados;
+  `driver:location` e `driver:presence` são emitidos somente para a sala de
+  administradores. As ofertas de dispatch permanecem sem os novos dados
+  pessoais do destinatário; esses metadados só aparecem ao motoboy após o
+  aceite.
+- A presença online vive no Redis com TTL de 150 segundos. Ativar
+  `AVAILABLE` exige posição inicial, versão do aplicativo e capacidade
+  `BACKGROUND_V1`; `POST /driver/presence/heartbeat` renova o estado. O
+  reconciliador por minuto fecha o `DriverPresenceLog` expirado e marca o
+  perfil offline. Dispatch e mapa administrativo exigem presença Redis
+  válida. Uma desconexão Socket.IO isolada não encerra outras sessões.
+
+### Aplicativo e interfaces
+
+- O driver-app solicita permissão e posição antes de ficar disponível, faz
+  rollback para offline se o serviço nativo não iniciar e encerra presença e
+  rastreamento em offline, logout ou bloqueio. Sem entrega ativa usa cerca de
+  60 s/100 m; com entrega ativa usa 20 s/50 m e reaproveita o mesmo fix no
+  heartbeat e nos pedidos ativos. Android mantém foreground service e iOS usa
+  Core Location em segundo plano. Os dados do destinatário aparecem na tela
+  operacional somente após o aceite.
+- Os dois painéis usam `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY`, que deve receber
+  uma chave web separada e restrita aos domínios publicados. A central da
+  empresa usa Places Autocomplete e invalida texto digitado que não tenha uma
+  sugestão válida. Detalhes de empresa e admin exibem mapa, lote, tempos por
+  etapa e linha do tempo; o detalhe admin também exibe a auditoria das ofertas.
+
+Principais arquivos afetados: migration e `apps/api/prisma/schema.prisma`;
+`apps/api/src/{deliveries,driver-presence,live-presence,dispatch,realtime}`;
+`apps/api/src/admin/operations`; contratos em
+`packages/{validation,types,api-client}`; componentes em
+`apps/{company-web,admin-web}/src/components/operations`; Homes e detalhes dos
+dois painéis; e rastreamento/presença em `apps/driver-app/{src,android,ios}`.
+
+Validações desta entrega:
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` | aprovado nos 8 workspaces |
+| `pnpm lint` e lints específicos de API, painéis e driver-app | aprovados |
+| `pnpm --filter @motoboycity/api test -- --runInBand` | 24 suítes / 235 testes aprovados |
+| `pnpm --filter @motoboycity/api test:e2e` com PostgreSQL/Redis temporários e isolados | 18 suítes / 133 testes aprovados; containers removidos ao final |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
+| builds de API, company-web e admin-web | aprovados |
+| `gradlew.bat :app:compileDebugKotlin` | aprovado no Android, somente avisos de dependências/depreciação |
+| `prisma validate` e aplicação das 14 migrations em banco vazio isolado | aprovados |
+| `git diff --check` | aprovado; somente avisos de normalização CRLF do worktree |
+
+A nova migration foi aplicada no PostgreSQL local e validada também em banco
+vazio isolado. Ela **não foi aplicada nem validada em cópia atual de
+staging/Neon**, e não houve backup/restore de dados reais nesta entrega. Antes
+de qualquer ambiente compartilhado, executar backup, restaurar uma cópia de
+staging, aplicar a migration nessa cópia e validar consultas/rollback.
+
+Também permanecem obrigatórios antes da publicação: teste Android e iOS em
+aparelhos reais (permissão negada, segundo plano, reinício, logout e bloqueio),
+smoke visual dos mapas com chave Google web restrita e sessão com dados reais,
+e coordenação do rollout API/contratos → driver-app → central da empresa →
+exigência de heartbeat/central administrativa. O código já exige GPS para
+`AVAILABLE`; portanto API e app incompatíveis não devem ser publicados em
+ordem invertida. `apps/driver-app/src/lib/appVersion.ts` acompanha por enquanto
+a versão `0.0.1` do pacote e precisa ser atualizado junto com cada release.

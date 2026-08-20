@@ -11,6 +11,7 @@ import { Prisma, type DeliveryStatus } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
@@ -56,6 +57,7 @@ export class DispatchService {
     private readonly prisma: PrismaService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly livePresence: LiveDriverPresenceService,
     @InjectQueue(DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
   ) {}
 
@@ -321,6 +323,12 @@ export class DispatchService {
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} agendado entrou na fila.`,
     );
+    this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
+      deliveryId,
+      displayNumber: delivery.displayNumber,
+      companyId: delivery.companyId,
+      status: 'AWAITING_DRIVER',
+    });
     await this.dispatchDelivery(deliveryId);
   }
 
@@ -419,6 +427,13 @@ export class DispatchService {
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} foi aceito por um motoboy.`,
     );
+    this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      companyId: delivery.companyId,
+      driverId,
+      status: 'ACCEPTED',
+    });
 
     return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
   }
@@ -516,6 +531,16 @@ export class DispatchService {
     this.realtimeGateway.emitAdminActivity(
       `Lote de ${deliveries.length} pedidos foi aceito por um motoboy.`,
     );
+    for (const item of deliveries) {
+      this.realtimeGateway.emitDeliveryUpdated(item.companyId, {
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        companyId: item.companyId,
+        batchId,
+        driverId,
+        status: 'ACCEPTED',
+      });
+    }
     return {
       deliveryId,
       displayNumber: accepted.displayNumber,
@@ -599,6 +624,9 @@ export class DispatchService {
     regionId: string;
     serviceTypeIds: string[];
   }) {
+    if (!(await this.livePresence.isLive(driverId))) {
+      return null;
+    }
     try {
       return await this.prisma.$transaction(
         async (tx) => {
@@ -671,18 +699,21 @@ export class DispatchService {
     const busyDriverIds = busyOffers.map((o) => o.driverId);
     const excluded = [...new Set([...excludeDriverIds, ...busyDriverIds])];
 
-    const [nextPresence] = await this.prisma.driverPresenceLog.findMany({
+    const presences = await this.prisma.driverPresenceLog.findMany({
       where: {
         wentOfflineAt: null,
         driverId: excluded.length > 0 ? { notIn: excluded } : undefined,
         driver: this.eligibleDriverWhere(regionId, serviceTypeIds),
       },
       orderBy: { wentOnlineAt: 'asc' },
-      take: 1,
+      take: 50,
       select: { driverId: true },
     });
 
-    return nextPresence?.driverId ?? null;
+    for (const presence of presences) {
+      if (await this.livePresence.isLive(presence.driverId)) return presence.driverId;
+    }
+    return null;
   }
 
   private eligibleDriverWhere(regionId: string, serviceTypeIds: string[]): Prisma.DriverWhereInput {

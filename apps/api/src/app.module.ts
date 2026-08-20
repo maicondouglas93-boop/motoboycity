@@ -7,6 +7,7 @@ import { AdminDriversModule } from './admin/drivers/admin-drivers.module';
 import { AdminPlatformSettingsModule } from './admin/platform-settings/admin-platform-settings.module';
 import { AdminPricingTablesModule } from './admin/pricing-tables/admin-pricing-tables.module';
 import { AdminReportsModule } from './admin/reports/admin-reports.module';
+import { AdminOperationsModule } from './admin/operations/admin-operations.module';
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
@@ -23,6 +24,7 @@ import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ServiceTypesModule } from './service-types/service-types.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { LivePresenceModule } from './live-presence/live-presence.module';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { TrackingModule } from './tracking/tracking.module';
     PrismaModule,
     QueueModule,
     RealtimeModule,
+    LivePresenceModule,
     HealthModule,
     AuthModule,
     AdminCompaniesModule,
@@ -38,6 +41,7 @@ import { TrackingModule } from './tracking/tracking.module';
     AdminServiceTypesModule,
     AdminPricingTablesModule,
     AdminReportsModule,
+    AdminOperationsModule,
     AdminPlatformSettingsModule,
     PricingModule,
     GoogleMapsModule,

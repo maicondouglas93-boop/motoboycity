@@ -6,6 +6,8 @@ import type {
   DeliveryDetail,
   DeliveryGroupResult,
   DeliveryListItem,
+  DeliveryOperationsResult,
+  DeliverySearchResult,
   DeliveryStatus,
   MarkDeliveredPayload,
 } from '@motoboycity/types';
@@ -21,6 +23,56 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
   }
 
   return {
+    async operations(
+      accessToken: string,
+      filters?: {
+        q?: string;
+        statuses?: DeliveryStatus[];
+        companyId?: string;
+        driverId?: string;
+      },
+    ): Promise<DeliveryOperationsResult> {
+      const params = new URLSearchParams();
+      if (filters?.q) params.set('q', filters.q);
+      if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      if (filters?.driverId) params.set('driverId', filters.driverId);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await fetch(`${baseUrl}/deliveries/operations${query}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryOperationsResult>(response);
+    },
+
+    async search(
+      accessToken: string,
+      filters?: {
+        q?: string;
+        status?: DeliveryStatus;
+        driverId?: string;
+        companyId?: string;
+        from?: string;
+        to?: string;
+        page?: number;
+        pageSize?: number;
+      },
+    ): Promise<DeliverySearchResult> {
+      const params = new URLSearchParams();
+      if (filters?.q) params.set('q', filters.q);
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.driverId) params.set('driverId', filters.driverId);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      if (filters?.from) params.set('from', filters.from);
+      if (filters?.to) params.set('to', filters.to);
+      if (filters?.page) params.set('page', String(filters.page));
+      if (filters?.pageSize) params.set('pageSize', String(filters.pageSize));
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await fetch(`${baseUrl}/deliveries/search${query}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliverySearchResult>(response);
+    },
+
     async list(
       accessToken: string,
       filters?: {
@@ -50,6 +102,13 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
+    async group(accessToken: string, id: string): Promise<DeliveryGroupResult> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/group`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
 
     async create(accessToken: string, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {

@@ -1,5 +1,10 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
-import { setDriverPresenceSchema, type SetDriverPresencePayload } from '@motoboycity/validation';
+import { Body, Controller, Get, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  driverPresenceHeartbeatSchema,
+  setDriverPresenceSchema,
+  type DriverPresenceHeartbeatPayload,
+  type SetDriverPresencePayload,
+} from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { DriverOnlyGuard } from '../auth/driver-only.guard';
@@ -22,6 +27,15 @@ export class DriverPresenceController {
     @Body(new ZodValidationPipe(setDriverPresenceSchema)) body: SetDriverPresencePayload,
     @CurrentUser() user: User,
   ): Promise<DriverPresenceItem> {
-    return this.driverPresenceService.setAvailability(user, body.availability);
+    return this.driverPresenceService.setAvailability(user, body);
+  }
+
+  @Post('heartbeat')
+  heartbeat(
+    @Body(new ZodValidationPipe(driverPresenceHeartbeatSchema))
+    body: DriverPresenceHeartbeatPayload,
+    @CurrentUser() user: User,
+  ): Promise<DriverPresenceItem> {
+    return this.driverPresenceService.heartbeat(user, body);
   }
 }

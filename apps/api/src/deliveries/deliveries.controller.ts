@@ -7,10 +7,15 @@ import {
   type CompleteReturnPayload,
   type CreateDeliveryBatchPayload,
   listDeliveriesQuerySchema,
+  deliveryOperationsQuerySchema,
+  searchDeliveriesQuerySchema,
   type CreateDeliveryPayload,
   type ListDeliveriesQuery,
+  type DeliveryOperationsQuery,
+  type SearchDeliveriesQuery,
   type MarkDeliveredPayload,
 } from '@motoboycity/validation';
+import type { DeliveryOperationsResult, DeliverySearchResult } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { CompanyOnlyGuard } from '../auth/company-only.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -54,6 +59,27 @@ export class DeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryListItem[]> {
     return this.deliveriesService.list(user, query);
+  }
+
+  @Get('operations')
+  operations(
+    @Query(new ZodValidationPipe(deliveryOperationsQuerySchema)) query: DeliveryOperationsQuery,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryOperationsResult> {
+    return this.deliveriesService.operations(user, query);
+  }
+
+  @Get('search')
+  search(
+    @Query(new ZodValidationPipe(searchDeliveriesQuerySchema)) query: SearchDeliveriesQuery,
+    @CurrentUser() user: User,
+  ): Promise<DeliverySearchResult> {
+    return this.deliveriesService.search(user, query);
+  }
+
+  @Get(':id/group')
+  group(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryGroupResult> {
+    return this.deliveriesService.group(user, id);
   }
 
   @Get(':id')

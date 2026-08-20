@@ -7,6 +7,7 @@ import {
   createAdminPricingTablesApi,
   createAdminReportsApi,
   createAdminServiceTypesApi,
+  createAdminOperationsApi,
   createAuthApi,
   createDeliveriesApi,
   createTrackingApi,
@@ -23,5 +24,6 @@ export const adminServiceTypesApi = createAdminServiceTypesApi({ baseUrl });
 export const adminPricingTablesApi = createAdminPricingTablesApi({ baseUrl });
 export const adminReportsApi = createAdminReportsApi({ baseUrl });
 export const adminPlatformSettingsApi = createAdminPlatformSettingsApi({ baseUrl });
+export const adminOperationsApi = createAdminOperationsApi({ baseUrl });
 export const deliveriesApi = createDeliveriesApi({ baseUrl });
 export const trackingApi = createTrackingApi({ baseUrl });

@@ -16,13 +16,14 @@ class LocationTrackingModule(
   override fun getName(): String = "LocationTracking"
 
   @ReactMethod
-  fun start(deliveryIds: ReadableArray, baseUrl: String, accessToken: String, promise: Promise) {
+  fun start(
+    deliveryIds: ReadableArray,
+    baseUrl: String,
+    accessToken: String,
+    appVersion: String,
+    promise: Promise,
+  ) {
     val ids = deliveryIds.toArrayList().filterIsInstance<String>().filter { it.isNotBlank() }.distinct()
-
-    if (ids.isEmpty()) {
-      stop(promise)
-      return
-    }
 
     if (reactContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
       promise.reject("location_permission_required", "A localização precisa é necessária para iniciar o rastreamento.")
@@ -34,6 +35,7 @@ class LocationTrackingModule(
       putStringArrayListExtra(DeliveryLocationTrackingService.EXTRA_DELIVERY_IDS, ArrayList(ids))
       putExtra(DeliveryLocationTrackingService.EXTRA_BASE_URL, baseUrl)
       putExtra(DeliveryLocationTrackingService.EXTRA_ACCESS_TOKEN, accessToken)
+      putExtra(DeliveryLocationTrackingService.EXTRA_APP_VERSION, appVersion)
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

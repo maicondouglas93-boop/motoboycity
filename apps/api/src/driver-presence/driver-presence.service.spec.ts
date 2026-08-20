@@ -1,13 +1,20 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { DriverPresenceService } from './driver-presence.service';
 
 const driverUser = { id: 'user-1', type: 'DRIVER' } as User;
 const companyUser = { id: 'user-2', type: 'COMPANY_MEMBER' } as User;
+const availablePayload = {
+  availability: 'AVAILABLE' as const,
+  location: { lat: -23.5, lng: -46.6, accuracy: 12 },
+  appVersion: '1.0.0',
+  trackingCapability: 'BACKGROUND_V1' as const,
+};
 
 describe('DriverPresenceService', () => {
   let service: DriverPresenceService;
@@ -17,24 +24,48 @@ describe('DriverPresenceService', () => {
     $transaction: jest.Mock;
   };
   let dispatchService: { dispatchAvailableDeliveries: jest.Mock };
-  let realtimeGateway: { emitAdminActivity: jest.Mock };
+  let realtimeGateway: {
+    emitAdminActivity: jest.Mock;
+    emitDriverPresence: jest.Mock;
+    emitDriverLocation: jest.Mock;
+  };
+  let livePresence: {
+    isLive: jest.Mock;
+    upsert: jest.Mock;
+    remove: jest.Mock;
+    reconcileExpired: jest.Mock;
+  };
   let tx: {
     driver: { update: jest.Mock };
-    driverPresenceLog: { create: jest.Mock; updateMany: jest.Mock };
+    driverPresenceLog: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
       driver: { update: jest.fn() },
-      driverPresenceLog: { create: jest.fn(), updateMany: jest.fn() },
+      driverPresenceLog: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     };
     prisma = {
       driver: { findUnique: jest.fn(), update: jest.fn() },
       driverPresenceLog: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
-      $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
+      $transaction: jest.fn().mockImplementation(async (input: unknown) =>
+        typeof input === 'function'
+          ? (input as (tx: unknown) => unknown)(tx)
+          : Promise.all(input as Promise<unknown>[]),
+      ),
     };
     dispatchService = { dispatchAvailableDeliveries: jest.fn().mockResolvedValue(undefined) };
-    realtimeGateway = { emitAdminActivity: jest.fn() };
+    realtimeGateway = {
+      emitAdminActivity: jest.fn(),
+      emitDriverPresence: jest.fn(),
+      emitDriverLocation: jest.fn(),
+    };
+    livePresence = {
+      isLive: jest.fn().mockResolvedValue(true),
+      upsert: jest.fn().mockResolvedValue(undefined),
+      remove: jest.fn().mockResolvedValue(undefined),
+      reconcileExpired: jest.fn().mockResolvedValue(0),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -42,6 +73,7 @@ describe('DriverPresenceService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: DispatchService, useValue: dispatchService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        { provide: LiveDriverPresenceService, useValue: livePresence },
       ],
     }).compile();
 
@@ -88,7 +120,7 @@ describe('DriverPresenceService', () => {
         accountStatus: 'ACTIVE',
       });
 
-      await expect(service.setAvailability(driverUser, 'AVAILABLE')).rejects.toBeInstanceOf(
+      await expect(service.setAvailability(driverUser, availablePayload)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
     });
@@ -101,12 +133,12 @@ describe('DriverPresenceService', () => {
         accountStatus: 'SUSPENDED',
       });
 
-      await expect(service.setAvailability(driverUser, 'AVAILABLE')).rejects.toBeInstanceOf(
+      await expect(service.setAvailability(driverUser, availablePayload)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
     });
 
-    it('rejeita quando já está no status pedido (idempotência)', async () => {
+    it('renova a presença quando já está disponível', async () => {
       prisma.driver.findUnique.mockResolvedValue({
         id: 'driver-1',
         availability: 'AVAILABLE',
@@ -114,9 +146,13 @@ describe('DriverPresenceService', () => {
         accountStatus: 'ACTIVE',
       });
 
-      await expect(service.setAvailability(driverUser, 'AVAILABLE')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      tx.driverPresenceLog.findFirst.mockResolvedValue({ id: 'log-1' });
+      prisma.driverPresenceLog.findFirst.mockResolvedValue({ wentOnlineAt: new Date() });
+
+      await service.setAvailability(driverUser, availablePayload);
+
+      expect(livePresence.upsert).toHaveBeenCalled();
+      expect(tx.driverPresenceLog.create).not.toHaveBeenCalled();
     });
 
     it('fica disponível: atualiza Driver, cria presence log e dispara o scan de despacho', async () => {
@@ -125,23 +161,30 @@ describe('DriverPresenceService', () => {
         availability: 'UNAVAILABLE',
         approvalStatus: 'APPROVED',
         accountStatus: 'ACTIVE',
+        userId: 'user-1',
       });
+      tx.driverPresenceLog.findFirst.mockResolvedValue(null);
       prisma.driverPresenceLog.findFirst.mockResolvedValue({
         wentOnlineAt: new Date('2026-01-01T10:00:00.000Z'),
       });
 
-      const result = await service.setAvailability(driverUser, 'AVAILABLE');
+      const result = await service.setAvailability(driverUser, availablePayload);
 
       expect(tx.driver.update).toHaveBeenCalledWith({
         where: { id: 'driver-1' },
-        data: { availability: 'AVAILABLE' },
+        data: expect.objectContaining({
+          availability: 'AVAILABLE',
+          lastKnownLat: -23.5,
+          lastKnownLng: -46.6,
+          appVersion: '1.0.0',
+        }),
       });
       expect(tx.driverPresenceLog.create).toHaveBeenCalledWith({
         data: { driverId: 'driver-1', wentOnlineAt: expect.any(Date) },
       });
       expect(dispatchService.dispatchAvailableDeliveries).toHaveBeenCalled();
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
-        expect.stringContaining('online'),
+        expect.objectContaining({ type: 'DRIVER_ONLINE' }),
       );
       expect(result.availability).toBe('AVAILABLE');
     });
@@ -152,16 +195,77 @@ describe('DriverPresenceService', () => {
         availability: 'AVAILABLE',
         approvalStatus: 'APPROVED',
         accountStatus: 'ACTIVE',
+        userId: 'user-1',
       });
 
-      const result = await service.setAvailability(driverUser, 'UNAVAILABLE');
+      const result = await service.setAvailability(driverUser, { availability: 'UNAVAILABLE' });
 
-      expect(tx.driverPresenceLog.updateMany).toHaveBeenCalledWith({
+      expect(prisma.driverPresenceLog.updateMany).toHaveBeenCalledWith({
         where: { driverId: 'driver-1', wentOfflineAt: null },
         data: { wentOfflineAt: expect.any(Date) },
       });
       expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
       expect(result).toEqual({ availability: 'UNAVAILABLE', since: null });
+    });
+  });
+
+  describe('heartbeat', () => {
+    it('renova o TTL, atualiza o cache do Driver e emite GPS somente para admin', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        userId: 'user-1',
+        availability: 'AVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      prisma.driverPresenceLog.findFirst.mockResolvedValue({
+        wentOnlineAt: new Date('2026-01-01T10:00:00.000Z'),
+      });
+
+      const result = await service.heartbeat(driverUser, {
+        lat: -20.154,
+        lng: -41.623,
+        accuracy: 9,
+        appVersion: '1.0.1',
+      });
+
+      expect(livePresence.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverId: 'driver-1',
+          lat: -20.154,
+          lng: -41.623,
+          appVersion: '1.0.1',
+        }),
+      );
+      expect(prisma.driver.update).toHaveBeenCalledWith({
+        where: { id: 'driver-1' },
+        data: expect.objectContaining({ lastKnownLat: -20.154, lastKnownLng: -41.623 }),
+      });
+      expect(realtimeGateway.emitDriverLocation).toHaveBeenCalledWith(
+        expect.objectContaining({ driverId: 'driver-1', accuracy: 9 }),
+      );
+      expect(result).toEqual({
+        availability: 'AVAILABLE',
+        since: '2026-01-01T10:00:00.000Z',
+      });
+    });
+
+    it('rejeita heartbeat depois de ficar offline', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'UNAVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+
+      await expect(
+        service.heartbeat(driverUser, {
+          lat: -20.154,
+          lng: -41.623,
+          appVersion: '1.0.1',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(livePresence.upsert).not.toHaveBeenCalled();
     });
   });
 });

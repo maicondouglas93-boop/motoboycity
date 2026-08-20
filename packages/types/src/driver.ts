@@ -7,6 +7,25 @@ export interface DriverPresenceItem {
   since: string | null;
 }
 
+export interface DriverLiveLocationInput {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+}
+
+export type SetDriverPresencePayload =
+  | {
+      availability: 'AVAILABLE';
+      location: DriverLiveLocationInput;
+      appVersion: string;
+      trackingCapability: 'BACKGROUND_V1';
+    }
+  | { availability: 'UNAVAILABLE' };
+
+export interface DriverPresenceHeartbeatPayload extends DriverLiveLocationInput {
+  appVersion: string;
+}
+
 export interface RegisterDriverResult {
   driverId: string;
   approvalStatus: DriverApprovalStatus;
@@ -21,6 +40,8 @@ export interface AdminDriverListItem {
   approvalStatus: DriverApprovalStatus;
   accountStatus: DriverAccountStatus;
   availability: DriverAvailability;
+  appVersion: string | null;
+  lastSeenAt: string | null;
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;

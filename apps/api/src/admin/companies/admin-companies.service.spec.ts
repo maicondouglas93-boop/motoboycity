@@ -32,7 +32,10 @@ describe('AdminCompaniesService', () => {
           status: 'PENDING_APPROVAL',
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           teamMembers: [
-            { user: { name: 'Dono Um', email: 'dono1@example.com', phone: '33999990000' } },
+            {
+              role: 'OWNER',
+              user: { name: 'Dono Um', email: 'dono1@example.com', phone: '33999990000' },
+            },
           ],
           approvedBy: null,
           approvedAt: null,

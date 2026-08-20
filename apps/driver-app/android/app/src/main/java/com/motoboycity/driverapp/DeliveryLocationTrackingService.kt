@@ -24,8 +24,8 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * Serviço explícito e visível ao entregador. Ele só existe enquanto houver
- * ao menos uma entrega operacional e não decide nenhum status de pedido.
+ * Serviço explícito e visível enquanto o entregador estiver online. O mesmo
+ * fix renova a presença e alimenta as entregas operacionais atuais.
  */
 class DeliveryLocationTrackingService : Service(), LocationListener {
   private lateinit var locationManager: LocationManager
@@ -34,6 +34,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
 
   @Volatile private var baseUrl: String? = null
   @Volatile private var accessToken: String? = null
+  @Volatile private var appVersion: String? = null
   @Volatile private var receivingUpdates = false
 
   override fun onCreate() {
@@ -49,13 +50,13 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     }
 
     updateConfiguration(intent)
-    if (deliveryIds.isEmpty() || baseUrl.isNullOrBlank() || accessToken.isNullOrBlank()) {
+    if (baseUrl.isNullOrBlank() || accessToken.isNullOrBlank() || appVersion.isNullOrBlank()) {
       stopTracking()
       return START_NOT_STICKY
     }
 
     startForeground(NOTIFICATION_ID, buildNotification())
-    requestLocationUpdates()
+    requestLocationUpdates(force = true)
     return START_REDELIVER_INTENT
   }
 
@@ -67,11 +68,12 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     }
     intent?.getStringExtra(EXTRA_BASE_URL)?.takeIf { it.isNotBlank() }?.let { baseUrl = it }
     intent?.getStringExtra(EXTRA_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }?.let { accessToken = it }
+    intent?.getStringExtra(EXTRA_APP_VERSION)?.takeIf { it.isNotBlank() }?.let { appVersion = it }
   }
 
   @Suppress("MissingPermission")
-  private fun requestLocationUpdates() {
-    if (receivingUpdates) return
+  private fun requestLocationUpdates(force: Boolean = false) {
+    if (receivingUpdates && !force) return
     if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
       Log.w(TAG, "Rastreamento interrompido: localização precisa não autorizada")
       stopTracking()
@@ -79,10 +81,13 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     }
 
     try {
+      if (receivingUpdates) locationManager.removeUpdates(this)
+      val updateInterval = if (deliveryIds.isEmpty()) IDLE_UPDATE_INTERVAL_MS else ACTIVE_UPDATE_INTERVAL_MS
+      val updateDistance = if (deliveryIds.isEmpty()) IDLE_UPDATE_DISTANCE_METERS else ACTIVE_UPDATE_DISTANCE_METERS
       locationManager.requestLocationUpdates(
         LocationManager.GPS_PROVIDER,
-        UPDATE_INTERVAL_MS,
-        UPDATE_DISTANCE_METERS,
+        updateInterval,
+        updateDistance,
         this,
         Looper.getMainLooper(),
       )
@@ -96,9 +101,23 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     val ids = deliveryIds.toList()
     val currentBaseUrl = baseUrl
     val currentAccessToken = accessToken
-    if (ids.isEmpty() || currentBaseUrl.isNullOrBlank() || currentAccessToken.isNullOrBlank()) return
+    val currentAppVersion = appVersion
+    if (currentBaseUrl.isNullOrBlank() || currentAccessToken.isNullOrBlank() || currentAppVersion.isNullOrBlank()) return
 
     executor.execute {
+      val heartbeatStatus = sendPresenceHeartbeat(
+        currentBaseUrl,
+        currentAccessToken,
+        currentAppVersion,
+        location,
+      )
+      if (heartbeatStatus == HttpURLConnection.HTTP_UNAUTHORIZED ||
+        heartbeatStatus == HttpURLConnection.HTTP_FORBIDDEN ||
+        heartbeatStatus == HttpURLConnection.HTTP_CONFLICT
+      ) {
+        stopTracking()
+        return@execute
+      }
       ids.forEach { deliveryId ->
         val status = sendLocation(currentBaseUrl, currentAccessToken, deliveryId, location)
         if (status == HttpURLConnection.HTTP_UNAUTHORIZED ||
@@ -109,13 +128,34 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
           deliveryIds.remove(deliveryId)
         }
       }
-      if (deliveryIds.isEmpty()) stopTracking()
     }
   }
 
+  private fun sendPresenceHeartbeat(
+    baseUrl: String,
+    token: String,
+    version: String,
+    location: Location,
+  ): Int? {
+    val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
+    val payload =
+      "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy,\"appVersion\":\"${escapeJson(version)}\"}"
+    return sendJson("${baseUrl.trimEnd('/')}/driver/presence/heartbeat", token, payload)
+  }
+
   private fun sendLocation(baseUrl: String, token: String, deliveryId: String, location: Location): Int? {
+    val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
+    val payload = "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy}"
+    return sendJson(
+      "${baseUrl.trimEnd('/')}/tracking/driver/deliveries/$deliveryId/points",
+      token,
+      payload,
+    )
+  }
+
+  private fun sendJson(url: String, token: String, payload: String): Int? {
     return try {
-      val connection = (URL("${baseUrl.trimEnd('/')}/tracking/driver/deliveries/$deliveryId/points").openConnection()
+      val connection = (URL(url).openConnection()
         as HttpURLConnection).apply {
         requestMethod = "POST"
         connectTimeout = NETWORK_TIMEOUT_MS
@@ -124,8 +164,6 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
         setRequestProperty("Authorization", "Bearer $token")
         setRequestProperty("Content-Type", "application/json")
       }
-      val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
-      val payload = "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy}"
       connection.outputStream.use { stream -> OutputStreamWriter(stream, Charsets.UTF_8).use { it.write(payload) } }
       connection.responseCode.also { connection.disconnect() }
     } catch (error: Exception) {
@@ -133,6 +171,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
       null
     }
   }
+
+  private fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
   private fun stopTracking() {
     if (receivingUpdates) {
@@ -147,10 +187,10 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val channel = NotificationChannel(
       NOTIFICATION_CHANNEL_ID,
-      "Rastreamento de entregas",
+      "Localização enquanto online",
       NotificationManager.IMPORTANCE_LOW,
     ).apply {
-      description = "Mostra que a localização é usada durante uma entrega ativa."
+      description = "Mostra que a localização é compartilhada enquanto você está online."
     }
     (getSystemService(NotificationManager::class.java)).createNotificationChannel(channel)
   }
@@ -168,8 +208,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
       Notification.Builder(this)
     }
     return builder
-      .setContentTitle("Rastreamento de entrega ativo")
-      .setContentText("Sua localização é compartilhada apenas durante entregas em andamento.")
+      .setContentTitle("Você está online")
+      .setContentText("Sua localização está sendo compartilhada com a operação.")
       .setSmallIcon(R.mipmap.ic_launcher)
       .setContentIntent(openApp)
       .setOngoing(true)
@@ -190,12 +230,15 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     const val EXTRA_DELIVERY_IDS = "deliveryIds"
     const val EXTRA_BASE_URL = "baseUrl"
     const val EXTRA_ACCESS_TOKEN = "accessToken"
+    const val EXTRA_APP_VERSION = "appVersion"
 
     private const val TAG = "DeliveryTracking"
     private const val NOTIFICATION_CHANNEL_ID = "delivery_location_tracking"
     private const val NOTIFICATION_ID = 7412
-    private const val UPDATE_INTERVAL_MS = 20_000L
-    private const val UPDATE_DISTANCE_METERS = 50f
+    private const val ACTIVE_UPDATE_INTERVAL_MS = 20_000L
+    private const val ACTIVE_UPDATE_DISTANCE_METERS = 50f
+    private const val IDLE_UPDATE_INTERVAL_MS = 60_000L
+    private const val IDLE_UPDATE_DISTANCE_METERS = 100f
     private const val NETWORK_TIMEOUT_MS = 15_000
   }
 }

@@ -142,7 +142,7 @@ describe('RealtimeGateway', () => {
       expect(prisma.driver.findUnique).not.toHaveBeenCalled();
     });
 
-    it('marca o motoboy offline e fecha o presence log quando estava AVAILABLE', async () => {
+    it('não derruba a presença ao desconectar um socket isolado', async () => {
       jwtService.verifyAsync.mockResolvedValue({ sub: 'user-driver' });
       prisma.user.findUnique.mockResolvedValue({ id: 'user-driver', type: 'DRIVER' });
       prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', availability: 'AVAILABLE' });
@@ -152,15 +152,11 @@ describe('RealtimeGateway', () => {
       prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', availability: 'AVAILABLE' });
       await gateway.handleDisconnect(socket);
 
-      expect(prisma.$transaction).toHaveBeenCalled();
-      expect(serverTo).toHaveBeenCalledWith('admin');
-      expect(serverEmit).toHaveBeenCalledWith(
-        'admin:activity',
-        expect.objectContaining({ message: expect.stringContaining('offline') }),
-      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(serverTo).not.toHaveBeenCalledWith('admin');
     });
 
-    it('não grava nada se o motoboy já estava UNAVAILABLE', async () => {
+    it('não consulta nem grava o banco quando outra sessão pode seguir válida', async () => {
       jwtService.verifyAsync.mockResolvedValue({ sub: 'user-driver' });
       prisma.user.findUnique.mockResolvedValue({ id: 'user-driver', type: 'DRIVER' });
       prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', availability: 'AVAILABLE' });
@@ -171,6 +167,7 @@ describe('RealtimeGateway', () => {
       await gateway.handleDisconnect(socket);
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.driver.findUnique).toHaveBeenCalledTimes(1);
     });
   });
 

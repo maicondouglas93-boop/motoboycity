@@ -26,6 +26,7 @@ describe('DriverWalletService', () => {
       pendingWithdrawalAmount: 0,
       cacheMatchesLedger: true,
       transactions: [],
+      withdrawalRequests: [],
     });
     expect(prisma.walletTransaction.findMany).not.toHaveBeenCalled();
   });
@@ -63,6 +64,7 @@ describe('DriverWalletService', () => {
           },
         },
       ],
+      withdrawalRequests: [],
     });
     prisma.walletTransaction.findMany.mockResolvedValue([
       releasedCredit,

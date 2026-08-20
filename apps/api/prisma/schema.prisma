@@ -105,6 +105,15 @@ enum PaymentMethod {
   ONLINE
 }
 
+/// Como o destinatário paga a compra à empresa. Não é a forma de cobrança
+/// da plataforma (`PaymentMethod`) e não movimenta carteira ou fatura.
+enum CustomerPaymentMethod {
+  PREPAID
+  CARD
+  CASH
+  PIX
+}
+
 enum DeliveryOfferResponse {
   PENDING
   ACCEPTED
@@ -502,6 +511,14 @@ model Delivery {
   paymentMethod PaymentMethod
   invoiceId     String?
 
+  /// Metadados operacionais informados pela empresa. São opcionais para
+  /// preservar pedidos antigos e integrações que ainda não os enviam.
+  recipientName        String?
+  recipientPhone       String?
+  externalOrderNumber  String?
+  driverNote           String?
+  customerPaymentMethod CustomerPaymentMethod?
+
   requiresDeliveryProof          Boolean @default(false)
   requiresCollectionRecipient    Boolean @default(false)
   pickupSurchargeChargedToDriver Boolean @default(false)
@@ -530,6 +547,7 @@ model Delivery {
   @@index([driverId, status])
   @@index([status, createdAt])
   @@index([companyId, createdAt])
+  @@index([companyId, externalOrderNumber])
   @@index([invoiceId])
   @@index([batchId])
   @@map("deliveries")

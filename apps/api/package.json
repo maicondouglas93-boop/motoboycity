@@ -24,6 +24,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
   },
   "dependencies": {
+    "@motoboycity/types": "workspace:*",
     "@motoboycity/validation": "workspace:*",
     "@nestjs/bullmq": "^11.0.1",
     "@nestjs/common": "^11.0.1",

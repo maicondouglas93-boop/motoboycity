@@ -41,7 +41,14 @@ function batchPayload(serviceTypeId: string, count = 3) {
   };
 }
 
-type RealtimeGatewayMock = { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
+type RealtimeGatewayMock = {
+  emitToDriver: jest.Mock;
+  emitAdminActivity: jest.Mock;
+  emitDeliveryUpdated: jest.Mock;
+  emitDriverPresence: jest.Mock;
+  emitDriverLocation: jest.Mock;
+  emitDeliveryLocation: jest.Mock;
+};
 
 describe('Despacho em lote — criação, concorrência e realtime (e2e)', () => {
   let app: INestApplication<App>;
@@ -61,7 +68,16 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
     await request(app.getHttpServer())
       .put('/driver/presence')
       .set('Authorization', `Bearer ${token}`)
-      .send({ availability });
+      .send(
+        availability === 'AVAILABLE'
+          ? {
+              availability,
+              location: { lat: -20.153, lng: -41.622, accuracy: 8 },
+              appVersion: 'e2e',
+              trackingCapability: 'BACKGROUND_V1',
+            }
+          : { availability },
+      );
   }
 
   async function createBatch(count = 3): Promise<{
@@ -108,7 +124,14 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
       .overrideProvider(GoogleMapsService)
       .useValue({ getDistance: async () => ({ distanceKm: 5, durationMinutes: 20 }) })
       .overrideProvider(RealtimeGateway)
-      .useValue({ emitToDriver: jest.fn(), emitAdminActivity: jest.fn() })
+      .useValue({
+        emitToDriver: jest.fn(),
+        emitAdminActivity: jest.fn(),
+        emitDeliveryUpdated: jest.fn(),
+        emitDriverPresence: jest.fn(),
+        emitDriverLocation: jest.fn(),
+        emitDeliveryLocation: jest.fn(),
+      })
       .compile();
 
     app = moduleFixture.createNestApplication();

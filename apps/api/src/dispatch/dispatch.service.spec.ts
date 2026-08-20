@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 
 const offerPickupAddress = {
   type: 'PICKUP',
@@ -45,7 +46,12 @@ describe('DispatchService', () => {
     $transaction: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
-  let realtimeGateway: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
+  let realtimeGateway: {
+    emitToDriver: jest.Mock;
+    emitAdminActivity: jest.Mock;
+    emitDeliveryUpdated: jest.Mock;
+  };
+  let livePresence: { isLive: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
   let tx: {
     $queryRaw: jest.Mock;
@@ -81,7 +87,12 @@ describe('DispatchService', () => {
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     platformSettingsService = { get: jest.fn() };
-    realtimeGateway = { emitToDriver: jest.fn(), emitAdminActivity: jest.fn() };
+    realtimeGateway = {
+      emitToDriver: jest.fn(),
+      emitAdminActivity: jest.fn(),
+      emitDeliveryUpdated: jest.fn(),
+    };
+    livePresence = { isLive: jest.fn().mockResolvedValue(true) };
     queue = { add: jest.fn(), remove: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -90,6 +101,7 @@ describe('DispatchService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        { provide: LiveDriverPresenceService, useValue: livePresence },
         { provide: getQueueToken(DISPATCH_QUEUE), useValue: queue },
       ],
     }).compile();
@@ -209,6 +221,9 @@ describe('DispatchService', () => {
         distanceKm: { toString: () => '5.43' },
         requiresReturn: true,
         paymentMethod: 'BILLED',
+        recipientName: 'Cliente protegido',
+        recipientPhone: '33999990000',
+        driverNote: 'Instrução disponível somente depois do aceite',
         company: { regionId: 'region-1', tradeName: 'Loja de teste' },
         serviceType: { name: 'Motofrete' },
         addresses: [offerPickupAddress, offerDropoffAddress],

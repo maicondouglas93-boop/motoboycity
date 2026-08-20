@@ -64,6 +64,13 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     platformValue: { toString: () => '2.50' },
     requiresReturn: false,
     returnValue: null,
+    paymentMethod: 'BILLED',
+    recipientName: null,
+    recipientPhone: null,
+    externalOrderNumber: null,
+    driverNote: null,
+    customerPaymentMethod: null,
+    statusChangedAt: new Date('2026-01-01T00:00:00.000Z'),
     scheduledAt: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     addresses: [
@@ -92,6 +99,9 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
         referenceNote: null,
       },
     ],
+    statusHistory: [],
+    driver: null,
+    invoice: null,
     ...overrides,
   };
 }
@@ -116,7 +126,11 @@ describe('DeliveriesService', () => {
   };
   let platformSettingsService: { get: jest.Mock };
   let financeLedgerService: { creditDriverRepasse: jest.Mock };
-  let realtimeGateway: { emitToDriver: jest.Mock };
+  let realtimeGateway: {
+    emitToDriver: jest.Mock;
+    emitDeliveryUpdated: jest.Mock;
+    emitAdminActivity: jest.Mock;
+  };
   let tx: {
     delivery: { create: jest.Mock; update: jest.Mock };
     deliveryAddress: { createMany: jest.Mock; create: jest.Mock };
@@ -147,7 +161,11 @@ describe('DeliveriesService', () => {
     };
     platformSettingsService = { get: jest.fn() };
     financeLedgerService = { creditDriverRepasse: jest.fn().mockResolvedValue(undefined) };
-    realtimeGateway = { emitToDriver: jest.fn() };
+    realtimeGateway = {
+      emitToDriver: jest.fn(),
+      emitDeliveryUpdated: jest.fn(),
+      emitAdminActivity: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

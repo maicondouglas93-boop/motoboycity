@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'node:crypto';
+import type { OperationalActivityEvent } from '@motoboycity/types';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -95,15 +97,35 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     this.logger.debug(`Motoboy desconectado: ${client.id} (driver ${driverId})`);
-    await this.markDriverOfflineOnDisconnect(driverId);
   }
 
   emitToDriver(driverId: string, event: string, payload: unknown): void {
     this.server.to(this.driverRoom(driverId)).emit(event, payload);
   }
 
-  emitAdminActivity(message: string): void {
-    this.server.to('admin').emit('admin:activity', { message, at: new Date().toISOString() });
+  emitAdminActivity(
+    input: string | Omit<OperationalActivityEvent, 'id' | 'at'>,
+  ): OperationalActivityEvent {
+    const event: OperationalActivityEvent = {
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      ...(typeof input === 'string' ? { type: 'GENERIC', message: input } : input),
+    };
+    this.server.to('admin').emit('admin:activity', event);
+    return event;
+  }
+
+  emitDeliveryUpdated(companyId: string, payload: unknown): void {
+    this.server.to('admin').emit('delivery:updated', payload);
+    this.server.to(this.companyRoom(companyId)).emit('delivery:updated', payload);
+  }
+
+  emitDriverLocation(payload: unknown): void {
+    this.server.to('admin').emit('driver:location', payload);
+  }
+
+  emitDriverPresence(payload: unknown): void {
+    this.server.to('admin').emit('driver:presence', payload);
   }
 
   emitDeliveryLocation(companyId: string, payload: unknown): void {
@@ -133,28 +155,4 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return null;
   }
 
-  /**
-   * Duplica de propósito uma fatia pequena da lógica de presença — este
-   * módulo não pode importar DriverPresenceModule (que já importa este
-   * módulo pros eventos de presença); fechar o ciclo aqui com Prisma direto
-   * é mais simples do que forwardRef().
-   */
-  private async markDriverOfflineOnDisconnect(driverId: string): Promise<void> {
-    const driver = await this.prisma.driver.findUnique({ where: { id: driverId } });
-    if (!driver || driver.availability !== 'AVAILABLE') {
-      return;
-    }
-
-    await this.prisma.$transaction([
-      this.prisma.driver.update({
-        where: { id: driverId },
-        data: { availability: 'UNAVAILABLE' },
-      }),
-      this.prisma.driverPresenceLog.updateMany({
-        where: { driverId, wentOfflineAt: null },
-        data: { wentOfflineAt: new Date() },
-      }),
-    ]);
-    this.emitAdminActivity(`Um motoboy ficou offline (conexão perdida).`);
-  }
 }

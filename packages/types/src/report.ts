@@ -1,4 +1,4 @@
-import type { DeliveryStatus } from './delivery';
+import type { DeliveryStatus } from './delivery.js';
 
 export interface OperationsReportCompanyItem {
   companyId: string;

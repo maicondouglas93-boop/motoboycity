@@ -8,6 +8,8 @@ export type DeliveryStatus =
   | 'CANCELLED'
   | 'AWAITING_PAYMENT';
 
+export type CustomerPaymentMethod = 'PREPAID' | 'CARD' | 'CASH' | 'PIX';
+
 export interface DeliveryAddressItem {
   type: string;
   street: string | null;
@@ -37,6 +39,11 @@ export interface DeliveryListItem {
   requiresReturn: boolean;
   returnValue: number | null;
   paymentMethod: 'BILLED' | 'ONLINE';
+  recipientName: string | null;
+  recipientPhone: string | null;
+  externalOrderNumber: string | null;
+  driverNote: string | null;
+  customerPaymentMethod: CustomerPaymentMethod | null;
   statusChangedAt: string;
   scheduledAt: string | null;
   createdAt: string;
@@ -67,12 +74,19 @@ export interface DeliveryAddressInput {
   state: string;
   zip: string;
   referenceNote?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface CreateDeliveryPayload {
   serviceTypeId: string;
   destinationKnownAtCreation?: boolean;
   dropoffAddress?: DeliveryAddressInput;
+  recipientName?: string;
+  recipientPhone?: string;
+  externalOrderNumber?: string;
+  driverNote?: string;
+  customerPaymentMethod?: CustomerPaymentMethod;
   requiresReturn?: boolean;
   requiresDeliveryProof?: boolean;
   requiresCollectionRecipient?: boolean;
@@ -92,6 +106,34 @@ export interface DeliveryBatchDetail {
 export interface DeliveryGroupResult {
   batchId: string | null;
   deliveries: DeliveryDetail[];
+}
+
+export interface OperationalDeliveryItem extends DeliveryListItem {
+  addresses: DeliveryAddressItem[];
+  driver: { id: string; name: string; phone: string } | null;
+  lastLocation: DeliveryTrackingPoint | null;
+}
+
+export interface DeliveryOperationsResult {
+  active: OperationalDeliveryItem[];
+  recent: OperationalDeliveryItem[];
+  counts: Partial<Record<DeliveryStatus, number>>;
+}
+
+export interface DeliverySearchResult {
+  items: DeliveryListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface DeliveryDispatchAuditItem {
+  id: string;
+  offerId: string;
+  driver: { id: string; name: string };
+  offeredAt: string;
+  respondedAt: string | null;
+  response: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED';
 }
 
 export interface MarkDeliveredPayload {
