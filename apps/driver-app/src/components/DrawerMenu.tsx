@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import type { AuthUser } from '@motoboycity/types';
 import { colors } from '../theme/colors';
-import { mockDriver, mockWallet } from '../lib/mockData';
+import { authApi } from '../lib/apiClient';
+import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { session } from '../lib/session';
 import type { RootStackParamList, ScreenNavigator } from '../navigation/types';
 
 type DrawerMenuProps = {
@@ -9,20 +13,10 @@ type DrawerMenuProps = {
   navigation: ScreenNavigator;
 };
 
-const MENU_ITEMS: {
-  icon: string;
-  label: string;
-  screen: keyof RootStackParamList;
-  badge?: string;
-}[] = [
-  { icon: '💳', label: 'Carteira', screen: 'Wallet', badge: mockWallet.availableBalance },
-  { icon: '🕒', label: 'Pedidos Disponíveis', screen: 'AvailableOrders' },
-  { icon: '📜', label: 'Histórico de Pedidos', screen: 'History' },
-  { icon: '⏳', label: 'Pedidos Agendados', screen: 'ScheduledOrders' },
-  { icon: '✅', label: 'Minhas Escalas', screen: 'MyShifts' },
-  { icon: '🏆', label: 'Desafios', screen: 'Challenges' },
-  { icon: '🎧', label: 'Suporte', screen: 'Support' },
-  { icon: '👤', label: 'Perfil', screen: 'Profile' },
+const MENU_ITEMS: { label: string; screen: keyof RootStackParamList }[] = [
+  { label: 'Carteira', screen: 'Wallet' },
+  { label: 'Historico de pedidos', screen: 'History' },
+  { label: 'Perfil', screen: 'Profile' },
 ];
 
 export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
@@ -31,10 +25,39 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
   const text = isDark ? colors.textDark : colors.text;
   const muted = isDark ? colors.mutedDark : colors.muted;
   const border = isDark ? colors.borderDark : colors.border;
+  const [profile, setProfile] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadProfile() {
+      const token = await session.getToken();
+      if (!token) return;
+
+      try {
+        const current = await authApi.me(token);
+        if (mounted) setProfile(current);
+      } catch {
+        // O menu continua navegavel mesmo que a identidade nao possa ser recarregada.
+      }
+    }
+
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   function go(screen: keyof RootStackParamList) {
     onClose();
     navigation.navigate(screen);
+  }
+
+  async function handleSignOut() {
+    await stopDeliveryTracking();
+    await session.clearToken();
+    onClose();
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   }
 
   return (
@@ -45,36 +68,32 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
           <View style={[styles.profileRow, { borderBottomColor: border }]}>
             <View style={styles.profileInfo}>
               <View style={[styles.avatar, { backgroundColor: border }]}>
-                <Text>{mockDriver.name.charAt(0)}</Text>
+                <Text>{profile?.name.charAt(0).toUpperCase() ?? '?'}</Text>
               </View>
               <View>
-                <Text style={[styles.profileName, { color: text }]}>{mockDriver.name}</Text>
-                <Text style={[styles.profileEmail, { color: muted }]}>{mockDriver.email}</Text>
+                <Text style={[styles.profileName, { color: text }]}>
+                  {profile?.name ?? 'Entregador'}
+                </Text>
+                <Text style={[styles.profileEmail, { color: muted }]}>
+                  {profile?.email ?? 'Carregando perfil...'}
+                </Text>
               </View>
             </View>
             <Pressable onPress={() => go('Settings')} hitSlop={12}>
-              <Text style={styles.settingsIcon}>⚙️</Text>
+              <Text style={[styles.settingsLabel, { color: text }]}>Ajustes</Text>
             </Pressable>
           </View>
 
           {MENU_ITEMS.map((item) => (
             <Pressable key={item.screen} style={styles.menuItem} onPress={() => go(item.screen)}>
-              <Text style={styles.menuIcon}>{item.icon}</Text>
               <Text style={[styles.menuLabel, { color: text }]}>{item.label}</Text>
-              {item.badge && (
-                <View style={[styles.badge, { backgroundColor: '#dcfce7' }]}>
-                  <Text style={styles.badgeText}>{item.badge}</Text>
-                </View>
-              )}
+              <Text style={[styles.chevron, { color: muted }]}>&gt;</Text>
             </Pressable>
           ))}
 
-          <Pressable style={styles.menuItem} onPress={onClose}>
-            <Text style={styles.menuIcon}>🚪</Text>
-            <Text style={[styles.menuLabel, { color: text }]}>Sair</Text>
+          <Pressable style={styles.menuItem} onPress={handleSignOut}>
+            <Text style={[styles.signOutLabel, { color: colors.danger }]}>Sair da conta</Text>
           </Pressable>
-
-          <Text style={[styles.version, { color: muted }]}>Versão {mockDriver.version}</Text>
         </View>
       </View>
     </Modal>
@@ -82,19 +101,8 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  panel: {
-    width: '80%',
-    maxWidth: 320,
-    paddingTop: 56,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 4,
-  },
+  overlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)' },
+  panel: { width: '80%', maxWidth: 320, paddingTop: 56, paddingHorizontal: 16, paddingBottom: 16 },
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -103,11 +111,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  profileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
+  profileInfo: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   avatar: {
     width: 40,
     height: 40,
@@ -115,43 +119,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profileName: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  profileEmail: {
-    fontSize: 12,
-  },
-  settingsIcon: {
-    fontSize: 18,
-  },
+  profileName: { fontSize: 14, fontWeight: '600' },
+  profileEmail: { fontSize: 12 },
+  settingsLabel: { fontSize: 12, fontWeight: '700' },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
+    justifyContent: 'space-between',
+    paddingVertical: 14,
   },
-  menuIcon: {
-    fontSize: 16,
-    width: 20,
-  },
-  menuLabel: {
-    fontSize: 14,
-    flex: 1,
-  },
-  badge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.success,
-  },
-  version: {
-    marginTop: 'auto',
-    fontSize: 11,
-    textAlign: 'center',
-  },
+  menuLabel: { fontSize: 15, fontWeight: '600' },
+  chevron: { fontSize: 16, fontWeight: '700' },
+  signOutLabel: { fontSize: 15, fontWeight: '700' },
 });

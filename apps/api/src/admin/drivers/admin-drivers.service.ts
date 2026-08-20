@@ -20,6 +20,7 @@ export interface AdminDriverListItem {
   cpf: string;
   approvalStatus: string;
   accountStatus: string;
+  availability: string;
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;
@@ -70,7 +71,38 @@ export class AdminDriversService {
       },
     });
 
-    return drivers.map((driver) => ({
+    return drivers.map((driver) => this.toDriverListItem(driver));
+  }
+
+  async detail(driverId: string): Promise<AdminDriverListItem> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      include: {
+        user: true,
+        reviewedBy: true,
+        serviceTypes: { include: { serviceType: true }, orderBy: { serviceType: { name: 'asc' } } },
+      },
+    });
+    if (!driver) {
+      throw new NotFoundException('Motoboy n\u00e3o encontrado.');
+    }
+
+    return this.toDriverListItem(driver);
+  }
+
+  private toDriverListItem(driver: {
+    id: string;
+    cpf: string;
+    approvalStatus: string;
+    accountStatus: string;
+    availability: string;
+    createdAt: Date;
+    reviewedAt: Date | null;
+    user: { name: string; email: string; phone: string };
+    reviewedBy: { id: string; name: string } | null;
+    serviceTypes: { isPrimary: boolean; serviceType: { id: string; code: string; name: string } }[];
+  }): AdminDriverListItem {
+    return {
       id: driver.id,
       name: driver.user.name,
       email: driver.user.email,
@@ -78,6 +110,7 @@ export class AdminDriversService {
       cpf: driver.cpf,
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
+      availability: driver.availability,
       createdAt: driver.createdAt.toISOString(),
       reviewedBy: driver.reviewedBy
         ? { id: driver.reviewedBy.id, name: driver.reviewedBy.name }
@@ -86,7 +119,7 @@ export class AdminDriversService {
       serviceTypes: driver.serviceTypes.map((assignment) =>
         this.toServiceTypeItem(assignment.serviceType, assignment.isPrimary),
       ),
-    }));
+    };
   }
 
   async approve(driverId: string, reviewedByUserId: string): Promise<DriverReviewResult> {

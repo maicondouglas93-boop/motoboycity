@@ -20,6 +20,7 @@ export interface AdminDriverListItem {
   cpf: string;
   approvalStatus: DriverApprovalStatus;
   accountStatus: DriverAccountStatus;
+  availability: DriverAvailability;
   createdAt: string;
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;

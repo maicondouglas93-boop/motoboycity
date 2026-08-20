@@ -21,9 +21,22 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
   }
 
   return {
-    async list(accessToken: string, filters?: { status?: DeliveryStatus }): Promise<DeliveryListItem[]> {
+    async list(
+      accessToken: string,
+      filters?: {
+        status?: DeliveryStatus;
+        driverId?: string;
+        companyId?: string;
+        from?: string;
+        to?: string;
+      },
+    ): Promise<DeliveryListItem[]> {
       const params = new URLSearchParams();
       if (filters?.status) params.set('status', filters.status);
+      if (filters?.driverId) params.set('driverId', filters.driverId);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      if (filters?.from) params.set('from', filters.from);
+      if (filters?.to) params.set('to', filters.to);
       const query = params.toString() ? `?${params.toString()}` : '';
 
       const response = await fetch(`${baseUrl}/deliveries${query}`, {
@@ -76,7 +89,11 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
 
-    async deliver(accessToken: string, id: string, payload: MarkDeliveredPayload): Promise<DeliveryDetail> {
+    async deliver(
+      accessToken: string,
+      id: string,
+      payload: MarkDeliveredPayload,
+    ): Promise<DeliveryDetail> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/deliver`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },

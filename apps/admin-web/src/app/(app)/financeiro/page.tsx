@@ -1,5 +1,11 @@
+'use client';
+
+import Link from 'next/link';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { AlertCircle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -10,239 +16,259 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StatCard } from '@/components/stat-card';
-import {
-  mockDriverWallets,
-  mockFinanceAnalytics,
-  mockFinanceSummary,
-  mockPendingInvoiceOrders,
-  mockReceiptsByDay,
-} from '@/lib/mock-data';
+import { adminFinancialApi } from '@/lib/api-client';
+import { session } from '@/lib/session';
+
+const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+function formatCurrency(value: number): string {
+  return currencyFormatter.format(value);
+}
 
 export default function FinancePage() {
+  const token = session.getToken();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
+  const [walletSearch, setWalletSearch] = useState('');
+  const [appliedWalletSearch, setAppliedWalletSearch] = useState('');
+
+  const overviewQuery = useQuery({
+    queryKey: ['admin', 'financial', 'overview', appliedPeriod],
+    queryFn: () => adminFinancialApi.overview(token as string, appliedPeriod),
+    enabled: Boolean(token),
+  });
+  const walletsQuery = useQuery({
+    queryKey: ['admin', 'financial', 'driver-wallets', appliedWalletSearch],
+    queryFn: () =>
+      adminFinancialApi.listDriverWallets(token as string, {
+        ...(appliedWalletSearch && { search: appliedWalletSearch }),
+      }),
+    enabled: Boolean(token),
+  });
+
+  if (!token) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Faça login como administrador para ver o financeiro.
+      </p>
+    );
+  }
+
+  const overview = overviewQuery.data;
+  const wallets = walletsQuery.data ?? [];
+
+  function applyPeriod() {
+    if (from && to && from > to) {
+      setPeriodError('A data inicial não pode ser posterior à data final.');
+      return;
+    }
+    setPeriodError(null);
+    setAppliedPeriod({ ...(from && { from }), ...(to && { to }) });
+  }
+
+  function clearPeriod() {
+    setFrom('');
+    setTo('');
+    setPeriodError(null);
+    setAppliedPeriod({});
+  }
+
+  function clearWalletSearch() {
+    setWalletSearch('');
+    setAppliedWalletSearch('');
+  }
+
   return (
-    <Tabs defaultValue="dashboard">
-      <TabsList>
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-        <TabsTrigger value="wallets">Carteiras Digitais</TabsTrigger>
-        <TabsTrigger value="invoices">Controle de Faturas</TabsTrigger>
-        <TabsTrigger value="receipts">Extrato de Recebimentos</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="dashboard" className="space-y-6 pt-4">
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">Faturados</h2>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatCard label="Pedidos Ainda Sem Fatura" value={mockFinanceSummary.unbilledOrders} />
-            <StatCard label="Faturas Pendentes" value={mockFinanceSummary.pendingInvoices} />
-            <StatCard label="Faturas Vencidas" value={mockFinanceSummary.overdueInvoices} />
-            <StatCard label="Valor Total a Receber" value={mockFinanceSummary.totalReceivable} />
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">Carteiras</h2>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatCard
-              label="Clientes — Saldo Disponível"
-              value={mockFinanceSummary.clientWalletAvailable}
-            />
-            <StatCard
-              label="Entregadores — Saldo Disponível"
-              value={mockFinanceSummary.driverWalletAvailable}
-            />
-            <StatCard label="Saques Pendentes" value={mockFinanceSummary.pendingWithdrawals} />
-            <StatCard label="Bloqueado nas Carteiras" value={mockFinanceSummary.blockedInWallets} />
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">Dados Analíticos por Data</h2>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="start-date">Data Inicial</Label>
-              <Input id="start-date" type="date" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="end-date">Data Final</Label>
-              <Input id="end-date" type="date" />
-            </div>
-            <Button>Aplicar Filtro</Button>
-          </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatCard
-              label="Faturas Recebidas no Período"
-              value={mockFinanceAnalytics.invoicesReceived}
-            />
-            <StatCard
-              label="Saldos Adicionados de Clientes"
-              value={mockFinanceAnalytics.clientBalanceAdded}
-            />
-            <StatCard
-              label="Saldos Adicionados de Entregadores"
-              value={mockFinanceAnalytics.driverBalanceAdded}
-            />
-            <StatCard
-              label="Pagamentos Online de Pedidos"
-              value={mockFinanceAnalytics.onlinePayments}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <StatCard
-              label="Saques Solicitados"
-              value={mockFinanceAnalytics.withdrawalsRequested}
-            />
-            <StatCard label="Saques Pagos" value={mockFinanceAnalytics.withdrawalsPaid} />
-            <StatCard label="Saques Pendentes" value={mockFinanceAnalytics.withdrawalsPending} />
-          </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <StatCard label="Total dos Entregadores" value={mockFinanceAnalytics.driverTotal} />
-            <StatCard label="Total de Comissão" value={mockFinanceAnalytics.commissionTotal} />
-            <StatCard label="Soma Total" value={mockFinanceAnalytics.grandTotal} />
-          </div>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="wallets" className="space-y-4 pt-4">
-        <Input placeholder="Buscar entregador..." className="max-w-xs" />
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>#</TableHead>
-              <TableHead>Entregador</TableHead>
-              <TableHead>Saldo Disponível</TableHead>
-              <TableHead>Saldo Bloqueado</TableHead>
-              <TableHead>Saques Solicitados</TableHead>
-              <TableHead>Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {mockDriverWallets.map((wallet, index) => (
-              <TableRow key={wallet.name}>
-                <TableCell>{index + 1}</TableCell>
-                <TableCell>{wallet.name}</TableCell>
-                <TableCell>{wallet.available}</TableCell>
-                <TableCell>{wallet.blocked}</TableCell>
-                <TableCell>{wallet.requested}</TableCell>
-                <TableCell>
-                  <Button size="sm" variant="outline">
-                    Abrir Carteira
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TabsContent>
-
-      <TabsContent
-        value="invoices"
-        className="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-[1fr_320px]"
-      >
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="inv-start">Data Inicial</Label>
-              <Input id="inv-start" type="date" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="inv-end">Data Final</Label>
-              <Input id="inv-end" type="date" />
-            </div>
-            <Button variant="outline">Filtrar</Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Selecione os pedidos para marcar o pagamento
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">Financeiro</h1>
+          <p className="text-sm text-muted-foreground">
+            Visão calculada a partir dos pedidos concluídos, faturas e lançamentos do ledger.
           </p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8" />
-                <TableHead>ID</TableHead>
-                <TableHead>Data</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Vr. Entregador</TableHead>
-                <TableHead>Vr. App</TableHead>
-                <TableHead>Vr. Total</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockPendingInvoiceOrders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell>
-                    <Checkbox />
-                  </TableCell>
-                  <TableCell>#{order.id}</TableCell>
-                  <TableCell>{order.date}</TableCell>
-                  <TableCell>{order.client}</TableCell>
-                  <TableCell>{order.driverValue}</TableCell>
-                  <TableCell>{order.appValue}</TableCell>
-                  <TableCell>{order.total}</TableCell>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="finance-from">Conclusão a partir de</Label>
+            <Input
+              id="finance-from"
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="finance-to">Conclusão até</Label>
+            <Input
+              id="finance-to"
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+            />
+          </div>
+          <Button onClick={applyPeriod}>Aplicar período</Button>
+          <Button variant="outline" onClick={clearPeriod}>
+            Limpar
+          </Button>
+          {periodError && <p className="text-sm text-destructive">{periodError}</p>}
+        </div>
+      </div>
+
+      {overviewQuery.isLoading && (
+        <p className="text-sm text-muted-foreground">Calculando financeiro...</p>
+      )}
+      {overviewQuery.isError && (
+        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertCircle className="size-4" />
+          Não foi possível carregar o resumo financeiro. Tente novamente.
+        </div>
+      )}
+
+      {overview && (
+        <>
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-muted-foreground">
+              Entregas concluídas no período
+            </h2>
+            <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+              <StatCard label="Entregas" value={String(overview.completedDeliveries.count)} />
+              <StatCard
+                label="Valor total"
+                value={formatCurrency(overview.completedDeliveries.totalValue)}
+              />
+              <StatCard
+                label="Repasse aos entregadores"
+                value={formatCurrency(overview.completedDeliveries.driverValue)}
+              />
+              <StatCard
+                label="Receita da plataforma"
+                value={formatCurrency(overview.completedDeliveries.platformValue)}
+              />
+              <StatCard
+                label="Concluído sem fatura"
+                value={formatCurrency(overview.completedDeliveries.unbilledValue)}
+              />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-muted-foreground">Faturas e carteira</h2>
+            <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+              <StatCard label="Faturas pendentes" value={String(overview.invoices.pendingCount)} />
+              <StatCard label="Faturas vencidas" value={String(overview.invoices.overdueCount)} />
+              <StatCard
+                label="Total a receber"
+                value={formatCurrency(overview.invoices.totalReceivable)}
+              />
+              <StatCard
+                label="Saldo disponível dos entregadores"
+                value={formatCurrency(overview.driverWallets.availableBalance)}
+              />
+              <StatCard
+                label="Saldo a liberar dos entregadores"
+                value={formatCurrency(overview.driverWallets.blockedBalance)}
+              />
+            </div>
+          </section>
+        </>
+      )}
+
+      <Card>
+        <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Carteiras dos entregadores</CardTitle>
+            <p className="mt-1 text-sm font-normal text-muted-foreground">
+              Saldos calculados do ledger; “a liberar” não está disponível para saque.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+              href="/financeiro/saques"
+            >
+              Gerenciar saques
+            </Link>
+            <Input
+              aria-label="Buscar entregador"
+              className="w-64"
+              placeholder="Nome ou e-mail"
+              value={walletSearch}
+              onChange={(event) => setWalletSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') setAppliedWalletSearch(walletSearch.trim());
+              }}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setAppliedWalletSearch(walletSearch.trim())}
+            >
+              <Search className="size-4" />
+              <span className="sr-only">Buscar</span>
+            </Button>
+            <Button variant="outline" onClick={clearWalletSearch}>
+              Limpar
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {walletsQuery.isLoading ? (
+            <p className="p-6 text-sm text-muted-foreground">Carregando carteiras...</p>
+          ) : walletsQuery.isError ? (
+            <p className="p-6 text-sm text-destructive">Não foi possível carregar as carteiras.</p>
+          ) : wallets.length === 0 ? (
+            <p className="p-10 text-center text-sm text-muted-foreground">
+              Nenhum entregador encontrado.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Entregador</TableHead>
+                  <TableHead>Saldo disponível</TableHead>
+                  <TableHead>Saldo a liberar</TableHead>
+                  <TableHead>Saques pendentes</TableHead>
+                  <TableHead>Conferência</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        <div className="space-y-3 rounded-lg border p-4">
-          <h3 className="text-sm font-semibold">Resumo do Pagamento</h3>
-          <div className="space-y-1.5">
-            <Label htmlFor="due-date">Data de Vencimento</Label>
-            <Input id="due-date" type="date" />
-          </div>
-          <Button className="w-full">Gerar Todas as Faturas</Button>
-          <p className="text-center text-xs text-muted-foreground">ou</p>
-          <Button className="w-full" variant="secondary">
-            Marcar Todos Pedidos como Pagos
-          </Button>
-          <Button className="w-full" variant="outline">
-            Marcar Manualmente como Pago
-          </Button>
-          <Button className="w-full" variant="ghost">
-            Imprimir Relatório de Pedidos
-          </Button>
-        </div>
-      </TabsContent>
-
-      <TabsContent value="receipts" className="space-y-4 pt-4">
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="rec-start">Data Inicial</Label>
-            <Input id="rec-start" type="date" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rec-end">Data Final</Label>
-            <Input id="rec-end" type="date" />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Checkbox /> Somente pagos online
-          </label>
-          <Button>Aplicar Filtro</Button>
-        </div>
-
-        {mockReceiptsByDay.map((day) => (
-          <div key={day.date} className="rounded-lg border">
-            <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2 text-sm font-medium">
-              <span>{day.date}</span>
-              <span>Total: {day.total}</span>
-            </div>
-            <div className="divide-y">
-              {day.invoices.map((invoice) => (
-                <div
-                  key={invoice.number}
-                  className="flex items-center justify-between px-4 py-2 text-sm"
-                >
-                  <span className="text-primary underline-offset-2 hover:underline">
-                    Fatura #{invoice.number} — {invoice.client}
-                  </span>
-                  <span>{invoice.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </TabsContent>
-    </Tabs>
+              </TableHeader>
+              <TableBody>
+                {wallets.map((wallet) => (
+                  <TableRow key={wallet.driverId}>
+                    <TableCell>
+                      <p className="font-medium">{wallet.driverName}</p>
+                      <p className="text-xs text-muted-foreground">{wallet.driverEmail}</p>
+                    </TableCell>
+                    <TableCell>{formatCurrency(wallet.availableBalance)}</TableCell>
+                    <TableCell>{formatCurrency(wallet.blockedBalance)}</TableCell>
+                    <TableCell>{formatCurrency(wallet.pendingWithdrawalAmount)}</TableCell>
+                    <TableCell>
+                      <span
+                        className={
+                          wallet.cacheMatchesLedger ? 'text-emerald-700' : 'text-destructive'
+                        }
+                      >
+                        {wallet.cacheMatchesLedger ? 'Conferido' : 'Divergência'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link
+                        className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+                        href={`/entregadores/${wallet.driverId}`}
+                      >
+                        Ver entregador
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

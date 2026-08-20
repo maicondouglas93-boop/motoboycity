@@ -111,7 +111,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     await request(server)
       .patch(`/admin/companies/${companyRegister.body.companyId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`);
-    const companyLogin = await request(server).post('/auth/login').send({ email: companyEmail, password });
+    const companyLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: companyEmail, password });
     companyToken = companyLogin.body.accessToken;
     await request(server)
       .put('/company/address')
@@ -127,17 +129,19 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       });
 
     async function registerApproveDriver(email: string, cpf: string) {
-      const register = await request(server).post('/auth/register/driver').send({
-        name: `Motoboy Lifecycle E2E ${email}`,
-        email,
-        phone: '33999887799',
-        cpf,
-        birthDate: '1990-05-20',
-        pixKey: email,
-        pixKeyType: 'EMAIL',
-        hasCnpj: false,
-        password,
-      });
+      const register = await request(server)
+        .post('/auth/register/driver')
+        .send({
+          name: `Motoboy Lifecycle E2E ${email}`,
+          email,
+          phone: '33999887799',
+          cpf,
+          birthDate: '1990-05-20',
+          pixKey: email,
+          pixKeyType: 'EMAIL',
+          hasCnpj: false,
+          password,
+        });
       const registeredDriverId = register.body.driverId as string;
       await request(server)
         .patch(`/admin/drivers/${registeredDriverId}/approve`)
@@ -190,12 +194,24 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+    await prisma.invoiceStatusHistory.deleteMany({
+      where: { invoice: { company: { document: companyDocument } } },
+    });
+    await prisma.invoice.deleteMany({ where: { company: { document: companyDocument } } });
+    await prisma.walletTransaction.deleteMany({
+      where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
+    });
+    await prisma.wallet.deleteMany({
+      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+    });
     await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
     await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
     await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
     await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({ where: { company: { document: companyDocument } } });
+    await prisma.companyTeamMember.deleteMany({
+      where: { company: { document: companyDocument } },
+    });
     await prisma.company.deleteMany({ where: { document: companyDocument } });
     await prisma.user.deleteMany({ where: { email: companyEmail } });
 
@@ -205,7 +221,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     await prisma.driverPresenceLog.deleteMany({
       where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
     });
-    await prisma.driver.deleteMany({ where: { user: { email: { in: [driver1Email, driver2Email] } } } });
+    await prisma.driver.deleteMany({
+      where: { user: { email: { in: [driver1Email, driver2Email] } } },
+    });
     await prisma.user.deleteMany({ where: { email: { in: [driver1Email, driver2Email] } } });
 
     await app.close();
@@ -226,6 +244,26 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({ serviceTypeId, dropoffAddress: dropoff(1) })
         .expect(201);
       const deliveryId = created.body.id as string;
+
+      expect(realtime.emitToDriver).toHaveBeenCalledWith(
+        driver1Id,
+        'delivery:offer',
+        expect.objectContaining({
+          companyName: 'Lifecycle E2E',
+          paymentMethod: 'BILLED',
+          totalValue: 12.5,
+          platformValue: 2.5,
+          driverValue: 10,
+          deliveries: [
+            expect.objectContaining({
+              deliveryId,
+              serviceTypeName: expect.any(String),
+              pickupAddress: expect.objectContaining({ street: 'Rua da Loja' }),
+              dropoffAddress: expect.objectContaining({ street: 'Rua do Cliente 1' }),
+            }),
+          ],
+        }),
+      );
 
       const offer = await pendingOfferFor(deliveryId);
       await request(app.getHttpServer())
@@ -258,6 +296,260 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         'DELIVERED',
         'COMPLETED',
       ]);
+
+      const wallet = await request(app.getHttpServer())
+        .get('/driver/wallet?status=PENDING')
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      expect(wallet.body.availableBalance).toBe(0);
+      expect(wallet.body.blockedBalance).toBe(10);
+      expect(wallet.body.transactions).toEqual([
+        expect.objectContaining({
+          type: 'CREDIT_REPASSE',
+          status: 'PENDING',
+          amount: 10,
+          relatedDelivery: expect.objectContaining({ id: deliveryId }),
+        }),
+      ]);
+
+      const financialOverview = await request(app.getHttpServer())
+        .get('/admin/financial/overview')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(financialOverview.body.completedDeliveries).toMatchObject({
+        count: 1,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+        unbilledValue: 12.5,
+      });
+      expect(financialOverview.body.driverWallets).toMatchObject({
+        availableBalance: 0,
+        blockedBalance: 10,
+      });
+
+      const driverWallets = await request(app.getHttpServer())
+        .get('/admin/financial/driver-wallets?search=Lifecycle')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(driverWallets.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            driverId: driver1Id,
+            blockedBalance: 10,
+            cacheMatchesLedger: true,
+          }),
+        ]),
+      );
+
+      const adminDriverDetail = await request(app.getHttpServer())
+        .get(`/admin/drivers/${driver1Id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(adminDriverDetail.body).toEqual(
+        expect.objectContaining({
+          id: driver1Id,
+          email: driver1Email,
+          approvalStatus: 'APPROVED',
+          availability: expect.any(String),
+        }),
+      );
+
+      const adminCompanyDetail = await request(app.getHttpServer())
+        .get(`/admin/companies/${created.body.companyId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(adminCompanyDetail.body).toEqual(
+        expect.objectContaining({
+          id: created.body.companyId,
+          region: expect.objectContaining({ name: expect.any(String) }),
+          addresses: [expect.objectContaining({ isPrimary: true })],
+          teamMembers: [expect.objectContaining({ role: 'OWNER', active: true })],
+        }),
+      );
+
+      const adminWalletDetail = await request(app.getHttpServer())
+        .get(`/admin/financial/driver-wallets/${driver1Id}?status=PENDING`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(adminWalletDetail.body).toEqual(
+        expect.objectContaining({
+          driverId: driver1Id,
+          blockedBalance: 10,
+          transactions: [
+            expect.objectContaining({
+              relatedDelivery: expect.objectContaining({
+                id: deliveryId,
+                displayNumber: created.body.displayNumber,
+                companyName: 'Lifecycle E2E',
+              }),
+            }),
+          ],
+        }),
+      );
+
+      const scopedDeliveries = await request(app.getHttpServer())
+        .get(`/deliveries?driverId=${driver1Id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(scopedDeliveries.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: deliveryId, paymentMethod: 'BILLED' }),
+        ]),
+      );
+
+      const companyScopedDeliveries = await request(app.getHttpServer())
+        .get(`/deliveries?companyId=${created.body.companyId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(companyScopedDeliveries.body).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: deliveryId })]),
+      );
+
+      await request(app.getHttpServer())
+        .get(`/deliveries?driverId=${driver1Id}`)
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(403);
+
+      const detailedDelivery = await request(app.getHttpServer())
+        .get(`/deliveries/${deliveryId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(detailedDelivery.body).toEqual(
+        expect.objectContaining({
+          driver: expect.objectContaining({ id: driver1Id, email: driver1Email }),
+          statusHistory: expect.arrayContaining([
+            expect.objectContaining({ toStatus: 'COMPLETED' }),
+          ]),
+        }),
+      );
+
+      const today = new Date().toISOString().slice(0, 10);
+      const companyDeliveriesInPeriod = await request(app.getHttpServer())
+        .get(`/deliveries?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+      expect(companyDeliveriesInPeriod.body).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: deliveryId })]),
+      );
+
+      const operationsReport = await request(app.getHttpServer())
+        .get(`/admin/reports/operations?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(operationsReport.body).toEqual(
+        expect.objectContaining({
+          period: { from: today, to: today },
+          ordersCreated: expect.objectContaining({
+            byCurrentStatus: expect.objectContaining({ COMPLETED: expect.any(Number) }),
+          }),
+          deliveriesCompleted: expect.objectContaining({ count: expect.any(Number) }),
+          companies: expect.arrayContaining([
+            expect.objectContaining({ companyId: created.body.companyId, completedCount: 1 }),
+          ]),
+          drivers: expect.arrayContaining([
+            expect.objectContaining({ driverId: driver1Id, completedCount: 1, driverValue: 10 }),
+          ]),
+        }),
+      );
+
+      await request(app.getHttpServer())
+        .get(`/admin/reports/operations?from=${today}&to=${today}`)
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(403);
+
+      const nextMonday = new Date();
+      nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7 || 7));
+      const closingDate = nextMonday.toISOString().slice(0, 10);
+      const closedInvoices = await request(app.getHttpServer())
+        .post('/admin/financial/invoices/close')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ issueDate: closingDate })
+        .expect(201);
+      expect(closedInvoices.body).toHaveLength(1);
+      expect(closedInvoices.body[0]).toEqual(
+        expect.objectContaining({ deliveryCount: 1, totalValue: 12.5, status: 'PENDING' }),
+      );
+
+      const companyInvoicesForAdmin = await request(app.getHttpServer())
+        .get(`/admin/financial/invoices?companyId=${created.body.companyId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(companyInvoicesForAdmin.body).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: closedInvoices.body[0].id })]),
+      );
+
+      const companyInvoices = await request(app.getHttpServer())
+        .get('/company/invoices')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+      expect(companyInvoices.body).toEqual([
+        expect.objectContaining({
+          id: closedInvoices.body[0].id,
+          companyId: created.body.companyId,
+        }),
+      ]);
+
+      const [firstPayment, duplicatePayment] = await Promise.all([
+        request(app.getHttpServer())
+          .patch(`/admin/financial/invoices/${closedInvoices.body[0].id}/mark-paid`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ paymentDate: closingDate, paymentMethod: 'BILLED' }),
+        request(app.getHttpServer())
+          .patch(`/admin/financial/invoices/${closedInvoices.body[0].id}/mark-paid`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ paymentDate: closingDate, paymentMethod: 'BILLED' }),
+      ]);
+      expect([firstPayment.status, duplicatePayment.status].sort()).toEqual([200, 409]);
+
+      const paidInvoice = await request(app.getHttpServer())
+        .get(`/admin/financial/invoices/${closedInvoices.body[0].id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(paidInvoice.body.status).toBe('PAID');
+      expect(
+        paidInvoice.body.statusHistory.map((item: { toStatus: string }) => item.toStatus),
+      ).toEqual(['PENDING', 'PAID']);
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('duas finalizações concorrentes criam exatamente um repasse', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(11) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const responses = await Promise.all([
+        request(app.getHttpServer())
+          .patch(`/deliveries/${deliveryId}/deliver`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .send({}),
+        request(app.getHttpServer())
+          .patch(`/deliveries/${deliveryId}/deliver`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .send({}),
+      ]);
+      expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+
+      const repasses = await prisma.walletTransaction.findMany({
+        where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
+      });
+      expect(repasses).toHaveLength(1);
+      expect(Number(repasses[0]!.amount)).toBe(10);
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
@@ -392,7 +684,18 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       expect(realtime.emitToDriver).toHaveBeenCalledWith(
         driver1Id,
         'delivery:offer',
-        expect.objectContaining({ driverValue: null, distanceKm: null }),
+        expect.objectContaining({
+          totalValue: null,
+          driverValue: null,
+          platformValue: null,
+          distanceKm: null,
+          deliveries: expect.arrayContaining([
+            expect.objectContaining({
+              pickupAddress: expect.objectContaining({ street: 'Rua da Loja' }),
+              dropoffAddress: null,
+            }),
+          ]),
+        }),
       );
 
       const offer = await pendingOfferFor(deliveryIds[0]);
@@ -517,7 +820,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       expect(completeReturnResponse.body.deliveries[0].id).toBe(withReturnId);
 
       const finalNoReturn = await prisma.delivery.findUniqueOrThrow({ where: { id: noReturnId } });
-      const finalWithReturn = await prisma.delivery.findUniqueOrThrow({ where: { id: withReturnId } });
+      const finalWithReturn = await prisma.delivery.findUniqueOrThrow({
+        where: { id: withReturnId },
+      });
       expect(finalNoReturn.status).toBe('COMPLETED');
       expect(finalWithReturn.status).toBe('COMPLETED');
 

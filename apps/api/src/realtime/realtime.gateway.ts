@@ -15,8 +15,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * Autentica a conexão pelo mesmo JWT da API REST (claim "sub" = userId).
  * ADMIN entra na sala "admin" (feed de atividade); DRIVER entra numa sala
  * própria (driver:{driverId}) pra receber ofertas de despacho endereçadas
- * só a ele. COMPANY_MEMBER não tem sala nesta fase — nenhum evento é
- * direcionado a empresa ainda.
+ * só a ele. COMPANY_MEMBER entra na sala de cada empresa ativa à qual
+ * pertence, inclusive para receber atualizações de localização dos seus pedidos.
  */
 @Injectable()
 @WebSocketGateway({ cors: { origin: getAllowedOrigins() } })
@@ -70,6 +70,21 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.logger.debug(`Motoboy conectado: ${client.id} (driver ${driver.id})`);
       return;
     }
+
+    if (user.type === 'COMPANY_MEMBER') {
+      const memberships = await this.prisma.companyTeamMember.findMany({
+        where: { userId: user.id, active: true },
+        select: { companyId: true },
+      });
+      if (memberships.length === 0) {
+        client.disconnect(true);
+        return;
+      }
+      await Promise.all(
+        memberships.map((membership) => client.join(this.companyRoom(membership.companyId))),
+      );
+      this.logger.debug(`Membro de empresa conectado: ${client.id}`);
+    }
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
@@ -91,8 +106,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to('admin').emit('admin:activity', { message, at: new Date().toISOString() });
   }
 
+  emitDeliveryLocation(companyId: string, payload: unknown): void {
+    this.server.to('admin').emit('delivery:location', payload);
+    this.server.to(this.companyRoom(companyId)).emit('delivery:location', payload);
+  }
+
   private driverRoom(driverId: string): string {
     return `driver:${driverId}`;
+  }
+
+  private companyRoom(companyId: string): string {
+    return `company:${companyId}`;
   }
 
   private extractToken(client: Socket): string | null {

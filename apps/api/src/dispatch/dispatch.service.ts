@@ -26,6 +26,28 @@ function activateJobId(deliveryId: string): string {
   return `activate-${deliveryId}`;
 }
 
+function offerAddress(
+  address: {
+    street: string | null;
+    number: string | null;
+    complement: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    referenceNote: string | null;
+  } | null,
+) {
+  return {
+    street: address?.street ?? null,
+    number: address?.number ?? null,
+    complement: address?.complement ?? null,
+    city: address?.city ?? null,
+    state: address?.state ?? null,
+    zip: address?.zip ?? null,
+    referenceNote: address?.referenceNote ?? null,
+  };
+}
+
 @Injectable()
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
@@ -65,7 +87,11 @@ export class DispatchService {
   async dispatchDelivery(deliveryId: string): Promise<void> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
-      include: { company: { select: { regionId: true } } },
+      include: {
+        company: { select: { regionId: true, tradeName: true } },
+        serviceType: { select: { name: true } },
+        addresses: true,
+      },
     });
     if (!delivery || delivery.status !== 'AWAITING_DRIVER') {
       return;
@@ -75,6 +101,10 @@ export class DispatchService {
       ? await this.prisma.delivery.findMany({
           where: { batchId: delivery.batchId },
           orderBy: { createdAt: 'asc' },
+          include: {
+            serviceType: { select: { name: true } },
+            addresses: true,
+          },
         })
       : [delivery];
     if (deliveries.some((item) => item.status !== 'AWAITING_DRIVER')) {
@@ -146,11 +176,23 @@ export class DispatchService {
       offerId: offers[0]!.id,
       deliveryId: delivery.id,
       displayNumber: delivery.displayNumber,
+      companyName: delivery.company.tradeName,
+      paymentMethod: delivery.paymentMethod,
+      totalValue: !delivery.destinationKnownAtCreation
+        ? null
+        : delivery.batchId
+          ? deliveries.reduce((sum, item) => sum + Number(item.totalValue), 0)
+          : Number(delivery.totalValue),
       driverValue: !delivery.destinationKnownAtCreation
         ? null
         : delivery.batchId
           ? deliveries.reduce((sum, item) => sum + Number(item.driverValue), 0)
           : Number(delivery.driverValue),
+      platformValue: !delivery.destinationKnownAtCreation
+        ? null
+        : delivery.batchId
+          ? deliveries.reduce((sum, item) => sum + Number(item.platformValue), 0)
+          : Number(delivery.platformValue),
       distanceKm: !delivery.destinationKnownAtCreation
         ? null
         : delivery.batchId
@@ -161,6 +203,23 @@ export class DispatchService {
       requiresReturn: delivery.batchId
         ? deliveries.some((item) => item.requiresReturn)
         : delivery.requiresReturn,
+      deliveries: deliveries.map((item) => ({
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        serviceTypeName: item.serviceType.name,
+        destinationKnownAtCreation: item.destinationKnownAtCreation,
+        pickupAddress: offerAddress(
+          item.addresses.find((address) => address.type === 'PICKUP') ?? null,
+        ),
+        dropoffAddress: item.destinationKnownAtCreation
+          ? offerAddress(item.addresses.find((address) => address.type === 'DROPOFF') ?? null)
+          : null,
+        totalValue: item.totalValue === null ? null : Number(item.totalValue),
+        driverValue: item.driverValue === null ? null : Number(item.driverValue),
+        platformValue: item.platformValue === null ? null : Number(item.platformValue),
+        distanceKm: item.distanceKm === null ? null : Number(item.distanceKm),
+        requiresReturn: item.requiresReturn,
+      })),
       expiresInSeconds: timeoutSeconds,
       ...(delivery.batchId ? { batchId: delivery.batchId, deliveryCount: deliveries.length } : {}),
     });

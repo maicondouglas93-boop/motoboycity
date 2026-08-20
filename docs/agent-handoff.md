@@ -189,6 +189,461 @@ Arquivos de contrato:
 
 ## Historico de mudancas
 
+### 2026-08-20 - detalhes administrativos reais de entregador, cliente e pedido
+
+O painel de detalhe de entregador deixou de usar `mockDriverDetailStats`,
+`mockWalletTransactions` e solicitacoes de saque ficticias. Ele agora consulta
+o cadastro real, os pedidos vinculados e o ledger da carteira, com filtros de
+status para pedidos e de status/periodo para o extrato. Os valores de carteira
+sao sempre derivados do ledger; nao ha botoes para inserir/remover saldo sem
+uma operacao financeira real por tras.
+
+Foram adicionados `GET /admin/drivers/:id` e o detalhe administrativo da
+carteira em `GET /admin/financial/driver-wallets/:driverId`. Este ultimo aceita
+os mesmos filtros de `GET /driver/wallet` (`status`, `from`, `to`, `limit`) e
+retorna o extrato associado ao resumo e a conferencia cache-versus-ledger.
+`GET /deliveries` aceita `driverId` somente para administradores; empresa ou
+motoboy que tentarem ampliar o escopo recebem 403.
+
+O contrato de detalhe de pedido passou a expor status atualizado, metodo de
+pagamento, fatura vinculada, entregador e historico de status. A nova tela
+`admin-web/pedidos/[id]` usa esses dados para navegar entre pedido, entregador
+e fatura e mostra valores congelados, enderecos e auditoria operacional.
+Nenhuma migration foi necessaria.
+
+Arquivos principais: `apps/admin-web/src/app/(app)/{entregadores/[id],pedidos/[id]}`,
+`apps/api/src/{admin/drivers,deliveries,finance}` e contratos em
+`packages/{types,validation,api-client}`.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces; E2E completa da API
+aprovada (17 suites, 130 testes), cobrindo detalhe administrativo de motorista,
+extrato filtrado, isolamento do filtro por entregador e auditoria do pedido.
+
+O detalhe de cliente tambem deixou de usar `mockClientDetailStats`. A tela usa
+o cadastro administrativo de empresa (responsavel, praca, aprovacao), equipe e
+enderecos cadastrados, alem dos pedidos e faturas daquela empresa. O admin pode
+filtrar pedidos por status e faturas por status; os cards financeiros mostram
+somente agregados de entregas/faturas retornados pela API, sem uma carteira
+ficticia. A lista de clientes ganhou o atalho para este detalhe real.
+
+`GET /admin/companies/:id` entrega cadastro, praca, equipe e enderecos.
+`GET /deliveries?companyId=` e `GET /admin/financial/invoices?companyId=`
+permitem recortar pedidos e faturas por empresa somente para administradores;
+a listagem de faturas da propria empresa continua ignorando esse filtro externo
+e mantem o escopo da associacao autenticada. Nenhuma migration foi necessaria.
+
+Arquivos adicionais: `apps/admin-web/src/app/(app)/clientes/{page,[id]/page}.tsx`,
+`apps/api/src/admin/companies/*`, `apps/api/src/finance/invoice.service.ts` e
+os contratos de empresa, fatura e pedidos compartilhados. A E2E completa foi
+executada novamente apos este recorte e permaneceu aprovada (17 suites, 130
+testes), incluindo o detalhe de empresa e os filtros administrativos por
+empresa.
+
+O antigo indice mockado de relatorios foi substituido por
+`GET /admin/reports/operations`. Sem periodo informado, a API usa os ultimos
+30 dias; `from` e `to` restringem o periodo em UTC. O resultado separa
+explicitamente pedidos criados (com distribuicao pelo status atual) de entregas
+concluidas (onde valor total, repasse, receita e ticket medio fazem sentido).
+Tambem agrega empresas, entregadores e modalidades, com links para os detalhes
+de investigacao no painel. O endpoint e exclusivo do admin e foi coberto na
+E2E com uma tentativa de acesso de empresa recebendo 403.
+
+Arquivos adicionais: `apps/api/src/admin/reports/*`,
+`packages/{validation,types,api-client}/src/{admin,report}*` e
+`apps/admin-web/src/app/(app)/relatorios/page.tsx`. Nenhuma migration foi
+necessaria.
+
+O painel da empresa agora tem detalhe de pedido em `company-web/pedidos/[id]`,
+com coleta/destino, status, entregador, fatura e historico real. A lista ganhou
+filtro de status e links de detalhe. O filtro compartilhado de pedidos tambem
+passou a aceitar `from` e `to` pela data de criacao, sempre combinado ao escopo
+autenticado da empresa, entregador ou administrador.
+
+`company-web/indicadores` e `company-web/relatorios` nao usam mais arrays
+mockados: calculam pedidos, valores, cancelamentos, modalidades, distribuicao
+de status e faturas diretamente das APIs. Os dois permitem periodo; o relatorio
+de faturamento ainda filtra o status das faturas e abre os detalhes de pedido e
+fatura. Validacao: typecheck dos 8 workspaces, build de producao do company-web
+e a E2E completa da API (17 suites, 130 testes) aprovados, incluindo o filtro
+de data da empresa. Nenhuma migration foi necessaria.
+
+O dashboard inicial do admin tambem foi refeito com dados reais: pedidos por
+estado operacional, entregas concluidas recentes, primeira fatura pendente ou
+vencida, indicadores financeiros e disponibilidade declarada pelos entregadores.
+`AdminDriverListItem` agora inclui `availability`, que e o estado registrado no
+app - nao uma fila Redis ou rastreamento de mapa, dados que a API nao expoe.
+
+Os dois painéis web nao possuem mais imports de arquivos `mock-data`: foram
+removidos o dashboard administrativo, indicadores/relatorios ficticios da
+empresa, identidades falsas no topo e formularios de integracao sem backend.
+As paginas de integracao agora deixam claro que Aiqfome e o unico escopo e que
+nao ha credencial/webhook implementado; nao simulam salvamento ou ativacao.
+Configuracoes tambem mostra somente as rotas realmente operaveis (modalidades e
+tabelas de preco). Nenhuma migration foi necessaria.
+
+O perfil do driver-app passou a consultar `/auth/me` e mostra nome/e-mail reais;
+os antigos campos editaveis, senha, foto e exclusao foram removidos porque nao
+ha endpoints que executem essas acoes com seguranca. Validacao adicional:
+typecheck completo e o teste do driver-app aprovados.
+
+O menu lateral do driver-app tambem deixou de usar a identidade simulada: ele
+consulta `/auth/me` para mostrar o entregador autenticado e o comando Sair agora
+remove o token persistido e reinicia a navegacao na tela de login. O arquivo
+`src/lib/mockData.ts` foi removido. A tela Ajustes nao mostra mais chaves de
+mapa, sobreposicao, som ou tela sempre ligada, pois esses recursos nao sao
+persistidos nem executados pelo aplicativo; ela explica essa limitacao e aponta
+o seletor de disponibilidade real na tela inicial.
+
+Arquivos: `apps/driver-app/src/components/DrawerMenu.tsx`,
+`apps/driver-app/src/screens/SettingsScreen.tsx` e
+`apps/driver-app/src/navigation/types.ts`. Validacao: Prettier nos tres
+arquivos, `pnpm typecheck`, `pnpm --filter @motoboycity/driver-app test --
+--runInBand`, `pnpm lint` e `git diff --check` aprovados. O lint do driver-app
+termina sem erros e com 52 avisos pre-existentes de estilos inline e `no-void`.
+
+A Home do entregador nao mostra mais um mapa de fase futura nem abas sem dados.
+Ela informa online/offline pelo valor retornado de `GET /driver/presence`, o
+estado da conexao Socket.IO, erro recuperavel de sincronizacao e entregas ativas
+obtidas da API. A cada reconexao do Socket, o app consulta a presenca novamente:
+isso evita continuar exibindo online quando o backend marcou o entregador como
+indisponivel depois de uma queda de conexao. O menu manteve somente carteira,
+historico, perfil e ajustes; escalas, desafios, suporte e listas sem API nao sao
+mais oferecidos como recursos operacionais.
+
+Arquivos: `apps/driver-app/src/screens/HomeScreen.tsx`,
+`apps/driver-app/src/lib/socket.ts` e `apps/driver-app/src/components/DrawerMenu.tsx`.
+Validacao: Prettier, `pnpm typecheck`, `pnpm --filter @motoboycity/driver-app
+test -- --runInBand`, lint do driver-app e `git diff --check` aprovados. O lint
+permanece sem erros e com 48 avisos pre-existentes.
+
+O evento Socket.IO `delivery:offer` foi ampliado para uma decisao operacional
+real: empresa, forma de pagamento, valor total, comissao da plataforma, ganho
+do entregador, distancia e a lista de todos os itens do lote. Cada item inclui
+modalidade, coleta e destino congelados no pedido, seus valores e a exigencia
+de retorno. O app mostra esses dados antes de Aceitar/Recusar. Quando o destino
+e definido somente na entrega, o contrato preserva valores e destino como nulos
+e a UI deixa claro que ambos serao informados/calculados na conclusao; nao usa
+zero ou endereco ficticio.
+
+Arquivos: `packages/types/src/delivery-offer.ts`,
+`apps/api/src/dispatch/dispatch.service.ts`,
+`apps/driver-app/src/screens/IncomingOfferScreen.tsx` e testes de dispatch/
+ciclo de entrega. Nenhuma migration foi necessaria. Validacao: `pnpm typecheck`,
+teste unitario focado de dispatch (37 testes) e E2E completa da API (17 suites,
+130 testes) aprovados; `pnpm lint` e o teste do driver-app tambem aprovados.
+
+A carteira e o historico do entregador passaram a aceitar periodo por data,
+reaproveitando os filtros `from` e `to` ja validados nas APIs de ledger e
+entregas. Ambos validam `AAAA-MM-DD` e ordem das datas no aplicativo, permitem
+limpar o filtro e mantem o link para o detalhe do pedido. A carteira tambem
+inclui transacoes canceladas e esclarece que os saldos sao atuais, enquanto
+somente as linhas do extrato sao filtradas. Erros de periodo nao escondem os
+campos usados para corrigi-los.
+
+Arquivos: `apps/driver-app/src/screens/{DriverWalletScreen,DriverHistoryScreen}.tsx`.
+Validacao: Prettier, `pnpm typecheck`, teste do driver-app, lint do driver-app
+e `git diff --check` aprovados. O lint do app termina sem erros e com 37 avisos
+pre-existentes de estilo inline e `no-void`.
+
+Durante uma entrega ativa, o entregador pode abrir a navegacao externa para a
+coleta (`ACCEPTED`), destino (`COLLECTED`) ou retorno a coleta (`DELIVERED`).
+O link usa coordenadas quando existentes e, caso contrario, o endereco
+estruturado congelado no pedido. Destino ainda indefinido nao mostra atalho de
+rota, evitando sugerir um local inexistente. Arquivo:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`. Validacao: Prettier,
+`pnpm typecheck`, teste e lint do driver-app e `git diff --check` aprovados.
+
+As antigas rotas de "Disponiveis", "Pedidos agendados", "Minhas escalas",
+"Desafios" e "Suporte" tambem foram removidas do registro de navegacao e do
+tipo de rotas. Elas eram telas locais de fase zero, sem endpoint, acao de
+suporte ou contrato operacional correspondente; deixa-las acessiveis criaria
+uma promessa falsa de funcionalidade. O menu ja nao as oferecia e agora nao ha
+rota interna para alcança-las. Arquivos removidos:
+`apps/driver-app/src/screens/{AvailableOrdersScreen,ScheduledOrdersScreen,MyShiftsScreen,ChallengesScreen,SupportScreen}.tsx`
+e `src/components/NotSpecifiedNotice.tsx`; o registro foi atualizado em
+`apps/driver-app/App.tsx` e `src/navigation/types.ts`.
+
+Validacao: Prettier, `pnpm typecheck` (8 workspaces) e teste do driver-app
+aprovados. O lint do app segue sem erros, agora com 24 avisos de estilo
+inline/no-void; `git diff --check` ainda deve ser executado apos o proximo
+bloco de alteracoes.
+
+O painel administrativo tambem deixou de oferecer os atalhos "IAGo", "Lancar
+Pedido" e "Ver mais", que levavam a telas sem fluxo ou itens definidos. As
+duas paginas de fase zero foram removidas e a navegacao agora lista somente
+modulos com dados e operacoes reais. O unico item do menu da conta e `Sair`,
+que limpa o token da sessao e redireciona para `/login`. Arquivos:
+`apps/admin-web/src/components/layout/top-nav.tsx` e remocao de
+`src/app/(app)/{iago,lancar-pedido}/page.tsx`.
+
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/admin-web` aprovados. A exclusao de rotas exigiu regenerar os
+tipos de rota do Next antes da validacao, pois o cache local de desenvolvimento
+mantinha as entradas removidas.
+
+No painel da empresa, o item decorativo `Suporte` e o item `Perfil` sem tela
+foram retirados da barra. `Sair` passou a limpar a sessao do lojista e a
+redirecionar para `/login`, deixando o menu de conta com uma unica operacao
+executavel. Arquivo: `apps/company-web/src/components/layout/top-nav.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/company-web` aprovados.
+
+Na pagina inicial do lojista tambem foi removido o card de "Mapa" marcado como fase
+futura. Ela agora concentra o fluxo existente: consultar/configurar o endereco
+de coleta e lancar pedido, sem representar visualmente uma integracao de mapa
+ou rastreamento que nao existe. Arquivo: `apps/company-web/src/app/(app)/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e novo build de
+producao do `@motoboycity/company-web` aprovados.
+
+`InvoiceService.markPaid()` passou a fazer a transicao financeira de modo
+condicional no banco: tenta `PENDING -> PAID` e `OVERDUE -> PAID`, gravando o
+historico somente quando uma das atualizacoes afetar exatamente uma fatura.
+Uma segunda confirmacao concorrente agora recebe conflito e nao cria uma linha
+`PAID` duplicada nem sobrescreve a origem da transicao. Arquivos:
+`apps/api/src/finance/invoice.service.ts` e
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: Prettier, E2E focado de ciclo de entrega (17 testes, incluindo duas
+confirmacoes simultaneas de pagamento), `pnpm typecheck` nos 8 workspaces e
+lint da API aprovados.
+
+As tabelas de pedidos dentro do detalhe de fatura, nos paineis administrativo
+e da empresa, agora ligam cada numero ao detalhe do pedido correspondente.
+Isso permite conferir endereco, entregador, transicoes de status e valores
+congelados sem perder o contexto financeiro da fatura. Arquivos:
+`apps/{admin-web,company-web}/src/app/(app)/faturas/[id]/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+dos dois paineis aprovados.
+
+Os filtros financeiros do admin passaram a validar o intervalo antes de chamar
+a API e permitem limpar o periodo aplicado. A listagem de faturas tambem limpa
+status e datas, enquanto a busca de carteiras limpa o texto aplicado. Assim o
+operador nao fica preso a um recorte anterior ou recebe apenas um erro generico
+da consulta para datas invertidas. Arquivos:
+`apps/admin-web/src/app/(app)/{financeiro,faturas}/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/admin-web` aprovados.
+
+As rotas de integracao dos paineis admin e empresa foram removidas porque so
+exibiam um aviso de que Aiqfome, credenciais e webhook ainda nao existem. Sem
+consulta ou operacao real, mante-las no menu contrariava o criterio de nao
+oferecer recursos simulados. O fluxo manual de pedidos continua intacto;
+integracao deve voltar apenas com contrato, armazenamento seguro de credenciais
+e auditoria de webhook ponta a ponta. Arquivos removidos:
+`apps/{admin-web,company-web}/src/app/(app)/integracoes/page.tsx`; a barra da
+empresa foi atualizada em `apps/company-web/src/components/layout/top-nav.tsx`.
+Validacao: Prettier, regeneracao dos tipos de rota, `pnpm typecheck` (8
+workspaces), lint e build de producao dos dois paineis aprovados.
+
+Relatorios e indicadores passaram a usar o mesmo comportamento de filtros do
+financeiro: datas invertidas sao informadas antes da consulta e `Limpar`
+restaura o recorte completo. No relatorio da empresa, o status da fatura agora
+e aplicado junto com o periodo, em vez de disparar uma consulta diferente ao
+alterar somente o seletor. Arquivos:
+`apps/admin-web/src/app/(app)/relatorios/page.tsx` e
+`apps/company-web/src/app/(app)/{relatorios,indicadores}/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+dos dois paineis aprovados.
+
+Regressao integrada apos os recortes financeiros e de navegacao: `pnpm --filter
+@motoboycity/api test:e2e` passou com 17 suites e 130 testes; `pnpm lint` da
+raiz passou nos 8 workspaces. O Jest ainda informa o aviso conhecido de handles
+abertos ao encerrar a suite E2E, sem teste pendente ou falha. O lint permanece
+sem erros, com 24 avisos de estilos inline/no-void no driver-app.
+
+O detalhe de pedido do driver-app deixou de mostrar o status fixo "Concluido"
+e passou a consumir todo o detalhe ja retornado pela API: status atual, data de
+criacao e atualizacao, valores total/repasse/comissao/retorno, distancia,
+enderecos e referencia, empresa/modalidade, obrigacao de retorno, cobranca,
+fatura e trilha de transicoes com ator e nota. Os estilos claro/escuro foram
+consolidados em `StyleSheet`, sem avisos inline nessa tela. Arquivo:
+`apps/driver-app/src/screens/DriverOrderDetailScreen.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste do driver-app e
+lint do driver-app aprovados; o lint segue sem erros e agora totaliza 11 avisos
+remanescentes em outros arquivos.
+
+Ao concluir uma entrega no fluxo operacional, o motoboy agora recebe o atalho
+`Ver detalhes e histórico` antes de voltar ao inicio. Ele abre o registro
+detalhado da mesma entrega, preservando a auditoria de status e os valores que
+acabaram de ser calculados. Arquivo:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste e lint do
+driver-app aprovados; o lint continua sem erros e com 11 avisos remanescentes.
+
+Os avisos remanescentes do lint do driver-app foram eliminados sem alterar
+fluxos: estilos condicionais de botao, carregamento, login/cadastro, carteira
+e operacao passaram a usar estilos nomeados. Arquivos:
+`apps/driver-app/{App.tsx,src/components/PrimaryButton.tsx,src/screens/{LoginScreen,RegisterScreen,DriverWalletScreen,DeliveryOperationScreen}.tsx}`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste e lint do
+driver-app aprovados; lint sem avisos ou erros.
+
+Limitacao operacional importante: o app captura GPS real apenas pontualmente
+para destino indefinido e retorno. Nao ha rastreamento continuo, atualizacao em
+segundo plano, mapa de rota ou notificacao push nativa; o mapa de fase futura
+foi removido da Home para nao aparentar cobertura GPS que nao existe. A proxima
+decisao de produto precisa definir a politica de rastreamento (somente durante
+entrega ativa ou tambem enquanto online), permissao de segundo plano e retencao
+da localizacao antes de implementar esse fluxo.
+
+Limitacao: liberacao de repasse, solicitacao/pagamento de saque e antecipacao
+continuam sem regras ou operacoes implementadas; o painel mostra os estados
+existentes sem inferir que qualquer valor pendente foi pago.
+
+### 2026-08-20 — Faturas auditáveis para empresa e administrador
+
+Implementadas rotas reais de fatura: o admin fecha, somente em segunda-feira,
+todas as entregas `COMPLETED`, `BILLED` e ainda sem `invoiceId`, agrupadas por
+empresa. Os valores total, repasse e plataforma são congelados na emissão e os
+pedidos são vinculados condicionalmente na mesma transação para não entrar em
+duas faturas concorrentes. O admin também pode marcar uma fatura `PENDING` ou
+`OVERDUE` como paga de forma manual; a empresa só lista/detalha as próprias
+faturas.
+
+Nova tabela append-only `InvoiceStatusHistory` registra emissão, vencimento
+automático na consulta financeira e confirmação de pagamento, incluindo o
+usuário quando a mudança é humana. Migration aditiva local aplicada:
+`20260820123825_invoice_status_history`.
+
+Rotas: `POST/GET/PATCH /admin/financial/invoices`,
+`GET /company/invoices` e `GET /company/invoices/:id`. Arquivos centrais:
+`apps/api/src/finance/invoice.{service,controller}.ts`, contratos Zod/types e
+a migration acima.
+
+Validação: `prisma validate`, `prisma migrate status`, typecheck da API e E2E
+do ciclo de entrega aprovados (17 testes). A E2E cria repasse, fecha a fatura,
+consulta como empresa e a marca como paga, verificando o histórico
+`PENDING → PAID`.
+
+As telas `company-web/faturas` e `admin-web/faturas` agora usam as rotas reais:
+ambas têm filtro por status/período e detalhe de valores, pedidos e trilha de
+auditoria. O admin fecha o ciclo selecionando uma segunda-feira e confirma o
+pagamento manual no detalhe; a empresa só visualiza, sem qualquer ação de
+cobrança. Builds dos dois Next.js e a suíte E2E completa da API (17 suítes,
+130 testes) foram aprovados após a integração.
+
+Pendente: substituir os detalhes mockados de cliente/entregador no admin por
+dados financeiros reais e ampliar os relatórios por período. Saque, liberação
+de repasse e antecipação ainda não possuem operação financeira.
+
+### 2026-08-20 — Base financeira real para o motoboy
+
+Ao concluir uma entrega, a mesma transacao que grava `COMPLETED` agora cria um
+`WalletTransaction` `CREDIT_REPASSE` em `PENDING` e soma o valor congelado em
+`Wallet.cachedBlockedBalance`. A chave unica `idempotencyKey` garante que duas
+finalizacoes concorrentes nao gerem dois repasses; a segunda recebe conflito e
+o unico credito confirmado permanece no ledger.
+
+Nova rota autenticada de motorista: `GET /driver/wallet`, com filtros por
+status e periodo, retorna saldo disponivel, saldo a liberar, reserva de saque,
+checagem cache-versus-ledger e extrato com referencia da entrega. O app trocou
+a carteira mockada por essa rota, mostra os tres estados de extrato, permite
+filtrar e abrir o pedido associado. As telas de saque e antecipacao eram apenas
+formularios ficticios; foram removidas da navegacao ate haver as regras e
+operacoes reais.
+
+Migration aditiva aplicada somente no PostgreSQL local:
+`20260820121751_wallet_transaction_idempotency` adiciona
+`wallet_transactions.idempotencyKey` e indice unico. O SQL foi obtido com
+`prisma migrate diff`, pois `prisma migrate dev --create-only` nao pode abrir
+o prompt interativo neste ambiente; o resultado foi inspecionado antes do
+`prisma migrate deploy` local.
+
+Arquivos principais: `apps/api/src/finance/*`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`packages/{types,validation,api-client}/src/finance*`,
+`apps/driver-app/src/screens/DriverWalletScreen.tsx` e a migration acima.
+
+Validacao: `prisma validate`, `prisma migrate status`, `pnpm typecheck`, tres
+suites unitarias de API (50 testes) e `pnpm --filter @motoboycity/api test:e2e`
+(17 suites, 130 testes) aprovados. A e2e cobre o credito pendente no endpoint
+e duas finalizacoes concorrentes gerando exatamente um repasse.
+
+Limitacoes/proximo passo: ainda nao existem as acoes financeiras para liberar
+repasse, solicitar/pagar saque, antecipar ou faturar empresas. Logo o saldo
+disponivel continuara em zero para novos creditos; isso e exibido como
+"a liberar", sem prometer pagamento ao motoboy. A proxima fase deve definir a
+regra de liberacao e ligar faturas/controles auditaveis do admin e da empresa.
+
+### 2026-08-20 — Historico e detalhe reais no driver-app
+
+As rotas `History` e `OrderDetail` do app nao usam mais os pedidos e valores
+ficticios de `mockData`. O historico consulta somente entregas `COMPLETED` do
+motoboy autenticado e mostra a soma de `driverValue` como **ganhos por
+entregas**, nao como saldo, carteira ou repasse. O detalhe busca o pedido por
+ID e exibe valores congelados, coleta, destino, empresa e modalidade reais.
+
+`mockData` mantem somente as telas que ainda nao tem backend (carteira,
+perfil/configuracoes); os mocks de historico e detalhe foram removidos para
+nao reaparecerem acidentalmente em producao.
+
+Arquivos: `apps/driver-app/src/screens/{DriverHistoryScreen,DriverOrderDetailScreen}.tsx`,
+`apps/driver-app/App.tsx` e `apps/driver-app/src/lib/mockData.ts`.
+
+Validacao: typecheck e teste do driver-app aprovados. O lint nao tem erros e
+reporta 79 warnings de estilo no app, incluindo estilos inline das telas novas.
+
+Limitacao: `driverValue` e a remuneracao congelada da entrega, mas nao existe
+carteira, credito ou estado de repasse no backend ainda; por isso esta tela nao
+declara pagamento recebido.
+
+### 2026-08-20 — Realtime para cancelamento e conta impedida no app
+
+Cancelamento administrativo de entrega ja aceita/coletada/em retorno agora
+notifica o motoboy por `delivery:cancelled`, com todos os IDs do lote afetado.
+O evento e emitido apenas apos a transacao de cancelamento e o app remove esses
+pedidos do estado ativo, informa o motivo e volta para a home. Isso evita manter
+uma tela operacional cujo proximo CTA inevitavelmente falharia em conflito.
+
+O socket do app tambem passou a tratar o evento ja existente
+`driver:account-status-changed`: ao receber `SUSPENDED` ou `BLOCKED`, remove a
+oferta pendente, marca a presenca local como indisponivel e encerra a tela de
+operacao com orientacao para suporte. `ACTIVE` nao muda disponibilidade, como
+define a regra de negocio.
+
+Arquivos: `apps/api/src/deliveries/{deliveries.module,deliveries.service}.ts`,
+`apps/driver-app/src/lib/socket.ts` e `apps/driver-app/src/screens/HomeScreen.tsx`.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces e teste unitario de
+`DeliveriesService` aprovado (46 testes), incluindo emissao para o motorista
+afetado pelo cancelamento.
+
+### 2026-08-20 — Ciclo operacional no driver-app
+
+O app agora consome o ciclo de entrega ja existente na API. Depois de aceitar
+uma oferta, ele abre o pedido atribuido e mostra uma acao por estado:
+`ACCEPTED` confirma coleta, `COLLECTED` marca a entrega e `DELIVERED` conclui
+o retorno quando exigido. Pedido sem destino conhecido captura um fix GPS para
+definir o destino e o preco; retorno sempre captura um fix para a validacao de
+proximidade. Pedido com destino conhecido nao envia coordenada desnecessaria.
+
+- Adicionado `@react-native-community/geolocation` (3.x), permissao precisa no
+  Android e texto de permissao no iOS. A captura e pontual, em primeiro plano,
+  com alta precisao, timeout de 20 s e sem rastreamento em segundo plano.
+  Fix marcado pelo sistema como simulado e recusado no app antes da chamada.
+- `GET /deliveries` passou a aceitar motoboy, sempre filtrando por `driverId`
+  no servidor. Isso permite recuperar os pedidos `ACCEPTED`, `COLLECTED` e
+  `DELIVERED` ao reabrir o app; nenhuma entrega de outro motoboy e exposta.
+- Ao concluir um item sem retorno, o app avanca para o proximo pedido ativo,
+  quando existir. Enquanto uma entrega esta operacional, a tela nao permite
+  voltar acidentalmente para a home e perder o acesso a ela.
+- O Jest do app passou a mockar AsyncStorage e geolocalizacao; antes, o unico
+  teste de renderizacao falhava por tentar acessar o modulo nativo real.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/lib/{location,activeDeliveries}.ts` e permissoes nativas.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces;
+`pnpm --filter @motoboycity/driver-app test -- --runInBand` aprovado;
+`pnpm --filter @motoboycity/api exec jest src/deliveries/deliveries.service.spec.ts --runInBand`
+aprovado (46 testes); e E2E focado de ofertas aprovado (8 testes), incluindo
+listagem isolada por motoboy. Lint do driver-app sem erros, com 75 warnings de
+estilos inline/no-void preexistentes ou ja adotados pelo padrao atual.
+
+Limitacao: nao ha mapa, navegacao externa, rastreamento continuo, segundo plano
+ou foreground service neste recorte; isso continua fora do contrato atual de
+captura pontual de GPS.
+
 ### 2026-08-19 — Precisao do GPS nas acoes que valem dinheiro
 
 Preparacao para as telas do driver-app, feita ANTES delas de proposito: o
@@ -370,7 +825,7 @@ pra `number | null`: `apps/company-web` (lista de pedidos e mensagem de
 sucesso da criacao) e `apps/admin-web` (lista de pedidos) mostram
 "A calcular na entrega" quando nulo; `apps/driver-app`
 (`IncomingOfferScreen`) mostra "A calcular" no lugar do valor da oferta.
-Nenhuma dessas telas tem UI pra *criar* um pedido sem destino ainda — so
+Nenhuma dessas telas tem UI pra _criar_ um pedido sem destino ainda — so
 passaram a exibir corretamente o caso quando ele existir via API.
 
 ### 2026-08-13 — pedidos em lote
@@ -508,36 +963,36 @@ seguinte de forma inesperada.
 
 Executadas em 2026-08-13, apos a implementacao de lote:
 
-| Comando                                                                             | Resultado                                |
-| ----------------------------------------------------------------------------------- | ---------------------------------------- |
-| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma` | aprovado                                 |
-| `pnpm typecheck`                                                                    | aprovado nos 8 workspaces (P1-02)        |
-| `pnpm --filter @motoboycity/api test -- --runInBand`                                | 17 suites, 186 testes aprovados (P1-02)  |
-| testes focados de drivers + dispatch                                                | 2 suites, 51 testes aprovados (P1-02)    |
-| `pnpm --filter @motoboycity/api lint`                                               | aprovado (P1-02)                         |
-| `pnpm --filter @motoboycity/admin-web lint`                                         | aprovado (P1-02)                         |
-| Prettier nos arquivos alterados e `git diff --check`                                | aprovados (P1-02)                        |
-| `pnpm --filter @motoboycity/driver-app lint`                                        | aprovado com 74 warnings preexistentes   |
-| `git diff --check`                                                                  | aprovado                                 |
-| `prisma migrate deploy` em PostgreSQL temporario vazio                              | 7 migrations aplicadas com sucesso       |
-| `prisma migrate status` no banco temporario                                         | schema atualizado                        |
-| rollback manual da migration no banco temporario                                    | indice e coluna removidos com sucesso    |
-| `prisma migrate deploy` em PostgreSQL temporario vazio (P1-01)                      | 8 migrations aplicadas com sucesso       |
-| duas insercoes `PENDING` concorrentes para a mesma entrega (P1-01)                  | uma confirmada, outra rejeitada; total 1 |
-| rollback manual da migration P1-01 no banco temporario                              | indice parcial removido com sucesso      |
-| `prisma migrate status` no Neon Postgres (staging, 2026-08-16)                      | banco vazio, 0/8 migrations aplicadas    |
-| `prisma migrate deploy` no Neon Postgres (staging, 2026-08-16)                      | 8/8 migrations aplicadas com sucesso     |
-| `prisma migrate status` no Neon apos o deploy (2026-08-16)                          | "Database schema is up to date!"         |
-| `prisma migrate deploy` no Postgres local `docker-compose` (2026-08-16)             | 2 migrations pendentes aplicadas         |
-| `pnpm --filter @motoboycity/api exec jest --config test/jest-e2e.json --runInBand` (2026-08-16) | 16 suites, 110 testes aprovados |
-| mesmo comando sem `--runInBand` (2026-08-16)                                        | 3 falhas intermitentes por corrida entre arquivos |
-| `pnpm --filter @motoboycity/api exec eslint test/delivery-batch-dispatch.e2e-spec.ts test/delivery-offers.e2e-spec.ts` | aprovado |
-| `pnpm --filter @motoboycity/api exec tsc --noEmit` (2026-08-16)                     | aprovado                                 |
-| `prisma migrate dev` (ciclo de entrega, 2026-08-16)                                 | migration aditiva aplicada no Postgres local |
-| `pnpm --filter @motoboycity/api exec jest --runInBand` (ciclo de entrega, 2026-08-16) | 18 suites, 210 testes aprovados         |
-| `pnpm --filter @motoboycity/api exec jest --config test/jest-e2e.json --runInBand` (ciclo de entrega, 2026-08-16) | 17 suites, 126 testes aprovados |
-| `pnpm typecheck` (raiz, 8 workspaces, ciclo de entrega, 2026-08-16)                  | aprovado                                 |
-| `pnpm lint` (raiz, 8 workspaces, ciclo de entrega, 2026-08-16)                       | aprovado (driver-app com 74 warnings preexistentes) |
+| Comando                                                                                                                | Resultado                                           |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma`                                    | aprovado                                            |
+| `pnpm typecheck`                                                                                                       | aprovado nos 8 workspaces (P1-02)                   |
+| `pnpm --filter @motoboycity/api test -- --runInBand`                                                                   | 17 suites, 186 testes aprovados (P1-02)             |
+| testes focados de drivers + dispatch                                                                                   | 2 suites, 51 testes aprovados (P1-02)               |
+| `pnpm --filter @motoboycity/api lint`                                                                                  | aprovado (P1-02)                                    |
+| `pnpm --filter @motoboycity/admin-web lint`                                                                            | aprovado (P1-02)                                    |
+| Prettier nos arquivos alterados e `git diff --check`                                                                   | aprovados (P1-02)                                   |
+| `pnpm --filter @motoboycity/driver-app lint`                                                                           | aprovado com 74 warnings preexistentes              |
+| `git diff --check`                                                                                                     | aprovado                                            |
+| `prisma migrate deploy` em PostgreSQL temporario vazio                                                                 | 7 migrations aplicadas com sucesso                  |
+| `prisma migrate status` no banco temporario                                                                            | schema atualizado                                   |
+| rollback manual da migration no banco temporario                                                                       | indice e coluna removidos com sucesso               |
+| `prisma migrate deploy` em PostgreSQL temporario vazio (P1-01)                                                         | 8 migrations aplicadas com sucesso                  |
+| duas insercoes `PENDING` concorrentes para a mesma entrega (P1-01)                                                     | uma confirmada, outra rejeitada; total 1            |
+| rollback manual da migration P1-01 no banco temporario                                                                 | indice parcial removido com sucesso                 |
+| `prisma migrate status` no Neon Postgres (staging, 2026-08-16)                                                         | banco vazio, 0/8 migrations aplicadas               |
+| `prisma migrate deploy` no Neon Postgres (staging, 2026-08-16)                                                         | 8/8 migrations aplicadas com sucesso                |
+| `prisma migrate status` no Neon apos o deploy (2026-08-16)                                                             | "Database schema is up to date!"                    |
+| `prisma migrate deploy` no Postgres local `docker-compose` (2026-08-16)                                                | 2 migrations pendentes aplicadas                    |
+| `pnpm --filter @motoboycity/api exec jest --config test/jest-e2e.json --runInBand` (2026-08-16)                        | 16 suites, 110 testes aprovados                     |
+| mesmo comando sem `--runInBand` (2026-08-16)                                                                           | 3 falhas intermitentes por corrida entre arquivos   |
+| `pnpm --filter @motoboycity/api exec eslint test/delivery-batch-dispatch.e2e-spec.ts test/delivery-offers.e2e-spec.ts` | aprovado                                            |
+| `pnpm --filter @motoboycity/api exec tsc --noEmit` (2026-08-16)                                                        | aprovado                                            |
+| `prisma migrate dev` (ciclo de entrega, 2026-08-16)                                                                    | migration aditiva aplicada no Postgres local        |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` (ciclo de entrega, 2026-08-16)                                  | 18 suites, 210 testes aprovados                     |
+| `pnpm --filter @motoboycity/api exec jest --config test/jest-e2e.json --runInBand` (ciclo de entrega, 2026-08-16)      | 17 suites, 126 testes aprovados                     |
+| `pnpm typecheck` (raiz, 8 workspaces, ciclo de entrega, 2026-08-16)                                                    | aprovado                                            |
+| `pnpm lint` (raiz, 8 workspaces, ciclo de entrega, 2026-08-16)                                                         | aprovado (driver-app com 74 warnings preexistentes) |
 
 Nao foram executados:
 
@@ -625,3 +1080,134 @@ usado como staging real. Continua comentado no `.env` de proposito — o dev
 local segue no Postgres do `docker-compose.yml`. Para rodar qualquer comando
 Prisma contra o Neon, use override de `DATABASE_URL` na propria chamada em
 vez de editar o `.env` compartilhado.
+
+## Atualização — 2026-08-20: ciclo semanal de repasse e saques auditáveis
+
+Decisão de produto confirmada: o crédito do entregador nasce `PENDING` ao
+concluir a entrega e recebe a data da **próxima segunda-feira**. A fila BullMQ
+`finance` agenda a liberação semanal às 00:00 de `America/Sao_Paulo`; na
+inicialização, créditos cuja data já venceu também são liberados de forma
+idempotente. Créditos antigos sem `releaseAt` são incluídos somente no job
+semanal de transição. A entrega concluída numa segunda entra no ciclo seguinte.
+
+O saque é permitido ao motoboy somente na segunda-feira, sem taxa nem valor
+mínimo. A solicitação reserva saldo disponível por meio de um lançamento
+`DEBIT_WITHDRAWAL` pendente. O administrador pode aprovar, marcar como pago
+com referência opcional de comprovante/protocolo, ou rejeitar com motivo
+obrigatório; a rejeição cancela o débito e devolve o saldo. Cada transição
+(`PENDING → APPROVED → PAID` ou `PENDING/APPROVED → REJECTED`) gera uma linha
+append-only de auditoria, com responsável, data e nota. As mutações usam
+transação serializável com retentativa de `P2034` e atualização condicional;
+as corridas de solicitação, aprovação e pagamento não duplicam dinheiro.
+
+Foi criada e aplicada **somente no PostgreSQL local** a migration aditiva
+`20260820173418_withdrawal_request_audit`: adiciona `paymentReference` opcional
+em `withdrawal_requests` e cria `withdrawal_request_status_history` com FKs e
+índice. O SQL foi revisado: não remove nem altera colunas existentes. Não foi
+executada contra staging/Neon.
+
+Principais arquivos:
+
+- `apps/api/src/finance/financial-payout.service.ts`,
+  `financial-payout.processor.ts`, `financial-release.scheduler.ts`,
+  `financial-clock.service.ts` e `finance-release.utils.ts`;
+- `apps/api/src/finance/withdrawal.controller.ts`, `finance.module.ts`,
+  `finance-ledger.service.ts` e `apps/api/src/app.module.ts` (o
+  `FinanceModule` passou a ser registrado no módulo principal; antes disso as
+  rotas financeiras não eram carregadas em execução);
+- contratos em `packages/validation/src/finance/withdrawal.schema.ts`,
+  `packages/types/src/finance.ts` e os clientes financeiros tipados;
+- `apps/driver-app/src/screens/DriverWalletScreen.tsx`: pedido, saldo
+  reservado e linha do tempo de cada saque;
+- `apps/admin-web/src/app/(app)/financeiro/saques/`: fila filtrável e detalhe
+  de pagamento com PIX, referência e auditoria.
+
+Validações desta fase:
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma` | aprovado antes da migration |
+| `pnpm --filter @motoboycity/api exec prisma migrate dev --name withdrawal_request_audit` | migration aditiva aplicada no Postgres local |
+| `pnpm --filter @motoboycity/validation build` | aprovado |
+| `pnpm typecheck` | aprovado nos 8 workspaces |
+| testes unitários focados de `finance-release`, `financial-payout` e `finance-ledger` | 3 suítes / 7 testes aprovados |
+| `apps/api/test/withdrawal-payout.e2e-spec.ts` | 2 testes E2E aprovados: concorrência, aprovação, pagamento, rejeição e saldo derivado conferido |
+| `pnpm --filter @motoboycity/driver-app lint` e `pnpm --filter @motoboycity/admin-web lint` | aprovados |
+| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 132 testes aprovados |
+| `pnpm lint` | aprovado nos 8 workspaces |
+| builds de `@motoboycity/admin-web` e `@motoboycity/company-web` | aprovados; rotas de saque incluídas no admin |
+| `git diff --check` | aprovado (avisos de CRLF preexistentes no worktree) |
+
+Próximo passo concreto: executar a suíte E2E e os lints completos após esta
+fase; a próxima decisão de produto ainda em aberto é rastreamento GPS contínuo
+durante entrega ativa (permissão, retenção e visibilidade), que não deve ser
+implementado sem essa política explícita.
+
+## Atualização — 2026-08-20: rastreamento GPS contínuo durante entrega ativa
+
+Política de produto confirmada pelo responsável: o rastreamento começa no
+aceite e termina em `COMPLETED`/`CANCELLED`; deve continuar com a tela bloqueada
+ou o aplicativo em segundo plano; admin acompanha todas as entregas ativas e a
+empresa somente as suas; a trajetória bruta é removida após 30 dias; GPS serve
+para acompanhamento, sem alterar status nem aplicar punições automaticamente.
+
+Persistência e contrato:
+
+- Migration aditiva local `20260820175719_delivery_location_tracking` cria
+  `delivery_location_points`, com FKs de pedido/motoboy e índices por
+  entrega/data e data. Foi aplicada **somente no PostgreSQL local** após
+  revisão do SQL; não altera dados nem migrations anteriores.
+- `POST /tracking/driver/deliveries/:deliveryId/points` aceita ponto somente
+  do motoboy atribuído a uma entrega em `ACCEPTED`, `COLLECTED` ou `DELIVERED`.
+  Além do ponto, atualiza a última posição do perfil e emite
+  `delivery:location` para o admin e a empresa dona do pedido.
+- `GET /tracking/active` aplica o escopo no servidor (todas as entregas para
+  admin; empresas ativas do membro para empresa; próprias para motoboy).
+  `GET /tracking/deliveries/:deliveryId` entrega a trajetória por pedido para
+  quem tem acesso. A fila BullMQ `tracking` remove pontos mais antigos que 30
+  dias diariamente às 03:00 de `America/Sao_Paulo` e também na inicialização.
+
+Aplicativo do motoboy:
+
+- Android: `DeliveryLocationTrackingService` é um foreground service visível
+  com atualização GPS por intervalo/distância (20 s / 50 m), enviando os
+  pontos diretamente à API para cada entrega ativa. Inclui permissões precisa,
+  background, foreground-location e notificação.
+- iOS: `LocationTrackingModule` usa Core Location com autorização “Sempre”,
+  `UIBackgroundModes=location`, distância de 50 m e envio direto à API.
+- O app sincroniza o serviço no aceite, na reabertura, após cada transição de
+  status e no cancelamento; para no logout e sem nenhuma entrega ativa. A tela
+  operacional explica o uso e a interrupção automática ao motoboy.
+
+Painéis:
+
+- As listas de pedidos administrativa e da empresa exibem rastreamento ao
+  vivo, com atualização Socket.IO e link da última posição para o mapa. Os
+  detalhes do pedido exibem a última posição e a sequência de pontos
+  disponíveis, deixando explícita a retenção máxima de 30 dias.
+
+Arquivos principais: `apps/api/src/tracking/`,
+`apps/api/src/realtime/realtime.gateway.ts`,
+`apps/driver-app/{android,ios,src/lib/deliveryTracking.ts}`, detalhes/listas de
+`pedidos` dos dois painéis e contratos em `packages/{validation,types,api-client}`.
+
+Validações já executadas nesta fase:
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` antes da migration | aprovado |
+| `prisma migrate dev --name delivery_location_tracking` | migration aplicada no PostgreSQL local; SQL aditivo revisado |
+| `pnpm --filter @motoboycity/{validation,api,api-client} typecheck` | aprovado |
+| `pnpm --filter @motoboycity/{driver-app,admin-web,company-web,api} typecheck` | aprovado |
+| `apps/api/src/tracking/delivery-tracking.service.spec.ts` | 3 testes aprovados: registro/emissão, escopo de empresa e retenção |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
+| lints específicos de driver, admin, empresa e API | aprovados |
+| `pnpm typecheck` | aprovado nos 8 workspaces |
+| `pnpm lint` | aprovado nos 8 workspaces |
+| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 132 testes aprovados |
+| `git diff --check` | aprovado (somente avisos CRLF já presentes no worktree) |
+
+Não foi executado build nativo Android/iOS nesta sessão. Antes de publicar,
+validar em dispositivo físico as permissões, a notificação Android e o fluxo
+Core Location em segundo plano; em iOS, encerramento forçado pelo usuário é
+uma limitação do sistema operacional e não pode ser contornado pelo app.

@@ -1,4 +1,9 @@
-import type { AdminCompanyListItem, ApproveCompanyResult, CompanyStatus } from '@motoboycity/types';
+import type {
+  AdminCompanyDetail,
+  AdminCompanyListItem,
+  ApproveCompanyResult,
+  CompanyStatus,
+} from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminCompaniesApiConfig {
@@ -13,6 +18,13 @@ export function createAdminCompaniesApi({ baseUrl }: AdminCompaniesApiConfig) {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<AdminCompanyListItem[]>(response);
+    },
+
+    async detail(accessToken: string, companyId: string): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
     },
 
     async approve(accessToken: string, companyId: string): Promise<ApproveCompanyResult> {

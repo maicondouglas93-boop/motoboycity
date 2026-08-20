@@ -1,31 +1,26 @@
 /**
  * MOTOboyCity — Motoboy
- * Fase 9 — reprodução da estrutura visual das telas (sem API, sem recursos nativos)
+ * Entrada do aplicativo operacional: autenticação, presença, ofertas,
+ * entregas, carteira e históricos usam os contratos reais da API.
  *
  * @format
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, StatusBar, StyleSheet, View, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AvailableOrdersScreen } from './src/screens/AvailableOrdersScreen';
-import { ChallengesScreen } from './src/screens/ChallengesScreen';
-import { HistoryScreen } from './src/screens/HistoryScreen';
+import { DeliveryOperationScreen } from './src/screens/DeliveryOperationScreen';
+import { DriverHistoryScreen } from './src/screens/DriverHistoryScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { IncomingOfferScreen } from './src/screens/IncomingOfferScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
-import { MyShiftsScreen } from './src/screens/MyShiftsScreen';
-import { OrderDetailScreen } from './src/screens/OrderDetailScreen';
+import { DriverOrderDetailScreen } from './src/screens/DriverOrderDetailScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
-import { ScheduledOrdersScreen } from './src/screens/ScheduledOrdersScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import { SupportScreen } from './src/screens/SupportScreen';
-import { WalletAdvanceScreen } from './src/screens/WalletAdvanceScreen';
-import { WalletScreen } from './src/screens/WalletScreen';
-import { WalletWithdrawScreen } from './src/screens/WalletWithdrawScreen';
+import { DriverWalletScreen } from './src/screens/DriverWalletScreen';
 import { authApi } from './src/lib/apiClient';
 import { session } from './src/lib/session';
 import type { RootStackParamList } from './src/navigation/types';
@@ -54,7 +49,7 @@ function App() {
       }
     }
 
-    void resolveInitialRoute();
+    resolveInitialRoute().catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -63,7 +58,7 @@ function App() {
   if (!initialRoute) {
     return (
       <SafeAreaProvider>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={styles.loading}>
           <ActivityIndicator />
         </View>
       </SafeAreaProvider>
@@ -83,18 +78,12 @@ function App() {
             component={IncomingOfferScreen}
             options={{ presentation: 'modal', gestureEnabled: false }}
           />
-          <Stack.Screen name="Wallet" component={WalletScreen} />
-          <Stack.Screen name="WalletWithdraw" component={WalletWithdrawScreen} />
-          <Stack.Screen name="WalletAdvance" component={WalletAdvanceScreen} />
-          <Stack.Screen name="History" component={HistoryScreen} />
-          <Stack.Screen name="AvailableOrders" component={AvailableOrdersScreen} />
-          <Stack.Screen name="ScheduledOrders" component={ScheduledOrdersScreen} />
-          <Stack.Screen name="MyShifts" component={MyShiftsScreen} />
-          <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
+          <Stack.Screen name="Wallet" component={DriverWalletScreen} />
+          <Stack.Screen name="History" component={DriverHistoryScreen} />
+          <Stack.Screen name="OrderDetail" component={DriverOrderDetailScreen} />
+          <Stack.Screen name="DeliveryOperation" component={DeliveryOperationScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Challenges" component={ChallengesScreen} />
-          <Stack.Screen name="Support" component={SupportScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>
@@ -102,3 +91,7 @@ function App() {
 }
 
 export default App;
+
+const styles = StyleSheet.create({
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+});

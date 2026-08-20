@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyListItem } from '@motoboycity/types';
@@ -124,6 +125,12 @@ export default function ClientsPage() {
                     : 'Aprovar'}
                 </Button>
               )}
+              <Link
+                className="inline-flex h-9 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+                href={`/clientes/${company.id}`}
+              >
+                Ver detalhes
+              </Link>
             </CardContent>
           </Card>
         ))}

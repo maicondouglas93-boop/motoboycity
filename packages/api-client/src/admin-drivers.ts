@@ -34,6 +34,13 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       return parseJsonOrThrow<AdminDriverListItem[]>(response);
     },
 
+    async detail(accessToken: string, driverId: string): Promise<AdminDriverListItem> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverListItem>(response);
+    },
+
     async approve(accessToken: string, driverId: string): Promise<DriverReviewResult> {
       const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/approve`, {
         method: 'PATCH',

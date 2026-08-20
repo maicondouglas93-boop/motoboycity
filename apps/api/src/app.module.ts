@@ -6,11 +6,13 @@ import { AdminCompaniesModule } from './admin/companies/admin-companies.module';
 import { AdminDriversModule } from './admin/drivers/admin-drivers.module';
 import { AdminPlatformSettingsModule } from './admin/platform-settings/admin-platform-settings.module';
 import { AdminPricingTablesModule } from './admin/pricing-tables/admin-pricing-tables.module';
+import { AdminReportsModule } from './admin/reports/admin-reports.module';
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
+import { FinanceModule } from './finance/finance.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { DriverPresenceModule } from './driver-presence/driver-presence.module';
 import { HealthModule } from './health/health.module';
@@ -20,6 +22,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ServiceTypesModule } from './service-types/service-types.module';
+import { TrackingModule } from './tracking/tracking.module';
 
 @Module({
   imports: [
@@ -34,6 +37,7 @@ import { ServiceTypesModule } from './service-types/service-types.module';
     AdminDriversModule,
     AdminServiceTypesModule,
     AdminPricingTablesModule,
+    AdminReportsModule,
     AdminPlatformSettingsModule,
     PricingModule,
     GoogleMapsModule,
@@ -42,7 +46,9 @@ import { ServiceTypesModule } from './service-types/service-types.module';
     DriverPresenceModule,
     DeliveriesModule,
     DeliveryOffersModule,
+    FinanceModule,
     ServiceTypesModule,
+    TrackingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

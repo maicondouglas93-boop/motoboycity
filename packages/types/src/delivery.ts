@@ -36,12 +36,27 @@ export interface DeliveryListItem {
   platformValue: number | null;
   requiresReturn: boolean;
   returnValue: number | null;
+  paymentMethod: 'BILLED' | 'ONLINE';
+  statusChangedAt: string;
   scheduledAt: string | null;
   createdAt: string;
 }
 
 export interface DeliveryDetail extends DeliveryListItem {
   addresses: DeliveryAddressItem[];
+  driver: { id: string; name: string; email: string; phone: string } | null;
+  invoice: {
+    id: string;
+    number: string;
+    status: 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+  } | null;
+  statusHistory: Array<{
+    fromStatus: DeliveryStatus | null;
+    toStatus: DeliveryStatus;
+    changedAt: string;
+    changedBy: { id: string; name: string } | null;
+    note: string | null;
+  }>;
 }
 
 export interface DeliveryAddressInput {
@@ -91,6 +106,35 @@ export interface CompleteReturnPayload {
   lng: number;
   /** Raio de erro do fix em metros — ver complete-return.schema.ts. */
   accuracy?: number;
+}
+
+export interface DeliveryTrackingPoint {
+  id: string;
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  capturedAt: string;
+}
+
+export interface DeliveryTrackingDetail {
+  deliveryId: string;
+  displayNumber: number;
+  status: DeliveryStatus;
+  isActive: boolean;
+  driver: { id: string; name: string } | null;
+  lastLocation: DeliveryTrackingPoint | null;
+  points: DeliveryTrackingPoint[];
+  historyAvailableSince: string;
+}
+
+export interface ActiveDeliveryTrackingItem {
+  deliveryId: string;
+  displayNumber: number;
+  companyId: string;
+  companyName: string;
+  driver: { id: string; name: string; phone: string };
+  status: DeliveryStatus;
+  lastLocation: DeliveryTrackingPoint | null;
 }
 
 export interface CompanyAddressItem {

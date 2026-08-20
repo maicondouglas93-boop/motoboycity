@@ -7,6 +7,9 @@ import { DrawerMenu } from '../components/DrawerMenu';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
 import { driverPresenceApi } from '../lib/apiClient';
+import { getActiveDeliveries } from '../lib/activeDeliveries';
+import { syncDeliveryTracking } from '../lib/deliveryTracking';
+import { LocationError } from '../lib/location';
 import { session } from '../lib/session';
 import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -14,39 +17,98 @@ import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
+function deliveryStatusLabel(status: string): string {
+  switch (status) {
+    case 'ACCEPTED':
+      return 'A caminho da coleta';
+    case 'COLLECTED':
+      return 'Em entrega';
+    case 'DELIVERED':
+      return 'Retorno pendente';
+    default:
+      return status;
+  }
+}
+
 export function HomeScreen({ navigation }: Props) {
   const isDark = useColorScheme() === 'dark';
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [tab, setTab] = useState<'ongoing' | 'pending'>('ongoing');
   const [presenceLoading, setPresenceLoading] = useState(true);
+  const [presenceError, setPresenceError] = useState<string | null>(null);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
 
   const availability = useDispatchStore((state) => state.availability);
+  const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
+  const socketConnected = useDispatchStore((state) => state.socketConnected);
   const setPresence = useDispatchStore((state) => state.setPresence);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
+  const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
   const text = isDark ? colors.textDark : colors.text;
   const muted = isDark ? colors.mutedDark : colors.muted;
   const background = isDark ? colors.backgroundDark : colors.background;
+  const surface = isDark ? colors.surfaceDark : colors.surface;
+  const border = isDark ? colors.borderDark : colors.border;
+  const isAvailable = availability === 'AVAILABLE';
+
+  async function syncPresence(token: string) {
+    try {
+      const presence = await driverPresenceApi.get(token);
+      setPresence(presence.availability, presence.since);
+      setPresenceError(null);
+    } catch {
+      setPresenceError('Nao foi possivel confirmar sua disponibilidade. Verifique a conexao.');
+    } finally {
+      setPresenceLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrap() {
       const token = await session.getToken();
-      if (!token || cancelled) return;
+      if (!token || cancelled) {
+        if (!cancelled) setPresenceLoading(false);
+        return;
+      }
+
+      await syncPresence(token);
+      if (cancelled) return;
 
       try {
-        const presence = await driverPresenceApi.get(token);
-        if (!cancelled) setPresence(presence.availability, presence.since);
+        const deliveries = await getActiveDeliveries(token);
+        if (!cancelled) {
+          setActiveDeliveries(deliveries);
+          try {
+            await syncDeliveryTracking(
+              token,
+              deliveries.map((delivery) => delivery.id),
+            );
+            if (!cancelled) setTrackingError(null);
+          } catch (error) {
+            if (!cancelled) {
+              setTrackingError(
+                error instanceof LocationError
+                  ? error.message
+                  : 'Não foi possível iniciar o rastreamento das entregas ativas.',
+              );
+            }
+          }
+          if (cancelled) return;
+          const current = deliveries[0];
+          if (current) navigation.navigate('DeliveryOperation', { deliveryId: current.id });
+        }
       } catch {
-        // Mantém UNAVAILABLE (padrão da store) se a busca inicial falhar.
-      } finally {
-        if (!cancelled) setPresenceLoading(false);
+        // A disponibilidade continua utilizavel; a proxima abertura recarrega as entregas ativas.
       }
 
       if (cancelled) return;
 
       connectDriverSocket(token, {
+        onConnected: () => {
+          syncPresence(token).catch(() => undefined);
+        },
         onOffer: (offer) => {
           setIncomingOffer(offer);
           navigation.navigate('IncomingOffer');
@@ -61,16 +123,52 @@ export function HomeScreen({ navigation }: Props) {
             setIncomingOffer(null);
           }
         },
+        onDeliveryCancelled: (deliveryIds) => {
+          const remainingDeliveries = useDispatchStore
+            .getState()
+            .activeDeliveries.filter((delivery) => !deliveryIds.includes(delivery.id));
+          setActiveDeliveries(remainingDeliveries);
+          syncDeliveryTracking(
+            token,
+            remainingDeliveries.map((delivery) => delivery.id),
+          ).catch(() => undefined);
+          Alert.alert('Pedido cancelado', 'Este pedido foi cancelado pela administracao.');
+          navigation.popToTop();
+        },
+        onAccountStatusChanged: (accountStatus) => {
+          if (accountStatus === 'ACTIVE') return;
+          setIncomingOffer(null);
+          setPresence('UNAVAILABLE', null);
+          Alert.alert(
+            'Conta indisponivel',
+            'Sua conta foi suspensa ou bloqueada. Entre em contato com o suporte.',
+          );
+          navigation.popToTop();
+        },
       });
     }
 
-    void bootstrap();
+    bootstrap().catch(() => {
+      if (!cancelled) {
+        setPresenceError('Nao foi possivel iniciar a sincronizacao do aplicativo.');
+        setPresenceLoading(false);
+      }
+    });
+
     return () => {
       cancelled = true;
       disconnectDriverSocket();
     };
+    // Esta tela e montada uma unica vez na sessao; callbacks do socket usam a store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function refreshPresence() {
+    const token = await session.getToken();
+    if (!token) return;
+    setPresenceLoading(true);
+    await syncPresence(token);
+  }
 
   async function handleToggleAvailability(value: boolean) {
     const token = await session.getToken();
@@ -83,11 +181,14 @@ export function HomeScreen({ navigation }: Props) {
     try {
       const result = await driverPresenceApi.set(token, nextAvailability);
       setPresence(result.availability, result.since);
+      setPresenceError(null);
     } catch (error) {
-      setPresence(previous.availability, previous.since);
+      await syncPresence(token);
       Alert.alert(
-        'Ops',
-        error instanceof ApiError ? error.message : 'Não foi possível atualizar sua disponibilidade.',
+        'Disponibilidade nao atualizada',
+        error instanceof ApiError
+          ? error.message
+          : 'Nao foi possivel atualizar sua disponibilidade. Tente novamente.',
       );
     }
   }
@@ -96,46 +197,108 @@ export function HomeScreen({ navigation }: Props) {
     <SafeAreaView style={[styles.container, { backgroundColor: background }]} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => setDrawerVisible(true)} hitSlop={12}>
-          <Text style={[styles.menuIcon, { color: text }]}>☰</Text>
+          <Text style={[styles.menuIcon, { color: text }]}>Menu</Text>
         </Pressable>
-      </View>
-
-      <View style={styles.map}>
-        <Text style={{ color: muted }}>🗺️ Mapa (integração com Google Maps — Fase futura)</Text>
-      </View>
-
-      <View
-        style={[styles.sheet, { backgroundColor: isDark ? colors.surfaceDark : colors.surface }]}
-      >
-        <View style={styles.tabs}>
-          <Pressable
-            style={[styles.tab, tab === 'ongoing' && styles.tabActive]}
-            onPress={() => setTab('ongoing')}
-          >
-            <Text style={[styles.tabLabel, { color: tab === 'ongoing' ? '#fff' : muted }]}>
-              Em Andamento
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tab, tab === 'pending' && styles.tabActive]}
-            onPress={() => setTab('pending')}
-          >
-            <Text style={[styles.tabLabel, { color: tab === 'pending' ? '#fff' : muted }]}>
-              Pendentes
-            </Text>
-          </Pressable>
+        <View style={styles.connection}>
+          <View
+            style={[
+              styles.connectionDot,
+              { backgroundColor: socketConnected ? colors.success : colors.warning },
+            ]}
+          />
+          <Text style={[styles.connectionText, { color: muted }]}>
+            {socketConnected ? 'Conectado' : 'Reconectando'}
+          </Text>
         </View>
+      </View>
 
-        <View style={styles.activeRow}>
-          <Text style={{ color: text }}>Ativo</Text>
+      <View style={styles.content}>
+        <View style={[styles.availabilityCard, { backgroundColor: surface, borderColor: border }]}>
+          <View style={styles.availabilityText}>
+            <Text style={[styles.availabilityTitle, { color: text }]}>
+              {isAvailable ? 'Voce esta online' : 'Voce esta offline'}
+            </Text>
+            <Text style={[styles.availabilityDescription, { color: muted }]}>
+              {isAvailable
+                ? 'Disponivel para receber novas ofertas.'
+                : 'Voce nao recebera novas ofertas ate ficar online.'}
+            </Text>
+          </View>
           <Switch
-            value={availability === 'AVAILABLE'}
+            value={isAvailable}
             onValueChange={handleToggleAvailability}
             disabled={presenceLoading}
           />
         </View>
 
-        <EmptyState message="Você não tem nenhuma entrega" />
+        {presenceError && (
+          <Pressable
+            style={[styles.errorCard, { borderColor: colors.danger }]}
+            onPress={refreshPresence}
+          >
+            <Text style={styles.errorText}>{presenceError}</Text>
+            <Text style={styles.retryText}>Tocar para tentar novamente</Text>
+          </Pressable>
+        )}
+
+        {trackingError && (
+          <Pressable
+            style={[styles.errorCard, { borderColor: colors.warning }]}
+            onPress={() => {
+              session.getToken().then((token) => {
+                if (!token) return;
+                syncDeliveryTracking(
+                  token,
+                  useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+                )
+                  .then(() => setTrackingError(null))
+                  .catch((error: unknown) =>
+                    setTrackingError(
+                      error instanceof LocationError
+                        ? error.message
+                        : 'Não foi possível ativar o rastreamento agora.',
+                    ),
+                  );
+              });
+            }}
+          >
+            <Text style={[styles.errorText, { color: colors.warning }]}>{trackingError}</Text>
+            <Text style={styles.retryText}>Tocar para ativar o rastreamento</Text>
+          </Pressable>
+        )}
+
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: text }]}>Entregas em andamento</Text>
+          {presenceLoading && (
+            <Text style={[styles.loadingText, { color: muted }]}>Sincronizando...</Text>
+          )}
+        </View>
+
+        {activeDeliveries.length > 0 ? (
+          activeDeliveries.map((delivery) => (
+            <Pressable
+              key={delivery.id}
+              style={[styles.deliveryCard, { backgroundColor: surface, borderColor: border }]}
+              onPress={() => navigation.navigate('DeliveryOperation', { deliveryId: delivery.id })}
+            >
+              <Text style={[styles.deliveryNumber, { color: text }]}>
+                Pedido #{delivery.displayNumber}
+              </Text>
+              <Text style={[styles.deliveryStatus, { color: colors.primary }]}>
+                {deliveryStatusLabel(delivery.status)}
+              </Text>
+              <Text style={[styles.deliveryCompany, { color: muted }]}>{delivery.companyName}</Text>
+            </Pressable>
+          ))
+        ) : (
+          <EmptyState
+            message={
+              isAvailable
+                ? 'Aguardando uma nova oferta'
+                : 'Fique online quando estiver pronto para receber ofertas'
+            }
+          />
+        )}
       </View>
 
       <DrawerMenu
@@ -148,51 +311,44 @@ export function HomeScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  menuIcon: {
-    fontSize: 22,
-  },
-  map: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 24,
-    gap: 12,
-  },
-  tabs: {
-    flexDirection: 'row',
-    backgroundColor: '#e4e4e7',
-    borderRadius: 999,
-    padding: 3,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  tabActive: {
-    backgroundColor: colors.primary,
-  },
-  tabLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  activeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
+  menuIcon: { fontSize: 15, fontWeight: '700' },
+  connection: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  connectionDot: { width: 8, height: 8, borderRadius: 4 },
+  connectionText: { fontSize: 12, fontWeight: '600' },
+  content: { flex: 1, paddingHorizontal: 16, gap: 12 },
+  availabilityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    padding: 16,
+    gap: 12,
+  },
+  availabilityText: { flex: 1, gap: 4 },
+  availabilityTitle: { fontSize: 18, fontWeight: '700' },
+  availabilityDescription: { fontSize: 13, lineHeight: 18 },
+  errorCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 4 },
+  errorText: { color: colors.danger, fontSize: 13, fontWeight: '600' },
+  retryText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sectionTitle: { fontSize: 15, fontWeight: '700' },
+  loadingText: { fontSize: 12 },
+  deliveryCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 14,
+    gap: 3,
+  },
+  deliveryNumber: { fontSize: 15, fontWeight: '700' },
+  deliveryStatus: { fontSize: 13, fontWeight: '700' },
+  deliveryCompany: { fontSize: 12 },
 });

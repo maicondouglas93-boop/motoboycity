@@ -14,15 +14,11 @@ export function PrimaryButton({ label, onPress, variant = 'primary', style }: Pr
   return (
     <Pressable
       onPress={onPress}
-      style={[
-        styles.button,
-        isOutline
-          ? { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }
-          : { backgroundColor: colors.primary },
-        style,
-      ]}
+      style={[styles.button, isOutline ? styles.outlineButton : styles.primaryButton, style]}
     >
-      <Text style={[styles.label, { color: isOutline ? colors.text : '#ffffff' }]}>{label}</Text>
+      <Text style={[styles.label, isOutline ? styles.outlineLabel : styles.primaryLabel]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -33,8 +29,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  primaryButton: { backgroundColor: colors.primary },
+  outlineButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
   label: {
     fontSize: 14,
     fontWeight: '600',
   },
+  primaryLabel: { color: '#ffffff' },
+  outlineLabel: { color: colors.text },
 });

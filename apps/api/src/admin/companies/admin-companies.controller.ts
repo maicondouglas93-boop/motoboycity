@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import {
   AdminCompaniesService,
+  type AdminCompanyDetail,
   type AdminCompanyListItem,
   type ApproveCompanyResult,
 } from './admin-companies.service';
@@ -21,6 +22,11 @@ export class AdminCompaniesController {
     @Query(new ZodValidationPipe(listCompaniesQuerySchema)) query: ListCompaniesQuery,
   ): Promise<AdminCompanyListItem[]> {
     return this.adminCompaniesService.list(query.status);
+  }
+
+  @Get(':id')
+  detail(@Param('id') id: string): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.detail(id);
   }
 
   @Patch(':id/approve')

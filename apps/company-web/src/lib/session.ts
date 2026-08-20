@@ -2,10 +2,8 @@ const ACCESS_TOKEN_KEY = 'motoboycity.accessToken';
 
 /**
  * Armazenamento mínimo de sessão (localStorage). Sem refresh token, sem
- * contexto de usuário global ainda — isso é o suficiente para o Login
- * funcionar e para futuras chamadas autenticadas anexarem o token.
- * Proteção de rotas (redirecionar quando não autenticado) fica para uma
- * fase futura.
+ * contexto de usuário global ainda. O `AuthGate` valida o token contra a API
+ * antes de renderizar as rotas autenticadas.
  */
 export const session = {
   getToken(): string | null {

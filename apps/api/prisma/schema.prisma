@@ -210,6 +210,8 @@ model User {
   companyMemberships    CompanyTeamMember[]
   notifications         Notification[]
   deliveryStatusChanges DeliveryStatusHistory[]
+  invoiceStatusChanges  InvoiceStatusHistory[]
+  withdrawalStatusChanges WithdrawalRequestStatusHistory[]
   companiesApproved     Company[]               @relation("CompanyApprovedBy")
   driversReviewed       Driver[]                @relation("DriverReviewedBy")
   platformSettingsEdits PlatformSettings[]      @relation("PlatformSettingsUpdatedBy")
@@ -352,6 +354,7 @@ model Driver {
   deliveries   Delivery[]
   offers       DeliveryOffer[]
   presenceLogs DriverPresenceLog[]
+  trackingPoints DeliveryLocationPoint[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -518,6 +521,7 @@ model Delivery {
   statusHistory      DeliveryStatusHistory[]
   offers             DeliveryOffer[]
   walletTransactions WalletTransaction[]
+  trackingPoints     DeliveryLocationPoint[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -529,6 +533,26 @@ model Delivery {
   @@index([invoiceId])
   @@index([batchId])
   @@map("deliveries")
+}
+
+/// Pontos brutos de localização durante uma entrega ativa. São operacionais,
+/// não evidência automática de status: o job de retenção remove-os após 30
+/// dias, conforme a política de privacidade confirmada.
+model DeliveryLocationPoint {
+  id         String   @id @default(uuid())
+  deliveryId String
+  driverId   String
+  lat        Decimal  @db.Decimal(10, 7)
+  lng        Decimal  @db.Decimal(10, 7)
+  accuracy   Decimal? @db.Decimal(8, 2)
+  capturedAt DateTime @default(now())
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+  driver   Driver   @relation(fields: [driverId], references: [id])
+
+  @@index([deliveryId, capturedAt])
+  @@index([capturedAt])
+  @@map("delivery_location_points")
 }
 
 /// Endereço de coleta ou de entrega de um pedido — é um snapshot
@@ -638,6 +662,11 @@ model WalletTransaction {
   status   WalletTransactionStatus @default(PENDING)
   amount   Decimal                 @db.Decimal(10, 2)
 
+  /// Chave de idempotência da origem financeira. Para o repasse automático,
+  /// é derivada da entrega; assim uma repetição concorrente de conclusão não
+  /// cria crédito duplicado na carteira do entregador.
+  idempotencyKey String? @unique
+
   relatedDeliveryId String?
 
   /// Referências informativas (IDs simples, não relações Prisma) para
@@ -679,16 +708,36 @@ model WithdrawalRequest {
 
   status              WithdrawalRequestStatus @default(PENDING)
   walletTransactionId String                  @unique
+  paymentReference    String?
 
   wallet               Wallet            @relation(fields: [walletId], references: [id])
   walletTransaction    WalletTransaction @relation(fields: [walletTransactionId], references: [id])
   advanceRequestOrigin AdvanceRequest?
+  statusHistory        WithdrawalRequestStatusHistory[]
 
   createdAt DateTime @default(now())
 
   @@index([status])
   @@index([walletId, status])
   @@map("withdrawal_requests")
+}
+
+/// Trilha append-only das decisÃµes financeiras sobre um saque. Ela preserva
+/// o responsÃ¡vel e a justificativa de aprovaÃ§Ã£o, rejeiÃ§Ã£o ou pagamento.
+model WithdrawalRequestStatusHistory {
+  id                  String                  @id @default(uuid())
+  withdrawalRequestId String
+  fromStatus          WithdrawalRequestStatus?
+  toStatus            WithdrawalRequestStatus
+  changedAt           DateTime                @default(now())
+  changedByUserId     String?
+  note                String?
+
+  withdrawalRequest WithdrawalRequest @relation(fields: [withdrawalRequestId], references: [id])
+  changedByUser     User?             @relation(fields: [changedByUserId], references: [id])
+
+  @@index([withdrawalRequestId])
+  @@map("withdrawal_request_status_history")
 }
 
 /// Ao ser aprovada, uma antecipação libera o saldo bloqueado na hora
@@ -728,12 +777,32 @@ model Invoice {
 
   company    Company    @relation(fields: [companyId], references: [id])
   deliveries Delivery[]
+  statusHistory InvoiceStatusHistory[]
 
   createdAt DateTime @default(now())
 
   @@index([companyId, status])
   @@index([dueDate, status])
   @@map("invoices")
+}
+
+/// Trilha append-only de mudanças da fatura. Permite responder quem fechou,
+/// marcou como pago ou atualizou o status financeiro sem depender de logs da
+/// aplicação.
+model InvoiceStatusHistory {
+  id              String        @id @default(uuid())
+  invoiceId       String
+  fromStatus      InvoiceStatus?
+  toStatus        InvoiceStatus
+  changedAt       DateTime      @default(now())
+  changedByUserId String?
+  note            String?
+
+  invoice       Invoice @relation(fields: [invoiceId], references: [id])
+  changedByUser User?   @relation(fields: [changedByUserId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_status_history")
 }
 
 // ============================================================================

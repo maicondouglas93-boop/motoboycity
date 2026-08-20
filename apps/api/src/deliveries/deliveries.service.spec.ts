@@ -9,10 +9,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { DispatchService } from '../dispatch/dispatch.service';
+import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { GoogleMapsApiError, GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DeliveriesService } from './deliveries.service';
 
 const companyUser = { id: 'user-company-1', type: 'COMPANY_MEMBER' } as User;
@@ -113,6 +115,8 @@ describe('DeliveriesService', () => {
     cancelScheduledActivation: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
+  let financeLedgerService: { creditDriverRepasse: jest.Mock };
+  let realtimeGateway: { emitToDriver: jest.Mock };
   let tx: {
     delivery: { create: jest.Mock; update: jest.Mock };
     deliveryAddress: { createMany: jest.Mock; create: jest.Mock };
@@ -142,6 +146,8 @@ describe('DeliveriesService', () => {
       cancelScheduledActivation: jest.fn().mockResolvedValue(undefined),
     };
     platformSettingsService = { get: jest.fn() };
+    financeLedgerService = { creditDriverRepasse: jest.fn().mockResolvedValue(undefined) };
+    realtimeGateway = { emitToDriver: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -150,7 +156,9 @@ describe('DeliveriesService', () => {
         { provide: PricingService, useValue: pricingService },
         { provide: GoogleMapsService, useValue: googleMapsService },
         { provide: DispatchService, useValue: dispatchService },
+        { provide: FinanceLedgerService, useValue: financeLedgerService },
         { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
+        { provide: RealtimeGateway, useValue: realtimeGateway },
       ],
     }).compile();
 
@@ -158,8 +166,9 @@ describe('DeliveriesService', () => {
   });
 
   function mockCompanyMembership(userId: string, companyId: string, status = 'ACTIVE') {
-    prisma.companyTeamMember.findFirst.mockImplementation(({ where }: { where: { userId: string } }) =>
-      where.userId === userId ? { company: { id: companyId, status } } : null,
+    prisma.companyTeamMember.findFirst.mockImplementation(
+      ({ where }: { where: { userId: string } }) =>
+        where.userId === userId ? { company: { id: companyId, status } } : null,
     );
   }
 
@@ -215,7 +224,12 @@ describe('DeliveriesService', () => {
       );
       expect(tx.deliveryAddress.createMany).toHaveBeenCalled();
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
-        data: { deliveryId: 'delivery-1', fromStatus: null, toStatus: 'AWAITING_DRIVER', changedByUserId: companyUser.id },
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: null,
+          toStatus: 'AWAITING_DRIVER',
+          changedByUserId: companyUser.id,
+        },
       });
       expect(result.id).toBe('delivery-1');
       expect(dispatchService.assertConfigured).toHaveBeenCalled();
@@ -422,9 +436,7 @@ describe('DeliveriesService', () => {
 
       await service.list(adminUser, {});
 
-      expect(prisma.delivery.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: {} }),
-      );
+      expect(prisma.delivery.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
     });
 
     it('empresa só vê os próprios pedidos (companyId no filtro)', async () => {
@@ -438,8 +450,15 @@ describe('DeliveriesService', () => {
       );
     });
 
-    it('rejeita acesso de motoboy', async () => {
-      await expect(service.list(driverUser, {})).rejects.toBeInstanceOf(ForbiddenException);
+    it('motoboy vê apenas os pedidos atribuídos a ele', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findMany.mockResolvedValue([]);
+
+      await service.list(driverUser, {});
+
+      expect(prisma.delivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { driverId: driverRow.id } }),
+      );
     });
 
     it('repassa o filtro de status', async () => {
@@ -566,12 +585,15 @@ describe('DeliveriesService', () => {
 
     it('admin pode cancelar um pedido ACCEPTED', async () => {
       prisma.delivery.findUnique
-        .mockResolvedValueOnce(fullDeliveryRow({ status: 'ACCEPTED' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'ACCEPTED', driverId: 'driver-1' }))
         .mockResolvedValueOnce(fullDeliveryRow({ status: 'CANCELLED' }));
 
       const result = await service.cancel(adminUser, 'delivery-1');
 
       expect(result.status).toBe('CANCELLED');
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:cancelled', {
+        deliveryIds: ['delivery-1'],
+      });
     });
 
     it('empresa não pode cancelar pedido de outra empresa', async () => {
@@ -587,7 +609,9 @@ describe('DeliveriesService', () => {
       mockCompanyMembership(companyUser.id, 'company-1');
       prisma.delivery.findUnique
         .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1' }))
-        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'CANCELLED' }));
+        .mockResolvedValueOnce(
+          fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'CANCELLED' }),
+        );
       prisma.delivery.findMany.mockResolvedValue([
         fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1' }),
         fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1' }),
@@ -606,8 +630,12 @@ describe('DeliveriesService', () => {
     it('lote com um item já COMPLETED: cancela só os itens ainda ativos, sem travar o lote inteiro', async () => {
       mockCompanyMembership(companyUser.id, 'company-1');
       prisma.delivery.findUnique
-        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'AWAITING_DRIVER' }))
-        .mockResolvedValueOnce(fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'CANCELLED' }));
+        .mockResolvedValueOnce(
+          fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'AWAITING_DRIVER' }),
+        )
+        .mockResolvedValueOnce(
+          fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'CANCELLED' }),
+        );
       prisma.delivery.findMany.mockResolvedValue([
         fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'COMPLETED' }),
         fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'AWAITING_DRIVER' }),
@@ -671,8 +699,18 @@ describe('DeliveriesService', () => {
         fullDeliveryRow({ driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
       );
       prisma.delivery.findMany.mockResolvedValue([
-        fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
-        fullDeliveryRow({ id: 'delivery-2', driverId: 'driver-1', batchId: 'batch-1', status: 'AWAITING_DRIVER' }),
+        fullDeliveryRow({
+          id: 'delivery-1',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'ACCEPTED',
+        }),
+        fullDeliveryRow({
+          id: 'delivery-2',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'AWAITING_DRIVER',
+        }),
       ]);
 
       await expect(service.collect(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
@@ -684,12 +722,27 @@ describe('DeliveriesService', () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
         Promise.resolve(
-          fullDeliveryRow({ id: where.id, driverId: 'driver-1', batchId: 'batch-1', status: 'COLLECTED' }),
+          fullDeliveryRow({
+            id: where.id,
+            driverId: 'driver-1',
+            batchId: 'batch-1',
+            status: 'COLLECTED',
+          }),
         ),
       );
       prisma.delivery.findMany.mockResolvedValue([
-        fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
-        fullDeliveryRow({ id: 'delivery-2', driverId: 'driver-1', batchId: 'batch-1', status: 'ACCEPTED' }),
+        fullDeliveryRow({
+          id: 'delivery-1',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'ACCEPTED',
+        }),
+        fullDeliveryRow({
+          id: 'delivery-2',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'ACCEPTED',
+        }),
       ]);
 
       const result = await service.collect(driverUser, 'delivery-1');
@@ -758,6 +811,10 @@ describe('DeliveriesService', () => {
           changedByUserId: driverUser.id,
         },
       });
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ id: 'delivery-1', driverId: 'driver-1', driverValue: 10 }),
+      );
     });
 
     it('destino conhecido, com retorno: fica em DELIVERED, só uma transição', async () => {
@@ -783,7 +840,11 @@ describe('DeliveriesService', () => {
     it('sem destino conhecido: exige lat/lng no corpo', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
-        fullDeliveryRow({ driverId: 'driver-1', status: 'COLLECTED', destinationKnownAtCreation: false }),
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+        }),
       );
 
       await expect(service.markDelivered(driverUser, 'delivery-1', {})).rejects.toBeInstanceOf(
@@ -868,7 +929,11 @@ describe('DeliveriesService', () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
       platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
-      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+      prisma.companyAddress.findFirst.mockResolvedValue({
+        ...pickupAddress,
+        lat: -20.15,
+        lng: -41.74,
+      });
 
       await expect(
         service.completeReturn(driverUser, 'delivery-1', { lat: -21, lng: -42 }),
@@ -878,12 +943,27 @@ describe('DeliveriesService', () => {
     it('rejeita quando não há entregas aguardando retorno', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
-        fullDeliveryRow({ driverId: 'driver-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'DELIVERED',
+          requiresReturn: false,
+        }),
       );
       platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
-      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+      prisma.companyAddress.findFirst.mockResolvedValue({
+        ...pickupAddress,
+        lat: -20.15,
+        lng: -41.74,
+      });
       prisma.delivery.findMany.mockResolvedValue([
-        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
+        fullDeliveryRow({
+          id: 'delivery-1',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'DELIVERED',
+          requiresReturn: false,
+        }),
       ]);
 
       await expect(
@@ -897,14 +977,37 @@ describe('DeliveriesService', () => {
         fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1' }),
       );
       platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
-      prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: -20.15, lng: -41.74 });
+      prisma.companyAddress.findFirst.mockResolvedValue({
+        ...pickupAddress,
+        lat: -20.15,
+        lng: -41.74,
+      });
       prisma.delivery.findMany.mockResolvedValue([
-        fullDeliveryRow({ id: 'delivery-1', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: true }),
-        fullDeliveryRow({ id: 'delivery-2', batchId: 'batch-1', status: 'DELIVERED', requiresReturn: false }),
-        fullDeliveryRow({ id: 'delivery-3', batchId: 'batch-1', status: 'COMPLETED', requiresReturn: true }),
+        fullDeliveryRow({
+          id: 'delivery-1',
+          driverId: 'driver-1',
+          batchId: 'batch-1',
+          status: 'DELIVERED',
+          requiresReturn: true,
+        }),
+        fullDeliveryRow({
+          id: 'delivery-2',
+          batchId: 'batch-1',
+          status: 'DELIVERED',
+          requiresReturn: false,
+        }),
+        fullDeliveryRow({
+          id: 'delivery-3',
+          batchId: 'batch-1',
+          status: 'COMPLETED',
+          requiresReturn: true,
+        }),
       ]);
 
-      const result = await service.completeReturn(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+      const result = await service.completeReturn(driverUser, 'delivery-1', {
+        lat: -20.15,
+        lng: -41.74,
+      });
 
       expect(tx.delivery.update).toHaveBeenCalledTimes(1);
       expect(tx.delivery.update).toHaveBeenCalledWith({
@@ -915,6 +1018,10 @@ describe('DeliveriesService', () => {
         expect.objectContaining({
           data: expect.objectContaining({ deliveryId: 'delivery-1', toStatus: 'COMPLETED' }),
         }),
+      );
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ id: 'delivery-1', driverId: 'driver-1' }),
       );
       expect(result.deliveries).toHaveLength(1);
     });

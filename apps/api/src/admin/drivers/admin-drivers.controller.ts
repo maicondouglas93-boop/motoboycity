@@ -30,6 +30,11 @@ export class AdminDriversController {
     return this.adminDriversService.list(query);
   }
 
+  @Get(':id')
+  detail(@Param('id') id: string): Promise<AdminDriverListItem> {
+    return this.adminDriversService.detail(id);
+  }
+
   @Patch(':id/approve')
   approve(@Param('id') id: string, @CurrentUser() admin: User): Promise<DriverReviewResult> {
     return this.adminDriversService.approve(id, admin.id);

@@ -13,14 +13,17 @@ import type {
   CreateDeliveryPayload,
   MarkDeliveredPayload,
 } from '@motoboycity/validation';
-import type { Delivery, DeliveryStatus, Prisma, User } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { Delivery, DeliveryStatus, User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { haversineDistanceMeters } from '../common/haversine';
 import { DispatchService } from '../dispatch/dispatch.service';
+import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
 import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 
@@ -66,12 +69,27 @@ export interface DeliveryListItem {
   platformValue: number | null;
   requiresReturn: boolean;
   returnValue: number | null;
+  paymentMethod: 'BILLED' | 'ONLINE';
+  statusChangedAt: string;
   scheduledAt: string | null;
   createdAt: string;
 }
 
 export interface DeliveryDetail extends DeliveryListItem {
   addresses: DeliveryAddressItem[];
+  driver: { id: string; name: string; email: string; phone: string } | null;
+  invoice: {
+    id: string;
+    number: string;
+    status: 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+  } | null;
+  statusHistory: Array<{
+    fromStatus: DeliveryStatus | null;
+    toStatus: DeliveryStatus;
+    changedAt: string;
+    changedBy: { id: string; name: string } | null;
+    note: string | null;
+  }>;
 }
 
 export interface DeliveryBatchDetail {
@@ -91,7 +109,9 @@ export class DeliveriesService {
     private readonly pricingService: PricingService,
     private readonly googleMapsService: GoogleMapsService,
     private readonly dispatchService: DispatchService,
+    private readonly financeLedgerService: FinanceLedgerService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async create(user: User, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {
@@ -355,13 +375,38 @@ export class DeliveriesService {
     };
   }
 
-  async list(user: User, filters: { status?: DeliveryStatus }): Promise<DeliveryListItem[]> {
-    const companyId = await this.resolveScopeCompanyId(user);
+  async list(
+    user: User,
+    filters: {
+      status?: DeliveryStatus;
+      driverId?: string;
+      companyId?: string;
+      from?: string;
+      to?: string;
+    },
+  ): Promise<DeliveryListItem[]> {
+    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Os filtros por entregador ou empresa sao restritos a administradores.',
+      );
+    }
+
+    const scope = await this.resolveListScope(user);
 
     const deliveries = await this.prisma.delivery.findMany({
       where: {
-        ...(companyId && { companyId }),
+        ...scope,
         ...(filters.status && { status: filters.status }),
+        ...(filters.driverId && { driverId: filters.driverId }),
+        ...(filters.companyId && { companyId: filters.companyId }),
+        ...(filters.from || filters.to
+          ? {
+              createdAt: {
+                ...(filters.from && { gte: this.startOfDay(filters.from) }),
+                ...(filters.to && { lte: this.endOfDay(filters.to) }),
+              },
+            }
+          : {}),
       },
       orderBy: { createdAt: 'desc' },
       include: { company: true, serviceType: true },
@@ -373,7 +418,19 @@ export class DeliveriesService {
   async detail(user: User, id: string): Promise<DeliveryDetail> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
-      include: { company: true, serviceType: true, addresses: true },
+      include: {
+        company: true,
+        serviceType: true,
+        addresses: true,
+        driver: {
+          include: { user: { select: { id: true, name: true, email: true, phone: true } } },
+        },
+        invoice: { select: { id: true, number: true, status: true } },
+        statusHistory: {
+          include: { changedByUser: { select: { id: true, name: true } } },
+          orderBy: { changedAt: 'asc' },
+        },
+      },
     });
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
@@ -394,6 +451,30 @@ export class DeliveriesService {
         lat: address.lat === null ? null : Number(address.lat),
         lng: address.lng === null ? null : Number(address.lng),
         referenceNote: address.referenceNote,
+      })),
+      driver: delivery.driver
+        ? {
+            id: delivery.driver.id,
+            name: delivery.driver.user.name,
+            email: delivery.driver.user.email,
+            phone: delivery.driver.user.phone,
+          }
+        : null,
+      invoice: delivery.invoice
+        ? {
+            id: delivery.invoice.id,
+            number: delivery.invoice.number,
+            status: delivery.invoice.status,
+          }
+        : null,
+      statusHistory: delivery.statusHistory.map((entry) => ({
+        fromStatus: entry.fromStatus,
+        toStatus: entry.toStatus,
+        changedAt: entry.changedAt.toISOString(),
+        changedBy: entry.changedByUser
+          ? { id: entry.changedByUser.id, name: entry.changedByUser.name }
+          : null,
+        note: entry.note,
       })),
     };
   }
@@ -452,6 +533,20 @@ export class DeliveriesService {
       ),
     );
 
+    // Empresa nao pode cancelar depois do aceite. Quando o admin encerra uma
+    // entrega operacional, o motoboy precisa sair da tela imediatamente em vez
+    // de descobrir so no proximo toque que nao pode mais avancar o pedido.
+    const cancelledIdsByDriver = new Map<string, string[]>();
+    for (const item of cancellable) {
+      if (!item.driverId) continue;
+      const ids = cancelledIdsByDriver.get(item.driverId) ?? [];
+      ids.push(item.id);
+      cancelledIdsByDriver.set(item.driverId, ids);
+    }
+    for (const [driverId, deliveryIds] of cancelledIdsByDriver) {
+      this.realtimeGateway.emitToDriver(driverId, 'delivery:cancelled', { deliveryIds });
+    }
+
     return this.detail(user, id);
   }
 
@@ -503,7 +598,11 @@ export class DeliveriesService {
    * viram o destino: distância e preço são calculados agora, não na criação.
    * Fecha sozinho (COMPLETED) se não exigir retorno; senão fica em
    * DELIVERED até completeReturn(). */
-  async markDelivered(user: User, id: string, payload: MarkDeliveredPayload): Promise<DeliveryDetail> {
+  async markDelivered(
+    user: User,
+    id: string,
+    payload: MarkDeliveredPayload,
+  ): Promise<DeliveryDetail> {
     const driver = await this.findDriverForUser(user);
     // `company` entra junto porque a cotação por GPS acontece aqui, e o preço depende da
     // praça da EMPRESA — não de quem está entregando nem da primeira região do banco.
@@ -518,7 +617,9 @@ export class DeliveriesService {
       throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
     }
     if (delivery.status !== 'COLLECTED') {
-      throw new ConflictException('O pedido precisa estar coletado antes de ser marcado como entregue.');
+      throw new ConflictException(
+        'O pedido precisa estar coletado antes de ser marcado como entregue.',
+      );
     }
 
     let distanceKm = delivery.distanceKm === null ? null : Number(delivery.distanceKm);
@@ -587,57 +688,71 @@ export class DeliveriesService {
 
     const autoComplete = !delivery.requiresReturn;
 
-    await this.prisma.$transaction(async (tx) => {
-      if (!delivery.destinationKnownAtCreation) {
-        await tx.deliveryAddress.create({
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (!delivery.destinationKnownAtCreation) {
+          await tx.deliveryAddress.create({
+            data: {
+              deliveryId: delivery.id,
+              type: 'DROPOFF',
+              street: null,
+              number: null,
+              complement: null,
+              city: null,
+              state: null,
+              zip: null,
+              lat: capturedLat,
+              lng: capturedLng,
+            },
+          });
+        }
+
+        await tx.delivery.update({
+          where: { id: delivery.id },
           data: {
-            deliveryId: delivery.id,
-            type: 'DROPOFF',
-            street: null,
-            number: null,
-            complement: null,
-            city: null,
-            state: null,
-            zip: null,
-            lat: capturedLat,
-            lng: capturedLng,
+            status: autoComplete ? 'COMPLETED' : 'DELIVERED',
+            statusChangedAt: new Date(),
+            distanceKm,
+            totalValue,
+            driverValue,
+            platformValue,
+            returnValue,
           },
         });
-      }
 
-      await tx.delivery.update({
-        where: { id: delivery.id },
-        data: {
-          status: autoComplete ? 'COMPLETED' : 'DELIVERED',
-          statusChangedAt: new Date(),
-          distanceKm,
-          totalValue,
-          driverValue,
-          platformValue,
-          returnValue,
-        },
-      });
-
-      await tx.deliveryStatusHistory.create({
-        data: {
-          deliveryId: delivery.id,
-          fromStatus: 'COLLECTED',
-          toStatus: 'DELIVERED',
-          changedByUserId: user.id,
-        },
-      });
-
-      if (autoComplete) {
         await tx.deliveryStatusHistory.create({
           data: {
             deliveryId: delivery.id,
-            fromStatus: 'DELIVERED',
-            toStatus: 'COMPLETED',
+            fromStatus: 'COLLECTED',
+            toStatus: 'DELIVERED',
             changedByUserId: user.id,
           },
         });
+
+        if (autoComplete) {
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: delivery.id,
+              fromStatus: 'DELIVERED',
+              toStatus: 'COMPLETED',
+              changedByUserId: user.id,
+            },
+          });
+          await this.financeLedgerService.creditDriverRepasse(tx, {
+            id: delivery.id,
+            driverId: delivery.driverId,
+            driverValue,
+          });
+        }
+      });
+    } catch (error) {
+      if (this.isRepasseIdempotencyConflict(error)) {
+        throw new ConflictException(
+          'Esta entrega já foi concluída em outra solicitação. Atualize a tela.',
+        );
       }
-    });
+      throw error;
+    }
 
     return this.detail(user, delivery.id);
   }
@@ -645,7 +760,11 @@ export class DeliveriesService {
   /** Fecha os itens do lote que exigem retorno e já foram entregues —
    * só quando o motoboy está fisicamente perto do endereço de coleta da
    * empresa (checagem por distância em linha reta, não rota real). */
-  async completeReturn(user: User, id: string, payload: CompleteReturnPayload): Promise<DeliveryGroupResult> {
+  async completeReturn(
+    user: User,
+    id: string,
+    payload: CompleteReturnPayload,
+  ): Promise<DeliveryGroupResult> {
     const driver = await this.findDriverForUser(user);
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
     if (!delivery) {
@@ -666,7 +785,9 @@ export class DeliveriesService {
       where: { companyId: delivery.companyId, isPrimary: true },
     });
     if (!pickupAddress || pickupAddress.lat === null || pickupAddress.lng === null) {
-      throw new ConflictException('O endereço de coleta da empresa não tem coordenadas cadastradas.');
+      throw new ConflictException(
+        'O endereço de coleta da empresa não tem coordenadas cadastradas.',
+      );
     }
 
     // Precisao maior que o proprio raio torna a checagem vazia: com raio de 200 m e um
@@ -693,30 +814,51 @@ export class DeliveriesService {
     const siblings = delivery.batchId
       ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
       : [delivery];
-    const candidates = siblings.filter((item) => item.status === 'DELIVERED' && item.requiresReturn);
+    const candidates = siblings.filter(
+      (item) => item.status === 'DELIVERED' && item.requiresReturn,
+    );
     if (candidates.length === 0) {
       throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
     }
+    if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
+      throw new InternalServerErrorException(
+        'Não foi possível gerar o repasse: há uma entrega de retorno sem entregador ou valor definido.',
+      );
+    }
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const item of candidates) {
-        await tx.delivery.update({
-          where: { id: item.id },
-          data: { status: 'COMPLETED', statusChangedAt: new Date() },
-        });
-        await tx.deliveryStatusHistory.create({
-          data: {
-            deliveryId: item.id,
-            fromStatus: 'DELIVERED',
-            toStatus: 'COMPLETED',
-            changedByUserId: user.id,
-            note:
-              `Retorno validado a ${Math.round(distanceMeters)}m do ponto de coleta ` +
-              `(raio configurado: ${settings.returnProximityRadiusMeters}m).`,
-          },
-        });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (const item of candidates) {
+          await tx.delivery.update({
+            where: { id: item.id },
+            data: { status: 'COMPLETED', statusChangedAt: new Date() },
+          });
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: item.id,
+              fromStatus: 'DELIVERED',
+              toStatus: 'COMPLETED',
+              changedByUserId: user.id,
+              note:
+                `Retorno validado a ${Math.round(distanceMeters)}m do ponto de coleta ` +
+                `(raio configurado: ${settings.returnProximityRadiusMeters}m).`,
+            },
+          });
+          await this.financeLedgerService.creditDriverRepasse(tx, {
+            id: item.id,
+            driverId: item.driverId,
+            driverValue: item.driverValue,
+          });
+        }
+      });
+    } catch (error) {
+      if (this.isRepasseIdempotencyConflict(error)) {
+        throw new ConflictException(
+          'Este retorno já foi concluído em outra solicitação. Atualize a tela.',
+        );
       }
-    });
+      throw error;
+    }
 
     return {
       batchId: delivery.batchId,
@@ -745,18 +887,26 @@ export class DeliveriesService {
     throw new ForbiddenException('Acesso restrito a empresas e administradores.');
   }
 
-  private async resolveScopeCompanyId(user: User): Promise<string | undefined> {
+  private isRepasseIdempotencyConflict(error: unknown): boolean {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+  }
+
+  private async resolveListScope(user: User): Promise<{ companyId?: string; driverId?: string }> {
     if (user.type === 'ADMIN') {
-      return undefined;
+      return {};
     }
     if (user.type === 'COMPANY_MEMBER') {
       const company = await this.findCompanyForUser(user);
       if (!company) {
         throw new ForbiddenException('Usuário não está vinculado a uma empresa.');
       }
-      return company.id;
+      return { companyId: company.id };
     }
-    throw new ForbiddenException('Acesso restrito a empresas e administradores.');
+    if (user.type === 'DRIVER') {
+      const driver = await this.findDriverForUser(user);
+      return { driverId: driver.id };
+    }
+    throw new ForbiddenException('Acesso restrito a empresas, entregadores e administradores.');
   }
 
   private async findCompanyForUser(
@@ -792,6 +942,14 @@ export class DeliveriesService {
     return driver;
   }
 
+  private startOfDay(date: string): Date {
+    return new Date(`${date}T00:00:00.000Z`);
+  }
+
+  private endOfDay(date: string): Date {
+    return new Date(`${date}T23:59:59.999Z`);
+  }
+
   private formatAddress(address: {
     street: string;
     number: string;
@@ -819,6 +977,8 @@ export class DeliveriesService {
     platformValue: { toString(): string } | null;
     requiresReturn: boolean;
     returnValue: { toString(): string } | null;
+    paymentMethod: 'BILLED' | 'ONLINE';
+    statusChangedAt: Date;
     scheduledAt: Date | null;
     createdAt: Date;
   }): DeliveryListItem {
@@ -837,6 +997,8 @@ export class DeliveriesService {
       platformValue: delivery.platformValue === null ? null : Number(delivery.platformValue),
       requiresReturn: delivery.requiresReturn,
       returnValue: delivery.returnValue === null ? null : Number(delivery.returnValue),
+      paymentMethod: delivery.paymentMethod,
+      statusChangedAt: delivery.statusChangedAt.toISOString(),
       scheduledAt: delivery.scheduledAt?.toISOString() ?? null,
       createdAt: delivery.createdAt.toISOString(),
     };

@@ -39,7 +39,10 @@ describe('DeliveryOffersController (e2e)', () => {
   let otherDriverToken: string;
   let serviceTypeId: string;
 
-  async function createAwaitingDeliveryAndGetOffer(): Promise<{ deliveryId: string; offerId: string }> {
+  async function createAwaitingDeliveryAndGetOffer(): Promise<{
+    deliveryId: string;
+    offerId: string;
+  }> {
     const response = await request(app.getHttpServer())
       .post('/deliveries')
       .set('Authorization', `Bearer ${companyToken}`)
@@ -84,12 +87,20 @@ describe('DeliveryOffersController (e2e)', () => {
     await request(server)
       .patch(`/admin/companies/${companyRegister.body.companyId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`);
-    const companyLogin = await request(server).post('/auth/login').send({ email: companyEmail, password });
+    const companyLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: companyEmail, password });
     companyToken = companyLogin.body.accessToken;
     await request(server)
       .put('/company/address')
       .set('Authorization', `Bearer ${companyToken}`)
-      .send({ street: 'Rua da Loja', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+      .send({
+        street: 'Rua da Loja',
+        number: '100',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+      });
 
     const driverRegister = await request(server).post('/auth/register/driver').send({
       name: 'Motoboy Offers E2E',
@@ -106,7 +117,9 @@ describe('DeliveryOffersController (e2e)', () => {
     await request(server)
       .patch(`/admin/drivers/${driverId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`);
-    const driverLogin = await request(server).post('/auth/login').send({ email: driverEmail, password });
+    const driverLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: driverEmail, password });
     driverToken = driverLogin.body.accessToken;
     await request(server)
       .put('/driver/presence')
@@ -170,14 +183,18 @@ describe('DeliveryOffersController (e2e)', () => {
     await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
     await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({ where: { company: { document: companyDocument } } });
+    await prisma.companyTeamMember.deleteMany({
+      where: { company: { document: companyDocument } },
+    });
     await prisma.company.deleteMany({ where: { document: companyDocument } });
     await prisma.user.deleteMany({ where: { email: companyEmail } });
 
     await prisma.driverPresenceLog.deleteMany({
       where: { driver: { user: { email: { in: [driverEmail, otherDriverEmail] } } } },
     });
-    await prisma.driver.deleteMany({ where: { user: { email: { in: [driverEmail, otherDriverEmail] } } } });
+    await prisma.driver.deleteMany({
+      where: { user: { email: { in: [driverEmail, otherDriverEmail] } } },
+    });
     await prisma.user.deleteMany({ where: { email: { in: [driverEmail, otherDriverEmail] } } });
 
     await app.close();
@@ -231,6 +248,22 @@ describe('DeliveryOffersController (e2e)', () => {
     const delivery = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
     expect(delivery.status).toBe('ACCEPTED');
     expect(delivery.driverId).toBe(driverId);
+
+    const ownDeliveries = await request(app.getHttpServer())
+      .get('/deliveries?status=ACCEPTED')
+      .set('Authorization', `Bearer ${driverToken}`)
+      .expect(200);
+    expect((ownDeliveries.body as Array<{ id: string }>).map((item) => item.id)).toContain(
+      deliveryId,
+    );
+
+    const otherDriverDeliveries = await request(app.getHttpServer())
+      .get('/deliveries?status=ACCEPTED')
+      .set('Authorization', `Bearer ${otherDriverToken}`)
+      .expect(200);
+    expect(
+      (otherDriverDeliveries.body as Array<{ id: string }>).map((item) => item.id),
+    ).not.toContain(deliveryId);
 
     const offer = await prisma.deliveryOffer.findUniqueOrThrow({ where: { id: offerId } });
     expect(offer.response).toBe('ACCEPTED');

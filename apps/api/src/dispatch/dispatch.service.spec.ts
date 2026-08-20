@@ -5,6 +5,28 @@ import { Prisma } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+
+const offerPickupAddress = {
+  type: 'PICKUP',
+  street: 'Rua da Loja',
+  number: '100',
+  complement: null,
+  city: 'Lajinha',
+  state: 'MG',
+  zip: '36930000',
+  referenceNote: 'Porta lateral',
+};
+
+const offerDropoffAddress = {
+  type: 'DROPOFF',
+  street: 'Rua do Cliente',
+  number: '200',
+  complement: null,
+  city: 'Lajinha',
+  state: 'MG',
+  zip: '36930000',
+  referenceNote: null,
+};
 import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 
 describe('DispatchService', () => {
@@ -181,10 +203,15 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         displayNumber: 7,
         destinationKnownAtCreation: true,
+        totalValue: { toString: () => '16.90' },
         driverValue: { toString: () => '13.52' },
+        platformValue: { toString: () => '3.38' },
         distanceKm: { toString: () => '5.43' },
         requiresReturn: true,
-        company: { regionId: 'region-1' },
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress, offerDropoffAddress],
         serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
@@ -213,9 +240,44 @@ describe('DispatchService', () => {
         offerId: 'offer-1',
         deliveryId: 'delivery-1',
         displayNumber: 7,
+        companyName: 'Loja de teste',
+        paymentMethod: 'BILLED',
+        totalValue: 16.9,
         driverValue: 13.52,
+        platformValue: 3.38,
         distanceKm: 5.43,
         requiresReturn: true,
+        deliveries: [
+          {
+            deliveryId: 'delivery-1',
+            displayNumber: 7,
+            serviceTypeName: 'Motofrete',
+            destinationKnownAtCreation: true,
+            pickupAddress: {
+              street: 'Rua da Loja',
+              number: '100',
+              complement: null,
+              city: 'Lajinha',
+              state: 'MG',
+              zip: '36930000',
+              referenceNote: 'Porta lateral',
+            },
+            dropoffAddress: {
+              street: 'Rua do Cliente',
+              number: '200',
+              complement: null,
+              city: 'Lajinha',
+              state: 'MG',
+              zip: '36930000',
+              referenceNote: null,
+            },
+            totalValue: 16.9,
+            driverValue: 13.52,
+            platformValue: 3.38,
+            distanceKm: 5.43,
+            requiresReturn: true,
+          },
+        ],
         expiresInSeconds: 90,
       });
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalled();
@@ -247,10 +309,15 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         displayNumber: 7,
         destinationKnownAtCreation: false,
+        totalValue: null,
         driverValue: null,
+        platformValue: null,
         distanceKm: null,
         requiresReturn: false,
-        company: { regionId: 'region-1' },
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress],
         serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
@@ -268,7 +335,18 @@ describe('DispatchService', () => {
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
         'driver-1',
         'delivery:offer',
-        expect.objectContaining({ driverValue: null, distanceKm: null }),
+        expect.objectContaining({
+          totalValue: null,
+          driverValue: null,
+          platformValue: null,
+          distanceKm: null,
+          deliveries: [
+            expect.objectContaining({
+              pickupAddress: expect.objectContaining({ street: 'Rua da Loja' }),
+              dropoffAddress: null,
+            }),
+          ],
+        }),
       );
     });
 
@@ -277,10 +355,16 @@ describe('DispatchService', () => {
         id: 'delivery-1',
         status: 'AWAITING_DRIVER',
         displayNumber: 1,
+        destinationKnownAtCreation: true,
+        totalValue: { toString: () => '12.50' },
         driverValue: { toString: () => '10' },
+        platformValue: { toString: () => '2.50' },
         distanceKm: null,
         requiresReturn: false,
-        company: { regionId: 'region-1' },
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress, offerDropoffAddress],
         serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
@@ -395,10 +479,15 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         displayNumber: 7,
         destinationKnownAtCreation: true,
+        totalValue: { toString: () => '12' },
         driverValue: { toString: () => '10' },
+        platformValue: { toString: () => '2' },
         distanceKm: { toString: () => '2' },
         requiresReturn: false,
-        company: { regionId: 'region-1' },
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de lote' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress, offerDropoffAddress],
         serviceTypeId: 'service-1',
       });
       prisma.delivery.findMany.mockResolvedValue([
@@ -406,18 +495,28 @@ describe('DispatchService', () => {
           id: 'delivery-1',
           status: 'AWAITING_DRIVER',
           displayNumber: 7,
+          destinationKnownAtCreation: true,
+          totalValue: { toString: () => '12' },
           driverValue: { toString: () => '10' },
+          platformValue: { toString: () => '2' },
           distanceKm: { toString: () => '2' },
           requiresReturn: false,
+          serviceType: { name: 'Motofrete' },
+          addresses: [offerPickupAddress, offerDropoffAddress],
           serviceTypeId: 'service-1',
         },
         {
           id: 'delivery-2',
           status: 'AWAITING_DRIVER',
           displayNumber: 8,
+          destinationKnownAtCreation: true,
+          totalValue: { toString: () => '15' },
           driverValue: { toString: () => '12' },
+          platformValue: { toString: () => '3' },
           distanceKm: { toString: () => '3' },
           requiresReturn: true,
+          serviceType: { name: 'Entrega expressa' },
+          addresses: [offerPickupAddress, offerDropoffAddress],
           serviceTypeId: 'service-2',
         },
       ]);
@@ -443,9 +542,27 @@ describe('DispatchService', () => {
         offerId: 'offer-1',
         deliveryId: 'delivery-1',
         displayNumber: 7,
+        companyName: 'Loja de lote',
+        paymentMethod: 'BILLED',
+        totalValue: 27,
         driverValue: 22,
+        platformValue: 5,
         distanceKm: 5,
         requiresReturn: true,
+        deliveries: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            serviceTypeName: 'Motofrete',
+            pickupAddress: expect.objectContaining({ street: 'Rua da Loja' }),
+            dropoffAddress: expect.objectContaining({ street: 'Rua do Cliente' }),
+          }),
+          expect.objectContaining({
+            deliveryId: 'delivery-2',
+            serviceTypeName: 'Entrega expressa',
+            pickupAddress: expect.objectContaining({ street: 'Rua da Loja' }),
+            dropoffAddress: expect.objectContaining({ street: 'Rua do Cliente' }),
+          }),
+        ],
         expiresInSeconds: 60,
         batchId: 'batch-1',
         deliveryCount: 2,

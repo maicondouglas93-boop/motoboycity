@@ -55,9 +55,7 @@ export function LoginScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: isDark ? colors.backgroundDark : colors.background }}
-    >
+    <SafeAreaView style={isDark ? styles.safeAreaDark : styles.safeAreaLight}>
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: text }]}>MOTOboyCity</Text>
@@ -100,6 +98,8 @@ export function LoginScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  safeAreaLight: { flex: 1, backgroundColor: colors.background },
+  safeAreaDark: { flex: 1, backgroundColor: colors.backgroundDark },
   content: {
     flex: 1,
     justifyContent: 'center',

@@ -1,16 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import {
-  BarChart3,
-  ClipboardList,
-  FileText,
-  Headset,
-  Plug,
-  PlusCircle,
-  Receipt,
-} from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { BarChart3, ClipboardList, FileText, PlusCircle, Receipt } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,19 +10,24 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { mockUser } from '@/lib/mock-data';
+import { session } from '@/lib/session';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Lançar Pedidos', icon: PlusCircle },
   { href: '/indicadores', label: 'Indicadores', icon: BarChart3 },
   { href: '/pedidos', label: 'Pedidos', icon: ClipboardList },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
-  { href: '/integracoes', label: 'Integrações', icon: Plug },
   { href: '/faturas', label: 'Faturas', icon: Receipt },
 ];
 
 export function TopNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  function handleLogout() {
+    session.clearToken();
+    router.replace('/login');
+  }
 
   return (
     <header className="flex items-center justify-between border-b bg-background px-4 py-2">
@@ -52,22 +49,17 @@ export function TopNav() {
             </Link>
           );
         })}
-        <span className="flex flex-col items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground">
-          <Headset className="size-4" />
-          Suporte
-        </span>
       </nav>
 
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-2 text-sm">
           <Avatar className="size-7">
-            <AvatarFallback>{mockUser.name.charAt(0)}</AvatarFallback>
+            <AvatarFallback>E</AvatarFallback>
           </Avatar>
-          {mockUser.name}
+          Empresa
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem>Perfil</DropdownMenuItem>
-          <DropdownMenuItem>Sair</DropdownMenuItem>
+          <DropdownMenuItem onSelect={handleLogout}>Sair</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

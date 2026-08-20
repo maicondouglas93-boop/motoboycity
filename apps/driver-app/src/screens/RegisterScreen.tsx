@@ -41,7 +41,6 @@ const initialFormState = {
 
 export function RegisterScreen({ navigation }: Props) {
   const isDark = useColorScheme() === 'dark';
-  const border = isDark ? colors.borderDark : colors.border;
   const text = isDark ? colors.textDark : colors.text;
 
   const [form, setForm] = useState(initialFormState);
@@ -93,9 +92,7 @@ export function RegisterScreen({ navigation }: Props) {
 
   if (status === 'success') {
     return (
-      <SafeAreaView
-        style={{ flex: 1, backgroundColor: isDark ? colors.backgroundDark : colors.background }}
-      >
+      <SafeAreaView style={isDark ? styles.safeAreaDark : styles.safeAreaLight}>
         <View style={styles.successContainer}>
           <Text style={[styles.successTitle, { color: text }]}>Cadastro enviado!</Text>
           <Text style={[styles.successBody, { color: isDark ? colors.mutedDark : colors.muted }]}>
@@ -112,9 +109,7 @@ export function RegisterScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: isDark ? colors.backgroundDark : colors.background }}
-    >
+    <SafeAreaView style={isDark ? styles.safeAreaDark : styles.safeAreaLight}>
       <ScreenHeader title="Cadastro de Motoboy" />
       <ScrollView contentContainerStyle={styles.content}>
         <FormField
@@ -167,13 +162,23 @@ export function RegisterScreen({ navigation }: Props) {
                   onPress={() => setPixKeyType(type)}
                   style={[
                     styles.chip,
-                    {
-                      borderColor: selected ? colors.primary : border,
-                      backgroundColor: selected ? colors.primary : 'transparent',
-                    },
+                    selected
+                      ? styles.chipSelected
+                      : isDark
+                        ? styles.chipUnselectedDark
+                        : styles.chipUnselectedLight,
                   ]}
                 >
-                  <Text style={[styles.chipLabel, { color: selected ? '#ffffff' : text }]}>
+                  <Text
+                    style={[
+                      styles.chipLabel,
+                      selected
+                        ? styles.chipLabelSelected
+                        : isDark
+                          ? styles.chipLabelDark
+                          : styles.chipLabelLight,
+                    ]}
+                  >
                     {pixKeyTypeLabels[type]}
                   </Text>
                 </Pressable>
@@ -233,6 +238,8 @@ export function RegisterScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  safeAreaLight: { flex: 1, backgroundColor: colors.background },
+  safeAreaDark: { flex: 1, backgroundColor: colors.backgroundDark },
   content: {
     padding: 16,
     gap: 12,
@@ -254,10 +261,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  chipSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  chipUnselectedLight: { borderColor: colors.border, backgroundColor: 'transparent' },
+  chipUnselectedDark: { borderColor: colors.borderDark, backgroundColor: 'transparent' },
   chipLabel: {
     fontSize: 12,
     fontWeight: '600',
   },
+  chipLabelSelected: { color: '#ffffff' },
+  chipLabelLight: { color: colors.text },
+  chipLabelDark: { color: colors.textDark },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

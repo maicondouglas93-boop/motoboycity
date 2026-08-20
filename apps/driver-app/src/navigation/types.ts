@@ -3,18 +3,12 @@ export type RootStackParamList = {
   Register: undefined;
   Home: undefined;
   Wallet: undefined;
-  WalletWithdraw: undefined;
-  WalletAdvance: undefined;
   History: undefined;
-  AvailableOrders: undefined;
-  ScheduledOrders: undefined;
-  MyShifts: undefined;
   OrderDetail: { orderId: string };
+  DeliveryOperation: { deliveryId: string };
   IncomingOffer: undefined;
   Settings: undefined;
   Profile: undefined;
-  Challenges: undefined;
-  Support: undefined;
 };
 
 /**
@@ -26,4 +20,5 @@ export type RootStackParamList = {
  */
 export type ScreenNavigator = {
   navigate: (screen: keyof RootStackParamList) => void;
+  reset: (state: { index: number; routes: Array<{ name: keyof RootStackParamList }> }) => void;
 };
