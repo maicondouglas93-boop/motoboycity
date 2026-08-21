@@ -1,7 +1,16 @@
 const path = require('path');
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const { resolveAppConfig } = require('./app.env');
 
 const workspaceRoot = path.resolve(__dirname, '../..');
+
+/**
+ * A chave de cache do Metro deriva do conteudo dos arquivos de configuracao,
+ * nao das variaveis de ambiente que eles leem. Sem isto, trocar
+ * MOTOBOYCITY_APP_ENV reaproveitaria transformacoes em cache e o bundle sairia
+ * com a URL do ambiente anterior — um APK de piloto apontando para localhost.
+ */
+const { appEnv, apiBaseUrl } = resolveAppConfig(process.env);
 
 /**
  * pnpm instala pacotes via symlinks (content-addressable store), então o
@@ -12,6 +21,7 @@ const workspaceRoot = path.resolve(__dirname, '../..');
  * @type {import('@react-native/metro-config').MetroConfig}
  */
 const config = {
+  cacheVersion: `motoboycity-${appEnv}-${apiBaseUrl}`,
   watchFolders: [workspaceRoot],
   resolver: {
     unstable_enableSymlinks: true,

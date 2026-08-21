@@ -1426,3 +1426,266 @@ conta foi modificado. Próximo passo concreto: revisar e, mediante pedido
 expresso, commitar/pushar separadamente o recorte financeiro/CI que já está no
 worktree; em seguida iniciar a Fase 1 do roadmap pela configuração de ambiente
 e versionamento do driver-app.
+
+## Atualização — 2026-08-20: pesquisa oficial e plano de integração aiqfome
+
+Foi pesquisada a documentação oficial atual do aiqfome para receber pedidos de
+lojas parceiras e despachá-los aos motoboys do MOTOboyCity. A API V2 é o caminho
+principal recomendado: OAuth 2.0/ID Magalu e tokens são individuais por loja;
+os webhooks V2 são cadastrados por estabelecimento com segredo enviado no
+header `Authorization`; e existem eventos de pedido e endpoints próprios para
+informar os marcos da logística de terceiros. A camada Open Delivery permanece
+como alternativa de compatibilidade/contingência sujeita à homologação. O módulo
+AiqEntrega foi explicitamente excluído, pois ele chama entregadores do próprio
+aiqfome, não a frota do MOTOboyCity.
+
+O plano completo está em `docs/aiqfome-integration-plan.md`, com fontes
+oficiais, escopo, elegibilidade, mapeamento de dados e pagamentos, persistência
+aditiva, OAuth, webhook, filas inbound/outbound, outbox, idempotência,
+observabilidade, interfaces, segurança, fases, testes, homologação, rollout e
+rollback. A integração deve convergir no `DeliveriesService`,
+`PricingService` e `DispatchService` existentes; não haverá segundo fluxo de
+preço, oferta ou financeiro. Pedidos manuais continuam em paralelo.
+
+Decisões ainda obrigatórias antes do schema/código: confirmar com o aiqfome que
+a aplicação pode atuar somente na logística sem assumir o PDV/aceite da loja;
+escolher `ready-order` (recomendado) ou `read-order` como gatilho; definir
+cancelamento externo após aceite/coleta; decidir o piloto somente PREPAID ou
+modelar custódia/conciliação de pagamento offline; definir permissão de conexão
+e retenção dos dados. Essas decisões não foram adicionadas a
+`docs/business-rules.md` porque ainda não foram confirmadas pelo responsável.
+
+Nenhum código, migration, credencial, ambiente ou loja foi alterado. Próximo
+passo concreto: cadastrar Aplicativo de Integração e loja de teste no Portal do
+Desenvolvedor, obter as respostas de homologação acima e registrar as decisões
+antes de implementar a Fase 1.
+
+Validação documental: `pnpm exec prettier --check
+docs/aiqfome-integration-plan.md` e `git diff --check` aprovados. Não foram
+executados typecheck, testes ou builds porque o recorte contém somente
+documentação.
+
+## Atualização — 2026-08-20: runbook de publicação e piloto de rua
+
+Foi criado `docs/go-live-pilot-runbook.md` com o procedimento detalhado para
+publicar um ambiente de piloto, cadastrar e aprovar empresa/motoboy, configurar
+operação e preço, gerar um APK Android assinado, executar o caminho dourado na
+rua, conferir o financeiro, monitorar, interromper e fazer rollback. O runbook
+separa explicitamente um piloto Android privado — possível após fechar os
+portões P0 — de um lançamento público, que ainda não deve ser prometido no
+estado atual.
+
+A inspeção do primeiro GitHub Actions publicado confirmou a causa exata da
+falha: o run `32426789496`, no commit `34d2c5e`, executou
+`jest -- --runInBand`; o Jest interpretou `--runInBand` como padrão e encerrou
+com “No tests found”. Typecheck, lint, migrations e seed haviam passado antes
+disso. Enquanto o workflow não for corrigido e reexecutado, o CI permanece um
+portão vermelho, mesmo não sendo uma falha de regra de negócio. O runbook
+recomenda chamadas inequívocas via `pnpm --filter <pacote> exec jest
+--runInBand` para API e driver-app.
+
+Outros bloqueios objetivos documentados: URL mobile fixa em localhost; versão
+inconsistente e release Android assinado com debug; ausência de push para
+ofertas com app suspenso; falta de homologação física Android/iOS; Redis de
+produção sem suporte atual a URL/usuário/senha/TLS; healthcheck apenas de
+liveness; Socket.IO sem adapter distribuído, exigindo uma réplica no piloto;
+migration mais recente ainda não validada em cópia restaurada de staging; e
+necessidade de completar configuração operacional antes de criar pedidos.
+
+Foram identificadas duas lacunas de interface relevantes para o ensaio. A tela
+`AddressSetupForm` não envia `lat/lng`, embora `complete-return` exija
+coordenadas da coleta; o runbook prioriza corrigir a tela com Places e fornece
+um PUT autenticado provisório somente para piloto. O percentual do motoboy tem
+UI, mas `dispatchOfferTimeoutSeconds` e `returnProximityRadiusMeters` não têm;
+o runbook fornece PATCH autenticado provisório e registra que os dois campos
+precisam entrar no admin antes da abertura pública. Nenhum valor de comissão,
+timeout, raio ou preço foi decidido — os números mostrados são exemplos
+técnicos e continuam dependentes da decisão do responsável.
+
+O caminho de rua começa com dados sintéticos, pagamento PREPAID, destino
+conhecido e sem retorno. Depois de três execuções bem-sucedidas, o runbook
+orienta testar retorno, lote de dois itens, cancelamentos, perda de rede/GPS e
+expiração/recusa com dois motoboys. O ciclo financeiro não deve ser acelerado
+alterando relógio ou banco: no dia do piloto valida-se o crédito pendente; a
+liberação, saque e fatura são conferidos na segunda-feira às 00:00/00:05 de
+`America/Sao_Paulo`, mantendo o E2E isolado como prova com relógio controlado.
+
+Fontes oficiais atuais foram incorporadas para segurança das chaves Google,
+monorepos/variáveis Vercel, deploy/pre-deploy/health/Redis/rede privada
+Railway, assinatura e localização Android, política Google Play, distribuição
+Apple/TestFlight, migrations Neon e orientação de segurança da ANPD.
+
+Esta atualização é somente documentação. Nenhum código, migration, banco,
+segredo, conta, deploy ou dado externo foi alterado. Próximo passo concreto:
+corrigir as duas chamadas Jest em `.github/workflows/ci.yml`, repetir as
+validações e obter CI verde; em seguida executar os portões P0 mobile, Redis,
+pickup/configurações e migration antes de provisionar o piloto.
+
+## Atualização — 2026-08-21: portão P0.1 (CI) corrigido e todos os gates validados
+
+O bug do CI foi reproduzido localmente antes da correção, não apenas assumido a
+partir do log do GitHub. Rodar `pnpm --filter @motoboycity/driver-app test --
+--runInBand` faz o pnpm repassar `jest "--" "--runInBand"`; o Jest trata o que
+vem depois de `--` como posicional, ou seja `testPathPattern`. A saída mostra
+`Pattern: --runInBand - 0 matches` e encerra com "No tests found, exiting with
+code 1". A causa é o `--` extra, não o `--runInBand` em si, e vale para
+qualquer script cujo comando seja apenas `jest` (é o caso de `test` na API e no
+driver-app). `test:e2e` nunca foi afetado porque já embute as flags no próprio
+script e é chamado sem argumentos extras.
+
+Correção aplicada nas três ocorrências do padrão quebrado, não só na do CI:
+
+- `.github/workflows/ci.yml` — passos "API unit tests" e "Driver app tests"
+  agora usam `pnpm --filter <pacote> exec jest --runInBand`;
+- `AGENTS.md` — bloco de comandos (a linha do driver-app também passou a fixar
+  `--runInBand`, antes rodava sem);
+- `README.md` — bloco "Verificação contínua".
+
+### Banco isolado para E2E
+
+Os E2E não tinham ambiente isolado local e o `test/jest-e2e.json` não
+sobrescreve `DATABASE_URL`, então herdariam o banco de desenvolvimento. A
+limpeza dos specs é escopada (`deleteMany` por e-mail/documento/código), mas
+`test/admin-platform-settings.e2e-spec.ts` apaga a linha `platformSettings` de
+id `global` — ou seja, comissão, timeout de oferta e raio de retorno do
+ambiente. Rodar E2E contra o dev destruiria essa configuração.
+
+Foi criado o banco `motoboycity_e2e_local` no mesmo container PostgreSQL do
+`docker-compose`, espelhando o `motoboycity_ci` do workflow. `motoboycity_dev`
+não foi tocado em nenhum momento; a URL de destino é derivada da de dev por
+substituição do nome do banco e o comando aborta se o resultado não contiver
+`motoboycity_e2e_local`. Use override de `DATABASE_URL` na própria chamada, não
+edite `apps/api/.env`. O banco foi mantido para reuso; se for descartado, basta
+recriar com `CREATE DATABASE`, `prisma migrate deploy` e o seed.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                                    | Resultado                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------ |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand` (forma antiga) | falhou: "No tests found" — bug reproduzido |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`              | 1 suíte, 1 teste aprovado                  |
+| `pnpm --filter @motoboycity/api exec jest --runInBand`                     | 28 suítes, 244 testes aprovados            |
+| `pnpm typecheck`                                                           | aprovado nos 8 workspaces                  |
+| `pnpm lint`                                                                | aprovado nos 8 workspaces                  |
+| `prisma migrate deploy` no `motoboycity_e2e_local` (banco vazio)           | 14 migrations aplicadas                    |
+| `prisma:seed` no `motoboycity_e2e_local`                                   | aprovado                                   |
+| `pnpm --filter @motoboycity/api run test:e2e` no banco isolado             | 18 suítes, 133 testes aprovados            |
+| `pnpm --filter @motoboycity/api run build`                                 | aprovado                                   |
+| `pnpm --filter @motoboycity/company-web run build`                         | aprovado (11 rotas)                        |
+| `pnpm --filter @motoboycity/admin-web run build`                           | aprovado (17 rotas)                        |
+| `pnpm exec prettier --check` nos arquivos do recorte                       | aprovado                                   |
+| `git diff --check`                                                         | aprovado                                   |
+
+Todos os passos do workflow foram exercitados localmente na mesma ordem do CI.
+Os passos posteriores aos testes unitários (E2E e os três builds) nunca tinham
+rodado no GitHub, porque o job morria antes; agora existe evidência local de que
+passam. A contagem de E2E subiu de 126 (2026-08-16) para 133, e a de unitários
+de 210 para 244, refletindo os recortes financeiro e operacional intermediários.
+
+A aplicação das 14 migrations do zero num banco vazio ficou comprovada. Isso
+**não** substitui o item P0.7 do runbook: continua faltando validar a migration
+mais recente contra uma cópia restaurada com dado real, que é um cenário
+diferente de banco vazio.
+
+### Estado e próximo passo
+
+Nenhum código de aplicação, contrato, schema Prisma ou migration foi alterado —
+o recorte é workflow e documentação, mais a criação de um banco local isolado.
+Nenhum secret foi lido, impresso ou versionado; `.env` não foi editado.
+
+O CI só pode ser declarado verde depois de um run real no GitHub. Próximo passo
+concreto: mediante pedido expresso, commitar e pushar este recorte para
+disparar o workflow e confirmar o run verde de ponta a ponta; em seguida seguir
+para o P0.2 (URL da API configurável no driver-app, hoje fixa em
+`http://localhost:3333` em `apps/driver-app/src/lib/config.ts`).
+
+## Atualização — 2026-08-21: portão P0.2 (URL da API configurável no app)
+
+`API_BASE_URL` era a constante `http://localhost:3333` em
+`apps/driver-app/src/lib/config.ts`, o que só funciona com `adb reverse` — na
+rua o telefone tentaria acessar a si mesmo. Agora a URL é resolvida em tempo de
+build por ambiente e congelada no artefato.
+
+### Como funciona
+
+`apps/driver-app/app.env.js` (CommonJS, carregado por `babel.config.js` e
+`metro.config.js`) resolve e valida duas variáveis:
+
+| Variável              | Valores                                       |
+| --------------------- | --------------------------------------------- |
+| `MOTOBOYCITY_APP_ENV` | `development` (padrão), `pilot`, `production` |
+| `MOTOBOYCITY_API_URL` | obrigatória em `pilot`/`production`           |
+
+Um plugin Babel local em `babel.config.js` substitui os identificadores
+`__MOTOBOYCITY_APP_ENV__` e `__MOTOBOYCITY_API_URL__` por literais. Verificado
+na saída compilada: `exports.API_BASE_URL="http://localhost:3333"` em
+development e `"https://api-pilot.exemplo.com"` em pilot.
+
+**Nenhuma dependência nova.** O comentário antigo do `config.ts` registrava a
+decisão de não adotar `react-native-config` só por causa disso; essa decisão
+foi preservada. Também não foi necessário
+`babel-plugin-transform-inline-environment-variables`: o preset
+`@react-native/babel-preset` 0.86.2 não inlina `process.env` (confirmado no
+fonte instalado), mas `babel.config.js` aceita um plugin como função e
+`@babel/core` já era devDependency.
+
+`pilot` e `production` exigem HTTPS e recusam `localhost`, IPs privados
+(10/8, 172.16–31, 192.168/16, 127/8, 169.254/16), `::1`, `0.x` e hosts
+`.local`. A falha é de build, no escopo do módulo, antes de gerar bundle.
+`development` mantém o padrão localhost e aceita override (ex.: `10.0.2.2` no
+emulador). A URL é normalizada sem barra final, porque o `api-client`
+concatena `${baseUrl}/rota`.
+
+### Duas armadilhas encontradas na implementação
+
+1. **Cache do Metro.** A chave de cache do Metro deriva do conteúdo dos
+   arquivos de configuração, não das variáveis de ambiente que eles leem. Sem
+   tratamento, trocar `MOTOBOYCITY_APP_ENV` reaproveitaria transformações em
+   cache e o APK de piloto sairia apontando para localhost — exatamente a falha
+   que este portão existe para impedir. `metro.config.js` agora define
+   `cacheVersion` derivado do ambiente e da URL.
+2. **Lookup por objeto literal no plugin Babel.** A primeira versão usava
+   `constants[path.node.name]`, que para identificadores chamados `toString` ou
+   `constructor` — ambos presentes no fonte do React — retornava o método
+   herdado de `Object.prototype` e tentava inliná-lo como string. Isso quebrava
+   o bundle inteiro, não só um teste. Corrigido com `Map`. O `App.test.tsx`
+   pegou a regressão.
+
+### Arquivos
+
+- `apps/driver-app/app.env.js` (novo) — resolução e validação;
+- `apps/driver-app/babel.config.js` — plugin local de inline;
+- `apps/driver-app/metro.config.js` — `cacheVersion` por ambiente;
+- `apps/driver-app/src/lib/config.ts` — exporta `API_BASE_URL` (nome
+  preservado, os três consumidores não mudaram), `APP_ENV` e `APP_ENV_LABEL`;
+- `apps/driver-app/src/screens/SettingsScreen.tsx` — bloco "Diagnóstico" com
+  ambiente, servidor e versão;
+- `apps/driver-app/__tests__/appEnv.test.js` (novo) — 21 testes.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                          | Resultado                               |
+| ---------------------------------------------------------------- | --------------------------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`    | 2 suítes, 22 testes aprovados           |
+| inline verificado na saída do Babel (development e pilot)        | literal congelado nos dois casos        |
+| build com production + URL vazia / HTTP / localhost / IP privado | falhou nos quatro, com mensagem legível |
+| build com pilot + URL vazia                                      | falhou, como esperado                   |
+| `pnpm typecheck`                                                 | aprovado nos 8 workspaces               |
+| `pnpm lint`                                                      | aprovado nos 8 workspaces               |
+| `pnpm exec prettier --check` nos 6 arquivos do recorte           | aprovado                                |
+
+### Limitações
+
+- O domínio real do piloto **não foi decidido**, então `pilot` não tem URL
+  padrão de propósito: passar `MOTOBOYCITY_API_URL` é obrigatório e a ausência
+  falha o build em vez de cair em localhost silenciosamente.
+- Nenhum APK release foi gerado nem instalado nesta sessão; a verificação do
+  inline foi feita pela saída do Babel, não por build Android. O portão P0.3
+  (versão e assinatura) continua aberto e é pré-requisito para gerar o APK de
+  piloto — `DRIVER_APP_VERSION` segue `0.0.1` contra `versionName "1.0"` no
+  Android, divergência que esta sessão não tocou.
+- iOS não foi verificado.
+
+Próximo passo concreto: P0.3 — alinhar versão visível, `versionName` e
+`versionCode`, e substituir `signingConfigs.debug` no release Android por uma
+chave real fora do repositório, com caminho e senhas injetados por ambiente.
