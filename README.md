@@ -213,7 +213,7 @@ e dos dois painéis. Localmente, os mesmos portões principais são:
 ```bash
 pnpm typecheck
 pnpm lint
-pnpm --filter @motoboycity/api test -- --runInBand
+pnpm --filter @motoboycity/api exec jest --runInBand
 pnpm --filter @motoboycity/api test:e2e
 pnpm --filter @motoboycity/api run build
 pnpm --filter @motoboycity/company-web run build

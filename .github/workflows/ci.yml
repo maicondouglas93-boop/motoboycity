@@ -83,10 +83,10 @@ jobs:
         run: pnpm lint
 
       - name: API unit tests
-        run: pnpm --filter @motoboycity/api test -- --runInBand
+        run: pnpm --filter @motoboycity/api exec jest --runInBand
 
       - name: Driver app tests
-        run: pnpm --filter @motoboycity/driver-app test -- --runInBand
+        run: pnpm --filter @motoboycity/driver-app exec jest --runInBand
 
       - name: API end-to-end tests
         run: pnpm --filter @motoboycity/api test:e2e
