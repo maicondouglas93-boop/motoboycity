@@ -1689,3 +1689,234 @@ concatena `${baseUrl}/rota`.
 Próximo passo concreto: P0.3 — alinhar versão visível, `versionName` e
 `versionCode`, e substituir `signingConfigs.debug` no release Android por uma
 chave real fora do repositório, com caminho e senhas injetados por ambiente.
+
+## Atualização — 2026-08-21: portão P0.3 (versão e assinatura Android)
+
+Existiam três versões divergentes: `package.json` `0.0.1`, a constante
+`DRIVER_APP_VERSION` `0.0.1` e o Android com `versionName "1.0"`. E o release
+Android assinava com `signingConfigs.debug`.
+
+### Versão com fonte única
+
+O `version` do `package.json` do driver-app passou a ser a única fonte, hoje
+`0.1.0-pilot.1`. O bundle lê via `resolveAppVersion()` em `app.env.js` e o
+`versionName` do Android lê o mesmo arquivo com `JsonSlurper`. Reaproveitei o
+plugin Babel do P0.2 em vez de criar um segundo mecanismo: `appVersion.ts`
+agora só reexporta o literal inlinado `__MOTOBOYCITY_APP_VERSION__`.
+
+Confirmado nos dois lados: `DRIVER_APP_VERSION="0.1.0-pilot.1"` na saída do
+Babel e `versionName = 0.1.0-pilot.1` consultando o Gradle.
+
+`versionCode` **não** deriva da versão, de propósito: é um inteiro que precisa
+crescer a cada APK e nunca ser reaproveitado, inclusive num rollback, porque o
+Android recusa reinstalar um `versionCode` já usado. Vem de
+`MOTOBOYCITY_VERSION_CODE` (ou da propriedade Gradle `motoboycity.versionCode`),
+com padrão `1` apenas para debug local.
+
+### Assinatura
+
+`signingConfigs.debug` saiu do buildType de release. Existe um `signingConfigs.release`
+que lê `MOTOBOYCITY_KEYSTORE_FILE`, `MOTOBOYCITY_KEYSTORE_PASSWORD`,
+`MOTOBOYCITY_KEY_ALIAS` e `MOTOBOYCITY_KEY_PASSWORD` do ambiente. Um
+`gradle.taskGraph.whenReady` derruba o build de release se faltar qualquer
+variável, se o keystore não existir no caminho informado, ou se o `versionCode`
+não for explícito. A checagem filtra por tarefas de release do próprio módulo,
+então build de debug não é afetado.
+
+O motivo de falhar em vez de avisar: a chave de debug é pública e conhecida, e
+o Android só aceita atualizar um app se a assinatura for a mesma — publicar com
+ela inviabiliza qualquer atualização futura do app.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                       | Resultado                                 |
+| ------------------------------------------------------------- | ----------------------------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 2 suítes, 25 testes aprovados             |
+| versão inlinada conferida na saída do Babel                   | `DRIVER_APP_VERSION="0.1.0-pilot.1"`      |
+| `./gradlew help`                                              | configuração válida, trava não dispara    |
+| `assembleRelease --dry-run` sem variáveis                     | falhou listando as quatro faltantes       |
+| `assembleRelease --dry-run` com keystore inexistente          | falhou apontando o caminho                |
+| `assembleRelease --dry-run` sem `MOTOBOYCITY_VERSION_CODE`    | falhou explicando o inteiro crescente     |
+| `assembleRelease --dry-run` com tudo definido                 | passou a trava                            |
+| `versionName`/`versionCode` consultados via init script       | `0.1.0-pilot.1` / `1` padrão, `7` por env |
+| `pnpm typecheck` e `pnpm lint`                                | aprovados nos 8 workspaces                |
+| `pnpm exec prettier --check` nos arquivos do recorte          | aprovado                                  |
+
+`--dry-run` monta o grafo de tarefas sem compilar, então as travas foram
+exercitadas sem nenhum build nativo real e sem nenhuma chave verdadeira: o
+teste usou um arquivo descartável no scratchpad e valores obviamente fictícios,
+que `--dry-run` nunca chega a usar para assinar.
+
+### Limitações
+
+- **Nenhuma chave de assinatura foi criada.** Isso é deliberado: gerar e
+  guardar a chave de produção é do responsável, não de um agente. Perder essa
+  chave significa nunca mais atualizar o app publicado. O encanamento está
+  pronto e aguarda a chave.
+- **Nenhum APK foi gerado ou instalado.** A verificação foi de configuração
+  (`--dry-run` e consulta de propriedades), não de build real. O primeiro
+  `assembleRelease` de verdade ainda pode revelar problemas de compilação,
+  ProGuard ou empacotamento que este recorte não cobre.
+- `0.1.0-pilot.1` veio do exemplo do runbook; se preferir outra numeração,
+  agora é um campo só no `package.json`.
+- iOS não foi tocado — continua sem tratamento de versão ou assinatura.
+
+Próximo passo concreto: P0.4 — `QueueModule` e `LiveDriverPresenceService` só
+usam `REDIS_HOST`/`REDIS_PORT`, e Redis gerenciado normalmente exige URL,
+usuário, senha e TLS.
+
+## Atualização — 2026-08-21: portão P0.4 (Redis gerenciado)
+
+`QueueModule` e `LiveDriverPresenceService` montavam cada um o seu objeto de
+conexão, ambos lendo só `REDIS_HOST`/`REDIS_PORT`. Isso impede usar qualquer
+Redis gerenciado — eles exigem autenticação e normalmente TLS — e deixava as
+duas conexões livres para divergirem.
+
+### Fonte única
+
+Novo `apps/api/src/common/redis-connection.ts`, seguindo o padrão de
+`common/cors.ts` (função pura sobre `process.env`, com spec ao lado). Os dois
+consumidores passaram a usar `buildRedisConnectionOptions()`, então fila e
+presença não podem mais apontar para Redis diferentes.
+
+Precedência: `REDIS_URL` vence; sem ela, cai em `REDIS_HOST`/`REDIS_PORT` com
+padrão `localhost:6379`. Variáveis aceitas: `REDIS_URL`, `REDIS_HOST`,
+`REDIS_PORT`, `REDIS_USERNAME` (ou `REDISUSER`), `REDIS_PASSWORD` (ou
+`REDISPASSWORD`), `REDIS_TLS` e `REDIS_FAMILY`.
+
+Optei por `process.env` em vez de `ConfigService` porque a função é chamada de
+uma fábrica de módulo e de um construtor de serviço, e o `ConfigModule` é
+global sem `load` próprio — ou seja, `ConfigService` apenas reflete
+`process.env`. Mesmo raciocínio já registrado em `cors.ts`.
+
+Detalhes que evitam falha silenciosa em produção:
+
+- senha percent-encoded na URL é decodificada antes de conectar (um `%40` que
+  deveria ser `@` quebraria a autenticação);
+- host IPv6 vem sem colchetes, que é o que o ioredis espera;
+- índice de banco lido do caminho (`redis://host:6379/2`);
+- `rediss://` liga TLS sem flag separada;
+- porta, protocolo e `REDIS_FAMILY` inválidos falham na inicialização, com
+  mensagem direta, em vez de deixarem a API subir sem fila;
+- `describeRedisTarget()` monta o log de conexão com host, porta, TLS e se há
+  autenticação — nunca usuário, senha ou a URL inteira.
+
+`LiveDriverPresenceService` deixou de injetar `ConfigService` (era usado só
+para o Redis). Nenhum teste instanciava o serviço diretamente, então a mudança
+de construtor não quebrou nada.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                          | Resultado                       |
+| ---------------------------------------------------------------- | ------------------------------- |
+| `pnpm --filter @motoboycity/api exec jest --runInBand`           | 29 suítes, 269 testes aprovados |
+| E2E completo no banco isolado                                    | 18 suítes, 133 testes aprovados |
+| E2E de presença e ofertas com `REDIS_URL` no lugar de host/porta | 2 suítes, 16 testes aprovados   |
+| `pnpm typecheck` e `pnpm lint`                                   | aprovados nos 8 workspaces      |
+| `pnpm exec prettier --check` nos arquivos do recorte             | aprovado                        |
+
+Os unitários subiram de 244 para 269 (25 testes novos). O terceiro item é o
+que importa de verdade: exercita o caminho novo contra um Redis real, não só o
+fallback — sem ele, `REDIS_URL` estaria coberta apenas por teste de unidade.
+
+### Limitações
+
+- **Não foi testado contra um Redis gerenciado real.** A prova de conexão usou
+  `redis://localhost:6379` do `docker-compose`, que valida o parsing e a
+  conexão, mas não exercita TLS real, `rediss://` com certificado de provedor,
+  nem `family: 0` numa rede só-IPv6. Esses três só se provam no provedor
+  escolhido.
+- `apps/api/.env.example` foi atualizado com as variáveis novas; o `.env` local
+  não foi tocado.
+- O workflow de CI continua usando `REDIS_HOST`/`REDIS_PORT`, que segue sendo
+  o caminho de fallback e passou nos E2E.
+
+Próximo passo concreto: P0.5 — `dispatchOfferTimeoutSeconds` e
+`returnProximityRadiusMeters` não têm tela no admin (só o percentual do motoboy
+tem), e os três valores precisam ser decididos pelo responsável antes do
+piloto.
+
+## Atualização — 2026-08-21: portão P0.5 (telas de configuração operacional)
+
+O runbook pedia "implemente os dois campos faltantes no painel". A investigação
+mostrou que a lacuna era maior: **o contrato compartilhado estava mais estreito
+que o backend**.
+
+`updatePlatformSettingsSchema`, o service e o controller já aceitavam e
+devolviam os três campos, mas:
+
+- `PlatformSettingsItem` em `packages/types` declarava só
+  `driverCommissionPercentage`;
+- `adminPlatformSettingsApi.update()` tipava o payload como
+  `{ driverCommissionPercentage: number }`;
+- `AdminPlatformSettingsService` mantinha uma cópia local da interface, com os
+  três campos — foi essa duplicata que permitiu o tipo compartilhado ficar para
+  trás sem ninguém perceber.
+
+### O que mudou
+
+- `packages/types/src/pricing.ts`: `PlatformSettingsItem` ganhou
+  `dispatchOfferTimeoutSeconds` e `returnProximityRadiusMeters`; novo
+  `UpdatePlatformSettingsInput` espelhando o schema Zod (parcial, sem `null` —
+  limpar um valor configurado pararia a operação e não é suportado);
+- `packages/api-client`: `update()` passou a aceitar `UpdatePlatformSettingsInput`;
+- `apps/api`: o service passou a reexportar o tipo de `@motoboycity/types` em
+  vez de manter cópia local, eliminando a origem da divergência;
+- `apps/admin-web`: nova rota `/configuracoes/operacao` com os dois campos, e
+  um card apontando para ela no índice de configurações.
+
+A tela ficou fora de `tabela-de-precos` de propósito: timeout de oferta e raio
+de retorno são operacionais, não de precificação, e o índice de configurações
+já é uma lista de subpáginas.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                              | Resultado                                        |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                                     | aprovado nos 8 workspaces                        |
+| `pnpm lint`                                          | aprovado nos 8 workspaces                        |
+| testes de `platform-settings`                        | 5 testes aprovados                               |
+| `pnpm --filter @motoboycity/admin-web run build`     | aprovado; rota `/configuracoes/operacao` gerada  |
+| smoke no navegador, autenticado                      | tela renderiza os dois estados "não configurado" |
+| validação de faixa no cliente (valor 5, mínimo 10)   | bloqueou com mensagem; nenhum PATCH na rede      |
+| `pnpm exec prettier --check` nos arquivos do recorte | aprovado                                         |
+
+O smoke usou o admin de seed local (credenciais são placeholder público
+versionado em `prisma/seed.ts`) contra a API e o banco de desenvolvimento. O
+token foi descartado depois. **Nenhum valor foi gravado** em
+`PlatformSettings`: os três seguem `null` no banco de dev, porque comissão,
+timeout e raio são decisão do responsável, não do agente.
+
+### Correção de um registro anterior
+
+As atualizações do P0.1 e do P0.4 descrevem os E2E como rodando "contra banco
+isolado". Isso vale para o **PostgreSQL** (`motoboycity_e2e_local`), mas **não
+para o Redis**: nenhum comando sobrescreveu `REDIS_HOST`/`REDIS_PORT`, então os
+E2E usaram o mesmo Redis (db0) do desenvolvimento. Resíduo de presença de
+motoboys de teste ficou visível no widget "Atividade ao Vivo" do admin.
+
+Não é destrutivo — `listActive()` executa `zremrangebyscore` e `get()` remove
+membro cuja chave expirou, então o índice se limpa sozinho na próxima leitura.
+Mas contraria a regra do `AGENTS.md` de rodar E2E só com Redis isolado.
+
+Correção para as próximas execuções: acrescentar um índice de banco separado ao
+comando, agora que `REDIS_URL` existe (P0.4):
+
+```
+DATABASE_URL=<banco isolado> REDIS_URL=redis://localhost:6379/1 pnpm --filter @motoboycity/api run test:e2e
+```
+
+### Limitações
+
+- **O caminho de gravação não foi exercitado pelo navegador**, só a validação
+  que barra antes da rede. A mutação em si está coberta por
+  `admin-platform-settings.e2e-spec.ts` e pelos unitários, incluindo update
+  parcial de cada campo isolado.
+- Os três valores continuam `null`. O piloto não pode criar pedido nem fechar
+  retorno até o responsável decidir e preencher — a tela agora existe, os
+  números não.
+- Nenhum teste automatizado cobre a nova tela; o `admin-web` não tem suíte de
+  componentes, e criar uma está fora deste recorte.
+
+Próximo passo concreto: P0.6 — `AddressSetupForm` no company-web não envia
+`lat/lng`, embora `complete-return` exija coordenadas da coleta.

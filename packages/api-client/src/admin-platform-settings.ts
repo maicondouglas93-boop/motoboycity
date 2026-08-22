@@ -1,4 +1,4 @@
-import type { PlatformSettingsItem } from '@motoboycity/types';
+import type { PlatformSettingsItem, UpdatePlatformSettingsInput } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminPlatformSettingsApiConfig {
@@ -20,7 +20,7 @@ export function createAdminPlatformSettingsApi({ baseUrl }: AdminPlatformSetting
 
     async update(
       accessToken: string,
-      payload: { driverCommissionPercentage: number },
+      payload: UpdatePlatformSettingsInput,
     ): Promise<PlatformSettingsItem> {
       const response = await fetch(`${baseUrl}/admin/platform-settings`, {
         method: 'PATCH',

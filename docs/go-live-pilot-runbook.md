@@ -235,6 +235,58 @@ com `signingConfigs.debug`. Android exige que todo APK seja assinado e a chave
 é necessária para futuras atualizações; siga a
 [documentação oficial de assinatura](https://developer.android.com/studio/publish/app-signing).
 
+#### Estado — encanamento pronto em 2026-08-21, chave ainda pendente
+
+**Versão unificada.** As três informações agora vêm de uma fonte só: o
+`version` do `package.json` do driver-app, hoje `0.1.0-pilot.1`. O bundle
+JavaScript lê via `app.env.js` e o `versionName` do Android lê o mesmo arquivo
+com `JsonSlurper`. Confirmado no Gradle: `versionName = 0.1.0-pilot.1`. Para
+publicar uma versão nova, altere esse único campo.
+
+**`versionCode` sempre explícito.** Não é derivado da versão — é um inteiro que
+precisa crescer a cada APK e nunca ser reaproveitado, inclusive num rollback,
+porque o Android recusa reinstalar um `versionCode` já usado. O padrão `1`
+serve só para debug local; um release sem `MOTOBOYCITY_VERSION_CODE` falha.
+
+**Assinatura.** `signingConfigs.debug` saiu do release. A configuração agora lê
+quatro variáveis de ambiente e o build de release **falha** se qualquer uma
+faltar, em vez de cair silenciosamente na chave de debug:
+
+| Variável                        | Conteúdo                              |
+| ------------------------------- | ------------------------------------- |
+| `MOTOBOYCITY_KEYSTORE_FILE`     | caminho da chave, fora do repositório |
+| `MOTOBOYCITY_KEYSTORE_PASSWORD` | senha do keystore                     |
+| `MOTOBOYCITY_KEY_ALIAS`         | alias da chave                        |
+| `MOTOBOYCITY_KEY_PASSWORD`      | senha da chave                        |
+| `MOTOBOYCITY_VERSION_CODE`      | inteiro crescente                     |
+
+As quatro travas foram verificadas com `--dry-run`, que monta o grafo de
+tarefas sem compilar: sem variáveis, com caminho inexistente, sem
+`versionCode`, e o caminho completo passando. Nenhuma trava dispara em build de
+debug.
+
+O `.gitignore` já cobre `*.jks` e `*.keystore` (exceto `debug.keystore`), então
+uma chave largada por engano na pasta não é versionada.
+
+**Pendente e fora do meu alcance**: gerar a chave. Ela deve ser criada por você
+com `keytool`, guardada em cópia segura fora do repositório, e as senhas
+mantidas no cofre — perder essa chave significa nunca mais conseguir atualizar
+o app publicado. Gerar o APK do piloto:
+
+```bash
+MOTOBOYCITY_APP_ENV=pilot \
+MOTOBOYCITY_API_URL=https://api-pilot.seudominio.com \
+MOTOBOYCITY_KEYSTORE_FILE=/caminho/seguro/motoboycity-pilot.jks \
+MOTOBOYCITY_KEYSTORE_PASSWORD=... \
+MOTOBOYCITY_KEY_ALIAS=... \
+MOTOBOYCITY_KEY_PASSWORD=... \
+MOTOBOYCITY_VERSION_CODE=1 \
+./gradlew assembleRelease
+```
+
+Prefira injetar as senhas por cofre/CI a digitá-las na linha de comando, para
+não deixá-las no histórico do shell.
+
 ### P0.4 — aceitar uma conexão Redis de produção
 
 `QueueModule` e `LiveDriverPresenceService` usam somente `REDIS_HOST` e
@@ -252,6 +304,41 @@ O Redis do Railway, por exemplo, fornece `REDISUSER`, `REDISPASSWORD` e
 `REDIS_URL`, e nasce privado por padrão, conforme a
 [documentação oficial do Redis no Railway](https://docs.railway.com/databases/redis).
 Não ignore autenticação para “fazer funcionar”.
+
+#### Estado — implementado em 2026-08-21
+
+Os seis requisitos acima estão implementados em
+`apps/api/src/common/redis-connection.ts`. `QueueModule` e
+`LiveDriverPresenceService` passaram a consumir `buildRedisConnectionOptions()`,
+então fila e presença não podem mais divergir em host, autenticação ou TLS.
+
+Precedência: `REDIS_URL` vence; sem ela, cai no par `REDIS_HOST`/`REDIS_PORT`
+com padrão `localhost:6379`.
+
+| Variável         | Uso                                                  |
+| ---------------- | ---------------------------------------------------- |
+| `REDIS_URL`      | preferencial; `rediss://` liga TLS sem flag separada |
+| `REDIS_HOST`     | fallback local                                       |
+| `REDIS_PORT`     | fallback local, padrão 6379                          |
+| `REDIS_USERNAME` | também lido de `REDISUSER` (nome do Railway)         |
+| `REDIS_PASSWORD` | também lido de `REDISPASSWORD`                       |
+| `REDIS_TLS`      | `true` para TLS com host/porta em vez de URL         |
+| `REDIS_FAMILY`   | `0`, `4` ou `6`; use `0` em rede privada só-IPv6     |
+
+Detalhes que evitam falha silenciosa em produção:
+
+- senha percent-encoded na URL é decodificada antes de conectar — um `%40`
+  que deveria ser `@` quebraria a autenticação;
+- host IPv6 vem sem colchetes para o ioredis;
+- índice de banco é lido do caminho da URL (`redis://host:6379/2`);
+- porta, `REDIS_FAMILY` e protocolo inválidos **falham na inicialização**, com
+  mensagem direta, em vez de deixarem a API subir sem fila;
+- o log de conexão usa `describeRedisTarget()`, que imprime host, porta, TLS e
+  se há autenticação — nunca usuário, senha ou a URL inteira.
+
+Validado com 25 testes unitários e, contra o Redis real, rodando o E2E de
+presença e de ofertas com `REDIS_URL` no lugar de `REDIS_HOST`/`REDIS_PORT` —
+exercitando o caminho novo de ponta a ponta, não só o fallback.
 
 ### P0.5 — completar as configurações operacionais
 

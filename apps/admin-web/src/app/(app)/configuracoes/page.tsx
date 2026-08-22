@@ -13,6 +13,12 @@ const settings = [
     title: 'Tabelas de preços',
     description: 'Consulte e altere os valores que são congelados na criação de cada pedido.',
   },
+  {
+    href: '/configuracoes/operacao',
+    title: 'Operação',
+    description:
+      'Defina o tempo de resposta de uma oferta e o raio aceito para concluir um retorno.',
+  },
 ];
 
 export default function SettingsPage() {

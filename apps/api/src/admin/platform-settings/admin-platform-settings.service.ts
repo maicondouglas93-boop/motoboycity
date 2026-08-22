@@ -1,16 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import type { PlatformSettingsItem } from '@motoboycity/types';
 import type { UpdatePlatformSettingsPayload } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const SETTINGS_ID = 'global';
 
-export interface PlatformSettingsItem {
-  driverCommissionPercentage: number | null;
-  dispatchOfferTimeoutSeconds: number | null;
-  returnProximityRadiusMeters: number | null;
-  updatedBy: { id: string; name: string } | null;
-  updatedAt: string | null;
-}
+// O tipo vem de `@motoboycity/types` de proposito: uma copia local aqui foi o
+// que deixou o contrato compartilhado ficar para tras, expondo so a comissao
+// enquanto a API ja devolvia os tres campos.
+export type { PlatformSettingsItem };
 
 @Injectable()
 export class AdminPlatformSettingsService {
