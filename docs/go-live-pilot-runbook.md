@@ -370,6 +370,31 @@ Nunca envie apenas uma coordenada e não use coordenadas aproximadas. O primeiro
 pedido do caminho dourado deve ser criado **sem retorno**; ensaie retorno só
 depois de confirmar a coleta no mapa e o raio configurado.
 
+#### Estado — opção 1 implementada em 2026-08-21
+
+A opção recomendada foi adotada. `AddressSetupForm` deixou de ter campos de
+digitação livre para rua/cidade/UF/CEP e passou a usar o
+`GoogleAddressAutocomplete` que o formulário de pedido já usava — o componente
+só devolve um endereço quando a empresa escolhe uma sugestão, e junto vêm as
+coordenadas. Digitar sem selecionar zera a seleção, e o botão de salvar fica
+desabilitado nesse estado.
+
+Número e complemento continuam editáveis: o Google costuma omitir o número em
+endereços brasileiros, e o número vem pré-preenchido quando existe. Cidade, UF,
+CEP e o par de coordenadas aparecem abaixo do formulário, para a empresa
+conferir o ponto antes de salvar.
+
+Também foi fechada uma brecha no `upsertCompanyAddressSchema`: `lat` e `lng`
+eram opcionais **independentes**, então a API aceitaria meia coordenada. Um
+`refine` passou a exigir as duas juntas ou nenhuma. As duas continuam opcionais
+em conjunto — há endereço já salvo sem elas, e a opção provisória 2 segue
+funcionando —, mas meia coordenada não é mais aceita.
+
+**Ainda não verificado**: o caminho feliz do Places não foi exercitado, porque
+não há `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` no ambiente de desenvolvimento.
+Sem a chave o componente mostra "Mapa indisponível". Confirme esta tela com uma
+chave de navegador real antes do piloto, junto da seção 7.
+
 ### P0.7 — validar migration, backup e restauração
 
 As 14 migrations passam em banco vazio, mas a migration mais recente ainda não

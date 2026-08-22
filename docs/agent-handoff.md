@@ -1920,3 +1920,66 @@ DATABASE_URL=<banco isolado> REDIS_URL=redis://localhost:6379/1 pnpm --filter @m
 
 Próximo passo concreto: P0.6 — `AddressSetupForm` no company-web não envia
 `lat/lng`, embora `complete-return` exija coordenadas da coleta.
+
+## Atualização — 2026-08-21: portão P0.6 (coordenadas da coleta)
+
+`AddressSetupForm` no company-web enviava rua, número, cidade, UF e CEP por
+digitação livre, sem `lat`/`lng`. Como `complete-return` mede a distância em
+linha reta entre o motoboy e o ponto de coleta, a empresa terminava o cadastro
+com um endereço aparentemente completo e o retorno só falhava na rua.
+
+### O que mudou
+
+O componente necessário **já existia**: `GoogleAddressAutocomplete`, usado pelo
+`operational-order-form` para o destino. Ele devolve rua, número, cidade, UF,
+CEP e o par de coordenadas, e zera a seleção se a pessoa digitar sem escolher
+uma sugestão. O trabalho foi ligá-lo ao formulário de coleta, seguindo o mesmo
+padrão do formulário de pedido (autocomplete + número editável + complemento).
+
+O botão de salvar fica desabilitado sem uma sugestão selecionada, e cidade/UF/
+CEP/coordenadas aparecem para conferência antes de salvar.
+
+Fechada também uma brecha no `upsertCompanyAddressSchema`: `lat` e `lng` eram
+opcionais **independentes**, então a API aceitava meia coordenada — um valor
+inutilizável que só apareceria como falha no `complete-return`. Um `refine`
+passou a exigir as duas juntas ou nenhuma.
+
+Optei por **não** tornar as coordenadas obrigatórias: `company-address.e2e-spec.ts`
+cobre explicitamente que são opcionais ("aceita e devolve lat/lng opcionais"),
+há endereço já salvo sem elas, e a opção provisória do runbook (gravar o par
+pela API) depende desse comportamento. Tornar obrigatório seria uma mudança de
+contrato que o runbook não pediu.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                | Resultado                              |
+| ------------------------------------------------------ | -------------------------------------- |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 30 suítes, 274 testes aprovados        |
+| novo `company-address-validation.spec.ts`              | 5 testes cobrindo o par de coordenadas |
+| E2E completo, Postgres **e Redis** isolados            | 18 suítes, 133 testes aprovados        |
+| `pnpm --filter @motoboycity/company-web run build`     | aprovado                               |
+| `pnpm typecheck` e `pnpm lint`                         | aprovados nos 8 workspaces             |
+| `pnpm exec prettier --check` nos arquivos do recorte   | aprovado                               |
+
+Este E2E já usou a isolação corrigida registrada no P0.5
+(`REDIS_URL=redis://localhost:6379/1`). Conferido depois: 30 chaves no db1 e o
+db0 do desenvolvimento intocado — a correção funciona.
+
+### Limitações
+
+- **O caminho feliz do Places não foi exercitado.** Não existe
+  `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` no ambiente de desenvolvimento; sem
+  chave o componente mostra "Mapa indisponível". A tela precisa de uma
+  verificação manual com chave de navegador real antes do piloto. Não
+  provisionei chave por conta própria: envolve conta Google Cloud com
+  faturamento e é decisão do responsável.
+- Endereços já salvos sem coordenadas continuam sem elas. Nada foi migrado —
+  a empresa precisa reabrir a tela e selecionar o endereço de novo, ou usar a
+  opção provisória da seção 12 do runbook.
+- O `admin-web`/`company-web` seguem sem suíte de componentes, então a tela não
+  tem teste automatizado.
+
+Próximo passo concreto: P0.7 — validar a migration mais recente em cópia
+restaurada com dado real. Hoje o Neon está vazio, então na prática ainda não há
+o que restaurar; o portão só se fecha de verdade quando existir um banco com
+dado real para copiar.
