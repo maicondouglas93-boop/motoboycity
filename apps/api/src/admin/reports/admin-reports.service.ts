@@ -1,7 +1,31 @@
 import { Injectable } from '@nestjs/common';
+import type {
+  AdminOperationsReport,
+  OperationsReportCompanyItem,
+  OperationsReportDriverItem,
+  OperationsReportServiceTypeItem,
+} from '@motoboycity/types';
 import type { OperationsReportQuery } from '@motoboycity/validation';
 import type { DeliveryStatus } from '@prisma/client';
+import {
+  dateInSaoPaulo,
+  endOfDayInSaoPaulo,
+  startOfDayInSaoPaulo,
+} from '../../common/sao-paulo-time';
 import { PrismaService } from '../../prisma/prisma.service';
+import { computePeakHours } from './delivery-peak-hours';
+
+/**
+ * As formas do relatorio vivem em `@motoboycity/types` e sao apenas
+ * reexportadas: a copia local que existia aqui era a mesma armadilha que ja
+ * deixou o contrato de configuracoes divergir entre a API e o painel.
+ */
+export type {
+  AdminOperationsReport,
+  OperationsReportCompanyItem,
+  OperationsReportDriverItem,
+  OperationsReportServiceTypeItem,
+};
 
 const deliveryStatuses: DeliveryStatus[] = [
   'SCHEDULED',
@@ -14,49 +38,6 @@ const deliveryStatuses: DeliveryStatus[] = [
   'CANCELLED',
   'AWAITING_PAYMENT',
 ];
-
-export interface OperationsReportCompanyItem {
-  companyId: string;
-  companyName: string;
-  createdCount: number;
-  completedCount: number;
-  cancelledCount: number;
-  completedTotalValue: number;
-  platformValue: number;
-}
-
-export interface OperationsReportDriverItem {
-  driverId: string;
-  driverName: string;
-  driverEmail: string;
-  completedCount: number;
-  driverValue: number;
-}
-
-export interface OperationsReportServiceTypeItem {
-  serviceTypeName: string;
-  createdCount: number;
-  completedCount: number;
-  completedTotalValue: number;
-}
-
-export interface AdminOperationsReport {
-  period: { from: string; to: string };
-  ordersCreated: {
-    count: number;
-    byCurrentStatus: Record<DeliveryStatus, number>;
-  };
-  deliveriesCompleted: {
-    count: number;
-    totalValue: number;
-    driverValue: number;
-    platformValue: number;
-    averageTicket: number;
-  };
-  companies: OperationsReportCompanyItem[];
-  drivers: OperationsReportDriverItem[];
-  serviceTypes: OperationsReportServiceTypeItem[];
-}
 
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -73,6 +54,7 @@ export class AdminReportsService {
         where: { createdAt: { gte: period.from, lte: period.to } },
         select: {
           status: true,
+          createdAt: true,
           company: { select: { id: true, tradeName: true } },
           serviceType: { select: { name: true } },
         },
@@ -170,8 +152,8 @@ export class AdminReportsService {
 
     return {
       period: {
-        from: this.dateOnly(period.from),
-        to: this.dateOnly(period.to),
+        from: dateInSaoPaulo(period.from),
+        to: dateInSaoPaulo(period.to),
       },
       ordersCreated: {
         count: createdDeliveries.length,
@@ -204,6 +186,10 @@ export class AdminReportsService {
           (left, right) =>
             right.driverValue - left.driverValue || left.driverName.localeCompare(right.driverName),
         ),
+      peakHours: computePeakHours(
+        createdDeliveries.map((delivery) => delivery.createdAt),
+        period,
+      ),
       serviceTypes: [...serviceTypes.values()]
         .map((item) => ({
           ...item,
@@ -218,24 +204,28 @@ export class AdminReportsService {
     };
   }
 
+  /**
+   * O periodo e recortado no relogio de Sao Paulo, nao em UTC.
+   *
+   * Antes as pontas eram `T00:00:00Z` e `T23:59:59Z`, o que fazia um pedido
+   * das 22h de terca cair no relatorio de quarta — tres horas de todo dia
+   * lançadas no dia errado. Com os horarios de pico isso deixaria de ser um
+   * detalhe contabil e viraria um pico deslocado no grafico.
+   */
   private resolvePeriod(query: OperationsReportQuery): { from: Date; to: Date } {
-    const to = query.to ? this.endOfDay(query.to) : new Date();
-    if (query.from) return { from: this.startOfDay(query.from), to };
+    const to = query.to ? endOfDayInSaoPaulo(query.to) : new Date();
+    if (query.from) return { from: startOfDayInSaoPaulo(query.from), to };
 
-    const from = new Date(to);
-    from.setUTCDate(from.getUTCDate() - 29);
-    from.setUTCHours(0, 0, 0, 0);
-    return { from, to };
+    // 30 dias contando o de hoje, andando por dias civis locais.
+    const [ano, mes, dia] = dateInSaoPaulo(to).split('-').map(Number);
+    const primeiroDia = new Date(Date.UTC(ano!, mes! - 1, dia! - 29));
+    return {
+      from: startOfDayInSaoPaulo(this.dateOnly(primeiroDia)),
+      to,
+    };
   }
 
-  private startOfDay(date: string): Date {
-    return new Date(`${date}T00:00:00.000Z`);
-  }
-
-  private endOfDay(date: string): Date {
-    return new Date(`${date}T23:59:59.999Z`);
-  }
-
+  /** Data civil de um instante ja expresso como UTC puro. */
   private dateOnly(date: Date): string {
     return date.toISOString().slice(0, 10);
   }

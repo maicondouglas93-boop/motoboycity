@@ -1,51 +1,13 @@
-const SAO_PAULO_TIME_ZONE = 'America/Sao_Paulo';
+import { dateInSaoPaulo, saoPauloDateParts, saoPauloLocalToUtc } from '../common/sao-paulo-time';
+
 const INVOICE_CLOSING_HOUR = 0;
 const INVOICE_CLOSING_MINUTE = 5;
 
-function saoPauloDateParts(date: Date): {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  weekday: string;
-} {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: SAO_PAULO_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    weekday: 'short',
-  }).formatToParts(date);
-
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value;
-  return {
-    year: Number(get('year')),
-    month: Number(get('month')),
-    day: Number(get('day')),
-    hour: Number(get('hour')),
-    minute: Number(get('minute')),
-    weekday: get('weekday') ?? '',
-  };
-}
-
-function dateString(year: number, month: number, day: number): string {
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-/** Data civil vigente no fuso operacional, sem depender do fuso do servidor. */
-export function dateInSaoPaulo(date: Date): string {
-  const parts = saoPauloDateParts(date);
-  return dateString(parts.year, parts.month, parts.day);
-}
+export { dateInSaoPaulo };
 
 /** A liberação financeira ocorre toda segunda-feira no fuso operacional. */
 export function isMondayInSaoPaulo(date: Date): boolean {
-  return saoPauloDateParts(date).weekday === 'Mon';
+  return saoPauloDateParts(date).weekday === 1;
 }
 
 /**
@@ -80,11 +42,7 @@ export function latestInvoiceClosingDateInSaoPaulo(date: Date): string {
     daysSinceMonday = 7;
   }
   localDate.setUTCDate(localDate.getUTCDate() - daysSinceMonday);
-  return dateString(
-    localDate.getUTCFullYear(),
-    localDate.getUTCMonth() + 1,
-    localDate.getUTCDate(),
-  );
+  return `${String(localDate.getUTCFullYear()).padStart(4, '0')}-${String(localDate.getUTCMonth() + 1).padStart(2, '0')}-${String(localDate.getUTCDate()).padStart(2, '0')}`;
 }
 
 /** Converte a data civil do corte de 00:05 em São Paulo para um instante UTC. */
@@ -93,15 +51,5 @@ export function invoiceClosingCutoff(issueDate: string): Date {
   if (!year || !month || !day) {
     throw new RangeError('Data de fechamento inválida.');
   }
-  const desiredAsUtc = Date.UTC(year, month - 1, day, INVOICE_CLOSING_HOUR, INVOICE_CLOSING_MINUTE);
-  const guess = new Date(desiredAsUtc);
-  const represented = saoPauloDateParts(guess);
-  const representedAsUtc = Date.UTC(
-    represented.year,
-    represented.month - 1,
-    represented.day,
-    represented.hour,
-    represented.minute,
-  );
-  return new Date(desiredAsUtc - (representedAsUtc - desiredAsUtc));
+  return saoPauloLocalToUtc(year, month, day, INVOICE_CLOSING_HOUR, INVOICE_CLOSING_MINUTE);
 }

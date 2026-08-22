@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { calculateWalletBalances, type WalletTransactionType } from './driver-wallet.service';
 import { FinancialClock } from './financial-clock.service';
 import { isMondayInSaoPaulo } from './finance-release.utils';
+import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
 
@@ -86,10 +87,7 @@ export class FinancialPayoutService {
         where: {
           type: 'CREDIT_REPASSE',
           status: 'PENDING',
-          OR: [
-            { releaseAt: { lte: now } },
-            ...(includeLegacy ? [{ releaseAt: null }] : []),
-          ],
+          OR: [{ releaseAt: { lte: now } }, ...(includeLegacy ? [{ releaseAt: null }] : [])],
         },
         select: { id: true, walletId: true, amount: true },
       });
@@ -103,7 +101,9 @@ export class FinancialPayoutService {
         if (updated.count === 1) {
           releasedByWallet.set(
             candidate.walletId,
-            roundCurrency((releasedByWallet.get(candidate.walletId) ?? 0) + numberValue(candidate.amount)),
+            roundCurrency(
+              (releasedByWallet.get(candidate.walletId) ?? 0) + numberValue(candidate.amount),
+            ),
           );
         }
       }
@@ -122,10 +122,15 @@ export class FinancialPayoutService {
     });
   }
 
-  async requestWithdrawal(user: User, payload: RequestWithdrawalPayload): Promise<WithdrawalRequestItem> {
+  async requestWithdrawal(
+    user: User,
+    payload: RequestWithdrawalPayload,
+  ): Promise<WithdrawalRequestItem> {
     const now = this.clock.now();
     if (!isMondayInSaoPaulo(now)) {
-      throw new UnprocessableEntityException('Saques estão disponíveis somente às segundas-feiras.');
+      throw new UnprocessableEntityException(
+        'Saques estão disponíveis somente às segundas-feiras.',
+      );
     }
     if (user.type !== 'DRIVER') {
       throw new ForbiddenException('Acesso restrito a entregadores.');
@@ -406,7 +411,9 @@ export class FinancialPayoutService {
     });
   }
 
-  private toWithdrawalRequestItem(request: Prisma.WithdrawalRequestGetPayload<{ include: typeof withdrawalInclude }>): WithdrawalRequestItem {
+  private toWithdrawalRequestItem(
+    request: Prisma.WithdrawalRequestGetPayload<{ include: typeof withdrawalInclude }>,
+  ): WithdrawalRequestItem {
     return {
       id: request.id,
       walletId: request.walletId,
@@ -436,12 +443,19 @@ export class FinancialPayoutService {
     };
   }
 
+  /**
+   * O filtro por data e lido no relogio da operacao, nao em UTC.
+   *
+   * Com as pontas em `T00:00:00Z`/`T23:59:59Z`, o registro das 22h de terca
+   * caia no recorte de quarta: tres horas de todo dia lancadas no dia errado.
+   * Quem digita 22/08 no painel quer o dia 22 em Lajinha.
+   */
   private startOfDay(date: string): Date {
-    return new Date(`${date}T00:00:00.000Z`);
+    return startOfDayInSaoPaulo(date);
   }
 
   private endOfDay(date: string): Date {
-    return new Date(`${date}T23:59:59.999Z`);
+    return endOfDayInSaoPaulo(date);
   }
 
   private async withSerializableTransaction<T>(
@@ -458,6 +472,8 @@ export class FinancialPayoutService {
         if (!canRetry || attempt === 2) throw error;
       }
     }
-    throw new ConflictException('Não foi possível concluir a operação financeira. Tente novamente.');
+    throw new ConflictException(
+      'Não foi possível concluir a operação financeira. Tente novamente.',
+    );
   }
 }

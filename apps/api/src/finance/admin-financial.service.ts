@@ -11,6 +11,7 @@ import {
   type WalletTransactionItem,
   type WalletTransactionType,
 } from './driver-wallet.service';
+import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 export interface AdminFinancialOverview {
   completedDeliveries: {
@@ -239,11 +240,18 @@ export class AdminFinancialService {
     };
   }
 
+  /**
+   * O filtro por data e lido no relogio da operacao, nao em UTC.
+   *
+   * Com as pontas em `T00:00:00Z`/`T23:59:59Z`, o registro das 22h de terca
+   * caia no recorte de quarta: tres horas de todo dia lancadas no dia errado.
+   * Quem digita 22/08 no painel quer o dia 22 em Lajinha.
+   */
   private startOfDay(date: string): Date {
-    return new Date(`${date}T00:00:00.000Z`);
+    return startOfDayInSaoPaulo(date);
   }
 
   private endOfDay(date: string): Date {
-    return new Date(`${date}T23:59:59.999Z`);
+    return endOfDayInSaoPaulo(date);
   }
 }

@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { PeakHoursChart } from '@/components/reports/peak-hours-chart';
 import { StatCard } from '@/components/stat-card';
 import { adminReportsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -168,6 +169,8 @@ export default function AdminReportsPage() {
               />
             ))}
           </section>
+
+          <PeakHoursChart peakHours={report.peakHours} />
 
           <section className="space-y-3">
             <div>

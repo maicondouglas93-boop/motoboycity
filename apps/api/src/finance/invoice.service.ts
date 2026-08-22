@@ -18,6 +18,7 @@ import {
   invoiceClosingCutoff,
   latestInvoiceClosingDateInSaoPaulo,
 } from './finance-release.utils';
+import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 export interface InvoiceListItem {
   id: string;
@@ -269,7 +270,7 @@ export class InvoiceService {
         ...(query.from || query.to
           ? {
               issueDate: {
-                ...(query.from && { gte: this.dateOnly(query.from) }),
+                ...(query.from && { gte: this.startOfDayLocal(query.from) }),
                 ...(query.to && { lte: this.endOfDay(query.to) }),
               },
             }
@@ -413,11 +414,26 @@ export class InvoiceService {
     return `FAT-${issueDate.replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
   }
 
+  /**
+   * Meia-noite UTC, que e como a coluna representa uma data civil guardada.
+   *
+   * Isto NAO e o fuso da operacao de proposito: `issueDate` e `paymentDate`
+   * sao valores armazenados e comparados com linhas ja existentes. Move-los
+   * para 03:00 mudaria dado gravado, nao so o recorte de uma consulta.
+   */
   private dateOnly(value: string): Date {
     return new Date(`${value}T00:00:00.000Z`);
   }
 
+  /**
+   * Ja o filtro da listagem e lido no relogio da operacao, igual ao resto do
+   * produto: quem digita 22/08 no painel quer o dia 22 em Lajinha.
+   */
+  private startOfDayLocal(value: string): Date {
+    return startOfDayInSaoPaulo(value);
+  }
+
   private endOfDay(value: string): Date {
-    return new Date(`${value}T23:59:59.999Z`);
+    return endOfDayInSaoPaulo(value);
   }
 }

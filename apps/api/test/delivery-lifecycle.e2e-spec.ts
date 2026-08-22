@@ -9,6 +9,7 @@ import { InvoiceService } from './../src/finance/invoice.service';
 import { GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { RealtimeGateway } from './../src/realtime/realtime.gateway';
+import { dateInSaoPaulo } from '../src/common/sao-paulo-time';
 
 const uniqueSuffix = Date.now();
 const password = 'senhaSegura123';
@@ -476,7 +477,10 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         }),
       );
 
-      const today = new Date().toISOString().slice(0, 10);
+      // A data vem do relogio da operacao, e nao do UTC: entre 21h e meia-noite
+      // em Lajinha ja e o dia seguinte em UTC, e o filtro pediria um dia em que
+      // a entrega deste teste nao existe.
+      const today = dateInSaoPaulo(new Date());
       const companyDeliveriesInPeriod = await request(app.getHttpServer())
         .get(`/deliveries?from=${today}&to=${today}`)
         .set('Authorization', `Bearer ${companyToken}`)

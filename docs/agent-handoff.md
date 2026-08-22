@@ -1124,19 +1124,19 @@ Principais arquivos:
 
 Validações desta fase:
 
-| Comando | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma` | aprovado antes da migration |
-| `pnpm --filter @motoboycity/api exec prisma migrate dev --name withdrawal_request_audit` | migration aditiva aplicada no Postgres local |
-| `pnpm --filter @motoboycity/validation build` | aprovado |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| testes unitários focados de `finance-release`, `financial-payout` e `finance-ledger` | 3 suítes / 7 testes aprovados |
-| `apps/api/test/withdrawal-payout.e2e-spec.ts` | 2 testes E2E aprovados: concorrência, aprovação, pagamento, rejeição e saldo derivado conferido |
-| `pnpm --filter @motoboycity/driver-app lint` e `pnpm --filter @motoboycity/admin-web lint` | aprovados |
-| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 132 testes aprovados |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| builds de `@motoboycity/admin-web` e `@motoboycity/company-web` | aprovados; rotas de saque incluídas no admin |
-| `git diff --check` | aprovado (avisos de CRLF preexistentes no worktree) |
+| Comando                                                                                    | Resultado                                                                                       |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma`        | aprovado antes da migration                                                                     |
+| `pnpm --filter @motoboycity/api exec prisma migrate dev --name withdrawal_request_audit`   | migration aditiva aplicada no Postgres local                                                    |
+| `pnpm --filter @motoboycity/validation build`                                              | aprovado                                                                                        |
+| `pnpm typecheck`                                                                           | aprovado nos 8 workspaces                                                                       |
+| testes unitários focados de `finance-release`, `financial-payout` e `finance-ledger`       | 3 suítes / 7 testes aprovados                                                                   |
+| `apps/api/test/withdrawal-payout.e2e-spec.ts`                                              | 2 testes E2E aprovados: concorrência, aprovação, pagamento, rejeição e saldo derivado conferido |
+| `pnpm --filter @motoboycity/driver-app lint` e `pnpm --filter @motoboycity/admin-web lint` | aprovados                                                                                       |
+| `pnpm --filter @motoboycity/api test:e2e`                                                  | 18 suítes / 132 testes aprovados                                                                |
+| `pnpm lint`                                                                                | aprovado nos 8 workspaces                                                                       |
+| builds de `@motoboycity/admin-web` e `@motoboycity/company-web`                            | aprovados; rotas de saque incluídas no admin                                                    |
+| `git diff --check`                                                                         | aprovado (avisos de CRLF preexistentes no worktree)                                             |
 
 Próximo passo concreto: executar a suíte E2E e os lints completos após esta
 fase; a próxima decisão de produto ainda em aberto é rastreamento GPS contínuo
@@ -1193,19 +1193,19 @@ Arquivos principais: `apps/api/src/tracking/`,
 
 Validações já executadas nesta fase:
 
-| Comando | Resultado |
-| --- | --- |
-| `prisma validate` antes da migration | aprovado |
-| `prisma migrate dev --name delivery_location_tracking` | migration aplicada no PostgreSQL local; SQL aditivo revisado |
-| `pnpm --filter @motoboycity/{validation,api,api-client} typecheck` | aprovado |
-| `pnpm --filter @motoboycity/{driver-app,admin-web,company-web,api} typecheck` | aprovado |
-| `apps/api/src/tracking/delivery-tracking.service.spec.ts` | 3 testes aprovados: registro/emissão, escopo de empresa e retenção |
-| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
-| lints específicos de driver, admin, empresa e API | aprovados |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 132 testes aprovados |
-| `git diff --check` | aprovado (somente avisos CRLF já presentes no worktree) |
+| Comando                                                                       | Resultado                                                          |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `prisma validate` antes da migration                                          | aprovado                                                           |
+| `prisma migrate dev --name delivery_location_tracking`                        | migration aplicada no PostgreSQL local; SQL aditivo revisado       |
+| `pnpm --filter @motoboycity/{validation,api,api-client} typecheck`            | aprovado                                                           |
+| `pnpm --filter @motoboycity/{driver-app,admin-web,company-web,api} typecheck` | aprovado                                                           |
+| `apps/api/src/tracking/delivery-tracking.service.spec.ts`                     | 3 testes aprovados: registro/emissão, escopo de empresa e retenção |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`                   | 1 suíte / 1 teste aprovado                                         |
+| lints específicos de driver, admin, empresa e API                             | aprovados                                                          |
+| `pnpm typecheck`                                                              | aprovado nos 8 workspaces                                          |
+| `pnpm lint`                                                                   | aprovado nos 8 workspaces                                          |
+| `pnpm --filter @motoboycity/api test:e2e`                                     | 18 suítes / 132 testes aprovados                                   |
+| `git diff --check`                                                            | aprovado (somente avisos CRLF já presentes no worktree)            |
 
 Não foi executado build nativo Android/iOS nesta sessão. Antes de publicar,
 validar em dispositivo físico as permissões, a notificação Android e o fluxo
@@ -1275,17 +1275,17 @@ dois painéis; e rastreamento/presença em `apps/driver-app/{src,android,ios}`.
 
 Validações desta entrega:
 
-| Comando | Resultado |
-| --- | --- |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` e lints específicos de API, painéis e driver-app | aprovados |
-| `pnpm --filter @motoboycity/api test -- --runInBand` | 24 suítes / 235 testes aprovados |
+| Comando                                                                               | Resultado                                                       |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm typecheck`                                                                      | aprovado nos 8 workspaces                                       |
+| `pnpm lint` e lints específicos de API, painéis e driver-app                          | aprovados                                                       |
+| `pnpm --filter @motoboycity/api test -- --runInBand`                                  | 24 suítes / 235 testes aprovados                                |
 | `pnpm --filter @motoboycity/api test:e2e` com PostgreSQL/Redis temporários e isolados | 18 suítes / 133 testes aprovados; containers removidos ao final |
-| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
-| builds de API, company-web e admin-web | aprovados |
-| `gradlew.bat :app:compileDebugKotlin` | aprovado no Android, somente avisos de dependências/depreciação |
-| `prisma validate` e aplicação das 14 migrations em banco vazio isolado | aprovados |
-| `git diff --check` | aprovado; somente avisos de normalização CRLF do worktree |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`                           | 1 suíte / 1 teste aprovado                                      |
+| builds de API, company-web e admin-web                                                | aprovados                                                       |
+| `gradlew.bat :app:compileDebugKotlin`                                                 | aprovado no Android, somente avisos de dependências/depreciação |
+| `prisma validate` e aplicação das 14 migrations em banco vazio isolado                | aprovados                                                       |
+| `git diff --check`                                                                    | aprovado; somente avisos de normalização CRLF do worktree       |
 
 A nova migration foi aplicada no PostgreSQL local e validada também em banco
 vazio isolado. Ela **não foi aplicada nem validada em cópia atual de
@@ -1352,19 +1352,19 @@ e `README.md`.
 
 Validações executadas:
 
-| Comando | Resultado |
-| --- | --- |
-| testes unitários focados do scheduler, processor, datas e faturas | 5 suítes / 12 testes aprovados |
-| `pnpm --filter @motoboycity/validation build` | aprovado |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| `pnpm --filter @motoboycity/api test -- --runInBand` | 28 suítes / 244 testes aprovados |
-| `pnpm --filter @motoboycity/driver-app test -- --runInBand` | 1 suíte / 1 teste aprovado |
-| E2E focado `delivery-lifecycle.e2e-spec.ts` | 1 suíte / 17 testes aprovados em PostgreSQL/Redis isolados |
-| `pnpm --filter @motoboycity/api test:e2e` | 18 suítes / 133 testes aprovados no mesmo ambiente isolado |
-| builds de API, company-web e admin-web | aprovados |
-| `prettier --check .github/workflows/ci.yml` | aprovado |
-| `pnpm audit --audit-level high` | falhou por 3 alertas altos transitivos conhecidos: dois em `image-size@1.2.1` (Metro) e um em `deepmerge-ts@7.1.5` (Prisma CLI) |
+| Comando                                                           | Resultado                                                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| testes unitários focados do scheduler, processor, datas e faturas | 5 suítes / 12 testes aprovados                                                                                                  |
+| `pnpm --filter @motoboycity/validation build`                     | aprovado                                                                                                                        |
+| `pnpm typecheck`                                                  | aprovado nos 8 workspaces                                                                                                       |
+| `pnpm lint`                                                       | aprovado nos 8 workspaces                                                                                                       |
+| `pnpm --filter @motoboycity/api test -- --runInBand`              | 28 suítes / 244 testes aprovados                                                                                                |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`       | 1 suíte / 1 teste aprovado                                                                                                      |
+| E2E focado `delivery-lifecycle.e2e-spec.ts`                       | 1 suíte / 17 testes aprovados em PostgreSQL/Redis isolados                                                                      |
+| `pnpm --filter @motoboycity/api test:e2e`                         | 18 suítes / 133 testes aprovados no mesmo ambiente isolado                                                                      |
+| builds de API, company-web e admin-web                            | aprovados                                                                                                                       |
+| `prettier --check .github/workflows/ci.yml`                       | aprovado                                                                                                                        |
+| `pnpm audit --audit-level high`                                   | falhou por 3 alertas altos transitivos conhecidos: dois em `image-size@1.2.1` (Metro) e um em `deepmerge-ts@7.1.5` (Prisma CLI) |
 
 Limitações: o workflow foi validado localmente quanto a formato e todos os
 comandos que ele executa passaram, mas a execução dentro do GitHub Actions só
@@ -2322,3 +2322,102 @@ botão renderiza `rgb(253, 160, 46)`.
 configurações inspecionadas. O achado que muda prioridade: **tarifa dinâmica é
 um upsell que a operação não contrata** (R$ 199/mês), logo não é paridade nem
 bloqueio de migração — e é a mais cara da lista.
+
+## Atualização — 2026-08-22: horários de pico, e o fuso que apareceu junto
+
+Primeiro item tirado do levantamento da plataforma concorrente. O dado já
+estava em `createdAt`, como o levantamento previa — mas construir o relatório
+expôs dois erros que ele não previa.
+
+### O fuso estava errado em seis serviços
+
+O recorte por data usava `T00:00:00.000Z` e `T23:59:59.999Z`, copiado em
+`deliveries`, `admin-financial`, `driver-wallet`, `financial-payout`,
+`delivery-tracking`, `invoice` e no próprio relatório. Numa operação em UTC-03,
+isso joga **três horas de todo dia no dia errado**: o pedido das 22h de terça
+entrava no recorte de quarta.
+
+Para um total mensal isso passava despercebido. Para horários de pico não
+passaria — o pico do almoço apareceria às 15h.
+
+`apps/api/src/common/sao-paulo-time.ts` passou a ser a fonte única. A regra de
+fuso vem do `Intl`, e não de uma constante `-3`, porque o Brasil teve horário de
+verão até 2019 e uma subtração fixa erraria a meia-noite em todo o histórico
+anterior. O fim do dia é calculado como o começo do dia seguinte menos um
+milissegundo, que é sempre um instante único mesmo em dia de virada.
+
+`finance-release.utils.ts` foi reescrito em cima desse módulo e seus cinco
+testes continuam passando sem alteração.
+
+**Uma exceção deliberada:** `invoice.service.dateOnly` continua em meia-noite
+UTC. Ela não é só filtro — grava `issueDate` e `paymentDate`, que são datas
+civis armazenadas e comparadas com linhas já existentes. Movê-la mudaria dado
+gravado, não o recorte de uma consulta. Só o filtro da listagem virou local.
+
+### O calendário inflava dia da semana
+
+Uma janela de 30 dias quase nunca tem o mesmo número de segundas e de domingos.
+Somar pedidos por dia da semana daria 25% a mais de volume ao dia que caísse
+cinco vezes em vez de quatro — efeito de calendário lido como demanda.
+
+Por isso `byWeekday` reporta **média por ocorrência**, e é dela que sai o dia de
+pico. Na conferência visual isso apareceu bem: sábado com 58 pedidos perde para
+sexta com 56, porque houve cinco sábados e quatro sextas.
+
+### O que ficou
+
+- `apps/api/src/common/sao-paulo-time.ts` + spec (7 testes)
+- `apps/api/src/admin/reports/delivery-peak-hours.ts` + spec (6 testes)
+- `apps/api/src/admin/reports/admin-reports.service.spec.ts` (6 testes) — o
+  serviço não tinha nenhum teste antes
+- `PeakHoursChart` no painel admin, sem biblioteca de gráfico: 24 barras não
+  justificam uma dependência
+- os tipos foram para `@motoboycity/types` e o serviço parou de declarar cópia
+  local — era a mesma armadilha que já deixou o contrato de configurações
+  divergir
+
+O laranja da marca marca só a barra de pico. Gastá-lo nas 24 barras o tornaria
+decoração e o olho pararia de achar o que importa, que aqui é uma barra só.
+
+Os gráficos são `aria-hidden` e os números vivem num `<details>` — barra não é
+legível por leitor de tela, nem serve para quem precisa do valor exato para
+montar escala.
+
+### Um teste que ia ficar instável
+
+`delivery-lifecycle.e2e-spec.ts` montava `today` com `toISOString()`, ou seja em
+UTC. Depois da correção de fuso ele falharia sempre que o CI rodasse entre 21h e
+meia-noite de Brasília — o filtro pediria um dia em que a entrega do teste ainda
+não existe. Passou a usar `dateInSaoPaulo`.
+
+### Armadilha de ambiente: e2e local pode apontar para o banco de dev
+
+Tentando rodar a suíte e2e localmente, descobri um risco que vale registrar
+antes que alguém repita.
+
+O `apps/api/.env` aponta para `motoboycity_dev` na porta **5434** (contêiner
+Docker, não a porta padrão). E **o CLI do Prisma carrega esse `.env` por cima**
+da variável exportada no shell: `prisma migrate deploy` com `DATABASE_URL`
+exportado apontando para `motoboycity_e2e_local` mesmo assim reportou
+`Datasource "db": PostgreSQL database "motoboycity_dev"`.
+
+Para o Jest o comportamento é o oposto — `process.env` vence — mas eu não
+consegui **confirmar** para qual banco a suíte tinha conectado: o
+`pg_stat_activity` mostrava 8 conexões em `motoboycity_dev`, que são o servidor
+de desenvolvimento na porta 3333, e nenhuma em `motoboycity_e2e_local`. Sem
+conseguir distinguir as duas coisas, interrompi a execução em vez de arriscar
+uma suíte que limpa tabelas rodando no banco errado.
+
+Conferido depois que o banco de dev está íntegro: 33 usuários e 12 empresas.
+As entregas estão em zero, mas isso é o estado de repouso dele — o
+`pg_stat_user_tables` mostra 1085 inserções e 1140 remoções acumuladas em
+`deliveries`, ou seja, esse banco já serviu de alvo de e2e em sessões
+anteriores e sempre termina vazio.
+
+**Recomendação:** não rodar e2e local sem um passo que verifique o alvo antes de
+começar (conectar, ler `current_database()` e abortar se não for o banco
+isolado). Enquanto isso não existir, o e2e do CI é a fonte confiável — lá o
+Postgres é dedicado e as credenciais vêm do workflow.
+
+Vale também considerar mudar o `.env` de desenvolvimento para não ser o padrão
+que qualquer ferramenta pega sozinha.

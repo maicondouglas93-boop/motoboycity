@@ -36,6 +36,7 @@ import { GoogleMapsService } from '../maps/google-maps.service';
 import { computeStageTimes } from './delivery-stage-times';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
@@ -1254,8 +1255,15 @@ export class DeliveriesService {
     return driver;
   }
 
+  /**
+   * O filtro por data e lido no relogio da operacao, nao em UTC.
+   *
+   * Com as pontas em `T00:00:00Z`/`T23:59:59Z`, o registro das 22h de terca
+   * caia no recorte de quarta: tres horas de todo dia lancadas no dia errado.
+   * Quem digita 22/08 no painel quer o dia 22 em Lajinha.
+   */
   private startOfDay(date: string): Date {
-    return new Date(`${date}T00:00:00.000Z`);
+    return startOfDayInSaoPaulo(date);
   }
 
   private buildDeliveryWhere(
@@ -1340,7 +1348,7 @@ export class DeliveriesService {
   }
 
   private endOfDay(date: string): Date {
-    return new Date(`${date}T23:59:59.999Z`);
+    return endOfDayInSaoPaulo(date);
   }
 
   private formatAddress(address: {

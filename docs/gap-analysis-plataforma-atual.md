@@ -146,9 +146,17 @@ Histórico de Entregas, Pedidos Faturados, **Pedidos Cancelados por motivo**,
 **Tempos e SLA por etapa**, **Insucesso de Entrega**, **Entregas por
 Bairro/Cidade**, Relatório de Escalas, Pedidos por Entregador.
 
-Dois já foram feitos aqui: SLA por etapa e o caminho de insucesso. **Cancelamento
-com motivo** é o próximo mais barato — hoje o cancelamento não registra
-justificativa.
+Três já foram feitos aqui: SLA por etapa, o caminho de insucesso e **horários de
+pico**. **Cancelamento com motivo** é o próximo mais barato — hoje o
+cancelamento não registra justificativa.
+
+Sobre horários de pico, vale registrar o que o trabalho revelou: o dado já
+estava em `createdAt`, como previsto, mas o relatório só ficou honesto depois de
+duas correções que não apareciam no levantamento. A primeira é o fuso — contar a
+hora em UTC jogaria o pico do almoço para as 15h. A segunda é o calendário: uma
+janela de 30 dias quase nunca tem o mesmo número de segundas e de domingos, e a
+contagem crua daria 25% a mais de volume ao dia que aparecesse cinco vezes. O
+número por dia da semana é média por ocorrência, não soma.
 
 ## Limites deste levantamento
 

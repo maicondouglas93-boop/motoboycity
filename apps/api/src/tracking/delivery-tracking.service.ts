@@ -11,6 +11,7 @@ import type {
 import type { DeliveryStatus, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 // FAILED continua rastreavel: o motoboy esta voltando com a mercadoria, e e
 // justamente nesse trecho que a empresa quer saber onde ela esta.
@@ -279,11 +280,18 @@ export class DeliveryTrackingService {
     return new Date(now.getTime() - LOCATION_RETENTION_DAYS * 24 * 60 * 60 * 1_000);
   }
 
+  /**
+   * O filtro por data e lido no relogio da operacao, nao em UTC.
+   *
+   * Com as pontas em `T00:00:00Z`/`T23:59:59Z`, o registro das 22h de terca
+   * caia no recorte de quarta: tres horas de todo dia lancadas no dia errado.
+   * Quem digita 22/08 no painel quer o dia 22 em Lajinha.
+   */
   private startOfDay(value: string): Date {
-    return new Date(`${value}T00:00:00.000Z`);
+    return startOfDayInSaoPaulo(value);
   }
 
   private endOfDay(value: string): Date {
-    return new Date(`${value}T23:59:59.999Z`);
+    return endOfDayInSaoPaulo(value);
   }
 }

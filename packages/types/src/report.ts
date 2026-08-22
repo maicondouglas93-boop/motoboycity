@@ -25,6 +25,39 @@ export interface OperationsReportServiceTypeItem {
   completedTotalValue: number;
 }
 
+/**
+ * Quando a operacao aperta.
+ *
+ * Responde a pergunta de escala de entregador: em que horas e em que dias vale
+ * ter mais gente na rua. Tudo contado no relogio de Sao Paulo.
+ */
+export interface PeakHourBucket {
+  /** 0 a 23, no fuso operacional. */
+  hour: number;
+  count: number;
+  /** Media por dia do periodo, que e o numero comparavel entre recortes. */
+  averagePerDay: number;
+}
+
+export interface PeakWeekdayBucket {
+  /** 0 = domingo, como em `Date.prototype.getDay`. */
+  weekday: number;
+  count: number;
+  /** Quantas vezes este dia da semana caiu dentro do periodo. */
+  occurrences: number;
+  averagePerOccurrence: number;
+}
+
+export interface DeliveryPeakHours {
+  totalConsidered: number;
+  daysInPeriod: number;
+  byHour: PeakHourBucket[];
+  byWeekday: PeakWeekdayBucket[];
+  /** `null` quando nao houve pedido no periodo — nao existe pico de nada. */
+  busiestHour: number | null;
+  busiestWeekday: number | null;
+}
+
 export interface AdminOperationsReport {
   period: { from: string; to: string };
   ordersCreated: {
@@ -41,4 +74,5 @@ export interface AdminOperationsReport {
   companies: OperationsReportCompanyItem[];
   drivers: OperationsReportDriverItem[];
   serviceTypes: OperationsReportServiceTypeItem[];
+  peakHours: DeliveryPeakHours;
 }
