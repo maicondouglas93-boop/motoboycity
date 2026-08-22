@@ -1,5 +1,6 @@
 import type { OperationalDeliveryItem } from '@motoboycity/types';
 import { StatusChip, statusRailClass } from '@/components/orders/status-chip';
+import { ElapsedTime } from '@/components/orders/elapsed-time';
 
 /**
  * Linha de pedido da central operacional.
@@ -33,7 +34,11 @@ export function OrderRow({
         className={`absolute inset-y-0 left-0 w-1 ${statusRailClass(order.status)}`}
       />
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-sm font-semibold">#{order.displayNumber}</span>
+        <span className="flex items-baseline gap-2">
+          <span className="font-mono text-sm font-semibold">#{order.displayNumber}</span>
+          {/* Ha quanto tempo neste estado — o medidor de pressao da fila. */}
+          <ElapsedTime since={order.statusChangedAt} />
+        </span>
         <StatusChip status={order.status} />
       </div>
       <p className="mt-1.5 truncate text-xs text-muted-foreground">

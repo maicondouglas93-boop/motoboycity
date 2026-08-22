@@ -12,6 +12,7 @@ import {
   type MapMode,
 } from '@/components/operations/admin-operations-map';
 import { StatusChip, STATUS_OPTIONS, statusLabel } from '@/components/orders/status-chip';
+import { ElapsedTime } from '@/components/orders/elapsed-time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -51,7 +52,11 @@ function OperationRow({
       className="w-full rounded-lg border p-2 text-left text-xs hover:bg-muted"
     >
       <div className="flex items-center justify-between gap-2">
-        <strong>#{order.displayNumber}</strong>
+        <span className="flex items-baseline gap-2">
+          <strong className="font-mono">#{order.displayNumber}</strong>
+          {/* Ha quanto tempo neste estado — o medidor de pressao da fila. */}
+          <ElapsedTime since={order.statusChangedAt} />
+        </span>
         <StatusChip status={order.status} />
       </div>
       <p className="mt-1 truncate text-muted-foreground">
