@@ -3132,3 +3132,60 @@ Sete das onze precisam de endpoint novo, com regras de transição de estado e
 auditoria — não cabem na fatia "barato e de alto uso". Ficam para uma decisão
 própria sobre quais transições manuais a operação realmente quer permitir: cada
 uma delas é o admin sobrescrevendo o que aconteceu na rua.
+
+## Atualização — 2026-08-22: intervenções manuais do admin
+
+Das sete ações que o concorrente tem e nós não tínhamos, foram feitas as duas
+que cobrem os casos reais: **trocar entregador** e **finalizar manualmente**.
+
+### O limite de ambas é o mesmo: dinheiro já creditado
+
+O repasse nasce em `COMPLETED`, com chave de idempotência por entrega. Isso
+define exatamente o que é permitido:
+
+- **trocar entregador** só em `ACCEPTED`, `COLLECTED`, `DELIVERED` e `FAILED` —
+  estados em que a entrega tem motoboy e o repasse ainda não existe. Em
+  `COMPLETED` o crédito já está na carteira do antigo, e trocar o nome no pedido
+  deixaria o dinheiro com quem não fez a entrega;
+- **finalizar manualmente** só em `DELIVERED` e `FAILED` — os estados que estão
+  esperando uma confirmação que o motoboy não deu.
+
+Desfazer ou transferir um crédito lançado é outra operação, com estorno e trilha
+própria, e não cabe num menu de contexto.
+
+### Os casos que elas resolvem
+
+**Trocar entregador**: o motoboy quebrou a moto, passou mal ou sumiu. Cancelar e
+recriar destruiria o número do pedido e a hora de criação — que é o que a loja
+usa para conversar com o cliente.
+
+**Finalizar manualmente**: ele entregou e não apertou "voltei à loja". O pedido
+fica parado em `DELIVERED` para sempre e **o repasse dele fica preso junto**.
+Faz o mesmo que `completeReturn`, inclusive creditar, mas sem a checagem de
+proximidade — o ponto é justamente que ninguém confirmou no lugar certo.
+
+### Motivo obrigatório
+
+As duas exigem uma justificativa de pelo menos cinco caracteres, gravada no
+histórico com o nome de quem fez. Sem isso a auditoria mostra que alguém mudou o
+pedido e não mostra por quê, que é a pergunta de quem for conferir depois.
+
+Por causa disso elas ficam **na página do pedido**, não num menu de contexto na
+fila: uma ação que pede justificativa escrita não cabe num menu que some quando
+o mouse sai de cima.
+
+### Um detalhe do histórico
+
+A troca de entregador grava `fromStatus` igual a `toStatus` de propósito. Não
+foi uma transição de estado — foi uma intervenção dentro do mesmo estado, e a
+trilha precisa dizer isso.
+
+`publishDeliveryUpdate` deixou de ser privado: as intervenções vivem em outro
+módulo e precisam avisar as telas do mesmo jeito. Duplicar a publicação criaria
+dois caminhos para o mesmo evento, e um deles envelheceria.
+
+### Verificação
+
+Vinte e um testes cobrindo cada estado permitido e recusado nas duas ações, o
+não-crédito na troca, o crédito na finalização, e a chave de idempotência
+virando conflito legível quando dois admins apertam ao mesmo tempo.

@@ -1197,7 +1197,12 @@ export class DeliveriesService {
     throw new ForbiddenException('Acesso restrito a empresas e administradores.');
   }
 
-  private publishDeliveryUpdate(delivery: DeliveryDetail, type: OperationalActivityType): void {
+  /**
+   * Publico porque as intervencoes manuais do admin vivem em outro modulo e
+   * precisam avisar as telas do mesmo jeito. Duplicar a publicacao la deixaria
+   * dois caminhos para o mesmo evento, e um deles envelheceria.
+   */
+  publishDeliveryUpdate(delivery: DeliveryDetail, type: OperationalActivityType): void {
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, delivery);
     this.realtimeGateway.emitAdminActivity({
       type,

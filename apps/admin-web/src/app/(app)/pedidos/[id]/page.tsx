@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
+import { DeliveryOverrides } from '@/components/operations/delivery-overrides';
 import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -185,6 +186,13 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
           value={delivery.requiresReturn ? formatCurrency(delivery.returnValue) : 'Não'}
         />
       </section>
+
+      {/*
+        As intervencoes ficam antes dos detalhes de propostito: quem abriu esta
+        pagina por causa de um pedido travado veio para agir, nao para ler.
+        O componente some sozinho quando nenhuma acao e possivel no estado atual.
+      */}
+      <DeliveryOverrides delivery={delivery} />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>

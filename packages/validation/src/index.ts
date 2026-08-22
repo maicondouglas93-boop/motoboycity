@@ -11,6 +11,7 @@ export * from './admin/update-service-type.schema';
 export * from './admin/create-pricing-table.schema';
 export * from './admin/list-pricing-tables-query.schema';
 export * from './admin/business-hours.schema';
+export * from './admin/delivery-override.schema';
 export * from './admin/surcharge.schema';
 export * from './admin/update-platform-settings.schema';
 export * from './admin/replace-driver-service-types.schema';
