@@ -2475,3 +2475,57 @@ para ser testável no dia em que houver runner.
 
 A verificação foi por página temporária, exercitando os três casos: clone
 completo, destino sem coordenadas e modalidade desativada.
+
+## Atualização — 2026-08-22: chave do Google Maps no navegador
+
+O painel exibia "Configure NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY". Investigando,
+eram três problemas diferentes, e só um deles é "falta a chave".
+
+### O impacto é maior do que "o mapa não aparece"
+
+Sem a chave, `loadGoogleMaps()` rejeita e o autocomplete nunca devolve endereço.
+Como `OperationalOrderForm` exige uma sugestão escolhida no Google para
+submeter, e `AddressSetupForm` desabilita o botão de salvar sem ela, ficam
+bloqueados **a criação de pedido com destino conhecido e o cadastro do endereço
+de coleta** — ou seja, uma empresa nova não termina o onboarding.
+
+A chave de servidor (`GOOGLE_MAPS_API_KEY`, usada pelo Routes na API) **está**
+configurada em `apps/api/.env`. É outra credencial e não substitui a do
+navegador: `NEXT_PUBLIC_` é embutido no pacote JavaScript e fica visível para
+qualquer visitante, então a chave do navegador precisa ser restrita por
+referrer.
+
+### 1. A variável não estava documentada onde se procura
+
+Nenhum dos dois `.env.example` dos painéis mencionava
+`NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` — só o runbook de go-live. Quem clona o
+repositório e copia o `.env.example` descobria a variável batendo no erro em
+tempo de execução. Ambos ganharam a entrada, com o motivo e a restrição de
+referrer de desenvolvimento.
+
+### 2. Chave recusada vazava um TypeError na tela
+
+Testado de verdade, com uma chave inválida de propósito: o Google devolve um
+script que **executa normalmente** — `onload` dispara — mas não preenche
+`google.maps.places`, e só registra `InvalidKey` como aviso no console. O
+`new maps.maps.places.Autocomplete(...)` então lançava, e o `.catch` mostrava a
+mensagem crua na interface:
+
+> Cannot read properties of undefined (reading 'Autocomplete')
+
+O `onload` passou a verificar se as bibliotecas realmente vieram antes de
+resolver. O mesmo caminho cobre API não habilitada e faturamento desligado, que
+falham igual.
+
+### 3. `gm_authFailure` não estava ligado
+
+O hook oficial do Google para chave recusada não era tratado. Ele **não** cobre
+o caso acima — dispara depois, ao desenhar o mapa com referrer não autorizado —
+então os dois caminhos são necessários. Os quatro mapas e o autocomplete se
+inscrevem nele agora.
+
+### Verificação
+
+Os dois caminhos foram exercitados no navegador contra a resposta real do
+Google: chave ausente e chave inválida. O `.env.local` usado no teste foi
+restaurado a partir de backup, com hash conferido.

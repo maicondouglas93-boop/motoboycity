@@ -506,6 +506,16 @@ por HTTP referrer:
 - não use a chave do servidor no navegador;
 - não coloque chave móvel ou de servidor na mesma credencial.
 
+Para desenvolvimento local, a mesma chave web precisa aceitar
+`http://localhost:3000/*` (empresa) e `http://localhost:3001/*` (admin), ou use
+uma credencial separada só para dev. O valor vai em `.env.local` de cada painel
+— e como `NEXT_PUBLIC_` é embutido no pacote em tempo de build, **reinicie o
+servidor de desenvolvimento** depois de alterar.
+
+Sem essa chave o painel não é apenas "sem mapa": o autocomplete não devolve
+endereço, e como o formulário exige uma sugestão do Google, ficam bloqueados o
+cadastro do endereço de coleta e a criação de pedido com destino conhecido.
+
 O Google recomenda combinar restrição de aplicação e restrição de API, além de
 manter chaves diferentes por plataforma. Consulte as
 [práticas oficiais de segurança do Google Maps](https://developers.google.com/maps/api-security-best-practices).

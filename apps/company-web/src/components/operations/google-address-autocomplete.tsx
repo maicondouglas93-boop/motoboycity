@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
-import { loadGoogleMaps } from '@/lib/google-maps';
+import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
 
 export interface SelectedGoogleAddress {
   label: string;
@@ -40,6 +40,14 @@ export function GoogleAddressAutocomplete({ value, onValueChange, onAddressChang
     valueChangeRef.current = onValueChange;
     addressChangeRef.current = onAddressChange;
   }, [onAddressChange, onValueChange]);
+
+  /**
+   * Chave recusada nao passa pelo `catch` do carregamento: o script carrega,
+   * a promise resolve, e so as chamadas seguintes sao negadas. Sem esta
+   * inscricao, digitar um endereco simplesmente nao traria sugestao nenhuma e
+   * a tela nao diria por que.
+   */
+  useEffect(() => onGoogleMapsAuthFailure(setError), []);
 
   useEffect(() => {
     let listener: google.maps.MapsEventListener | null = null;

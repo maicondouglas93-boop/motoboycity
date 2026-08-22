@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CompanyAddressItem, OperationalDeliveryItem } from '@motoboycity/types';
 import { statusHex } from '@/components/orders/status-chip';
-import { loadGoogleMaps } from '@/lib/google-maps';
+import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
 
 interface Props {
   pickupAddress: CompanyAddressItem;
@@ -18,6 +18,11 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
   const markersRef = useRef<google.maps.Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Chave recusada nao passa pelo `catch` do carregamento: o script carrega e a
+  // promise resolve, so as chamadas seguintes sao negadas. Sem isto o mapa
+  // ficaria em branco sem dizer por que.
+  useEffect(() => onGoogleMapsAuthFailure(setError), []);
 
   useEffect(() => {
     let cancelled = false;
