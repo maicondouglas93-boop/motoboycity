@@ -4,12 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CompanyAddressItem, OperationalDeliveryItem } from '@motoboycity/types';
 import { statusHex } from '@/components/orders/status-chip';
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
-
-/**
- * Centro de Lajinha, obtido pelo geocoder do proprio Google e nao estimado:
- * `Lajinha, MG, 36980-000, Brasil` responde -20.15221, -41.62322.
- */
-const LAJINHA_CENTER = { lat: -20.15221, lng: -41.62322 };
+import { LAJINHA_CENTER } from '@/lib/operation-area';
 
 /**
  * Enquadramento inicial na escala da cidade.

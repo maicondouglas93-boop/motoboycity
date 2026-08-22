@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
+import { LAJINHA_CENTER, SUGGESTION_BIAS_RADIUS_METERS } from '@/lib/operation-area';
 
 export interface SelectedGoogleAddress {
   label: string;
@@ -55,10 +56,33 @@ export function GoogleAddressAutocomplete({ value, onValueChange, onAddressChang
     loadGoogleMaps()
       .then((maps) => {
         if (cancelled || !inputRef.current) return;
+        /**
+         * Puxa as sugestoes para Lajinha.
+         *
+         * So com `country: 'br'`, digitar "aven" trazia avenidas do Rio, de
+         * Recife e de Campo Grande antes de qualquer coisa daqui — o Google
+         * ordena por relevancia global, e a cidade com mais gente ganha sempre.
+         *
+         * O circulo e convertido em bordas porque e isso que a Autocomplete
+         * aceita como referencia de lugar.
+         */
+        const bias = new maps.maps.Circle({
+          center: LAJINHA_CENTER,
+          radius: SUGGESTION_BIAS_RADIUS_METERS,
+        }).getBounds();
+
         const autocomplete = new maps.maps.places.Autocomplete(inputRef.current, {
           componentRestrictions: { country: 'br' },
           fields: ['address_components', 'formatted_address', 'geometry'],
           types: ['address'],
+          ...(bias ? { bounds: bias } : {}),
+          /**
+           * Viés, e nao filtro: `strictBounds` continua desligado. Uma entrega
+           * para a cidade vizinha e rara, mas travar o campo a impediria por
+           * completo, ja que o formulario exige uma sugestao do Google para
+           * submeter.
+           */
+          strictBounds: false,
         });
         listener = autocomplete.addListener('place_changed', () => {
           const place = autocomplete.getPlace();
