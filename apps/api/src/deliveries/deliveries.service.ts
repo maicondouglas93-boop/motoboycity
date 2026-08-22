@@ -37,6 +37,7 @@ import { computeStageTimes } from './delivery-stage-times';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import { deliveryStatusEventLabel } from '../common/status-labels';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
@@ -1190,7 +1191,7 @@ export class DeliveriesService {
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, delivery);
     this.realtimeGateway.emitAdminActivity({
       type,
-      message: `Pedido #${delivery.displayNumber}: ${delivery.status}.`,
+      message: `Pedido #${delivery.displayNumber} ${deliveryStatusEventLabel[delivery.status]}.`,
       deliveryId: delivery.id,
       displayNumber: delivery.displayNumber,
       companyId: delivery.companyId,

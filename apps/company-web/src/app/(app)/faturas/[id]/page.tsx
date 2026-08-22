@@ -20,6 +20,17 @@ import { session } from '@/lib/session';
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 
+/**
+ * Status de fatura em português. O mesmo mapa da listagem — a linha do tempo
+ * mostrava o enum cru, e "OVERDUE" não diz nada a quem opera a loja.
+ */
+const invoiceStatusLabel: Record<string, string> = {
+  PENDING: 'Pendente',
+  PAID: 'Paga',
+  OVERDUE: 'Vencida',
+  CANCELLED: 'Cancelada',
+};
+
 export default function CompanyInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
@@ -170,7 +181,8 @@ export default function CompanyInvoiceDetailPage() {
               className="border-l-2 border-border pl-3 text-sm"
             >
               <p className="font-medium">
-                {entry.fromStatus ?? 'Criação'} → {entry.toStatus}
+                {entry.fromStatus ? invoiceStatusLabel[entry.fromStatus] : 'Criação'} →{' '}
+                {invoiceStatusLabel[entry.toStatus] ?? entry.toStatus}
               </p>
               <p className="text-muted-foreground">
                 {date.format(new Date(entry.changedAt))}

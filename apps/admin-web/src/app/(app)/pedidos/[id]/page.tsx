@@ -65,6 +65,17 @@ function durationLabel(from: string, to: string): string {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
 }
 
+/**
+ * Resposta da oferta em português. A trilha de despacho é lida por quem
+ * investiga por que um pedido demorou — "DECLINED" não conta essa história.
+ */
+const offerResponseLabel: Record<string, string> = {
+  PENDING: 'Aguardando resposta',
+  ACCEPTED: 'Aceitou',
+  DECLINED: 'Recusou',
+  EXPIRED: 'Expirou',
+};
+
 export default function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const token = session.getToken();
@@ -398,7 +409,7 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                 >
                   {offer.driver.name}
                 </Link>
-                <span>{offer.response}</span>
+                <span>{offerResponseLabel[offer.response]}</span>
                 <span className="text-muted-foreground">
                   {formatDate(offer.offeredAt)}
                   {offer.respondedAt ? ` → ${formatDate(offer.respondedAt)}` : ''}

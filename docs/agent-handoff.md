@@ -2854,3 +2854,61 @@ desativada sem botão de interruptor.
 
 A plataforma concorrente tem **lista de clientes isentos** por taxa. Não entrou
 aqui — é outro eixo, e o pedido foi nome, regra, ativar, desativar e editar.
+
+### Nada de inglês na tela
+
+Sobravam valores de enum crus onde deveria haver português. O mais visível
+estava na "Atividade auditável" do admin, imprimindo `Pedido #1163: CANCELLED.`
+para quem opera a loja e não lê código.
+
+Corrigidos cinco pontos:
+
+| Onde | Antes |
+| ---- | ----- |
+| Atividade auditável (API) | `Pedido #1163: CANCELLED.` |
+| Ofertas na atividade (API) | `Oferta do pedido #X: DECLINED.` |
+| Trilha de despacho no pedido | `DECLINED` |
+| Linha do tempo da fatura | `PENDING → OVERDUE` |
+| Selo de status da fatura | `OVERDUE` |
+
+`apps/api/src/common/status-labels.ts` guarda os rótulos do lado do servidor,
+que é onde as frases de auditoria são montadas — traduzir no painel exigiria
+devolver o enum junto com o texto e remontar a frase do outro lado.
+
+A redação ali é de **evento**, no particípio, e não de estado: a linha do tempo
+diz o que aconteceu naquele instante, enquanto o chip da fila diz onde o pedido
+está agora. "Voltando à loja" é um bom chip e uma péssima entrada de log — no
+histórico ele vira "entregue".
+
+## Fila de implementação
+
+Pedidos do responsável, em ordem de chegada:
+
+1. **Horário de funcionamento** — bloquear envio de pedido fora da faixa.
+2. **Ranking de entregadores** — depende de definir o que é "performance";
+   volume, tempo médio e taxa de conclusão levam a comportamentos diferentes na
+   rua, e a escolha é de negócio.
+3. **Histórico de entregas** — como relatório, não só por pedido.
+4. **Acompanhamento ao vivo mais próximo do concorrente** — ver abaixo.
+
+### O que o concorrente tem no acompanhamento ao vivo
+
+Das telas enviadas, o que dá para aproveitar:
+
+- **agrupamento por empresa** com contadores coloridos por status, e a fila
+  recolhível por grupo;
+- **cronômetro por pedido** ao lado do horário de criação (já temos o
+  cronômetro; falta o horário e o agrupamento);
+- **"chegando..." / "menos de 1 min"** — estimativa de chegada, que exige rota e
+  não só distância em linha reta;
+- **menu de ações por pedido**: clonar, abrir completo, ver mapa, copiar link de
+  rastreio, alterar valores, alterar tipo de serviço, alterar entregador,
+  remover entregador, voltar para aceito, finalizar, cancelar;
+- **filtros** por cliente, entregador e status, com ordenação;
+- **painel de atividade ao vivo** sobreposto ao mapa, com o texto já em
+  português e ligado ao pedido;
+- **rotulagem no mapa** com o número do pedido no marcador.
+
+Vale registrar o que **não** dá para copiar direto: o "Roteirizador" deles é
+otimização de rota multi-parada, um problema de porte próprio, e está marcado
+como BETA na tela deles.

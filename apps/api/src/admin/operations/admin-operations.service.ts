@@ -1,8 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  AdminActivityQuery,
-  DeliveryOperationsQuery,
-} from '@motoboycity/validation';
+import type { AdminActivityQuery, DeliveryOperationsQuery } from '@motoboycity/validation';
 import type {
   AdminDeliveryDispatchAudit,
   AdminOperationsResult,
@@ -13,6 +10,7 @@ import type { DeliveryOfferResponse, User } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { deliveryStatusEventLabel, offerResponseLabel } from '../../common/status-labels';
 
 const ACTIVE_DRIVER_DELIVERY_STATUSES = ['ACCEPTED', 'COLLECTED', 'DELIVERED'] as const;
 
@@ -24,10 +22,7 @@ export class AdminOperationsService {
     private readonly livePresence: LiveDriverPresenceService,
   ) {}
 
-  async overview(
-    user: User,
-    filters: DeliveryOperationsQuery,
-  ): Promise<AdminOperationsResult> {
+  async overview(user: User, filters: DeliveryOperationsQuery): Promise<AdminOperationsResult> {
     const [deliveries, snapshots] = await Promise.all([
       this.deliveriesService.operations(user, filters),
       this.livePresence.listActive(),
@@ -133,7 +128,7 @@ export class AdminOperationsService {
           : history.fromStatus === null
             ? 'DELIVERY_CREATED'
             : 'DELIVERY_STATUS_CHANGED') as OperationalActivityType,
-        message: `Pedido #${history.delivery.displayNumber}: ${history.toStatus}.`,
+        message: `Pedido #${history.delivery.displayNumber} ${deliveryStatusEventLabel[history.toStatus]}.`,
         at: history.changedAt.toISOString(),
         deliveryId: history.delivery.id,
         displayNumber: history.delivery.displayNumber,
@@ -144,7 +139,7 @@ export class AdminOperationsService {
       ...offers.map((offer) => ({
         id: `offer:${offer.id}:${offer.response}`,
         type: this.offerActivityType(offer.response),
-        message: `Oferta do pedido #${offer.delivery.displayNumber}: ${offer.response}.`,
+        message: `Oferta do pedido #${offer.delivery.displayNumber} ${offerResponseLabel[offer.response]}.`,
         at: (offer.respondedAt ?? offer.offeredAt).toISOString(),
         deliveryId: offer.delivery.id,
         displayNumber: offer.delivery.displayNumber,

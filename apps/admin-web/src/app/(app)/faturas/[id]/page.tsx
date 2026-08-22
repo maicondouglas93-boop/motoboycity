@@ -29,6 +29,17 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Status de fatura em português. O mesmo mapa da listagem — a linha do tempo
+ * mostrava o enum cru, e "OVERDUE" não diz nada a quem opera a loja.
+ */
+const invoiceStatusLabel: Record<string, string> = {
+  PENDING: 'Pendente',
+  PAID: 'Paga',
+  OVERDUE: 'Vencida',
+  CANCELLED: 'Cancelada',
+};
+
 export default function AdminInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
@@ -83,7 +94,7 @@ export default function AdminInvoiceDetailPage() {
             {invoice.companyName} · {invoice.deliveryCount} pedido(s)
           </p>
         </div>
-        <Badge variant={statusTone}>{invoice.status}</Badge>
+        <Badge variant={statusTone}>{invoiceStatusLabel[invoice.status] ?? invoice.status}</Badge>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -189,7 +200,8 @@ export default function AdminInvoiceDetailPage() {
               className="border-l-2 border-border pl-3 text-sm"
             >
               <p className="font-medium">
-                {entry.fromStatus ?? 'Criação'} → {entry.toStatus}
+                {entry.fromStatus ? invoiceStatusLabel[entry.fromStatus] : 'Criação'} →{' '}
+                {invoiceStatusLabel[entry.toStatus] ?? entry.toStatus}
               </p>
               <p className="text-muted-foreground">
                 {date.format(new Date(entry.changedAt))}
