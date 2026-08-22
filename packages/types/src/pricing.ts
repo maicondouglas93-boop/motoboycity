@@ -30,6 +30,8 @@ export interface PlatformSettingsItem {
   driverCommissionPercentage: number | null;
   dispatchOfferTimeoutSeconds: number | null;
   returnProximityRadiusMeters: number | null;
+  /** Liga o bloqueio de pedido fora do horário de funcionamento. */
+  businessHoursEnabled: boolean;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -41,6 +43,7 @@ export interface PlatformSettingsItem {
  */
 export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
+  businessHoursEnabled?: boolean;
   dispatchOfferTimeoutSeconds?: number;
   returnProximityRadiusMeters?: number;
 }
@@ -76,4 +79,22 @@ export interface SurchargeItem {
   activeNow: boolean;
   schedules: SurchargeScheduleItem[];
   createdAt: string;
+}
+
+export interface BusinessHourItem {
+  id: string;
+  /** 0 = domingo .. 6 = sábado. */
+  weekday: number;
+  /** Minutos desde a meia-noite no fuso da operação. */
+  startMinute: number;
+  endMinute: number;
+}
+
+export interface BusinessHoursResult {
+  /** O interruptor geral: sem ele ligado, as faixas não bloqueiam nada. */
+  enabled: boolean;
+  hours: BusinessHourItem[];
+  /** Resolvido no servidor, pelo mesmo motivo de `activeNow` nas taxas. */
+  openNow: boolean;
+  nextOpeningLabel: string | null;
 }

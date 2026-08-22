@@ -5,6 +5,7 @@ import {
   createAdminInvoicesApi,
   createAdminPlatformSettingsApi,
   createAdminPricingTablesApi,
+  createAdminBusinessHoursApi,
   createAdminSurchargesApi,
   createAdminReportsApi,
   createAdminServiceTypesApi,
@@ -24,6 +25,7 @@ export const adminInvoicesApi = createAdminInvoicesApi({ baseUrl });
 export const adminServiceTypesApi = createAdminServiceTypesApi({ baseUrl });
 export const adminPricingTablesApi = createAdminPricingTablesApi({ baseUrl });
 export const adminSurchargesApi = createAdminSurchargesApi({ baseUrl });
+export const adminBusinessHoursApi = createAdminBusinessHoursApi({ baseUrl });
 export const adminReportsApi = createAdminReportsApi({ baseUrl });
 export const adminPlatformSettingsApi = createAdminPlatformSettingsApi({ baseUrl });
 export const adminOperationsApi = createAdminOperationsApi({ baseUrl });

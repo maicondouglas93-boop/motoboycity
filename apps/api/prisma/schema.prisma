@@ -205,6 +205,27 @@ enum NotificationChannel {
 /// Como o adicional e calculado. O MOTIVO da taxa (chuva, feriado, madrugada)
 /// deixou de ser enum e virou nome livre, para o admin criar quantas quiser
 /// sem depender de uma migracao a cada motivo novo.
+/// Faixa em que a operação aceita pedidos. Uma linha por intervalo, então um
+/// dia com pausa de almoço tem duas — é assim que se fecha o meio do dia sem
+/// precisar de campo de "intervalo".
+model BusinessHour {
+  id       String @id @default(uuid())
+  regionId String
+
+  /// 0 = domingo .. 6 = sábado.
+  weekday Int
+
+  /// Minutos desde a meia-noite no fuso operacional. `endMinute` menor ou igual
+  /// a `startMinute` atravessa a meia-noite — o caso de quem fecha às 2h.
+  startMinute Int
+  endMinute   Int
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@index([regionId, weekday])
+  @@map("business_hours")
+}
+
 enum SurchargeType {
   PERCENTAGE
   FIXED
@@ -883,7 +904,8 @@ model Region {
   pricingTables  PricingTable[]
   surcharges     Surcharge[]
 
-  createdAt DateTime @default(now())
+  createdAt     DateTime       @default(now())
+  businessHours BusinessHour[]
 
   @@map("regions")
 }
@@ -956,6 +978,11 @@ model PlatformSettings {
   /// coleta da empresa. Null = ainda não configurado — completeReturn falha
   /// com erro claro em vez de usar um raio inventado.
   returnProximityRadiusMeters Int?
+
+  /// Liga o bloqueio de pedido fora do horário de funcionamento. Desligado por
+  /// padrão: uma operação que nunca configurou horário não pode acordar um dia
+  /// recusando pedidos porque a tabela está vazia.
+  businessHoursEnabled Boolean @default(false)
 
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])

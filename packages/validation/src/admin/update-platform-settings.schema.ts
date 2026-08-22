@@ -19,12 +19,14 @@ export const updatePlatformSettingsSchema = z
       .min(10, 'O raio de retorno deve ser de pelo menos 10 metros.')
       .max(2000, 'O raio de retorno deve ser de no máximo 2000 metros.')
       .optional(),
+    businessHoursEnabled: z.boolean().optional(),
   })
   .refine(
     (data) =>
       data.driverCommissionPercentage !== undefined ||
       data.dispatchOfferTimeoutSeconds !== undefined ||
-      data.returnProximityRadiusMeters !== undefined,
+      data.returnProximityRadiusMeters !== undefined ||
+      data.businessHoursEnabled !== undefined,
     { message: 'Informe ao menos um campo para atualizar.' },
   );
 

@@ -25,6 +25,7 @@ export class AdminPlatformSettingsService {
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
         returnProximityRadiusMeters: null,
+        businessHoursEnabled: false,
         updatedBy: null,
         updatedAt: null,
       };
@@ -49,6 +50,9 @@ export class AdminPlatformSettingsService {
         ...(payload.returnProximityRadiusMeters !== undefined && {
           returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
         }),
+        ...(payload.businessHoursEnabled !== undefined && {
+          businessHoursEnabled: payload.businessHoursEnabled,
+        }),
         updatedByUserId,
       },
       create: {
@@ -56,6 +60,8 @@ export class AdminPlatformSettingsService {
         driverCommissionPercentage: payload.driverCommissionPercentage,
         dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
+        // Ausente cai no default do banco, como os outros campos deste ramo.
+        businessHoursEnabled: payload.businessHoursEnabled,
         updatedByUserId,
       },
       include: { updatedBy: true },
@@ -68,6 +74,7 @@ export class AdminPlatformSettingsService {
     driverCommissionPercentage: { toString(): string } | null;
     dispatchOfferTimeoutSeconds: number | null;
     returnProximityRadiusMeters: number | null;
+    businessHoursEnabled: boolean;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -78,6 +85,7 @@ export class AdminPlatformSettingsService {
           : Number(settings.driverCommissionPercentage),
       dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
+      businessHoursEnabled: settings.businessHoursEnabled,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

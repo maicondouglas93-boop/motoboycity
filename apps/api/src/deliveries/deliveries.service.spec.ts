@@ -111,6 +111,7 @@ describe('DeliveriesService', () => {
   let prisma: {
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
+    businessHour: { findMany: jest.Mock };
     delivery: { findMany: jest.Mock; findUnique: jest.Mock; update: jest.Mock };
     driver: { findUnique: jest.Mock };
     $transaction: jest.Mock;
@@ -146,6 +147,9 @@ describe('DeliveriesService', () => {
     prisma = {
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
+      // Sem horario configurado: a operacao esta sempre aberta, que e o estado
+      // padrao de quem nunca mexeu nisso.
+      businessHour: { findMany: jest.fn().mockResolvedValue([]) },
       delivery: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
       driver: { findUnique: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
@@ -160,6 +164,10 @@ describe('DeliveriesService', () => {
       cancelScheduledActivation: jest.fn().mockResolvedValue(undefined),
     };
     platformSettingsService = { get: jest.fn() };
+    // Padrao do ambiente: bloqueio de horario desligado. Os testes que precisam
+    // de outro valor sobrescrevem, e os que nao precisam nao deviam quebrar por
+    // causa dele.
+    platformSettingsService.get.mockResolvedValue({ businessHoursEnabled: false });
     financeLedgerService = { creditDriverRepasse: jest.fn().mockResolvedValue(undefined) };
     realtimeGateway = {
       emitToDriver: jest.fn(),
@@ -969,7 +977,10 @@ describe('DeliveriesService', () => {
     it('rejeita quando o raio de retorno ainda não foi configurado', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
-      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: null });
+      platformSettingsService.get.mockResolvedValue({
+        returnProximityRadiusMeters: null,
+        businessHoursEnabled: false,
+      });
 
       await expect(
         service.completeReturn(driverUser, 'delivery-1', nearPickup),
@@ -979,7 +990,10 @@ describe('DeliveriesService', () => {
     it('rejeita quando a empresa não tem coordenadas cadastradas', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
-      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      platformSettingsService.get.mockResolvedValue({
+        returnProximityRadiusMeters: 200,
+        businessHoursEnabled: false,
+      });
       prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: null, lng: null });
 
       await expect(
@@ -990,7 +1004,10 @@ describe('DeliveriesService', () => {
     it('rejeita quando o motoboy está fora do raio configurado', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
-      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      platformSettingsService.get.mockResolvedValue({
+        returnProximityRadiusMeters: 200,
+        businessHoursEnabled: false,
+      });
       prisma.companyAddress.findFirst.mockResolvedValue({
         ...pickupAddress,
         lat: -20.15,
@@ -1012,7 +1029,10 @@ describe('DeliveriesService', () => {
           requiresReturn: false,
         }),
       );
-      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      platformSettingsService.get.mockResolvedValue({
+        returnProximityRadiusMeters: 200,
+        businessHoursEnabled: false,
+      });
       prisma.companyAddress.findFirst.mockResolvedValue({
         ...pickupAddress,
         lat: -20.15,
@@ -1038,7 +1058,10 @@ describe('DeliveriesService', () => {
       prisma.delivery.findUnique.mockResolvedValue(
         fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1' }),
       );
-      platformSettingsService.get.mockResolvedValue({ returnProximityRadiusMeters: 200 });
+      platformSettingsService.get.mockResolvedValue({
+        returnProximityRadiusMeters: 200,
+        businessHoursEnabled: false,
+      });
       prisma.companyAddress.findFirst.mockResolvedValue({
         ...pickupAddress,
         lat: -20.15,

@@ -30,6 +30,7 @@ describe('AdminPlatformSettingsService', () => {
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
         returnProximityRadiusMeters: null,
+        businessHoursEnabled: false,
         updatedBy: null,
         updatedAt: null,
       });
@@ -72,7 +73,11 @@ describe('AdminPlatformSettingsService', () => {
 
       expect(prisma.platformSettings.upsert).toHaveBeenCalledWith({
         where: { id: 'global' },
-        update: { driverCommissionPercentage: 75, dispatchOfferTimeoutSeconds: 90, updatedByUserId: 'admin-1' },
+        update: {
+          driverCommissionPercentage: 75,
+          dispatchOfferTimeoutSeconds: 90,
+          updatedByUserId: 'admin-1',
+        },
         create: {
           id: 'global',
           driverCommissionPercentage: 75,

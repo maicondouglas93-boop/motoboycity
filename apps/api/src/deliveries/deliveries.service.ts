@@ -38,6 +38,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 import { deliveryStatusEventLabel } from '../common/status-labels';
+import { checkBusinessHours } from './business-hours';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
@@ -172,6 +173,8 @@ export class DeliveriesService {
     if (!pickupAddress) {
       throw new ConflictException('A empresa ainda não tem um endereço de coleta cadastrado.');
     }
+
+    await this.assertWithinBusinessHours(company.regionId, payload.scheduledAt);
 
     const destinationKnownAtCreation = payload.destinationKnownAtCreation ?? true;
 
@@ -320,6 +323,11 @@ export class DeliveriesService {
     if (!pickupAddress) {
       throw new ConflictException('A empresa ainda não tem um endereço de coleta cadastrado.');
     }
+
+    // O lote inteiro compartilha o mesmo agendamento, validado em Zod, entao
+    // basta olhar o primeiro item.
+    await this.assertWithinBusinessHours(company.regionId, payload.deliveries[0]?.scheduledAt);
+
     await this.dispatchService.assertConfigured();
 
     const prepared = await Promise.all(
@@ -1464,5 +1472,39 @@ export class DeliveriesService {
       scheduledAt: delivery.scheduledAt?.toISOString() ?? null,
       createdAt: delivery.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * Recusa o pedido fora do horário de funcionamento.
+   *
+   * O instante avaliado é o do AGENDAMENTO quando existe, e não o de agora: um
+   * pedido marcado para amanhã às 10h precisa ser aceito hoje à noite, senão a
+   * loja não conseguiria programar nada fora do expediente — que é justamente
+   * quando ela tem tempo de programar.
+   *
+   * Sem horário configurado, ou com o bloqueio desligado, passa direto. Uma
+   * operação que nunca mexeu nisso não pode acordar recusando pedidos.
+   */
+  private async assertWithinBusinessHours(regionId: string, scheduledAt?: string): Promise<void> {
+    const settings = await this.platformSettingsService.get();
+    if (!settings.businessHoursEnabled) return;
+
+    const windows = await this.prisma.businessHour.findMany({ where: { regionId } });
+    if (windows.length === 0) return;
+
+    const at = scheduledAt ? new Date(scheduledAt) : new Date();
+    const { open, nextOpeningLabel } = checkBusinessHours(windows, at);
+    if (open) return;
+
+    /**
+     * A mensagem diz quando abre. Uma recusa que informa só "estamos fechados"
+     * deixa a loja adivinhando; com o horário, o erro vira instrução.
+     */
+    const quando = scheduledAt ? 'O horário agendado está' : 'A operação está';
+    throw new ConflictException(
+      nextOpeningLabel
+        ? `${quando} fora do horário de funcionamento. Abre ${nextOpeningLabel}.`
+        : `${quando} fora do horário de funcionamento.`,
+    );
   }
 }

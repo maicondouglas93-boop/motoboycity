@@ -4,6 +4,7 @@ export * from './admin-companies';
 export * from './admin-drivers';
 export * from './admin-service-types';
 export * from './admin-pricing-tables';
+export * from './admin-business-hours';
 export * from './admin-surcharges';
 export * from './admin-platform-settings';
 export * from './admin-financial';

@@ -2863,13 +2863,13 @@ para quem opera a loja e não lê código.
 
 Corrigidos cinco pontos:
 
-| Onde | Antes |
-| ---- | ----- |
-| Atividade auditável (API) | `Pedido #1163: CANCELLED.` |
-| Ofertas na atividade (API) | `Oferta do pedido #X: DECLINED.` |
-| Trilha de despacho no pedido | `DECLINED` |
-| Linha do tempo da fatura | `PENDING → OVERDUE` |
-| Selo de status da fatura | `OVERDUE` |
+| Onde                         | Antes                            |
+| ---------------------------- | -------------------------------- |
+| Atividade auditável (API)    | `Pedido #1163: CANCELLED.`       |
+| Ofertas na atividade (API)   | `Oferta do pedido #X: DECLINED.` |
+| Trilha de despacho no pedido | `DECLINED`                       |
+| Linha do tempo da fatura     | `PENDING → OVERDUE`              |
+| Selo de status da fatura     | `OVERDUE`                        |
 
 `apps/api/src/common/status-labels.ts` guarda os rótulos do lado do servidor,
 que é onde as frases de auditoria são montadas — traduzir no painel exigiria
@@ -2912,3 +2912,53 @@ Das telas enviadas, o que dá para aproveitar:
 Vale registrar o que **não** dá para copiar direto: o "Roteirizador" deles é
 otimização de rota multi-parada, um problema de porte próprio, e está marcado
 como BETA na tela deles.
+
+## Atualização — 2026-08-22: horário de funcionamento
+
+Primeiro item da fila. Fora do horário, a loja não consegue enviar pedido.
+
+**Uma faixa por intervalo.** Um dia com pausa de almoço tem duas linhas —
+08:00–12:00 e 13:30–18:00 — e é assim que se fecha o meio do dia sem inventar um
+campo de "intervalo". Dia sem faixa nenhuma é dia fechado.
+
+**Lista vazia significa ABERTA, não fechada.** Quem ainda não configurou não
+pode ter os pedidos recusados por omissão. Quem liga o bloqueio é um interruptor
+próprio em `PlatformSettings`, desligado por padrão, e ele existe justamente
+para essa decisão ser explícita.
+
+### A janela virou módulo compartilhado
+
+A lógica de "esta faixa cobre este minuto?" já existia nas taxas adicionais, com
+a parte difícil — a virada da meia-noite — resolvida e testada. Foi extraída
+para `apps/api/src/common/time-window.ts` antes de escrever a segunda cópia. Os
+17 testes das taxas passam sem alteração, o que é a prova de que a extração
+preservou o comportamento.
+
+### A recusa vira instrução
+
+Uma mensagem que diz só "estamos fechados" deixa a loja adivinhando. O erro
+informa quando abre: _"A operação está fora do horário de funcionamento. Abre
+amanhã às 08:00."_ A varredura anda sete dias a partir de hoje e devolve a
+primeira abertura à frente, dizendo "hoje", "amanhã" ou o nome do dia.
+
+### Pedido agendado é avaliado pelo horário AGENDADO
+
+Não pelo de agora. Uma loja que marca entrega para amanhã às 10h precisa
+conseguir fazer isso hoje à noite — que é justamente quando ela tem tempo de
+programar.
+
+### Um bug que o teste pegou
+
+Ao acrescentar `businessHoursEnabled` ao upsert de configurações, a linha caiu
+no ramo errado: atualizar só o raio de retorno passava a **desligar o horário de
+funcionamento** junto. O teste de atualização parcial acusou na hora.
+
+### Verificação
+
+365 testes unitários (15 novos só do horário), typecheck, lint e os 4 builds. Um
+e2e novo cobre o CRUD e o bloqueio de ponta a ponta — a janela do teste é
+montada a partir do instante atual, com uma faixa de um minuto no dia seguinte,
+para não depender da hora em que o CI roda.
+
+A tela ainda **não foi conferida no navegador**: a sessão do admin caiu e eu não
+faço login.

@@ -14,6 +14,11 @@ const settings = [
     description: 'Consulte e altere os valores que são congelados na criação de cada pedido.',
   },
   {
+    href: '/configuracoes/horario',
+    title: 'Horário de funcionamento',
+    description: 'Defina as faixas em que a operação aceita pedidos, e bloqueie fora delas.',
+  },
+  {
     href: '/configuracoes/taxas',
     title: 'Taxas adicionais',
     description:
