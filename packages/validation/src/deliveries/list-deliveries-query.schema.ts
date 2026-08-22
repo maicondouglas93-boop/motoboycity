@@ -6,12 +6,13 @@ export const deliveryStatusValues = [
   'ACCEPTED',
   'COLLECTED',
   'DELIVERED',
+  'FAILED',
   'COMPLETED',
   'CANCELLED',
   'AWAITING_PAYMENT',
 ] as const;
 
-const dateOnlySchema = z
+export const dateOnlySchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Informe a data no formato AAAA-MM-DD.');
 

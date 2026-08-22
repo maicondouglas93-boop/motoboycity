@@ -304,7 +304,11 @@ describe('DispatchService', () => {
               approvalStatus: 'APPROVED',
               accountStatus: 'ACTIVE',
               availability: 'AVAILABLE',
-              deliveries: { none: { status: { in: ['ACCEPTED', 'COLLECTED', 'DELIVERED'] } } },
+              // FAILED bloqueia igual: a entrega nao deu certo, mas o motoboy
+              // esta com a mercadoria do cliente voltando para a loja.
+              deliveries: {
+                none: { status: { in: ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'] } },
+              },
               AND: [
                 {
                   serviceTypes: {

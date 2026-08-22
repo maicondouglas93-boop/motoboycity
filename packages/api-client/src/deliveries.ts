@@ -7,6 +7,7 @@ import type {
   DeliveryGroupResult,
   DeliveryListItem,
   DeliveryOperationsResult,
+  DeliveryStageTimesResult,
   DeliverySearchResult,
   DeliveryStatus,
   MarkDeliveredPayload,
@@ -23,6 +24,23 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
   }
 
   return {
+    async stageTimes(
+      accessToken: string,
+      filters?: { from?: string; to?: string; companyId?: string; driverId?: string },
+    ): Promise<DeliveryStageTimesResult> {
+      const params = new URLSearchParams();
+      if (filters?.from) params.set('from', filters.from);
+      if (filters?.to) params.set('to', filters.to);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      if (filters?.driverId) params.set('driverId', filters.driverId);
+      const query = params.toString();
+
+      const response = await fetch(`${baseUrl}/deliveries/stage-times${query ? `?${query}` : ''}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryStageTimesResult>(response);
+    },
+
     async operations(
       accessToken: string,
       filters?: {
@@ -146,6 +164,25 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryGroupResult>(response);
+    },
+
+    async fail(
+      accessToken: string,
+      id: string,
+      payload: {
+        reason: 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
+        note?: string;
+        lat: number;
+        lng: number;
+        accuracy?: number;
+      },
+    ): Promise<DeliveryDetail> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/fail`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
     },
 
     async deliver(

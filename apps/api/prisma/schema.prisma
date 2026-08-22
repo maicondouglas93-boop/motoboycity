@@ -90,9 +90,20 @@ enum DeliveryStatus {
   ACCEPTED
   COLLECTED
   DELIVERED
+  /// Motoboy coletou mas nao conseguiu entregar. A mercadoria volta para a
+  /// loja e a empresa paga a corrida normal, entao FAILED fecha pela mesma
+  /// confirmacao de retorno que DELIVERED — nao e um cancelamento.
+  FAILED
   COMPLETED
   CANCELLED
   AWAITING_PAYMENT
+}
+
+enum DeliveryFailureReason {
+  RECIPIENT_ABSENT
+  ADDRESS_NOT_FOUND
+  RECIPIENT_REFUSED
+  OTHER
 }
 
 enum DeliveryAddressType {
@@ -493,6 +504,12 @@ model Delivery {
   /// Carimbo do status atual — denormalizado para leitura rápida;
   /// a trilha completa vive em DeliveryStatusHistory.
   statusChangedAt DateTime  @default(now())
+
+  /// Preenchidos apenas quando a entrega falha. `failureNote` e obrigatoria
+  /// quando o motivo e OTHER — a validacao cuida disso.
+  failureReason DeliveryFailureReason?
+  failureNote   String?
+  failedAt      DateTime?
   scheduledAt     DateTime?
   distanceKm      Decimal?  @db.Decimal(6, 2)
 

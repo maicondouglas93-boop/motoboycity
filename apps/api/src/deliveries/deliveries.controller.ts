@@ -4,18 +4,26 @@ import {
   createDeliveryBatchSchema,
   completeReturnSchema,
   markDeliveredSchema,
+  markFailedSchema,
+  type MarkFailedPayload,
   type CompleteReturnPayload,
   type CreateDeliveryBatchPayload,
   listDeliveriesQuerySchema,
   deliveryOperationsQuerySchema,
   searchDeliveriesQuerySchema,
+  deliveryStageTimesQuerySchema,
+  type DeliveryStageTimesQuery,
   type CreateDeliveryPayload,
   type ListDeliveriesQuery,
   type DeliveryOperationsQuery,
   type SearchDeliveriesQuery,
   type MarkDeliveredPayload,
 } from '@motoboycity/validation';
-import type { DeliveryOperationsResult, DeliverySearchResult } from '@motoboycity/types';
+import type {
+  DeliveryOperationsResult,
+  DeliverySearchResult,
+  DeliveryStageTimesResult,
+} from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { CompanyOnlyGuard } from '../auth/company-only.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -69,6 +77,19 @@ export class DeliveriesController {
     return this.deliveriesService.operations(user, query);
   }
 
+  /**
+   * Precisa vir antes de `@Get(':id')`: o Nest casa as rotas na ordem de
+   * declaracao, e um segmento estatico depois do parametro nunca seria
+   * alcancado — "stage-times" viraria um id.
+   */
+  @Get('stage-times')
+  stageTimes(
+    @Query(new ZodValidationPipe(deliveryStageTimesQuerySchema)) query: DeliveryStageTimesQuery,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryStageTimesResult> {
+    return this.deliveriesService.stageTimes(user, query);
+  }
+
   @Get('search')
   search(
     @Query(new ZodValidationPipe(searchDeliveriesQuerySchema)) query: SearchDeliveriesQuery,
@@ -96,6 +117,21 @@ export class DeliveriesController {
   @UseGuards(DriverOnlyGuard)
   collect(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryGroupResult> {
     return this.deliveriesService.collect(user, id);
+  }
+
+  /**
+   * Insucesso: coletou mas nao conseguiu entregar. Nao fecha o pedido — ele
+   * vai para FAILED e so encerra quando o motoboy confirmar o retorno da
+   * mercadoria na loja, pelo mesmo `complete-return`.
+   */
+  @Patch(':id/fail')
+  @UseGuards(DriverOnlyGuard)
+  fail(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(markFailedSchema)) body: MarkFailedPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.deliveriesService.markFailed(user, id, body);
   }
 
   @Patch(':id/deliver')

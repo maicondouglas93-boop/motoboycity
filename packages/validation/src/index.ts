@@ -23,4 +23,6 @@ export * from './deliveries/list-deliveries-query.schema';
 export * from './deliveries/delivery-operations-query.schema';
 export * from './deliveries/mark-delivered.schema';
 export * from './deliveries/complete-return.schema';
+export * from './deliveries/stage-times-query.schema';
+export * from './deliveries/mark-failed.schema';
 export * from './tracking/tracking.schema';

@@ -4,6 +4,8 @@ export type DeliveryStatus =
   | 'ACCEPTED'
   | 'COLLECTED'
   | 'DELIVERED'
+  /** Coletado mas nao entregue: a mercadoria volta para a loja. */
+  | 'FAILED'
   | 'COMPLETED'
   | 'CANCELLED'
   | 'AWAITING_PAYMENT';
@@ -202,4 +204,30 @@ export interface UpsertCompanyAddressPayload {
   zip: string;
   lat?: number;
   lng?: number;
+}
+
+/**
+ * Tempo por etapa do ciclo, derivado do historico de status — nenhuma coluna
+ * nova no banco.
+ *
+ * Media, mediana e p90 juntas de proposito: media de tempo esconde a cauda, e
+ * a cauda e onde mora o cliente irritado. `samples` acompanha cada etapa
+ * porque com poucas amostras o p90 deixa de dizer algo util.
+ */
+export interface DeliveryStageSummary {
+  samples: number;
+  averageMinutes: number | null;
+  medianMinutes: number | null;
+  p90Minutes: number | null;
+}
+
+export interface DeliveryStageTimesResult {
+  /** Da entrada na fila ate um motoboy aceitar. */
+  aceite: DeliveryStageSummary;
+  /** Do aceite ate a coleta na loja. */
+  coleta: DeliveryStageSummary;
+  /** Da coleta ate a entrega ao cliente. */
+  entrega: DeliveryStageSummary;
+  /** Da fila ate a entrega — o tempo total sentido por quem pediu. */
+  total: DeliveryStageSummary;
 }

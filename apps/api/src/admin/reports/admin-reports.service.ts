@@ -9,6 +9,7 @@ const deliveryStatuses: DeliveryStatus[] = [
   'ACCEPTED',
   'COLLECTED',
   'DELIVERED',
+  'FAILED',
   'COMPLETED',
   'CANCELLED',
   'AWAITING_PAYMENT',

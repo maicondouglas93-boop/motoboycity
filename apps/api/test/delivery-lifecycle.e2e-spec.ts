@@ -64,6 +64,11 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   let driver2Id: string;
   let serviceTypeId: string;
 
+  /**
+   * `.expect(200)` de proposito: sem isso, um 429 do throttler ou qualquer
+   * outra falha aqui passa em silencio, e o teste quebra bem mais adiante —
+   * "nao ha oferta pendente" —, longe da causa real.
+   */
   async function setAvailability(token: string, availability: 'AVAILABLE' | 'UNAVAILABLE') {
     await request(app.getHttpServer())
       .put('/driver/presence')
@@ -77,7 +82,8 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
               trackingCapability: 'BACKGROUND_V1',
             }
           : { availability },
-      );
+      )
+      .expect(200);
   }
 
   async function pendingOfferFor(deliveryId: string) {
@@ -1023,6 +1029,178 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({ ...nearPickup, accuracy: 15 })
         .expect(200);
 
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
+  describe('insucesso de entrega', () => {
+    it('coletou e nao entregou: volta para a loja, fecha COMPLETED e paga a corrida normal', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        // Sem retorno pedido: mesmo assim a mercadoria tem de voltar.
+        .send({ serviceTypeId, dropoffAddress: dropoff(1), requiresReturn: false })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      const valorCombinado = created.body.driverValue as number;
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      // Antes de coletar nao ha mercadoria em posse: insucesso nao se aplica.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/fail`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'RECIPIENT_ABSENT', lat: -20.1385, lng: -41.7415 })
+        .expect(409);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      // "Outro" sem descricao e recusado pela validacao.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/fail`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'OTHER', lat: -20.1385, lng: -41.7415 })
+        .expect(400);
+
+      const falhou = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/fail`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({
+          reason: 'RECIPIENT_ABSENT',
+          note: 'Tocou a campainha tres vezes, ninguem atendeu.',
+          lat: -20.1385,
+          lng: -41.7415,
+          accuracy: 9,
+        })
+        .expect(200);
+      expect(falhou.body.status).toBe('FAILED');
+
+      // Nada foi creditado ainda: o pedido nao fechou.
+      const semCredito = await prisma.walletTransaction.count({
+        where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
+      });
+      expect(semCredito).toBe(0);
+
+      // Longe da loja o retorno nao fecha.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ ...farFromPickup, accuracy: 8 })
+        .expect(409);
+
+      // Na porta da loja, fecha.
+      const fechado = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ ...nearPickup, accuracy: 8 })
+        .expect(200);
+      expect(fechado.body.deliveries[0].status).toBe('COMPLETED');
+
+      // A regra do negocio: a empresa paga a corrida normal, e o motoboy
+      // recebe o mesmo valor que receberia numa entrega bem-sucedida.
+      const credito = await prisma.walletTransaction.findFirstOrThrow({
+        where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
+      });
+      expect(Number(credito.amount)).toBe(valorCombinado);
+
+      // A trilha registra o caminho real, nao um cancelamento.
+      const detalhe = await request(app.getHttpServer())
+        .get(`/deliveries/${deliveryId}`)
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+      expect(
+        detalhe.body.statusHistory.map((entry: { toStatus: string }) => entry.toStatus),
+      ).toEqual(['AWAITING_DRIVER', 'ACCEPTED', 'COLLECTED', 'FAILED', 'COMPLETED']);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
+  describe('tempo por etapa (stage-times)', () => {
+    it('deriva as etapas do historico e respeita o escopo de cada perfil', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(1) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.1385, lng: -41.7415, accuracy: 8 })
+        .expect(200);
+
+      const asCompany = await request(app.getHttpServer())
+        .get('/deliveries/stage-times')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+
+      // O ciclo inteiro roda em milissegundos no teste, entao o que se prova
+      // aqui e que as etapas foram DERIVADAS do historico — nao a duracao.
+      for (const stage of ['aceite', 'coleta', 'entrega', 'total'] as const) {
+        expect(asCompany.body[stage].samples).toBeGreaterThanOrEqual(1);
+        expect(asCompany.body[stage].averageMinutes).not.toBeNull();
+        expect(asCompany.body[stage].medianMinutes).not.toBeNull();
+        expect(asCompany.body[stage].p90Minutes).not.toBeNull();
+        expect(asCompany.body[stage].averageMinutes).toBeGreaterThanOrEqual(0);
+      }
+
+      // Admin enxerga pelo menos o mesmo volume que a empresa.
+      const asAdmin = await request(app.getHttpServer())
+        .get('/deliveries/stage-times')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(asAdmin.body.total.samples).toBeGreaterThanOrEqual(
+        asCompany.body.total.samples as number,
+      );
+
+      // Empresa nao pode ampliar o proprio escopo por querystring.
+      await request(app.getHttpServer())
+        .get('/deliveries/stage-times?companyId=00000000-0000-0000-0000-000000000000')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(403);
+
+      // Periodo invertido e recusado pela validacao.
+      await request(app.getHttpServer())
+        .get('/deliveries/stage-times?from=2026-09-01&to=2026-08-01')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(400);
+
+      // Janela sem pedido nenhum devolve zero, nao numero inventado.
+      const vazio = await request(app.getHttpServer())
+        .get('/deliveries/stage-times?from=2020-01-01&to=2020-01-02')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+      expect(vazio.body.total).toEqual({
+        samples: 0,
+        averageMinutes: null,
+        medianMinutes: null,
+        p90Minutes: null,
+      });
+
+      await releaseAllDeliveries([deliveryId]);
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
   });

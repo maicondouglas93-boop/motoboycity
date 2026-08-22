@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   ListDeliveryTrackingQuery,
   ReportDeliveryLocationPayload,
@@ -7,7 +12,9 @@ import type { DeliveryStatus, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
-const ACTIVE_TRACKING_STATUSES: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED'];
+// FAILED continua rastreavel: o motoboy esta voltando com a mercadoria, e e
+// justamente nesse trecho que a empresa quer saber onde ela esta.
+const ACTIVE_TRACKING_STATUSES: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'];
 const LOCATION_RETENTION_DAYS = 30;
 
 export interface DeliveryTrackingPointItem {
@@ -58,7 +65,8 @@ export class DeliveryTrackingService {
       where: { userId: user.id },
       select: { id: true },
     });
-    if (!driver) throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
+    if (!driver)
+      throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
 
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
@@ -200,7 +208,8 @@ export class DeliveryTrackingService {
         where: { userId: user.id },
         select: { id: true },
       });
-      if (!driver) throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
+      if (!driver)
+        throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
       return { status, driverId: driver.id };
     }
     if (user.type === 'COMPANY_MEMBER') {
@@ -208,7 +217,8 @@ export class DeliveryTrackingService {
         where: { userId: user.id, active: true },
         select: { companyId: true },
       });
-      if (memberships.length === 0) throw new ForbiddenException('Usuário não está vinculado a uma empresa ativa.');
+      if (memberships.length === 0)
+        throw new ForbiddenException('Usuário não está vinculado a uma empresa ativa.');
       return { status, companyId: { in: memberships.map((membership) => membership.companyId) } };
     }
     throw new ForbiddenException('Seu perfil não pode consultar rastreamento.');

@@ -33,6 +33,7 @@ const statusCountLabel: Record<DeliveryStatus, string> = {
   ACCEPTED: 'A caminho da coleta',
   COLLECTED: 'Em rota',
   DELIVERED: 'Voltando à loja',
+  FAILED: 'Não entregues',
   COMPLETED: 'Concluídos',
   CANCELLED: 'Cancelados',
   AWAITING_PAYMENT: 'Aguardando pagamento',

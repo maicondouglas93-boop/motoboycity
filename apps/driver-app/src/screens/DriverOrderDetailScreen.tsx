@@ -31,6 +31,7 @@ const statusLabel: Record<DeliveryStatus, string> = {
   ACCEPTED: 'Aceito',
   COLLECTED: 'Coletado',
   DELIVERED: 'Entregue',
+  FAILED: 'Sem sucesso — devolver na loja',
   COMPLETED: 'Concluído',
   CANCELLED: 'Cancelado',
   AWAITING_PAYMENT: 'Aguardando pagamento',
@@ -42,6 +43,10 @@ const statusTone: Record<DeliveryStatus, 'neutral' | 'warning' | 'success' | 'da
   ACCEPTED: 'warning',
   COLLECTED: 'warning',
   DELIVERED: 'warning',
+  // Ambar, nao vermelho: o motoboy ainda tem trabalho a fazer (devolver a
+  // mercadoria), e ele vai receber a corrida normal. Vermelho diria "deu
+  // errado, acabou", que e falso nos dois sentidos.
+  FAILED: 'warning',
   COMPLETED: 'success',
   CANCELLED: 'danger',
   AWAITING_PAYMENT: 'warning',

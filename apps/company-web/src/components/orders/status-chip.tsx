@@ -18,6 +18,9 @@ const STATUS: Record<DeliveryStatus, { label: string; tone: Tone; inMotion?: boo
   ACCEPTED: { label: 'A caminho da coleta', tone: 'rota', inMotion: true },
   COLLECTED: { label: 'Em rota', tone: 'rota', inMotion: true },
   DELIVERED: { label: 'Voltando à loja', tone: 'rota', inMotion: true },
+  // Ambar e inMotion: o motoboy esta na rua devolvendo a mercadoria, e vai
+  // receber a corrida normal. Nao e cancelamento nem erro terminal.
+  FAILED: { label: 'Não entregue — voltando', tone: 'rota', inMotion: true },
   COMPLETED: { label: 'Concluído', tone: 'entregue' },
   CANCELLED: { label: 'Cancelado', tone: 'cancelado' },
   AWAITING_PAYMENT: { label: 'Aguardando pagamento', tone: 'pagamento' },

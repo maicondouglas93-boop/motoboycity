@@ -25,6 +25,7 @@ const statusCountLabel: Record<DeliveryStatus, string> = {
   ACCEPTED: 'A caminho da coleta',
   COLLECTED: 'Em rota',
   DELIVERED: 'Voltando à loja',
+  FAILED: 'Não entregues',
   COMPLETED: 'Concluídos',
   CANCELLED: 'Cancelados',
   AWAITING_PAYMENT: 'Aguardando pagamento',
@@ -33,6 +34,29 @@ const statusCountLabel: Record<DeliveryStatus, string> = {
 function formatCurrency(value: number): string {
   return currencyFormatter.format(value);
 }
+
+/**
+ * Duração em linguagem de operação: "8 min" para o que cabe numa corrida,
+ * "1h 12min" para o que já virou problema. Sem casa decimal — ninguém decide
+ * nada com 30,79 minutos.
+ */
+function formatDuration(minutes: number | null): string {
+  if (minutes === null) {
+    return '—';
+  }
+  const rounded = Math.round(minutes);
+  if (rounded < 60) {
+    return `${rounded} min`;
+  }
+  return `${Math.floor(rounded / 60)}h ${String(rounded % 60).padStart(2, '0')}min`;
+}
+
+const STAGES = [
+  { key: 'aceite', label: 'Até um motoboy aceitar' },
+  { key: 'coleta', label: 'Do aceite até a coleta' },
+  { key: 'entrega', label: 'Da coleta até a entrega' },
+  { key: 'total', label: 'Total, do pedido à entrega' },
+] as const;
 
 export default function IndicatorsPage() {
   const token = session.getToken();
@@ -43,6 +67,11 @@ export default function IndicatorsPage() {
   const deliveriesQuery = useQuery({
     queryKey: ['company', 'indicators', appliedPeriod],
     queryFn: () => deliveriesApi.list(token as string, appliedPeriod),
+    enabled: Boolean(token),
+  });
+  const stageTimesQuery = useQuery({
+    queryKey: ['company', 'stage-times', appliedPeriod],
+    queryFn: () => deliveriesApi.stageTimes(token as string, appliedPeriod),
     enabled: Boolean(token),
   });
 
@@ -185,6 +214,65 @@ export default function IndicatorsPage() {
               />
             ))}
           </section>
+          <Card>
+            <CardHeader>
+              <CardTitle>Tempo por etapa</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stageTimesQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Calculando tempos...</p>
+              ) : stageTimesQuery.data ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs text-muted-foreground">
+                          <th className="pb-2 font-medium">Etapa</th>
+                          <th className="pb-2 text-right font-medium">Normal</th>
+                          <th className="pb-2 text-right font-medium">Média</th>
+                          <th className="pb-2 text-right font-medium">Dia ruim</th>
+                          <th className="pb-2 text-right font-medium">Pedidos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {STAGES.map((stage) => {
+                          const data = stageTimesQuery.data[stage.key];
+                          return (
+                            <tr key={stage.key} className="border-b last:border-b-0">
+                              <td className="py-2.5">{stage.label}</td>
+                              <td className="py-2.5 text-right font-mono font-medium">
+                                {formatDuration(data.medianMinutes)}
+                              </td>
+                              <td className="py-2.5 text-right font-mono text-muted-foreground">
+                                {formatDuration(data.averageMinutes)}
+                              </td>
+                              <td className="py-2.5 text-right font-mono">
+                                {formatDuration(data.p90Minutes)}
+                              </td>
+                              <td className="py-2.5 text-right font-mono text-muted-foreground">
+                                {data.samples}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    <strong className="font-medium text-foreground">Normal</strong> é a mediana:
+                    metade dos pedidos foi mais rápida que isso.{' '}
+                    <strong className="font-medium text-foreground">Dia ruim</strong> é o que
+                    acontece nos 10% piores — é onde mora o cliente irritado, e a média esconde.
+                    Pedidos cancelados ficam de fora.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Não foi possível calcular os tempos.
+                </p>
+              )}
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle>Pedidos criados por dia</CardTitle>

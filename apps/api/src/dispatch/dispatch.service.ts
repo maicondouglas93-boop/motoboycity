@@ -17,7 +17,17 @@ export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
 
-const ASSIGNMENT_BLOCKING_STATUSES: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED'];
+/**
+ * Status em que o motoboy ainda tem trabalho em maos e nao pode receber outra
+ * atribuicao. FAILED entra na lista: a entrega nao deu certo, mas ele esta com
+ * a mercadoria do cliente voltando para a loja — mais ocupado, nao menos.
+ */
+const ASSIGNMENT_BLOCKING_STATUSES: DeliveryStatus[] = [
+  'ACCEPTED',
+  'COLLECTED',
+  'DELIVERED',
+  'FAILED',
+];
 
 function expireJobId(offerId: string): string {
   return `expire-${offerId}`;

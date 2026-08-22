@@ -12,11 +12,14 @@ import type {
   CreateDeliveryBatchPayload,
   CreateDeliveryPayload,
   DeliveryOperationsQuery,
+  DeliveryStageTimesQuery,
   MarkDeliveredPayload,
+  MarkFailedPayload,
   SearchDeliveriesQuery,
 } from '@motoboycity/validation';
 import type {
   DeliveryOperationsResult,
+  DeliveryStageTimesResult,
   DeliverySearchResult,
   OperationalDeliveryItem,
   OperationalActivityType,
@@ -30,6 +33,7 @@ import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
 import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
+import { computeStageTimes } from './delivery-stage-times';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
@@ -40,6 +44,10 @@ const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
   'ACCEPTED',
   'COLLECTED',
   'DELIVERED',
+  // Ativa: o motoboy esta na rua devolvendo a mercadoria e o pedido ainda vai
+  // fechar. Fora daqui, a empresa perderia de vista justamente a entrega que
+  // deu problema.
+  'FAILED',
   'AWAITING_PAYMENT',
 ];
 const RECENT_OPERATION_STATUSES: DeliveryStatus[] = ['COMPLETED', 'CANCELLED'];
@@ -470,7 +478,9 @@ export class DeliveriesService {
     filters: DeliveryOperationsQuery,
   ): Promise<DeliveryOperationsResult> {
     if (user.type === 'DRIVER') {
-      throw new ForbiddenException('A central operacional é restrita a empresas e administradores.');
+      throw new ForbiddenException(
+        'A central operacional é restrita a empresas e administradores.',
+      );
     }
     if ((filters.companyId || filters.driverId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
@@ -761,6 +771,78 @@ export class DeliveriesService {
    * viram o destino: distância e preço são calculados agora, não na criação.
    * Fecha sozinho (COMPLETED) se não exigir retorno; senão fica em
    * DELIVERED até completeReturn(). */
+  /**
+   * Insucesso de entrega: o motoboy chegou mas nao conseguiu entregar.
+   *
+   * Nao e cancelamento. A regra de negocio confirmada e que a mercadoria volta
+   * para a loja e a empresa paga a corrida normal — entao o pedido NAO fecha
+   * aqui: ele vai para FAILED e so fecha quando o motoboy confirmar o retorno
+   * perto da loja, pelo mesmo `completeReturn` de uma entrega bem-sucedida com
+   * retorno. Isso faz o repasse sair pelo caminho ja existente, com o
+   * `driverValue` congelado na criacao — ou seja, a corrida normal.
+   *
+   * Nao ha desconto nem cobranca extra: o valor ja congelado e o que vale.
+   */
+  async markFailed(user: User, id: string, payload: MarkFailedPayload): Promise<DeliveryDetail> {
+    const driver = await this.findDriverForUser(user);
+    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (delivery.driverId !== driver.id) {
+      throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
+    }
+    // Antes da coleta nao existe mercadoria em posse do motoboy, entao nao ha
+    // o que devolver — desistir ali e outro problema (recusa/cancelamento),
+    // nao insucesso de entrega.
+    if (delivery.status !== 'COLLECTED') {
+      throw new ConflictException('Só é possível registrar insucesso depois de coletar o pedido.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.delivery.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          statusChangedAt: new Date(),
+          failedAt: new Date(),
+          failureReason: payload.reason,
+          failureNote: payload.note ?? null,
+        },
+      });
+      await tx.deliveryStatusHistory.create({
+        data: {
+          deliveryId: id,
+          fromStatus: 'COLLECTED',
+          toStatus: 'FAILED',
+          changedByUserId: user.id,
+          note: this.describeFailure(payload),
+        },
+      });
+    });
+
+    this.realtimeGateway.emitAdminActivity({
+      type: 'DELIVERY_STATUS_CHANGED',
+      message: `Pedido #${delivery.displayNumber} sem sucesso na entrega — retornando à loja.`,
+      deliveryId: id,
+    });
+
+    return this.detail(user, id);
+  }
+
+  private describeFailure(payload: MarkFailedPayload): string {
+    const labels: Record<MarkFailedPayload['reason'], string> = {
+      RECIPIENT_ABSENT: 'Destinatário ausente',
+      ADDRESS_NOT_FOUND: 'Endereço não encontrado',
+      RECIPIENT_REFUSED: 'Destinatário recusou',
+      OTHER: 'Outro motivo',
+    };
+    const where = `registrado a ${payload.lat.toFixed(5)}, ${payload.lng.toFixed(5)}`;
+    const note = payload.note ? ` — ${payload.note}` : '';
+    return `${labels[payload.reason]} (${where})${note}`;
+  }
+
   async markDelivered(
     user: User,
     id: string,
@@ -979,8 +1061,10 @@ export class DeliveriesService {
     const siblings = delivery.batchId
       ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
       : [delivery];
+    // FAILED entra sem olhar `requiresReturn`: a mercadoria precisa voltar
+    // para a loja de qualquer forma, tenha ou nao sido pedido retorno.
     const candidates = siblings.filter(
-      (item) => item.status === 'DELIVERED' && item.requiresReturn,
+      (item) => (item.status === 'DELIVERED' && item.requiresReturn) || item.status === 'FAILED',
     );
     if (candidates.length === 0) {
       throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
@@ -1001,7 +1085,7 @@ export class DeliveriesService {
           await tx.deliveryStatusHistory.create({
             data: {
               deliveryId: item.id,
-              fromStatus: 'DELIVERED',
+              fromStatus: item.status,
               toStatus: 'COMPLETED',
               changedByUserId: user.id,
               note:
@@ -1054,10 +1138,7 @@ export class DeliveriesService {
     throw new ForbiddenException('Acesso restrito a empresas e administradores.');
   }
 
-  private publishDeliveryUpdate(
-    delivery: DeliveryDetail,
-    type: OperationalActivityType,
-  ): void {
+  private publishDeliveryUpdate(delivery: DeliveryDetail, type: OperationalActivityType): void {
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, delivery);
     this.realtimeGateway.emitAdminActivity({
       type,
@@ -1075,6 +1156,51 @@ export class DeliveriesService {
 
   private isRepasseIdempotencyConflict(error: unknown): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+  }
+
+  /**
+   * Tempo por etapa do ciclo, no mesmo recorte da listagem.
+   *
+   * Deriva tudo do `DeliveryStatusHistory`, que ja grava cada transicao — nao
+   * exige coluna nova nem migration. Cancelados ficam de fora: uma entrega
+   * cancelada nao tem etapa concluida para medir, e incluí-la sujaria a media
+   * com meio-caminho.
+   */
+  async stageTimes(
+    user: User,
+    filters: DeliveryStageTimesQuery,
+  ): Promise<DeliveryStageTimesResult> {
+    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Os filtros por entregador ou empresa sao restritos a administradores.',
+      );
+    }
+
+    const scope = await this.resolveListScope(user);
+
+    const deliveries = await this.prisma.delivery.findMany({
+      where: {
+        ...scope,
+        ...(filters.driverId && { driverId: filters.driverId }),
+        ...(filters.companyId && { companyId: filters.companyId }),
+        status: { not: 'CANCELLED' },
+        ...(filters.from || filters.to
+          ? {
+              createdAt: {
+                ...(filters.from && { gte: this.startOfDay(filters.from) }),
+                ...(filters.to && { lte: this.endOfDay(filters.to) }),
+              },
+            }
+          : {}),
+      },
+      select: {
+        statusHistory: {
+          select: { fromStatus: true, toStatus: true, changedAt: true },
+        },
+      },
+    });
+
+    return computeStageTimes(deliveries.map((delivery) => delivery.statusHistory));
   }
 
   private async resolveListScope(user: User): Promise<{ companyId?: string; driverId?: string }> {
@@ -1147,7 +1273,8 @@ export class DeliveriesService {
     const query = filters.q?.trim();
     const parsedDisplayNumber = query && /^\d+$/.test(query) ? Number(query) : null;
     const isUuid = Boolean(
-      query && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query),
+      query &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query),
     );
     const queryFilter: Prisma.DeliveryWhereInput = query
       ? {
