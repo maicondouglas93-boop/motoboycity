@@ -13,6 +13,7 @@ export interface PricingTableItem {
   serviceTypeId: string;
   serviceTypeName: string;
   baseFee: number;
+  includedDistanceKm: number;
   perKmFee: number;
   minimumFee: number | null;
   returnFee: number | null;
@@ -68,6 +69,9 @@ export class AdminPricingTablesService {
           regionId: region.id,
           serviceTypeId: payload.serviceTypeId,
           baseFee: payload.baseFee,
+          // Ausente e zero: sem bandeirada, o por-quilometro comeca no metro
+          // zero, que e o comportamento de antes deste campo existir.
+          includedDistanceKm: payload.includedDistanceKm ?? 0,
           perKmFee: payload.perKmFee,
           minimumFee: payload.minimumFee,
           returnFee: payload.returnFee,
@@ -103,6 +107,7 @@ export class AdminPricingTablesService {
     serviceTypeId: string;
     serviceType: { name: string };
     baseFee: { toString(): string };
+    includedDistanceKm: { toString(): string };
     perKmFee: { toString(): string };
     minimumFee: { toString(): string } | null;
     returnFee: { toString(): string } | null;
@@ -115,6 +120,7 @@ export class AdminPricingTablesService {
       serviceTypeId: pricingTable.serviceTypeId,
       serviceTypeName: pricingTable.serviceType.name,
       baseFee: Number(pricingTable.baseFee),
+      includedDistanceKm: Number(pricingTable.includedDistanceKm),
       perKmFee: Number(pricingTable.perKmFee),
       minimumFee: pricingTable.minimumFee === null ? null : Number(pricingTable.minimumFee),
       returnFee: pricingTable.returnFee === null ? null : Number(pricingTable.returnFee),

@@ -2,6 +2,10 @@ import { calculatePricing, ReturnNotSupportedError } from './pricing-calculator'
 
 const base = {
   baseFee: 5,
+  // Zero reproduz o modelo antigo: por-quilometro desde o metro zero. Os
+  // testes abaixo desta constante sao os mesmos de antes da bandeirada
+  // existir, e continuam passando sem alteracao.
+  includedDistanceKm: 0,
   perKmFee: 1.5,
   minimumFee: 8,
   returnFee: 3,
@@ -89,6 +93,64 @@ describe('calculatePricing', () => {
     expect(result.platformValue).toBe(0);
   });
 
+  describe('bandeirada: valor fixo ate uma distancia', () => {
+    // R$ 8 fixos ate 3 km, R$ 1,50 por km depois disso.
+    const comBandeirada = { ...base, baseFee: 8, includedDistanceKm: 3, minimumFee: null };
+
+    it.each([0, 1, 2, 3])('cobra so a taxa base a %s km, dentro da bandeirada', (distanceKm) => {
+      const result = calculatePricing({ ...comBandeirada, distanceKm });
+
+      expect(result.chargeableDistanceKm).toBe(0);
+      expect(result.distanceFee).toBe(0);
+      expect(result.subtotal).toBe(8);
+    });
+
+    it('cobra por quilometro so no que passa da bandeirada', () => {
+      const result = calculatePricing({ ...comBandeirada, distanceKm: 5 });
+
+      // 5 km - 3 inclusos = 2 cobrados; 2 * 1,50 = 3
+      expect(result.chargeableDistanceKm).toBe(2);
+      expect(result.distanceFee).toBe(3);
+      expect(result.subtotal).toBe(11);
+    });
+
+    it('nao transforma o perKmFee em desconto abaixo da bandeirada', () => {
+      // Sem o piso em zero, 1 km daria -2 km cobrados e o subtotal cairia
+      // para 5, abaixo da propria taxa base.
+      const result = calculatePricing({ ...comBandeirada, distanceKm: 1 });
+
+      expect(result.subtotal).toBeGreaterThanOrEqual(comBandeirada.baseFee);
+    });
+
+    it('a fronteira exata ainda esta inclusa', () => {
+      const dentro = calculatePricing({ ...comBandeirada, distanceKm: 3 });
+      const fora = calculatePricing({ ...comBandeirada, distanceKm: 3.01 });
+
+      expect(dentro.distanceFee).toBe(0);
+      expect(fora.distanceFee).toBeGreaterThan(0);
+    });
+
+    it('aceita bandeirada fracionada', () => {
+      const result = calculatePricing({ ...comBandeirada, includedDistanceKm: 2.5, distanceKm: 4 });
+
+      expect(result.chargeableDistanceKm).toBe(1.5);
+      expect(result.distanceFee).toBe(2.25);
+    });
+
+    it('o minimo continua sendo piso, mesmo com bandeirada', () => {
+      // Piso de R$ 12 acima da base de R$ 8: entrega curta sobe para 12.
+      const result = calculatePricing({ ...comBandeirada, minimumFee: 12, distanceKm: 1 });
+
+      expect(result.subtotal).toBe(12);
+    });
+
+    it('rejeita bandeirada negativa', () => {
+      expect(() =>
+        calculatePricing({ ...comBandeirada, includedDistanceKm: -1, distanceKm: 5 }),
+      ).toThrow('includedDistanceKm não pode ser negativo');
+    });
+  });
+
   it.each([0, 20, 33.33, 50, 66.67, 80, 100])(
     'invariante driverValue + platformValue === totalValue para comissão %s%%',
     (commission) => {
@@ -99,9 +161,9 @@ describe('calculatePricing', () => {
         driverCommissionPercentage: commission,
       });
 
-      expect(
-        Math.round((result.driverValue + result.platformValue) * 100) / 100,
-      ).toBe(result.totalValue);
+      expect(Math.round((result.driverValue + result.platformValue) * 100) / 100).toBe(
+        result.totalValue,
+      );
     },
   );
 });

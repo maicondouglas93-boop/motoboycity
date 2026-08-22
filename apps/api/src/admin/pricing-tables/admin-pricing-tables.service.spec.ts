@@ -42,6 +42,7 @@ describe('AdminPricingTablesService', () => {
           serviceTypeId: 'st-1',
           serviceType: { name: 'Moto' },
           baseFee: { toString: () => '5.00' },
+          includedDistanceKm: { toString: () => '0.00' },
           perKmFee: { toString: () => '1.50' },
           minimumFee: { toString: () => '8.00' },
           returnFee: { toString: () => '3.00' },
@@ -59,6 +60,7 @@ describe('AdminPricingTablesService', () => {
           serviceTypeId: 'st-1',
           serviceTypeName: 'Moto',
           baseFee: 5,
+          includedDistanceKm: 0,
           perKmFee: 1.5,
           minimumFee: 8,
           returnFee: 3,
@@ -76,6 +78,7 @@ describe('AdminPricingTablesService', () => {
           serviceTypeId: 'st-1',
           serviceType: { name: 'Moto' },
           baseFee: { toString: () => '5.00' },
+          includedDistanceKm: { toString: () => '0.00' },
           perKmFee: { toString: () => '1.50' },
           minimumFee: null,
           returnFee: null,
@@ -102,7 +105,13 @@ describe('AdminPricingTablesService', () => {
   });
 
   describe('create', () => {
-    const payload = { serviceTypeId: 'st-1', baseFee: 5, perKmFee: 1.5, minimumFee: 8, returnFee: 3 };
+    const payload = {
+      serviceTypeId: 'st-1',
+      baseFee: 5,
+      perKmFee: 1.5,
+      minimumFee: 8,
+      returnFee: 3,
+    };
 
     it('cria uma nova tabela de preços e desativa a anterior da mesma região+serviço', async () => {
       prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
@@ -113,6 +122,7 @@ describe('AdminPricingTablesService', () => {
         serviceTypeId: 'st-1',
         serviceType: { name: 'Moto' },
         baseFee: { toString: () => '5.00' },
+        includedDistanceKm: { toString: () => '0.00' },
         perKmFee: { toString: () => '1.50' },
         minimumFee: { toString: () => '8.00' },
         returnFee: { toString: () => '3.00' },
@@ -132,6 +142,7 @@ describe('AdminPricingTablesService', () => {
             regionId: 'region-1',
             serviceTypeId: 'st-1',
             baseFee: 5,
+            includedDistanceKm: 0,
             perKmFee: 1.5,
             minimumFee: 8,
             returnFee: 3,
@@ -166,6 +177,7 @@ describe('AdminPricingTablesService', () => {
         serviceTypeId: 'st-1',
         serviceType: { name: 'Moto' },
         baseFee: { toString: () => '5.00' },
+        includedDistanceKm: { toString: () => '0.00' },
         perKmFee: { toString: () => '1.50' },
         minimumFee: null,
         returnFee: null,

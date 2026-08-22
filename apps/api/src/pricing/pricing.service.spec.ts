@@ -30,12 +30,18 @@ describe('PricingService', () => {
     service = module.get(PricingService);
   });
 
-  const input = { regionId: 'region-1', serviceTypeId: 'st-1', distanceKm: 5, requiresReturn: false };
+  const input = {
+    regionId: 'region-1',
+    serviceTypeId: 'st-1',
+    distanceKm: 5,
+    requiresReturn: false,
+  };
 
   it('calcula o preço usando a tabela ativa e a comissão configurada', async () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
     prisma.pricingTable.findFirst.mockResolvedValue({
       baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
@@ -57,6 +63,7 @@ describe('PricingService', () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-2' });
     prisma.pricingTable.findFirst.mockResolvedValue({
       baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
@@ -90,6 +97,7 @@ describe('PricingService', () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
     prisma.pricingTable.findFirst.mockResolvedValue({
       baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
@@ -103,6 +111,7 @@ describe('PricingService', () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
     prisma.pricingTable.findFirst.mockResolvedValue({
       baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,

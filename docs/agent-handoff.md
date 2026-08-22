@@ -2628,3 +2628,40 @@ container a input (o Google não permite) porque só uma lista abre por vez, a d
 campo em foco.
 
 Medido depois: desalinhamento 0 tanto na rolagem do painel quanto na da página.
+
+## Atualização — 2026-08-22: bandeirada na tabela de preços
+
+O modelo era `baseFee + perKmFee × distância`, com o por-quilômetro incidindo
+desde o metro zero. Não havia como dizer "até 3 km custa R$ 8".
+
+`PricingTable` ganhou `includedDistanceKm`, e a fórmula virou:
+
+```
+subtotal = max(baseFee + perKmFee × max(0, distância − includedDistanceKm), minimumFee)
+```
+
+**Interpretação assumida:** o enunciado pedia "valor fixo até X km" e "a partir
+de quantos km começa a cobrar por km" — são a mesma fronteira, expressa duas
+vezes, então virou um campo só. Se a intenção for duas fronteiras distintas (uma
+faixa de carência entre o fim do fixo e o início da cobrança), isso muda o
+modelo e ainda não está feito.
+
+O `Math.max(0, …)` não é defensivo por hábito: sem ele, entrega mais curta que a
+bandeirada daria distância negativa e o `perKmFee` viraria desconto, cobrando
+menos que a própria taxa base. Há teste cobrindo isso.
+
+`includedDistanceKm` é **obrigatório** em `PricingCalculatorInput`, não
+opcional. Num cálculo de dinheiro, um campo esquecido que assume zero sozinho
+cobra menos do que devia e ninguém percebe — melhor o compilador exigir a
+decisão de quem chama. O resultado ganhou `chargeableDistanceKm` para a tela
+poder mostrar quanto da distância foi efetivamente cobrado.
+
+Compatibilidade: a coluna entra com `DEFAULT 0`, que reproduz exatamente o
+comportamento anterior. Confirmado no banco de desenvolvimento — a tabela
+existente ficou com `0.00`. E os dez testes originais da calculadora passam sem
+alteração nenhuma, o que é a prova de que a fórmula antiga é um caso particular
+da nova.
+
+`minimumFee` continua sendo piso e não foi tocado. Com bandeirada configurada
+ele fica quase redundante, já que a taxa base é o piso natural de trajeto curto,
+mas remover seria mudança incompatível.

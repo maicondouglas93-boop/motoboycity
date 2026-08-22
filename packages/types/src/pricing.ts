@@ -12,6 +12,8 @@ export interface PricingTableItem {
   serviceTypeId: string;
   serviceTypeName: string;
   baseFee: number;
+  /** Distância coberta pela taxa base; o perKmFee só incide acima dela. */
+  includedDistanceKm: number;
   perKmFee: number;
   minimumFee: number | null;
   returnFee: number | null;

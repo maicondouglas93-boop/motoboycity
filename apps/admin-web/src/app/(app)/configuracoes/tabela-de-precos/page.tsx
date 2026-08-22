@@ -36,6 +36,15 @@ function formatCurrency(value: number | null): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/**
+ * Zero vira travessão, e não "0 km": sem bandeirada a cobrança começa no metro
+ * zero, e escrever um número ali sugeriria uma faixa que não existe.
+ */
+function formatDistance(value: number): string {
+  if (!value) return '—';
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} km`;
+}
+
 export default function PricingTablesPage() {
   const token = session.getToken();
   const queryClient = useQueryClient();
@@ -45,6 +54,7 @@ export default function PricingTablesPage() {
 
   const [serviceTypeId, setServiceTypeId] = useState('');
   const [baseFee, setBaseFee] = useState('');
+  const [includedDistanceKm, setIncludedDistanceKm] = useState('');
   const [perKmFee, setPerKmFee] = useState('');
   const [minimumFee, setMinimumFee] = useState('');
   const [returnFee, setReturnFee] = useState('');
@@ -85,6 +95,7 @@ export default function PricingTablesPage() {
     mutationFn: (payload: {
       serviceTypeId: string;
       baseFee: number;
+      includedDistanceKm?: number;
       perKmFee: number;
       minimumFee?: number;
       returnFee?: number;
@@ -155,6 +166,9 @@ export default function PricingTablesPage() {
     createMutation.mutate({
       serviceTypeId,
       baseFee: base,
+      ...(includedDistanceKm.trim() && {
+        includedDistanceKm: Number(includedDistanceKm.replace(',', '.')),
+      }),
       perKmFee: perKm,
       ...(minimumFee.trim() && { minimumFee: Number(minimumFee.replace(',', '.')) }),
       ...(returnFee.trim() && { returnFee: Number(returnFee.replace(',', '.')) }),
@@ -246,6 +260,16 @@ export default function PricingTablesPage() {
                 />
               </div>
               <div className="space-y-1.5">
+                <Label htmlFor="includedDistanceKm">Base cobre até (km)</Label>
+                <Input
+                  id="includedDistanceKm"
+                  placeholder="3"
+                  value={includedDistanceKm}
+                  onChange={(event) => setIncludedDistanceKm(event.target.value)}
+                  className="w-28"
+                />
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="perKmFee">Valor por km (R$)</Label>
                 <Input
                   id="perKmFee"
@@ -303,6 +327,7 @@ export default function PricingTablesPage() {
             <TableRow>
               <TableHead>Serviço</TableHead>
               <TableHead>Base</TableHead>
+              <TableHead>Cobre até</TableHead>
               <TableHead>Por km</TableHead>
               <TableHead>Mínimo</TableHead>
               <TableHead>Retorno</TableHead>
@@ -315,6 +340,7 @@ export default function PricingTablesPage() {
               <TableRow key={pricingTable.id}>
                 <TableCell>{pricingTable.serviceTypeName}</TableCell>
                 <TableCell>{formatCurrency(pricingTable.baseFee)}</TableCell>
+                <TableCell>{formatDistance(pricingTable.includedDistanceKm)}</TableCell>
                 <TableCell>{formatCurrency(pricingTable.perKmFee)}</TableCell>
                 <TableCell>{formatCurrency(pricingTable.minimumFee)}</TableCell>
                 <TableCell>{formatCurrency(pricingTable.returnFee)}</TableCell>

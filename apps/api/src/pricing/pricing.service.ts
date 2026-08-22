@@ -61,6 +61,7 @@ export class PricingService {
     return calculatePricing({
       distanceKm: input.distanceKm,
       baseFee: Number(pricingTable.baseFee),
+      includedDistanceKm: Number(pricingTable.includedDistanceKm),
       perKmFee: Number(pricingTable.perKmFee),
       minimumFee: pricingTable.minimumFee === null ? null : Number(pricingTable.minimumFee),
       returnFee: pricingTable.returnFee === null ? null : Number(pricingTable.returnFee),
