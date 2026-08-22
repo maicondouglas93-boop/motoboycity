@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { DriverRanking } from '@/components/reports/driver-ranking';
 import { PeakHoursChart } from '@/components/reports/peak-hours-chart';
 import { StatCard } from '@/components/stat-card';
 import { adminReportsApi } from '@/lib/api-client';
@@ -223,45 +224,16 @@ export default function AdminReportsPage() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <Card>
+            <Card className="xl:col-span-2">
               <CardHeader>
-                <CardTitle>Entregadores por repasse</CardTitle>
+                <CardTitle>Entregadores</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Volume, confiabilidade e agilidade lado a lado — ordene pela coluna que importa
+                  agora.
+                </p>
               </CardHeader>
               <CardContent className="p-0">
-                {report.drivers.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">
-                    Nenhum repasse de entrega concluída no período.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Entregador</TableHead>
-                        <TableHead>Concluídas</TableHead>
-                        <TableHead>Repasse</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {report.drivers.map((driver) => (
-                        <TableRow key={driver.driverId}>
-                          <TableCell>
-                            <Link
-                              className="font-medium text-primary underline-offset-4 hover:underline"
-                              href={`/entregadores/${driver.driverId}`}
-                            >
-                              {driver.driverName}
-                              <span className="block text-xs text-muted-foreground">
-                                {driver.driverEmail}
-                              </span>
-                            </Link>
-                          </TableCell>
-                          <TableCell>{driver.completedCount}</TableCell>
-                          <TableCell>{formatCurrency(driver.driverValue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                <DriverRanking drivers={report.drivers} />
               </CardContent>
             </Card>
             <Card>

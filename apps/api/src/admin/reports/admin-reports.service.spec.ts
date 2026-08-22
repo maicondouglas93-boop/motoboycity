@@ -1,10 +1,17 @@
 import { AdminReportsService } from './admin-reports.service';
 
 describe('AdminReportsService', () => {
-  const prisma = { delivery: { findMany: jest.fn() } };
+  const prisma = {
+    delivery: { findMany: jest.fn() },
+    // A terceira consulta e a de desempenho; a quarta, a de ofertas.
+    deliveryOffer: { findMany: jest.fn() },
+  };
   const service = new AdminReportsService(prisma as never);
 
-  /** Ambas as consultas do relatório passam pelo mesmo `findMany`. */
+  /**
+   * As tres consultas de entrega passam pelo mesmo `findMany`, na ordem em que
+   * o servico as dispara: criadas, concluidas e as com entregador.
+   */
   function comEntregasCriadas(criadas: { status: string; createdAt: Date }[]) {
     prisma.delivery.findMany.mockReset();
     prisma.delivery.findMany
@@ -15,7 +22,9 @@ describe('AdminReportsService', () => {
           serviceType: { name: 'Padrão' },
         })),
       )
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
+    prisma.deliveryOffer.findMany.mockResolvedValue([]);
   }
 
   /** O `where` da consulta de pedidos criados. */
@@ -29,6 +38,8 @@ describe('AdminReportsService', () => {
   beforeEach(() => {
     prisma.delivery.findMany.mockReset();
     prisma.delivery.findMany.mockResolvedValue([]);
+    prisma.deliveryOffer.findMany.mockReset();
+    prisma.deliveryOffer.findMany.mockResolvedValue([]);
   });
 
   it('recorta o período no relógio de São Paulo, e não em UTC', async () => {

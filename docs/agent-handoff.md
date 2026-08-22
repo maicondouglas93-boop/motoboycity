@@ -3003,3 +3003,44 @@ A correção tem duas partes:
 Confirmado localmente: a suíte do horário passa em 3,7s e o Jest encerra
 sozinho, **sem `--forceExit`**. Um `--forceExit` teria escondido o problema em
 vez de resolvê-lo.
+
+## Atualização — 2026-08-22: desempenho do entregador
+
+Segundo item da fila, e a pergunta que eu tinha feito estava errada.
+
+Eu perguntei qual critério de "performance" usar — volume, tempo ou taxa de
+conclusão. **Escolher um número único embute um incentivo**, e essa escolha não
+deveria estar no código: ranquear por volume faz o motoboy correr e recusar
+corrida ruim; por tempo, idem. A resposta certa é mostrar as medidas lado a
+lado, com colunas ordenáveis, e devolver a escolha para quem opera.
+
+### As quatro medidas
+
+| Coluna      | O que mede                                                     |
+| ----------- | -------------------------------------------------------------- |
+| Concluídas  | volume, sem juízo de valor                                     |
+| Conclusão   | das que ele assumiu e encerraram, quantas terminaram entregues |
+| Aceite      | das ofertas recebidas, quantas ele aceitou                     |
+| Tempo médio | do aceite até a conclusão, com o denominador à vista           |
+
+### Três decisões que mudam o número
+
+**Entrega em andamento não conta como falha.** O denominador da taxa de
+conclusão são as corridas que encerraram — concluída, não entregue, cancelada
+depois do aceite. Contar o que está na rua puniria quem está trabalhando no
+instante do relatório.
+
+**Nulo não é zero.** Sem corrida encerrada, a taxa de conclusão é `—`, não 0%.
+Zero por cento diria que ele falhou em tudo; o travessão diz que não houve o que
+medir. A diferença importa para quem vai cobrar alguém por esse número.
+
+**Quem só recusa aparece.** Um entregador sem entrega nenhuma mas com ofertas
+recebidas entra na lista com 0% de aceite — é justamente o caso que o relatório
+existe para revelar.
+
+O tempo médio mostra entre parênteses quantas entregas entraram na conta, para
+ninguém confundir média com cobertura.
+
+Onze testes no módulo puro. Na tela, ordenar por coluna diferente reordena de
+verdade — conferido no navegador, inclusive com o tempo médio invertendo o
+sentido (menor é melhor) e os nulos indo para o fim em qualquer ordenação.

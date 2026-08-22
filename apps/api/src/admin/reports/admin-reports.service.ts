@@ -14,6 +14,7 @@ import {
 } from '../../common/sao-paulo-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { computePeakHours } from './delivery-peak-hours';
+import { computeDriverPerformance } from './driver-performance';
 
 /**
  * As formas do relatorio vivem em `@motoboycity/types` e sao apenas
@@ -39,6 +40,20 @@ const deliveryStatuses: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
 ];
 
+/** Entregador sem nada medido no periodo — zeros e nulos, nunca inventado. */
+function emptyPerformance() {
+  return {
+    failedCount: 0,
+    cancelledAfterAcceptCount: 0,
+    completionRate: null,
+    offersReceived: 0,
+    offersAccepted: 0,
+    acceptanceRate: null,
+    averageMinutesToComplete: null,
+    timedSamples: 0,
+  };
+}
+
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -49,28 +64,83 @@ export class AdminReportsService {
 
   async operations(query: OperationsReportQuery): Promise<AdminOperationsReport> {
     const period = this.resolvePeriod(query);
-    const [createdDeliveries, completedDeliveries] = await Promise.all([
-      this.prisma.delivery.findMany({
-        where: { createdAt: { gte: period.from, lte: period.to } },
-        select: {
-          status: true,
-          createdAt: true,
-          company: { select: { id: true, tradeName: true } },
-          serviceType: { select: { name: true } },
-        },
-      }),
-      this.prisma.delivery.findMany({
-        where: { status: 'COMPLETED', statusChangedAt: { gte: period.from, lte: period.to } },
-        select: {
-          totalValue: true,
-          driverValue: true,
-          platformValue: true,
-          company: { select: { id: true, tradeName: true } },
-          serviceType: { select: { name: true } },
-          driver: { include: { user: { select: { name: true, email: true } } } },
-        },
-      }),
-    ]);
+    const [createdDeliveries, completedDeliveries, driverDeliveries, driverOffers] =
+      await Promise.all([
+        this.prisma.delivery.findMany({
+          where: { createdAt: { gte: period.from, lte: period.to } },
+          select: {
+            status: true,
+            createdAt: true,
+            company: { select: { id: true, tradeName: true } },
+            serviceType: { select: { name: true } },
+          },
+        }),
+        this.prisma.delivery.findMany({
+          where: { status: 'COMPLETED', statusChangedAt: { gte: period.from, lte: period.to } },
+          select: {
+            totalValue: true,
+            driverValue: true,
+            platformValue: true,
+            company: { select: { id: true, tradeName: true } },
+            serviceType: { select: { name: true } },
+            driver: { include: { user: { select: { name: true, email: true } } } },
+          },
+        }),
+        /**
+         * Tudo que teve entregador e ENCERROU no periodo — inclui insucesso e
+         * cancelamento, que a consulta de concluidas nao ve. Sem eles, a taxa de
+         * conclusao seria sempre 100%.
+         */
+        this.prisma.delivery.findMany({
+          where: {
+            driverId: { not: null },
+            statusChangedAt: { gte: period.from, lte: period.to },
+          },
+          select: {
+            driverId: true,
+            status: true,
+            statusHistory: {
+              where: { toStatus: { in: ['ACCEPTED', 'COMPLETED'] } },
+              select: { toStatus: true, changedAt: true },
+              orderBy: { changedAt: 'asc' },
+            },
+          },
+        }),
+        this.prisma.deliveryOffer.findMany({
+          where: { offeredAt: { gte: period.from, lte: period.to } },
+          select: { driverId: true, response: true },
+        }),
+      ]);
+
+    /**
+     * Do aceite ate a conclusao. Usa a PRIMEIRA ocorrencia de cada status: uma
+     * entrega reofertada teria varios ACCEPTED, e pegar o ultimo encolheria o
+     * tempo medido.
+     */
+    const performance = computeDriverPerformance(
+      driverDeliveries
+        .filter((delivery): delivery is typeof delivery & { driverId: string } =>
+          Boolean(delivery.driverId),
+        )
+        .map((delivery) => {
+          const aceite = delivery.statusHistory.find((item) => item.toStatus === 'ACCEPTED');
+          const conclusao = delivery.statusHistory.find((item) => item.toStatus === 'COMPLETED');
+          const minutos =
+            aceite && conclusao
+              ? Math.round(
+                  ((conclusao.changedAt.getTime() - aceite.changedAt.getTime()) / 60_000) * 10,
+                ) / 10
+              : null;
+          return {
+            driverId: delivery.driverId,
+            status: delivery.status,
+            // Duracao negativa nao existe: descarta em vez de poluir a media.
+            minutesToComplete: minutos !== null && minutos >= 0 ? minutos : null,
+          };
+        }),
+      driverOffers,
+    );
+    const performanceById = new Map(performance.map((item) => [item.driverId, item]));
 
     const byCurrentStatus = Object.fromEntries(
       deliveryStatuses.map((status) => [status, 0]),
@@ -143,6 +213,7 @@ export class AdminReportsService {
           driverEmail: delivery.driver.user.email,
           completedCount: 0,
           driverValue: 0,
+          ...emptyPerformance(),
         };
         current.completedCount += 1;
         current.driverValue += deliveryDriverValue;
@@ -181,7 +252,13 @@ export class AdminReportsService {
             left.companyName.localeCompare(right.companyName),
         ),
       drivers: [...drivers.values()]
-        .map((item) => ({ ...item, driverValue: roundCurrency(item.driverValue) }))
+        .map((item) => ({
+          ...item,
+          driverValue: roundCurrency(item.driverValue),
+          // O desempenho vem da consulta propria: a de concluidas nao enxerga
+          // insucesso, cancelamento nem oferta recusada.
+          ...(performanceById.get(item.driverId) ?? emptyPerformance()),
+        }))
         .sort(
           (left, right) =>
             right.driverValue - left.driverValue || left.driverName.localeCompare(right.driverName),

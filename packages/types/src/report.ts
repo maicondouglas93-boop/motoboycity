@@ -10,12 +10,31 @@ export interface OperationsReportCompanyItem {
   platformValue: number;
 }
 
+/**
+ * Desempenho do entregador em metricas SEPARADAS, sem nota unica.
+ *
+ * Um numero so de "performance" embutiria uma escolha de incentivo: ranquear
+ * por volume faz o motoboy correr e recusar corrida ruim; por tempo, idem.
+ * Mostrar lado a lado devolve a escolha para quem opera.
+ */
 export interface OperationsReportDriverItem {
   driverId: string;
   driverName: string;
   driverEmail: string;
   completedCount: number;
   driverValue: number;
+  /** Aceitas mas nao entregues: o destinatario nao recebeu. */
+  failedCount: number;
+  /** Canceladas depois de o motoboy ja ter aceitado. */
+  cancelledAfterAcceptCount: number;
+  /** `null` quando nao houve corrida encerrada — diferente de zero por cento. */
+  completionRate: number | null;
+  offersReceived: number;
+  offersAccepted: number;
+  acceptanceRate: number | null;
+  averageMinutesToComplete: number | null;
+  /** Quantas entregas entraram na media — o denominador, a vista. */
+  timedSamples: number;
 }
 
 export interface OperationsReportServiceTypeItem {
