@@ -71,6 +71,9 @@ describe('AdminPricingTablesController (e2e)', () => {
       serviceTypeId,
       serviceTypeName: 'Serviço Teste Preço E2E',
       baseFee: 5,
+      // Sem bandeirada no payload, a coluna entra com o default do banco — que
+      // e o que preserva o comportamento das tabelas criadas antes do campo.
+      includedDistanceKm: 0,
       perKmFee: 1.5,
       minimumFee: 8,
       returnFee: 3,
@@ -92,6 +95,24 @@ describe('AdminPricingTablesController (e2e)', () => {
 
     const first = await prisma.pricingTable.findUnique({ where: { id: firstPricingTableId } });
     expect(first?.active).toBe(false);
+  });
+
+  it('admin cria tabela com bandeirada e ela volta na resposta', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceTypeId, baseFee: 8, includedDistanceKm: 3, perKmFee: 1.5 })
+      .expect(201);
+
+    expect(response.body.includedDistanceKm).toBe(3);
+  });
+
+  it('recusa bandeirada negativa', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ serviceTypeId, baseFee: 8, includedDistanceKm: -1, perKmFee: 1.5 })
+      .expect(400);
   });
 
   it('admin lista tabelas de preço filtrando por serviceTypeId e active', async () => {
