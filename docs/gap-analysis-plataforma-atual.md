@@ -88,13 +88,45 @@ ordem de descoberta.
 - **Prova de entrega (foto/assinatura)** — `business-rules.md` registra que foi
   deliberadamente adiada, com o risco aceito por escrito. Reabrir é decisão de
   produto nova, não correção.
-- **Taxa de chuva** e **tarifa dinâmica** — motor de preço condicional.
+- **Taxa de chuva** — inspecionada em 2026-08-22, ver detalhamento abaixo.
 - **Roteirizador automático** e **agrupamento inteligente** — otimização de
   rotas; escopo próprio.
 - **Escalas e diárias**, **desafios**, **punição de entregadores** — gestão de
   frota.
 - **Perfis de acesso** — hoje há três perfis fixos; lá é RBAC configurável.
 - **Notas fiscais**.
+
+### 3.1 Detalhamento das três configurações inspecionadas
+
+Telas abertas em modo leitura no admin da plataforma, sem alterar nada.
+
+**Taxa de chuva** (`/admin/settings/taxa_chuva`) — o gatilho é **manual**, não
+API de clima: existe um interruptor "Taxa de Chuva Ativa Agora". A configuração
+é mais rica do que parecia de fora:
+
+- tipo **porcentagem ou fixo**, com valor;
+- **quanto do adicional vai para o entregador** — tabela de preço, porcentagem
+  ou fixo;
+- aviso opcional ao cliente no formulário, com mensagem customizável;
+- **lista de clientes isentos**, para não aplicar a empresas escolhidas.
+
+O último item é o que torna a funcionalidade vendável: sobe o preço na chuva
+sem irritar o cliente grande.
+
+**Horário de funcionamento** (`/admin/settings/horario_funcionamento`) — o mais
+simples dos três. Liga/desliga geral; por dia da semana, com **múltiplas faixas**
+(abre, fecha para o almoço, reabre); atalho "clonar de segunda a sexta". Fora do
+horário, o envio de pedido é **bloqueado**.
+
+**Tarifa dinâmica** (`/admin/settings/tarifa_dinamica`) — **a operação NÃO tem
+esta funcionalidade.** A tela é uma página de venda: R$ 199/mês somados ao plano
+atual, ou inclusa no plano Platina.
+
+Isso reposiciona o item: como nunca foi usada, **nenhum cliente depende dela** e
+ela não é bloqueio de migração. E é a mais cara de construir — polígonos
+desenhados no mapa, áreas automáticas comparando pedidos pendentes com
+entregadores disponíveis, prioridade de sobreposição e visualização das zonas no
+app do entregador. Recomendação: fora da lista por ora.
 
 ### 4. Provavelmente não vale
 

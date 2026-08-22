@@ -66,11 +66,11 @@
  *   asfalto  #14161A  texto e superfícies escuras
  *   concreto #F2F3F5  fundo da página (loja é clara; dark mode seria errado)
  *   papel    #FFFFFF  cards
- *   colete   #FF9E00  âmbar do colete de segurança — SÓ para movimento
+ *   colete   #FDA02E  laranja da marca (do logo) — SÓ para movimento
  *   placa    #0B6E4F  verde de placa de estrada — conclusão
  *   alerta   #D92D20  falha e cancelamento
  *
- * Regra do âmbar: ele significa uma coisa só — motoboy em movimento, ou a
+ * Regra do laranja: ele significa uma coisa só — motoboy em movimento, ou a
  * ação que põe alguém em movimento ("Chamar entregador"). Se ele virar
  * decoração em qualquer outro lugar, o olho para de encontrar a entrega ativa
  * na tela, que é justamente o trabalho desta interface.
@@ -79,7 +79,12 @@
   --asfalto: #14161a;
   --concreto: #f2f3f5;
   --papel: #ffffff;
-  --colete: #ff9e00;
+  /* Extraído do logo oficial: o gradiente da marca vai de #ea5505 a #fda02e.
+     A ponta clara é a que vira token de interface — tem 8.84:1 com o asfalto
+     (AAA), contra 5.00:1 da ponta escura. O gradiente inteiro fica reservado
+     para o logo, onde a marca precisa cantar. */
+  --colete: #fda02e;
+  --colete-escuro: #ea5505;
   --placa: #0b6e4f;
   --alerta: #d92d20;
 

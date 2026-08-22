@@ -2265,3 +2265,60 @@ verificação foi removido e confirmado fora do build.
 `elapsed-time.tsx` existe em dois lugares, pelo mesmo motivo já registrado para
 `status-chip.tsx`: os apps duplicam componentes por convenção do repositório.
 Precisa mudar nos dois.
+
+## Atualização — 2026-08-22: marca oficial aplicada
+
+O responsável forneceu o logo e o ícone do app. Até aqui a identidade era uma
+proposta minha, feita porque não havia marca nenhuma no repositório.
+
+### A cor inventada estava quase certa
+
+A cor foi **extraída dos arquivos**, não estimada a olho: o gradiente da marca
+vai de `#EA5505` a `#FDA02E`. O `--colete` que eu havia proposto partindo do
+colete de segurança era `#FF9E00` — praticamente o extremo claro do gradiente
+real.
+
+Adotado `#FDA02E` com base em contraste medido contra o asfalto: 8.84:1 (AAA),
+contra 6.54:1 da mediana e 5.00:1 do extremo escuro. Os três passariam em AA,
+mas o claro é o único AAA e é quase idêntico ao que já estava no ar — nada
+regrediu. O gradiente completo ficou reservado ao logo.
+
+### Os arquivos vinham com preto queimado
+
+Ambos eram RGB sem canal alfa. Sobre o painel asfalto apareceria um retângulo
+preto puro, visivelmente mais escuro. O fundo foi removido tratando a
+**luminância como alfa** e dividindo a cor por ela, não por limiar — limiar
+deixaria franja escura nas bordas. Resultado medido: 66,7% transparente, 20,4%
+branco opaco, 12,9% laranja, **0% de franja**.
+
+### O que foi instalado
+
+- `public/brand/motoboycity-logo.png` (507x164) nos dois painéis, consumido
+  pelo componente `Wordmark`, que passou de texto para imagem;
+- `src/app/icon.png` como favicon nos dois painéis, e o `favicon.ico` padrão do
+  `create-next-app` foi **removido** — era o logo do Next;
+- ícones do Android nas cinco densidades, quadrado e redondo, gerados do
+  monograma MC.
+
+O ícone exigiu tratamento próprio: o monograma é 3:1 e ícone de app é quadrado,
+então foi centralizado num quadrado com margem justa e recorte circular suave na
+variante redonda.
+
+### Restrição registrada
+
+O logo tem conteúdo branco, então **só funciona sobre fundo escuro**. Por isso
+aparece no painel asfalto e na navegação, nunca sobre o fundo claro das telas.
+Uma variante para fundo claro ainda não existe; está documentado no componente.
+
+### Validações
+
+Builds dos dois painéis, 25 testes do driver-app, typecheck e lint verdes.
+Confirmado no navegador que o logo carrega (zero imagens quebradas) e que o
+botão renderiza `rgb(253, 160, 46)`.
+
+### Levantamento refinado
+
+`docs/gap-analysis-plataforma-atual.md` ganhou o detalhamento das três
+configurações inspecionadas. O achado que muda prioridade: **tarifa dinâmica é
+um upsell que a operação não contrata** (R$ 199/mês), logo não é paridade nem
+bloqueio de migração — e é a mais cara da lista.
