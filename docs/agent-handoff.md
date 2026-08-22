@@ -2152,3 +2152,116 @@ gravado.
   reais — a lacuna registrada na atualização anterior permanece.
 - O banco de dev não tem pedidos ativos, então listas e mapas foram vistos
   majoritariamente em estado vazio.
+
+## Atualização — 2026-08-22: levantamento da plataforma atual e botão de insucesso
+
+### Levantamento
+
+Navegação **somente leitura** no sistema em produção que este projeto
+substitui, com autorização do responsável. Resultado em
+`docs/gap-analysis-plataforma-atual.md`.
+
+Contexto que muda o enquadramento: `motoboycity.app.br` é o portal de uma
+instância white-label da **Plataforma Entregas Expressas** — o MOTOboyCity
+opera hoje alugando um SaaS de terceiro. Os clientes que precisam migrar já
+usam tudo o que está catalogado ali, então funcionalidade ausente vira motivo
+concreto para a loja não trocar de sistema.
+
+**Dado que resolve uma decisão pendente**: a comissão praticada na operação
+real é de **~9,5%** (entregador fica com ~90,5%), medida pelos agregados do
+painel financeiro. `driverCommissionPercentage` continua sendo decisão do
+responsável, mas agora tem referência. Ticket médio de R$ 5,98 e tempo médio de
+entrega de ~31 min completam a ordem de grandeza.
+
+**Dois estados que faltam na máquina**: `Em preparo` e `Chegou na coleta`. O
+segundo importa para o SLA implementado hoje — sem ele, a etapa "do aceite até
+a coleta" mistura o tempo do motoboy chegando com o tempo da loja preparando, e
+não responde de quem é o atraso.
+
+Nenhum dado pessoal, endereço de cliente, nome de entregador ou valor
+individual foi copiado para o repositório.
+
+### Botão de insucesso no driver-app
+
+Fecha a lacuna registrada na atualização anterior: a rota `/fail` existia e
+estava testada, mas era inalcançável na rua.
+
+`DeliveryOperationScreen` ganhou um botão secundário "Não consegui entregar",
+visível **apenas em COLLECTED** — antes disso não há mercadoria em posse do
+motoboy, então não existe o que devolver. Ele abre um modal com os quatro
+motivos; "Outro" exige descrição, espelhando a validação do servidor.
+
+O GPS é capturado no registro do insucesso: é a única prova de que o motoboy
+chegou ao destino antes de declarar que não conseguiu entregar.
+
+Em `FAILED`, a ação principal vira "Confirmar devolução na loja" — o mesmo
+`completeReturn` — e a rota externa passa a apontar para a coleta, não para o
+destino.
+
+### Validações
+
+| Comando                                           | Resultado           |
+| ------------------------------------------------- | ------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest` | 2 suítes, 25 testes |
+| typecheck e lint do driver-app                    | aprovados           |
+
+### Limitações
+
+- **A tela não foi vista rodando.** O driver-app é React Native e não há
+  emulador nesta sessão; o modal, o seletor de motivo e o fluxo em `FAILED`
+  foram verificados por typecheck e lint, não visualmente. Precisa de uma
+  passada em aparelho antes do piloto.
+- O app continua com um único smoke test de renderização; não há teste
+  automatizado cobrindo o novo fluxo.
+- As seções Gestão e Suporte da plataforma atual, e os submenus de Financeiro
+  e Relatórios do admin, não foram abertos em profundidade.
+
+## Atualização — 2026-08-22: cronômetro ao vivo na fila de pedidos
+
+Primeiro item da lista de prioridade em `docs/gap-analysis-plataforma-atual.md`.
+Cada pedido na fila passa a mostrar há quanto tempo está no estado atual —
+`20s`, `4m 21s`, `1h 12m` — nos dois painéis.
+
+**Nenhuma mudança de API**: `statusChangedAt` já vinha em `DeliveryListItem`.
+
+### Duas decisões
+
+**Um relógio para a tela inteira.** Uma central com trinta pedidos criaria
+trinta `setInterval` se cada linha cuidasse do próprio tempo. Há um único
+intervalo com assinantes; como todos leem o mesmo instante, os contadores não
+piscam fora de sincronia.
+
+**Sem cor de alerta.** "Demorado" depende de um limite que ninguém decidiu, e
+pintar de vermelho um número arbitrário treina o operador a ignorar a cor. O
+tempo em si é a informação.
+
+### O lint corrigiu a primeira versão
+
+A implementação inicial usava `useEffect` + `setState` para capturar o relógio
+na montagem, e o lint recusou: setState síncrono dentro de efeito provoca
+render em cascata. A regra estava certa — reescrito com
+`useSyncExternalStore`, que é o primitivo do React para assinar fonte externa e
+já resolve o SSR pelo `getServerSnapshot`.
+
+### Verificação
+
+O painel do navegador não estava compondo frames, então a prova veio de leitura
+do DOM em vez de captura de tela — para um cronômetro, é evidência melhor:
+
+```
+antes:  20s · 4m 17s · 1h 00m
+depois: 24s · 4m 21s · 1h 00m
+```
+
+Escalas de segundo avançaram, escalas de hora ficaram paradas. A formatação foi
+conferida nos limites: 59s→"59s", 60s→"1m 00s", 3599s→"59m 59s",
+3600s→"1h 00m", 86399s→"23h 59m".
+
+typecheck, lint e build dos dois painéis aprovados. O harness usado na
+verificação foi removido e confirmado fora do build.
+
+### Limitação
+
+`elapsed-time.tsx` existe em dois lugares, pelo mesmo motivo já registrado para
+`status-chip.tsx`: os apps duplicam componentes por convenção do repositório.
+Precisa mudar nos dois.
