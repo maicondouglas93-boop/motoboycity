@@ -69,29 +69,46 @@ export function loadGoogleMaps(): Promise<typeof google> {
   };
 
   window.motoboyCityGoogleMaps = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async`;
-    script.async = true;
     /**
-     * Carregar não é o mesmo que funcionar.
+     * `callback` e nao `script.onload`.
      *
-     * Com chave inválida, API não habilitada ou faturamento desligado, o Google
-     * devolve um script que executa normalmente — `onload` dispara — mas deixa
-     * `google.maps.places` sem preencher, e só registra um aviso no console.
-     * Sem esta verificação, o erro chegava na tela como
-     * "Cannot read properties of undefined (reading 'Autocomplete')".
+     * Medido neste projeto: no `onload` o Google ainda nao definiu nem
+     * `google.maps.importLibrary`, quanto mais as bibliotecas. Qualquer
+     * verificacao ali acusa falha em chave perfeitamente valida — foi
+     * exatamente o falso negativo que apareceu ao configurar a chave real.
      *
-     * `gm_authFailure` não cobre este caso: ele é para a recusa que acontece
-     * depois, ao desenhar o mapa com referrer não autorizado.
+     * O `callback` e o sinal oficial de "API inicializada", e so depois dele
+     * faz sentido perguntar se `places` chegou.
      */
-    script.onload = () => {
+    const callbackName = '__motoboyCityGoogleMapsReady';
+
+    /**
+     * Rede de seguranca para o caso do callback nunca disparar.
+     *
+     * Sem isto, uma falha silenciosa deixaria a promessa pendente para sempre e
+     * a tela ficaria so com o campo inerte, sem erro nenhum — pior que a
+     * mensagem errada que este arquivo acabou de consertar.
+     */
+    const timeout = setTimeout(() => reject(new Error(KEY_REJECTED_MESSAGE)), 15_000);
+
+    Reflect.set(window, callbackName, () => {
+      clearTimeout(timeout);
       if (!window.google?.maps?.places) {
         reject(new Error(KEY_REJECTED_MESSAGE));
         return;
       }
       resolve(window.google);
+    });
+
+    const script = document.createElement('script');
+    script.src =
+      `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}` +
+      `&libraries=places&loading=async&callback=${callbackName}`;
+    script.async = true;
+    script.onerror = () => {
+      clearTimeout(timeout);
+      reject(new Error('Nao foi possivel carregar o Google Maps.'));
     };
-    script.onerror = () => reject(new Error('Não foi possível carregar o Google Maps.'));
     document.head.appendChild(script);
   });
   return window.motoboyCityGoogleMaps;

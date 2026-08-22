@@ -2529,3 +2529,35 @@ inscrevem nele agora.
 Os dois caminhos foram exercitados no navegador contra a resposta real do
 Google: chave ausente e chave inválida. O `.env.local` usado no teste foi
 restaurado a partir de backup, com hash conferido.
+
+### Correção do próprio conserto: `onload` não serve de sinal
+
+Ao configurar a chave real, a tela acusou "O Google recusou a chave" com uma
+chave **válida**. O falso negativo era meu: o guarda que eu tinha acabado de
+escrever rodava no `script.onload`, e ali o Google ainda não terminou de
+inicializar.
+
+Medido no navegador, não deduzido: no `onload` nem `google.maps.importLibrary`
+existe ainda — quanto mais `google.maps.places`. Qualquer verificação de
+presença naquele ponto reprova toda chave boa.
+
+O sinal correto é o parâmetro `callback` da URL, que é o "API inicializada" do
+próprio Google. Só depois dele faz sentido perguntar se `places` chegou. Foi
+acrescentado também um timeout de 15s como rede de segurança: se o callback
+nunca disparar, a promessa ficaria pendente para sempre e a tela mostraria um
+campo inerte sem erro nenhum — pior que a mensagem errada que isso corrigiu.
+
+### O `gm_authFailure` provou seu valor no primeiro uso real
+
+Com o callback certo, o carregamento passou limpo — e então a mensagem
+reapareceu **ao digitar**. Essa é a assinatura da restrição de referrer, e foi
+o `gm_authFailure` que a capturou.
+
+Evidência de rede: os 7 scripts carregaram (`places_impl.js` incluso), houve
+`AuthenticationService.Authenticate` com referrer
+`http://localhost:3000/zz-preview-temp`, nenhum `InvalidKey` no console — e
+`getPlacePredictions` nunca chama de volta.
+
+Ou seja, a chave é válida e o que falta é autorizar `http://localhost:3000/*` e
+`http://localhost:3001/*` nas restrições da credencial. Sem os dois caminhos
+tratados, isso apareceria como um campo que simplesmente não sugere nada.
