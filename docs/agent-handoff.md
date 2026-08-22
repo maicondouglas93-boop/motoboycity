@@ -2665,3 +2665,48 @@ da nova.
 `minimumFee` continua sendo piso e não foi tocado. Com bandeirada configurada
 ele fica quase redundante, já que a taxa base é o piso natural de trajeto curto,
 mas remover seria mudança incompatível.
+
+## Atualização — 2026-08-22: modal "Chamar entregador"
+
+O botão do topo era um `<Link href="/">` que só navegava para a central. Virou o
+caminho curto que a plataforma concorrente tem: coleta já salva, destino por
+GPS, uma ou várias entregas de uma vez.
+
+Ele **não substitui** o formulário completo — quem já sabe o endereço continua
+usando "Novo pedido", que exige a sugestão do Google e calcula o preço na hora.
+Aqui o preço fica nulo até a distância existir, que é o comportamento já
+desenhado para `destinationKnownAtCreation: false`.
+
+Uma entrega usa `create`; duas ou mais usam `createBatch`, cujo mínimo no schema
+é dois. O limite de cima é 50, o mesmo da validação.
+
+### Três coisas do original que não foram copiadas
+
+**"Obrigatório anexar comprovante de entrega"** — a pedido. Vale notar que
+`requiresDeliveryProof` já existe no payload e no schema; falta só a tela no app
+do entregador.
+
+**"Salvar local de coleta para o próximo pedido"** — aqui o ponto de coleta é o
+endereço da própria empresa, já salvo e reutilizado sempre. A caixa não teria o
+que controlar, então virou o endereço em leitura com um link para alterar.
+
+**Fotos nos cartões de tipo de serviço** — `ServiceType` não guarda imagem.
+Inventar uma ilustração genérica ocuparia espaço sem ajudar a distinguir as
+modalidades, então os cartões têm ícone e nome.
+
+E o cartão "Pagamento Faturado" virou linha informativa, não escolha: a API
+grava `paymentMethod: 'BILLED'` em toda entrega. Um cartão clicável prometeria
+uma opção que não existe.
+
+### Dialog novo no painel
+
+Não havia primitivo de modal. `components/ui/dialog.tsx` embrulha o Dialog do
+Base UI seguindo o mesmo padrão dos outros wrappers. O corpo rola por dentro com
+`max-h` em `dvh`: o formulário passa da altura da janela em tela baixa, e sem
+isso o botão de enviar ficaria fora de alcance.
+
+### Verificado no navegador
+
+Criação avulsa e lote de duas, confirmados no banco: `destinationKnownAtCreation`
+falso, `paymentMethod` BILLED, status AWAITING_DRIVER, e o `requiresReturn`
+chegando certo em ambos.

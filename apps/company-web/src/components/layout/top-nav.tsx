@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Wordmark } from '@/components/brand/wordmark';
+import { CallDriverDialog } from '@/components/operations/call-driver-dialog';
 import { session } from '@/lib/session';
 
 /**
@@ -66,12 +67,19 @@ export function TopNav() {
 
         {/* Nunca escondido: é a ação principal do produto. No celular só o
             rótulo encolhe — some daqui e o lojista não consegue pedir motoboy. */}
-        <Link
-          href="/"
-          className="inline-flex shrink-0 items-center rounded-md bg-colete px-3 py-2 text-sm font-semibold whitespace-nowrap text-asfalto transition-colors hover:brightness-95 focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-offset-2 focus-visible:ring-offset-asfalto focus-visible:outline-none sm:px-4"
-        >
-          Chamar<span className="hidden sm:inline">&nbsp;entregador</span>
-        </Link>
+        {/*
+          Abre o caminho curto — coleta salva, destino por GPS — em vez de
+          navegar para o formulario completo. Quem ja sabe o endereco continua
+          usando "Novo pedido" na central.
+        */}
+        <CallDriverDialog>
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center rounded-md bg-colete px-3 py-2 text-sm font-semibold whitespace-nowrap text-asfalto transition-colors hover:brightness-95 focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-offset-2 focus-visible:ring-offset-asfalto focus-visible:outline-none sm:px-4"
+          >
+            Chamar<span className="hidden sm:inline">&nbsp;entregador</span>
+          </button>
+        </CallDriverDialog>
 
         <DropdownMenu>
           <DropdownMenuTrigger className="ml-auto flex shrink-0 items-center gap-2 rounded-md text-sm text-white/70 lg:ml-0 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none">
