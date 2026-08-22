@@ -635,6 +635,37 @@ export class DeliveriesService {
     };
   }
 
+  /**
+   * Reenvia um pedido parado aos motoboys.
+   *
+   * A varredura automatica so roda quando um motoboy fica disponivel — nao ha
+   * temporizador. Entao um pedido cuja oferta expirou e para o qual nenhum
+   * motoboy novo entrou desde entao fica parado sem oferta pendente, e nada o
+   * move. Este endpoint e a forma de a loja destravar isso sem cancelar e
+   * recriar, que perderia o numero do pedido e a hora de criacao.
+   *
+   * `dispatchDelivery` ja e seguro de repetir: nao faz nada se ja existe oferta
+   * pendente, se o pedido saiu de AWAITING_DRIVER, ou se nao ha motoboy
+   * elegivel. Entao apertar duas vezes nao duplica oferta.
+   */
+  async redispatch(user: User, id: string): Promise<DeliveryDetail> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+
+    await this.assertCanAccess(user, delivery);
+
+    if (delivery.status !== 'AWAITING_DRIVER') {
+      throw new ConflictException(
+        'Só é possível chamar novamente enquanto o pedido está buscando motoboy.',
+      );
+    }
+
+    await this.dispatchService.dispatchDelivery(id);
+    return this.detail(user, id);
+  }
+
   async cancel(user: User, id: string): Promise<DeliveryDetail> {
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
     if (!delivery) {

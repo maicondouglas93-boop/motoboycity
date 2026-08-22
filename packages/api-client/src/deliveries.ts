@@ -158,6 +158,14 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryDetail>(response);
     },
 
+    async redispatch(accessToken: string, id: string): Promise<DeliveryDetail> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/redispatch`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
     async collect(accessToken: string, id: string): Promise<DeliveryGroupResult> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/collect`, {
         method: 'PATCH',

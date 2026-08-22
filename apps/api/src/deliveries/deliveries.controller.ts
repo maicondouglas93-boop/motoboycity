@@ -113,6 +113,11 @@ export class DeliveriesController {
     return this.deliveriesService.cancel(user, id);
   }
 
+  @Patch(':id/redispatch')
+  redispatch(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryDetail> {
+    return this.deliveriesService.redispatch(user, id);
+  }
+
   @Patch(':id/collect')
   @UseGuards(DriverOnlyGuard)
   collect(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryGroupResult> {

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type { CreateDeliveryPayload } from '@motoboycity/types';
-import { Bike, Info, Loader2, Phone, Receipt } from 'lucide-react';
+import { Bike, Info, Loader2, Phone, Receipt, RotateCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -81,8 +81,17 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     ...(operationsQuery.data?.recent ?? []),
   ].filter((delivery) => trackedIds.includes(delivery.id));
 
-  /** Quantas ainda nao tem entregador — zero significa que todas foram aceitas. */
-  const pendingCount = tracked.filter((delivery) => !delivery.driver).length;
+  /**
+   * Quantas ainda procuram entregador.
+   *
+   * O sinal e o STATUS, nao a ausencia de entregador: um pedido cancelado
+   * tambem nao tem entregador, e contando por ausencia ele aparecia como "ainda
+   * procurando" para sempre.
+   */
+  const pendingCount = tracked.filter(
+    (delivery) => delivery.status === 'AWAITING_DRIVER' || delivery.status === 'SCHEDULED',
+  ).length;
+  const cancelledCount = tracked.filter((delivery) => delivery.status === 'CANCELLED').length;
 
   const pickupAddress = addressQuery.data?.address ?? null;
   const serviceTypes = serviceTypesQuery.data ?? [];
@@ -141,6 +150,42 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     mutation.mutate();
   }
 
+  /**
+   * Cancelar e reenviar sao acoes por pedido, mas o `onSettled` recarrega a
+   * consulta compartilhada — o painel inteiro se atualiza sozinho.
+   */
+  const [actingOnId, setActingOnId] = useState<string | null>(null);
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => deliveriesApi.cancel(token as string, id),
+    onMutate: (id: string) => setActingOnId(id),
+    onError: (mutationError) =>
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.message
+          : 'Não foi possível cancelar o pedido.',
+      ),
+    onSettled: () => {
+      setActingOnId(null);
+      void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
+    },
+  });
+
+  const redispatchMutation = useMutation({
+    mutationFn: (id: string) => deliveriesApi.redispatch(token as string, id),
+    onMutate: (id: string) => setActingOnId(id),
+    onError: (mutationError) =>
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.message
+          : 'Não foi possível chamar novamente.',
+      ),
+    onSettled: () => {
+      setActingOnId(null);
+      void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
+    },
+  });
+
   function reset() {
     setTrackedIds([]);
     setQuantity('1');
@@ -176,15 +221,19 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                 esta olhando justamente para saber disso.
               */}
               <p className="text-sm text-muted-foreground">
-                {pendingCount === 0
-                  ? tracked.length === 1
-                    ? 'Entregador a caminho.'
-                    : 'Todos os pedidos foram aceitos.'
-                  : pendingCount === trackedIds.length
-                    ? trackedIds.length === 1
-                      ? 'Pedido criado. Acompanhe abaixo até um entregador aceitar.'
-                      : `${trackedIds.length} pedidos criados. Acompanhe abaixo até um entregador aceitar.`
-                    : `${pendingCount} de ${trackedIds.length} ainda procurando entregador.`}
+                {cancelledCount === trackedIds.length
+                  ? trackedIds.length === 1
+                    ? 'Pedido cancelado.'
+                    : 'Pedidos cancelados.'
+                  : pendingCount === 0
+                    ? tracked.length === 1
+                      ? 'Entregador a caminho.'
+                      : 'Todos os pedidos foram aceitos.'
+                    : pendingCount === trackedIds.length
+                      ? trackedIds.length === 1
+                        ? 'Pedido criado. Acompanhe abaixo até um entregador aceitar.'
+                        : `${trackedIds.length} pedidos criados. Acompanhe abaixo até um entregador aceitar.`
+                      : `${pendingCount} de ${trackedIds.length} ainda procurando entregador.`}
               </p>
 
               {tracked.length === 0 ? (
@@ -220,19 +269,57 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                             </a>
                           )}
                         </div>
-                      ) : (
+                      ) : delivery.status === 'AWAITING_DRIVER' ? (
                         <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                           <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                           Procurando um entregador disponível...
                         </p>
-                      )}
+                      ) : null}
 
-                      <Link
-                        href={`/pedidos/${delivery.id}`}
-                        className="mt-2 inline-flex text-xs font-medium underline decoration-colete decoration-2 underline-offset-4"
-                      >
-                        Abrir detalhes
-                      </Link>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {/*
+                          A API so aceita cancelamento da empresa em SCHEDULED e
+                          AWAITING_DRIVER. Mostrar o botao depois do aceite
+                          ofereceria uma acao que volta erro.
+
+                          E no lote o cancelamento pega TODOS os irmaos, entao o
+                          texto diz isso — "Cancelar" seco faria a pessoa achar
+                          que perde so um dos pedidos.
+                        */}
+                        {delivery.status === 'AWAITING_DRIVER' && (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={actingOnId === delivery.id}
+                              onClick={() => redispatchMutation.mutate(delivery.id)}
+                            >
+                              <RotateCw className="mr-1.5 size-3.5" aria-hidden="true" />
+                              Chamar de novo
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:text-destructive"
+                              disabled={actingOnId === delivery.id}
+                              onClick={() => cancelMutation.mutate(delivery.id)}
+                            >
+                              <X className="mr-1.5 size-3.5" aria-hidden="true" />
+                              {delivery.batchId && trackedIds.length > 1
+                                ? `Cancelar os ${trackedIds.length}`
+                                : 'Cancelar'}
+                            </Button>
+                          </>
+                        )}
+                        <Link
+                          href={`/pedidos/${delivery.id}`}
+                          className="text-xs font-medium underline decoration-colete decoration-2 underline-offset-4"
+                        >
+                          Abrir detalhes
+                        </Link>
+                      </div>
                     </li>
                   ))}
                 </ul>

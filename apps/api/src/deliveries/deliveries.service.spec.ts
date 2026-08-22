@@ -528,6 +528,50 @@ describe('DeliveriesService', () => {
     });
   });
 
+  describe('redispatch', () => {
+    it('retorna 404 quando o pedido não existe', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await expect(service.redispatch(companyUser, 'inexistente')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('recusa quem não é da empresa dona do pedido', async () => {
+      mockCompanyMembership(otherCompanyUser.id, 'company-2');
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status: 'AWAITING_DRIVER' }));
+
+      await expect(service.redispatch(otherCompanyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(dispatchService.dispatchDelivery).not.toHaveBeenCalled();
+    });
+
+    it.each(['ACCEPTED', 'COLLECTED', 'DELIVERED', 'COMPLETED', 'CANCELLED'] as const)(
+      'recusa reenviar um pedido em %s',
+      async (status) => {
+        mockCompanyMembership(companyUser.id, 'company-1');
+        prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status }));
+
+        await expect(service.redispatch(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        // O que importa aqui: um pedido ja aceito NAO pode ser reofertado, ou
+        // dois motoboys apareceriam para a mesma entrega.
+        expect(dispatchService.dispatchDelivery).not.toHaveBeenCalled();
+      },
+    );
+
+    it('reenvia um pedido AWAITING_DRIVER ao despacho', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status: 'AWAITING_DRIVER' }));
+
+      await service.redispatch(companyUser, 'delivery-1');
+
+      expect(dispatchService.dispatchDelivery).toHaveBeenCalledWith('delivery-1');
+    });
+  });
+
   describe('cancel', () => {
     it('retorna 404 quando o pedido não existe', async () => {
       prisma.delivery.findUnique.mockResolvedValue(null);

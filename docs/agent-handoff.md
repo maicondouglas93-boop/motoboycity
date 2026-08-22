@@ -2743,3 +2743,35 @@ Verificado no navegador: pedido #1163 criado pelo modal, painel mostrando
 E2E · 33999887766" acontecendo **sozinha**, sem recarregar. O aceite foi
 simulado por UPDATE direto no banco de desenvolvimento, já que não há motoboy
 online ali — a linha ficou em ACCEPTED sem registro de oferta correspondente.
+
+### Cancelar e chamar de novo na tela de acompanhamento
+
+Duas ações por pedido, com regras que vieram da API e não de escolha de layout.
+
+**Cancelar** só aparece em `AWAITING_DRIVER`. A API restringe o cancelamento da
+empresa a `SCHEDULED` e `AWAITING_DRIVER` — mostrar o botão depois do aceite
+ofereceria uma ação que volta erro.
+
+E no lote o cancelamento **pega todos os irmãos**, não só a linha clicada. Por
+isso o texto vira "Cancelar os N". Um "Cancelar" seco faria a pessoa acreditar
+que perde um pedido só, e ela descobriria o contrário depois de clicar.
+
+**Chamar de novo** existe porque a varredura automática (`dispatchAvailableDeliveries`)
+roda quando um motoboy fica disponível, **não em temporizador**. Um pedido cuja
+oferta expirou e para o qual nenhum motoboy novo entrou desde então fica parado
+sem oferta pendente, e nada o move. O botão destrava isso sem cancelar e
+recriar, o que perderia o número do pedido e a hora de criação.
+
+Endpoint novo: `PATCH /deliveries/:id/redispatch`. Ele reusa
+`dispatchService.dispatchDelivery`, que já é seguro de repetir — não faz nada se
+já há oferta pendente, se o pedido saiu de `AWAITING_DRIVER`, ou se não há
+motoboy elegível. Apertar duas vezes não duplica oferta.
+
+Oito testes cobrindo: 404, empresa de fora, e a recusa em cada um dos cinco
+estados não elegíveis. O que importa nesse último é que um pedido já aceito não
+seja reofertado, ou dois motoboys apareceriam para a mesma entrega.
+
+**Um bug que a verificação pegou:** o painel usava "tem entregador?" como sinal
+de "ainda procurando". Pedido cancelado também não tem entregador, então ele
+continuava girando o spinner e o cabeçalho seguia dizendo "acompanhe até um
+entregador aceitar". O sinal correto é o status, não a ausência de motorista.
