@@ -2589,3 +2589,42 @@ na borda do mapa.
 
 Verificado no navegador nos três casos: só a loja, duas entregas coladas
 (a ~30 m) e entregas em pontas opostas da cidade.
+
+### Autocomplete: sugerir Lajinha primeiro, e a lista que descolava
+
+Duas correções no mesmo componente — ele é único e serve tanto o formulário de
+pedido quanto o cadastro do endereço de coleta.
+
+**Ordenação.** Digitar "aven" trazia avenidas do Rio, de Recife e de Campo
+Grande antes de qualquer coisa daqui. Só `componentRestrictions: { country: 'br' }`
+não basta: o Google ordena por relevância global e cidade maior ganha sempre.
+
+O raio do viés foi medido contra o Google, não escolhido por intuição:
+
+| configuração     | resultado ao digitar "aven"             |
+| ---------------- | --------------------------------------- |
+| viés de 20 km    | Lajinha em 5º, atrás de Iúna e Ibatiba  |
+| **viés de 5 km** | **as cinco sugestões são de Lajinha**   |
+| restrito a 30 km | Avenida Paulista em 1º, Lajinha ausente |
+
+A última linha é o achado contraintuitivo: `strictBounds` saiu **pior** que o
+viés apertado — filtra a área mas mantém a ordenação global. Além de inferior,
+travaria o pedido para outra cidade, já que o formulário exige uma sugestão do
+Google para submeter. Confirmado que o viés não bloqueia: "Avenida Paulista Sao
+Paulo" e "Rua Sete de Setembro Ibatiba" continuam achando o que se pediu.
+
+`LAJINHA_CENTER` estava duplicado nos dois mapas e agora o autocomplete também
+precisava dele — virou `src/lib/operation-area.ts` em cada painel.
+
+**A lista descolava do campo.** O Google prende o `.pac-container` no `body` e o
+posiciona em coordenadas do documento, calculadas uma vez, quando a lista abre.
+O formulário vive num painel com rolagem própria, então rolar o painel deixava a
+lista para trás — 157px medidos, exatamente a altura rolável.
+
+A saída foi `position: fixed` sincronizado com o retângulo do campo na viewport.
+O detalhe que faz funcionar é a fase de captura no listener de scroll: sem ela,
+a rolagem de um ancestral nunca chega ao componente. Não é preciso associar
+container a input (o Google não permite) porque só uma lista abre por vez, a do
+campo em foco.
+
+Medido depois: desalinhamento 0 tanto na rolagem do painel quanto na da página.

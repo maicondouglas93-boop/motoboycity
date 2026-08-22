@@ -50,6 +50,49 @@ export function GoogleAddressAutocomplete({ value, onValueChange, onAddressChang
    */
   useEffect(() => onGoogleMapsAuthFailure(setError), []);
 
+  /**
+   * Mantem a lista de sugestoes colada no campo.
+   *
+   * O Google prende o `.pac-container` no `body` e o posiciona em coordenadas
+   * do documento, calculadas uma vez, quando a lista abre. So que este
+   * formulario vive num painel com rolagem propria: rolar o painel move o
+   * campo e deixa a lista para tras. Medido na central: 157px de
+   * desalinhamento, exatamente a altura rolavel do painel.
+   *
+   * A saida e trocar para `position: fixed` e sincronizar com o retangulo do
+   * campo na viewport, que e o mesmo referencial. O `true` no listener e o que
+   * faz isso funcionar: sem a fase de captura, a rolagem de um ancestral nao
+   * chega aqui.
+   *
+   * A lista aberta e sempre a do campo em foco — so uma abre por vez — entao
+   * nao e preciso associar container a input, o que o Google nao permite de
+   * qualquer forma.
+   */
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    const sync = () => {
+      if (document.activeElement !== input) return;
+      const pac = Array.from(document.querySelectorAll<HTMLElement>('.pac-container')).find(
+        (element) => element.children.length > 0 && element.style.display !== 'none',
+      );
+      if (!pac) return;
+      const rect = input.getBoundingClientRect();
+      pac.style.position = 'fixed';
+      pac.style.left = `${rect.left}px`;
+      pac.style.top = `${rect.bottom}px`;
+      pac.style.width = `${rect.width}px`;
+    };
+
+    window.addEventListener('scroll', sync, true);
+    window.addEventListener('resize', sync);
+    return () => {
+      window.removeEventListener('scroll', sync, true);
+      window.removeEventListener('resize', sync);
+    };
+  }, []);
+
   useEffect(() => {
     let listener: google.maps.MapsEventListener | null = null;
     let cancelled = false;
