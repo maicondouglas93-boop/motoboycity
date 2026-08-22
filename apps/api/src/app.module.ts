@@ -29,7 +29,23 @@ import { LivePresenceModule } from './live-presence/live-presence.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 30 }]),
+    /**
+     * Limite configuravel por ambiente.
+     *
+     * O padrao de 30/min protege a API em producao, mas em E2E todas as
+     * requisicoes saem do mesmo IP: a suite inteira conta como um cliente so,
+     * e cada teste novo aproxima o limite. Quando estoura, o 429 aparece como
+     * falha em um teste QUALQUER mais adiante — foi exatamente assim que a
+     * suite quebrou ao ganhar dois testes, com o erro surgindo tres testes
+     * depois da causa.
+     */
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: Number(process.env['THROTTLE_TTL_MS'] ?? 60_000),
+        limit: Number(process.env['THROTTLE_LIMIT'] ?? 30),
+      },
+    ]),
     PrismaModule,
     QueueModule,
     RealtimeModule,

@@ -59,6 +59,11 @@ jobs:
       NEXT_PUBLIC_API_URL: http://localhost:3333
       API_URL: http://localhost:3333
       NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ci-google-maps-browser-key-not-used
+      # A suite E2E inteira sai de um IP so, entao o limite de producao
+      # (30/min) e atingido conforme os testes crescem, e o 429 aparece como
+      # falha em um teste qualquer mais adiante. Aqui o rate limit nao esta sob
+      # teste; quem o cobre e um teste dedicado, nao a suite inteira.
+      THROTTLE_LIMIT: '100000'
 
     steps:
       - name: Checkout
