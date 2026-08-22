@@ -5,6 +5,29 @@ import type { CompanyAddressItem, OperationalDeliveryItem } from '@motoboycity/t
 import { statusHex } from '@/components/orders/status-chip';
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
 
+/**
+ * Centro de Lajinha, obtido pelo geocoder do proprio Google e nao estimado:
+ * `Lajinha, MG, 36980-000, Brasil` responde -20.15221, -41.62322.
+ */
+const LAJINHA_CENTER = { lat: -20.15221, lng: -41.62322 };
+
+/**
+ * Enquadramento inicial na escala da cidade.
+ *
+ * A operacao inteira cabe em Lajinha, entao abrir a regiao toda desperdicava a
+ * tela mostrando mata e municipios vizinhos onde nunca ha entrega.
+ */
+const DEFAULT_ZOOM = 15;
+
+/**
+ * Teto para o enquadramento automatico.
+ *
+ * Duas entregas muito proximas produzem bordas quase nulas, e o Google
+ * responderia com o zoom maximo. O teto mantem o quarteirao em volta visivel,
+ * que e o que diz ao operador onde aquilo fica.
+ */
+const MAX_AUTO_ZOOM = 16;
+
 interface Props {
   pickupAddress: CompanyAddressItem;
   deliveries: OperationalDeliveryItem[];
@@ -17,6 +40,17 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const [ready, setReady] = useState(false);
+  /**
+   * A loja e um centro melhor que o centro da cidade: as entregas saem dela, e
+   * uma lanchonete na periferia veria o proprio bairro na borda do mapa.
+   * Fica em ref porque so vale na montagem — recriar o mapa a cada render
+   * perderia o estado de navegacao de quem esta olhando.
+   */
+  const initialCenterRef = useRef(
+    pickupAddress.lat !== null && pickupAddress.lng !== null
+      ? { lat: pickupAddress.lat, lng: pickupAddress.lng }
+      : LAJINHA_CENTER,
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Chave recusada nao passa pelo `catch` do carregamento: o script carrega e a
@@ -30,8 +64,8 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       .then((maps) => {
         if (cancelled || !containerRef.current) return;
         mapRef.current = new maps.maps.Map(containerRef.current, {
-          center: { lat: -20.153, lng: -41.622 },
-          zoom: 13,
+          center: initialCenterRef.current,
+          zoom: DEFAULT_ZOOM,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
@@ -113,7 +147,24 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
         );
       }
     }
-    if (!bounds.isEmpty()) mapRef.current.fitBounds(bounds, 64);
+    /**
+     * Enquadrar so quando ha o que enquadrar.
+     *
+     * `fitBounds` com um unico marcador recebe bordas de tamanho zero e o
+     * Google responde com o zoom maximo — a tela saltava da cidade para a
+     * calcada de um endereco so. Com um ponto, o certo e centralizar e deixar o
+     * zoom como esta, o que tambem respeita quem ja tinha ajustado a vista.
+     */
+    const map = mapRef.current;
+    if (markersRef.current.length === 1) {
+      map.setCenter(markersRef.current[0]!.getPosition()!);
+    } else if (markersRef.current.length > 1) {
+      google.maps.event.addListenerOnce(map, 'idle', () => {
+        const zoom = map.getZoom();
+        if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
+      });
+      map.fitBounds(bounds, 64);
+    }
   }, [deliveries, onSelect, pickupAddress.lat, pickupAddress.lng, ready, selectedId]);
 
   return (

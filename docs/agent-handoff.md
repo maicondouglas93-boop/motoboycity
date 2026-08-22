@@ -2561,3 +2561,31 @@ Evidência de rede: os 7 scripts carregaram (`places_impl.js` incluso), houve
 Ou seja, a chave é válida e o que falta é autorizar `http://localhost:3000/*` e
 `http://localhost:3001/*` nas restrições da credencial. Sem os dois caminhos
 tratados, isso apareceria como um campo que simplesmente não sugere nada.
+
+### Enquadramento dos mapas
+
+O mapa abria em zoom 12 (admin) e 13 (empresa) centrado em `-20.153, -41.622`,
+mostrando mata e municípios vizinhos onde nunca há entrega.
+
+O centro foi confirmado pelo geocoder do próprio Google em vez de estimado:
+`Lajinha, MG, 36980-000, Brasil` responde `-20.15221, -41.62322` — praticamente
+o valor que já estava lá. O problema era só o zoom, que subiu para 15 nos dois.
+Nessa escala aparecem os nomes de rua e os comércios que são origem e destino
+real: Supermercado Juvenil, Padaria Elite, Show de Compras.
+
+**O `fitBounds` era o problema maior.** Ele roda sempre que há marcador, e com
+um único ponto recebe bordas de tamanho zero — o Google responde com o zoom
+máximo. Na prática o mapa da empresa caía nisso **sempre**, porque ele marca o
+ponto de coleta mesmo sem nenhuma entrega: a loja abria o painel na calçada dela
+em vez de ver a cidade.
+
+Agora o enquadramento automático só entra com dois marcadores ou mais. Com um,
+o mapa centraliza e mantém o zoom, o que também respeita quem já tinha ajustado
+a vista. Um teto de 16 cobre o caso de duas entregas quase no mesmo ponto.
+
+O mapa da empresa também passou a abrir centrado na própria loja quando ela tem
+coordenadas, e não no centro genérico da cidade — uma loja na periferia se via
+na borda do mapa.
+
+Verificado no navegador nos três casos: só a loja, duas entregas coladas
+(a ~30 m) e entregas em pontas opostas da cidade.
