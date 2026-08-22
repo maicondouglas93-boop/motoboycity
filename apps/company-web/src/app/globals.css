@@ -1,15 +1,29 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  /* Display separado do corpo de propósito: Archivo expandido tem a largura
+     de letreiro de sinalização, e é o que dá voz à marca nos títulos e nos
+     números grandes. Geist continua sendo a fonte de trabalho da interface. */
+  --font-heading: var(--font-archivo);
+
+  --color-asfalto: var(--asfalto);
+  --color-concreto: var(--concreto);
+  --color-colete: var(--colete);
+  --color-placa: var(--placa);
+  --color-alerta: var(--alerta);
+  --color-status-aguardando: var(--status-aguardando);
+  --color-status-rota: var(--status-rota);
+  --color-status-entregue: var(--status-entregue);
+  --color-status-cancelado: var(--status-cancelado);
+  --color-status-pagamento: var(--status-pagamento);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,39 +62,82 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/**
+ * Paleta MOTOboyCity — nomeada pelo mundo do produto.
+ *
+ *   asfalto  #14161A  texto e superfícies escuras
+ *   concreto #F2F3F5  fundo da página (loja é clara; dark mode seria errado)
+ *   papel    #FFFFFF  cards
+ *   colete   #FF9E00  âmbar do colete de segurança — SÓ para movimento
+ *   placa    #0B6E4F  verde de placa de estrada — conclusão
+ *   alerta   #D92D20  falha e cancelamento
+ *
+ * Regra do âmbar: ele significa uma coisa só — motoboy em movimento, ou a
+ * ação que põe alguém em movimento ("Chamar entregador"). Se ele virar
+ * decoração em qualquer outro lugar, o olho para de encontrar a entrega ativa
+ * na tela, que é justamente o trabalho desta interface.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --asfalto: #14161a;
+  --concreto: #f2f3f5;
+  --papel: #ffffff;
+  --colete: #ff9e00;
+  --placa: #0b6e4f;
+  --alerta: #d92d20;
+
+  --background: var(--concreto);
+  --foreground: var(--asfalto);
+  --card: var(--papel);
+  --card-foreground: var(--asfalto);
+  --popover: var(--papel);
+  --popover-foreground: var(--asfalto);
+
+  /* Texto escuro sobre o âmbar: contraste muito maior que branco sobre âmbar. */
+  --primary: var(--colete);
+  --primary-foreground: var(--asfalto);
+
+  --secondary: #e6e8eb;
+  --secondary-foreground: var(--asfalto);
+  --muted: #e9ebee;
+  --muted-foreground: #5c626b;
+  --accent: #e6e8eb;
+  --accent-foreground: var(--asfalto);
+  --destructive: var(--alerta);
+  --border: #d7dade;
+  --input: #d7dade;
+  --ring: var(--colete);
+
+  /**
+   * Estados do ciclo da entrega.
+   *
+   * O âmbar cobre ACCEPTED, COLLECTED e DELIVERED porque nos três há alguém
+   * se deslocando — é a mesma regra da paleta, aplicada ao status: âmbar na
+   * tela significa "tem motoboy na rua com isso".
+   */
+  --status-aguardando: #5c626b;
+  --status-rota: var(--colete);
+  --status-entregue: var(--placa);
+  --status-cancelado: var(--alerta);
+  --status-pagamento: #1d4ed8;
+
+  --chart-1: var(--colete);
+  --chart-2: var(--placa);
+  --chart-3: #1d4ed8;
+  --chart-4: #5c626b;
+  --chart-5: var(--alerta);
+
+  /* Mais fechado que o padrão do shadcn: lê como instrumento, não como card
+     de marketing — sem chegar em canto vivo, que é outro clichê. */
+  --radius: 0.5rem;
+
+  --sidebar: var(--asfalto);
+  --sidebar-foreground: #e6e8eb;
+  --sidebar-primary: var(--colete);
+  --sidebar-primary-foreground: var(--asfalto);
+  --sidebar-accent: #22262d;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #262b33;
+  --sidebar-ring: var(--colete);
 }
 
 .dark {

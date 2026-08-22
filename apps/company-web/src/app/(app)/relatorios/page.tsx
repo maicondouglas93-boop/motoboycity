@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
+import type { InvoiceStatus } from '@motoboycity/types';
 import { AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { StatCard } from '@/components/stat-card';
+import { StatusChip } from '@/components/orders/status-chip';
 import { companyInvoicesApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -28,17 +29,6 @@ const invoiceStatusLabel: Record<InvoiceStatus, string> = {
   PAID: 'Paga',
   OVERDUE: 'Vencida',
   CANCELLED: 'Cancelada',
-};
-
-const deliveryStatusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
 };
 
 function formatCurrency(value: number | null): string {
@@ -272,7 +262,9 @@ export default function CompanyReportsPage() {
                             </Link>
                           </TableCell>
                           <TableCell>{delivery.serviceTypeName}</TableCell>
-                          <TableCell>{deliveryStatusLabel[delivery.status]}</TableCell>
+                          <TableCell>
+                            <StatusChip status={delivery.status} />
+                          </TableCell>
                           <TableCell>
                             {delivery.distanceKm === null
                               ? 'A calcular'

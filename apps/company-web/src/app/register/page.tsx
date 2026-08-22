@@ -6,21 +6,39 @@ import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { registerCompanySchema } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Wordmark } from '@/components/brand/wordmark';
+import { RouteDiagram } from '@/components/brand/route-diagram';
 import { authApi } from '@/lib/api-client';
 
-const FIELDS: { id: keyof typeof initialFormState; label: string; type?: string }[] = [
-  { id: 'name', label: 'Nome' },
-  { id: 'email', label: 'E-mail', type: 'email' },
-  { id: 'phone', label: 'Telefone', type: 'tel' },
-  { id: 'document', label: 'CPF/CNPJ' },
-  { id: 'legalName', label: 'Razão Social' },
-  { id: 'tradeName', label: 'Nome Fantasia' },
-  { id: 'password', label: 'Senha', type: 'password' },
-  { id: 'confirmPassword', label: 'Confirmar Senha', type: 'password' },
+/**
+ * `wide` marca os campos que ocupam a linha inteira. Com oito campos, a grade
+ * de duas colunas encurta o formulário o suficiente para o botão de enviar
+ * caber na tela, em vez de virar uma coluna longa de rolagem.
+ */
+const FIELDS: {
+  id: keyof typeof initialFormState;
+  label: string;
+  type?: string;
+  autoComplete?: string;
+  wide?: boolean;
+}[] = [
+  { id: 'name', label: 'Seu nome', autoComplete: 'name', wide: true },
+  { id: 'email', label: 'E-mail', type: 'email', autoComplete: 'email' },
+  { id: 'phone', label: 'Telefone', type: 'tel', autoComplete: 'tel' },
+  { id: 'document', label: 'CPF ou CNPJ' },
+  { id: 'legalName', label: 'Razão social' },
+  { id: 'tradeName', label: 'Nome fantasia', wide: true },
+  { id: 'password', label: 'Senha', type: 'password', autoComplete: 'new-password' },
+  {
+    id: 'confirmPassword',
+    label: 'Confirmar senha',
+    type: 'password',
+    autoComplete: 'new-password',
+  },
 ];
 
 const initialFormState = {
@@ -81,68 +99,83 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-sm space-y-6 rounded-lg border bg-background p-8 shadow-sm">
-        <div className="space-y-1 text-center">
-          <p className="text-lg font-semibold">MOTOboyCity</p>
-          <p className="text-sm text-muted-foreground">
-            Faça o acompanhamento do seu pedido de forma rápida e fácil
+    // Mesmo esqueleto do login: quem vem de lá não pode sentir que trocou de
+    // produto no meio do caminho.
+    <div className="grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
+      <aside className="flex flex-row items-center justify-between gap-4 bg-asfalto px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
+        <Wordmark />
+
+        <div className="my-10 hidden lg:block">
+          <h1 className="font-heading max-w-[15ch] text-4xl leading-[1.05] font-extrabold tracking-tight text-balance">
+            Sua loja com motoboy na porta.
+          </h1>
+          <p className="mt-4 max-w-[38ch] text-sm leading-relaxed text-white/60">
+            Cadastre a empresa uma vez. Depois é só chamar o entregador e acompanhar cada pedido.
+          </p>
+          <RouteDiagram className="mt-10" />
+        </div>
+
+        <p className="font-mono text-[10px] tracking-wide whitespace-nowrap text-white/40 uppercase lg:text-[11px]">
+          Lajinha · MG
+        </p>
+      </aside>
+
+      <main className="flex items-center justify-center px-6 py-12 lg:px-12">
+        <div className="w-full max-w-lg">
+          <h2 className="font-heading text-2xl font-bold tracking-tight">Cadastrar empresa</h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Depois de enviar, o cadastro passa por aprovação antes de liberar os pedidos.
+          </p>
+
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              {FIELDS.map((field) => (
+                <div key={field.id} className={`space-y-1.5 ${field.wide ? 'sm:col-span-2' : ''}`}>
+                  <Label htmlFor={field.id}>{field.label}</Label>
+                  <Input
+                    id={field.id}
+                    type={field.type ?? 'text'}
+                    {...(field.autoComplete && { autoComplete: field.autoComplete })}
+                    value={form[field.id]}
+                    onChange={(event) =>
+                      setForm((previous) => ({ ...previous, [field.id]: event.target.value }))
+                    }
+                    aria-invalid={Boolean(fieldErrors[field.id])}
+                  />
+                  {fieldErrors[field.id] && (
+                    <p className="text-xs text-destructive">{fieldErrors[field.id]}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <label className="flex items-start gap-2.5 text-xs leading-relaxed text-muted-foreground">
+              <Checkbox className="mt-0.5" required />
+              Ao criar sua conta, você concorda com nossos Termos de Uso e Política de Privacidade.
+            </label>
+
+            {formError && (
+              <p className="border-l-2 border-destructive bg-destructive/5 py-2 pl-3 text-sm text-destructive">
+                {formError}
+              </p>
+            )}
+
+            <Button className="h-11 w-full text-[15px]" type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? 'Enviando...' : 'Enviar cadastro'}
+            </Button>
+          </form>
+
+          <p className="mt-8 border-t pt-6 text-sm text-muted-foreground">
+            Sua empresa já tem conta?{' '}
+            <Link
+              className="font-medium text-foreground underline decoration-colete decoration-2 underline-offset-4"
+              href="/login"
+            >
+              Entrar
+            </Link>
           </p>
         </div>
-
-        <div className="flex gap-2">
-          <Link
-            href="/login"
-            className={buttonVariants({ variant: 'outline', className: 'flex-1' })}
-          >
-            Já sou cliente
-          </Link>
-          <Button className="flex-1" variant="default">
-            Criar minha conta
-          </Button>
-        </div>
-
-        <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-          {FIELDS.map((field) => (
-            <div key={field.id} className="space-y-1.5">
-              <Label htmlFor={field.id}>{field.label} *</Label>
-              <Input
-                id={field.id}
-                type={field.type ?? 'text'}
-                value={form[field.id]}
-                onChange={(event) =>
-                  setForm((previous) => ({ ...previous, [field.id]: event.target.value }))
-                }
-                aria-invalid={Boolean(fieldErrors[field.id])}
-              />
-              {fieldErrors[field.id] && (
-                <p className="text-xs text-destructive">{fieldErrors[field.id]}</p>
-              )}
-            </div>
-          ))}
-
-          <label className="flex items-start gap-2 text-xs text-muted-foreground">
-            <Checkbox className="mt-0.5" required />
-            Ao criar sua conta, você concorda com nossos Termos de Uso e Política de Privacidade.
-          </label>
-
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
-
-          <Button className="w-full" type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Enviando...' : 'Criar Conta'}
-          </Button>
-        </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Já tem uma conta?{' '}
-          <Link
-            className="font-medium text-foreground underline-offset-2 hover:underline"
-            href="/login"
-          >
-            Entrar
-          </Link>
-        </p>
-      </div>
+      </main>
     </div>
   );
 }

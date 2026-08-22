@@ -259,7 +259,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes }: Pro
         </Button>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {message && <p className="text-sm text-emerald-600">{message}</p>}
+      {message && <p className="text-sm text-status-entregue">{message}</p>}
       <Button type="submit" className="w-full" disabled={mutation.isPending}>
         {mutation.isPending ? 'Criando...' : mode === 'batch' ? `Criar lote (${drafts.length})` : 'Criar pedido'}
       </Button>

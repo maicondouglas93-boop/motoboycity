@@ -14,12 +14,17 @@ import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const statusLabel: Record<DeliveryStatus, string> = {
+/**
+ * Plural é legítimo aqui — são contagens, não o estado de um pedido. Mas o
+ * vocabulário acompanha `status-chip.tsx`, para a mesma entrega não ser
+ * chamada de uma coisa nesta tela e de outra na lista.
+ */
+const statusCountLabel: Record<DeliveryStatus, string> = {
   SCHEDULED: 'Agendados',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceitos',
-  COLLECTED: 'Coletados',
-  DELIVERED: 'Entregues',
+  AWAITING_DRIVER: 'Buscando motoboy',
+  ACCEPTED: 'A caminho da coleta',
+  COLLECTED: 'Em rota',
+  DELIVERED: 'Voltando à loja',
   COMPLETED: 'Concluídos',
   CANCELLED: 'Cancelados',
   AWAITING_PAYMENT: 'Aguardando pagamento',
@@ -48,7 +53,7 @@ export default function IndicatorsPage() {
     const totalValue = deliveries.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0);
     const completedValue = completed.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0);
     const byStatus = Object.fromEntries(
-      Object.keys(statusLabel).map((status) => [status, 0]),
+      Object.keys(statusCountLabel).map((status) => [status, 0]),
     ) as Record<DeliveryStatus, number>;
     const serviceCounts = new Map<string, number>();
     const byDate = new Map<string, number>();
@@ -175,7 +180,7 @@ export default function IndicatorsPage() {
             {Object.entries(indicators.byStatus).map(([status, count]) => (
               <StatCard
                 key={status}
-                label={statusLabel[status as DeliveryStatus]}
+                label={statusCountLabel[status as DeliveryStatus]}
                 value={String(count)}
               />
             ))}

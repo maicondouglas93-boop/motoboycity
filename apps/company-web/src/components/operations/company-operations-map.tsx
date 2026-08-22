@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CompanyAddressItem, OperationalDeliveryItem } from '@motoboycity/types';
+import { statusHex } from '@/components/orders/status-chip';
 import { loadGoogleMaps } from '@/lib/google-maps';
 
 interface Props {
@@ -10,17 +11,6 @@ interface Props {
   selectedId: string | null;
   onSelect: (deliveryId: string) => void;
 }
-
-const statusColor: Record<string, string> = {
-  SCHEDULED: '#7c3aed',
-  AWAITING_DRIVER: '#f59e0b',
-  ACCEPTED: '#2563eb',
-  COLLECTED: '#0891b2',
-  DELIVERED: '#db2777',
-  AWAITING_PAYMENT: '#ea580c',
-  COMPLETED: '#16a34a',
-  CANCELLED: '#64748b',
-};
 
 export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,11 +84,16 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       const dropoff = delivery.addresses.find(
         (address) => address.type === 'DROPOFF' && address.lat !== null && address.lng !== null,
       );
-      if (dropoff?.lat !== null && dropoff?.lng !== null && dropoff?.lat !== undefined && dropoff?.lng !== undefined) {
+      if (
+        dropoff?.lat !== null &&
+        dropoff?.lng !== null &&
+        dropoff?.lat !== undefined &&
+        dropoff?.lng !== undefined
+      ) {
         addMarker(
           { lat: dropoff.lat, lng: dropoff.lng },
           `Pedido #${delivery.displayNumber}`,
-          statusColor[delivery.status] ?? '#2563eb',
+          statusHex(delivery.status),
           () => onSelect(delivery.id),
           selectedId === delivery.id ? 11 : 8,
         );

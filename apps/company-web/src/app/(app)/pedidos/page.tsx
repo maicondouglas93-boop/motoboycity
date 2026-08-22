@@ -6,35 +6,13 @@ import { Package } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryListItem, DeliveryStatus } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Badge } from '@/components/ui/badge';
+import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useCompanyActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
-
-const statusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
-};
-
-const statusVariant: Record<DeliveryStatus, 'outline' | 'default' | 'destructive' | 'secondary'> = {
-  SCHEDULED: 'outline',
-  AWAITING_DRIVER: 'outline',
-  ACCEPTED: 'default',
-  COLLECTED: 'default',
-  DELIVERED: 'default',
-  COMPLETED: 'secondary',
-  CANCELLED: 'destructive',
-  AWAITING_PAYMENT: 'outline',
-};
 
 const CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 
@@ -114,9 +92,9 @@ export default function CompanyOrdersPage() {
           onChange={(event) => setStatusFilter(event.target.value as DeliveryStatus | 'ALL')}
         >
           <option value="ALL">Todos os status</option>
-          {Object.entries(statusLabel).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
+          {STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
@@ -150,7 +128,7 @@ export default function CompanyOrdersPage() {
                     >
                       Pedido #{tracking.displayNumber}
                     </Link>
-                    <Badge variant="default">{statusLabel[tracking.status]}</Badge>
+                    <StatusChip status={tracking.status} />
                   </div>
                   <p className="text-muted-foreground">
                     Entregador: {tracking.driver.name} · {tracking.driver.phone}
@@ -210,9 +188,7 @@ export default function CompanyOrdersPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <Badge variant={statusVariant[delivery.status]}>
-                      {statusLabel[delivery.status]}
-                    </Badge>
+                    <StatusChip status={delivery.status} />
                     <p className="font-medium">{formatCurrency(delivery.totalValue)}</p>
                   </div>
                   <Link

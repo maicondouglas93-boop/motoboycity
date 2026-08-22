@@ -270,7 +270,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       </div>
 
       {formError && <p className="text-sm text-destructive">{formError}</p>}
-      {successMessage && <p className="text-sm text-emerald-600">{successMessage}</p>}
+      {successMessage && <p className="text-sm text-status-entregue">{successMessage}</p>}
 
       <Button className="w-full" type="submit" disabled={mutation.isPending}>
         {mutation.isPending ? 'Lançando pedido...' : 'Lançar Pedido'}

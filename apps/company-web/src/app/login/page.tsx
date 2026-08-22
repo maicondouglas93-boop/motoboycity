@@ -6,10 +6,11 @@ import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { loginSchema } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Wordmark } from '@/components/brand/wordmark';
+import { RouteDiagram } from '@/components/brand/route-diagram';
 import { authApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -58,81 +59,91 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-sm space-y-6 rounded-lg border bg-background p-8 shadow-sm">
-        <div className="space-y-1 text-center">
-          <p className="text-lg font-semibold">MOTOboyCity</p>
-          <p className="text-sm text-muted-foreground">
-            Faça o acompanhamento do seu pedido de forma rápida e fácil
+    // No celular: a marca ocupa só o que precisa e o formulário fica com o
+    // resto da tela. No desktop volta a ser duas colunas de altura cheia.
+    <div className="grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
+      {/* Painel da marca. No celular vira uma barra compacta: a área acima da
+          dobra pertence ao formulário, não à marca. */}
+      <aside className="flex flex-row items-center justify-between gap-4 bg-asfalto px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
+        <Wordmark />
+
+        <div className="my-10 hidden lg:block">
+          <h1 className="font-heading max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-tight text-balance">
+            Chame um motoboy sem sair do balcão.
+          </h1>
+          <p className="mt-4 max-w-[38ch] text-sm leading-relaxed text-white/60">
+            O pedido sai daqui, cai no celular de quem está mais perto e você acompanha até a porta
+            do cliente.
+          </p>
+          <RouteDiagram className="mt-10" />
+        </div>
+
+        <p className="font-mono text-[10px] tracking-wide whitespace-nowrap text-white/40 uppercase lg:text-[11px]">
+          Lajinha · MG
+        </p>
+      </aside>
+
+      <main className="flex items-center justify-center px-6 py-12 lg:px-12">
+        <div className="w-full max-w-sm">
+          <h2 className="font-heading text-2xl font-bold tracking-tight">Entrar</h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Use o e-mail cadastrado pela sua empresa.
+          </p>
+
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
+            <div className="space-y-1.5">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="voce@empresa.com.br"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                aria-invalid={Boolean(fieldErrors['email'])}
+              />
+              {fieldErrors['email'] && (
+                <p className="text-xs text-destructive">{fieldErrors['email']}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="password">Senha</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                aria-invalid={Boolean(fieldErrors['password'])}
+              />
+              {fieldErrors['password'] && (
+                <p className="text-xs text-destructive">{fieldErrors['password']}</p>
+              )}
+            </div>
+
+            {formError && (
+              <p className="border-l-2 border-destructive bg-destructive/5 py-2 pl-3 text-sm text-destructive">
+                {formError}
+              </p>
+            )}
+
+            <Button className="h-11 w-full text-[15px]" type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? 'Entrando...' : 'Entrar'}
+            </Button>
+          </form>
+
+          <p className="mt-8 border-t pt-6 text-sm text-muted-foreground">
+            Sua empresa ainda não tem conta?{' '}
+            <Link
+              className="font-medium text-foreground underline underline-offset-4 decoration-colete decoration-2"
+              href="/register"
+            >
+              Cadastrar empresa
+            </Link>
           </p>
         </div>
-
-        <div className="flex gap-2">
-          <Button className="flex-1" variant="default">
-            Já sou cliente
-          </Button>
-          <Link
-            href="/register"
-            className={buttonVariants({ variant: 'outline', className: 'flex-1' })}
-          >
-            Criar minha conta
-          </Link>
-        </div>
-
-        <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-          <div className="space-y-1.5">
-            <Label htmlFor="email">E-mail</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="voce@empresa.com.br"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              aria-invalid={Boolean(fieldErrors['email'])}
-            />
-            {fieldErrors['email'] && (
-              <p className="text-xs text-destructive">{fieldErrors['email']}</p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">Senha</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              aria-invalid={Boolean(fieldErrors['password'])}
-            />
-            {fieldErrors['password'] && (
-              <p className="text-xs text-destructive">{fieldErrors['password']}</p>
-            )}
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 text-muted-foreground">
-              <Checkbox /> Lembrar-me
-            </label>
-            <a className="text-muted-foreground underline-offset-2 hover:underline" href="#">
-              Esqueceu a senha
-            </a>
-          </div>
-
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
-
-          <Button className="w-full" type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Entrando...' : 'Entrar'}
-          </Button>
-        </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Ainda não tem uma conta?{' '}
-          <Link
-            className="font-medium text-foreground underline-offset-2 hover:underline"
-            href="/register"
-          >
-            Criar Conta
-          </Link>
-        </p>
-      </div>
+      </main>
     </div>
   );
 }
