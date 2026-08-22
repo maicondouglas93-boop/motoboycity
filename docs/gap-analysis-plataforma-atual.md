@@ -253,3 +253,142 @@ tempo real e o recebimento de pedidos em segundo plano podem ser afetados."_
 
 Vale conferir se o nosso app detecta isso. Rastreamento que morre em segundo
 plano é falha silenciosa — o pedido parece parado e ninguém sabe por quê.
+
+**Respondido na segunda inspeção (2026-08-22, noite).** Eles resolvem no
+servidor, não no aparelho — ver abaixo.
+
+## Segunda inspeção do painel — 2026-08-22 (noite)
+
+O primeiro levantamento deixou registrado que **Gestão**, **Suporte** e os
+submenus de Financeiro e Relatórios não tinham sido abertos. Foram, agora.
+Navegação somente leitura; um modal de "lançar pedido" abriu por clique errado
+e foi cancelado sem criar nada.
+
+### Aviso de segurança sobre o desenho deles
+
+A tela de atendimento lista as mensagens de cobrança em texto puro, e cada uma
+carrega um link `…/iago/auth/<token>` — magic link de acesso à conta do cliente
+— ao lado da chave PIX e do nome do titular. Mensagens de junho ainda apareciam
+com o token legível em agosto.
+
+**Consequência para nós:** quando fizermos cobrança automática com link, o token
+tem que ser de **uso único e validade curta**, e a tela de histórico não deve
+reexibi-lo. Copiar o formato deles copiaria o problema junto.
+
+### Números reais da operação — mesma cidade que a nossa
+
+Trinta dias até 22/08/2026, praça Cidade Lajinha:
+
+| Medida                      | Valor                             |
+| --------------------------- | --------------------------------- |
+| Entregas realizadas         | 3.152 (~105/dia)                  |
+| Recorde em um dia (90 dias) | 188 (10/07)                       |
+| Faturamento                 | R$ 20.958,37                      |
+| Repasse aos entregadores    | R$ 18.970,48                      |
+| **Margem da operação**      | R$ 1.987,89 — **9,5%**            |
+| **Ticket médio**            | **R$ 6,65**                       |
+| Cancelamento                | 2% (67 de 3.220)                  |
+| Entregadores ativos         | 5                                 |
+| Abertura → aceite           | 0 min                             |
+| Aceite → coleta             | 10 min                            |
+| Coleta → entrega            | 23 min                            |
+| **Origem dos pedidos**      | **Manual (painel): 3.220 — 100%** |
+
+Duas leituras que mudam decisão:
+
+1. **Margem de 9,5%.** O repasse é 90,5% do faturamento. Qualquer tabela de
+   preços nossa precisa fechar perto disso para ser competitiva com o que os
+   motoboys da cidade já recebem hoje.
+2. **100% dos pedidos são lançados à mão no painel.** As 40+ integrações
+   existem e **nenhuma é usada**. Isso confirma, com dado e não com opinião, que
+   a decisão de ficar só com o aiqfome não custa nada em migração.
+
+Os tempos médios servem de meta: 10 min até a coleta e 23 min até a entrega é o
+padrão que a cidade já conhece.
+
+### O que vale copiar — por valor sobre custo
+
+#### Nível 1 — barato, alto uso, o dado já existe aqui
+
+**Aviso de entregador sem localização.** É a resposta à pergunta que ficou em
+aberto acima. Eles **não** detectam otimização de bateria no aparelho: o
+servidor percebe que o motoboy tem pedido em andamento e parou de mandar
+posição, e manda mensagem pedindo para reabrir o app. Funciona independente da
+causa — bateria, app fechado, sinal. Temos os pings; falta o detector e o aviso.
+Foi visto em uso real, com dois motoboys diferentes.
+
+**Devolver a entrega à fila.** O motoboy relata um problema e solta o pedido,
+que volta a ficar disponível. É o par que falta da vitrine recém-entregue: hoje,
+um pedido aceito que travou não tem caminho de volta a não ser pela mão do
+admin. Eles têm regra de elegibilidade — a resposta observada foi "não encontrei
+nenhum Pedido seu elegível para devolver à fila agora".
+
+**Marcar coleta / entrega / retorno esquecidos, com tempo mínimo.** Motoboy
+esquece de tocar o botão. Cada ação tem um **tempo mínimo em minutos** para não
+marcar entrega cinco segundos depois da coleta. É um detalhe pequeno que separa
+a funcionalidade útil da que vira fraude.
+
+**Painel de caixa.** Numa tela: faturas vencidas, faturas a vencer, **concluídos
+sem fatura**, saques pendentes, saldos negativos, valor bloqueado, disponível em
+carteiras. "Concluídos sem fatura" (R$ 7.951,16 lá) é trabalho feito e ainda não
+cobrado — número que hoje não mostramos em lugar nenhum.
+
+**Ocultar valores.** Um botão que borra os números de dinheiro na tela. O dono
+mostra o painel para outras pessoas.
+
+#### Nível 2 — valor real, custo médio
+
+**Régua de cobrança automática.** Cinco disparos, todos às 09:00: ao gerar a
+fatura, 1 dia antes do vencimento, no dia, 1 dia depois, e aos 5 dias vencida.
+Canal por WhatsApp e/ou portal, e **escolha de qual telefone do cadastro** usar
+(padrão, da loja, administrativo). Há um campo de "texto extra" que eles usam
+para colar a chave PIX. Ver o aviso de segurança acima antes de copiar o link.
+
+**Kanban ao vivo por status com SLA configurável.** Uma coluna por status,
+atualizando sozinho, com sinalização em "sem aceite após 5 min · coleta após 15
+min · entrega após 30 min", ajustável. É a evolução natural da nossa fila com
+cronômetro.
+
+**Meta diária e recorde.** Meta por praça, "definida uma vez, vale todo dia", e
+o recorde de 90 dias com o progresso de hoje contra ele.
+
+**Comparação honesta de período.** Todo indicador compara com o período anterior
+"(até agora)" — 30 dias até este instante contra os 30 anteriores até o mesmo
+ponto do dia. Sem isso, o dia corrente pela metade sempre pareceria queda.
+
+**Rótulo HISTÓRICO.** Quando o filtro não é "Hoje", a tela avisa em destaque que
+os dados não atualizam em tempo real, e o feed ao vivo some. Evita que alguém
+tome decisão olhando número parado achando que é atual.
+
+#### Não é funcionalidade — é jogada do fornecedor
+
+**Oportunidades** e **Marketing** não são ferramentas da operação: são do dono
+da plataforma. Oportunidades roteia leads de um "Mercado de Entregas" por região
+para quem assina; Marketing entrega e-books e posts prontos. São mecanismos de
+retenção do fornecedor, não algo que uma operação de uma cidade constrói.
+
+### Configurações que ainda não estavam catalogadas
+
+Da tela de Configurações, itens que não apareciam no primeiro levantamento:
+Nomenclaturas (renomear entidades na interface), Valores Transportados,
+Segurança na Entrega, Chegada na Entrega, Tempo de Coleta, Tempo Entrega,
+Escalas de Clientes, Domínio Próprio, Automatizador de Carteiras, Bônus
+Automático, **Taxa de Deslocamento**, Repasses Automáticos, Toque do App, Links
+no App, Botão de Chamar Entregador, Modelos de importação, Parametrização
+Avançada.
+
+Duas seguradoras aparecem integradas (IZA, 88i), o que explica o item "Valores
+Transportados".
+
+### Como o operador digital deles é configurado
+
+Útil como especificação, mesmo que a gente nunca construa o chat. As tarefas
+autorizadas ao motoboy são exatamente a lista de furos operacionais que um app
+de entrega tem: consultar saldo e extrato, **ver entregas disponíveis**,
+solicitar saque, **devolver entrega à fila**, marcar coleta/entrega/retorno
+esquecidos. Marcados como "em breve" no painel deles: repassar entrega a outro
+entregador e lançar entrega para si mesmo.
+
+Do lado do cliente: consultar pedidos, entregas em andamento, faturas, carteira,
+lançar pedido, e transferir para humano — este último "sempre ativo", sem opção
+de desligar.
