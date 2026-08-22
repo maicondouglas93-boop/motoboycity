@@ -50,7 +50,17 @@ function Bar({ ratio, highlighted }: { ratio: number; highlighted: boolean }) {
   );
 }
 
-export function PeakHoursChart({ peakHours }: { peakHours: DeliveryPeakHours }) {
+/**
+ * `peakHours` e opcional de proposito.
+ *
+ * Todo deploy tem uma janela em que o painel ja subiu e a API ainda nao, ou o
+ * contrario. Desestruturar um campo ausente derrubava o relatorio INTEIRO com
+ * um TypeError — o operador perdia faturamento, empresas e entregadores por
+ * causa de um grafico. Faltando o dado, some so esta secao.
+ */
+export function PeakHoursChart({ peakHours }: { peakHours?: DeliveryPeakHours }) {
+  if (!peakHours) return null;
+
   const { byHour, byWeekday, busiestHour, busiestWeekday, totalConsidered, daysInPeriod } =
     peakHours;
 
