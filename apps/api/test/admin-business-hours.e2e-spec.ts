@@ -43,19 +43,44 @@ describe('AdminBusinessHoursController (e2e)', () => {
   });
 
   afterAll(async () => {
-    // Deixa o ambiente como estava: sem faixas e com o bloqueio desligado, que
-    // e o estado padrao e o que os outros e2e assumem ao criar pedidos.
-    await prisma.businessHour.deleteMany({});
-    await prisma.platformSettings.updateMany({ data: { businessHoursEnabled: false } });
-    await prisma.delivery.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({
-      where: { company: { document: companyDocument } },
-    });
-    await prisma.company.deleteMany({ where: { document: companyDocument } });
-    await prisma.user.deleteMany({ where: { email: companyEmail } });
-    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
-    await app.close();
+    /**
+     * A limpeza vai em `try`, e o `app.close()` em `finally`.
+     *
+     * Sem isso, qualquer erro aqui — uma chave estrangeira que impede apagar a
+     * empresa, uma tabela que nao existe — pula o fechamento, e o Jest fica
+     * pendurado para sempre esperando o servidor Nest, o Socket.IO e as filas.
+     * Foi exatamente assim que o CI travou: o passo de e2e nunca terminava.
+     */
+    try {
+      // Deixa o ambiente como estava: sem faixas e com o bloqueio desligado,
+      // que e o estado padrao e o que os outros e2e assumem ao criar pedidos.
+      await prisma.businessHour.deleteMany({});
+      await prisma.platformSettings.updateMany({ data: { businessHoursEnabled: false } });
+
+      // Filhos antes dos pais: o banco recusa apagar uma entrega que ainda tem
+      // oferta ou historico apontando para ela.
+      const entregas = await prisma.delivery.findMany({
+        where: { company: { document: companyDocument } },
+        select: { id: true },
+      });
+      const ids = entregas.map((entrega) => entrega.id);
+      if (ids.length > 0) {
+        await prisma.deliveryStatusHistory.deleteMany({ where: { deliveryId: { in: ids } } });
+        await prisma.deliveryOffer.deleteMany({ where: { deliveryId: { in: ids } } });
+        await prisma.deliveryAddress.deleteMany({ where: { deliveryId: { in: ids } } });
+        await prisma.delivery.deleteMany({ where: { id: { in: ids } } });
+      }
+
+      await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.companyTeamMember.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.company.deleteMany({ where: { document: companyDocument } });
+      await prisma.user.deleteMany({ where: { email: companyEmail } });
+      await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+    } finally {
+      await app.close();
+    }
   });
 
   it('rejeita sem token com 401', async () => {
@@ -201,9 +226,6 @@ describe('AdminBusinessHoursController (e2e)', () => {
        * a recusa por horario sumiu — as faixas continuam la, mas nao bloqueiam.
        */
       expect(String(criado.body.message ?? '')).not.toContain('horário de funcionamento');
-      if (criado.body.id) {
-        await prisma.delivery.deleteMany({ where: { id: criado.body.id } });
-      }
     });
   });
 });

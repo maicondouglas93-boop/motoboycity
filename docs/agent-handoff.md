@@ -2414,10 +2414,29 @@ As entregas estão em zero, mas isso é o estado de repouso dele — o
 `deliveries`, ou seja, esse banco já serviu de alvo de e2e em sessões
 anteriores e sempre termina vazio.
 
-**Recomendação:** não rodar e2e local sem um passo que verifique o alvo antes de
-começar (conectar, ler `current_database()` e abortar se não for o banco
-isolado). Enquanto isso não existir, o e2e do CI é a fonte confiável — lá o
-Postgres é dedicado e as credenciais vêm do workflow.
+**Resolvido em 2026-08-22.** O e2e roda localmente agora, e a causa da falha
+original era outra do que parecia.
+
+**A senha deste ambiente contém a string `motoboycity_dev`.** Qualquer script
+que troque o nome do banco por substituição de texto na URL acerta a senha em
+vez do banco — `replace` troca só a primeira ocorrência, que está na senha, e
+uma troca global corrompe a autenticação. Era essa a causa do "Authentication
+failed" que eu tinha atribuído a outra coisa.
+
+O jeito certo é trocar `pathname` pelo parser de `URL`, nunca por texto:
+
+```js
+const alvo = new URL(process.env.DATABASE_URL);
+alvo.pathname = '/motoboycity_e2e_local';
+```
+
+Vale para qualquer ferramenta que mexa nessa URL, não só para o e2e.
+
+Continua valendo que **o CLI do Prisma carrega o `.env` por cima da variável do
+shell** — `migrate deploy` ignora o `DATABASE_URL` exportado. O Jest não: ele
+respeita `process.env`, então a suíte roda no banco isolado sem problema. Para
+migrar o banco de e2e, aplicar o SQL direto por `psql` e registrar a linha em
+`_prisma_migrations`.
 
 Vale também considerar mudar o `.env` de desenvolvimento para não ser o padrão
 que qualquer ferramenta pega sozinha.
@@ -2962,3 +2981,25 @@ para não depender da hora em que o CI roda.
 
 A tela ainda **não foi conferida no navegador**: a sessão do admin caiu e eu não
 faço login.
+
+### O que travava o CI: `app.close()` que nunca rodava
+
+O passo de e2e ficou pendurado por mais de vinte minutos em `ac924e8`, sem
+falhar nem terminar. A causa estava no `afterAll` do teste novo: a limpeza de
+dados lançava — chave estrangeira impedindo apagar uma entrega que ainda tinha
+oferta e histórico apontando para ela — e `app.close()` nunca era alcançado.
+
+Sem o fechamento, o Jest fica esperando para sempre pelo servidor Nest, pelo
+Socket.IO e pelas filas do BullMQ. O sintoma é um passo de CI que não termina,
+não um teste vermelho, e por isso é mais difícil de ler.
+
+A correção tem duas partes:
+
+1. **`app.close()` vai em `finally`.** Qualquer erro na limpeza deixa de
+   sequestrar o encerramento. Vale como regra para todo e2e novo.
+2. **Apagar filhos antes dos pais** — histórico, ofertas e endereços da entrega
+   antes da entrega.
+
+Confirmado localmente: a suíte do horário passa em 3,7s e o Jest encerra
+sozinho, **sem `--forceExit`**. Um `--forceExit` teria escondido o problema em
+vez de resolvê-lo.
