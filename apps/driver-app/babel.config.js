@@ -24,6 +24,7 @@ function inlineBuildConstants({ types: t }, options) {
   const constants = new Map([
     ['__MOTOBOYCITY_APP_ENV__', options.appEnv],
     ['__MOTOBOYCITY_API_URL__', options.apiBaseUrl],
+    ['__MOTOBOYCITY_APP_VERSION__', options.appVersion],
   ]);
 
   return {

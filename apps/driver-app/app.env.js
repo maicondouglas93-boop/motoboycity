@@ -118,7 +118,31 @@ function resolveAppConfig(env = process.env) {
     assertStrictUrl(parsed, appEnv);
   }
 
-  return { appEnv, apiBaseUrl: normalize(parsed) };
+  return {
+    appEnv,
+    apiBaseUrl: normalize(parsed),
+    appVersion: resolveAppVersion(),
+  };
 }
 
-module.exports = { APP_ENVS, STRICT_ENVS, resolveAppConfig };
+/**
+ * Fonte unica da versao visivel (portao P0.3). O `package.json` manda, e tanto
+ * o bundle JavaScript quanto o `versionName` do Android leem daqui — antes as
+ * duas informacoes divergiam (`0.0.1` no JS contra `1.0` no Android), o que
+ * torna impossivel saber qual build um motoboy esta rodando ao dar suporte.
+ *
+ * `versionCode` NAO sai daqui: e um inteiro que precisa crescer a cada APK e
+ * nunca ser reaproveitado, inclusive num rollback, entao e sempre explicito no
+ * comando de build (ver `android/app/build.gradle`).
+ */
+function resolveAppVersion() {
+  const { version } = require('./package.json');
+
+  if (!version || typeof version !== 'string') {
+    throw new Error('package.json do driver-app esta sem "version".');
+  }
+
+  return version;
+}
+
+module.exports = { APP_ENVS, STRICT_ENVS, resolveAppConfig, resolveAppVersion };

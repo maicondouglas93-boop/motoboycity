@@ -72,6 +72,35 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Portao P0.3 — versao unica.
+ *
+ * O `versionName` vem do `package.json` do driver-app, o mesmo arquivo que o
+ * bundle JavaScript le via `app.env.js`. Antes as duas informacoes divergiam
+ * (`0.0.1` no JS contra `1.0` aqui), o que impede saber qual build um motoboy
+ * esta rodando ao dar suporte.
+ */
+def driverAppPackageJson = new groovy.json.JsonSlurper().parse(file("../../package.json"))
+def resolvedVersionName = driverAppPackageJson.version
+
+/**
+ * `versionCode` e sempre explicito: precisa ser um inteiro crescente e nunca
+ * reaproveitado, inclusive num rollback. O padrao 1 serve apenas para builds
+ * de debug locais; um release exige o valor no comando (ver a checagem em
+ * `gradle.taskGraph.whenReady`, mais abaixo).
+ */
+def resolvedVersionCode = Integer.parseInt(
+    (project.findProperty("motoboycity.versionCode")
+        ?: System.getenv("MOTOBOYCITY_VERSION_CODE")
+        ?: "1").toString()
+)
+
+/**
+ * Assinatura do release: caminho e senhas vem do ambiente, nunca do
+ * repositorio. Ver a checagem obrigatoria em `gradle.taskGraph.whenReady`.
+ */
+def releaseKeystorePath = System.getenv("MOTOBOYCITY_KEYSTORE_FILE")
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -82,8 +111,8 @@ android {
         applicationId "com.motoboycity.driverapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
     }
     signingConfigs {
         debug {
@@ -92,18 +121,74 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Configurado somente quando o ambiente fornece a chave. Sem ela o
+            // build de release falha na checagem abaixo, em vez de cair
+            // silenciosamente na chave de debug.
+            if (releaseKeystorePath) {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv("MOTOBOYCITY_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MOTOBOYCITY_KEY_ALIAS")
+                keyPassword System.getenv("MOTOBOYCITY_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+/**
+ * Portao P0.3 — um APK de release nao pode sair daqui assinado com a chave de
+ * debug: ela e publica e conhecida, e o Android so aceita atualizar um app se
+ * a assinatura for a mesma, entao publicar com a chave de debug inviabiliza
+ * qualquer atualizacao futura.
+ *
+ * A checagem roda no grafo de tarefas para nao atrapalhar builds de debug.
+ */
+gradle.taskGraph.whenReady { graph ->
+    def buildingRelease = graph.allTasks.any { task ->
+        task.project == project && task.name ==~ /(?i).*(assemble|bundle|install)release.*/
+    }
+
+    if (!buildingRelease) {
+        return
+    }
+
+    def missing = [
+        "MOTOBOYCITY_KEYSTORE_FILE",
+        "MOTOBOYCITY_KEYSTORE_PASSWORD",
+        "MOTOBOYCITY_KEY_ALIAS",
+        "MOTOBOYCITY_KEY_PASSWORD",
+    ].findAll { !System.getenv(it) }
+
+    if (missing) {
+        throw new GradleException(
+            "Build de release sem chave de assinatura. Defina no ambiente: ${missing.join(', ')}. " +
+            "A chave fica FORA do repositorio e as senhas nunca sao versionadas. " +
+            "Ver docs/go-live-pilot-runbook.md, portao P0.3."
+        )
+    }
+
+    if (!file(releaseKeystorePath).exists()) {
+        throw new GradleException(
+            "MOTOBOYCITY_KEYSTORE_FILE aponta para um arquivo inexistente: ${releaseKeystorePath}"
+        )
+    }
+
+    if (!project.findProperty("motoboycity.versionCode") && !System.getenv("MOTOBOYCITY_VERSION_CODE")) {
+        throw new GradleException(
+            "Build de release sem versionCode explicito. Defina MOTOBOYCITY_VERSION_CODE " +
+            "com um inteiro maior que o do ultimo APK publicado — inclusive num rollback, " +
+            "porque o Android recusa reinstalar um versionCode ja usado."
+        )
     }
 }
 

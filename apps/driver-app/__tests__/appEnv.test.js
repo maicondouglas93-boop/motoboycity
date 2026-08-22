@@ -1,4 +1,5 @@
-const { resolveAppConfig } = require('../app.env');
+const { resolveAppConfig, resolveAppVersion } = require('../app.env');
+const packageJson = require('../package.json');
 
 /**
  * Portao P0.2: a URL da API precisa ser configuravel por ambiente e um build
@@ -8,7 +9,7 @@ const { resolveAppConfig } = require('../app.env');
 describe('resolveAppConfig', () => {
   describe('development', () => {
     it('usa localhost como padrao quando nada e informado', () => {
-      expect(resolveAppConfig({})).toEqual({
+      expect(resolveAppConfig({})).toMatchObject({
         appEnv: 'development',
         apiBaseUrl: 'http://localhost:3333',
       });
@@ -69,7 +70,7 @@ describe('resolveAppConfig', () => {
           MOTOBOYCITY_APP_ENV: 'pilot',
           MOTOBOYCITY_API_URL: 'https://api-pilot.exemplo.com',
         }),
-      ).toEqual({ appEnv: 'pilot', apiBaseUrl: 'https://api-pilot.exemplo.com' });
+      ).toMatchObject({ appEnv: 'pilot', apiBaseUrl: 'https://api-pilot.exemplo.com' });
     });
 
     it('nao confunde 172.32 com a faixa privada 172.16-31', () => {
@@ -101,5 +102,25 @@ describe('resolveAppConfig', () => {
         resolveAppConfig({ MOTOBOYCITY_APP_ENV: 'pilot', MOTOBOYCITY_API_URL: '/api' }),
       ).toThrow(/nao e uma URL absoluta/);
     });
+  });
+});
+
+/**
+ * Portao P0.3: a versao visivel precisa ter uma fonte unica. O `versionName`
+ * do Android le o mesmo `package.json` (ver `android/app/build.gradle`), entao
+ * uma divergencia como a antiga — `0.0.1` no JS contra `1.0` no Android — nao
+ * pode voltar a existir sem quebrar este teste.
+ */
+describe('resolveAppVersion', () => {
+  it('vem do package.json, nao de uma constante escrita a mao', () => {
+    expect(resolveAppVersion()).toBe(packageJson.version);
+  });
+
+  it('e exposta na configuracao resolvida, para o Babel inlinar', () => {
+    expect(resolveAppConfig({}).appVersion).toBe(packageJson.version);
+  });
+
+  it('usa um formato que o versionName do Android aceita', () => {
+    expect(resolveAppVersion()).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
   });
 });
