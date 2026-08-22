@@ -14,6 +14,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { DeliveryOperationScreen } from './src/screens/DeliveryOperationScreen';
 import { DriverHistoryScreen } from './src/screens/DriverHistoryScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { AvailableDeliveriesScreen } from './src/screens/AvailableDeliveriesScreen';
 import { IncomingOfferScreen } from './src/screens/IncomingOfferScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { DriverOrderDetailScreen } from './src/screens/DriverOrderDetailScreen';
@@ -78,6 +79,7 @@ function App() {
             component={IncomingOfferScreen}
             options={{ presentation: 'modal', gestureEnabled: false }}
           />
+          <Stack.Screen name="AvailableDeliveries" component={AvailableDeliveriesScreen} />
           <Stack.Screen name="Wallet" component={DriverWalletScreen} />
           <Stack.Screen name="History" component={DriverHistoryScreen} />
           <Stack.Screen name="OrderDetail" component={DriverOrderDetailScreen} />

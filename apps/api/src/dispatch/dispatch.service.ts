@@ -693,6 +693,162 @@ export class DispatchService {
     }
   }
 
+  /**
+   * A vitrine: pedidos que ninguem aceitou e ficaram sem oferta pendente.
+   *
+   * O empurrao sozinho tem um buraco. Quando todo motoboy elegivel ja recebeu a
+   * oferta e deixou passar, `dispatchDelivery` retorna em silencio — e como
+   * quem ja recebeu fica excluido da proxima rodada, o pedido so volta a se
+   * mexer se aparecer um motoboy NOVO. Quem deixou expirar nunca mais o ve.
+   *
+   * Aqui ele reaparece para todos. E de proposito que a exclusao nao se aplica:
+   * deixar uma oferta expirar as 11h nao e recusar aquele pedido para sempre.
+   */
+  async listAvailableForDriver(driverId: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      include: { serviceTypes: { select: { serviceTypeId: true } } },
+    });
+    if (!driver) return [];
+
+    const serviceTypeIds = driver.serviceTypes.map((item) => item.serviceTypeId);
+    if (serviceTypeIds.length === 0) return [];
+
+    /**
+     * Motoboy que ja esta com uma corrida nao ve a vitrine — a mesma regra que
+     * o despacho automatico usa para nao empilhar entrega em quem esta na rua.
+     */
+    const ocupado = await this.prisma.delivery.findFirst({
+      where: { driverId, status: { in: ASSIGNMENT_BLOCKING_STATUSES } },
+      select: { id: true },
+    });
+    if (ocupado) return [];
+
+    const deliveries = await this.prisma.delivery.findMany({
+      where: {
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        company: { regionId: driver.regionId },
+        serviceTypeId: { in: serviceTypeIds },
+        // Sem oferta pendente: se alguem esta com o pedido na mao agora, ele
+        // ainda nao esta livre para a vitrine.
+        offers: { none: { response: 'PENDING' } },
+      },
+      // Mais antigo primeiro: o pedido que espera ha mais tempo e o que mais
+      // precisa de alguem.
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+      include: {
+        company: { select: { tradeName: true } },
+        serviceType: { select: { name: true } },
+        addresses: true,
+      },
+    });
+
+    /**
+     * Mapeado para a forma do contrato, e nao devolvido cru: o objeto do Prisma
+     * traz `Decimal`, campos internos e relacoes que o app nao usa — e um deles
+     * mudar de nome quebraria o app sem ninguem perceber.
+     */
+    return deliveries.map((delivery) => ({
+      id: delivery.id,
+      displayNumber: delivery.displayNumber,
+      companyName: delivery.company.tradeName,
+      serviceTypeName: delivery.serviceType.name,
+      destinationKnownAtCreation: delivery.destinationKnownAtCreation,
+      distanceKm: delivery.distanceKm === null ? null : Number(delivery.distanceKm),
+      driverValue: delivery.driverValue === null ? null : Number(delivery.driverValue),
+      requiresReturn: delivery.requiresReturn,
+      batchId: delivery.batchId,
+      addresses: delivery.addresses.map((address) => ({
+        type: address.type,
+        street: address.street,
+        number: address.number,
+        complement: address.complement,
+        city: address.city,
+        state: address.state,
+        zip: address.zip,
+        lat: address.lat === null ? null : Number(address.lat),
+        lng: address.lng === null ? null : Number(address.lng),
+        referenceNote: address.referenceNote,
+      })),
+      createdAt: delivery.createdAt.toISOString(),
+    }));
+  }
+
+  /**
+   * O motoboy assume um pedido da vitrine.
+   *
+   * A protecao contra dois assumindo ao mesmo tempo e a mesma do aceite de
+   * oferta: `updateMany` condicional e checagem de `count`. Quem chegar em
+   * segundo encontra zero linhas atualizadas e recebe conflito, em vez de os
+   * dois acharem que pegaram.
+   */
+  async claimDelivery(
+    deliveryId: string,
+    driverId: string,
+    claimingUserId: string,
+  ): Promise<{ deliveryId: string; displayNumber: number }> {
+    const alvo = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!alvo) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
+      throw new ConflictException('Este pedido já não está mais disponível.');
+    }
+
+    const pendente = await this.prisma.deliveryOffer.findFirst({
+      where: { deliveryId, response: 'PENDING' },
+    });
+    if (pendente) {
+      throw new ConflictException('Este pedido está oferecido a outro motoboy neste momento.');
+    }
+
+    // O lote e assumido inteiro, como no aceite de oferta: os itens de um lote
+    // compartilham motoboy por construcao.
+    const irmaos = alvo.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: alvo.batchId } })
+      : [alvo];
+    if (irmaos.some((item) => item.status !== 'AWAITING_DRIVER' || item.driverId !== null)) {
+      throw new ConflictException('Este lote já não está mais disponível por inteiro.');
+    }
+    const ids = irmaos.map((item) => item.id);
+
+    const delivery = await this.prisma.$transaction(async (tx) => {
+      const atualizadas = await tx.delivery.updateMany({
+        where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
+        data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+      });
+      if (atualizadas.count !== ids.length) {
+        throw new ConflictException('Este pedido já não está mais disponível.');
+      }
+
+      for (const id of ids) {
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: id,
+            fromStatus: 'AWAITING_DRIVER',
+            toStatus: 'ACCEPTED',
+            changedByUserId: claimingUserId,
+            note: 'Assumido pelo motoboy a partir dos pedidos disponíveis.',
+          },
+        });
+      }
+
+      return tx.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+    });
+
+    this.realtimeGateway.emitAdminActivity(
+      `Pedido #${delivery.displayNumber} foi assumido por um motoboy a partir dos pedidos disponíveis.`,
+    );
+    this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
+      deliveryId: delivery.id,
+      status: delivery.status,
+    });
+
+    return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+  }
+
   private async findNextEligibleDriverId({
     excludeDriverIds,
     regionId,

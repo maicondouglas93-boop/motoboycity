@@ -20,6 +20,22 @@ export class DeliveryOffersService {
     return this.dispatchService.acceptOffer(offerId, driver.id, user.id);
   }
 
+  /**
+   * Os pedidos que ninguem aceitou e ficaram sem oferta pendente.
+   *
+   * A mesma checagem de aprovado e ativo do aceite: quem foi bloqueado nao pode
+   * contornar a decisao do admin entrando pela vitrine.
+   */
+  async listAvailable(user: User) {
+    const driver = await this.findDriverForUser(user);
+    return this.dispatchService.listAvailableForDriver(driver.id);
+  }
+
+  async claim(user: User, deliveryId: string): Promise<AcceptOfferResult> {
+    const driver = await this.findDriverForUser(user);
+    return this.dispatchService.claimDelivery(deliveryId, driver.id, user.id);
+  }
+
   async decline(user: User, offerId: string): Promise<{ ok: true }> {
     const driver = await this.findDriverForUser(user);
     await this.dispatchService.declineOffer(offerId, driver.id);

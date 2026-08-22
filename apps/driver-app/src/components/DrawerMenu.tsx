@@ -15,6 +15,9 @@ type DrawerMenuProps = {
 
 const MENU_ITEMS: { label: string; screen: keyof RootStackParamList }[] = [
   { label: 'Carteira', screen: 'Wallet' },
+  // Logo abaixo da carteira: e o que o motoboy abre quando quer trabalhar e
+  // nao chegou oferta nenhuma.
+  { label: 'Pedidos disponíveis', screen: 'AvailableDeliveries' },
   { label: 'Historico de pedidos', screen: 'History' },
   { label: 'Perfil', screen: 'Profile' },
 ];
@@ -56,9 +59,7 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
   async function handleSignOut() {
     const token = await session.getToken();
     if (token) {
-      await driverPresenceApi
-        .set(token, { availability: 'UNAVAILABLE' })
-        .catch(() => undefined);
+      await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
     }
     await stopDeliveryTracking();
     await session.clearToken();

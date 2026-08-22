@@ -235,3 +235,24 @@ export interface DeliveryStageTimesResult {
   /** Da fila ate a entrega — o tempo total sentido por quem pediu. */
   total: DeliveryStageSummary;
 }
+
+/**
+ * Pedido que ninguém aceitou e ficou sem oferta pendente — a "vitrine".
+ *
+ * O empurrão sozinho tem um buraco: esgotada a fila de motoboys elegíveis, o
+ * pedido para de se mexer, e quem deixou a oferta expirar nunca mais o vê. Aqui
+ * ele reaparece para todos.
+ */
+export interface AvailableDeliveryItem {
+  id: string;
+  displayNumber: number;
+  companyName: string;
+  serviceTypeName: string;
+  destinationKnownAtCreation: boolean;
+  distanceKm: number | null;
+  driverValue: number | null;
+  requiresReturn: boolean;
+  batchId: string | null;
+  addresses: DeliveryAddressItem[];
+  createdAt: string;
+}

@@ -3189,3 +3189,51 @@ dois caminhos para o mesmo evento, e um deles envelheceria.
 Vinte e um testes cobrindo cada estado permitido e recusado nas duas ações, o
 não-crédito na troca, o crédito na finalização, e a chave de idempotência
 virando conflito legível quando dois admins apertam ao mesmo tempo.
+
+## Atualização — 2026-08-22: vitrine de pedidos disponíveis
+
+O responsável explicou como funciona no concorrente: _"um pedido que ninguém
+aceitou fica lá, para alguém entrar e aceitar"_. É o complemento do empurrão,
+não um substituto — e fecha um buraco real do nosso despacho.
+
+### O buraco que existia
+
+`dispatchDelivery` oferta a um motoboy por vez, com prazo. Quando todo elegível
+já recebeu, ele faz `if (!nextDriverId) return;` — **retorna em silêncio**.
+
+Pior: `excludeDriverIds` tira da próxima rodada quem já recebeu. Então o pedido
+só voltava a se mexer se aparecesse um motoboy **novo**; quem deixou a oferta
+expirar às 11h nunca mais o via. O botão "chamar de novo" que eu tinha feito era
+um contorno manual disso.
+
+### Como a vitrine resolve
+
+`GET /delivery-offers/available` lista os pedidos em `AWAITING_DRIVER`, sem
+entregador e **sem oferta pendente** — se alguém está com o pedido na mão agora,
+ele ainda não está livre. Filtra por região e pelas modalidades do motoboy, e
+não aparece para quem já está com uma corrida, que é a mesma regra do despacho
+automático.
+
+`PATCH /delivery-offers/available/:id/claim` assume. A proteção contra dois
+assumindo ao mesmo tempo é a mesma do aceite de oferta: `updateMany` condicional
+e checagem de `count` — quem chega em segundo recebe conflito, em vez de os dois
+acharem que pegaram. Lote é assumido inteiro ou nenhum.
+
+De propósito, a exclusão **não** se aplica aqui: deixar uma oferta passar não é
+recusar aquele pedido para sempre.
+
+### Na tela do motoboy
+
+`AvailableDeliveriesScreen`, no menu logo abaixo da Carteira — é o que ele abre
+quando quer trabalhar e não chegou oferta nenhuma. Puxar para atualizar, e o
+conflito ao assumir vira aviso com recarga da lista, não erro.
+
+Pedido sem destino conhecido mostra "destino definido na entrega" e "valor
+calculado na entrega" em vez de zero: mostrar zero mentiria sobre quanto rende.
+
+### Não verificado no aparelho
+
+A tela **não foi testada num dispositivo**. O app instalado no celular é uma
+compilação antiga, e subir Metro e recompilar seria um desvio longo. O backend
+tem oito testes cobrindo filtro, corrida entre dois motoboys e lote parcial; a
+tela segue os padrões das telas vizinhas, mas isso é argumento, não prova.

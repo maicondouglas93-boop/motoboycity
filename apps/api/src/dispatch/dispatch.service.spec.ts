@@ -33,7 +33,7 @@ import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 describe('DispatchService', () => {
   let service: DispatchService;
   let prisma: {
-    delivery: { findUnique: jest.Mock; findMany: jest.Mock };
+    delivery: { findUnique: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock };
     deliveryOffer: {
       findFirst: jest.Mock;
       findMany: jest.Mock;
@@ -43,6 +43,7 @@ describe('DispatchService', () => {
       findUnique: jest.Mock;
     };
     driverPresenceLog: { findMany: jest.Mock };
+    driver: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
@@ -74,7 +75,7 @@ describe('DispatchService', () => {
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
     };
     prisma = {
-      delivery: { findUnique: jest.fn(), findMany: jest.fn() },
+      delivery: { findUnique: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
       deliveryOffer: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -84,6 +85,7 @@ describe('DispatchService', () => {
         findUnique: jest.fn(),
       },
       driverPresenceLog: { findMany: jest.fn() },
+      driver: { findUnique: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     platformSettingsService = { get: jest.fn() };
@@ -930,6 +932,144 @@ describe('DispatchService', () => {
         {
           offerId: 'offer-1',
         },
+      );
+    });
+  });
+
+  describe('vitrine de pedidos disponiveis', () => {
+    const motoboy = {
+      id: 'driver-1',
+      regionId: 'region-1',
+      serviceTypes: [{ serviceTypeId: 'st-1' }],
+    };
+
+    it('nao lista nada para motoboy sem modalidade cadastrada', async () => {
+      prisma.driver.findUnique.mockResolvedValue({ ...motoboy, serviceTypes: [] });
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+    });
+
+    it('nao mostra a vitrine para quem ja esta com uma corrida', async () => {
+      // A mesma regra do despacho automatico: nao empilhar entrega em quem ja
+      // esta na rua.
+      prisma.driver.findUnique.mockResolvedValue(motoboy);
+      prisma.delivery.findFirst.mockResolvedValue({ id: 'delivery-em-andamento' });
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+    });
+
+    it('filtra por regiao, modalidade e ausencia de oferta pendente', async () => {
+      prisma.driver.findUnique.mockResolvedValue(motoboy);
+      prisma.delivery.findFirst.mockResolvedValue(null);
+      prisma.delivery.findMany.mockResolvedValue([]);
+
+      await service.listAvailableForDriver('driver-1');
+
+      const where = prisma.delivery.findMany.mock.calls[0]?.[0]?.where;
+      expect(where).toMatchObject({
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        company: { regionId: 'region-1' },
+        serviceTypeId: { in: ['st-1'] },
+        // Se alguem esta com o pedido na mao agora, ele ainda nao esta livre.
+        offers: { none: { response: 'PENDING' } },
+      });
+      // Mais antigo primeiro: quem espera ha mais tempo precisa mais.
+      expect(prisma.delivery.findMany.mock.calls[0]?.[0]?.orderBy).toEqual({ createdAt: 'asc' });
+    });
+
+    it('recusa assumir pedido que ja saiu de AWAITING_DRIVER', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'outro',
+      });
+
+      await expect(
+        service.claimDelivery('delivery-1', 'driver-1', 'user-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('recusa assumir pedido que esta oferecido a outro neste momento', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue({ id: 'offer-1' });
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'oferecido a outro motoboy',
+      );
+    });
+
+    it('quem chega em segundo recebe conflito, e nao um aceite silencioso', async () => {
+      // A protecao e o `updateMany` condicional: zero linhas atualizadas
+      // significa que outro motoboy passou na frente entre a leitura e a
+      // escrita.
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', status: 'AWAITING_DRIVER', driverId: null },
+      ]);
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.claimDelivery('delivery-1', 'driver-1', 'user-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('assume o pedido e registra que veio da vitrine', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 1234,
+        companyId: 'company-1',
+        status: 'ACCEPTED',
+      });
+
+      const result = await service.claimDelivery('delivery-1', 'driver-1', 'user-1');
+
+      expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 1234 });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['delivery-1'] }, status: 'AWAITING_DRIVER', driverId: null },
+        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+      });
+      const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
+      expect(historico.note).toContain('pedidos disponíveis');
+      expect(historico.changedByUserId).toBe('user-1');
+    });
+
+    it('o lote e assumido inteiro ou nenhum', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: 'batch-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      // Um irmao ja foi levado por outro: o lote inteiro esta fora.
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', status: 'AWAITING_DRIVER', driverId: null },
+        { id: 'delivery-2', status: 'ACCEPTED', driverId: 'outro' },
+      ]);
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'lote',
       );
     });
   });

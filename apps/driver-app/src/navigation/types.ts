@@ -7,6 +7,7 @@ export type RootStackParamList = {
   OrderDetail: { orderId: string };
   DeliveryOperation: { deliveryId: string };
   IncomingOffer: undefined;
+  AvailableDeliveries: undefined;
   Settings: undefined;
   Profile: undefined;
 };

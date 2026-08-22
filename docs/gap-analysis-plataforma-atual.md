@@ -178,3 +178,78 @@ número por dia da semana é média por ocorrência, não soma.
   inferido da interface.
 - Números refletem o período consultado em 2026-08-22 e servem para dimensionar
   ordem de grandeza, não para contabilidade.
+
+## App do entregador — comparação com o nosso
+
+Navegação em modo leitura no app do concorrente
+(`br.com.entregasexpressas.motoboycity.courier`, versão 2.14.6), com o
+interruptor "Ativo" desligado para não haver risco de aceitar corrida real.
+
+### O menu deles, e o que temos
+
+| Item do menu         | Nosso equivalente          |
+| -------------------- | -------------------------- |
+| Carteira             | `DriverWalletScreen` ✅    |
+| Pedidos Disponíveis  | **não temos** — ver abaixo |
+| Histórico de Pedidos | `DriverHistoryScreen` ✅   |
+| Pedidos Agendados    | **não temos** no app       |
+| Minhas Escalas       | **não temos**              |
+| Desafios             | **não temos**              |
+| Suporte              | **não temos**              |
+| Perfil               | `ProfileScreen` ✅         |
+
+### A diferença que mais importa: vitrine contra empurrão
+
+O nosso despacho **empurra** a oferta para um motoboy por vez
+(`emitToDriver(nextDriverId, 'delivery:offer')`), com prazo de resposta e fila —
+se ele não responde, passa para o próximo.
+
+O deles tem uma tela "Pedidos Disponíveis": o motoboy **navega** o que está
+aberto e escolhe. É um modelo de vitrine.
+
+Nenhum dos dois é obviamente melhor, e a escolha é de operação, não de código:
+
+- **empurrão** distribui de forma controlada e evita que o pedido ruim fique
+  encalhado, mas depende de o motoboy estar com o app aberto e responder rápido;
+- **vitrine** dá autonomia e cobre o caso de ninguém aceitar o empurrão, mas
+  deixa a corrida longa ou barata parada — foi provavelmente por isso que eles
+  também têm bônus por volume.
+
+**Confirmado pelo responsável:** no deles, o pedido que ninguém aceitou fica na
+vitrine esperando alguém entrar e assumir. É exatamente o complemento do
+empurrão, não um substituto.
+
+**Feito em 2026-08-22.** Empurra primeiro e, esgotada a fila, o pedido aparece
+na vitrine para todos — inclusive para quem deixou a oferta expirar. Isso fecha
+um buraco que existia: `dispatchDelivery` retorna em silêncio quando não há mais
+motoboy elegível, e como quem já recebeu fica excluído da próxima rodada, o
+pedido só voltava a se mexer se aparecesse um motoboy **novo**.
+
+### Minhas Escalas — turnos que o motoboy aceita
+
+A plataforma publica escalas e o motoboy aceita turnos, com seletor de data. É
+outro modelo de disponibilidade: o nosso é avulso, o motoboy liga o "disponível"
+quando quer.
+
+Conecta com o "Relatório de Escalas" que aparece no catálogo de relatórios
+deles.
+
+### Desafios — bônus por volume
+
+O admin cria um desafio com meta, bônus, janela de datas e filtro por tipo de
+veículo. O app mostra barra de progresso.
+
+O exemplo visto: meta de 1000 entregas no mês, bônus de R$ 100, com progresso
+parcial. É mecanismo de retenção.
+
+**Ressalva de desenho:** é exatamente o incentivo que motiva correr e recusar
+corrida ruim — o mesmo motivo que levou o nosso relatório de desempenho a não
+ter nota única. Se for implementar, vale pensar em meta que não seja só volume.
+
+### Detalhe operacional que o app deles trata e o nosso não sei se trata
+
+Um aviso fixo no topo: _"Otimização de bateria está ativada. A localização em
+tempo real e o recebimento de pedidos em segundo plano podem ser afetados."_
+
+Vale conferir se o nosso app detecta isso. Rastreamento que morre em segundo
+plano é falha silenciosa — o pedido parece parado e ninguém sabe por quê.
