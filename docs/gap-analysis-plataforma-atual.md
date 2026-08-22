@@ -63,12 +63,22 @@ ordem de descoberta.
 
 ### 1. Barato e de alto uso
 
-| Item                         | Por quê                                                                                                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Cronômetro ao vivo**       | Cada pedido na fila mostra há quanto tempo está no estado atual. É o medidor de pressão da operação. O dado já existe em `statusChangedAt` — é só interface. |
-| **Clonar entrega**           | Loja com ~8,5 entregas/dia sai sempre do mesmo endereço. Provavelmente o botão mais usado da plataforma atual. Reaproveita a criação existente.              |
-| **Chegou na coleta**         | Valor de enum aditivo + um endpoint. Conserta a ambiguidade do SLA recém-implementado.                                                                       |
-| **Inverter local de coleta** | Troca coleta e entrega. Trivial no formulário.                                                                                                               |
+| Item                         | Por quê                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cronômetro ao vivo** ✅    | _Feito._ Cada pedido na fila mostra há quanto tempo está no estado atual. É o medidor de pressão da operação.                                     |
+| **Clonar entrega** ✅        | _Feito._ Loja com ~8,5 entregas/dia sai sempre do mesmo endereço. Reaproveita a criação existente. Ver nota abaixo sobre o que **não** é copiado. |
+| **Chegou na coleta**         | Valor de enum aditivo + um endpoint. Conserta a ambiguidade do SLA recém-implementado.                                                            |
+| **Inverter local de coleta** | Troca coleta e entrega. Trivial no formulário.                                                                                                    |
+
+Sobre clonar entrega, duas decisões que só apareceram na construção:
+
+- **o número externo não é copiado.** Ele identifica UM pedido no sistema da
+  própria loja, e é por ele que a conciliação acontece depois — duplicá-lo
+  criaria duas entregas alegando ser o mesmo pedido;
+- **o endereço só é reaproveitado com coordenadas.** O despacho mede distância
+  por lat/lng; copiar rua e número sem o par montaria um destino que parece
+  completo e falha no cálculo. Sem coordenadas, a tela avisa e pede que a
+  pessoa reescolha.
 
 ### 2. Valor real, custo médio
 

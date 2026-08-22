@@ -16,8 +16,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { adminPlatformSettingsApi, adminPricingTablesApi, adminServiceTypesApi } from '@/lib/api-client';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  adminPlatformSettingsApi,
+  adminPricingTablesApi,
+  adminServiceTypesApi,
+} from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 function formatCurrency(value: number | null): string {
@@ -207,7 +218,11 @@ export default function PricingTablesPage() {
             <form className="flex flex-wrap items-end gap-3" onSubmit={handleCreatePricingTable}>
               <div className="space-y-1.5">
                 <Label>Tipo de serviço</Label>
-                <Select value={serviceTypeId} onValueChange={(value) => setServiceTypeId(value ?? '')}>
+                <Select
+                  items={Object.fromEntries(serviceTypes.map((item) => [item.id, item.name]))}
+                  value={serviceTypeId}
+                  onValueChange={(value) => setServiceTypeId(value ?? '')}
+                >
                   <SelectTrigger className="w-48">
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>

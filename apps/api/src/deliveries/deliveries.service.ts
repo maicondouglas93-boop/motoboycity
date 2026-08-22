@@ -96,6 +96,7 @@ export interface DeliveryListItem {
   companyId: string;
   companyName: string;
   batchId: string | null;
+  serviceTypeId: string;
   serviceTypeName: string;
   status: DeliveryStatus;
   destinationKnownAtCreation: boolean;
@@ -1369,7 +1370,7 @@ export class DeliveriesService {
     companyId: string;
     company: { tradeName: string };
     batchId: string | null;
-    serviceType: { name: string };
+    serviceType: { id: string; name: string };
     status: DeliveryStatus;
     destinationKnownAtCreation: boolean;
     distanceKm: { toString(): string } | null;
@@ -1394,6 +1395,9 @@ export class DeliveriesService {
       companyId: delivery.companyId,
       companyName: delivery.company.tradeName,
       batchId: delivery.batchId,
+      // O id acompanha o nome porque clonar um pedido precisa reselecionar a
+      // modalidade, e casar por nome quebraria numa renomeacao.
+      serviceTypeId: delivery.serviceType.id,
       serviceTypeName: delivery.serviceType.name,
       status: delivery.status,
       destinationKnownAtCreation: delivery.destinationKnownAtCreation,

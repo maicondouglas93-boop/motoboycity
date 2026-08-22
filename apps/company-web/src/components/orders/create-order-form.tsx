@@ -136,7 +136,11 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       {serviceTypes.length > 0 && (
         <div className="space-y-1.5">
           <Label>Tipo de serviço</Label>
-          <Select value={serviceTypeId} onValueChange={(value) => setServiceTypeId(value ?? '')}>
+          <Select
+            items={Object.fromEntries(serviceTypes.map((item) => [item.id, item.name]))}
+            value={serviceTypeId}
+            onValueChange={(value) => setServiceTypeId(value ?? '')}
+          >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Selecione" />
             </SelectTrigger>
@@ -184,8 +188,8 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
           <span>
             <span className="block font-medium">O motoboy informa na entrega</span>
             <span className="block text-xs text-muted-foreground">
-              Para quando o cliente ainda não passou o endereço. A distância e o valor saem
-              da localização do motoboy no momento da entrega — o pedido fica sem valor até lá.
+              Para quando o cliente ainda não passou o endereço. A distância e o valor saem da
+              localização do motoboy no momento da entrega — o pedido fica sem valor até lá.
             </span>
           </span>
         </label>
@@ -193,56 +197,60 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
 
       {!destinationKnownAtCreation && (
         <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          Este pedido será criado sem endereço de entrega e sem valor. Os dois passam a
-          existir quando o motoboy marcar a entrega como concluída.
+          Este pedido será criado sem endereço de entrega e sem valor. Os dois passam a existir
+          quando o motoboy marcar a entrega como concluída.
         </p>
       )}
 
       {destinationKnownAtCreation && (
-      <>
-      <div className="space-y-1.5">
-        <Label htmlFor="dropoff-street">Endereço de entrega</Label>
-        <Input
-          id="dropoff-street"
-          placeholder="Rua"
-          value={street}
-          onChange={(e) => setStreet(e.target.value)}
-        />
-      </div>
-      <div className="grid grid-cols-[1fr_100px] gap-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="dropoff-number">Número</Label>
-          <Input id="dropoff-number" value={number} onChange={(e) => setNumber(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="dropoff-complement">Complemento</Label>
-          <Input
-            id="dropoff-complement"
-            value={complement}
-            onChange={(e) => setComplement(e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="grid grid-cols-[1fr_80px] gap-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="dropoff-city">Cidade</Label>
-          <Input id="dropoff-city" value={city} onChange={(e) => setCity(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="dropoff-state">UF</Label>
-          <Input
-            id="dropoff-state"
-            maxLength={2}
-            value={state}
-            onChange={(e) => setState(e.target.value.toUpperCase())}
-          />
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="dropoff-zip">CEP</Label>
-        <Input id="dropoff-zip" value={zip} onChange={(e) => setZip(e.target.value)} />
-      </div>
-      </>
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="dropoff-street">Endereço de entrega</Label>
+            <Input
+              id="dropoff-street"
+              placeholder="Rua"
+              value={street}
+              onChange={(e) => setStreet(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-[1fr_100px] gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="dropoff-number">Número</Label>
+              <Input
+                id="dropoff-number"
+                value={number}
+                onChange={(e) => setNumber(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dropoff-complement">Complemento</Label>
+              <Input
+                id="dropoff-complement"
+                value={complement}
+                onChange={(e) => setComplement(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-[1fr_80px] gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="dropoff-city">Cidade</Label>
+              <Input id="dropoff-city" value={city} onChange={(e) => setCity(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dropoff-state">UF</Label>
+              <Input
+                id="dropoff-state"
+                maxLength={2}
+                value={state}
+                onChange={(e) => setState(e.target.value.toUpperCase())}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="dropoff-zip">CEP</Label>
+            <Input id="dropoff-zip" value={zip} onChange={(e) => setZip(e.target.value)} />
+          </div>
+        </>
       )}
 
       <div className="space-y-2">

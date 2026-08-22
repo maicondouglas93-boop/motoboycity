@@ -31,6 +31,7 @@ export interface DeliveryListItem {
   companyId: string;
   companyName: string;
   batchId: string | null;
+  serviceTypeId: string;
   serviceTypeName: string;
   status: DeliveryStatus;
   destinationKnownAtCreation: boolean;

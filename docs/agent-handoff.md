@@ -2421,3 +2421,57 @@ Postgres é dedicado e as credenciais vêm do workflow.
 
 Vale também considerar mudar o `.env` de desenvolvimento para não ser o padrão
 que qualquer ferramenta pega sozinha.
+
+## Atualização — 2026-08-22: clonar entrega
+
+Segundo item do levantamento. O botão vive no card do pedido selecionado da
+central, ao lado de "Abrir detalhes" — que é o único lugar onde ele cabe sem
+aninhar `<button>` dentro de `<button>`, já que a linha da fila inteira é um
+botão de seleção.
+
+### Duas coisas que o clone não copia, de propósito
+
+**O número externo.** Ele identifica UM pedido no sistema da própria loja, e é
+por ele que a conciliação acontece depois. Copiá-lo criaria duas entregas
+alegando ser o mesmo pedido.
+
+**Endereço sem coordenadas.** O formulário exige uma sugestão escolhida no
+Google porque o despacho mede distância pelo par lat/lng. Copiar rua e número
+sem as coordenadas montaria um destino que parece completo e só falha no
+cálculo — a tela avisa e pede que a pessoa reescolha. É a mesma regra que a
+coleta já adotou em `ffa7dbf`.
+
+Há um terceiro aviso, para quando a modalidade do pedido original foi desativada
+desde então: o campo cai no padrão em vez de ficar em branco sem explicação.
+
+### Um bug pré-existente que apareceu junto
+
+Com o clone pronto, a modalidade aparecia como `st-2` em vez de "Expresso".
+Conferido que **não era do clone**: sem clonar nada, o campo já mostrava
+`st-1`. Em produção seria um UUID cru no lugar do nome, no formulário mais usado
+do painel.
+
+A causa é o contrato do Base UI: `<Select.Value>` mostra o **valor** do item
+selecionado, e o valor ali é o id. O próprio componente resolve isso com a prop
+`items` no Root — "When specified, `<Select.Value>` renders the label of the
+selected item instead of the raw value". Corrigido nos três lugares que tinham
+o mesmo padrão: os dois formulários de pedido da empresa e a tabela de preços
+do admin.
+
+### Contrato
+
+`DeliveryListItem` ganhou `serviceTypeId`. O id precisa acompanhar o nome porque
+clonar reseleciona a modalidade, e casar por nome quebraria numa renomeação ou
+com nomes repetidos. O `serviceType` já vinha por `include`, então não houve
+consulta nova.
+
+### Sem teste, e por quê
+
+`buildCloneSeed` é função pura e as decisões acima mereciam teste, mas
+**`apps/company-web` não tem runner de teste nenhum** — o CI roda só os testes
+da API e do driver-app. Introduzir Jest ou Vitest no painel é uma decisão à
+parte, que muda o CI. A lógica ficou isolada em `clone-delivery.ts` justamente
+para ser testável no dia em que houver runner.
+
+A verificação foi por página temporária, exercitando os três casos: clone
+completo, destino sem coordenadas e modalidade desativada.

@@ -5,13 +5,15 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { io } from 'socket.io-client';
-import { CircleDot, MapPin, Search, Wifi, WifiOff } from 'lucide-react';
+import { CircleDot, Copy, MapPin, Search, Wifi, WifiOff } from 'lucide-react';
 import { StatusChip, statusLabel } from '@/components/orders/status-chip';
 import { OrderRow } from '@/components/orders/order-row';
 import { AddressSetupForm } from '@/components/orders/address-setup-form';
 import { CompanyOperationsMap } from '@/components/operations/company-operations-map';
 import { OperationalOrderForm } from '@/components/operations/operational-order-form';
+import { buildCloneSeed, type CloneSeed } from '@/components/operations/clone-delivery';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
@@ -25,6 +27,16 @@ export default function CompanyHomePage() {
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * O `nonce` existe para clonar o MESMO pedido duas vezes seguidas continuar
+   * remontando o formulario. Sem ele, a `key` nao mudaria e o segundo clique
+   * nao teria efeito visivel.
+   */
+  const [clone, setClone] = useState<{
+    seed: CloneSeed;
+    displayNumber: number;
+    nonce: number;
+  } | null>(null);
   const [connected, setConnected] = useState(false);
 
   const addressQuery = useQuery({
@@ -72,6 +84,7 @@ export default function CompanyHomePage() {
   );
   const selected = visibleOrders.find((order) => order.id === selectedId) ?? null;
   const selectOrder = useCallback((id: string) => setSelectedId(id), []);
+  const serviceTypes = useMemo(() => serviceTypesQuery.data ?? [], [serviceTypesQuery.data]);
 
   if (!token) return <p className="text-sm text-muted-foreground">Faça login para continuar.</p>;
   if (addressQuery.isLoading)
@@ -116,9 +129,11 @@ export default function CompanyHomePage() {
           </CardHeader>
           <CardContent className="max-h-[calc(100vh-215px)] overflow-y-auto pt-4">
             <OperationalOrderForm
+              key={clone?.nonce ?? 'novo'}
               token={token}
               pickupAddress={pickupAddress}
-              serviceTypes={serviceTypesQuery.data ?? []}
+              serviceTypes={serviceTypes}
+              clone={clone}
             />
           </CardContent>
         </Card>
@@ -173,12 +188,29 @@ export default function CompanyHomePage() {
                 {selected.driver && (
                   <p className="text-muted-foreground">Motoboy: {selected.driver.name}</p>
                 )}
-                <Link
-                  className="inline-flex font-medium underline decoration-colete decoration-2 underline-offset-4"
-                  href={`/pedidos/${selected.id}`}
-                >
-                  Abrir detalhes
-                </Link>
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setClone((current) => ({
+                        seed: buildCloneSeed(selected, serviceTypes),
+                        displayNumber: selected.displayNumber,
+                        nonce: (current?.nonce ?? 0) + 1,
+                      }))
+                    }
+                  >
+                    <Copy className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Clonar
+                  </Button>
+                  <Link
+                    className="font-medium underline decoration-colete decoration-2 underline-offset-4"
+                    href={`/pedidos/${selected.id}`}
+                  >
+                    Abrir detalhes
+                  </Link>
+                </div>
               </CardContent>
             </Card>
           )}
