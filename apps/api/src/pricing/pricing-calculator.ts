@@ -17,6 +17,18 @@ export interface PricingCalculatorInput {
   returnFee: number | null;
   requiresReturn: boolean;
   driverCommissionPercentage: number;
+  /**
+   * Taxa adicional vigente no momento, ja resolvida por quem chama — este
+   * modulo nao sabe de calendario nem de interruptor, so aplica o valor.
+   * `null` quando nenhuma taxa esta valendo.
+   */
+  surcharge: {
+    label: string;
+    type: 'PERCENTAGE' | 'FIXED';
+    value: number;
+    /** Quanto do adicional vai para o entregador, em % do proprio adicional. */
+    driverSharePercentage: number;
+  } | null;
 }
 
 export interface PricingCalculatorResult {
@@ -25,6 +37,9 @@ export interface PricingCalculatorResult {
   distanceFee: number;
   subtotal: number;
   returnValue: number;
+  /** Nome congelado da taxa aplicada, para a fatura poder explicar a cobranca. */
+  surchargeLabel: string | null;
+  surchargeValue: number;
   totalValue: number;
   driverValue: number;
   platformValue: number;
@@ -82,16 +97,42 @@ export function calculatePricing(input: PricingCalculatorInput): PricingCalculat
     returnValue = input.returnFee;
   }
 
+  /**
+   * A taxa adicional incide sobre o subtotal, nao sobre o total: cobrar
+   * percentual em cima do retorno faria a mesma entrega custar mais so por
+   * exigir volta, o que ja e cobrado a parte.
+   */
+  let surchargeValue = 0;
+  let surchargeDriverPart = 0;
+  if (input.surcharge) {
+    surchargeValue = roundToCents(
+      input.surcharge.type === 'PERCENTAGE'
+        ? subtotal * (input.surcharge.value / 100)
+        : input.surcharge.value,
+    );
+    surchargeDriverPart = roundToCents(
+      surchargeValue * (input.surcharge.driverSharePercentage / 100),
+    );
+  }
+
   const driverBasePart = roundToCents(subtotal * (input.driverCommissionPercentage / 100));
-  const platformValue = roundToCents(subtotal - driverBasePart);
-  const driverValue = roundToCents(driverBasePart + returnValue);
-  const totalValue = roundToCents(subtotal + returnValue);
+  const totalValue = roundToCents(subtotal + returnValue + surchargeValue);
+  const driverValue = roundToCents(driverBasePart + returnValue + surchargeDriverPart);
+  /**
+   * Residuo do total, e nao formula propria: somar tres parcelas arredondadas
+   * separadamente deixaria centavos sobrando ou faltando, e a invariante
+   * driverValue + platformValue === totalValue quebraria em alguma combinacao
+   * de comissao.
+   */
+  const platformValue = roundToCents(totalValue - driverValue);
 
   return {
     chargeableDistanceKm,
     distanceFee,
     subtotal,
     returnValue,
+    surchargeLabel: input.surcharge?.label ?? null,
+    surchargeValue,
     totalValue,
     driverValue,
     platformValue,

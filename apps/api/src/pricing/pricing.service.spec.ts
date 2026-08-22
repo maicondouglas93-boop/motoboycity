@@ -9,6 +9,7 @@ describe('PricingService', () => {
   let prisma: {
     region: { findFirst: jest.Mock };
     pricingTable: { findFirst: jest.Mock };
+    surcharge: { findMany: jest.Mock };
   };
   let platformSettingsService: { get: jest.Mock };
 
@@ -16,6 +17,8 @@ describe('PricingService', () => {
     prisma = {
       region: { findFirst: jest.fn() },
       pricingTable: { findFirst: jest.fn() },
+      // Sem taxa adicional configurada, que e o estado padrao da operacao.
+      surcharge: { findMany: jest.fn().mockResolvedValue([]) },
     };
     platformSettingsService = { get: jest.fn() };
 

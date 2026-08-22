@@ -202,10 +202,12 @@ enum NotificationChannel {
   EMAIL
 }
 
+/// Como o adicional e calculado. O MOTIVO da taxa (chuva, feriado, madrugada)
+/// deixou de ser enum e virou nome livre, para o admin criar quantas quiser
+/// sem depender de uma migracao a cada motivo novo.
 enum SurchargeType {
-  RAIN
-  PEAK_HOUR
-  OTHER
+  PERCENTAGE
+  FIXED
 }
 
 // ============================================================================
@@ -522,11 +524,18 @@ model Delivery {
 
   /// Nulos enquanto destinationKnownAtCreation=false e a entrega não foi
   /// concluída; congelados na criação quando destinationKnownAtCreation=true.
-  totalValue    Decimal?      @db.Decimal(10, 2)
-  driverValue   Decimal?      @db.Decimal(10, 2)
-  platformValue Decimal?      @db.Decimal(10, 2)
-  paymentMethod PaymentMethod
-  invoiceId     String?
+  totalValue    Decimal? @db.Decimal(10, 2)
+  driverValue   Decimal? @db.Decimal(10, 2)
+  platformValue Decimal? @db.Decimal(10, 2)
+
+  /// Taxa adicional vigente no momento da criação, congelada como nome e valor
+  /// e NÃO como chave estrangeira: renomear ou excluir a taxa depois não pode
+  /// reescrever o que a fatura já emitida dizia. Nulos quando nenhuma taxa
+  /// estava valendo.
+  surchargeLabel String?       @db.VarChar(80)
+  surchargeValue Decimal?      @db.Decimal(10, 2)
+  paymentMethod  PaymentMethod
+  invoiceId      String?
 
   /// Metadados operacionais informados pela empresa. São opcionais para
   /// preservar pedidos antigos e integrações que ainda não os enviam.
@@ -956,21 +965,65 @@ model PlatformSettings {
   @@map("platform_settings")
 }
 
-/// Sobretaxa configurável (chuva, horário de pico, etc.) — generalização
-/// de "Tarifa Dinâmica" + "Taxa de Chuva" da Fase 0.
+/// Taxa adicional configurável pelo admin — chuva, feriado, madrugada, alta
+/// demanda. Era um esqueleto da Fase 0 com o motivo em enum; virou nome livre
+/// para o admin criar quantas quiser sem migração a cada motivo novo.
 model Surcharge {
   id       String        @id @default(uuid())
   regionId String
+  name     String        @db.VarChar(80)
   type     SurchargeType
+  /// Percentual sobre o subtotal, ou valor fixo em reais, conforme `type`.
   value    Decimal       @db.Decimal(10, 2)
-  active   Boolean       @default(true)
 
-  region Region @relation(fields: [regionId], references: [id])
+  /// Quanto do adicional vai para o entregador. É percentual do próprio
+  /// adicional e não do pedido, separado da comissão normal: a operação pode
+  /// querer repassar todo o adicional de chuva e nada de outro.
+  driverSharePercentage Decimal @default(0) @db.Decimal(5, 2)
+
+  /// Interruptor geral. Desativar não apaga — o histórico das entregas que já
+  /// pagaram a taxa continua explicável.
+  active Boolean @default(true)
+
+  /// O interruptor manual, o que o admin liga quando começa a chover.
+  /// Independente das janelas: qualquer um dos dois valendo aplica a taxa.
+  manuallyActive Boolean @default(false)
+
+  region    Region              @relation(fields: [regionId], references: [id])
+  schedules SurchargeSchedule[]
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([regionId, type])
+  @@index([regionId, active])
   @@map("surcharges")
+}
+
+/// Janela em que a taxa vale sozinha, sem ninguém acionar o interruptor.
+model SurchargeSchedule {
+  id          String @id @default(uuid())
+  surchargeId String
+
+  /// 0 = domingo .. 6 = sábado. Null vale para qualquer dia da semana, que é o
+  /// caso de uma janela de datas como feriado.
+  weekday Int?
+
+  /// Janela de datas CIVIS, guardadas como texto "AAAA-MM-DD" de propósito: um
+  /// DateTime aqui viraria meia-noite UTC e deslocaria o feriado em três horas
+  /// no fuso da operação. Null nos dois significa "sem limite de data".
+  startDate String? @db.VarChar(10)
+  endDate   String? @db.VarChar(10)
+
+  /// Minutos desde a meia-noite no fuso operacional. `endMinute` menor ou igual
+  /// a `startMinute` significa janela que atravessa a meia-noite — o caso da
+  /// madrugada.
+  startMinute Int
+  endMinute   Int
+
+  surcharge Surcharge @relation(fields: [surchargeId], references: [id], onDelete: Cascade)
+
+  @@index([surchargeId])
+  @@map("surcharge_schedules")
 }
 
 // ============================================================================

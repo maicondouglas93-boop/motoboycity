@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { calculatePricing, type PricingCalculatorResult } from './pricing-calculator';
+import { isSurchargeActiveAt } from './surcharge-window';
 
 export interface PricingQuoteInput {
   /**
@@ -20,6 +21,13 @@ export interface PricingQuoteInput {
   serviceTypeId: string;
   distanceKm: number;
   requiresReturn: boolean;
+  /**
+   * Instante usado para decidir quais taxas adicionais estao valendo. Existe
+   * como parametro, e nao `new Date()` la dentro, para o calculo ser
+   * reproduzivel — recalcular uma entrega antiga precisa reaplicar a taxa que
+   * valia naquela hora, nao a de agora.
+   */
+  at?: Date;
 }
 
 @Injectable()
@@ -58,6 +66,8 @@ export class PricingService {
       );
     }
 
+    const surcharge = await this.resolveSurcharge(region.id, input.at ?? new Date());
+
     return calculatePricing({
       distanceKm: input.distanceKm,
       baseFee: Number(pricingTable.baseFee),
@@ -67,6 +77,53 @@ export class PricingService {
       returnFee: pricingTable.returnFee === null ? null : Number(pricingTable.returnFee),
       requiresReturn: input.requiresReturn,
       driverCommissionPercentage: settings.driverCommissionPercentage,
+      surcharge,
     });
+  }
+
+  /**
+   * Qual taxa adicional esta valendo agora — no maximo UMA.
+   *
+   * Somar taxas seria a decisao perigosa: numa sexta feriado chovendo, tres
+   * regras se empilhariam e o cliente pagaria um acrescimo que ninguem
+   * configurou de proposito. Com uma so, o pior caso e a taxa mais recente,
+   * que e um numero que o admin escolheu.
+   *
+   * O criterio de desempate e a criacao mais recente: e o que o admin acabou
+   * de mexer, e a tela mostra qual esta valendo para nao virar surpresa.
+   */
+  private async resolveSurcharge(
+    regionId: string,
+    at: Date,
+  ): Promise<{
+    label: string;
+    type: 'PERCENTAGE' | 'FIXED';
+    value: number;
+    driverSharePercentage: number;
+  } | null> {
+    const candidates = await this.prisma.surcharge.findMany({
+      where: { regionId, active: true },
+      include: { schedules: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const vigente = candidates.find((surcharge) =>
+      isSurchargeActiveAt(
+        {
+          active: surcharge.active,
+          manuallyActive: surcharge.manuallyActive,
+          schedules: surcharge.schedules,
+        },
+        at,
+      ),
+    );
+    if (!vigente) return null;
+
+    return {
+      label: vigente.name,
+      type: vigente.type,
+      value: Number(vigente.value),
+      driverSharePercentage: Number(vigente.driverSharePercentage),
+    };
   }
 }

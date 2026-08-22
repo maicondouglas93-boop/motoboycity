@@ -14,6 +14,12 @@ const settings = [
     description: 'Consulte e altere os valores que são congelados na criação de cada pedido.',
   },
   {
+    href: '/configuracoes/taxas',
+    title: 'Taxas adicionais',
+    description:
+      'Acréscimos para chuva, feriado ou madrugada — com nome, valor e janela definidos por você.',
+  },
+  {
     href: '/configuracoes/operacao',
     title: 'Operação',
     description:

@@ -44,3 +44,36 @@ export interface UpdatePlatformSettingsInput {
   dispatchOfferTimeoutSeconds?: number;
   returnProximityRadiusMeters?: number;
 }
+
+export type SurchargeType = 'PERCENTAGE' | 'FIXED';
+
+export interface SurchargeScheduleItem {
+  id: string;
+  /** 0 = domingo .. 6 = sábado. `null` vale para qualquer dia. */
+  weekday: number | null;
+  /** Datas civis "AAAA-MM-DD". `null` significa sem limite daquele lado. */
+  startDate: string | null;
+  endDate: string | null;
+  /** Minutos desde a meia-noite no fuso da operação. */
+  startMinute: number;
+  endMinute: number;
+}
+
+export interface SurchargeItem {
+  id: string;
+  name: string;
+  type: SurchargeType;
+  value: number;
+  driverSharePercentage: number;
+  active: boolean;
+  /** O interruptor manual — o que o admin liga quando começa a chover. */
+  manuallyActive: boolean;
+  /**
+   * Se esta taxa está valendo AGORA, resolvido no servidor. Vem pronto porque
+   * o painel não tem como avaliar janela no fuso da operação sem duplicar a
+   * regra — e duas cópias de uma regra de dinheiro divergem.
+   */
+  activeNow: boolean;
+  schedules: SurchargeScheduleItem[];
+  createdAt: string;
+}

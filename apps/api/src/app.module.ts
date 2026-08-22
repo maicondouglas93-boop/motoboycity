@@ -6,6 +6,7 @@ import { AdminCompaniesModule } from './admin/companies/admin-companies.module';
 import { AdminDriversModule } from './admin/drivers/admin-drivers.module';
 import { AdminPlatformSettingsModule } from './admin/platform-settings/admin-platform-settings.module';
 import { AdminPricingTablesModule } from './admin/pricing-tables/admin-pricing-tables.module';
+import { AdminSurchargesModule } from './admin/surcharges/admin-surcharges.module';
 import { AdminReportsModule } from './admin/reports/admin-reports.module';
 import { AdminOperationsModule } from './admin/operations/admin-operations.module';
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
@@ -56,6 +57,7 @@ import { LivePresenceModule } from './live-presence/live-presence.module';
     AdminDriversModule,
     AdminServiceTypesModule,
     AdminPricingTablesModule,
+    AdminSurchargesModule,
     AdminReportsModule,
     AdminOperationsModule,
     AdminPlatformSettingsModule,

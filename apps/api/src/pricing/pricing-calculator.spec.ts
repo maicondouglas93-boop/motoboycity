@@ -11,6 +11,9 @@ const base = {
   returnFee: 3,
   requiresReturn: false,
   driverCommissionPercentage: 80,
+  // Sem taxa adicional: os testes abaixo sao os de antes da taxa existir, e
+  // continuam passando sem alteracao.
+  surcharge: null,
 };
 
 describe('calculatePricing', () => {
@@ -149,6 +152,91 @@ describe('calculatePricing', () => {
         calculatePricing({ ...comBandeirada, includedDistanceKm: -1, distanceKm: 5 }),
       ).toThrow('includedDistanceKm não pode ser negativo');
     });
+  });
+
+  describe('taxa adicional', () => {
+    const chuvaPercentual = {
+      label: 'Taxa de chuva',
+      type: 'PERCENTAGE' as const,
+      value: 20,
+      driverSharePercentage: 100,
+    };
+
+    it('percentual incide sobre o subtotal', () => {
+      const result = calculatePricing({ ...base, distanceKm: 5, surcharge: chuvaPercentual });
+
+      // subtotal 12,50; 20% = 2,50
+      expect(result.surchargeValue).toBe(2.5);
+      expect(result.totalValue).toBe(15);
+      expect(result.surchargeLabel).toBe('Taxa de chuva');
+    });
+
+    it('valor fixo entra inteiro, independente da distância', () => {
+      const fixa = { ...chuvaPercentual, type: 'FIXED' as const, value: 3 };
+      const curta = calculatePricing({ ...base, distanceKm: 1, surcharge: fixa });
+      const longa = calculatePricing({ ...base, distanceKm: 20, surcharge: fixa });
+
+      expect(curta.surchargeValue).toBe(3);
+      expect(longa.surchargeValue).toBe(3);
+    });
+
+    it('não incide sobre o retorno', () => {
+      // Cobrar percentual em cima do retorno faria a mesma entrega custar mais
+      // so por exigir volta, o que ja e cobrado a parte.
+      const comRetorno = calculatePricing({
+        ...base,
+        distanceKm: 5,
+        requiresReturn: true,
+        surcharge: chuvaPercentual,
+      });
+
+      expect(comRetorno.surchargeValue).toBe(2.5);
+    });
+
+    it('repasse de 100% leva todo o adicional ao entregador', () => {
+      const result = calculatePricing({ ...base, distanceKm: 5, surcharge: chuvaPercentual });
+
+      // Sem taxa: entregador 10, plataforma 2,50. A taxa inteira vai pro
+      // entregador, entao a plataforma nao muda.
+      expect(result.driverValue).toBe(12.5);
+      expect(result.platformValue).toBe(2.5);
+    });
+
+    it('repasse de 0% deixa todo o adicional com a plataforma', () => {
+      const result = calculatePricing({
+        ...base,
+        distanceKm: 5,
+        surcharge: { ...chuvaPercentual, driverSharePercentage: 0 },
+      });
+
+      expect(result.driverValue).toBe(10);
+      expect(result.platformValue).toBe(5);
+    });
+
+    it('sem taxa, os valores não mudam em nada', () => {
+      const semTaxa = calculatePricing({ ...base, distanceKm: 5 });
+
+      expect(semTaxa.surchargeValue).toBe(0);
+      expect(semTaxa.surchargeLabel).toBeNull();
+      expect(semTaxa.totalValue).toBe(12.5);
+    });
+
+    it.each([0, 33.33, 50, 66.67, 100])(
+      'invariante driverValue + platformValue === totalValue com repasse de %s%%',
+      (share) => {
+        const result = calculatePricing({
+          ...base,
+          distanceKm: 7,
+          requiresReturn: true,
+          driverCommissionPercentage: 66.67,
+          surcharge: { ...chuvaPercentual, driverSharePercentage: share },
+        });
+
+        expect(Math.round((result.driverValue + result.platformValue) * 100) / 100).toBe(
+          result.totalValue,
+        );
+      },
+    );
   });
 
   it.each([0, 20, 33.33, 50, 66.67, 80, 100])(

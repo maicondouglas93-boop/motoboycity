@@ -10,6 +10,7 @@ export * from './admin/create-service-type.schema';
 export * from './admin/update-service-type.schema';
 export * from './admin/create-pricing-table.schema';
 export * from './admin/list-pricing-tables-query.schema';
+export * from './admin/surcharge.schema';
 export * from './admin/update-platform-settings.schema';
 export * from './admin/replace-driver-service-types.schema';
 export * from './company/upsert-company-address.schema';

@@ -179,6 +179,9 @@ export class DeliveriesService {
     let driverValue: number | null = null;
     let platformValue: number | null = null;
     let returnValue: number | null = null;
+    // Nome e valor da taxa adicional vigente, congelados junto com o preco.
+    let surchargeLabel: string | null = null;
+    let surchargeValue: number | null = null;
 
     if (destinationKnownAtCreation) {
       const dropoffAddress = payload.dropoffAddress!;
@@ -209,6 +212,8 @@ export class DeliveriesService {
       driverValue = quote.driverValue;
       platformValue = quote.platformValue;
       returnValue = quote.returnValue > 0 ? quote.returnValue : null;
+      surchargeLabel = quote.surchargeLabel;
+      surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
     }
 
     const initialStatus: DeliveryStatus = payload.scheduledAt ? 'SCHEDULED' : 'AWAITING_DRIVER';
@@ -228,6 +233,8 @@ export class DeliveriesService {
           totalValue,
           driverValue,
           platformValue,
+          surchargeLabel,
+          surchargeValue,
           paymentMethod: 'BILLED',
           recipientName: payload.recipientName,
           recipientPhone: payload.recipientPhone,
@@ -905,6 +912,10 @@ export class DeliveriesService {
     let driverValue = delivery.driverValue === null ? null : Number(delivery.driverValue);
     let platformValue = delivery.platformValue === null ? null : Number(delivery.platformValue);
     let returnValue = delivery.returnValue === null ? null : Number(delivery.returnValue);
+    // Parte do congelamento: a entrega sem destino conhecido so ganha preco —
+    // e taxa — quando o motoboy confirma a entrega e a distancia existe.
+    let surchargeLabel = delivery.surchargeLabel;
+    let surchargeValue = delivery.surchargeValue === null ? null : Number(delivery.surchargeValue);
     let capturedLat: number | null = null;
     let capturedLng: number | null = null;
 
@@ -960,6 +971,8 @@ export class DeliveriesService {
       driverValue = quote.driverValue;
       platformValue = quote.platformValue;
       returnValue = quote.returnValue > 0 ? quote.returnValue : null;
+      surchargeLabel = quote.surchargeLabel;
+      surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
       capturedLat = payload.lat;
       capturedLng = payload.lng;
     }
@@ -994,6 +1007,8 @@ export class DeliveriesService {
             totalValue,
             driverValue,
             platformValue,
+            surchargeLabel,
+            surchargeValue,
             returnValue,
           },
         });

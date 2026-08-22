@@ -2775,3 +2775,82 @@ seja reofertado, ou dois motoboys apareceriam para a mesma entrega.
 de "ainda procurando". Pedido cancelado também não tem entregador, então ele
 continuava girando o spinner e o cabeçalho seguia dizendo "acompanhe até um
 entregador aceitar". O sinal correto é o status, não a ausência de motorista.
+
+## Atualização — 2026-08-22: taxas adicionais configuráveis
+
+Substitui a "taxa de chuva" fixa que o levantamento tinha listado. A mesma
+mecânica serve para chuva, feriado, madrugada e alta demanda, com o nome que o
+admin escolher — sem depender de uma migração a cada motivo novo.
+
+**Existia um esqueleto.** `Surcharge` estava no schema desde a Fase 0, com
+`regionId`, `type` (enum RAIN/PEAK_HOUR/OTHER), `value` e `active`, sem uma
+única referência em código e sem nenhuma linha gravada. Foi evoluído em vez de
+duplicado: o enum de MOTIVO virou enum de CÁLCULO (PERCENTAGE/FIXED) e o motivo
+passou a ser nome livre.
+
+### Duas formas de valer, e basta uma
+
+O **interruptor manual** é o que o admin liga quando começa a chover. As
+**janelas agendadas** cobrem o previsível: dia da semana com faixa de horário,
+período de datas, ou os dois.
+
+`apps/api/src/pricing/surcharge-window.ts` decide se uma taxa está valendo num
+instante. Módulo puro, 17 testes, com os casos que enganam:
+
+- **atravessa a meia-noite** — fim antes do início significa madrugada;
+- **"sexta à noite" continua sexta à 1h da manhã** — uma janela de sexta 22h–2h
+  pertence à noite de sexta, mesmo já sendo sábado no calendário;
+- **faixa fechada no início e aberta no fim** — sem isso, 18h–23h e 23h–2h se
+  sobreporiam exatamente às 23h;
+- **tudo no relógio da operação** — janela de sexta em UTC cairia parcialmente
+  no sábado, e feriado começaria três horas cedo.
+
+### Uma decisão de risco: no máximo UMA taxa aplica
+
+Somar seria perigoso: numa sexta feriado chovendo, três regras se empilhariam e
+o cliente pagaria um acréscimo que ninguém configurou de propósito. Com uma só,
+o pior caso é a taxa mais recente — um número que o admin escolheu. O critério
+de desempate é a criação mais recente, e a tela mostra qual está valendo.
+
+### O que fica congelado
+
+`Delivery` ganhou `surchargeLabel` e `surchargeValue` — nome e valor, **não**
+chave estrangeira. Renomear ou excluir a taxa depois não pode reescrever o que a
+fatura já emitida dizia. É a mesma regra que congela o preço.
+
+O adicional incide sobre o **subtotal**, não sobre o total: cobrar percentual em
+cima do retorno faria a mesma entrega custar mais só por exigir volta, o que já
+é cobrado à parte.
+
+`platformValue` passou a ser o resíduo de `totalValue - driverValue`. Somar três
+parcelas arredondadas separadamente deixaria centavos sobrando, e a invariante
+`driverValue + platformValue === totalValue` quebraria em alguma combinação —
+há teste cobrindo comissão e repasse fracionados juntos.
+
+### Detalhes do CRUD
+
+Editar **substitui as janelas por inteiro**. Casar janelas antigas com novas
+exigiria que o painel devolvesse ids, e o primeiro id perdido viraria uma janela
+órfã cobrando sozinha.
+
+Desativar **também desliga o interruptor manual**. Sem isso, uma taxa arquivada
+com o manual esquecido em ligado voltaria a cobrar no instante da reativação.
+
+`activeNow` vem resolvido do servidor. Uma segunda cópia da regra no navegador
+divergiria da que cobra de verdade.
+
+### Verificação, e o que não deu para verificar
+
+350 testes unitários, typecheck, lint e os 4 builds. Um e2e novo cobre o CRUD
+inteiro — incluindo a recusa de ligar taxa desativada e a substituição das
+janelas — mas **roda só no CI**, pela armadilha de ambiente já registrada.
+
+A tela foi conferida em página temporária com dados injetados no cache, porque a
+sessão do admin caiu e eu não faço login. Ficou visível o que importa: badge
+"Valendo agora", a anotação "(vira o dia)" nas janelas de madrugada, e a taxa
+desativada sem botão de interruptor.
+
+### Fora de escopo, e vale registrar
+
+A plataforma concorrente tem **lista de clientes isentos** por taxa. Não entrou
+aqui — é outro eixo, e o pedido foi nome, regra, ativar, desativar e editar.
