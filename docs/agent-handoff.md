@@ -2710,3 +2710,36 @@ isso o botão de enviar ficaria fora de alcance.
 Criação avulsa e lote de duas, confirmados no banco: `destinationKnownAtCreation`
 falso, `paymentMethod` BILLED, status AWAITING_DRIVER, e o `requiresReturn`
 chegando certo em ambos.
+
+### O modal não fecha mais ao chamar — ele vira acompanhamento
+
+Fechar no sucesso jogava a pessoa de volta para a central justamente no momento
+em que ela mais quer olhar a tela: o da espera. Agora o modal troca de papel —
+título vira "Acompanhando" e o corpo passa a listar as entregas criadas.
+
+Enquanto não há entregador, cada linha mostra o chip "Buscando motoboy", o
+cronômetro do estado e um spinner. Quando alguém aceita, o spinner dá lugar ao
+nome e ao telefone clicável, e o chip vira âmbar — a mesma cor que na fila
+significa motoboy na rua.
+
+O texto do topo acompanha: "acompanhe até um entregador aceitar" enquanto todas
+estão pendentes, "N de M ainda procurando" no meio do caminho, e "entregador a
+caminho" quando acabou. Um texto que continuasse dizendo "até aceitar" depois de
+aceito seria a tela mentindo para quem está olhando justamente para saber disso.
+
+**Sondagem, não socket.** A consulta reaproveita a chave `['company',
+'operations']` da central: uma requisição para todas as entregas em vez de uma
+por id, e cache compartilhado. Abrir um segundo socket aqui duplicaria a conexão
+que a central já mantém, e o painel não tem hook compartilhado de tempo real.
+Três segundos é imperceptível para "alguém aceitou?", e o TanStack usa o menor
+intervalo entre observadores ativos — então isso só acelera enquanto o modal
+está aberto.
+
+Fechar encerra o acompanhamento; as entregas seguem na central, que é onde elas
+vivem depois de criadas. "Chamar outro" devolve o formulário limpo.
+
+Verificado no navegador: pedido #1163 criado pelo modal, painel mostrando
+"Procurando um entregador disponível...", e a transição para "Motoboy Aprovado
+E2E · 33999887766" acontecendo **sozinha**, sem recarregar. O aceite foi
+simulado por UPDATE direto no banco de desenvolvimento, já que não há motoboy
+online ali — a linha ficou em ACCEPTED sem registro de oferta correspondente.
