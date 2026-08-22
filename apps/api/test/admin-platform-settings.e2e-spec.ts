@@ -80,6 +80,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: null,
       returnProximityRadiusMeters: null,
+      businessHoursEnabled: false,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -96,6 +97,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
       returnProximityRadiusMeters: null,
+      businessHoursEnabled: false,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -120,6 +122,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
       returnProximityRadiusMeters: 150,
+      businessHoursEnabled: false,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
