@@ -3,9 +3,12 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useColorScheme,
 } from 'react-native';
@@ -26,7 +29,16 @@ import { useDispatchStore } from '../store/dispatchStore';
 import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
-type Operation = 'collect' | 'deliver' | 'return' | null;
+type Operation = 'collect' | 'deliver' | 'return' | 'fail' | null;
+
+type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
+
+const FAILURE_REASONS: { value: FailureReason; label: string }[] = [
+  { value: 'RECIPIENT_ABSENT', label: 'Ninguém atendeu' },
+  { value: 'ADDRESS_NOT_FOUND', label: 'Não encontrei o endereço' },
+  { value: 'RECIPIENT_REFUSED', label: 'O cliente recusou' },
+  { value: 'OTHER', label: 'Outro motivo' },
+];
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -89,6 +101,9 @@ function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): 
 export function DeliveryOperationScreen({ navigation, route }: Props) {
   const isDark = useColorScheme() === 'dark';
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
+  const [failureOpen, setFailureOpen] = useState(false);
+  const [failureReason, setFailureReason] = useState<FailureReason | null>(null);
+  const [failureNote, setFailureNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<Operation>(null);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -144,6 +159,23 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             fix ? { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy } : {},
           ),
         );
+      } else if (nextOperation === 'fail') {
+        // O GPS aqui e a unica prova de que o motoboy chegou ao destino antes
+        // de declarar insucesso — sem ele, "nao consegui entregar" seria
+        // indistinguivel de "nao fui".
+        const fix = await captureCurrentLocation();
+        setDelivery(
+          await deliveriesApi.fail(token, delivery.id, {
+            reason: failureReason ?? 'OTHER',
+            ...(failureNote.trim() && { note: failureNote.trim() }),
+            lat: fix.lat,
+            lng: fix.lng,
+            ...(fix.accuracy !== undefined && { accuracy: fix.accuracy }),
+          }),
+        );
+        setFailureOpen(false);
+        setFailureReason(null);
+        setFailureNote('');
       } else {
         const fix = await captureCurrentLocation();
         const result = await deliveriesApi.completeReturn(token, delivery.id, fix);
@@ -204,11 +236,17 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           }
         : delivery.status === 'DELIVERED'
           ? { kind: 'return' as const, label: 'Capturar GPS e concluir retorno' }
-          : null;
+          : delivery.status === 'FAILED'
+            ? // Mesma confirmacao de retorno: a entrega nao deu certo, mas o
+              // pedido so fecha quando a mercadoria voltar para a loja.
+              { kind: 'return' as const, label: 'Confirmar devolução na loja' }
+            : null;
   const routeAddress =
     delivery.status === 'COLLECTED'
       ? dropoff
-      : delivery.status === 'ACCEPTED' || delivery.status === 'DELIVERED'
+      : delivery.status === 'ACCEPTED' ||
+          delivery.status === 'DELIVERED' ||
+          delivery.status === 'FAILED'
         ? pickup
         : undefined;
   const routeDestination = navigationDestination(routeAddress);
@@ -315,10 +353,21 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           <PrimaryButton label={routeLabel} variant="outline" onPress={openExternalNavigation} />
         )}
         {action ? (
-          <PrimaryButton
-            label={busy ? 'Atualizando...' : action.label}
-            onPress={busy ? undefined : () => runOperation(action.kind)}
-          />
+          <>
+            <PrimaryButton
+              label={busy ? 'Atualizando...' : action.label}
+              onPress={busy ? undefined : () => runOperation(action.kind)}
+            />
+            {/* So depois de coletar: antes disso nao ha mercadoria em posse do
+                motoboy, entao nao existe o que devolver. */}
+            {delivery.status === 'COLLECTED' && (
+              <PrimaryButton
+                label="Não consegui entregar"
+                variant="outline"
+                onPress={busy ? undefined : () => setFailureOpen(true)}
+              />
+            )}
+          </>
         ) : (
           <>
             {delivery.status === 'COMPLETED' && (
@@ -332,6 +381,62 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           </>
         )}
       </View>
+
+      <Modal
+        visible={failureOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setFailureOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
+            <Text style={[styles.modalTitle, { color: text }]}>O que aconteceu?</Text>
+            <Text style={[styles.modalHint, { color: muted }]}>
+              A mercadoria volta para a loja e você recebe a corrida normalmente.
+            </Text>
+
+            {FAILURE_REASONS.map((item) => {
+              const selected = failureReason === item.value;
+              return (
+                <Pressable
+                  key={item.value}
+                  onPress={() => setFailureReason(item.value)}
+                  style={[styles.reason, selected && styles.reasonSelected]}
+                >
+                  <Text style={[styles.reasonLabel, { color: selected ? colors.primary : text }]}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+
+            {failureReason === 'OTHER' && (
+              <TextInput
+                style={[styles.noteInput, { color: text }]}
+                placeholder="Descreva o que aconteceu"
+                placeholderTextColor={muted}
+                value={failureNote}
+                onChangeText={setFailureNote}
+                multiline
+              />
+            )}
+
+            <PrimaryButton
+              label={busy ? 'Registrando...' : 'Registrar e voltar para a loja'}
+              onPress={
+                busy || !failureReason || (failureReason === 'OTHER' && !failureNote.trim())
+                  ? undefined
+                  : () => runOperation('fail')
+              }
+            />
+            <PrimaryButton
+              label="Cancelar"
+              variant="outline"
+              onPress={busy ? undefined : () => setFailureOpen(false)}
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -349,6 +454,30 @@ const styles = StyleSheet.create({
   company: { fontSize: 13, marginTop: 4 },
   value: { fontSize: 22, fontWeight: '700' },
   returnNotice: { fontSize: 13, fontWeight: '600', marginTop: 8 },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  modalCard: { padding: 20, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  modalCardLight: { backgroundColor: colors.background },
+  modalCardDark: { backgroundColor: colors.backgroundDark },
+  modalTitle: { fontSize: 18, fontWeight: '700' },
+  modalHint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },
+  reason: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  reasonSelected: { borderColor: colors.primary, borderWidth: 2 },
+  reasonLabel: { fontSize: 15, fontWeight: '600' },
+  noteInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    fontSize: 15,
+  },
   trackingNotice: { fontSize: 13, lineHeight: 19 },
   metadata: { fontSize: 13, marginTop: 4 },
   driverNote: { fontSize: 13, lineHeight: 19, marginTop: 10 },
