@@ -171,6 +171,18 @@ export default function AdminReportsPage() {
             ))}
           </section>
 
+          <p className="text-sm">
+            <Link
+              href="/relatorios/historico"
+              className="font-medium underline decoration-colete decoration-2 underline-offset-4"
+            >
+              Ver o histórico detalhado de entregas
+            </Link>{' '}
+            <span className="text-muted-foreground">
+              — entrega por entrega, com filtros e exportação para planilha.
+            </span>
+          </p>
+
           <PeakHoursChart peakHours={report.peakHours} />
 
           <section className="space-y-3">

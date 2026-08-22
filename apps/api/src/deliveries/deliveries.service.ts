@@ -114,6 +114,8 @@ export interface DeliveryListItem {
   externalOrderNumber: string | null;
   driverNote: string | null;
   customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
+  surchargeLabel: string | null;
+  surchargeValue: number | null;
   statusChangedAt: string;
   scheduledAt: string | null;
   createdAt: string;
@@ -1441,6 +1443,8 @@ export class DeliveriesService {
     driverNote: string | null;
     customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
     statusChangedAt: Date;
+    surchargeLabel: string | null;
+    surchargeValue: { toString(): string } | null;
     scheduledAt: Date | null;
     createdAt: Date;
   }): DeliveryListItem {
@@ -1452,6 +1456,8 @@ export class DeliveriesService {
       batchId: delivery.batchId,
       // O id acompanha o nome porque clonar um pedido precisa reselecionar a
       // modalidade, e casar por nome quebraria numa renomeacao.
+      surchargeLabel: delivery.surchargeLabel,
+      surchargeValue: delivery.surchargeValue === null ? null : Number(delivery.surchargeValue),
       serviceTypeId: delivery.serviceType.id,
       serviceTypeName: delivery.serviceType.name,
       status: delivery.status,

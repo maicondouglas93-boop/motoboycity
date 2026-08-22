@@ -3044,3 +3044,35 @@ ninguém confundir média com cobertura.
 Onze testes no módulo puro. Na tela, ordenar por coluna diferente reordena de
 verdade — conferido no navegador, inclusive com o tempo médio invertendo o
 sentido (menor é melhor) e os nulos indo para o fim em qualquer ordenação.
+
+## Atualização — 2026-08-22: histórico de entregas
+
+Último item da fila de relatórios, e o menor deles — porque o backend já
+existia.
+
+`GET /deliveries` já aceitava período, status, empresa e entregador, e o admin
+já tinha acesso. Não entrou endpoint novo: a lacuna era só a tela. Vale como
+lembrete de olhar o que existe antes de construir.
+
+### O que faltava mesmo era exportar
+
+O painel não tinha exportação em lugar nenhum, e é isso que separa um relatório
+de uma tela. `apps/admin-web/src/lib/csv.ts` resolve os três detalhes que
+decidem se o arquivo abre ou vira uma coluna só no Excel brasileiro:
+
+1. **separador ponto e vírgula** — o Excel em português usa a vírgula como
+   separador decimal, então um CSV com vírgula abre tudo numa coluna;
+2. **BOM no início** — sem ele o Excel lê como Latin-1 e "João" vira "JoÃ£o";
+3. **aspas dobradas** — um campo com aspas quebra a linha inteira sem isso.
+
+Os números vão com vírgula decimal e **sem** "R$": com o símbolo na célula, a
+planilha trata como texto e nenhuma soma funciona do outro lado.
+
+Conferido no navegador com campos que quebram um CSV ingênuo: empresa com ponto
+e vírgula no nome, observação com aspas, e texto com quebra de linha.
+
+### Um campo que passou a aparecer
+
+`DeliveryListItem` ganhou `surchargeLabel` e `surchargeValue`. Eles já estavam
+congelados na entrega desde as taxas configuráveis, mas não eram expostos na
+listagem — e são justamente o que explica por que aquele pedido custou mais.
