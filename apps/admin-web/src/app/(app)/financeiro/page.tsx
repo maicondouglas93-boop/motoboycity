@@ -248,7 +248,7 @@ export default function FinancePage() {
                     <TableCell>
                       <span
                         className={
-                          wallet.cacheMatchesLedger ? 'text-emerald-700' : 'text-destructive'
+                          wallet.cacheMatchesLedger ? 'text-status-entregue' : 'text-destructive'
                         }
                       >
                         {wallet.cacheMatchesLedger ? 'Conferido' : 'Divergência'}

@@ -1,14 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Activity, ChevronDown } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/format';
 import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 
+/**
+ * Painel flutuante de atividade.
+ *
+ * Agora recolhe: antes era `fixed` e permanente, cobrindo o canto inferior
+ * direito de todas as telas sem nenhuma forma de sair do caminho — atrapalhava
+ * justamente as tabelas e listas, que crescem para a direita.
+ *
+ * O ponto de conexão usa a cor de conclusão da paleta, não um verde avulso, e
+ * o âmbar continua reservado para movimento.
+ */
 export function LiveActivityWidget() {
   const { events, connected } = useAdminActivityFeed();
+  const [open, setOpen] = useState(false);
+
   // Força um re-render periódico só pra manter "há Xs"/"há X min" atualizado
   // sem precisar de nenhum novo evento chegando.
   const [, forceTick] = useState(0);
@@ -18,35 +30,52 @@ export function LiveActivityWidget() {
   }, []);
 
   return (
-    <Card className="fixed right-4 bottom-4 w-80 shadow-lg">
-      <CardHeader className="flex-row items-center gap-2 py-3">
-        <Activity className="size-4 text-muted-foreground" />
-        <CardTitle className="text-sm font-medium">Atividade ao Vivo</CardTitle>
-        <span
-          className={cn(
-            'ml-auto size-2 rounded-full',
-            connected ? 'bg-green-500' : 'bg-muted-foreground/40',
-          )}
-          title={connected ? 'Conectado' : 'Desconectado'}
-        />
-      </CardHeader>
-      <CardContent className="max-h-48 space-y-2 overflow-y-auto pt-0 text-xs">
-        {events.length === 0 ? (
-          <p className="text-muted-foreground">Nenhuma atividade ainda.</p>
-        ) : (
-          events.map((event) => (
-            <div
-              key={event.id}
-              className="flex items-start justify-between gap-2 border-t pt-2 first:border-t-0 first:pt-0"
-            >
-              <span>{event.message}</span>
-              <span className="shrink-0 text-muted-foreground">
-                {formatRelativeTime(event.at)}
-              </span>
-            </div>
-          ))
+    <div className="fixed right-4 bottom-4 z-30 w-72 sm:w-80">
+      <Card className={cn('gap-0 overflow-hidden py-0 shadow-lg', !open && 'border-transparent')}>
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 bg-asfalto px-3 py-2.5 text-left text-white transition-colors hover:bg-asfalto/90 focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none"
+        >
+          <Activity className="size-4 text-white/70" aria-hidden="true" />
+          <span className="text-sm font-medium">Atividade ao vivo</span>
+          <span
+            className={cn(
+              'ml-auto size-2 shrink-0 rounded-full',
+              connected ? 'bg-status-entregue' : 'bg-white/30',
+            )}
+            title={connected ? 'Conectado' : 'Desconectado'}
+          />
+          <ChevronDown
+            className={cn(
+              'size-4 shrink-0 text-white/70 transition-transform',
+              open && 'rotate-180',
+            )}
+            aria-hidden="true"
+          />
+        </button>
+
+        {open && (
+          <CardContent className="max-h-56 space-y-2 overflow-y-auto p-3 text-xs">
+            {events.length === 0 ? (
+              <p className="text-muted-foreground">Nenhuma atividade ainda.</p>
+            ) : (
+              events.map((event) => (
+                <div
+                  key={event.id}
+                  className="flex items-start justify-between gap-2 border-t pt-2 first:border-t-0 first:pt-0"
+                >
+                  <span className="min-w-0 break-words">{event.message}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {formatRelativeTime(event.at)}
+                  </span>
+                </div>
+              ))
+            )}
+          </CardContent>
         )}
-      </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }

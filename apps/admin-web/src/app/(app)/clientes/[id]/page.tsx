@@ -5,6 +5,7 @@ import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
 import { AlertCircle, ChevronLeft } from 'lucide-react';
+import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
@@ -18,17 +19,6 @@ const companyStatusLabel: Record<string, string> = {
   PENDING_APPROVAL: 'Pendente de aprovação',
   ACTIVE: 'Ativa',
   SUSPENDED: 'Suspensa',
-};
-
-const deliveryStatusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
 };
 
 const invoiceStatusLabel: Record<InvoiceStatus, string> = {
@@ -226,9 +216,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 onChange={(event) => setOrderStatus(event.target.value as DeliveryStatus | 'ALL')}
               >
                 <option value="ALL">Todos os status</option>
-                {Object.entries(deliveryStatusLabel).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -261,11 +251,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <Badge
-                            variant={delivery.status === 'CANCELLED' ? 'destructive' : 'secondary'}
-                          >
-                            {deliveryStatusLabel[delivery.status]}
-                          </Badge>
+                          <StatusChip status={delivery.status} />
                           <p className="mt-1 text-sm font-medium">
                             {formatCurrency(delivery.totalValue)}
                           </p>

@@ -202,7 +202,7 @@ export default function DriversPage() {
                 <div>
                   <p className="text-sm font-medium">Modalidades</p>
                   {driver.serviceTypes.length === 0 && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                    <p className="text-xs text-alerta">
                       Sem modalidade: este entregador não receberá ofertas.
                     </p>
                   )}

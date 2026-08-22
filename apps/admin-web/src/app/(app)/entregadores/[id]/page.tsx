@@ -5,6 +5,7 @@ import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, WalletTransactionStatus } from '@motoboycity/types';
 import { AlertCircle, ChevronLeft } from 'lucide-react';
+import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,17 +17,6 @@ import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-
-const deliveryStatusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
-};
 
 const walletStatusLabel: Record<WalletTransactionStatus, string> = {
   PENDING: 'A liberar',
@@ -199,7 +189,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                   <p className="mb-1 text-muted-foreground">Modalidades qualificadas</p>
                   <div className="flex flex-wrap gap-1">
                     {driver.serviceTypes.length === 0 ? (
-                      <span className="text-amber-700">Nenhuma modalidade atribuída.</span>
+                      <span className="text-alerta">Nenhuma modalidade atribuída.</span>
                     ) : (
                       driver.serviceTypes.map((serviceType) => (
                         <Badge
@@ -247,9 +237,9 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                 onChange={(event) => setOrderStatus(event.target.value as DeliveryStatus | 'ALL')}
               >
                 <option value="ALL">Todos os status</option>
-                {Object.entries(deliveryStatusLabel).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -285,11 +275,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <Badge
-                            variant={delivery.status === 'CANCELLED' ? 'destructive' : 'secondary'}
-                          >
-                            {deliveryStatusLabel[delivery.status]}
-                          </Badge>
+                          <StatusChip status={delivery.status} />
                           <p className="mt-1 text-sm font-medium">
                             Repasse: {formatCurrency(delivery.driverValue)}
                           </p>
@@ -412,7 +398,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                         <p
                           className={
                             transaction.direction === 'CREDIT'
-                              ? 'mt-1 font-medium text-emerald-700'
+                              ? 'mt-1 font-medium text-status-entregue'
                               : 'mt-1 font-medium text-destructive'
                           }
                         >

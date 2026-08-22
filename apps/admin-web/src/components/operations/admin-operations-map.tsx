@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { AdminOperationsResult } from '@motoboycity/types';
+import { statusHex } from '@/components/orders/status-chip';
 import { loadGoogleMaps } from '@/lib/google-maps';
 
 export type MapMode = 'orders' | 'drivers' | 'all';
@@ -13,17 +14,6 @@ interface Props {
   selection: AdminMapSelection;
   onSelect: (selection: NonNullable<AdminMapSelection>) => void;
 }
-
-const statusColor: Record<string, string> = {
-  SCHEDULED: '#7c3aed',
-  AWAITING_DRIVER: '#f59e0b',
-  ACCEPTED: '#2563eb',
-  COLLECTED: '#0891b2',
-  DELIVERED: '#db2777',
-  AWAITING_PAYMENT: '#ea580c',
-  COMPLETED: '#16a34a',
-  CANCELLED: '#64748b',
-};
 
 export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,16 +80,20 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
         const dropoff = delivery.addresses.find(
           (address) => address.type === 'DROPOFF' && address.lat !== null && address.lng !== null,
         );
-        const location = dropoff?.lat !== null && dropoff?.lng !== null && dropoff?.lat !== undefined && dropoff?.lng !== undefined
-          ? { lat: dropoff.lat, lng: dropoff.lng }
-          : delivery.lastLocation
-            ? { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng }
-            : null;
+        const location =
+          dropoff?.lat !== null &&
+          dropoff?.lng !== null &&
+          dropoff?.lat !== undefined &&
+          dropoff?.lng !== undefined
+            ? { lat: dropoff.lat, lng: dropoff.lng }
+            : delivery.lastLocation
+              ? { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng }
+              : null;
         if (!location) continue;
         marker(
           location,
           `#${delivery.displayNumber} · ${delivery.companyName}`,
-          statusColor[delivery.status] ?? '#2563eb',
+          statusHex(delivery.status),
           selection?.kind === 'delivery' && selection.id === delivery.id,
           () => onSelect({ kind: 'delivery', id: delivery.id }),
         );
@@ -122,9 +116,14 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
   return (
     <div className="relative h-full min-h-[600px] overflow-hidden rounded-2xl border bg-muted">
       <div ref={containerRef} className="absolute inset-0" />
-      {error && <div className="absolute inset-0 grid place-items-center bg-muted p-8 text-center text-sm text-muted-foreground">{error}</div>}
+      {error && (
+        <div className="absolute inset-0 grid place-items-center bg-muted p-8 text-center text-sm text-muted-foreground">
+          {error}
+        </div>
+      )}
       <div className="absolute top-3 left-3 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
-        <strong>{data?.active.length ?? 0}</strong> ativos · <strong>{data?.onlineDrivers.length ?? 0}</strong> motoboys online
+        <strong>{data?.active.length ?? 0}</strong> ativos ·{' '}
+        <strong>{data?.onlineDrivers.length ?? 0}</strong> motoboys online
       </div>
     </div>
   );

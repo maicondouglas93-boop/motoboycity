@@ -23,12 +23,16 @@ import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const statusLabel: Record<DeliveryStatus, string> = {
+/**
+ * Plural porque sao contagens, nao o estado de um pedido. Vocabulario alinhado
+ * a `status-chip.tsx`, para a mesma entrega nao mudar de nome entre telas.
+ */
+const statusCountLabel: Record<DeliveryStatus, string> = {
   SCHEDULED: 'Agendados',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceitos',
-  COLLECTED: 'Coletados',
-  DELIVERED: 'Entregues',
+  AWAITING_DRIVER: 'Buscando motoboy',
+  ACCEPTED: 'A caminho da coleta',
+  COLLECTED: 'Em rota',
+  DELIVERED: 'Voltando à loja',
   COMPLETED: 'Concluídos',
   CANCELLED: 'Cancelados',
   AWAITING_PAYMENT: 'Aguardando pagamento',
@@ -158,7 +162,7 @@ export default function AdminReportsPage() {
             {Object.entries(report.ordersCreated.byCurrentStatus).map(([status, count]) => (
               <StatCard
                 key={status}
-                label={statusLabel[status as DeliveryStatus]}
+                label={statusCountLabel[status as DeliveryStatus]}
                 value={String(count)}
               />
             ))}

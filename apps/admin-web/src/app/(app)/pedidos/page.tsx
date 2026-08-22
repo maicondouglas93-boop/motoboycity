@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Badge } from '@/components/ui/badge';
+import { StatusChip } from '@/components/orders/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { deliveriesApi } from '@/lib/api-client';
@@ -13,38 +13,16 @@ import { session } from '@/lib/session';
 import { useAdminActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
 
 const STATUS_FILTERS: { label: string; value: DeliveryStatus | 'ALL' }[] = [
-  { label: 'Todos os Pedidos', value: 'ALL' },
+  { label: 'Todos os pedidos', value: 'ALL' },
   { label: 'Agendados', value: 'SCHEDULED' },
-  { label: 'Buscando Entregador', value: 'AWAITING_DRIVER' },
-  { label: 'Aceitos', value: 'ACCEPTED' },
-  { label: 'Coletados', value: 'COLLECTED' },
-  { label: 'Entregues', value: 'DELIVERED' },
+  { label: 'Buscando motoboy', value: 'AWAITING_DRIVER' },
+  { label: 'A caminho da coleta', value: 'ACCEPTED' },
+  { label: 'Em rota', value: 'COLLECTED' },
+  { label: 'Voltando à loja', value: 'DELIVERED' },
   { label: 'Concluídos', value: 'COMPLETED' },
   { label: 'Cancelados', value: 'CANCELLED' },
-  { label: 'Aguardando Pagamento', value: 'AWAITING_PAYMENT' },
+  { label: 'Aguardando pagamento', value: 'AWAITING_PAYMENT' },
 ];
-
-const statusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
-};
-
-const statusVariant: Record<DeliveryStatus, 'outline' | 'default' | 'destructive' | 'secondary'> = {
-  SCHEDULED: 'outline',
-  AWAITING_DRIVER: 'outline',
-  ACCEPTED: 'default',
-  COLLECTED: 'default',
-  DELIVERED: 'default',
-  COMPLETED: 'secondary',
-  CANCELLED: 'destructive',
-  AWAITING_PAYMENT: 'outline',
-};
 
 const CANCELLABLE_STATUSES: DeliveryStatus[] = [
   'SCHEDULED',
@@ -148,7 +126,7 @@ export default function AdminOrdersPage() {
                       >
                         Pedido #{tracking.displayNumber}
                       </Link>
-                      <Badge variant="default">{statusLabel[tracking.status]}</Badge>
+                      <StatusChip status={tracking.status} />
                     </div>
                     <p className="text-muted-foreground">
                       {tracking.companyName} · {tracking.driver.name}
@@ -206,9 +184,7 @@ export default function AdminOrdersPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <Badge variant={statusVariant[delivery.status]}>
-                      {statusLabel[delivery.status]}
-                    </Badge>
+                    <StatusChip status={delivery.status} />
                     <p className="font-medium">{formatCurrency(delivery.totalValue)}</p>
                   </div>
                   <Link

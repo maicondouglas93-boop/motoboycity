@@ -1983,3 +1983,172 @@ Próximo passo concreto: P0.7 — validar a migration mais recente em cópia
 restaurada com dado real. Hoje o Neon está vazio, então na prática ainda não há
 o que restaurar; o portão só se fecha de verdade quando existir um banco com
 dado real para copiar.
+
+## Atualização — 2026-08-22: identidade visual do painel da empresa
+
+Trabalho de design solicitado pelo responsável ("está muito feio, quero deixar
+bonito antes do deploy"). Escopo escolhido por ele: painel da empresa primeiro;
+marca proposta do zero, porque não existia nenhuma no repositório.
+
+### Um bug, não uma escolha de design
+
+Os dois painéis renderizavam **tudo em Times New Roman**. Causa:
+`--font-sans: var(--font-sans)` no `@theme inline` — referência circular, que
+resolve para vazio e derruba no serif padrão do navegador. O `layout.tsx` cria
+a Geist sob `--font-geist-sans`, e a linha vizinha (`--font-mono`) já apontava
+certo, o que mascarava o erro. Corrigido em `company-web` e `admin-web`.
+
+Segundo achado: **todas as cores do tema tinham croma zero**
+(`oklch(0.205 0 0)` e afins, inclusive os cinco `--chart-*`). As 104 variáveis
+eram um sistema de tokens completo e nunca pintado — shadcn neutro de fábrica.
+
+### Direção visual
+
+Paleta nomeada pelo mundo do produto, em `company-web/globals.css`: `asfalto`,
+`concreto`, `papel`, `colete` (#FF9E00), `placa`, `alerta`.
+
+**Regra do âmbar**: significa uma coisa só — motoboy em movimento, ou a ação
+que põe alguém em movimento. Por isso o item ativo da navegação **não** é
+âmbar (seria decoração), e `--primary` é âmbar com `--primary-foreground`
+escuro (branco sobre âmbar daria ~2:1 e reprovaria em contraste).
+
+Tipografia: Archivo (display, eixo `wdth`) + Geist (interface) + Geist Mono
+(números e IDs) — três papéis, duas famílias, uma já carregada.
+
+### `StatusChip` — fonte única de status
+
+Havia **cinco arquivos com mapas de status duplicados e divergentes**: o mesmo
+`DELIVERED` aparecia como "Retorno" na home e "Entregue" na lista;
+`AWAITING_DRIVER` como "Buscando motoboy" num lugar e "Buscando entregador"
+noutro. `components/orders/status-chip.tsx` passou a ser a única fonte de
+rótulo, cor e da marcação `inMotion`. Convertidos: home, lista de pedidos,
+detalhe do pedido, relatórios e o mapa da central.
+
+O mapa merecia atenção própria: os marcadores usavam rosa, ciano e roxo
+(`#db2777`, `#0891b2`, `#7c3aed`) — um esquema sem relação nenhuma com a
+paleta, bem no centro da tela operacional. Como o Google Maps não lê variável
+CSS, `statusHex()` expõe o hex cru da mesma fonte, para marcador e chip nunca
+discordarem sobre a cor do mesmo pedido.
+
+`indicadores` mantém um mapa próprio de propósito: são contagens, e o plural
+lê melhor ali. O vocabulário foi alinhado ao compartilhado.
+
+`OrderRow` saiu da página e virou componente próprio, com o trilho colorido na
+borda — a assinatura da interface: dá para varrer a lista e ver quais pedidos
+têm motoboy na rua sem ler texto.
+
+### Verificação
+
+Login verificado em desktop e mobile. Navegação, chips e linhas de pedido
+verificados com um harness temporário em `app/zz-preview-temp/`, criado para
+renderizar os oito status sem depender de login — **e removido depois**. Optei
+por ele em vez de criar empresa de teste: criar conta e digitar senha é uma
+ação vedada, mesmo com autorização, e o harness cobre mais (os oito estados de
+uma vez, não só o que o banco tem).
+
+| Medida                     | Resultado             |
+| -------------------------- | --------------------- |
+| Texto do botão sobre âmbar | 8.75:1 (AAA)          |
+| Corpo sobre fundo          | 16.31:1               |
+| Os 8 chips de status       | 4.83 a 6.70 (AA)      |
+| Foco de teclado            | visível, cor da marca |
+| `prefers-reduced-motion`   | pulsos desligam       |
+| typecheck / lint / build   | verdes                |
+
+Dois defeitos de responsividade encontrados e corrigidos no processo: a faixa
+de marca do login ocupava 250px vazios no celular, e o botão "Chamar
+entregador" estava `hidden sm:inline-flex` — ou seja, **a ação principal do
+produto sumia no telefone**. A navegação passou a cair para uma segunda linha
+no celular, em vez de espremer contra o botão e desaparecer.
+
+### Limitações
+
+- **Nenhuma tela autenticada foi vista com dados reais.** Central operacional,
+  detalhe do pedido, faturas, indicadores e relatórios estão compilando mas
+  nunca foram renderizados com conteúdo de verdade.
+- Removi do login o link "Esqueceu a senha" (apontava para `href="#"`) e o
+  checkbox "Lembrar-me" (sem estado nem handler). Os dois mentiam para o
+  usuário; recuperação de senha está na lista de Nível B do runbook.
+- `admin-web` recebeu **apenas a correção de fonte**. A paleta não foi
+  aplicada lá, então os dois painéis estão visualmente divergentes.
+- Os PDFs em `imagensderefencia/` não puderam ser lidos (`pdftoppm` ausente);
+  a única referência visual usada foi o PNG da área da empresa, de onde veio o
+  vocabulário ("Chamar entregador", "Coleta", "Pagamento Faturado").
+
+Próximo passo concreto: aplicar a direção nas telas autenticadas restantes e
+converter os três arquivos que ainda duplicam o mapa de status.
+
+## Atualização — 2026-08-22: identidade visual estendida ao painel admin
+
+Continuação do recorte de design. O `admin-web` tinha recebido só a correção de
+fonte, então os dois painéis pareciam produtos diferentes.
+
+### Base compartilhada
+
+O bloco `:root` do `admin-web` é agora **idêntico** ao do `company-web` —
+mesma paleta, mesmos tokens de status, mesmo raio — e Archivo entrou como face
+de display. Os componentes `brand/wordmark`, `brand/route-diagram` e
+`orders/status-chip` foram copiados para o admin.
+
+Vale registrar por que copiados e não compartilhados: os dois apps já
+duplicavam todos os 12 componentes de `components/ui/` antes deste trabalho.
+Criar um pacote de UI compartilhado é uma refatoração de estrutura que não cabia
+neste recorte; a duplicação segue a convenção existente. **Consequência a
+vigiar**: `status-chip.tsx` existe em dois lugares e precisa mudar nos dois.
+
+### Decisões que mantêm a regra do âmbar
+
+- **Sem botão âmbar no admin.** O painel fiscaliza a operação, não põe motoboy
+  na rua. A cor só aparece nos status.
+- **Item ativo da navegação não é âmbar** em nenhum dos dois painéis — seria
+  decoração, e o olho pararia de encontrar a entrega em movimento.
+- Avisos de bloqueio ("nenhuma modalidade atribuída", "GPS parado") usam
+  `alerta`, não âmbar. Nos dois casos o motoboy não pode operar, então é
+  bloqueio, não recado. A paleta segue com seis cores; nenhuma cor de "atenção"
+  foi criada, justamente para não competir com o âmbar.
+- Etiqueta `ADMIN` ao lado da marca: os dois painéis passaram a dividir o mesmo
+  wordmark, e quem estiver com as duas abas abertas precisa saber onde está.
+
+### Defeitos encontrados e corrigidos
+
+- **A navegação do admin não cabia em 1024px.** Sete itens forçavam rolagem
+  horizontal e cortavam "Relatórios". O ponto de quebra do layout de linha
+  única subiu para `xl`; abaixo disso a navegação usa duas linhas. O
+  `company-web` não tinha o problema por ter quatro itens.
+- **`LiveActivityWidget` era `fixed` e permanente**, cobrindo o canto inferior
+  direito de todas as telas sem forma de fechar — justamente sobre as tabelas.
+  Agora recolhe.
+- **Vocabulário divergente**: os filtros do admin diziam "Buscando Entregador"
+  e "Aguardando Pagamento" em Title Case, ao lado de "Aceitos" em caixa de
+  sentença. Alinhados ao `status-chip`.
+- O mapa do admin repetia o esquema rosa/ciano/roxo do company-web; passou a
+  usar `statusHex()`.
+
+### Estado da consistência
+
+| Métrica                                 | company-web | admin-web |
+| --------------------------------------- | ----------- | --------- |
+| Cores fora da paleta                    | 0           | 0         |
+| Mapas de status duplicados (eram 5 e 7) | 1           | 1         |
+
+O que sobra nos dois é intencional: `indicadores` (company) e `relatorios`
+(admin) mantêm rótulos no plural, porque são contagens e não o estado de um
+pedido. O vocabulário deles acompanha a fonte compartilhada.
+
+### Validações
+
+typecheck e lint verdes nos 8 workspaces; build dos dois painéis aprovado.
+Telas do admin verificadas logadas no navegador (visão geral, pedidos,
+configurações) com o admin de seed — placeholder público documentado no README,
+em localhost, só para leitura. Nenhuma conta foi criada e nenhum dado foi
+gravado.
+
+### Limitações
+
+- **Telas do admin não redesenhadas individualmente**: clientes, entregadores,
+  financeiro e faturas herdaram a paleta e a navegação, mas o layout interno
+  delas não foi tocado.
+- As telas autenticadas do **company-web** continuam sem verificação com dados
+  reais — a lacuna registrada na atualização anterior permanece.
+- O banco de dev não tem pedidos ativos, então listas e mapas foram vistos
+  majoritariamente em estado vazio.

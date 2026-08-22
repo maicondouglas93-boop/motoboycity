@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryAddressItem, DeliveryStatus } from '@motoboycity/types';
 import { AlertCircle, ChevronLeft } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
-import { Badge } from '@/components/ui/badge';
+import { StatusChip, statusLabel } from '@/components/orders/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
@@ -16,17 +16,6 @@ import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-
-const statusLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendado',
-  AWAITING_DRIVER: 'Buscando entregador',
-  ACCEPTED: 'Aceito',
-  COLLECTED: 'Coletado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
-};
 
 const cancellableStatuses: DeliveryStatus[] = [
   'SCHEDULED',
@@ -57,11 +46,22 @@ function mapsUrl(lat: number, lng: number): string {
 }
 
 function customerPaymentLabel(method: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null): string {
-  return method === 'PREPAID' ? 'Pré-pago' : method === 'CARD' ? 'Cartão' : method === 'CASH' ? 'Dinheiro' : method === 'PIX' ? 'Pix' : 'Não informado';
+  return method === 'PREPAID'
+    ? 'Pré-pago'
+    : method === 'CARD'
+      ? 'Cartão'
+      : method === 'CASH'
+        ? 'Dinheiro'
+        : method === 'PIX'
+          ? 'Pix'
+          : 'Não informado';
 }
 
 function durationLabel(from: string, to: string): string {
-  const minutes = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
+  const minutes = Math.max(
+    0,
+    Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000),
+  );
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
 }
 
@@ -140,9 +140,7 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={delivery.status === 'CANCELLED' ? 'destructive' : 'secondary'}>
-            {statusLabel[delivery.status]}
-          </Badge>
+          <StatusChip status={delivery.status} />
           {cancellableStatuses.includes(delivery.status) && (
             <Button
               variant="outline"
@@ -179,13 +177,29 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle>Destinatário e instruções</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Destinatário e instruções</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p><span className="text-muted-foreground">Destinatário:</span> {delivery.recipientName ?? 'Não informado'}</p>
-            <p><span className="text-muted-foreground">Telefone:</span> {delivery.recipientPhone ?? 'Não informado'}</p>
-            <p><span className="text-muted-foreground">Número externo:</span> {delivery.externalOrderNumber ?? 'Não informado'}</p>
-            <p><span className="text-muted-foreground">Pagamento do cliente:</span> {customerPaymentLabel(delivery.customerPaymentMethod)}</p>
-            {delivery.driverNote && <p className="rounded-md bg-muted p-2">{delivery.driverNote}</p>}
+            <p>
+              <span className="text-muted-foreground">Destinatário:</span>{' '}
+              {delivery.recipientName ?? 'Não informado'}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Telefone:</span>{' '}
+              {delivery.recipientPhone ?? 'Não informado'}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Número externo:</span>{' '}
+              {delivery.externalOrderNumber ?? 'Não informado'}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Pagamento do cliente:</span>{' '}
+              {customerPaymentLabel(delivery.customerPaymentMethod)}
+            </p>
+            {delivery.driverNote && (
+              <p className="rounded-md bg-muted p-2">{delivery.driverNote}</p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -253,8 +267,20 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             <div>
               <p className="text-muted-foreground">Lote</p>
               {groupQuery.data && groupQuery.data.deliveries.length > 1 ? (
-                <div className="flex flex-wrap gap-2">{groupQuery.data.deliveries.map((item) => <Link key={item.id} className="text-primary hover:underline" href={`/pedidos/${item.id}`}>#{item.displayNumber}</Link>)}</div>
-              ) : <p>Pedido avulso</p>}
+                <div className="flex flex-wrap gap-2">
+                  {groupQuery.data.deliveries.map((item) => (
+                    <Link
+                      key={item.id}
+                      className="text-primary hover:underline"
+                      href={`/pedidos/${item.id}`}
+                    >
+                      #{item.displayNumber}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p>Pedido avulso</p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -357,16 +383,31 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
 
       <section>
         <Card>
-          <CardHeader><CardTitle>Auditoria do despacho</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Auditoria do despacho</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {dispatchAuditQuery.data?.offers.map((offer) => (
-              <div key={offer.id} className="flex flex-wrap items-center justify-between gap-2 border-t py-2 first:border-0">
-                <Link className="text-primary hover:underline" href={`/entregadores/${offer.driver.id}`}>{offer.driver.name}</Link>
+              <div
+                key={offer.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-t py-2 first:border-0"
+              >
+                <Link
+                  className="text-primary hover:underline"
+                  href={`/entregadores/${offer.driver.id}`}
+                >
+                  {offer.driver.name}
+                </Link>
                 <span>{offer.response}</span>
-                <span className="text-muted-foreground">{formatDate(offer.offeredAt)}{offer.respondedAt ? ` → ${formatDate(offer.respondedAt)}` : ''}</span>
+                <span className="text-muted-foreground">
+                  {formatDate(offer.offeredAt)}
+                  {offer.respondedAt ? ` → ${formatDate(offer.respondedAt)}` : ''}
+                </span>
               </div>
             ))}
-            {dispatchAuditQuery.data?.offers.length === 0 && <p className="text-muted-foreground">Nenhuma oferta registrada.</p>}
+            {dispatchAuditQuery.data?.offers.length === 0 && (
+              <p className="text-muted-foreground">Nenhuma oferta registrada.</p>
+            )}
           </CardContent>
         </Card>
       </section>
@@ -386,14 +427,22 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                 <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
                   <div>
                     <p className="font-medium">
-                      {entry.fromStatus ? `${statusLabel[entry.fromStatus]} → ` : ''}
-                      {statusLabel[entry.toStatus]}
+                      {entry.fromStatus ? `${statusLabel(entry.fromStatus)} → ` : ''}
+                      {statusLabel(entry.toStatus)}
                     </p>
                     {entry.note && <p className="text-muted-foreground">{entry.note}</p>}
                   </div>
                   <div className="text-right text-muted-foreground">
                     <p>{formatDate(entry.changedAt)}</p>
-                    {index > 0 && <p>{durationLabel(delivery.statusHistory[index - 1]!.changedAt, entry.changedAt)} desde a etapa anterior</p>}
+                    {index > 0 && (
+                      <p>
+                        {durationLabel(
+                          delivery.statusHistory[index - 1]!.changedAt,
+                          entry.changedAt,
+                        )}{' '}
+                        desde a etapa anterior
+                      </p>
+                    )}
                     <p>{entry.changedBy?.name ?? 'Evento do sistema'}</p>
                   </div>
                 </CardContent>
