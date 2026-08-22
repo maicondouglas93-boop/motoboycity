@@ -1,6 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import {
+  buildRedisConnectionOptions,
+  describeRedisTarget,
+  type RedisConnectionOptions,
+} from '../common/redis-connection';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
@@ -21,21 +25,22 @@ export interface LiveDriverSnapshot {
 export class LiveDriverPresenceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LiveDriverPresenceService.name);
   private readonly redis: Redis;
+  private readonly connectionOptions: RedisConnectionOptions;
 
   constructor(
-    config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly realtimeGateway: RealtimeGateway,
   ) {
+    this.connectionOptions = buildRedisConnectionOptions();
     this.redis = new Redis({
-      host: config.get<string>('REDIS_HOST', 'localhost'),
-      port: config.get<number>('REDIS_PORT', 6379),
+      ...this.connectionOptions,
       lazyConnect: true,
       maxRetriesPerRequest: 2,
     });
   }
 
   async onModuleInit(): Promise<void> {
+    this.logger.log(`Conectando ao Redis em ${describeRedisTarget(this.connectionOptions)}`);
     await this.redis.connect();
   }
 
