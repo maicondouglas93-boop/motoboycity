@@ -3076,3 +3076,59 @@ e vírgula no nome, observação com aspas, e texto com quebra de linha.
 `DeliveryListItem` ganhou `surchargeLabel` e `surchargeValue`. Eles já estavam
 congelados na entrega desde as taxas configuráveis, mas não eram expostos na
 listagem — e são justamente o que explica por que aquele pedido custou mais.
+
+## Atualização — 2026-08-22: acompanhamento ao vivo, primeira leva
+
+Da lista do concorrente, os dois itens de melhor valor por custo.
+
+### Horário de criação ao lado do cronômetro
+
+São duas medidas de tempo que respondem perguntas diferentes: a **hora** diz
+quando o pedido entrou, o **cronômetro** diz há quanto tempo ele está parado
+neste estado. Só o cronômetro não deixa remontar a fila; só a hora não mostra
+pressão. Entrou nos dois painéis.
+
+`src/lib/operation-clock.ts` formata em `America/Sao_Paulo` fixo, e não no fuso
+do navegador: relatórios, janelas de taxa e horário de funcionamento são todos
+avaliados nesse fuso, e um operador acessando de outro lugar veria a fila com
+um horário que não bate com o resto do sistema.
+
+### Fila agrupada por empresa
+
+A fila do admin agrupava só por status. As duas lentes respondem perguntas
+diferentes:
+
+- **por status** — o que está travado agora;
+- **por empresa** — algum cliente está sendo mal atendido.
+
+A segunda é a que faz o telefone tocar, e a lista por status não a mostra porque
+espalha os pedidos de uma mesma loja por várias seções. Virou uma alternância,
+não uma substituição.
+
+Os grupos vêm ordenados por tamanho da fila — a loja com mais pedidos é a que
+corre mais risco de atraso, e precisa estar no alto sem ninguém procurar. Cada
+grupo traz contadores por status, coloridos pelo **mesmo mapa** dos chips: a cor
+ali significa a mesma coisa que na fila, ou vira decoração e o olho para de
+confiar nela.
+
+Dentro do grupo, a linha deixa de repetir o nome da empresa — que já está no
+cabeçalho — e mostra o motoboy no lugar. Numa tela densa, essa largura vale
+mais.
+
+### O menu de ações NÃO é barato, e vale registrar por quê
+
+O concorrente tem onze ações por pedido. Cruzando com os endpoints existentes:
+
+| Ação                                              | Situação                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Abrir completo, Ver mapa                          | já existem como link                                       |
+| Cancelar                                          | endpoint existe                                            |
+| Clonar                                            | existe, mas no painel da empresa — o admin não cria pedido |
+| Copiar link de rastreio                           | **não existe** rastreio público                            |
+| Alterar valores, tipo de serviço, entregador      | **nenhum endpoint**                                        |
+| Remover entregador, Voltar para aceito, Finalizar | **nenhum endpoint**                                        |
+
+Sete das onze precisam de endpoint novo, com regras de transição de estado e
+auditoria — não cabem na fatia "barato e de alto uso". Ficam para uma decisão
+própria sobre quais transições manuais a operação realmente quer permitir: cada
+uma delas é o admin sobrescrevendo o que aconteceu na rua.

@@ -28,6 +28,8 @@ import {
 import { formatRelativeTime } from '@/lib/format';
 import { session } from '@/lib/session';
 import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
+import { operationTime } from '@/lib/operation-clock';
+import { CompanyQueues } from '@/components/operations/company-queues';
 
 const filterStatuses = STATUS_OPTIONS.map((option) => option.value);
 const sectionStatuses: DeliveryStatus[] = [
@@ -41,9 +43,15 @@ const sectionStatuses: DeliveryStatus[] = [
 function OperationRow({
   order,
   onSelect,
+  hideCompany = false,
 }: {
   order: OperationalDeliveryItem;
   onSelect: () => void;
+  /**
+   * Dentro do grupo da empresa o nome ja esta no cabecalho. Repeti-lo em cada
+   * linha rouba a largura que o nome do motoboy precisa numa tela densa.
+   */
+  hideCompany?: boolean;
 }) {
   return (
     <button
@@ -54,21 +62,28 @@ function OperationRow({
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-baseline gap-2">
           <strong className="font-mono">#{order.displayNumber}</strong>
-          {/* Ha quanto tempo neste estado — o medidor de pressao da fila. */}
+          {/*
+            A HORA diz quando o pedido entrou; o cronometro, ha quanto tempo ele
+            esta parado neste estado. Uma nao substitui a outra.
+          */}
+          <span className="font-mono text-muted-foreground">{operationTime(order.createdAt)}</span>
           <ElapsedTime since={order.statusChangedAt} />
         </span>
         <StatusChip status={order.status} />
       </div>
       <p className="mt-1 truncate text-muted-foreground">
-        {order.companyName}
-        {order.driver ? ` · ${order.driver.name}` : ''}
+        {hideCompany ? (order.driver?.name ?? 'Sem motoboy') : order.companyName}
+        {!hideCompany && order.driver ? ` · ${order.driver.name}` : ''}
       </p>
     </button>
   );
 }
 
+type QueueMode = 'status' | 'company';
+
 export default function AdminDashboardPage() {
   const token = session.getToken();
+  const [queueMode, setQueueMode] = useState<QueueMode>('status');
   const queryClient = useQueryClient();
   const { events, connected: activityConnected } = useAdminActivityFeed();
   const [query, setQuery] = useState('');
@@ -232,27 +247,68 @@ export default function AdminDashboardPage() {
 
           <Card>
             <CardHeader className="py-3">
-              <CardTitle className="text-sm">Filas operacionais</CardTitle>
+              <CardTitle className="flex items-center justify-between gap-2 text-sm">
+                Filas operacionais
+                {/*
+                  Duas lentes sobre a mesma fila, e cada uma responde uma
+                  pergunta: por status, "o que esta travado agora"; por empresa,
+                  "algum cliente esta sendo mal atendido". A segunda e a que faz
+                  o telefone tocar, e a lista por status nao a mostra porque
+                  espalha os pedidos de uma mesma loja por varias secoes.
+                */}
+                <span className="flex rounded-md border p-0.5 text-xs font-normal">
+                  {(
+                    [
+                      ['status', 'Por status'],
+                      ['company', 'Por empresa'],
+                    ] as const
+                  ).map(([modo, rotulo]) => (
+                    <button
+                      key={modo}
+                      type="button"
+                      onClick={() => setQueueMode(modo)}
+                      className={`rounded px-2 py-0.5 transition-colors ${
+                        queueMode === modo ? 'bg-colete font-medium text-asfalto' : ''
+                      }`}
+                    >
+                      {rotulo}
+                    </button>
+                  ))}
+                </span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="max-h-[450px] space-y-3 overflow-y-auto pt-0">
-              {sectionStatuses.map((status) => {
-                const orders = allOrders.filter((order) => order.status === status).slice(0, 8);
-                return (
-                  <div key={status} className="space-y-1.5">
-                    <p className="flex items-center justify-between text-xs font-semibold">
-                      {statusLabel(status)}{' '}
-                      <Badge variant="secondary">{data?.counts[status] ?? 0}</Badge>
-                    </p>
-                    {orders.map((order) => (
-                      <OperationRow
-                        key={order.id}
-                        order={order}
-                        onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
-                      />
-                    ))}
-                  </div>
-                );
-              })}
+              {queueMode === 'company' ? (
+                <CompanyQueues
+                  orders={allOrders}
+                  renderOrder={(order) => (
+                    <OperationRow
+                      order={order}
+                      hideCompany
+                      onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
+                    />
+                  )}
+                />
+              ) : (
+                sectionStatuses.map((status) => {
+                  const orders = allOrders.filter((order) => order.status === status).slice(0, 8);
+                  return (
+                    <div key={status} className="space-y-1.5">
+                      <p className="flex items-center justify-between text-xs font-semibold">
+                        {statusLabel(status)}{' '}
+                        <Badge variant="secondary">{data?.counts[status] ?? 0}</Badge>
+                      </p>
+                      {orders.map((order) => (
+                        <OperationRow
+                          key={order.id}
+                          order={order}
+                          onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
+                        />
+                      ))}
+                    </div>
+                  );
+                })
+              )}
             </CardContent>
           </Card>
         </div>

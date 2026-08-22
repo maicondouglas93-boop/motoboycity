@@ -1,6 +1,7 @@
 import type { OperationalDeliveryItem } from '@motoboycity/types';
 import { StatusChip, statusRailClass } from '@/components/orders/status-chip';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
+import { operationTime } from '@/lib/operation-clock';
 
 /**
  * Linha de pedido da central operacional.
@@ -36,7 +37,15 @@ export function OrderRow({
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-baseline gap-2">
           <span className="font-mono text-sm font-semibold">#{order.displayNumber}</span>
-          {/* Ha quanto tempo neste estado — o medidor de pressao da fila. */}
+          {/*
+            Duas medidas de tempo, e cada uma responde uma pergunta: a HORA diz
+            quando o pedido entrou, e o cronometro diz ha quanto tempo ele esta
+            parado neste estado. So o cronometro nao deixa remontar a fila; so a
+            hora nao mostra pressao.
+          */}
+          <span className="font-mono text-xs text-muted-foreground">
+            {operationTime(order.createdAt)}
+          </span>
           <ElapsedTime since={order.statusChangedAt} />
         </span>
         <StatusChip status={order.status} />
