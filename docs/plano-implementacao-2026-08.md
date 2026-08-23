@@ -562,6 +562,40 @@ coberto.
 
 ---
 
+### 6. Fila ao vivo por status, com SLA configurável ✅ FEITO (parcial, ver abaixo)
+
+**Entregue em 2026-08-23.** Três limites configuráveis
+(`slaAlertMinutesToAccept` / `ToCollect` / `ToDeliver`) e o cronômetro de cada
+pedido acendendo em vermelho quando passa do limite da etapa em que ele está.
+
+**As "colunas por status" não foram feitas — e de propósito.** A fila já tem
+duas lentes, uma delas exatamente "por status", com seção e contador para cada
+um. O que o plano pedia era transformá-las em colunas horizontais, e isso
+pioraria: no concorrente o kanban ocupa uma página inteira, enquanto aqui a fila
+divide a tela com o mapa e o feed ao vivo, numa coluna de 300px. Seções
+verticais cabem; colunas não. O agrupamento por status, que é o valor real,
+já existe.
+
+**Três decisões:**
+
+- **a comparação acontece no cliente**, junto do relógio que já bate a cada
+  segundo. Se o servidor resolvesse o alerta, a linha só acenderia na próxima
+  consulta — e a hora de acender é justamente enquanto alguém está olhando;
+- **o `ElapsedTime` tinha um comentário dizendo por que não havia cor:**
+  _"depende de um limite que ninguém decidiu ainda, e pintar de vermelho um
+  número arbitrário treinaria o operador a ignorar a cor"_. Este item é o que
+  destrava aquilo, e o comentário foi atualizado para dizer isso;
+- **sem sinalização fora das três etapas de espera.** Concluído e cancelado não
+  estão parados esperando nada; agendado está parado de propósito.
+
+A tela de configuração diz a média real da cidade em cada campo (10 min até a
+coleta, 23 até a entrega) para o admin escolher um limite acima dela — abaixo, a
+fila fica vermelha o tempo todo e a cor deixa de significar alguma coisa.
+
+**Não verificado visualmente:** exige login.
+
+---
+
 ### 6. Fila ao vivo por status, com SLA configurável
 
 **O que existe hoje.** A fila do painel já mostra há quanto tempo cada pedido

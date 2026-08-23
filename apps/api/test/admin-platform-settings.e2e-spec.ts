@@ -84,6 +84,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
       locationSilenceAlertMinutes: null,
+      slaAlertMinutesToAccept: null,
+      slaAlertMinutesToCollect: null,
+      slaAlertMinutesToDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -104,6 +107,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
       locationSilenceAlertMinutes: null,
+      slaAlertMinutesToAccept: null,
+      slaAlertMinutesToCollect: null,
+      slaAlertMinutesToDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -132,6 +138,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
       locationSilenceAlertMinutes: null,
+      slaAlertMinutesToAccept: null,
+      slaAlertMinutesToCollect: null,
+      slaAlertMinutesToDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });

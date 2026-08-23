@@ -29,6 +29,9 @@ export class AdminPlatformSettingsService {
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
         locationSilenceAlertMinutes: null,
+        slaAlertMinutesToAccept: null,
+        slaAlertMinutesToCollect: null,
+        slaAlertMinutesToDeliver: null,
         updatedBy: null,
         updatedAt: null,
       };
@@ -65,6 +68,15 @@ export class AdminPlatformSettingsService {
         ...(payload.locationSilenceAlertMinutes !== undefined && {
           locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
         }),
+        ...(payload.slaAlertMinutesToAccept !== undefined && {
+          slaAlertMinutesToAccept: payload.slaAlertMinutesToAccept,
+        }),
+        ...(payload.slaAlertMinutesToCollect !== undefined && {
+          slaAlertMinutesToCollect: payload.slaAlertMinutesToCollect,
+        }),
+        ...(payload.slaAlertMinutesToDeliver !== undefined && {
+          slaAlertMinutesToDeliver: payload.slaAlertMinutesToDeliver,
+        }),
         updatedByUserId,
       },
       create: {
@@ -77,6 +89,9 @@ export class AdminPlatformSettingsService {
         minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
         minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
         locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
+        slaAlertMinutesToAccept: payload.slaAlertMinutesToAccept,
+        slaAlertMinutesToCollect: payload.slaAlertMinutesToCollect,
+        slaAlertMinutesToDeliver: payload.slaAlertMinutesToDeliver,
         updatedByUserId,
       },
       include: { updatedBy: true },
@@ -93,6 +108,9 @@ export class AdminPlatformSettingsService {
     minMinutesBeforeCollect: number | null;
     minMinutesBeforeDeliver: number | null;
     locationSilenceAlertMinutes: number | null;
+    slaAlertMinutesToAccept: number | null;
+    slaAlertMinutesToCollect: number | null;
+    slaAlertMinutesToDeliver: number | null;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -107,6 +125,9 @@ export class AdminPlatformSettingsService {
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,
       minMinutesBeforeDeliver: settings.minMinutesBeforeDeliver,
       locationSilenceAlertMinutes: settings.locationSilenceAlertMinutes,
+      slaAlertMinutesToAccept: settings.slaAlertMinutesToAccept,
+      slaAlertMinutesToCollect: settings.slaAlertMinutesToCollect,
+      slaAlertMinutesToDeliver: settings.slaAlertMinutesToDeliver,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

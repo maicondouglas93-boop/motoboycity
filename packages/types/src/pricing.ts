@@ -46,6 +46,13 @@ export interface PlatformSettingsItem {
    * andamento e rastreamento parado. Null = detector desligado.
    */
   locationSilenceAlertMinutes: number | null;
+  /**
+   * Limites que acendem o alerta na fila ao vivo, por etapa em que o pedido
+   * está parado. Null = sem sinalização para aquela etapa.
+   */
+  slaAlertMinutesToAccept: number | null;
+  slaAlertMinutesToCollect: number | null;
+  slaAlertMinutesToDeliver: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -63,6 +70,9 @@ export interface UpdatePlatformSettingsInput {
   minMinutesBeforeCollect?: number;
   minMinutesBeforeDeliver?: number;
   locationSilenceAlertMinutes?: number;
+  slaAlertMinutesToAccept?: number;
+  slaAlertMinutesToCollect?: number;
+  slaAlertMinutesToDeliver?: number;
 }
 
 export type SurchargeType = 'PERCENTAGE' | 'FIXED';

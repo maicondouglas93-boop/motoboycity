@@ -22,6 +22,7 @@ import {
   adminCompaniesApi,
   adminDriversApi,
   adminOperationsApi,
+  adminPlatformSettingsApi,
   baseUrl,
   deliveriesApi,
 } from '@/lib/api-client';
@@ -31,6 +32,7 @@ import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 import { operationTime } from '@/lib/operation-clock';
 import { CompanyQueues } from '@/components/operations/company-queues';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
+import { slaAlertMinutesFor } from '@/lib/sla';
 
 const filterStatuses = STATUS_OPTIONS.map((option) => option.value);
 const sectionStatuses: DeliveryStatus[] = [
@@ -45,6 +47,7 @@ function OperationRow({
   order,
   onSelect,
   hideCompany = false,
+  slaAlertMinutes = null,
 }: {
   order: OperationalDeliveryItem;
   onSelect: () => void;
@@ -53,6 +56,8 @@ function OperationRow({
    * linha rouba a largura que o nome do motoboy precisa numa tela densa.
    */
   hideCompany?: boolean;
+  /** Minutos a partir dos quais o cronometro acende. Null = sem sinalizacao. */
+  slaAlertMinutes?: number | null;
 }) {
   return (
     <button
@@ -68,7 +73,7 @@ function OperationRow({
             esta parado neste estado. Uma nao substitui a outra.
           */}
           <span className="font-mono text-muted-foreground">{operationTime(order.createdAt)}</span>
-          <ElapsedTime since={order.statusChangedAt} />
+          <ElapsedTime since={order.statusChangedAt} alertAfterMinutes={slaAlertMinutes} />
         </span>
         <StatusChip status={order.status} />
       </div>
@@ -107,6 +112,20 @@ export default function AdminDashboardPage() {
     enabled: Boolean(token),
     refetchInterval: 30_000,
   });
+  /**
+   * Os limites de SLA vem das configuracoes e sao comparados NO CLIENTE, junto
+   * do cronometro que ja bate a cada segundo. Se viessem resolvidos do servidor,
+   * a linha so acenderia na proxima consulta — e a hora de acender e justamente
+   * enquanto alguem esta olhando a fila.
+   */
+  const settingsQuery = useQuery({
+    queryKey: ['admin', 'platform-settings'],
+    queryFn: () => adminPlatformSettingsApi.get(token as string),
+    enabled: Boolean(token),
+    staleTime: 5 * 60_000,
+  });
+  const slaSettings = settingsQuery.data ?? null;
+
   const companiesQuery = useQuery({
     queryKey: ['admin', 'companies', 'operations-filter'],
     queryFn: () => adminCompaniesApi.list(token as string),
@@ -290,6 +309,7 @@ export default function AdminDashboardPage() {
                     <OperationRow
                       order={order}
                       hideCompany
+                      slaAlertMinutes={slaAlertMinutesFor(order.status, slaSettings)}
                       onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
                     />
                   )}
@@ -307,6 +327,7 @@ export default function AdminDashboardPage() {
                         <OperationRow
                           key={order.id}
                           order={order}
+                          slaAlertMinutes={slaAlertMinutesFor(order.status, slaSettings)}
                           onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
                         />
                       ))}

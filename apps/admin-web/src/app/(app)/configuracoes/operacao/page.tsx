@@ -26,6 +26,10 @@ const MIN_MINUTES_MAX = 240;
 // pings e acusaria silêncio onde não há nenhum.
 const SILENCE_MIN_MINUTES = 2;
 const SILENCE_MAX_MINUTES = 120;
+// Precisam ficar ACIMA da média da operação, ou a fila fica vermelha o tempo
+// todo e a cor perde o sentido.
+const SLA_MIN_MINUTES = 1;
+const SLA_MAX_MINUTES = 480;
 
 export default function OperationSettingsPage() {
   const token = session.getToken();
@@ -36,6 +40,9 @@ export default function OperationSettingsPage() {
   const [minCollectInput, setMinCollectInput] = useState('');
   const [minDeliverInput, setMinDeliverInput] = useState('');
   const [silenceInput, setSilenceInput] = useState('');
+  const [slaAcceptInput, setSlaAcceptInput] = useState('');
+  const [slaCollectInput, setSlaCollectInput] = useState('');
+  const [slaDeliverInput, setSlaDeliverInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
@@ -54,6 +61,9 @@ export default function OperationSettingsPage() {
       setMinCollectInput('');
       setMinDeliverInput('');
       setSilenceInput('');
+      setSlaAcceptInput('');
+      setSlaCollectInput('');
+      setSlaDeliverInput('');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
     },
     onError: (error) => {
@@ -128,8 +138,34 @@ export default function OperationSettingsPage() {
       SILENCE_MAX_MINUTES,
     );
 
+    const slaAccept = parseField(
+      slaAcceptInput,
+      'O limite de aceite',
+      SLA_MIN_MINUTES,
+      SLA_MAX_MINUTES,
+    );
+    const slaCollect = parseField(
+      slaCollectInput,
+      'O limite de coleta',
+      SLA_MIN_MINUTES,
+      SLA_MAX_MINUTES,
+    );
+    const slaDeliver = parseField(
+      slaDeliverInput,
+      'O limite de entrega',
+      SLA_MIN_MINUTES,
+      SLA_MAX_MINUTES,
+    );
+
     const error =
-      timeout.error ?? radius.error ?? minCollect.error ?? minDeliver.error ?? silence.error;
+      timeout.error ??
+      radius.error ??
+      minCollect.error ??
+      minDeliver.error ??
+      silence.error ??
+      slaAccept.error ??
+      slaCollect.error ??
+      slaDeliver.error;
     if (error) {
       setFormError(error);
       return;
@@ -140,7 +176,10 @@ export default function OperationSettingsPage() {
       radius.value === undefined &&
       minCollect.value === undefined &&
       minDeliver.value === undefined &&
-      silence.value === undefined
+      silence.value === undefined &&
+      slaAccept.value === undefined &&
+      slaCollect.value === undefined &&
+      slaDeliver.value === undefined
     ) {
       setFormError('Preencha ao menos um dos campos para salvar.');
       return;
@@ -152,6 +191,9 @@ export default function OperationSettingsPage() {
       ...(minCollect.value !== undefined && { minMinutesBeforeCollect: minCollect.value }),
       ...(minDeliver.value !== undefined && { minMinutesBeforeDeliver: minDeliver.value }),
       ...(silence.value !== undefined && { locationSilenceAlertMinutes: silence.value }),
+      ...(slaAccept.value !== undefined && { slaAlertMinutesToAccept: slaAccept.value }),
+      ...(slaCollect.value !== undefined && { slaAlertMinutesToCollect: slaCollect.value }),
+      ...(slaDeliver.value !== undefined && { slaAlertMinutesToDeliver: slaDeliver.value }),
     });
   }
 
@@ -216,6 +258,22 @@ export default function OperationSettingsPage() {
                   {settings?.locationSilenceAlertMinutes === null
                     ? 'desligado'
                     : `${settings?.locationSilenceAlertMinutes} minutos sem posição`}
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="text-muted-foreground">
+                  Alerta na fila (aceite / coleta / entrega):
+                </dt>
+                <dd>
+                  {settings?.slaAlertMinutesToAccept === null &&
+                  settings?.slaAlertMinutesToCollect === null &&
+                  settings?.slaAlertMinutesToDeliver === null
+                    ? 'sem sinalização'
+                    : [
+                        settings?.slaAlertMinutesToAccept ?? '—',
+                        settings?.slaAlertMinutesToCollect ?? '—',
+                        settings?.slaAlertMinutesToDeliver ?? '—',
+                      ].join(' / ') + ' min'}
                 </dd>
               </div>
               {settings?.updatedBy && (
@@ -300,6 +358,50 @@ export default function OperationSettingsPage() {
                 <p className="text-xs text-muted-foreground">
                   Quanto tempo sem receber a posição de um motoboy que está com pedido em andamento
                   antes de avisar. Em branco mantém desligado.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sla-accept">Alerta: sem aceite após (minutos)</Label>
+                <Input
+                  id="sla-accept"
+                  inputMode="numeric"
+                  placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
+                  value={slaAcceptInput}
+                  onChange={(event) => setSlaAcceptInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  O cronômetro do pedido acende na fila quando passa deste tempo esperando um
+                  motoboy aceitar.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sla-collect">Alerta: sem coleta após (minutos)</Label>
+                <Input
+                  id="sla-collect"
+                  inputMode="numeric"
+                  placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
+                  value={slaCollectInput}
+                  onChange={(event) => setSlaCollectInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Contado desde o aceite. Na cidade, a média é 10 min — deixe acima disso ou a fila
+                  fica vermelha o tempo todo.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sla-deliver">Alerta: sem entrega após (minutos)</Label>
+                <Input
+                  id="sla-deliver"
+                  inputMode="numeric"
+                  placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
+                  value={slaDeliverInput}
+                  onChange={(event) => setSlaDeliverInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Contado desde a coleta. Na cidade, a média é 23 min.
                 </p>
               </div>
               <Button type="submit" disabled={updateMutation.isPending}>

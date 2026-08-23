@@ -1023,6 +1023,16 @@ model PlatformSettings {
   /// enquanto o app estiver vivo para checar.
   locationSilenceAlertMinutes Int?
 
+  /// Limites de tempo que acendem o alerta na fila ao vivo, por etapa em que o
+  /// pedido está parado. Null = sem sinalização para aquela etapa.
+  ///
+  /// Precisam ficar ACIMA da média da operação, ou a fila fica vermelha o
+  /// tempo todo e a cor perde o sentido — na referência medida na cidade,
+  /// aceite ~0 min, aceite→coleta 10 min e coleta→entrega 23 min.
+  slaAlertMinutesToAccept  Int?
+  slaAlertMinutesToCollect Int?
+  slaAlertMinutesToDeliver Int?
+
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
 

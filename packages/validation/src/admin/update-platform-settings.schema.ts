@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const slaMinutesSchema = z
+  .number()
+  .int('O limite de alerta deve ser um número inteiro de minutos.')
+  .min(1, 'O limite de alerta deve ser de pelo menos 1 minuto.')
+  .max(480, 'O limite de alerta deve ser de no máximo 480 minutos.');
+
 export const updatePlatformSettingsSchema = z
   .object({
     driverCommissionPercentage: z
@@ -51,6 +57,13 @@ export const updatePlatformSettingsSchema = z
       .min(2, 'O tempo sem posição deve ser de pelo menos 2 minutos.')
       .max(120, 'O tempo sem posição deve ser de no máximo 120 minutos.')
       .optional(),
+    /**
+     * Piso de 1 minuto: um limite de zero acenderia todo pedido no instante em
+     * que entra na fila, e a cor deixaria de significar qualquer coisa.
+     */
+    slaAlertMinutesToAccept: slaMinutesSchema.optional(),
+    slaAlertMinutesToCollect: slaMinutesSchema.optional(),
+    slaAlertMinutesToDeliver: slaMinutesSchema.optional(),
   })
   .refine(
     (data) =>
@@ -60,7 +73,10 @@ export const updatePlatformSettingsSchema = z
       data.businessHoursEnabled !== undefined ||
       data.minMinutesBeforeCollect !== undefined ||
       data.minMinutesBeforeDeliver !== undefined ||
-      data.locationSilenceAlertMinutes !== undefined,
+      data.locationSilenceAlertMinutes !== undefined ||
+      data.slaAlertMinutesToAccept !== undefined ||
+      data.slaAlertMinutesToCollect !== undefined ||
+      data.slaAlertMinutesToDeliver !== undefined,
     { message: 'Informe ao menos um campo para atualizar.' },
   );
 

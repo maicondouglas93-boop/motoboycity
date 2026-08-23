@@ -75,11 +75,25 @@ export function formatElapsed(milliseconds: number): string {
 /**
  * Há quanto tempo o pedido está no estado atual.
  *
- * Sem cor de alerta de propósito: "demorado" depende de um limite que ninguém
- * decidiu ainda, e pintar de vermelho um número arbitrário treinaria o
- * operador a ignorar a cor. O tempo em si já é a informação.
+ * A cor de alerta só existe quando o admin define um limite para aquela etapa —
+ * antes disso não havia cor nenhuma, porque "demorado" dependia de um número
+ * que ninguém tinha decidido, e pintar de vermelho um limite arbitrário
+ * treinaria o operador a ignorar a cor.
+ *
+ * O limite chega em minutos e é comparado aqui, no relógio que já bate a cada
+ * segundo: assim a linha acende sozinha enquanto a pessoa olha, sem depender de
+ * uma nova consulta ao servidor.
  */
-export function ElapsedTime({ since, className = '' }: { since: string; className?: string }) {
+export function ElapsedTime({
+  since,
+  alertAfterMinutes = null,
+  className = '',
+}: {
+  since: string;
+  /** Null = sem sinalização para esta etapa. */
+  alertAfterMinutes?: number | null;
+  className?: string;
+}) {
   const now = useNow();
   const startedAt = new Date(since).getTime();
 
@@ -87,9 +101,21 @@ export function ElapsedTime({ since, className = '' }: { since: string; classNam
     return null;
   }
 
+  const elapsed = now - startedAt;
+  const atrasado = alertAfterMinutes !== null && elapsed >= alertAfterMinutes * 60_000;
+
   return (
-    <span className={`font-mono text-xs tabular-nums text-muted-foreground ${className}`}>
-      {formatElapsed(now - startedAt)}
+    <span
+      className={`font-mono text-xs tabular-nums ${
+        atrasado ? 'font-semibold text-alerta' : 'text-muted-foreground'
+      } ${className}`}
+      title={
+        atrasado
+          ? `Acima do limite de ${alertAfterMinutes} min definido para esta etapa`
+          : undefined
+      }
+    >
+      {formatElapsed(elapsed)}
     </span>
   );
 }
