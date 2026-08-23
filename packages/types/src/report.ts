@@ -77,8 +77,35 @@ export interface DeliveryPeakHours {
   busiestWeekday: number | null;
 }
 
+/**
+ * O mesmo recorte, imediatamente antes e com a MESMA duração.
+ *
+ * `changePercent` é nulo quando a base é zero: sair de nenhuma entrega para dez
+ * não é crescimento percentual, é um começo.
+ */
+export interface OperationsReportComparison {
+  period: { from: string; to: string };
+  ordersCreatedCount: number;
+  deliveriesCompletedCount: number;
+  totalValue: number;
+  averageTicket: number;
+  changePercent: {
+    ordersCreated: number | null;
+    deliveriesCompleted: number | null;
+    totalValue: number | null;
+    averageTicket: number | null;
+  };
+}
+
 export interface AdminOperationsReport {
   period: { from: string; to: string };
+  /**
+   * O recorte termina hoje. Quando falso, a tela avisa que os números não
+   * atualizam sozinhos — decidir isso exige o fuso da operação, então vem
+   * resolvido do servidor.
+   */
+  live: boolean;
+  comparison: OperationsReportComparison;
   ordersCreated: {
     count: number;
     byCurrentStatus: Record<DeliveryStatus, number>;

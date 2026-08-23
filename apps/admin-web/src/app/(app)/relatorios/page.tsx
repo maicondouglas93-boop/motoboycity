@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus } from '@motoboycity/types';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -127,21 +127,44 @@ export default function AdminReportsPage() {
 
       {report && (
         <>
+          {/*
+            Quando o recorte nao termina hoje, os numeros estao parados. Sem
+            este aviso, alguem decide olhando um numero antigo achando que e o
+            de agora — e a tela nao da nenhuma pista da diferenca.
+          */}
+          {!report.live && (
+            <div className="flex items-start gap-2 rounded-md border border-alerta/40 bg-alerta/5 p-3 text-sm">
+              <History className="mt-0.5 size-4 shrink-0 text-alerta" />
+              <p>
+                <strong className="text-alerta">Histórico.</strong> Este recorte terminou em{' '}
+                {report.period.to} e não atualiza em tempo real.
+              </p>
+            </div>
+          )}
+
           <p className="text-sm text-muted-foreground">
             Período considerado: <strong>{report.period.from}</strong> até{' '}
             <strong>{report.period.to}</strong>. Pedidos são contados pela criação; valores
-            financeiros, pela conclusão.
+            financeiros, pela conclusão. Comparação com{' '}
+            <strong>{report.comparison.period.from}</strong> até{' '}
+            <strong>{report.comparison.period.to}</strong>, janela de mesma duração.
           </p>
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-            <StatCard label="Pedidos criados" value={String(report.ordersCreated.count)} />
+            <StatCard
+              label="Pedidos criados"
+              value={String(report.ordersCreated.count)}
+              changePercent={report.comparison.changePercent.ordersCreated}
+            />
             <StatCard
               label="Entregas concluídas"
               value={String(report.deliveriesCompleted.count)}
+              changePercent={report.comparison.changePercent.deliveriesCompleted}
             />
             <StatCard
               label="Valor concluído"
               value={money(report.deliveriesCompleted.totalValue)}
+              changePercent={report.comparison.changePercent.totalValue}
             />
             <StatCard
               label="Repasse aos entregadores"
@@ -157,6 +180,7 @@ export default function AdminReportsPage() {
             <StatCard
               label="Ticket médio concluído"
               value={money(report.deliveriesCompleted.averageTicket)}
+              changePercent={report.comparison.changePercent.averageTicket}
             />
             {Object.entries(report.ordersCreated.byCurrentStatus).map(([status, count]) => (
               <StatCard

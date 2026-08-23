@@ -14,6 +14,7 @@ import {
 } from '../../common/sao-paulo-time';
 import { PrismaService } from '../../prisma/prisma.service';
 import { computePeakHours } from './delivery-peak-hours';
+import { isLiveWindow, percentChange, previousComparableWindow } from './report-window';
 import { computeDriverPerformance } from './driver-performance';
 
 /**
@@ -64,6 +65,8 @@ export class AdminReportsService {
 
   async operations(query: OperationsReportQuery): Promise<AdminOperationsReport> {
     const period = this.resolvePeriod(query);
+    const agora = new Date();
+    const anterior = previousComparableWindow(period);
     const [createdDeliveries, completedDeliveries, driverDeliveries, driverOffers] =
       await Promise.all([
         this.prisma.delivery.findMany({
@@ -111,6 +114,37 @@ export class AdminReportsService {
           select: { driverId: true, response: true },
         }),
       ]);
+
+    /**
+     * A janela anterior sai de AGREGADOS, e nao das linhas.
+     *
+     * O periodo atual precisa das linhas porque monta ranking por empresa, por
+     * motoboy e horario de pico. A comparacao precisa de quatro numeros — puxar
+     * mais um mes inteiro de linhas so para soma-los dobraria o custo da tela
+     * sem nada em troca.
+     */
+    const [criadasAntes, concluidasAntes] = await Promise.all([
+      this.prisma.delivery.count({
+        where: { createdAt: { gte: anterior.from, lte: anterior.to } },
+      }),
+      this.prisma.delivery.aggregate({
+        where: {
+          status: 'COMPLETED',
+          statusChangedAt: { gte: anterior.from, lte: anterior.to },
+        },
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+    ]);
+    const totalAntes = roundCurrency(Number(concluidasAntes._sum.totalValue ?? 0));
+    const comparacao = {
+      ordersCreatedCount: criadasAntes,
+      deliveriesCompletedCount: concluidasAntes._count._all,
+      totalValue: totalAntes,
+      averageTicket: concluidasAntes._count._all
+        ? roundCurrency(totalAntes / concluidasAntes._count._all)
+        : 0,
+    };
 
     /**
      * Do aceite ate a conclusao. Usa a PRIMEIRA ocorrencia de cada status: uma
@@ -221,10 +255,34 @@ export class AdminReportsService {
       }
     }
 
+    const ticketMedio = completedDeliveries.length
+      ? roundCurrency(totalValue / completedDeliveries.length)
+      : 0;
+
     return {
       period: {
         from: dateInSaoPaulo(period.from),
         to: dateInSaoPaulo(period.to),
+      },
+      live: isLiveWindow(period, agora),
+      comparison: {
+        period: {
+          from: dateInSaoPaulo(anterior.from),
+          to: dateInSaoPaulo(anterior.to),
+        },
+        ordersCreatedCount: comparacao.ordersCreatedCount,
+        deliveriesCompletedCount: comparacao.deliveriesCompletedCount,
+        totalValue: comparacao.totalValue,
+        averageTicket: comparacao.averageTicket,
+        changePercent: {
+          ordersCreated: percentChange(createdDeliveries.length, comparacao.ordersCreatedCount),
+          deliveriesCompleted: percentChange(
+            completedDeliveries.length,
+            comparacao.deliveriesCompletedCount,
+          ),
+          totalValue: percentChange(roundCurrency(totalValue), comparacao.totalValue),
+          averageTicket: percentChange(ticketMedio, comparacao.averageTicket),
+        },
       },
       ordersCreated: {
         count: createdDeliveries.length,
@@ -235,9 +293,7 @@ export class AdminReportsService {
         totalValue: roundCurrency(totalValue),
         driverValue: roundCurrency(driverValue),
         platformValue: roundCurrency(platformValue),
-        averageTicket: completedDeliveries.length
-          ? roundCurrency(totalValue / completedDeliveries.length)
-          : 0,
+        averageTicket: ticketMedio,
       },
       companies: [...companies.values()]
         .map((item) => ({

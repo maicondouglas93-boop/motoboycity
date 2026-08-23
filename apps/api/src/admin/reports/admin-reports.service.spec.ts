@@ -2,7 +2,13 @@ import { AdminReportsService } from './admin-reports.service';
 
 describe('AdminReportsService', () => {
   const prisma = {
-    delivery: { findMany: jest.fn() },
+    delivery: {
+      findMany: jest.fn(),
+      // A janela anterior sai de agregados, e nao das linhas: quatro numeros
+      // nao justificam puxar mais um mes inteiro de registros.
+      count: jest.fn().mockResolvedValue(0),
+      aggregate: jest.fn().mockResolvedValue({ _count: { _all: 0 }, _sum: { totalValue: null } }),
+    },
     // A terceira consulta e a de desempenho; a quarta, a de ofertas.
     deliveryOffer: { findMany: jest.fn() },
   };
@@ -103,5 +109,43 @@ describe('AdminReportsService', () => {
     expect(relatorio.peakHours.busiestHour).toBeNull();
     expect(relatorio.peakHours.busiestWeekday).toBeNull();
     expect(relatorio.peakHours.daysInPeriod).toBe(31);
+  });
+
+  describe('comparação com o período anterior', () => {
+    it('consulta uma janela anterior de duração idêntica, colada antes', async () => {
+      await service.operations({ from: '2026-08-01', to: '2026-08-31' });
+
+      const atual = periodoConsultado();
+      const anterior = prisma.delivery.count.mock.calls[0]?.[0]?.where?.createdAt as {
+        gte: Date;
+        lte: Date;
+      };
+
+      expect(anterior.lte.toISOString()).toBe(atual.gte.toISOString());
+      expect(anterior.lte.getTime() - anterior.gte.getTime()).toBe(
+        atual.lte.getTime() - atual.gte.getTime(),
+      );
+    });
+
+    it('base zero não vira percentual', async () => {
+      // Sem nada no periodo anterior, sair de zero para qualquer coisa nao e
+      // crescimento percentual — mostrar um numero sugeriria tendencia.
+      const relatorio = await service.operations({ from: '2026-08-01', to: '2026-08-31' });
+
+      expect(relatorio.comparison.changePercent.ordersCreated).toBeNull();
+      expect(relatorio.comparison.changePercent.totalValue).toBeNull();
+    });
+
+    it('marca como histórico o recorte que não termina hoje', async () => {
+      const relatorio = await service.operations({ from: '2020-01-01', to: '2020-01-31' });
+
+      expect(relatorio.live).toBe(false);
+    });
+
+    it('sem filtro, o recorte termina hoje e é ao vivo', async () => {
+      const relatorio = await service.operations({});
+
+      expect(relatorio.live).toBe(true);
+    });
   });
 });

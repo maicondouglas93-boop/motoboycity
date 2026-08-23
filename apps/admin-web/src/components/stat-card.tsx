@@ -4,6 +4,7 @@ export function StatCard({
   label,
   value,
   hint,
+  changePercent = null,
 }: {
   label: string;
   value: string | number;
@@ -15,6 +16,11 @@ export function StatCard({
    * informação que faz alguém agir.
    */
   hint?: string;
+  /**
+   * Variação percentual contra o período anterior. `null` quando a base é zero
+   * — ali não há tendência a mostrar, e um número daria a impressão contrária.
+   */
+  changePercent?: number | null;
 }) {
   return (
     <Card className="h-full">
@@ -23,6 +29,14 @@ export function StatCard({
       </CardHeader>
       <CardContent>
         <p className="text-2xl font-semibold">{value}</p>
+        {changePercent !== null && (
+          <p
+            className={`mt-1 text-xs ${changePercent < 0 ? 'text-alerta' : 'text-status-entregue'}`}
+          >
+            {changePercent < 0 ? '↓' : '↑'} {Math.abs(changePercent).toLocaleString('pt-BR')}%{' '}
+            <span className="text-muted-foreground">vs período anterior (até agora)</span>
+          </p>
+        )}
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>

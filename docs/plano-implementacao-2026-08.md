@@ -625,6 +625,38 @@ cópia dessa aritmética.
 
 ---
 
+### 7. Comparação honesta de período, e o rótulo de histórico ✅ FEITO
+
+**Entregue em 2026-08-23.** O plano falava em "corrigir" a comparação — mas
+**não existia comparação nenhuma**. Os relatórios mostravam números absolutos e
+só. Foi construída do zero.
+
+**A comparação é por DURAÇÃO espelhada, não por dias de calendário.** É isso que
+a torna honesta: o recorte padrão termina _agora_, então contém 29 dias inteiros
+mais as horas já decorridas de hoje. Comparar com 30 dias civis completos faria
+todo indicador parecer em queda, todo dia, até a noite. Espelhando a duração em
+milissegundos, as duas janelas têm exatamente as mesmas horas — e de quebra
+dispensa aritmética de mês, que é onde o índice base zero de `Date.UTC` já
+produziu o mês errado aqui.
+
+**Base zero devolve `null`, não "100%".** Sair de nenhuma entrega para dez não é
+crescimento percentual, é um começo; qualquer número ali sugeriria uma tendência
+que não existe. Zero contra zero também é nulo, e não "0%".
+
+**A janela anterior sai de agregados, não de linhas.** O período atual precisa
+das linhas porque monta ranking por empresa, por motoboy e horário de pico; a
+comparação precisa de quatro números. Puxar mais um mês inteiro de registros só
+para somá-los dobraria o custo da tela sem nada em troca.
+
+**O rótulo HISTÓRICO** aparece quando o recorte não termina hoje, dizendo em que
+data ele parou. O `live` vem resolvido do servidor: decidir isso exige o fuso da
+operação, e uma segunda cópia da regra no navegador divergiria da que monta o
+recorte — mesma escolha já feita em `activeNow` das taxas.
+
+**Não verificado visualmente:** exige login.
+
+---
+
 ### 7. Comparação honesta de período, e o rótulo de histórico
 
 Duas correções nos relatórios que já existem. Baratas e evitam decisão errada.
