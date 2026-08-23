@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { adminSurchargesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -59,6 +60,7 @@ function describeSchedule(schedule: SurchargeItem['schedules'][number]): string 
 }
 
 export default function SurchargesPage() {
+  const money = useMoney();
   const token = session.getToken();
   const queryClient = useQueryClient();
 
@@ -396,10 +398,7 @@ export default function SurchargesPage() {
                     <span className="text-sm text-muted-foreground">
                       {surcharge.type === 'PERCENTAGE'
                         ? `${surcharge.value}%`
-                        : surcharge.value.toLocaleString('pt-BR', {
-                            style: 'currency',
-                            currency: 'BRL',
-                          })}{' '}
+                        : money(surcharge.value)}{' '}
                       · {surcharge.driverSharePercentage}% ao entregador
                     </span>
                     {/*

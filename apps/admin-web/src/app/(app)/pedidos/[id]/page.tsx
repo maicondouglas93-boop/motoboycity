@@ -14,8 +14,8 @@ import { OrderDetailMap } from '@/components/operations/order-detail-map';
 import { DeliveryOverrides } from '@/components/operations/delivery-overrides';
 import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 const cancellableStatuses: DeliveryStatus[] = [
@@ -26,10 +26,6 @@ const cancellableStatuses: DeliveryStatus[] = [
   'DELIVERED',
   'AWAITING_PAYMENT',
 ];
-
-function formatCurrency(value: number | null): string {
-  return value === null ? 'A calcular na entrega' : currencyFormatter.format(value);
-}
 
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : '—';
@@ -78,6 +74,7 @@ const offerResponseLabel: Record<string, string> = {
 };
 
 export default function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const money = useMoney();
   const { id } = use(params);
   const token = session.getToken();
   const queryClient = useQueryClient();
@@ -174,16 +171,16 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       )}
 
       <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-        <StatCard label="Valor total" value={formatCurrency(delivery.totalValue)} />
-        <StatCard label="Repasse" value={formatCurrency(delivery.driverValue)} />
-        <StatCard label="Receita plataforma" value={formatCurrency(delivery.platformValue)} />
+        <StatCard label="Valor total" value={money(delivery.totalValue)} />
+        <StatCard label="Repasse" value={money(delivery.driverValue)} />
+        <StatCard label="Receita plataforma" value={money(delivery.platformValue)} />
         <StatCard
           label="Distância"
           value={delivery.distanceKm === null ? 'Não calculada' : `${delivery.distanceKm} km`}
         />
         <StatCard
           label="Retorno"
-          value={delivery.requiresReturn ? formatCurrency(delivery.returnValue) : 'Não'}
+          value={delivery.requiresReturn ? money(delivery.returnValue) : 'Não'}
         />
       </section>
 

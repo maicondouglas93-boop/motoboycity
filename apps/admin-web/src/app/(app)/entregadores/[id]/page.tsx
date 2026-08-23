@@ -14,8 +14,8 @@ import { Label } from '@/components/ui/label';
 import { StatCard } from '@/components/stat-card';
 import { adminDriversApi, adminFinancialApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 const walletStatusLabel: Record<WalletTransactionStatus, string> = {
@@ -46,15 +46,12 @@ const accountLabel: Record<string, string> = {
   BLOCKED: 'Bloqueada',
 };
 
-function formatCurrency(value: number | null): string {
-  return value === null ? 'A calcular na entrega' : currencyFormatter.format(value);
-}
-
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : '—';
 }
 
 export default function DriverDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const money = useMoney();
   const { id: driverId } = use(params);
   const token = session.getToken();
   const [orderStatus, setOrderStatus] = useState<DeliveryStatus | 'ALL'>('ALL');
@@ -154,13 +151,10 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           </header>
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <StatCard
-              label="Saldo disponível"
-              value={formatCurrency(wallet?.availableBalance ?? 0)}
-            />
-            <StatCard label="Saldo a liberar" value={formatCurrency(wallet?.blockedBalance ?? 0)} />
+            <StatCard label="Saldo disponível" value={money(wallet?.availableBalance ?? 0)} />
+            <StatCard label="Saldo a liberar" value={money(wallet?.blockedBalance ?? 0)} />
             <StatCard label="Pedidos concluídos" value={String(deliveryStats.completed)} />
-            <StatCard label="Repasse concluído" value={formatCurrency(deliveryStats.repasse)} />
+            <StatCard label="Repasse concluído" value={money(deliveryStats.repasse)} />
           </section>
 
           <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -277,7 +271,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                         <div className="text-right">
                           <StatusChip status={delivery.status} />
                           <p className="mt-1 text-sm font-medium">
-                            Repasse: {formatCurrency(delivery.driverValue)}
+                            Repasse: {money(delivery.driverValue)}
                           </p>
                         </div>
                         <Link
@@ -403,7 +397,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                           }
                         >
                           {transaction.direction === 'CREDIT' ? '+' : '−'}{' '}
-                          {formatCurrency(transaction.amount)}
+                          {money(transaction.amount)}
                         </p>
                       </div>
                     </CardContent>

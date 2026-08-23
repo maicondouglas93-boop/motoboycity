@@ -13,8 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 
 const statusLabel: Record<WithdrawalRequestStatus, string> = {
@@ -24,13 +24,16 @@ const statusLabel: Record<WithdrawalRequestStatus, string> = {
   REJECTED: 'Rejeitado',
 };
 
-function statusVariant(status: WithdrawalRequestStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusVariant(
+  status: WithdrawalRequestStatus,
+): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'PAID' || status === 'APPROVED') return 'default';
   if (status === 'REJECTED') return 'destructive';
   return 'secondary';
 }
 
 export default function WithdrawalDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const money = useMoney();
   const { id } = use(params);
   const token = session.getToken();
   const queryClient = useQueryClient();
@@ -63,7 +66,9 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
       await invalidate();
     },
     onError: (error) =>
-      setActionError(error instanceof ApiError ? error.message : 'Não foi possível aprovar o saque.'),
+      setActionError(
+        error instanceof ApiError ? error.message : 'Não foi possível aprovar o saque.',
+      ),
   });
   const paidMutation = useMutation({
     mutationFn: () =>
@@ -82,17 +87,24 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
       ),
   });
   const rejectMutation = useMutation({
-    mutationFn: () => adminFinancialApi.rejectWithdrawal(token as string, id, { note: note.trim() }),
+    mutationFn: () =>
+      adminFinancialApi.rejectWithdrawal(token as string, id, { note: note.trim() }),
     onSuccess: async () => {
       setNote('');
       await invalidate();
     },
     onError: (error) =>
-      setActionError(error instanceof ApiError ? error.message : 'Não foi possível rejeitar o saque.'),
+      setActionError(
+        error instanceof ApiError ? error.message : 'Não foi possível rejeitar o saque.',
+      ),
   });
 
   if (!token) {
-    return <p className="text-sm text-muted-foreground">Faça login como administrador para ver este saque.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Faça login como administrador para ver este saque.
+      </p>
+    );
   }
   if (withdrawalQuery.isLoading) {
     return <p className="text-sm text-muted-foreground">Carregando solicitação de saque...</p>;
@@ -106,7 +118,8 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
   }
 
   const withdrawal = withdrawalQuery.data;
-  const actionInFlight = approveMutation.isPending || paidMutation.isPending || rejectMutation.isPending;
+  const actionInFlight =
+    approveMutation.isPending || paidMutation.isPending || rejectMutation.isPending;
 
   function reject() {
     if (note.trim().length < 3) {
@@ -119,7 +132,10 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="space-y-6">
-      <Link href="/financeiro/saques" className="flex w-fit items-center gap-1 text-sm text-muted-foreground">
+      <Link
+        href="/financeiro/saques"
+        className="flex w-fit items-center gap-1 text-sm text-muted-foreground"
+      >
         <ChevronLeft className="size-4" /> Voltar para fila de saques
       </Link>
 
@@ -142,15 +158,15 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between gap-3">
               <span className="text-muted-foreground">Solicitado</span>
-              <strong>{currencyFormatter.format(withdrawal.requestedAmount)}</strong>
+              <strong>{money(withdrawal.requestedAmount)}</strong>
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-muted-foreground">Taxa</span>
-              <span>{currencyFormatter.format(withdrawal.feeAmount)}</span>
+              <span>{money(withdrawal.feeAmount)}</span>
             </div>
             <div className="flex justify-between gap-3 border-t pt-2">
               <span className="text-muted-foreground">Líquido a pagar</span>
-              <strong>{currencyFormatter.format(withdrawal.netAmount)}</strong>
+              <strong>{money(withdrawal.netAmount)}</strong>
             </div>
           </CardContent>
         </Card>

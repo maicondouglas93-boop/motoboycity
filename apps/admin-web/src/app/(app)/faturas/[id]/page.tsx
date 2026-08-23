@@ -21,8 +21,8 @@ import {
 } from '@/components/ui/table';
 import { adminInvoicesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 
 function today(): string {
@@ -41,6 +41,7 @@ const invoiceStatusLabel: Record<string, string> = {
 };
 
 export default function AdminInvoiceDetailPage() {
+  const money = useMoney();
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
   const queryClient = useQueryClient();
@@ -101,24 +102,20 @@ export default function AdminInvoiceDetailPage() {
           <CardHeader>
             <CardTitle className="text-sm">Total faturado</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold">
-            {currency.format(invoice.totalValue)}
-          </CardContent>
+          <CardContent className="text-2xl font-bold">{money(invoice.totalValue)}</CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Repasse</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold">
-            {currency.format(invoice.driverValueSum)}
-          </CardContent>
+          <CardContent className="text-2xl font-bold">{money(invoice.driverValueSum)}</CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Receita da plataforma</CardTitle>
           </CardHeader>
           <CardContent className="text-2xl font-bold">
-            {currency.format(invoice.platformValueSum)}
+            {money(invoice.platformValueSum)}
           </CardContent>
         </Card>
       </div>
@@ -180,9 +177,9 @@ export default function AdminInvoiceDetailPage() {
                     </Link>
                   </TableCell>
                   <TableCell>{date.format(new Date(delivery.completedAt))}</TableCell>
-                  <TableCell>{currency.format(delivery.driverValue)}</TableCell>
-                  <TableCell>{currency.format(delivery.platformValue)}</TableCell>
-                  <TableCell>{currency.format(delivery.totalValue)}</TableCell>
+                  <TableCell>{money(delivery.driverValue)}</TableCell>
+                  <TableCell>{money(delivery.platformValue)}</TableCell>
+                  <TableCell>{money(delivery.totalValue)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

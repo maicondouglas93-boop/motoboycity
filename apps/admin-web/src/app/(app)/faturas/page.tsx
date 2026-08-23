@@ -20,8 +20,8 @@ import {
 } from '@/components/ui/table';
 import { adminInvoicesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' });
 
 const statusLabel: Record<InvoiceStatus, string> = {
@@ -45,6 +45,7 @@ function nextMonday(): string {
 }
 
 export default function AdminInvoicesPage() {
+  const money = useMoney();
   const token = session.getToken();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
@@ -228,9 +229,7 @@ export default function AdminInvoicesPage() {
                     </TableCell>
                     <TableCell>{date.format(new Date(invoice.issueDate))}</TableCell>
                     <TableCell>{invoice.deliveryCount}</TableCell>
-                    <TableCell className="font-medium">
-                      {currency.format(invoice.totalValue)}
-                    </TableCell>
+                    <TableCell className="font-medium">{money(invoice.totalValue)}</TableCell>
                     <TableCell>
                       {invoice.paymentDate
                         ? `${date.format(new Date(invoice.paymentDate))} · ${invoice.paymentMethod === 'ONLINE' ? 'Online' : 'Manual'}`

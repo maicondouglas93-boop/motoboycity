@@ -11,8 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi, adminInvoicesApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 const companyStatusLabel: Record<string, string> = {
@@ -28,15 +28,12 @@ const invoiceStatusLabel: Record<InvoiceStatus, string> = {
   CANCELLED: 'Cancelada',
 };
 
-function formatCurrency(value: number | null): string {
-  return value === null ? 'A calcular na entrega' : currencyFormatter.format(value);
-}
-
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : '—';
 }
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const money = useMoney();
   const { id: companyId } = use(params);
   const token = session.getToken();
   const [orderStatus, setOrderStatus] = useState<DeliveryStatus | 'ALL'>('ALL');
@@ -149,8 +146,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <StatCard label="Pedidos" value={String(deliveryStats.total)} />
             <StatCard label="Concluídos" value={String(deliveryStats.completed)} />
             <StatCard label="Cancelados" value={String(deliveryStats.cancelled)} />
-            <StatCard label="Valor dos pedidos" value={formatCurrency(deliveryStats.totalValue)} />
-            <StatCard label="Faturas em aberto" value={formatCurrency(invoiceStats.receivable)} />
+            <StatCard label="Valor dos pedidos" value={money(deliveryStats.totalValue)} />
+            <StatCard label="Faturas em aberto" value={money(invoiceStats.receivable)} />
           </section>
 
           <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -190,13 +187,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <CardTitle>Conferência financeira</CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <StatCard
-                  label="Total faturado no filtro"
-                  value={formatCurrency(invoiceStats.total)}
-                />
+                <StatCard label="Total faturado no filtro" value={money(invoiceStats.total)} />
                 <StatCard
                   label="Receita da plataforma"
-                  value={formatCurrency(deliveryStats.platformValue)}
+                  value={money(deliveryStats.platformValue)}
                 />
                 <StatCard label="Faturas encontradas" value={String(invoices.length)} />
               </CardContent>
@@ -252,9 +246,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       <div className="flex items-center gap-3">
                         <div className="text-right">
                           <StatusChip status={delivery.status} />
-                          <p className="mt-1 text-sm font-medium">
-                            {formatCurrency(delivery.totalValue)}
-                          </p>
+                          <p className="mt-1 text-sm font-medium">{money(delivery.totalValue)}</p>
                         </div>
                         <Link
                           className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"
@@ -321,7 +313,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                           >
                             {invoiceStatusLabel[invoice.status]}
                           </Badge>
-                          <p className="mt-1 font-medium">{formatCurrency(invoice.totalValue)}</p>
+                          <p className="mt-1 font-medium">{money(invoice.totalValue)}</p>
                         </div>
                         <Link
                           className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"

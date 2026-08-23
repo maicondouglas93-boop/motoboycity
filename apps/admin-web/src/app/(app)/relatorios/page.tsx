@@ -22,8 +22,7 @@ import { PeakHoursChart } from '@/components/reports/peak-hours-chart';
 import { StatCard } from '@/components/stat-card';
 import { adminReportsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
-
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+import { useMoney } from '@/lib/money';
 
 /**
  * Plural porque sao contagens, nao o estado de um pedido. Vocabulario alinhado
@@ -41,11 +40,8 @@ const statusCountLabel: Record<DeliveryStatus, string> = {
   AWAITING_PAYMENT: 'Aguardando pagamento',
 };
 
-function formatCurrency(value: number): string {
-  return currencyFormatter.format(value);
-}
-
 export default function AdminReportsPage() {
+  const money = useMoney();
   const token = session.getToken();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -145,22 +141,22 @@ export default function AdminReportsPage() {
             />
             <StatCard
               label="Valor concluído"
-              value={formatCurrency(report.deliveriesCompleted.totalValue)}
+              value={money(report.deliveriesCompleted.totalValue)}
             />
             <StatCard
               label="Repasse aos entregadores"
-              value={formatCurrency(report.deliveriesCompleted.driverValue)}
+              value={money(report.deliveriesCompleted.driverValue)}
             />
             <StatCard
               label="Receita da plataforma"
-              value={formatCurrency(report.deliveriesCompleted.platformValue)}
+              value={money(report.deliveriesCompleted.platformValue)}
             />
           </section>
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard
               label="Ticket médio concluído"
-              value={formatCurrency(report.deliveriesCompleted.averageTicket)}
+              value={money(report.deliveriesCompleted.averageTicket)}
             />
             {Object.entries(report.ordersCreated.byCurrentStatus).map(([status, count]) => (
               <StatCard
@@ -224,8 +220,8 @@ export default function AdminReportsPage() {
                           <TableCell>{company.createdCount}</TableCell>
                           <TableCell>{company.completedCount}</TableCell>
                           <TableCell>{company.cancelledCount}</TableCell>
-                          <TableCell>{formatCurrency(company.completedTotalValue)}</TableCell>
-                          <TableCell>{formatCurrency(company.platformValue)}</TableCell>
+                          <TableCell>{money(company.completedTotalValue)}</TableCell>
+                          <TableCell>{money(company.platformValue)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -275,7 +271,7 @@ export default function AdminReportsPage() {
                           </TableCell>
                           <TableCell>{serviceType.createdCount}</TableCell>
                           <TableCell>{serviceType.completedCount}</TableCell>
-                          <TableCell>{formatCurrency(serviceType.completedTotalValue)}</TableCell>
+                          <TableCell>{money(serviceType.completedTotalValue)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

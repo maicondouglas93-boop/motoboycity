@@ -20,8 +20,8 @@ import {
 } from '@/components/ui/table';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 const statusLabel: Record<WithdrawalRequestStatus, string> = {
@@ -31,7 +31,9 @@ const statusLabel: Record<WithdrawalRequestStatus, string> = {
   REJECTED: 'Rejeitado',
 };
 
-function statusVariant(status: WithdrawalRequestStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusVariant(
+  status: WithdrawalRequestStatus,
+): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'PAID' || status === 'APPROVED') return 'default';
   if (status === 'REJECTED') return 'destructive';
   return 'secondary';
@@ -45,6 +47,7 @@ type Filters = {
 };
 
 export default function WithdrawalRequestsPage() {
+  const money = useMoney();
   const token = session.getToken();
   const [status, setStatus] = useState<WithdrawalRequestStatus | 'ALL'>('ALL');
   const [search, setSearch] = useState('');
@@ -60,7 +63,11 @@ export default function WithdrawalRequestsPage() {
   });
 
   if (!token) {
-    return <p className="text-sm text-muted-foreground">Faça login como administrador para ver os saques.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Faça login como administrador para ver os saques.
+      </p>
+    );
   }
 
   function applyFilters() {
@@ -93,7 +100,10 @@ export default function WithdrawalRequestsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/financeiro" className="flex w-fit items-center gap-1 text-sm text-muted-foreground">
+      <Link
+        href="/financeiro"
+        className="flex w-fit items-center gap-1 text-sm text-muted-foreground"
+      >
         <ChevronLeft className="size-4" /> Voltar ao financeiro
       </Link>
 
@@ -108,7 +118,7 @@ export default function WithdrawalRequestsPage() {
         <Card className="min-w-52">
           <CardContent className="p-3">
             <p className="text-xs text-muted-foreground">Aguardando ação neste resultado</p>
-            <p className="text-lg font-semibold">{currencyFormatter.format(pendingTotal)}</p>
+            <p className="text-lg font-semibold">{money(pendingTotal)}</p>
           </CardContent>
         </Card>
       </header>
@@ -211,7 +221,7 @@ export default function WithdrawalRequestsPage() {
                     <TableCell>
                       <p>{dateFormatter.format(new Date(withdrawal.createdAt))}</p>
                       <p className="text-xs text-muted-foreground">
-                        Taxa: {currencyFormatter.format(withdrawal.feeAmount)}
+                        Taxa: {money(withdrawal.feeAmount)}
                       </p>
                     </TableCell>
                     <TableCell>
@@ -220,9 +230,11 @@ export default function WithdrawalRequestsPage() {
                     </TableCell>
                     <TableCell>
                       <p>{withdrawal.pixKey ?? 'Não informado'}</p>
-                      <p className="text-xs text-muted-foreground">{withdrawal.pixKeyType ?? '—'}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {withdrawal.pixKeyType ?? '—'}
+                      </p>
                     </TableCell>
-                    <TableCell>{currencyFormatter.format(withdrawal.netAmount)}</TableCell>
+                    <TableCell>{money(withdrawal.netAmount)}</TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(withdrawal.status)}>
                         {statusLabel[withdrawal.status]}

@@ -514,6 +514,39 @@ dia; carteira sem transação nenhuma; ausência de entrega concluída.
 
 ---
 
+### 5. Ocultar valores ✅ FEITO
+
+**Entregue em 2026-08-23.** Botão de olho no cabeçalho, ao lado da conta. Troca
+todo valor em dinheiro por `R$ ••••`, guardado no navegador.
+
+**A parte difícil não era o botão — era garantir que nada escapasse.** O plano
+avisava que meia solução é pior que nenhuma, e o painel tinha **treze cópias**
+de formatador de dinheiro: cada página com a sua, várias chamando
+`Intl.NumberFormat` direto. Wireá-las uma a uma deixaria qualquer tela nova
+vazando por padrão.
+
+A solução foi unificar: um único `useMoney()` em `lib/money.tsx`, com a máscara
+dentro dele. Nenhuma tela pode esquecer de esconder porque nenhuma tela formata
+sozinha. A prova é um grep — `Intl.NumberFormat.*BRL` não casa em mais nada fora
+de `money.tsx`.
+
+**Duas decisões:**
+
+- **`useSyncExternalStore`, não `useState` + `useEffect`.** `localStorage` é
+  estado externo ao React, e semeá-lo num efeito é o que a regra
+  `react-hooks/set-state-in-effect` barra — a mesma que já mordeu antes neste
+  repositório. Com o hook certo, o React cuida do SSR: `getServerSnapshot`
+  responde "visível" e a leitura real acontece na hidratação. De quebra, dispensa
+  o Provider: qualquer componente chama o hook e todos ficam em sincronia;
+- **texto de ausência não é mascarado.** "A calcular na entrega" e "—" não
+  revelam valor nenhum, e escondê-los só tiraria informação de quem olha.
+
+**Não verificado visualmente:** as telas com dinheiro exigem login, que eu não
+faço. Typecheck, lint, build e a checagem estrutural dos 14 pontos de uso
+passaram; o clique no botão não foi exercido.
+
+---
+
 ### 5. Ocultar valores
 
 Um botão no cabeçalho do painel que substitui todo número em dinheiro por

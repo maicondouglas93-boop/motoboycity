@@ -21,6 +21,7 @@ import {
 import { adminCompaniesApi, adminDriversApi, deliveriesApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 
 const STATUSES: DeliveryStatus[] = [
   'SCHEDULED',
@@ -35,7 +36,6 @@ const STATUSES: DeliveryStatus[] = [
 ];
 
 const dateTime = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
  * Número no formato que o Excel brasileiro entende: vírgula decimal e sem
@@ -47,6 +47,7 @@ function csvNumber(value: number | null): string {
 }
 
 export default function DeliveryHistoryPage() {
+  const money = useMoney();
   const token = session.getToken();
 
   const [from, setFrom] = useState('');
@@ -316,12 +317,10 @@ export default function DeliveryHistoryPage() {
                           : `${delivery.distanceKm.toLocaleString('pt-BR')} km`}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {delivery.totalValue === null ? '—' : currency.format(delivery.totalValue)}
+                        {delivery.totalValue === null ? '—' : money(delivery.totalValue)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {delivery.driverValue === null
-                          ? '—'
-                          : currency.format(delivery.driverValue)}
+                        {delivery.driverValue === null ? '—' : money(delivery.driverValue)}
                       </TableCell>
                     </TableRow>
                   ))}

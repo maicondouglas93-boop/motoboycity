@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useMoney } from '@/lib/money';
 
 /**
  * Colunas ordenáveis, e NENHUMA nota única de desempenho.
@@ -48,8 +49,6 @@ const COLUNAS: Array<{ key: SortKey; label: string; hint: string }> = [
   { key: 'driverValue', label: 'Repasse', hint: 'Total a receber no período' },
 ];
 
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
 /**
  * Nulo vira travessão, nunca zero.
  *
@@ -67,6 +66,7 @@ function minutos(value: number | null, samples: number): string {
 }
 
 export function DriverRanking({ drivers }: { drivers: OperationsReportDriverItem[] }) {
+  const money = useMoney();
   const [sortKey, setSortKey] = useState<SortKey>('completedCount');
 
   const ordenados = [...drivers].sort((left, right) => {
@@ -148,7 +148,7 @@ export function DriverRanking({ drivers }: { drivers: OperationsReportDriverItem
               <TableCell className="tabular-nums">
                 {minutos(driver.averageMinutesToComplete, driver.timedSamples)}
               </TableCell>
-              <TableCell className="tabular-nums">{currency.format(driver.driverValue)}</TableCell>
+              <TableCell className="tabular-nums">{money(driver.driverValue)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

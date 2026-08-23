@@ -19,14 +19,10 @@ import {
 import { StatCard } from '@/components/stat-card';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
-
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
-function formatCurrency(value: number): string {
-  return currencyFormatter.format(value);
-}
+import { useMoney } from '@/lib/money';
 
 export default function FinancePage() {
+  const money = useMoney();
   const token = session.getToken();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -154,45 +150,45 @@ export default function FinancePage() {
             <Link href="/pedidos?status=COMPLETED">
               <StatCard
                 label="Concluído sem fatura"
-                value={formatCurrency(caixa.unbilledValue)}
+                value={money(caixa.unbilledValue)}
                 hint={`${caixa.unbilledCount} entrega(s) feitas e ainda não cobradas`}
               />
             </Link>
             <Link href="/faturas">
               <StatCard
                 label="Faturas a vencer"
-                value={formatCurrency(caixa.invoicesDueValue)}
+                value={money(caixa.invoicesDueValue)}
                 hint={`${caixa.invoicesDueCount} fatura(s)`}
               />
             </Link>
             <Link href="/faturas">
               <StatCard
                 label="Faturas vencidas"
-                value={formatCurrency(caixa.invoicesOverdueValue)}
+                value={money(caixa.invoicesOverdueValue)}
                 hint={`${caixa.invoicesOverdueCount} fatura(s)`}
               />
             </Link>
             <StatCard
               label="Total a receber"
-              value={formatCurrency(caixa.totalReceivable)}
+              value={money(caixa.totalReceivable)}
               hint="Sem fatura + a vencer + vencidas"
             />
           </div>
           <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
             <StatCard
               label="Disponível nas carteiras"
-              value={formatCurrency(caixa.driverAvailableBalance)}
+              value={money(caixa.driverAvailableBalance)}
               hint="Os motoboys podem sacar a qualquer hora"
             />
             <StatCard
               label="A liberar nas carteiras"
-              value={formatCurrency(caixa.driverBlockedBalance)}
+              value={money(caixa.driverBlockedBalance)}
               hint="Ainda dentro do prazo de liberação"
             />
             <Link href="/financeiro/saques">
               <StatCard
                 label="Saques pendentes"
-                value={formatCurrency(caixa.pendingWithdrawalValue)}
+                value={money(caixa.pendingWithdrawalValue)}
                 hint="Pedidos ainda não pagos"
               />
             </Link>
@@ -207,17 +203,14 @@ export default function FinancePage() {
           </h2>
           <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard label="Entregas" value={String(overview.completedDeliveries.count)} />
-            <StatCard
-              label="Valor total"
-              value={formatCurrency(overview.completedDeliveries.totalValue)}
-            />
+            <StatCard label="Valor total" value={money(overview.completedDeliveries.totalValue)} />
             <StatCard
               label="Repasse aos entregadores"
-              value={formatCurrency(overview.completedDeliveries.driverValue)}
+              value={money(overview.completedDeliveries.driverValue)}
             />
             <StatCard
               label="Receita da plataforma"
-              value={formatCurrency(overview.completedDeliveries.platformValue)}
+              value={money(overview.completedDeliveries.platformValue)}
             />
           </div>
         </section>
@@ -289,9 +282,9 @@ export default function FinancePage() {
                       <p className="font-medium">{wallet.driverName}</p>
                       <p className="text-xs text-muted-foreground">{wallet.driverEmail}</p>
                     </TableCell>
-                    <TableCell>{formatCurrency(wallet.availableBalance)}</TableCell>
-                    <TableCell>{formatCurrency(wallet.blockedBalance)}</TableCell>
-                    <TableCell>{formatCurrency(wallet.pendingWithdrawalAmount)}</TableCell>
+                    <TableCell>{money(wallet.availableBalance)}</TableCell>
+                    <TableCell>{money(wallet.blockedBalance)}</TableCell>
+                    <TableCell>{money(wallet.pendingWithdrawalAmount)}</TableCell>
                     <TableCell>
                       <span
                         className={

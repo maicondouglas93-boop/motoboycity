@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useAdminActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
+import { useMoney } from '@/lib/money';
 
 const STATUS_FILTERS: { label: string; value: DeliveryStatus | 'ALL' }[] = [
   { label: 'Todos os pedidos', value: 'ALL' },
@@ -33,13 +34,6 @@ const CANCELLABLE_STATUSES: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
 ];
 
-function formatCurrency(value: number | null): string {
-  if (value === null) {
-    return 'A calcular na entrega';
-  }
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 const trackingDateFormatter = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
   minute: '2-digit',
@@ -50,6 +44,7 @@ function mapsUrl(lat: number, lng: number): string {
 }
 
 export default function AdminOrdersPage() {
+  const money = useMoney();
   const [statusFilter, setStatusFilter] = useState<DeliveryStatus | 'ALL'>('ALL');
   const [actionError, setActionError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -185,7 +180,9 @@ export default function AdminOrdersPage() {
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <StatusChip status={delivery.status} />
-                    <p className="font-medium">{formatCurrency(delivery.totalValue)}</p>
+                    <p className="font-medium">
+                      {money(delivery.totalValue, 'A calcular na entrega')}
+                    </p>
                   </div>
                   <Link
                     className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"

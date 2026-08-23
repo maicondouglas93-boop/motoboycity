@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   DollarSign,
+  Eye,
+  EyeOff,
   FileText,
   LayoutDashboard,
   ListOrdered,
@@ -18,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { useMoneyVisibility } from '@/lib/money';
 import { Wordmark } from '@/components/brand/wordmark';
 import { session } from '@/lib/session';
 
@@ -43,6 +46,7 @@ const NAV_ITEMS = [
 export function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const { hidden: moneyHidden, toggle: toggleMoney } = useMoneyVisibility();
 
   function handleLogout() {
     session.clearToken();
@@ -84,8 +88,27 @@ export function TopNav() {
           })}
         </nav>
 
+        {/* Ao lado da conta e sempre visivel: quem precisa esconder valores
+            costuma precisar disso NA HORA, com alguem ja olhando a tela. */}
+        <button
+          type="button"
+          onClick={toggleMoney}
+          aria-pressed={moneyHidden}
+          title={moneyHidden ? 'Mostrar valores' : 'Ocultar valores'}
+          className="ml-auto flex shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm text-white/60 transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none xl:ml-0"
+        >
+          {moneyHidden ? (
+            <EyeOff className="size-4" aria-hidden="true" />
+          ) : (
+            <Eye className="size-4" aria-hidden="true" />
+          )}
+          <span className="sr-only">
+            {moneyHidden ? 'Mostrar valores em dinheiro' : 'Ocultar valores em dinheiro'}
+          </span>
+        </button>
+
         <DropdownMenu>
-          <DropdownMenuTrigger className="ml-auto flex shrink-0 items-center gap-2 rounded-md text-sm text-white/70 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none xl:ml-0">
+          <DropdownMenuTrigger className="flex shrink-0 items-center gap-2 rounded-md text-sm text-white/70 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none xl:ml-0">
             <Avatar className="size-8">
               <AvatarFallback className="bg-white/10 text-xs text-white">A</AvatarFallback>
             </Avatar>

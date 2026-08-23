@@ -30,11 +30,7 @@ import {
   adminServiceTypesApi,
 } from '@/lib/api-client';
 import { session } from '@/lib/session';
-
-function formatCurrency(value: number | null): string {
-  if (value === null) return '—';
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+import { useMoney } from '@/lib/money';
 
 /**
  * Zero vira travessão, e não "0 km": sem bandeirada a cobrança começa no metro
@@ -46,6 +42,7 @@ function formatDistance(value: number): string {
 }
 
 export default function PricingTablesPage() {
+  const money = useMoney();
   const token = session.getToken();
   const queryClient = useQueryClient();
 
@@ -339,11 +336,11 @@ export default function PricingTablesPage() {
             {pricingTables.map((pricingTable) => (
               <TableRow key={pricingTable.id}>
                 <TableCell>{pricingTable.serviceTypeName}</TableCell>
-                <TableCell>{formatCurrency(pricingTable.baseFee)}</TableCell>
+                <TableCell>{money(pricingTable.baseFee)}</TableCell>
                 <TableCell>{formatDistance(pricingTable.includedDistanceKm)}</TableCell>
-                <TableCell>{formatCurrency(pricingTable.perKmFee)}</TableCell>
-                <TableCell>{formatCurrency(pricingTable.minimumFee)}</TableCell>
-                <TableCell>{formatCurrency(pricingTable.returnFee)}</TableCell>
+                <TableCell>{money(pricingTable.perKmFee)}</TableCell>
+                <TableCell>{money(pricingTable.minimumFee)}</TableCell>
+                <TableCell>{money(pricingTable.returnFee)}</TableCell>
                 <TableCell>
                   <Badge variant={pricingTable.active ? 'default' : 'outline'}>
                     {pricingTable.active ? 'Ativa' : 'Inativa'}
