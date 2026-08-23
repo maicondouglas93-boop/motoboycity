@@ -2,10 +2,20 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
+# Scripts de instalacao permitidos. `false` nao quebra o pacote: apenas nao
+# roda o postinstall dele.
+#
+# @firebase/util e protobufjs entraram como dependencias transitivas do
+# firebase-admin. Ficam em `false` porque o push usa a API HTTP de mensageria, e
+# nao gRPC: verificado carregando `firebase-admin/messaging` e obtendo
+# `getMessaging` com os dois scripts ignorados. Script que nao precisa rodar e
+# superficie que nao precisa existir.
 allowBuilds:
+  '@firebase/util': false
   '@prisma/client': true
   '@prisma/engines': true
   msgpackr-extract: true
   prisma: true
+  protobufjs: false
   sharp: false
   unrs-resolver: false

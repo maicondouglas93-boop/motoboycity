@@ -4,6 +4,7 @@ import type { AuthUser } from '@motoboycity/types';
 import { colors } from '../theme/colors';
 import { authApi, driverPresenceApi } from '../lib/apiClient';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { desativarPush } from '../lib/push';
 import { session } from '../lib/session';
 import type { RootStackParamList, ScreenNavigator } from '../navigation/types';
 
@@ -62,6 +63,12 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
       await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
     }
     await stopDeliveryTracking();
+    /**
+     * ANTES de limpar a sessao: desregistrar exige o token de acesso, e sem ele
+     * o aparelho continuaria recebendo as ofertas de quem saiu — inclusive o
+     * numero do pedido na notificacao, que e informacao de outra pessoa.
+     */
+    await desativarPush();
     await session.clearToken();
     onClose();
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });

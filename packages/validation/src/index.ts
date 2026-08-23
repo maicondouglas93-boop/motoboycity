@@ -17,6 +17,7 @@ export * from './admin/update-platform-settings.schema';
 export * from './admin/replace-driver-service-types.schema';
 export * from './company/upsert-company-address.schema';
 export * from './driver/set-driver-presence.schema';
+export * from './driver/register-device-token.schema';
 export * from './finance/list-wallet-transactions-query.schema';
 export * from './finance/admin-financial-query.schema';
 export * from './finance/invoice.schema';

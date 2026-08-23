@@ -6,6 +6,7 @@ import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-p
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
+import { PushService } from '../push/push.service';
 
 const offerPickupAddress = {
   type: 'PICKUP',
@@ -53,6 +54,7 @@ describe('DispatchService', () => {
     emitDeliveryUpdated: jest.Mock;
   };
   let livePresence: { isLive: jest.Mock };
+  let push: { sendToDriver: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
   let tx: {
     $queryRaw: jest.Mock;
@@ -95,6 +97,7 @@ describe('DispatchService', () => {
       emitDeliveryUpdated: jest.fn(),
     };
     livePresence = { isLive: jest.fn().mockResolvedValue(true) };
+    push = { sendToDriver: jest.fn().mockResolvedValue(1) };
     queue = { add: jest.fn(), remove: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -104,6 +107,7 @@ describe('DispatchService', () => {
         { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
         { provide: LiveDriverPresenceService, useValue: livePresence },
+        { provide: PushService, useValue: push },
         { provide: getQueueToken(DISPATCH_QUEUE), useValue: queue },
       ],
     }).compile();

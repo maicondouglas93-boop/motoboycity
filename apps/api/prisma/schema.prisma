@@ -387,6 +387,8 @@ model Driver {
   lastKnownLng Decimal?  @db.Decimal(10, 7)
   lastSeenAt   DateTime?
 
+  deviceTokens DeviceToken[]
+
   /// Quando o último aviso de "sem posição" foi disparado para este motoboy.
   ///
   /// Existe para o aviso sair uma vez por EPISÓDIO de silêncio, e não a cada
@@ -607,6 +609,32 @@ model Delivery {
   @@index([invoiceId])
   @@index([batchId])
   @@map("deliveries")
+}
+
+/// Token de push de um aparelho, para alcançar o motoboy com o app fechado.
+///
+/// O token é ÚNICO no sistema inteiro, e não por motoboy: um mesmo aparelho
+/// pode trocar de dono — o motoboy sai da conta e outro entra. Sem a
+/// unicidade, o aparelho ficaria registrado nas duas contas e a oferta de um
+/// tocaria no celular do outro.
+///
+/// `lastSeenAt` existe para limpar token morto: o FCM só avisa que um token
+/// expirou quando alguém tenta enviar, então um aparelho que sumiu sem
+/// desinstalar ficaria acumulando aqui para sempre.
+model DeviceToken {
+  id         String   @id @default(uuid())
+  driverId   String
+  token      String   @unique
+  platform   String
+  appVersion String?
+
+  driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([driverId])
+  @@map("device_tokens")
 }
 
 /// Pontos brutos de localização durante uma entrega ativa. São operacionais,

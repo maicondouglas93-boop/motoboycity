@@ -24,7 +24,11 @@ verdes. No estado registrado em 2026-08-20 ainda existem bloqueios objetivos:
 5. as migrations atuais não foram validadas em cópia restaurada do staging;
 6. o endereço de coleta salvo pela tela da empresa não inclui coordenadas;
 7. timeout de despacho e raio de retorno só podem ser configurados pela API;
-8. não há push nativo; uma oferta não é garantida com o aplicativo suspenso;
+8. ~~não há push nativo; uma oferta não é garantida com o aplicativo
+   suspenso~~ — **construído em 2026-08-23**, ver
+   [`push-notifications-setup.md`](push-notifications-setup.md). Falta criar o
+   projeto no Firebase e trazer as credenciais, que é ação do responsável; e
+   nada foi testado em aparelho;
 9. Android/iOS, GPS em segundo plano e ciclo financeiro ainda não foram
    homologados em aparelhos e infraestrutura compartilhada reais.
 

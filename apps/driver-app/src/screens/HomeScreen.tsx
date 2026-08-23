@@ -17,6 +17,7 @@ import {
 } from '../lib/location';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { session } from '../lib/session';
+import { ativarPush } from '../lib/push';
 import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -113,6 +114,17 @@ export function HomeScreen({ navigation }: Props) {
       }
 
       if (cancelled) return;
+
+      /**
+       * Push junto do socket, e nao no login: o token do FCM pode trocar entre
+       * uma sessao e outra, e reregistrar a cada abertura e barato — o servidor
+       * faz upsert.
+       *
+       * Sem `await` de proposito. Pedir permissao abre um dialogo do sistema, e
+       * segurar a conexao do socket atras dele deixaria o motoboy sem fila ao
+       * vivo enquanto decide.
+       */
+      ativarPush().catch(() => undefined);
 
       connectDriverSocket(token, {
         onConnected: () => {

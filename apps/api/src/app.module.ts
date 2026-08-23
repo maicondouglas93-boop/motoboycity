@@ -27,6 +27,7 @@ import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ServiceTypesModule } from './service-types/service-types.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { PushModule } from './push/push.module';
 import { LivePresenceModule } from './live-presence/live-presence.module';
 
 @Module({
@@ -75,6 +76,7 @@ import { LivePresenceModule } from './live-presence/live-presence.module';
     FinanceModule,
     ServiceTypesModule,
     TrackingModule,
+    PushModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

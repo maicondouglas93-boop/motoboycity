@@ -80,3 +80,9 @@ $RECYCLE.BIN/
 # ==============================================================================
 logs/
 *.log
+
+# Credenciais do Firebase para push. Ficam FORA do repositorio porque ele e
+# publico: o arquivo identifica o projeto do Firebase e a chave do app Android.
+# Sem ele o aplicativo compila normalmente, apenas sem push.
+apps/driver-app/android/app/google-services.json
+apps/driver-app/ios/GoogleService-Info.plist

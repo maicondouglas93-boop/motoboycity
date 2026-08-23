@@ -12,6 +12,7 @@ import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-p
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
+import { PushService } from '../push/push.service';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
@@ -68,6 +69,7 @@ export class DispatchService {
     private readonly platformSettingsService: AdminPlatformSettingsService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly livePresence: LiveDriverPresenceService,
+    private readonly pushService: PushService,
     @InjectQueue(DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
   ) {}
 
@@ -251,6 +253,38 @@ export class DispatchService {
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} ofertado a um motoboy.`,
     );
+
+    /**
+     * O push e o que faz a oferta chegar com o APLICATIVO FECHADO.
+     *
+     * O socket acima so alcanca quem esta com o app aberto, e o caso que
+     * interessa e o oposto: o motoboy esperando corrida com o celular no bolso.
+     * Sem isto, a oferta expira sozinha e o pedido volta para a fila sem que
+     * ninguem tenha sido avisado de verdade.
+     *
+     * Nao bloqueia o despacho: se o Firebase estiver fora do ar ou nao
+     * configurado, o pedido segue ofertado e o prazo continua correndo. Push
+     * indisponivel nao pode virar pedido nao despachado.
+     */
+    const quantidade = deliveries.length;
+    const corpo =
+      quantidade > 1
+        ? `${quantidade} entregas de ${delivery.company.tradeName}. Toque para ver.`
+        : `${delivery.company.tradeName}. Toque para ver.`;
+    this.pushService
+      .sendToDriver(nextDriverId, {
+        kind: 'offer',
+        title: 'Nova entrega para voce',
+        body: corpo,
+        data: {
+          type: 'offer',
+          offerId: offers[0]!.id,
+          deliveryId: delivery.id,
+        },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`Falha ao enviar push da oferta ${offers[0]!.id}: ${String(error)}`);
+      });
   }
 
   /** Varre pedidos AWAITING_DRIVER sem oferta pendente e tenta despachar

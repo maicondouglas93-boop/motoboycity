@@ -14,6 +14,9 @@ buildscript {
     dependencies {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
+        // Push (FCM). O plugin so e APLICADO se google-services.json existir —
+        // ver apps/driver-app/android/app/build.gradle.
+        classpath("com.google.gms:google-services:4.4.2")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
     }
 }

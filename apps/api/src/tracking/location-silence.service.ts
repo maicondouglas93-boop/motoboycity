@@ -3,6 +3,7 @@ import type { DeliveryStatus } from '@prisma/client';
 import type { SilentDriverItem } from '@motoboycity/types';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { shouldAlertSilence, silentMinutes } from './location-silence';
 
@@ -24,6 +25,7 @@ export class LocationSilenceService {
     private readonly prisma: PrismaService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly pushService: PushService,
   ) {}
 
   /**
@@ -66,18 +68,32 @@ export class LocationSilenceService {
       const pedidos = driver.deliveryNumbers.map((numero) => `#${numero}`).join(', ');
 
       /**
-       * O aviso ao motoboy vai por socket, que so chega se o app estiver VIVO.
+       * Dois caminhos ate o motoboy, porque cobrem situacoes diferentes.
        *
-       * Isso cobre o caso comum de app aberto com rastreamento quebrado —
-       * permissao revogada, GPS desligado, economia de bateria matando o
-       * servico de localizacao. Nao cobre app encerrado de vez: para isso
-       * seria preciso push ou WhatsApp, e nenhum dos dois existe neste sistema.
-       * Por isso o aviso ao ADMIN abaixo e a parte que sempre funciona.
+       * O socket so chega com o app VIVO, e cobre o caso de rastreamento
+       * quebrado com o app aberto: permissao revogada, GPS desligado, economia
+       * de bateria matando o servico de localizacao.
+       *
+       * O push alcanca o app ENCERRADO — que e justamente a causa mais
+       * provavel de a posicao ter sumido. Sem ele, o unico aviso que
+       * funcionava era o do admin.
        */
       this.realtimeGateway.emitToDriver(driver.driverId, 'driver:location-lost', {
         activeDeliveryCount: driver.activeDeliveryCount,
         silentMinutes: driver.silentMinutes,
       });
+
+      await this.pushService
+        .sendToDriver(driver.driverId, {
+          title: 'Nao estamos recebendo sua localizacao',
+          body:
+            `Voce esta com ${driver.activeDeliveryCount} pedido(s) em andamento. ` +
+            'Abra o aplicativo e confira a permissao de localizacao.',
+          data: { type: 'location-lost' },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(`Falha ao enviar push de localizacao: ${String(error)}`);
+        });
 
       this.realtimeGateway.emitAdminActivity({
         type: 'DRIVER_LOCATION_LOST',

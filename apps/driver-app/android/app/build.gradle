@@ -3,6 +3,22 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 /**
+ * Push so entra no build quando as credenciais do Firebase estao presentes.
+ *
+ * Aplicar o plugin sem `google-services.json` faz o build FALHAR, e o arquivo
+ * nao esta no repositorio: ele identifica o projeto do Firebase, e este
+ * repositorio e publico. Condicionar aqui mantem o aplicativo compilando sem
+ * push — que e exatamente o estado de quem clona o projeto pela primeira vez —
+ * e liga o push assim que alguem coloca o arquivo em android/app/.
+ */
+def googleServicesFile = file("google-services.json")
+if (googleServicesFile.exists()) {
+    apply plugin: "com.google.gms.google-services"
+} else {
+    logger.warn("AVISO: android/app/google-services.json nao encontrado. O aplicativo sera compilado SEM push — as ofertas so chegarao com ele aberto.")
+}
+
+/**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */

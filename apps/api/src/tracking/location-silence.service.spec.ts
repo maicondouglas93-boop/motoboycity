@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { LocationSilenceService } from './location-silence.service';
 
@@ -19,6 +20,7 @@ describe('LocationSilenceService', () => {
   };
   let settings: { get: jest.Mock };
   let realtime: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
+  let push: { sendToDriver: jest.Mock };
 
   /** Um pedido em andamento, com o motoboy e o carimbo do estado. */
   function pedido(overrides: Record<string, unknown> = {}) {
@@ -43,6 +45,7 @@ describe('LocationSilenceService', () => {
     };
     settings = { get: jest.fn().mockResolvedValue({ locationSilenceAlertMinutes: 10 }) };
     realtime = { emitToDriver: jest.fn(), emitAdminActivity: jest.fn() };
+    push = { sendToDriver: jest.fn().mockResolvedValue(1) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +53,7 @@ describe('LocationSilenceService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AdminPlatformSettingsService, useValue: settings },
         { provide: RealtimeGateway, useValue: realtime },
+        { provide: PushService, useValue: push },
       ],
     }).compile();
 
@@ -112,6 +116,22 @@ describe('LocationSilenceService', () => {
         where: { id: 'driver-1' },
         data: { locationSilenceAlertedAt: agora },
       });
+    });
+
+    it('avisa tambem por push, que e o que alcanca o app fechado', async () => {
+      // O socket so chega com o app vivo — e app encerrado e justamente a causa
+      // mais provavel de a posicao ter sumido.
+      prisma.delivery.findMany.mockResolvedValue([pedido()]);
+      prisma.deliveryLocationPoint.groupBy.mockResolvedValue([
+        { driverId: 'driver-1', _max: { capturedAt: minutosAtras(14) } },
+      ]);
+
+      await service.alertSilentDrivers(agora);
+
+      expect(push.sendToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({ data: { type: 'location-lost' } }),
+      );
     });
 
     it('não repete o aviso dentro do mesmo episódio', async () => {
