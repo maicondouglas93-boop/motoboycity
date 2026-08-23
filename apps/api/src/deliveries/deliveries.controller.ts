@@ -5,7 +5,9 @@ import {
   completeReturnSchema,
   markDeliveredSchema,
   markFailedSchema,
+  returnToQueueSchema,
   type MarkFailedPayload,
+  type ReturnToQueuePayload,
   type CompleteReturnPayload,
   type CreateDeliveryBatchPayload,
   listDeliveriesQuerySchema,
@@ -137,6 +139,21 @@ export class DeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.deliveriesService.markFailed(user, id, body);
+  }
+
+  /**
+   * Devolver a fila: aceitou e nao vai conseguir entregar. Fica ao lado de
+   * `fail` porque e a mesma familia de acao — desistir de um pedido — so que
+   * ANTES da coleta, quando ainda nao ha mercadoria em posse do motoboy.
+   */
+  @Patch(':id/return-to-queue')
+  @UseGuards(DriverOnlyGuard)
+  returnToQueue(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(returnToQueueSchema)) body: ReturnToQueuePayload,
+    @CurrentUser() user: User,
+  ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
+    return this.deliveriesService.returnToQueue(user, id, body);
   }
 
   @Patch(':id/deliver')

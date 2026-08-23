@@ -12,6 +12,7 @@ describe('AdminDriversService', () => {
     serviceType: { findMany: jest.Mock };
     driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
     driverPresenceLog: { updateMany: jest.Mock };
+    deliveryStatusHistory: { groupBy: jest.Mock };
     $transaction: jest.Mock;
   };
   let dispatchService: { releasePendingOffersForDriver: jest.Mock };
@@ -23,6 +24,7 @@ describe('AdminDriversService', () => {
       serviceType: { findMany: jest.fn() },
       driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
       driverPresenceLog: { updateMany: jest.fn() },
+      deliveryStatusHistory: { groupBy: jest.fn().mockResolvedValue([]) },
       $transaction: jest
         .fn()
         .mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma)),
@@ -48,6 +50,7 @@ describe('AdminDriversService', () => {
       prisma.driver.findMany.mockResolvedValue([
         {
           id: 'driver-1',
+          userId: 'user-1',
           cpf: '11122233344',
           approvalStatus: 'PENDING',
           accountStatus: 'ACTIVE',
@@ -62,6 +65,7 @@ describe('AdminDriversService', () => {
         },
         {
           id: 'driver-2',
+          userId: 'user-2',
           cpf: '55566677788',
           approvalStatus: 'APPROVED',
           accountStatus: 'SUSPENDED',
@@ -79,6 +83,11 @@ describe('AdminDriversService', () => {
             },
           ],
         },
+      ]);
+      // Só o segundo devolveu pedidos na janela — o primeiro tem que sair zero,
+      // e não indefinido.
+      prisma.deliveryStatusHistory.groupBy.mockResolvedValue([
+        { changedByUserId: 'user-2', _count: { _all: 3 } },
       ]);
 
       const result = await service.list({});
@@ -99,6 +108,7 @@ describe('AdminDriversService', () => {
           reviewedBy: null,
           reviewedAt: null,
           serviceTypes: [],
+          returnsLast7Days: 0,
         },
         {
           id: 'driver-2',
@@ -115,8 +125,49 @@ describe('AdminDriversService', () => {
           reviewedBy: { id: 'admin-1', name: 'Admin Um' },
           reviewedAt: '2026-01-02T12:00:00.000Z',
           serviceTypes: [{ id: 'service-1', code: 'MOTO', name: 'Moto', isPrimary: true }],
+          returnsLast7Days: 3,
         },
       ]);
+    });
+
+    it('conta devolucoes pela transicao de aceito de volta para a fila', async () => {
+      prisma.driver.findMany.mockResolvedValue([]);
+
+      await service.list({});
+
+      // Sem motoboy na lista nao ha o que contar: a consulta agrupada nem sai.
+      expect(prisma.deliveryStatusHistory.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('a janela de devolucoes olha so a transicao ACCEPTED -> AWAITING_DRIVER', async () => {
+      prisma.driver.findMany.mockResolvedValue([
+        {
+          id: 'driver-1',
+          userId: 'user-1',
+          cpf: '11122233344',
+          approvalStatus: 'APPROVED',
+          accountStatus: 'ACTIVE',
+          availability: 'AVAILABLE',
+          appVersion: null,
+          lastSeenAt: null,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          user: { name: 'Motoboy Um', email: 'm1@example.com', phone: '33999990000' },
+          reviewedBy: null,
+          reviewedAt: null,
+          serviceTypes: [],
+        },
+      ]);
+
+      await service.list({});
+
+      const where = prisma.deliveryStatusHistory.groupBy.mock.calls[0]?.[0]?.where;
+      // E a assinatura da devolucao: o pedido andou para TRAS. Nenhuma outra
+      // transicao faz esse caminho, entao contar por ela nao pega carona em
+      // cancelamento nem em reatribuicao feita pelo admin.
+      expect(where.fromStatus).toBe('ACCEPTED');
+      expect(where.toStatus).toBe('AWAITING_DRIVER');
+      expect(where.changedByUserId).toEqual({ in: ['user-1'] });
+      expect(where.changedAt.gte).toBeInstanceOf(Date);
     });
 
     it('repassa os filtros de status para a query do Prisma', async () => {

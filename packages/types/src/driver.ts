@@ -46,6 +46,15 @@ export interface AdminDriverListItem {
   reviewedBy: { id: string; name: string } | null;
   reviewedAt: string | null;
   serviceTypes: DriverServiceTypeItem[];
+  /**
+   * Quantas vezes este motoboy devolveu a fila um pedido que ja tinha aceitado,
+   * nos ultimos 7 dias.
+   *
+   * Existe para o admin OLHAR, nao para o sistema bloquear. Numa operacao de
+   * cinco motoboys, bloquear um automaticamente e perder 20% da frota por causa
+   * de uma semana ruim — a decisao e de quem conhece as pessoas.
+   */
+  returnsLast7Days: number;
 }
 
 export interface DriverServiceTypeItem {

@@ -46,7 +46,18 @@ pnpm install
 ```
 
 ```bash
-pnpm turbo typecheck lint test build
+pnpm turbo typecheck lint build
+```
+
+O Turborepo **não** tem tarefa `test` — as tarefas são `build`, `dev`, `lint`,
+`typecheck` e `clean`. Os testes rodam por pacote, com jest:
+
+```bash
+pnpm --filter @motoboycity/api exec jest
+```
+
+```bash
+pnpm --filter @motoboycity/driver-app exec jest
 ```
 
 Os testes e2e da API precisam de banco isolado e do Redis de pé. Não rode e2e
@@ -165,7 +176,24 @@ teste, e feche em commit próprio.
 
 ---
 
-### 1. Devolver a entrega à fila
+### 1. Devolver a entrega à fila ✅ FEITO
+
+**Entregue em 2026-08-23.** `PATCH /deliveries/:id/return-to-queue`, botão
+"Devolver para a fila" no app do motoboy e a contagem de devoluções de 7 dias na
+ficha do motoboy no painel. Três decisões que só apareceram na construção:
+
+- **a exclusão do redespacho é só da rodada.** `dispatchDelivery` ganhou um
+  `excludeDriverIds` opcional para não devolver o pedido à mesma pessoa em
+  segundos. Não virou registro permanente de recusa: se daqui a meia hora ele
+  estiver de volta e o pedido continuar parado, ofertar de novo é o certo;
+- **nenhuma oferta sintética foi criada** para conseguir essa exclusão. Seria o
+  atalho óbvio — a exclusão já se apoia na tabela de ofertas —, mas inventaria
+  uma oferta que nunca existiu e sujaria a métrica de aceite/recusa, que é a
+  razão de a tabela existir;
+- **a cópia local de `AdminDriverListItem` na API foi apagada.** Havia duas
+  definições idênticas por sorte; bastou acrescentar um campo para uma ficar
+  para trás. O painel lê a de `packages/types`, então a da API era justamente a
+  que envelheceria sem ninguém notar.
 
 **O problema.** Um pedido já aceito por um motoboy que travou — moto quebrou,
 loja não tinha o produto, ele passou mal — não tem caminho de volta. Só sai pela

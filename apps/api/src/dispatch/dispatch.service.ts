@@ -95,8 +95,18 @@ export class DispatchService {
    * elegível. Sem efeito (não lança erro) se o pedido já tem oferta
    * pendente, não está mais AWAITING_DRIVER, ou não há motoboy elegível —
    * chamado de vários gatilhos assíncronos (criação, expiração, motoboy
-   * ficou disponível), então precisa ser seguro de repetir. */
-  async dispatchDelivery(deliveryId: string): Promise<void> {
+   * ficou disponível), então precisa ser seguro de repetir.
+   *
+   * `excludeDriverIds` tira alguem desta rodada por um motivo que nao esta
+   * registrado em oferta nenhuma — hoje, o motoboy que acabou de devolver o
+   * pedido a fila. Sem isso, o redespacho seguinte poderia devolver o mesmo
+   * pedido para a mesma pessoa em segundos. E de propósito que a exclusao vale
+   * so para esta chamada: se daqui a meia hora ele estiver de volta e o pedido
+   * continuar parado, ofertar de novo e o certo. */
+  async dispatchDelivery(
+    deliveryId: string,
+    options?: { excludeDriverIds?: string[] },
+  ): Promise<void> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
       include: {
@@ -156,7 +166,10 @@ export class DispatchService {
         });
 
     const nextDriverId = await this.findNextEligibleDriverId({
-      excludeDriverIds: alreadyOffered.map((offer) => offer.driverId),
+      excludeDriverIds: [
+        ...alreadyOffered.map((offer) => offer.driverId),
+        ...(options?.excludeDriverIds ?? []),
+      ],
       regionId: delivery.company.regionId,
       serviceTypeIds,
     });
@@ -847,6 +860,94 @@ export class DispatchService {
     });
 
     return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+  }
+
+  /**
+   * O motoboy devolve a fila um pedido que aceitou e nao vai conseguir entregar.
+   *
+   * Ate agora esse caminho nao existia: um pedido aceito que travou so saia
+   * pela mao do admin, e ate la o motoboy segurava uma entrega que nao ia
+   * acontecer enquanto a loja esperava. E o par que faltava da vitrine — o
+   * pedido volta para AWAITING_DRIVER e reaparece para todos.
+   *
+   * SO DE `ACCEPTED`. Depois de `COLLECTED` a mercadoria esta com o motoboy, e
+   * devolver o pedido a fila deixaria o pacote orfao: outro assumiria uma
+   * entrega cuja carga esta na garupa de um terceiro. Esse caso ja tem caminho
+   * proprio, que e o insucesso (`markFailed`) — ele devolve a mercadoria a loja.
+   */
+  async returnDeliveryToQueue(
+    deliveryId: string,
+    driverId: string,
+    reason: string,
+    actingUserId: string,
+  ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
+    const alvo = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!alvo) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (alvo.driverId !== driverId) {
+      throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
+    }
+    if (alvo.status !== 'ACCEPTED') {
+      throw new ConflictException(
+        alvo.status === 'COLLECTED'
+          ? 'A mercadoria já está com você. Registre o insucesso da entrega para devolvê-la à loja.'
+          : 'Este pedido não pode mais ser devolvido à fila.',
+      );
+    }
+
+    // O lote volta inteiro, como e assumido inteiro: devolver metade deixaria o
+    // motoboy com um pedaco de uma corrida que ele acabou de dizer que nao faz.
+    const irmaos = alvo.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: alvo.batchId } })
+      : [alvo];
+    if (irmaos.some((item) => item.driverId !== driverId || item.status !== 'ACCEPTED')) {
+      throw new ConflictException('Este lote não pode ser devolvido por inteiro.');
+    }
+    const ids = irmaos.map((item) => item.id);
+
+    const delivery = await this.prisma.$transaction(async (tx) => {
+      const atualizadas = await tx.delivery.updateMany({
+        where: { id: { in: ids }, driverId, status: 'ACCEPTED' },
+        data: { status: 'AWAITING_DRIVER', driverId: null, statusChangedAt: new Date() },
+      });
+      if (atualizadas.count !== ids.length) {
+        throw new ConflictException('Este pedido já não está mais com este motoboy.');
+      }
+
+      for (const id of ids) {
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: id,
+            fromStatus: 'ACCEPTED',
+            toStatus: 'AWAITING_DRIVER',
+            changedByUserId: actingUserId,
+            note: `Devolvido à fila pelo motoboy: ${reason}`,
+          },
+        });
+      }
+
+      return tx.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+    });
+
+    this.realtimeGateway.emitAdminActivity(
+      `Pedido #${delivery.displayNumber} foi devolvido à fila pelo motoboy: ${reason}`,
+    );
+    for (const id of ids) {
+      this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
+        deliveryId: id,
+        status: 'AWAITING_DRIVER',
+      });
+    }
+
+    // Uma chamada so: para lote, `dispatchDelivery` ja trata os irmaos juntos.
+    await this.dispatchDelivery(deliveryId, { excludeDriverIds: [driverId] });
+
+    return {
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      returnedCount: ids.length,
+    };
   }
 
   private async findNextEligibleDriverId({

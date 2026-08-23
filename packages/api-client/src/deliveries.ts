@@ -174,6 +174,27 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
 
+    /**
+     * Devolve a fila um pedido aceito. So vale antes da coleta — depois dela a
+     * mercadoria esta com o motoboy e o caminho e `fail`.
+     */
+    async returnToQueue(
+      accessToken: string,
+      id: string,
+      payload: { reason: string },
+    ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
+      const response = await fetch(`${baseUrl}/deliveries/${id}/return-to-queue`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<{
+        deliveryId: string;
+        displayNumber: number;
+        returnedCount: number;
+      }>(response);
+    },
+
     async fail(
       accessToken: string,
       id: string,

@@ -76,7 +76,7 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => {
-    void load();
+    load().catch(() => undefined);
   }, [load]);
 
   async function claim(delivery: AvailableDeliveryItem) {
@@ -99,7 +99,7 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
           ? claimError.message
           : 'Não foi possível assumir este pedido.',
       );
-      void load();
+      load().catch(() => undefined);
     } finally {
       setClaimingId(null);
     }
@@ -119,7 +119,7 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
               refreshing={refreshing}
               onRefresh={() => {
                 setRefreshing(true);
-                void load();
+                load().catch(() => undefined);
               }}
               tintColor={palette.accent}
             />
@@ -165,11 +165,12 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
                 </Text>
 
                 <Pressable
-                  onPress={() => void claim(delivery)}
+                  onPress={() => claim(delivery).catch(() => undefined)}
                   disabled={claimingId !== null}
                   style={[
                     styles.button,
-                    { backgroundColor: palette.accent, opacity: claimingId !== null ? 0.6 : 1 },
+                    { backgroundColor: palette.accent },
+                    claimingId !== null && styles.buttonBusy,
                   ]}
                 >
                   <Text
@@ -204,5 +205,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  buttonBusy: { opacity: 0.6 },
   buttonText: { fontSize: 15, fontWeight: '700' },
 });

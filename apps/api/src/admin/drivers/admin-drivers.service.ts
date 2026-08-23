@@ -1,33 +1,25 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { ReplaceDriverServiceTypesPayload } from '@motoboycity/validation';
-import type { Driver, DriverAccountStatus, DriverApprovalStatus } from '@prisma/client';
+import type {
+  Driver,
+  DriverAccountStatus,
+  DriverApprovalStatus,
+  DriverAvailability,
+} from '@prisma/client';
+import type { AdminDriverListItem, DriverServiceTypeItem } from '@motoboycity/types';
 import { DispatchService } from '../../dispatch/dispatch.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
-export interface DriverServiceTypeItem {
-  id: string;
-  code: string;
-  name: string;
-  isPrimary: boolean;
-}
-
-export interface AdminDriverListItem {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  cpf: string;
-  approvalStatus: string;
-  accountStatus: string;
-  availability: string;
-  appVersion: string | null;
-  lastSeenAt: string | null;
-  createdAt: string;
-  reviewedBy: { id: string; name: string } | null;
-  reviewedAt: string | null;
-  serviceTypes: DriverServiceTypeItem[];
-}
+/**
+ * As formas vem de `@motoboycity/types` e nao sao redeclaradas aqui.
+ *
+ * Ate agora havia uma copia local identica a compartilhada, e as duas ficaram
+ * iguais so por sorte: bastou acrescentar um campo em uma para a outra ficar
+ * para tras. O painel le a compartilhada, entao a copia da API era justamente a
+ * que envelheceria sem ninguem notar.
+ */
+export type { AdminDriverListItem, DriverServiceTypeItem };
 
 export interface DriverReviewResult {
   driverId: string;
@@ -73,7 +65,46 @@ export class AdminDriversService {
       },
     });
 
-    return drivers.map((driver) => this.toDriverListItem(driver));
+    const devolucoes = await this.countRecentReturns(drivers.map((driver) => driver.userId));
+    return drivers.map((driver) =>
+      this.toDriverListItem(driver, devolucoes.get(driver.userId) ?? 0),
+    );
+  }
+
+  /**
+   * Quantas devolucoes a fila cada motoboy fez nos ultimos 7 dias.
+   *
+   * Uma consulta agrupada para a lista inteira, e nao uma por motoboy: sao
+   * poucos motoboys hoje, mas a versao ingenua vira N+1 no dia em que nao for.
+   *
+   * A janela e de 7x24h corridas, nao de sete dias de calendario. Devolucao nao
+   * e um numero contabil que precise fechar com o dia da operacao, e a janela
+   * corrida dispensa a aritmetica de calendario que ja produziu mes errado aqui.
+   */
+  private async countRecentReturns(userIds: string[]): Promise<Map<string, number>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const grupos = await this.prisma.deliveryStatusHistory.groupBy({
+      by: ['changedByUserId'],
+      where: {
+        changedByUserId: { in: userIds },
+        // A assinatura da devolucao: o pedido andou para TRAS, de aceito de
+        // volta para a fila. Nenhuma outra transicao faz esse caminho.
+        fromStatus: 'ACCEPTED',
+        toStatus: 'AWAITING_DRIVER',
+        changedAt: { gte: desde },
+      },
+      _count: { _all: true },
+    });
+
+    return new Map(
+      grupos
+        .filter((grupo) => grupo.changedByUserId !== null)
+        .map((grupo) => [grupo.changedByUserId as string, grupo._count._all]),
+    );
   }
 
   async detail(driverId: string): Promise<AdminDriverListItem> {
@@ -89,24 +120,32 @@ export class AdminDriversService {
       throw new NotFoundException('Motoboy n\u00e3o encontrado.');
     }
 
-    return this.toDriverListItem(driver);
+    const devolucoes = await this.countRecentReturns([driver.userId]);
+    return this.toDriverListItem(driver, devolucoes.get(driver.userId) ?? 0);
   }
 
-  private toDriverListItem(driver: {
-    id: string;
-    cpf: string;
-    approvalStatus: string;
-    accountStatus: string;
-    availability: string;
-    appVersion: string | null;
-    lastSeenAt: Date | null;
-    createdAt: Date;
-    reviewedAt: Date | null;
-    user: { name: string; email: string; phone: string };
-    reviewedBy: { id: string; name: string } | null;
-    serviceTypes: { isPrimary: boolean; serviceType: { id: string; code: string; name: string } }[];
-  }): AdminDriverListItem {
+  private toDriverListItem(
+    driver: {
+      id: string;
+      cpf: string;
+      approvalStatus: DriverApprovalStatus;
+      accountStatus: DriverAccountStatus;
+      availability: DriverAvailability;
+      appVersion: string | null;
+      lastSeenAt: Date | null;
+      createdAt: Date;
+      reviewedAt: Date | null;
+      user: { name: string; email: string; phone: string };
+      reviewedBy: { id: string; name: string } | null;
+      serviceTypes: {
+        isPrimary: boolean;
+        serviceType: { id: string; code: string; name: string };
+      }[];
+    },
+    returnsLast7Days: number,
+  ): AdminDriverListItem {
     return {
+      returnsLast7Days,
       id: driver.id,
       name: driver.user.name,
       email: driver.user.email,

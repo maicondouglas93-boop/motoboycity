@@ -29,7 +29,7 @@ import { useDispatchStore } from '../store/dispatchStore';
 import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
-type Operation = 'collect' | 'deliver' | 'return' | 'fail' | null;
+type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'return-to-queue' | null;
 
 type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
 
@@ -104,6 +104,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [failureOpen, setFailureOpen] = useState(false);
   const [failureReason, setFailureReason] = useState<FailureReason | null>(null);
   const [failureNote, setFailureNote] = useState('');
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<Operation>(null);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -159,6 +161,23 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             fix ? { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy } : {},
           ),
         );
+      } else if (nextOperation === 'return-to-queue') {
+        await deliveriesApi.returnToQueue(token, delivery.id, { reason: returnReason.trim() });
+        setReturnOpen(false);
+        setReturnReason('');
+        /**
+         * O pedido deixou de ser dele e voltou para a vitrine. Sair da tela em
+         * vez de ficar mostrando uma entrega que agora e de outro — e o
+         * rastreamento precisa parar junto, senao o app segue mandando posicao
+         * de uma corrida que ele nao esta mais fazendo.
+         */
+        const restantes = await refreshActiveDeliveries(token);
+        await syncDeliveryTracking(
+          token,
+          restantes.map((item) => item.id),
+        ).catch(() => undefined);
+        navigation.popToTop();
+        return;
       } else if (nextOperation === 'fail') {
         // O GPS aqui e a unica prova de que o motoboy chegou ao destino antes
         // de declarar insucesso — sem ele, "nao consegui entregar" seria
@@ -367,6 +386,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
                 onPress={busy ? undefined : () => setFailureOpen(true)}
               />
             )}
+            {/* So antes da coleta: dali em diante a mercadoria esta com ele, e
+                o caminho passa a ser o insucesso, que a devolve para a loja. */}
+            {delivery.status === 'ACCEPTED' && (
+              <PrimaryButton
+                label="Devolver para a fila"
+                variant="outline"
+                onPress={busy ? undefined : () => setReturnOpen(true)}
+              />
+            )}
           </>
         ) : (
           <>
@@ -433,6 +461,48 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               label="Cancelar"
               variant="outline"
               onPress={busy ? undefined : () => setFailureOpen(false)}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={returnOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReturnOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
+            <Text style={[styles.modalTitle, { color: text }]}>Devolver para a fila?</Text>
+            <Text style={[styles.modalHint, { color: muted }]}>
+              O pedido volta a ficar disponível para outro motoboy assumir. Conte o que aconteceu —
+              a loja e o administrador veem este motivo.
+            </Text>
+
+            <TextInput
+              style={[styles.noteInput, { color: text }]}
+              placeholder="Ex.: moto quebrou, a loja não tinha o produto"
+              placeholderTextColor={muted}
+              value={returnReason}
+              onChangeText={setReturnReason}
+              multiline
+            />
+
+            <PrimaryButton
+              label={busy ? 'Devolvendo...' : 'Devolver para a fila'}
+              onPress={
+                // O minimo de 5 caracteres e o mesmo que a API exige: barrar
+                // aqui evita uma ida ao servidor so para receber o erro.
+                busy || returnReason.trim().length < 5
+                  ? undefined
+                  : () => runOperation('return-to-queue')
+              }
+            />
+            <PrimaryButton
+              label="Cancelar"
+              variant="outline"
+              onPress={busy ? undefined : () => setReturnOpen(false)}
             />
           </View>
         </View>

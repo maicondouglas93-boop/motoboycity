@@ -1329,6 +1329,112 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  describe('devolver a entrega à fila', () => {
+    /**
+     * Cria um pedido e o deixa aceito por driver1. driver2 fica indisponível de
+     * propósito: sem isso, o redespacho logo após a devolução criaria uma
+     * oferta nova e o estado observado dependeria de quem correu primeiro.
+     */
+    async function aceitoPorDriver1(numero: number): Promise<string> {
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(numero) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      return deliveryId;
+    }
+
+    it('devolve o pedido à fila e solta o motoboy', async () => {
+      const deliveryId = await aceitoPorDriver1(21);
+
+      const resposta = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/return-to-queue`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'moto quebrou no meio do caminho' })
+        .expect(200);
+
+      expect(resposta.body).toEqual({
+        deliveryId,
+        displayNumber: expect.any(Number),
+        returnedCount: 1,
+      });
+
+      const depois = await prisma.delivery.findUnique({ where: { id: deliveryId } });
+      expect(depois?.status).toBe('AWAITING_DRIVER');
+      expect(depois?.driverId).toBeNull();
+
+      // O motivo tem que sobreviver ate o historico: e a unica coisa que
+      // distingue moto quebrada de motoboy escolhendo corrida.
+      const historico = await prisma.deliveryStatusHistory.findFirst({
+        where: { deliveryId, fromStatus: 'ACCEPTED', toStatus: 'AWAITING_DRIVER' },
+      });
+      expect(historico?.note).toContain('moto quebrou no meio do caminho');
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('depois de coletar não devolve à fila (409)', async () => {
+      const deliveryId = await aceitoPorDriver1(22);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      // A mercadoria ja esta com o motoboy: devolver o pedido deixaria o pacote
+      // orfao. O caminho dali em diante e o insucesso.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/return-to-queue`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'mudei de ideia sobre esta entrega' })
+        .expect(409);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('recusa devolução sem motivo (400)', async () => {
+      const deliveryId = await aceitoPorDriver1(23);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/return-to-queue`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: '   ' })
+        .expect(400);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('outro motoboy não devolve o pedido alheio (403)', async () => {
+      const deliveryId = await aceitoPorDriver1(24);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/return-to-queue`)
+        .set('Authorization', `Bearer ${driver2Token}`)
+        .send({ reason: 'não é meu pedido, mas vou tentar' })
+        .expect(403);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('empresa não pode devolver à fila (DriverOnlyGuard)', async () => {
+      await request(app.getHttpServer())
+        .patch('/deliveries/qualquer-id/return-to-queue')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ reason: 'a loja tentando devolver sozinha' })
+        .expect(403);
+    });
+  });
+
   describe('regressão: cancel() com item já COMPLETED no lote', () => {
     it('admin consegue cancelar o item ainda ativo mesmo com outro item do lote já COMPLETED', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');

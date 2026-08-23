@@ -15,6 +15,7 @@ import type {
   DeliveryStageTimesQuery,
   MarkDeliveredPayload,
   MarkFailedPayload,
+  ReturnToQueuePayload,
   SearchDeliveriesQuery,
 } from '@motoboycity/validation';
 import type {
@@ -1305,6 +1306,26 @@ export class DeliveriesService {
       status: membership.company.status,
       regionId: membership.company.regionId,
     };
+  }
+
+  /**
+   * Devolver a fila um pedido aceito.
+   *
+   * A checagem de dono e de estado vive no despacho, junto do resto das
+   * transicoes que passam por AWAITING_DRIVER — duplicar aqui seria manter duas
+   * regras que precisam concordar para sempre.
+   *
+   * De proposito nao ha checagem de aprovado/ativo: um motoboy que acabou de
+   * ser bloqueado precisa poder soltar o pedido que ainda esta com ele, senao a
+   * decisao do admin trava a entrega da loja junto.
+   */
+  async returnToQueue(
+    user: User,
+    id: string,
+    payload: ReturnToQueuePayload,
+  ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
+    const driver = await this.findDriverForUser(user);
+    return this.dispatchService.returnDeliveryToQueue(id, driver.id, payload.reason, user.id);
   }
 
   private async findDriverForUser(user: User) {

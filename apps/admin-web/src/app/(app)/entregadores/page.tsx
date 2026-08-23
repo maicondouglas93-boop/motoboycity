@@ -197,6 +197,21 @@ export default function DriversPage() {
                   Revisado por {driver.reviewedBy.name}
                 </p>
               )}
+              {/*
+                So aparece quando ha devolucao. Um "0 devolucoes" fixo em toda
+                ficha vira ruido e some no meio do resto — o numero precisa
+                chamar atencao justamente quando nao e zero.
+
+                E numero para OLHAR, nao gatilho de bloqueio: numa operacao de
+                cinco motoboys, bloquear um automaticamente e perder 20% da
+                frota por uma semana ruim.
+              */}
+              {driver.returnsLast7Days > 0 && (
+                <p className="text-xs text-alerta">
+                  Devolveu {driver.returnsLast7Days}{' '}
+                  {driver.returnsLast7Days === 1 ? 'pedido' : 'pedidos'} à fila nos últimos 7 dias
+                </p>
+              )}
 
               <div className="space-y-2 rounded-md border p-3">
                 <div>

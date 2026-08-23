@@ -28,4 +28,5 @@ export * from './deliveries/mark-delivered.schema';
 export * from './deliveries/complete-return.schema';
 export * from './deliveries/stage-times-query.schema';
 export * from './deliveries/mark-failed.schema';
+export * from './deliveries/return-to-queue.schema';
 export * from './tracking/tracking.schema';

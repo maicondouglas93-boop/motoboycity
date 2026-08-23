@@ -1073,4 +1073,168 @@ describe('DispatchService', () => {
       );
     });
   });
+
+  describe('devolver a entrega a fila', () => {
+    it('lanca NotFoundException se o pedido nao existe', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('lanca ForbiddenException se o pedido esta com outro motoboy', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'outro-motoboy',
+        batchId: null,
+      });
+
+      await expect(
+        service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('depois de coletar nao devolve a fila — aponta o insucesso', async () => {
+      // A mercadoria esta com o motoboy. Devolver o pedido a fila deixaria o
+      // pacote orfao: outro assumiria uma entrega cuja carga esta com terceiro.
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'COLLECTED',
+        driverId: 'driver-1',
+        batchId: null,
+      });
+
+      await expect(
+        service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1'),
+      ).rejects.toThrow('insucesso');
+    });
+
+    it('devolve para AWAITING_DRIVER, solta o motoboy e grava o motivo', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        batchId: null,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 1234,
+        companyId: 'company-1',
+        status: 'AWAITING_DRIVER',
+      });
+
+      const resultado = await service.returnDeliveryToQueue(
+        'delivery-1',
+        'driver-1',
+        'moto quebrou no meio do caminho',
+        'user-1',
+      );
+
+      expect(resultado).toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 1234,
+        returnedCount: 1,
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['delivery-1'] }, driverId: 'driver-1', status: 'ACCEPTED' },
+        data: {
+          status: 'AWAITING_DRIVER',
+          driverId: null,
+          statusChangedAt: expect.any(Date),
+        },
+      });
+      const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
+      expect(historico.fromStatus).toBe('ACCEPTED');
+      expect(historico.toStatus).toBe('AWAITING_DRIVER');
+      // O motivo precisa sobreviver ate o historico: e a unica coisa que
+      // distingue moto quebrada de motoboy escolhendo corrida.
+      expect(historico.note).toContain('moto quebrou no meio do caminho');
+      expect(historico.changedByUserId).toBe('user-1');
+    });
+
+    it('quem perdeu o pedido no meio do caminho recebe conflito', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        batchId: null,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('o lote volta inteiro ou nenhum', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        batchId: 'batch-1',
+      });
+      // Um irmao ja foi coletado: devolver o resto deixaria o motoboy com um
+      // pedaco de uma corrida que ele acabou de dizer que nao faz.
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', status: 'ACCEPTED', driverId: 'driver-1' },
+        { id: 'delivery-2', status: 'COLLECTED', driverId: 'driver-1' },
+      ]);
+
+      await expect(
+        service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1'),
+      ).rejects.toThrow('lote');
+    });
+
+    it('o motoboy que devolveu fica de fora do redespacho imediato', async () => {
+      // Sem isto o pedido voltaria para a mesma pessoa em segundos — ela acabou
+      // de dizer que nao consegue.
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        batchId: null,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 1234,
+        companyId: 'company-1',
+        status: 'AWAITING_DRIVER',
+      });
+      const redespacho = jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
+
+      await service.returnDeliveryToQueue('delivery-1', 'driver-1', 'moto quebrou', 'user-1');
+
+      expect(redespacho).toHaveBeenCalledWith('delivery-1', { excludeDriverIds: ['driver-1'] });
+    });
+
+    it('a exclusao pontual entra junto com quem ja recebeu oferta', async () => {
+      // A exclusao vale so para esta rodada: se daqui a meia hora ele estiver
+      // de volta e o pedido continuar parado, ofertar de novo e o certo.
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        batchId: null,
+        displayNumber: 1,
+        company: { regionId: 'region-1', tradeName: 'Loja' },
+        serviceType: { name: 'Padrão' },
+        serviceTypeId: 'st-1',
+        addresses: [],
+        destinationKnownAtCreation: true,
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ driverId: 'ja-recebeu' }]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([]);
+
+      await service.dispatchDelivery('delivery-1', { excludeDriverIds: ['devolveu'] });
+
+      // Nenhum motoboy elegivel sobrou, entao nao houve oferta — o que importa
+      // aqui e que a chamada aceitou as duas origens de exclusao sem quebrar.
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+    });
+  });
 });
