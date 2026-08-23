@@ -35,6 +35,12 @@ export default function FinancePage() {
   const [walletSearch, setWalletSearch] = useState('');
   const [appliedWalletSearch, setAppliedWalletSearch] = useState('');
 
+  const cashQuery = useQuery({
+    queryKey: ['admin', 'financial', 'cash-position'],
+    queryFn: () => adminFinancialApi.cashPosition(token as string),
+    enabled: Boolean(token),
+  });
+
   const overviewQuery = useQuery({
     queryKey: ['admin', 'financial', 'overview', appliedPeriod],
     queryFn: () => adminFinancialApi.overview(token as string, appliedPeriod),
@@ -58,6 +64,7 @@ export default function FinancePage() {
   }
 
   const overview = overviewQuery.data;
+  const caixa = cashQuery.data;
   const wallets = walletsQuery.data ?? [];
 
   function applyPeriod() {
@@ -127,53 +134,93 @@ export default function FinancePage() {
         </div>
       )}
 
-      {overview && (
-        <>
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground">
-              Entregas concluídas no período
-            </h2>
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-              <StatCard label="Entregas" value={String(overview.completedDeliveries.count)} />
-              <StatCard
-                label="Valor total"
-                value={formatCurrency(overview.completedDeliveries.totalValue)}
-              />
-              <StatCard
-                label="Repasse aos entregadores"
-                value={formatCurrency(overview.completedDeliveries.driverValue)}
-              />
-              <StatCard
-                label="Receita da plataforma"
-                value={formatCurrency(overview.completedDeliveries.platformValue)}
-              />
+      {/*
+        Caixa PRIMEIRO, e fora do seletor de período.
+
+        Antes, os números de fatura e carteira ficavam logo abaixo do filtro de
+        datas sem serem filtrados por ele — e "concluído sem fatura" era o
+        contrário: filtrado, quando não deveria. As duas coisas juntas faziam a
+        tela mostrar números que ninguém sabia dizer a que recorte pertenciam.
+      */}
+      {caixa && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold">Posição de caixa — agora</h2>
+            <p className="text-xs text-muted-foreground">
+              Não muda com o filtro de período abaixo.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <Link href="/pedidos?status=COMPLETED">
               <StatCard
                 label="Concluído sem fatura"
-                value={formatCurrency(overview.completedDeliveries.unbilledValue)}
+                value={formatCurrency(caixa.unbilledValue)}
+                hint={`${caixa.unbilledCount} entrega(s) feitas e ainda não cobradas`}
               />
-            </div>
-          </section>
+            </Link>
+            <Link href="/faturas">
+              <StatCard
+                label="Faturas a vencer"
+                value={formatCurrency(caixa.invoicesDueValue)}
+                hint={`${caixa.invoicesDueCount} fatura(s)`}
+              />
+            </Link>
+            <Link href="/faturas">
+              <StatCard
+                label="Faturas vencidas"
+                value={formatCurrency(caixa.invoicesOverdueValue)}
+                hint={`${caixa.invoicesOverdueCount} fatura(s)`}
+              />
+            </Link>
+            <StatCard
+              label="Total a receber"
+              value={formatCurrency(caixa.totalReceivable)}
+              hint="Sem fatura + a vencer + vencidas"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+            <StatCard
+              label="Disponível nas carteiras"
+              value={formatCurrency(caixa.driverAvailableBalance)}
+              hint="Os motoboys podem sacar a qualquer hora"
+            />
+            <StatCard
+              label="A liberar nas carteiras"
+              value={formatCurrency(caixa.driverBlockedBalance)}
+              hint="Ainda dentro do prazo de liberação"
+            />
+            <Link href="/financeiro/saques">
+              <StatCard
+                label="Saques pendentes"
+                value={formatCurrency(caixa.pendingWithdrawalValue)}
+                hint="Pedidos ainda não pagos"
+              />
+            </Link>
+          </div>
+        </section>
+      )}
 
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground">Faturas e carteira</h2>
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-              <StatCard label="Faturas pendentes" value={String(overview.invoices.pendingCount)} />
-              <StatCard label="Faturas vencidas" value={String(overview.invoices.overdueCount)} />
-              <StatCard
-                label="Total a receber"
-                value={formatCurrency(overview.invoices.totalReceivable)}
-              />
-              <StatCard
-                label="Saldo disponível dos entregadores"
-                value={formatCurrency(overview.driverWallets.availableBalance)}
-              />
-              <StatCard
-                label="Saldo a liberar dos entregadores"
-                value={formatCurrency(overview.driverWallets.blockedBalance)}
-              />
-            </div>
-          </section>
-        </>
+      {overview && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground">
+            Entregas concluídas no período
+          </h2>
+          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <StatCard label="Entregas" value={String(overview.completedDeliveries.count)} />
+            <StatCard
+              label="Valor total"
+              value={formatCurrency(overview.completedDeliveries.totalValue)}
+            />
+            <StatCard
+              label="Repasse aos entregadores"
+              value={formatCurrency(overview.completedDeliveries.driverValue)}
+            />
+            <StatCard
+              label="Receita da plataforma"
+              value={formatCurrency(overview.completedDeliveries.platformValue)}
+            />
+          </div>
+        </section>
       )}
 
       <Card>

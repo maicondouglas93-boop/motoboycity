@@ -1679,6 +1679,58 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  describe('posição de caixa', () => {
+    it('conta as entregas concluídas e ainda não faturadas', async () => {
+      const antes = await request(app.getHttpServer())
+        .get('/admin/financial/cash-position')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      // Uma entrega inteira, do aceite ao COMPLETED, sem passar por fatura.
+      const { deliveryId } = await aceitoHaMinutos(51, 1);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({})
+        .expect(200);
+
+      const depois = await request(app.getHttpServer())
+        .get('/admin/financial/cash-position')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(depois.body.unbilledCount).toBe(antes.body.unbilledCount + 1);
+      expect(depois.body.unbilledValue).toBeGreaterThan(antes.body.unbilledValue);
+      // Trabalho feito e nao cobrado entra no total a receber junto com as
+      // faturas — e o numero que faltava.
+      expect(depois.body.totalReceivable).toBeGreaterThanOrEqual(depois.body.unbilledValue);
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('não aceita filtro de período — é estado, não relatório', async () => {
+      // A rota ignora qualquer data: trabalho concluido em junho e nunca
+      // faturado continua sendo dinheiro a receber em agosto.
+      const comFiltro = await request(app.getHttpServer())
+        .get('/admin/financial/cash-position?from=2020-01-01&to=2020-01-02')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(comFiltro.body.unbilledCount).toBeGreaterThan(0);
+    });
+
+    it('rota é restrita ao administrador', async () => {
+      await request(app.getHttpServer())
+        .get('/admin/financial/cash-position')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(403);
+    });
+  });
+
   describe('regressão: cancel() com item já COMPLETED no lote', () => {
     it('admin consegue cancelar o item ainda ativo mesmo com outro item do lote já COMPLETED', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');

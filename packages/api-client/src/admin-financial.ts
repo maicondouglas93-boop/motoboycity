@@ -5,6 +5,7 @@ import type {
   WalletTransactionStatus,
   WithdrawalRequestItem,
   WithdrawalRequestStatus,
+  CashPositionItem,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -18,6 +19,14 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
   }
 
   return {
+    /** Posicao de caixa agora. Sem periodo: e estado, nao relatorio. */
+    async cashPosition(accessToken: string): Promise<CashPositionItem> {
+      const response = await fetch(`${baseUrl}/admin/financial/cash-position`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<CashPositionItem>(response);
+    },
+
     async overview(
       accessToken: string,
       filters?: { from?: string; to?: string },
@@ -101,11 +110,14 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note?: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/withdrawals/${withdrawalId}/approve`, {
-        method: 'POST',
-        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/approve`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       return parseJsonOrThrow<WithdrawalRequestItem>(response);
     },
 
@@ -114,11 +126,14 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note?: string; paymentReference?: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/withdrawals/${withdrawalId}/mark-paid`, {
-        method: 'POST',
-        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/mark-paid`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       return parseJsonOrThrow<WithdrawalRequestItem>(response);
     },
 
@@ -127,11 +142,14 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/withdrawals/${withdrawalId}/reject`, {
-        method: 'POST',
-        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/reject`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       return parseJsonOrThrow<WithdrawalRequestItem>(response);
     },
   };

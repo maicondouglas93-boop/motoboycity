@@ -373,7 +373,14 @@ export class InvoiceService {
     };
   }
 
-  private async refreshOverdueInvoices(): Promise<void> {
+  /**
+   * Publico porque a posicao de caixa tambem depende dele.
+   *
+   * "Vencida" e um status ARMAZENADO, nao derivado na consulta — quem le sem
+   * chamar isto antes pode ver uma fatura ja vencida ainda como pendente, e o
+   * caixa mostraria zero atrasado com dinheiro atrasado de verdade.
+   */
+  async refreshOverdueInvoices(): Promise<void> {
     const now = this.dateOnly(dateInSaoPaulo(this.clock.now()));
     const overdue = await this.prisma.invoice.findMany({
       where: { status: 'PENDING', dueDate: { lt: now } },

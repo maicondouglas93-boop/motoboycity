@@ -439,6 +439,45 @@ que nunca mandou posição nenhuma desde que aceitou.
 
 ---
 
+### 4. Painel de caixa ✅ FEITO
+
+**Entregue em 2026-08-23.** `GET /admin/financial/cash-position` e a seção
+"Posição de caixa — agora" no topo do Financeiro.
+
+**Metade dos números já existia — mal.** A tela de Financeiro já mostrava
+"Concluído sem fatura", faturas e carteiras, mas com as semânticas trocadas:
+
+- **"Concluído sem fatura" era filtrado por período**, o que o tornava inútil
+  como número de caixa. Trabalho de junho nunca faturado sumia ao filtrar
+  agosto — justamente o dinheiro que se quer enxergar;
+- **faturas e carteiras NÃO eram filtradas**, mas ficavam logo abaixo do
+  seletor de datas, sem nada indicando isso. Ninguém conseguia dizer a que
+  recorte cada número pertencia.
+
+Agora o caixa é uma seção própria, acima e fora do filtro, com o aviso "não muda
+com o filtro de período abaixo". O bloco do período ficou só com o que é
+genuinamente do período.
+
+**Um defeito silencioso corrigido no caminho.** "Vencida" é status
+**armazenado**, atualizado por `refreshOverdueInvoices` — que só rodava ao abrir
+a lista de faturas. Quem abrisse o Financeiro direto podia ver "faturas
+vencidas: 0" com dinheiro atrasado de verdade. O método virou público e o caixa
+o chama antes de somar.
+
+**Duas decisões:**
+
+- **"sem fatura" conta só `paymentMethod: BILLED`.** Pedido pago online nunca
+  vira fatura, então nunca seria "sem fatura" — entraria como dívida que não
+  existe;
+- **só carteiras de motoboy.** A carteira de empresa existe no schema e não é
+  usada; misturar as duas daria um número que não é dívida com ninguém.
+
+Cada número leva à lista que o compõe, e os cartões ganharam uma linha de
+explicação — "R$ 7.951" sozinho não conta que são entregas já feitas e ainda não
+cobradas, que é a informação que faz alguém agir.
+
+---
+
 ### 4. Painel de caixa
 
 **O problema.** Não existe nenhuma tela que responda "quanto eu tenho a

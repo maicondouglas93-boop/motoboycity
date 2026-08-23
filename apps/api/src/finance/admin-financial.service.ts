@@ -4,7 +4,9 @@ import type {
   ListAdminWalletsQuery,
   ListWalletTransactionsQuery,
 } from '@motoboycity/validation';
+import type { CashPositionItem } from '@motoboycity/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { InvoiceService } from './invoice.service';
 import {
   calculateWalletBalances,
   toWalletTransactionItem,
@@ -58,7 +60,80 @@ function roundCurrency(value: number): number {
 
 @Injectable()
 export class AdminFinancialService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly invoiceService: InvoiceService,
+  ) {}
+
+  /**
+   * Posicao de caixa do instante. Nada aqui e filtrado por periodo.
+   *
+   * O numero que faltava e "concluido sem fatura": trabalho feito e ainda nao
+   * cobrado. No concorrente isso passava de um terco do faturamento mensal, e
+   * aqui nao aparecia em tela nenhuma como posicao — so dentro de um recorte de
+   * datas, onde some assim que alguem filtra outro mes.
+   */
+  async cashPosition(): Promise<CashPositionItem> {
+    /**
+     * "Vencida" e status ARMAZENADO. Sem este refresh, uma fatura que venceu
+     * ontem ainda estaria PENDING e o caixa mostraria zero atrasado com
+     * dinheiro atrasado de verdade.
+     */
+    await this.invoiceService.refreshOverdueInvoices();
+
+    const [unbilled, due, overdue, transactionGroups] = await Promise.all([
+      this.prisma.delivery.aggregate({
+        // Somente faturadas: pedido pago online nao vira fatura, entao nunca
+        // seria "sem fatura" — entraria como divida que nao existe.
+        where: { status: 'COMPLETED', paymentMethod: 'BILLED', invoiceId: null },
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.invoice.aggregate({
+        where: { status: 'PENDING' },
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.invoice.aggregate({
+        where: { status: 'OVERDUE' },
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.walletTransaction.groupBy({
+        by: ['type', 'status'],
+        // So carteiras de motoboy: a carteira de empresa existe no schema mas
+        // nao e usada, e misturar as duas daria um numero que nao e divida
+        // com ninguem.
+        where: { wallet: { driverId: { not: null } } },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const wallets = calculateWalletBalances(
+      transactionGroups.map((group) => ({
+        type: group.type as WalletTransactionType,
+        status: group.status,
+        amount: { toString: () => numberOrZero(group._sum.amount).toString() },
+      })),
+    );
+
+    const unbilledValue = numberOrZero(unbilled._sum.totalValue);
+    const invoicesDueValue = numberOrZero(due._sum.totalValue);
+    const invoicesOverdueValue = numberOrZero(overdue._sum.totalValue);
+
+    return {
+      unbilledValue: roundCurrency(unbilledValue),
+      unbilledCount: unbilled._count._all,
+      invoicesDueValue: roundCurrency(invoicesDueValue),
+      invoicesDueCount: due._count._all,
+      invoicesOverdueValue: roundCurrency(invoicesOverdueValue),
+      invoicesOverdueCount: overdue._count._all,
+      totalReceivable: roundCurrency(unbilledValue + invoicesDueValue + invoicesOverdueValue),
+      driverAvailableBalance: wallets.availableBalance,
+      driverBlockedBalance: wallets.blockedBalance,
+      pendingWithdrawalValue: wallets.pendingWithdrawalAmount,
+    };
+  }
 
   async overview(filters: AdminFinancialOverviewQuery): Promise<AdminFinancialOverview> {
     const completedWhere = {

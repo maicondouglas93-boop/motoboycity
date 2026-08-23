@@ -115,3 +115,29 @@ export interface BusinessHoursResult {
   openNow: boolean;
   nextOpeningLabel: string | null;
 }
+
+/**
+ * Posição de caixa do INSTANTE — quanto há a receber e quanto se deve, agora.
+ *
+ * Nenhum número aqui é filtrado por período, e é essa a razão de existir
+ * separado do relatório: trabalho concluído em junho e nunca faturado continua
+ * sendo dinheiro a receber em agosto, e sumiria de qualquer recorte de datas.
+ */
+export interface CashPositionItem {
+  /** Entregas concluídas, faturadas, que ainda não entraram em nenhuma fatura. */
+  unbilledValue: number;
+  unbilledCount: number;
+  /** Faturas emitidas com vencimento ainda no futuro. */
+  invoicesDueValue: number;
+  invoicesDueCount: number;
+  invoicesOverdueValue: number;
+  invoicesOverdueCount: number;
+  /** Soma dos três acima: tudo que a operação tem a receber hoje. */
+  totalReceivable: number;
+  /** Saldo dos motoboys já liberado para saque — dívida exigível a qualquer hora. */
+  driverAvailableBalance: number;
+  /** Saldo ainda no prazo de liberação. */
+  driverBlockedBalance: number;
+  /** Saques pedidos e ainda não pagos. */
+  pendingWithdrawalValue: number;
+}
