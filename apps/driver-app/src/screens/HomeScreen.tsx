@@ -156,6 +156,20 @@ export function HomeScreen({ navigation }: Props) {
           );
           navigation.popToTop();
         },
+        /**
+         * O servidor deixou de receber a posicao dele.
+         *
+         * Se esta mensagem chegou, o app esta VIVO — o problema e o
+         * rastreamento, nao o aplicativo. Por isso o texto pede para conferir
+         * permissao e GPS em vez de "reabra o app", que ja esta aberto.
+         */
+        onLocationLost: ({ activeDeliveryCount }) => {
+          Alert.alert(
+            'Não estamos recebendo sua localização',
+            `Você está com ${activeDeliveryCount} pedido(s) em andamento e paramos de receber ` +
+              'sua posição. Confira se a permissão de localização e o GPS estão ligados.',
+          );
+        },
       });
     }
 
@@ -210,9 +224,7 @@ export function HomeScreen({ navigation }: Props) {
           true,
         );
       } catch (trackingStartError) {
-        await driverPresenceApi
-          .set(token, { availability: 'UNAVAILABLE' })
-          .catch(() => undefined);
+        await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
         await stopDeliveryTracking();
         setPresence('UNAVAILABLE', null);
         throw trackingStartError;

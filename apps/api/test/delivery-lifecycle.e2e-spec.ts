@@ -106,6 +106,39 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     }
   }
 
+  /**
+   * Aceita o pedido e RECUA o carimbo do aceite.
+   *
+   * Sem isso o aceite acontece "agora" e qualquer horario declarado depois
+   * dele cai no futuro — o teste nao conseguiria exercer a janela que a
+   * funcionalidade existe para cobrir.
+   */
+  async function aceitoHaMinutos(
+    numero: number,
+    minutosAtras: number,
+    corpo?: Record<string, unknown>,
+  ): Promise<{ deliveryId: string; aceiteEm: Date }> {
+    await setAvailability(driver1Token, 'AVAILABLE');
+    const created = await request(app.getHttpServer())
+      .post('/deliveries')
+      .set('Authorization', `Bearer ${companyToken}`)
+      .send(corpo ?? { serviceTypeId, dropoffAddress: dropoff(numero) })
+      .expect(201);
+    const deliveryId = created.body.id as string;
+    const offer = await pendingOfferFor(deliveryId);
+    await request(app.getHttpServer())
+      .patch(`/delivery-offers/${offer.id}/accept`)
+      .set('Authorization', `Bearer ${driver1Token}`)
+      .expect(200);
+
+    const aceiteEm = new Date(Date.now() - minutosAtras * 60_000);
+    await prisma.delivery.update({
+      where: { id: deliveryId },
+      data: { statusChangedAt: aceiteEm },
+    });
+    return { deliveryId, aceiteEm };
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -1436,39 +1469,6 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   describe('marcação retroativa', () => {
-    /**
-     * Aceita o pedido e RECUA o carimbo do aceite.
-     *
-     * Sem isso o aceite acontece "agora" e qualquer horario declarado depois
-     * dele cai no futuro — o teste nao conseguiria exercer a janela que a
-     * funcionalidade existe para cobrir.
-     */
-    async function aceitoHaMinutos(
-      numero: number,
-      minutosAtras: number,
-      corpo?: Record<string, unknown>,
-    ): Promise<{ deliveryId: string; aceiteEm: Date }> {
-      await setAvailability(driver1Token, 'AVAILABLE');
-      const created = await request(app.getHttpServer())
-        .post('/deliveries')
-        .set('Authorization', `Bearer ${companyToken}`)
-        .send(corpo ?? { serviceTypeId, dropoffAddress: dropoff(numero) })
-        .expect(201);
-      const deliveryId = created.body.id as string;
-      const offer = await pendingOfferFor(deliveryId);
-      await request(app.getHttpServer())
-        .patch(`/delivery-offers/${offer.id}/accept`)
-        .set('Authorization', `Bearer ${driver1Token}`)
-        .expect(200);
-
-      const aceiteEm = new Date(Date.now() - minutosAtras * 60_000);
-      await prisma.delivery.update({
-        where: { id: deliveryId },
-        data: { statusChangedAt: aceiteEm },
-      });
-      return { deliveryId, aceiteEm };
-    }
-
     beforeAll(async () => {
       await request(app.getHttpServer())
         .patch('/admin/platform-settings')
@@ -1617,6 +1617,65 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
 
       await releaseAllDeliveries([deliveryId]);
       await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
+  describe('motoboy sem posição', () => {
+    /**
+     * Limite alto de propósito: com 120 minutos, nenhum outro teste da suíte
+     * fica silencioso por tempo suficiente para o detector disparar e sujar o
+     * estado deles.
+     */
+    const LIMITE_MINUTOS = 120;
+
+    beforeAll(async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ locationSilenceAlertMinutes: LIMITE_MINUTOS })
+        .expect(200);
+    });
+
+    it('lista quem está com pedido em andamento e sem posição', async () => {
+      const { deliveryId } = await aceitoHaMinutos(41, LIMITE_MINUTOS + 30);
+
+      const resposta = await request(app.getHttpServer())
+        .get('/admin/operations/silent-drivers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const encontrado = resposta.body.find(
+        (item: { deliveryNumbers: number[] }) => item.deliveryNumbers.length > 0,
+      );
+      expect(encontrado).toBeDefined();
+      // Nunca chegou posicao nenhuma: o relogio conta desde que ele assumiu o
+      // pedido, que e o caso mais grave e nao um caso a ignorar.
+      expect(encontrado.silentMinutes).toBeGreaterThanOrEqual(LIMITE_MINUTOS);
+      expect(encontrado.activeDeliveryCount).toBeGreaterThanOrEqual(1);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('não lista quem acabou de assumir', async () => {
+      const { deliveryId } = await aceitoHaMinutos(42, 1);
+
+      const resposta = await request(app.getHttpServer())
+        .get('/admin/operations/silent-drivers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(resposta.body).toEqual([]);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('rota é restrita ao administrador', async () => {
+      await request(app.getHttpServer())
+        .get('/admin/operations/silent-drivers')
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(403);
     });
   });
 

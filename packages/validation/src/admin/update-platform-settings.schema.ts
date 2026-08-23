@@ -41,6 +41,16 @@ export const updatePlatformSettingsSchema = z
       .min(0, 'O tempo mínimo não pode ser negativo.')
       .max(240, 'O tempo mínimo deve ser de no máximo 240 minutos.')
       .optional(),
+    /**
+     * Piso de 2 minutos: abaixo disso o aviso dispararia no intervalo normal
+     * entre dois pings e acusaria silencio onde nao ha nenhum.
+     */
+    locationSilenceAlertMinutes: z
+      .number()
+      .int('O tempo sem posição deve ser um número inteiro de minutos.')
+      .min(2, 'O tempo sem posição deve ser de pelo menos 2 minutos.')
+      .max(120, 'O tempo sem posição deve ser de no máximo 120 minutos.')
+      .optional(),
   })
   .refine(
     (data) =>
@@ -49,7 +59,8 @@ export const updatePlatformSettingsSchema = z
       data.returnProximityRadiusMeters !== undefined ||
       data.businessHoursEnabled !== undefined ||
       data.minMinutesBeforeCollect !== undefined ||
-      data.minMinutesBeforeDeliver !== undefined,
+      data.minMinutesBeforeDeliver !== undefined ||
+      data.locationSilenceAlertMinutes !== undefined,
     { message: 'Informe ao menos um campo para atualizar.' },
   );
 

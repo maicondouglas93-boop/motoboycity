@@ -33,6 +33,7 @@ describe('AdminPlatformSettingsService', () => {
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
+        locationSilenceAlertMinutes: null,
         updatedBy: null,
         updatedAt: null,
       });
@@ -49,6 +50,7 @@ describe('AdminPlatformSettingsService', () => {
         businessHoursEnabled: false,
         minMinutesBeforeCollect: 2,
         minMinutesBeforeDeliver: 5,
+        locationSilenceAlertMinutes: null,
         updatedBy: null,
         updatedAt: new Date('2026-08-23T12:00:00.000Z'),
       });

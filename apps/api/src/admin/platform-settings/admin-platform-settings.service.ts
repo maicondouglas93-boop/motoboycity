@@ -28,6 +28,7 @@ export class AdminPlatformSettingsService {
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
+        locationSilenceAlertMinutes: null,
         updatedBy: null,
         updatedAt: null,
       };
@@ -61,6 +62,9 @@ export class AdminPlatformSettingsService {
         ...(payload.minMinutesBeforeDeliver !== undefined && {
           minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
         }),
+        ...(payload.locationSilenceAlertMinutes !== undefined && {
+          locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
+        }),
         updatedByUserId,
       },
       create: {
@@ -72,6 +76,7 @@ export class AdminPlatformSettingsService {
         businessHoursEnabled: payload.businessHoursEnabled,
         minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
         minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
+        locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
         updatedByUserId,
       },
       include: { updatedBy: true },
@@ -87,6 +92,7 @@ export class AdminPlatformSettingsService {
     businessHoursEnabled: boolean;
     minMinutesBeforeCollect: number | null;
     minMinutesBeforeDeliver: number | null;
+    locationSilenceAlertMinutes: number | null;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -100,6 +106,7 @@ export class AdminPlatformSettingsService {
       businessHoursEnabled: settings.businessHoursEnabled,
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,
       minMinutesBeforeDeliver: settings.minMinutesBeforeDeliver,
+      locationSilenceAlertMinutes: settings.locationSilenceAlertMinutes,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

@@ -9,6 +9,7 @@ import type {
   AdminDeliveryDispatchAudit,
   AdminOperationsResult,
   OperationalActivityEvent,
+  SilentDriverItem,
 } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -35,6 +36,18 @@ export class AdminOperationsController {
     @Query(new ZodValidationPipe(adminActivityQuerySchema)) query: AdminActivityQuery,
   ): Promise<OperationalActivityEvent[]> {
     return this.service.activity(query);
+  }
+
+  /**
+   * Quem esta com pedido em andamento e parou de mandar posicao.
+   *
+   * Fica no painel do admin porque e o lado que SEMPRE funciona: o aviso ao
+   * motoboy depende do app dele estar vivo, e o caso mais grave e justamente
+   * aquele em que nao esta.
+   */
+  @Get('silent-drivers')
+  silentDrivers(): Promise<SilentDriverItem[]> {
+    return this.service.silentDrivers();
   }
 
   @Get('deliveries/:id/dispatch-audit')

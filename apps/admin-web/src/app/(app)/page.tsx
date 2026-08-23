@@ -30,6 +30,7 @@ import { session } from '@/lib/session';
 import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 import { operationTime } from '@/lib/operation-clock';
 import { CompanyQueues } from '@/components/operations/company-queues';
+import { SilentDrivers } from '@/components/operations/silent-drivers';
 
 const filterStatuses = STATUS_OPTIONS.map((option) => option.value);
 const sectionStatuses: DeliveryStatus[] = [
@@ -171,6 +172,10 @@ export default function AdminDashboardPage() {
           {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
         </div>
       </header>
+
+      {/* Acima da grade: e alerta, e alerta que some sozinho quando nao ha
+          ninguem em silencio. Dentro de uma coluna ele passaria batido. */}
+      <SilentDrivers />
 
       <section className="grid min-h-[760px] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
         <div className="space-y-4">

@@ -10,6 +10,16 @@ export interface DriverSocketHandlers {
   onOfferCancelled: (offerId: string) => void;
   onDeliveryCancelled: (deliveryIds: string[]) => void;
   onAccountStatusChanged: (accountStatus: DriverAccountStatus) => void;
+  /**
+   * O servidor percebeu que ele esta com pedido em andamento e parou de mandar
+   * posicao.
+   *
+   * Este aviso so chega com o app VIVO, que e o caso de rastreamento quebrado
+   * com o app aberto — permissao revogada, GPS desligado, economia de bateria
+   * matando o servico de localizacao. App encerrado de vez nao tem socket, e
+   * ai quem ve o problema e o admin.
+   */
+  onLocationLost: (info: { activeDeliveryCount: number; silentMinutes: number }) => void;
 }
 
 let socket: Socket | null = null;
@@ -45,6 +55,11 @@ export function connectDriverSocket(token: string, handlers: DriverSocketHandler
   );
   socket.on('driver:account-status-changed', (payload: { accountStatus: DriverAccountStatus }) =>
     handlers.onAccountStatusChanged(payload.accountStatus),
+  );
+  socket.on(
+    'driver:location-lost',
+    (payload: { activeDeliveryCount: number; silentMinutes: number }) =>
+      handlers.onLocationLost(payload),
   );
 
   return socket;

@@ -5,11 +5,13 @@ import type {
   AdminOperationsResult,
   OperationalActivityEvent,
   OperationalActivityType,
+  SilentDriverItem,
 } from '@motoboycity/types';
 import type { DeliveryOfferResponse, User } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LocationSilenceService } from '../../tracking/location-silence.service';
 import { deliveryStatusEventLabel, offerResponseLabel } from '../../common/status-labels';
 
 const ACTIVE_DRIVER_DELIVERY_STATUSES = ['ACCEPTED', 'COLLECTED', 'DELIVERED'] as const;
@@ -20,7 +22,13 @@ export class AdminOperationsService {
     private readonly prisma: PrismaService,
     private readonly deliveriesService: DeliveriesService,
     private readonly livePresence: LiveDriverPresenceService,
+    private readonly locationSilenceService: LocationSilenceService,
   ) {}
+
+  /** Delega: a regra de silencio vive junto do rastreamento, que e o dono do dado. */
+  silentDrivers(): Promise<SilentDriverItem[]> {
+    return this.locationSilenceService.listSilentDrivers();
+  }
 
   async overview(user: User, filters: DeliveryOperationsQuery): Promise<AdminOperationsResult> {
     const [deliveries, snapshots] = await Promise.all([

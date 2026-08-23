@@ -387,6 +387,15 @@ model Driver {
   lastKnownLng Decimal?  @db.Decimal(10, 7)
   lastSeenAt   DateTime?
 
+  /// Quando o último aviso de "sem posição" foi disparado para este motoboy.
+  ///
+  /// Existe para o aviso sair uma vez por EPISÓDIO de silêncio, e não a cada
+  /// rodada do detector. O episódio se fecha comparando este carimbo com a
+  /// posição mais recente: se chegou posição depois do aviso, ele voltou e
+  /// sumiu de novo — silêncio novo, aviso novo. Isso evita qualquer escrita a
+  /// mais no caminho do ping, que é quente.
+  locationSilenceAlertedAt DateTime?
+
   user   User   @relation(fields: [userId], references: [id])
   region Region @relation(fields: [regionId], references: [id])
 
@@ -1004,6 +1013,15 @@ model PlatformSettings {
   /// Null = sem restrição.
   minMinutesBeforeCollect Int?
   minMinutesBeforeDeliver Int?
+
+  /// Minutos sem posição que disparam o aviso de motoboy com pedido em
+  /// andamento e rastreamento parado. Null = detector desligado.
+  ///
+  /// A detecção é no SERVIDOR, não no aparelho: a ausência de posição é o
+  /// sintoma comum de bateria, app fechado, permissão revogada, GPS desligado
+  /// e falta de sinal — uma checagem dentro do app só pega uma dessas, e só
+  /// enquanto o app estiver vivo para checar.
+  locationSilenceAlertMinutes Int?
 
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])

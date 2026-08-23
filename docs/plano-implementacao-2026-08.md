@@ -344,6 +344,49 @@ tempo mínimo nulo; efeito no relatório de etapas.
 
 ---
 
+### 3. Aviso de motoboy sem localização ✅ FEITO
+
+**Entregue em 2026-08-23.** O detector no servidor roda de 2 em 2 minutos e o
+resultado aparece em dois lugares — mas os dois **não** valem o mesmo:
+
+**Não existe infraestrutura de push neste sistema.** Nem Firebase, nem FCM, nem
+`expo-notifications` — o único canal para o motoboy é o Socket.IO, que exige o
+app vivo. Ou seja: **quando o app morre de vez, não há como avisá-lo**. É
+exatamente por isso que o concorrente usa WhatsApp aqui.
+
+O que sobra, e que foi construído:
+
+- **o bloco no painel do admin é a parte que sempre funciona.** "Fulano está com
+  2 pedidos (#1001, #1002) e sem posição há 14 min" — é a resposta pronta para a
+  ligação da loja. Fica no topo da tela e some sozinho quando não há ninguém em
+  silêncio, para não virar ruído permanente;
+- **o aviso ao motoboy cobre o subconjunto real** de app aberto com rastreamento
+  quebrado: permissão revogada, GPS desligado, economia de bateria matando o
+  serviço de localização. Se a mensagem chegou, o app está vivo — por isso o
+  texto pede para conferir permissão e GPS, e não "reabra o app".
+
+**Alcançar app encerrado continua em aberto** e exige push (FCM) ou WhatsApp.
+É projeto próprio, não um ajuste.
+
+**Quatro decisões da construção:**
+
+- **a varredura olha quatro status, não dois.** O plano dizia `ACCEPTED` e
+  `COLLECTED`; entraram também `DELIVERED` (só fica parado aí quando exige
+  retorno — ele está voltando para a loja) e `FAILED` (mercadoria voltando). Nos
+  quatro o motoboy está na rua e a loja ainda espera;
+- **quem nunca mandou posição conta desde que assumiu o pedido.** É o caso mais
+  grave — aceitou e o rastreamento nunca subiu — e sem esse piso ele não
+  apareceria em varredura nenhuma;
+- **um aviso por episódio**, decidido comparando o carimbo do último aviso com a
+  posição mais recente. Se chegou posição depois do aviso, ele voltou e sumiu de
+  novo: episódio novo. Isso evita qualquer escrita a mais no caminho do ping, que
+  é quente;
+- **o painel mostra o estado, não o log.** Quem já foi avisado continua na lista
+  enquanto o silêncio durar — esconder deixaria o admin sem o número justamente
+  durante o problema.
+
+---
+
 ### 3. Aviso de motoboy sem localização
 
 **O problema.** O rastreamento morre em segundo plano — otimização de bateria,

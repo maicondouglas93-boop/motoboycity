@@ -41,6 +41,11 @@ export interface PlatformSettingsItem {
    */
   minMinutesBeforeCollect: number | null;
   minMinutesBeforeDeliver: number | null;
+  /**
+   * Minutos sem posição que disparam o aviso de motoboy com pedido em
+   * andamento e rastreamento parado. Null = detector desligado.
+   */
+  locationSilenceAlertMinutes: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -57,6 +62,7 @@ export interface UpdatePlatformSettingsInput {
   returnProximityRadiusMeters?: number;
   minMinutesBeforeCollect?: number;
   minMinutesBeforeDeliver?: number;
+  locationSilenceAlertMinutes?: number;
 }
 
 export type SurchargeType = 'PERCENTAGE' | 'FIXED';

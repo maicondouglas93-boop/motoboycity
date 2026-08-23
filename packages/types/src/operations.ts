@@ -16,6 +16,8 @@ export type OperationalActivityType =
   | 'OFFER_EXPIRED'
   | 'DRIVER_ONLINE'
   | 'DRIVER_OFFLINE'
+  /** Motoboy com pedido em andamento e rastreamento parado. */
+  | 'DRIVER_LOCATION_LOST'
   | 'GENERIC';
 
 export interface OperationalActivityEvent {
@@ -51,4 +53,20 @@ export interface AdminOperationsResult extends DeliveryOperationsResult {
 export interface AdminDeliveryDispatchAudit {
   deliveryId: string;
   offers: DeliveryDispatchAuditItem[];
+}
+
+/**
+ * Motoboy com pedido em andamento cujo rastreamento parou de chegar.
+ *
+ * É o número que responde à ligação da loja perguntando por que o pedido não
+ * anda: sem isto, o pedido parece parado no mapa e ninguém sabe por quê.
+ */
+export interface SilentDriverItem {
+  driverId: string;
+  driverName: string;
+  activeDeliveryCount: number;
+  /** Números visíveis dos pedidos, para o admin achar na fila. */
+  deliveryNumbers: number[];
+  silentMinutes: number;
+  lastContactAt: string;
 }

@@ -83,6 +83,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
+      locationSilenceAlertMinutes: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -102,6 +103,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
+      locationSilenceAlertMinutes: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -129,6 +131,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
       minMinutesBeforeDeliver: null,
+      locationSilenceAlertMinutes: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });

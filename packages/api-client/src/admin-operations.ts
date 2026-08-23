@@ -3,6 +3,7 @@ import type {
   AdminOperationsResult,
   DeliveryStatus,
   OperationalActivityEvent,
+  SilentDriverItem,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -38,6 +39,19 @@ export function createAdminOperationsApi({ baseUrl }: { baseUrl: string }) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<OperationalActivityEvent[]>(response);
+    },
+
+    /**
+     * Quem esta com pedido em andamento e sem posicao agora.
+     *
+     * O painel le o ESTADO, e nao o log de avisos: quem ja foi avisado continua
+     * aparecendo enquanto o silencio durar.
+     */
+    async silentDrivers(accessToken: string): Promise<SilentDriverItem[]> {
+      const response = await fetch(`${baseUrl}/admin/operations/silent-drivers`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<SilentDriverItem[]>(response);
     },
 
     async dispatchAudit(

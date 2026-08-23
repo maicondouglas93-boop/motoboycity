@@ -22,6 +22,10 @@ const RADIUS_MAX_METERS = 2000;
 // quer trava, em vez de deixado em branco por esquecimento.
 const MIN_MINUTES_MIN = 0;
 const MIN_MINUTES_MAX = 240;
+// Piso de 2: abaixo disso o aviso dispararia no intervalo normal entre dois
+// pings e acusaria silêncio onde não há nenhum.
+const SILENCE_MIN_MINUTES = 2;
+const SILENCE_MAX_MINUTES = 120;
 
 export default function OperationSettingsPage() {
   const token = session.getToken();
@@ -31,6 +35,7 @@ export default function OperationSettingsPage() {
   const [radiusInput, setRadiusInput] = useState('');
   const [minCollectInput, setMinCollectInput] = useState('');
   const [minDeliverInput, setMinDeliverInput] = useState('');
+  const [silenceInput, setSilenceInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
@@ -48,6 +53,7 @@ export default function OperationSettingsPage() {
       setRadiusInput('');
       setMinCollectInput('');
       setMinDeliverInput('');
+      setSilenceInput('');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
     },
     onError: (error) => {
@@ -115,7 +121,15 @@ export default function OperationSettingsPage() {
       MIN_MINUTES_MAX,
     );
 
-    const error = timeout.error ?? radius.error ?? minCollect.error ?? minDeliver.error;
+    const silence = parseField(
+      silenceInput,
+      'O tempo sem posição',
+      SILENCE_MIN_MINUTES,
+      SILENCE_MAX_MINUTES,
+    );
+
+    const error =
+      timeout.error ?? radius.error ?? minCollect.error ?? minDeliver.error ?? silence.error;
     if (error) {
       setFormError(error);
       return;
@@ -125,7 +139,8 @@ export default function OperationSettingsPage() {
       timeout.value === undefined &&
       radius.value === undefined &&
       minCollect.value === undefined &&
-      minDeliver.value === undefined
+      minDeliver.value === undefined &&
+      silence.value === undefined
     ) {
       setFormError('Preencha ao menos um dos campos para salvar.');
       return;
@@ -136,6 +151,7 @@ export default function OperationSettingsPage() {
       ...(radius.value !== undefined && { returnProximityRadiusMeters: radius.value }),
       ...(minCollect.value !== undefined && { minMinutesBeforeCollect: minCollect.value }),
       ...(minDeliver.value !== undefined && { minMinutesBeforeDeliver: minDeliver.value }),
+      ...(silence.value !== undefined && { locationSilenceAlertMinutes: silence.value }),
     });
   }
 
@@ -192,6 +208,14 @@ export default function OperationSettingsPage() {
                     : `${settings?.minMinutesBeforeCollect ?? 0} / ${
                         settings?.minMinutesBeforeDeliver ?? 0
                       } minuto(s)`}
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="text-muted-foreground">Aviso de motoboy sem posição:</dt>
+                <dd>
+                  {settings?.locationSilenceAlertMinutes === null
+                    ? 'desligado'
+                    : `${settings?.locationSilenceAlertMinutes} minutos sem posição`}
                 </dd>
               </div>
               {settings?.updatedBy && (
@@ -261,6 +285,21 @@ export default function OperationSettingsPage() {
                 <p className="text-xs text-muted-foreground">
                   Mesma ideia na entrega. É o que impede faturar uma corrida declarando coleta e
                   entrega no mesmo minuto.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="silence-minutes">Aviso de motoboy sem posição (minutos)</Label>
+                <Input
+                  id="silence-minutes"
+                  inputMode="numeric"
+                  placeholder={`${SILENCE_MIN_MINUTES} a ${SILENCE_MAX_MINUTES}`}
+                  value={silenceInput}
+                  onChange={(event) => setSilenceInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quanto tempo sem receber a posição de um motoboy que está com pedido em andamento
+                  antes de avisar. Em branco mantém desligado.
                 </p>
               </div>
               <Button type="submit" disabled={updateMutation.isPending}>
