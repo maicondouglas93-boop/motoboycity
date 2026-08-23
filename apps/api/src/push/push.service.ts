@@ -104,10 +104,40 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
 
     const envios = await Promise.all(
       tokens.map(async ({ token }) => {
+        /**
+         * OFERTA vai SÓ COM DADOS, sem o bloco `notification`.
+         *
+         * É a diferença entre a oferta aparecer como faixa no topo ou tomar a
+         * tela inteira. Com bloco `notification`, o Android desenha a
+         * notificação sozinho e o aplicativo nunca é chamado — e é só de dentro
+         * do aplicativo que dá para pedir tela cheia. Com dados, o serviço
+         * nativo `OfferMessagingService` recebe a mensagem e monta a
+         * notificação com `setFullScreenIntent`.
+         *
+         * O preço: se o sistema tiver ENCERRADO o aplicativo à força, o serviço
+         * não roda e nada aparece — enquanto o bloco `notification` apareceria
+         * de qualquer jeito. É por isso que o aplicativo também busca a oferta
+         * pendente ao abrir, e por isso o motoboy precisa liberar o aplicativo
+         * na economia de bateria.
+         *
+         * O resto das mensagens continua com `notification`: nenhuma delas
+         * precisa de tela cheia, e ali a entrega mais garantida é o que importa.
+         */
+        const ehOferta = message.kind === 'offer';
         const payload: Message = {
           token,
-          notification: { title: message.title, body: message.body },
-          ...(message.data && { data: message.data }),
+          ...(ehOferta
+            ? {
+                data: {
+                  ...(message.data ?? {}),
+                  title: message.title,
+                  body: message.body,
+                },
+              }
+            : {
+                notification: { title: message.title, body: message.body },
+                ...(message.data && { data: message.data }),
+              }),
           android: {
             /**
              * Alta prioridade acorda o aparelho em modo de economia. Sem isso o
@@ -115,15 +145,15 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
              * manutenção — e a oferta tem prazo de resposta.
              */
             priority: 'high',
-            notification: {
-              channelId: canal,
-              /**
-               * Oferta é evento vivo: guardar uma que expirou para entregar
-               * depois só faria o motoboy abrir o app e encontrar nada.
-               */
-              ...(message.kind === 'offer' && { ttl: 0 }),
-            },
-            ...(message.kind === 'offer' && { ttl: 0 }),
+            ...(ehOferta
+              ? {
+                  /**
+                   * Oferta é evento vivo: guardar uma que expirou para entregar
+                   * depois só faria o motoboy abrir o app e encontrar nada.
+                   */
+                  ttl: 0,
+                }
+              : { notification: { channelId: canal } }),
           },
         };
 

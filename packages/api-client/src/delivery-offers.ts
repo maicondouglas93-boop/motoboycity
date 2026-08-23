@@ -1,4 +1,8 @@
-import type { AcceptOfferResult, AvailableDeliveryItem } from '@motoboycity/types';
+import type {
+  AcceptOfferResult,
+  AvailableDeliveryItem,
+  DeliveryOfferPayload,
+} from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
 export interface DeliveryOffersApiConfig {
@@ -17,6 +21,19 @@ export function createDeliveryOffersApi({ baseUrl }: DeliveryOffersApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AvailableDeliveryItem[]>(response);
+    },
+
+    /**
+     * A oferta esperando resposta agora. `null` quando nao ha nenhuma.
+     *
+     * Chamado ao abrir o aplicativo: a oferta pode ter chegado com ele fechado,
+     * e ai o socket nao estava la para receber.
+     */
+    async pending(accessToken: string): Promise<DeliveryOfferPayload | null> {
+      const response = await fetch(`${baseUrl}/delivery-offers/pending`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryOfferPayload | null>(response);
     },
 
     async claim(accessToken: string, deliveryId: string): Promise<AcceptOfferResult> {

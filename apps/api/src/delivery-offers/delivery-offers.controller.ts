@@ -19,6 +19,15 @@ export class DeliveryOffersController {
     return this.deliveryOffersService.listAvailable(user);
   }
 
+  /**
+   * Precisa vir antes de qualquer rota com parametro: o Nest casa na ordem de
+   * declaracao, e `:id/accept` engoliria `pending`.
+   */
+  @Get('pending')
+  pending(@CurrentUser() user: User) {
+    return this.deliveryOffersService.pending(user);
+  }
+
   @Patch('available/:id/claim')
   claim(@Param('id') id: string, @CurrentUser() user: User): Promise<AcceptOfferResult> {
     return this.deliveryOffersService.claim(user, id);

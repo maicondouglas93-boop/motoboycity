@@ -211,6 +211,9 @@ gradle.taskGraph.whenReady { graph ->
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // NotificationCompat, usado pelo OfferMessagingService. Ja vem transitivo do
+    // React Native; declarado aqui para a dependencia ser explicita onde e usada.
+    implementation("androidx.core:core-ktx:1.13.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

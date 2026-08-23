@@ -8,11 +8,13 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { Prisma, type DeliveryStatus } from '@prisma/client';
+import type { DeliveryOfferPayload } from '@motoboycity/types';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { PushService } from '../push/push.service';
+import { buildOfferPayload, remainingSeconds } from './offer-payload';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
@@ -36,28 +38,6 @@ function expireJobId(offerId: string): string {
 
 function activateJobId(deliveryId: string): string {
   return `activate-${deliveryId}`;
-}
-
-function offerAddress(
-  address: {
-    street: string | null;
-    number: string | null;
-    complement: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    referenceNote: string | null;
-  } | null,
-) {
-  return {
-    street: address?.street ?? null,
-    number: address?.number ?? null,
-    complement: address?.complement ?? null,
-    city: address?.city ?? null,
-    state: address?.state ?? null,
-    zip: address?.zip ?? null,
-    referenceNote: address?.referenceNote ?? null,
-  };
 }
 
 @Injectable()
@@ -199,57 +179,16 @@ export class DispatchService {
       ),
     );
 
-    this.realtimeGateway.emitToDriver(nextDriverId, 'delivery:offer', {
-      offerId: offers[0]!.id,
-      deliveryId: delivery.id,
-      displayNumber: delivery.displayNumber,
-      companyName: delivery.company.tradeName,
-      paymentMethod: delivery.paymentMethod,
-      totalValue: !delivery.destinationKnownAtCreation
-        ? null
-        : delivery.batchId
-          ? deliveries.reduce((sum, item) => sum + Number(item.totalValue), 0)
-          : Number(delivery.totalValue),
-      driverValue: !delivery.destinationKnownAtCreation
-        ? null
-        : delivery.batchId
-          ? deliveries.reduce((sum, item) => sum + Number(item.driverValue), 0)
-          : Number(delivery.driverValue),
-      platformValue: !delivery.destinationKnownAtCreation
-        ? null
-        : delivery.batchId
-          ? deliveries.reduce((sum, item) => sum + Number(item.platformValue), 0)
-          : Number(delivery.platformValue),
-      distanceKm: !delivery.destinationKnownAtCreation
-        ? null
-        : delivery.batchId
-          ? deliveries.reduce((sum, item) => sum + Number(item.distanceKm ?? 0), 0)
-          : delivery.distanceKm === null
-            ? null
-            : Number(delivery.distanceKm),
-      requiresReturn: delivery.batchId
-        ? deliveries.some((item) => item.requiresReturn)
-        : delivery.requiresReturn,
-      deliveries: deliveries.map((item) => ({
-        deliveryId: item.id,
-        displayNumber: item.displayNumber,
-        serviceTypeName: item.serviceType.name,
-        destinationKnownAtCreation: item.destinationKnownAtCreation,
-        pickupAddress: offerAddress(
-          item.addresses.find((address) => address.type === 'PICKUP') ?? null,
-        ),
-        dropoffAddress: item.destinationKnownAtCreation
-          ? offerAddress(item.addresses.find((address) => address.type === 'DROPOFF') ?? null)
-          : null,
-        totalValue: item.totalValue === null ? null : Number(item.totalValue),
-        driverValue: item.driverValue === null ? null : Number(item.driverValue),
-        platformValue: item.platformValue === null ? null : Number(item.platformValue),
-        distanceKm: item.distanceKm === null ? null : Number(item.distanceKm),
-        requiresReturn: item.requiresReturn,
-      })),
-      expiresInSeconds: timeoutSeconds,
-      ...(delivery.batchId ? { batchId: delivery.batchId, deliveryCount: deliveries.length } : {}),
-    });
+    this.realtimeGateway.emitToDriver(
+      nextDriverId,
+      'delivery:offer',
+      buildOfferPayload({
+        offerId: offers[0]!.id,
+        principal: delivery,
+        entregas: deliveries,
+        expiresInSeconds: timeoutSeconds,
+      }),
+    );
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} ofertado a um motoboy.`,
     );
@@ -982,6 +921,56 @@ export class DispatchService {
       displayNumber: delivery.displayNumber,
       returnedCount: ids.length,
     };
+  }
+
+  /**
+   * A oferta que esta esperando resposta deste motoboy agora, se houver.
+   *
+   * Existe porque a oferta so chegava pelo socket: se ela foi criada com o
+   * aplicativo FECHADO, abrir o aplicativo depois nao mostrava nada — o motoboy
+   * via a notificacao, entrava, e encontrava a tela vazia enquanto o prazo
+   * corria.
+   */
+  async findPendingOfferForDriver(driverId: string): Promise<DeliveryOfferPayload | null> {
+    const offer = await this.prisma.deliveryOffer.findFirst({
+      where: { driverId, response: 'PENDING' },
+      orderBy: { offeredAt: 'desc' },
+    });
+    if (!offer) {
+      return null;
+    }
+
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: offer.deliveryId },
+      include: {
+        company: { select: { tradeName: true } },
+        serviceType: { select: { name: true } },
+        addresses: true,
+      },
+    });
+    if (!delivery || delivery.status !== 'AWAITING_DRIVER') {
+      return null;
+    }
+
+    const settings = await this.platformSettingsService.get();
+    if (settings.dispatchOfferTimeoutSeconds === null) {
+      return null;
+    }
+
+    const entregas = delivery.batchId
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: delivery.batchId },
+          orderBy: { createdAt: 'asc' },
+          include: { serviceType: { select: { name: true } }, addresses: true },
+        })
+      : [delivery];
+
+    return buildOfferPayload({
+      offerId: offer.id,
+      principal: delivery,
+      entregas,
+      expiresInSeconds: remainingSeconds(offer.offeredAt, settings.dispatchOfferTimeoutSeconds),
+    });
   }
 
   private async findNextEligibleDriverId({

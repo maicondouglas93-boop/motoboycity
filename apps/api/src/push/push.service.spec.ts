@@ -90,27 +90,48 @@ describe('PushService', () => {
       expect(send).not.toHaveBeenCalled();
     });
 
-    it('oferta vai em canal próprio, com prioridade alta e sem validade', async () => {
+    it('oferta vai SÓ COM DADOS, para o serviço nativo abrir a tela cheia', async () => {
+      /**
+       * E a diferenca entre a oferta aparecer como faixa no topo ou tomar a tela
+       * inteira. Com bloco `notification`, o Android desenha sozinho e o
+       * aplicativo nunca e chamado — e e so de dentro dele que da para pedir
+       * tela cheia.
+       */
       prisma.deviceToken.findMany.mockResolvedValue([{ token: 't1' }]);
       service = await montar();
 
-      await service.sendToDriver('driver-1', { kind: 'offer', title: 'a', body: 'b' });
+      await service.sendToDriver('driver-1', {
+        kind: 'offer',
+        title: 'Nova entrega',
+        body: 'Loja X',
+        data: { type: 'offer', offerId: 'o1' },
+      });
 
       const enviado = send.mock.calls[0]?.[0];
+      expect(enviado.notification).toBeUndefined();
+      // Titulo e corpo viajam nos dados, porque e o servico nativo que desenha.
+      expect(enviado.data).toEqual({
+        type: 'offer',
+        offerId: 'o1',
+        title: 'Nova entrega',
+        body: 'Loja X',
+      });
       expect(enviado.android.priority).toBe('high');
-      expect(enviado.android.notification.channelId).toBe('ofertas');
       // Oferta e evento vivo: guardar uma que expirou para entregar depois so
       // faria o motoboy abrir o app e nao encontrar nada.
       expect(enviado.android.ttl).toBe(0);
     });
 
-    it('aviso comum usa o canal geral e não expira', async () => {
+    it('aviso comum mantém o bloco de notificação, que é mais garantido', async () => {
+      // Nenhum deles precisa de tela cheia, e ali o que importa e a entrega
+      // acontecer mesmo com o aplicativo encerrado.
       prisma.deviceToken.findMany.mockResolvedValue([{ token: 't1' }]);
       service = await montar();
 
       await service.sendToDriver('driver-1', { title: 'a', body: 'b' });
 
       const enviado = send.mock.calls[0]?.[0];
+      expect(enviado.notification).toEqual({ title: 'a', body: 'b' });
       expect(enviado.android.notification.channelId).toBe('avisos');
       expect(enviado.android.ttl).toBeUndefined();
     });

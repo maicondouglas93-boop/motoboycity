@@ -112,6 +112,12 @@ Suba a API e olhe o log da inicialização:
 - **Desregistro ao sair da conta**, antes de limpar a sessão.
 - **Handler de segundo plano** registrado fora do React, porque com o aplicativo
   encerrado o Android sobe um contexto onde nenhum componente existe ainda.
+- **`OfferMessagingService` em Kotlin**, que recebe a oferta e monta a
+  notificação com `setFullScreenIntent`. Precisa ser nativo pelo motivo acima.
+- **Busca da oferta pendente** (`GET /delivery-offers/pending`) ao abrir e ao
+  voltar do segundo plano. Antes disso, uma oferta criada com o aplicativo
+  fechado só existia no socket que ninguém estava ouvindo: o motoboy tocava a
+  notificação, entrava, e encontrava a tela vazia com o prazo correndo.
 
 ---
 
@@ -126,8 +132,25 @@ primeiro teste de verdade é instalar num celular e lançar um pedido.
 trata o caso, mas falta certificado APNs e o arquivo do projeto. O piloto é
 Android, conforme o runbook.
 
-**A oferta chega como notificação do sistema, não como tela cheia.** Ela toca e
-aparece sobre o que estiver na tela, mas não toma o aparelho como uma ligação. Se
-na prática o motoboy ainda perder ofertas, o próximo passo é uma notificação de
-tela cheia — que exige permissão adicional no Android 14+ e vale decidir com
-dado, não por precaução.
+**A oferta abre em TELA CHEIA**, sobre o que estiver no aparelho e sobre a tela
+de bloqueio, acendendo a tela. Isso tem um preço que vale entender:
+
+Para pedir tela cheia, a oferta precisa viajar como mensagem **só de dados**. Uma
+mensagem com bloco `notification` é desenhada pelo próprio Android sem o
+aplicativo ser chamado — e é só de dentro dele que dá para pedir tela cheia.
+
+A consequência: **se o sistema tiver encerrado o aplicativo à força, nada
+aparece.** Com o formato anterior, a notificação apareceria de qualquer jeito,
+como faixa no topo. Duas coisas compensam isso:
+
+- o aplicativo **busca a oferta pendente ao abrir e ao voltar do segundo
+  plano**, com o tempo que ainda sobra do prazo — então uma oferta perdida
+  reaparece assim que ele abre o aplicativo;
+- o motoboy precisa **liberar o aplicativo na economia de bateria** do aparelho.
+  Em Xiaomi, Samsung e Motorola isso é obrigatório na prática, e vale entrar no
+  roteiro de instalação junto com a permissão de localização.
+
+No Android 14+, a permissão de tela cheia não é concedida automaticamente para
+aplicativos que não são de chamada ou despertador. Quando ela falta, o Android
+**rebaixa sozinho** para notificação com som em vez de descartar — pior que a
+tela cheia, melhor que silêncio.

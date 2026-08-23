@@ -31,6 +31,19 @@ export class DeliveryOffersService {
     return this.dispatchService.listAvailableForDriver(driver.id);
   }
 
+  /**
+   * A oferta que esta esperando resposta agora, se houver.
+   *
+   * O aplicativo chama isto ao abrir. Sem ele, uma oferta criada com o
+   * aplicativo fechado so existia no socket que ninguem estava ouvindo — o
+   * motoboy tocava a notificacao, entrava, e encontrava a tela vazia com o
+   * prazo correndo.
+   */
+  async pending(user: User) {
+    const driver = await this.findDriverForUser(user);
+    return this.dispatchService.findPendingOfferForDriver(driver.id);
+  }
+
   async claim(user: User, deliveryId: string): Promise<AcceptOfferResult> {
     const driver = await this.findDriverForUser(user);
     return this.dispatchService.claimDelivery(deliveryId, driver.id, user.id);

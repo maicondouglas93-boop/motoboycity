@@ -1241,4 +1241,59 @@ describe('DispatchService', () => {
       expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
     });
   });
+
+  describe('oferta pendente', () => {
+    it('devolve null quando nao ha oferta esperando resposta', async () => {
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+
+      await expect(service.findPendingOfferForDriver('driver-1')).resolves.toBeNull();
+    });
+
+    it('devolve null se o pedido saiu de AWAITING_DRIVER no meio-tempo', async () => {
+      // A oferta ainda consta PENDING mas outro ja assumiu: mostrar a tela seria
+      // oferecer o que nao existe mais.
+      prisma.deliveryOffer.findFirst.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        offeredAt: new Date(),
+      });
+      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'ACCEPTED' });
+
+      await expect(service.findPendingOfferForDriver('driver-1')).resolves.toBeNull();
+    });
+
+    it('devolve a oferta com o tempo que SOBRA, nao o prazo cheio', async () => {
+      // O aplicativo busca isto ao abrir. Reabrir o cronometro do zero faria o
+      // motoboy decidir confiando num tempo que ele nao tem.
+      const ofertadaEm = new Date(Date.now() - 40_000);
+      prisma.deliveryOffer.findFirst.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        offeredAt: ofertadaEm,
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 1001,
+        status: 'AWAITING_DRIVER',
+        batchId: null,
+        paymentMethod: 'BILLED',
+        destinationKnownAtCreation: true,
+        totalValue: 10,
+        driverValue: 8,
+        platformValue: 2,
+        distanceKm: 3,
+        requiresReturn: false,
+        company: { tradeName: 'Loja' },
+        serviceType: { name: 'Padrão' },
+        addresses: [],
+      });
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 120 });
+
+      const oferta = await service.findPendingOfferForDriver('driver-1');
+
+      expect(oferta?.offerId).toBe('offer-1');
+      expect(oferta?.expiresInSeconds).toBeLessThanOrEqual(81);
+      expect(oferta?.expiresInSeconds).toBeGreaterThanOrEqual(78);
+    });
+  });
 });

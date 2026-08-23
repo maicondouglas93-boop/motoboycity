@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Switch, Text, View, useColorScheme } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Pressable,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
 import { DrawerMenu } from '../components/DrawerMenu';
 import { EmptyState } from '../components/EmptyState';
 import { colors } from '../theme/colors';
-import { driverPresenceApi } from '../lib/apiClient';
+import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { getActiveDeliveries } from '../lib/activeDeliveries';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
@@ -183,6 +192,43 @@ export function HomeScreen({ navigation }: Props) {
           );
         },
       });
+
+      /**
+       * Recupera a oferta que chegou com o aplicativo FECHADO.
+       *
+       * O socket so entrega para quem esta conectado. Sem esta busca, o motoboy
+       * tocava a notificacao, entrava, e encontrava a tela vazia enquanto o
+       * prazo corria — que e exatamente o caso que o push existe para cobrir.
+       */
+      await mostrarOfertaPendente(token);
+    }
+
+    /**
+     * O mesmo ao VOLTAR do segundo plano.
+     *
+     * Tocar a notificacao com o aplicativo suspenso nao remonta esta tela: o
+     * `useEffect` acima nao roda de novo, e sem isto a oferta so apareceria na
+     * proxima vez que o aplicativo fosse aberto do zero.
+     */
+    const assinatura = AppState.addEventListener('change', (estado) => {
+      if (estado !== 'active') return;
+      session
+        .getToken()
+        .then((atual) => (atual ? mostrarOfertaPendente(atual) : undefined))
+        .catch(() => undefined);
+    });
+
+    async function mostrarOfertaPendente(token: string) {
+      if (cancelled) return;
+      // Ja ha uma oferta na tela: sobrescrever trocaria o cronometro por baixo
+      // de quem esta decidindo.
+      if (useDispatchStore.getState().incomingOffer) return;
+
+      const pendente = await deliveryOffersApi.pending(token).catch(() => null);
+      if (!pendente || cancelled) return;
+
+      setIncomingOffer(pendente);
+      navigation.navigate('IncomingOffer');
     }
 
     bootstrap().catch(() => {
@@ -194,6 +240,7 @@ export function HomeScreen({ navigation }: Props) {
 
     return () => {
       cancelled = true;
+      assinatura.remove();
       disconnectDriverSocket();
     };
     // Esta tela e montada uma unica vez na sessao; callbacks do socket usam a store.

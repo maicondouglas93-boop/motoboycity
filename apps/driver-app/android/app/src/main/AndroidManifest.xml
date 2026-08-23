@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      Tela cheia da oferta, sobre o que estiver no aparelho e sobre a tela de
+      bloqueio. No Android 14+ ela nao e concedida automaticamente para
+      aplicativos que nao sao de chamada ou despertador: sem a liberacao manual,
+      o Android rebaixa a oferta para notificacao com som em vez de descartar.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
       android:name=".MainApplication"
@@ -17,16 +24,35 @@
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
+      <!--
+        Recebe o push de oferta e monta a notificacao de tela cheia. Precisa ser
+        nativo: mensagem com bloco `notification` e desenhada pelo Android sem
+        passar pelo aplicativo, e ai nao ha como pedir tela cheia.
+      -->
+      <service
+        android:name=".OfferMessagingService"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent-filter>
+      </service>
       <service
         android:name=".DeliveryLocationTrackingService"
         android:exported="false"
         android:foregroundServiceType="location" />
+      <!--
+        `showWhenLocked` e `turnScreenOn`: a oferta aparece sobre a tela de
+        bloqueio e acende a tela. Ela tem prazo, e esperar o motoboy desbloquear
+        por conta propria gasta esse prazo.
+      -->
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
         android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
         android:launchMode="singleTask"
         android:windowSoftInputMode="adjustResize"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
         android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />
