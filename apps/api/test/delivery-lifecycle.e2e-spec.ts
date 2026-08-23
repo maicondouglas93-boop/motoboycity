@@ -1435,6 +1435,191 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  describe('marcação retroativa', () => {
+    /**
+     * Aceita o pedido e RECUA o carimbo do aceite.
+     *
+     * Sem isso o aceite acontece "agora" e qualquer horario declarado depois
+     * dele cai no futuro — o teste nao conseguiria exercer a janela que a
+     * funcionalidade existe para cobrir.
+     */
+    async function aceitoHaMinutos(
+      numero: number,
+      minutosAtras: number,
+      corpo?: Record<string, unknown>,
+    ): Promise<{ deliveryId: string; aceiteEm: Date }> {
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send(corpo ?? { serviceTypeId, dropoffAddress: dropoff(numero) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const aceiteEm = new Date(Date.now() - minutosAtras * 60_000);
+      await prisma.delivery.update({
+        where: { id: deliveryId },
+        data: { statusChangedAt: aceiteEm },
+      });
+      return { deliveryId, aceiteEm };
+    }
+
+    beforeAll(async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ minMinutesBeforeCollect: 2, minMinutesBeforeDeliver: 5 })
+        .expect(200);
+    });
+
+    it('coleta declarada para antes: o carimbo passa a ser o horário informado', async () => {
+      const { deliveryId, aceiteEm } = await aceitoHaMinutos(31, 30);
+      const declarado = new Date(aceiteEm.getTime() + 10 * 60_000);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: declarado.toISOString() })
+        .expect(200);
+
+      const depois = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      // O relogio operacional passa a ser o declarado — e o que a fila mostra e
+      // o piso da proxima declaracao.
+      expect(depois.statusChangedAt.toISOString()).toBe(declarado.toISOString());
+
+      const linha = await prisma.deliveryStatusHistory.findFirstOrThrow({
+        where: { deliveryId, toStatus: 'COLLECTED' },
+      });
+      expect(linha.occurredAt?.toISOString()).toBe(declarado.toISOString());
+      // A prova do registro continua sendo quando a linha foi escrita: e a
+      // distancia entre os dois numeros que denuncia declaracao esticada.
+      expect(linha.changedAt.getTime()).toBeGreaterThan(declarado.getTime());
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('recusa horário no futuro (409)', async () => {
+      const { deliveryId } = await aceitoHaMinutos(32, 30);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: new Date(Date.now() + 60 * 60_000).toISOString() })
+        .expect(409);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('recusa declaração abaixo do tempo mínimo (409)', async () => {
+      const { deliveryId, aceiteEm } = await aceitoHaMinutos(33, 30);
+
+      // Um minuto depois do aceite, com minimo de dois: e o caso que a trava
+      // existe para barrar.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: new Date(aceiteEm.getTime() + 60_000).toISOString() })
+        .expect(409);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('recusa horário anterior ao aceite (409)', async () => {
+      const { deliveryId, aceiteEm } = await aceitoHaMinutos(34, 30);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: new Date(aceiteEm.getTime() - 60_000).toISOString() })
+        .expect(409);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('a entrega declarada encadeia a partir da coleta declarada', async () => {
+      const { deliveryId, aceiteEm } = await aceitoHaMinutos(35, 60);
+      const coletaEm = new Date(aceiteEm.getTime() + 10 * 60_000);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: coletaEm.toISOString() })
+        .expect(200);
+
+      /**
+       * Este e o caso que so funciona porque o carimbo guardou o DECLARADO:
+       * o motoboy tocou tudo agora, mas a entrega e declarada para um horario
+       * anterior ao toque. Se o piso fosse o instante do toque, seria recusada.
+       */
+      const entregaEm = new Date(coletaEm.getTime() + 6 * 60_000);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: entregaEm.toISOString() })
+        .expect(200);
+
+      const linha = await prisma.deliveryStatusHistory.findFirstOrThrow({
+        where: { deliveryId, toStatus: 'DELIVERED' },
+      });
+      expect(linha.occurredAt?.toISOString()).toBe(entregaEm.toISOString());
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('entrega com preço definido por GPS não aceita marcação retroativa (409)', async () => {
+      // Ali a coordenada DO MOMENTO vira destino, distancia e preco. Declarar
+      // so o horario deixaria o valor vindo de uma posicao errada.
+      const { deliveryId } = await aceitoHaMinutos(36, 60, {
+        serviceTypeId,
+        destinationKnownAtCreation: false,
+      });
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const resposta = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ occurredAt: new Date(Date.now() - 30 * 60_000).toISOString() })
+        .expect(409);
+
+      expect(resposta.body.message).toContain('administrador');
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    it('coleta sem corpo continua funcionando', async () => {
+      // A marcacao normal e a esmagadora maioria: nao pode ter passado a exigir
+      // corpo por causa do campo opcional.
+      const { deliveryId } = await aceitoHaMinutos(37, 30);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const linha = await prisma.deliveryStatusHistory.findFirstOrThrow({
+        where: { deliveryId, toStatus: 'COLLECTED' },
+      });
+      expect(linha.occurredAt).toBeNull();
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
   describe('regressão: cancel() com item já COMPLETED no lote', () => {
     it('admin consegue cancelar o item ainda ativo mesmo com outro item do lote já COMPLETED', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');

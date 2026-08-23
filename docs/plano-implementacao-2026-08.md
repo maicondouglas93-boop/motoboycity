@@ -246,6 +246,56 @@ que não é o dono do pedido.
 
 ---
 
+### 2. Marcar coleta e entrega esquecidas — com tempo mínimo ✅ FEITO
+
+**Entregue em 2026-08-23**, com **duas das três** ações. O que a construção
+mostrou:
+
+**O "retorno esquecido" não pode existir como ação do motoboy.** `completeReturn`
+exige estar fisicamente dentro do raio da loja — essa proximidade _é_ a prova, e
+é ela que dispara o repasse. Se ele esqueceu de tocar e já foi embora, não há
+forma honesta de ele mesmo declarar: ou o app aceita um GPS de outro lugar, ou
+aceita a palavra dele sobre dinheiro. Esse buraco já está fechado pelo lado
+certo — o `forceComplete` do admin (commit `99fa5f3`) faz exatamente isso, a
+partir de `DELIVERED|FAILED`, exigindo motivo e gravando quem fez.
+
+**A entrega com preço definido por GPS também recusa.** Quando
+`destinationKnownAtCreation = false`, a coordenada do momento vira destino,
+distância e preço. Declarar só o horário deixaria o valor saindo de uma rota que
+nunca existiu. O botão nem aparece nesse caso, e o servidor recusa antes de
+validar horário — "não dá para marcar depois" é a informação útil, enquanto
+reclamar do horário mandaria a pessoa corrigir um campo que nunca seria aceito.
+
+**Onde o horário declarado é gravado.** `DeliveryStatusHistory.occurredAt`, novo
+e nulável. `changedAt` continua sendo quando a linha foi **escrita** — é a prova
+do registro, e a distância entre os dois números é o que denuncia declaração
+esticada. O relatório de etapas usa `occurredAt ?? changedAt` e ganhou
+`excludeRetroactive`, desligado por padrão: no dia a dia o declarado é a melhor
+aproximação disponível; para cobrar meta de alguém, só serve o que o servidor
+carimbou.
+
+**O carimbo do pedido passa a ser o declarado.** `statusChangedAt` é o relógio
+operacional — é o que a fila ao vivo mostra e o piso da próxima declaração. Sem
+isso, quem declarasse coleta às 14h não conseguiria declarar entrega às 14h30,
+porque o piso seria o instante do toque.
+
+**Na tela do motoboy: "há quantos minutos?", não seletor de data.** É como a
+pessoa lembra de verdade, resolve em um toque, sem teclado, de moto — e não abre
+a porta para digitar o dia errado.
+
+**Uma regressão que o e2e pegou.** Acrescentar um campo **opcional** ao corpo do
+`collect` quebrou toda coleta feita na hora: `@Body()` do Nest entrega
+`undefined` num PATCH sem corpo, e `z.object` recusa `undefined`. Resolvido com
+`.default({})`. O sintoma era `400` sem pista nenhuma, e derrubou 26 testes em
+cascata — o primeiro travava o motoboy e nenhum pedido seguinte achava alguém
+elegível.
+
+**O runner local de e2e passou a aplicar migrações** antes de rodar. Sem isso,
+uma migração aplicada só no banco de desenvolvimento faz a suíte inteira falhar
+com `500`, e o erro aponta para o lado errado.
+
+---
+
 ### 2. Marcar coleta, entrega e retorno esquecidos — com tempo mínimo
 
 **O problema.** O motoboy esquece de tocar o botão. A entrega aconteceu no mundo

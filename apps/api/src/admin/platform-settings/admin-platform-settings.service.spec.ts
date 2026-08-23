@@ -31,9 +31,33 @@ describe('AdminPlatformSettingsService', () => {
         dispatchOfferTimeoutSeconds: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
+        minMinutesBeforeCollect: null,
+        minMinutesBeforeDeliver: null,
         updatedBy: null,
         updatedAt: null,
       });
+    });
+
+    it('atualizar só o raio não mexe nos tempos mínimos', async () => {
+      // Mesmo cuidado que a hora de funcionamento ja exigiu: um upsert que
+      // escreve campo ausente apagaria configuracao que ninguem pediu para
+      // mudar.
+      prisma.platformSettings.upsert.mockResolvedValue({
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: null,
+        returnProximityRadiusMeters: 200,
+        businessHoursEnabled: false,
+        minMinutesBeforeCollect: 2,
+        minMinutesBeforeDeliver: 5,
+        updatedBy: null,
+        updatedAt: new Date('2026-08-23T12:00:00.000Z'),
+      });
+
+      await service.update({ returnProximityRadiusMeters: 200 }, 'user-1');
+
+      const update = prisma.platformSettings.upsert.mock.calls[0]?.[0]?.update;
+      expect(update).not.toHaveProperty('minMinutesBeforeCollect');
+      expect(update).not.toHaveProperty('minMinutesBeforeDeliver');
     });
 
     it('converte Decimal para number, repassa o timeout/raio e inclui quem atualizou', async () => {

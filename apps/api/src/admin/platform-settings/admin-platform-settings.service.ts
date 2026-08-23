@@ -26,6 +26,8 @@ export class AdminPlatformSettingsService {
         dispatchOfferTimeoutSeconds: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
+        minMinutesBeforeCollect: null,
+        minMinutesBeforeDeliver: null,
         updatedBy: null,
         updatedAt: null,
       };
@@ -53,6 +55,12 @@ export class AdminPlatformSettingsService {
         ...(payload.businessHoursEnabled !== undefined && {
           businessHoursEnabled: payload.businessHoursEnabled,
         }),
+        ...(payload.minMinutesBeforeCollect !== undefined && {
+          minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
+        }),
+        ...(payload.minMinutesBeforeDeliver !== undefined && {
+          minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
+        }),
         updatedByUserId,
       },
       create: {
@@ -62,6 +70,8 @@ export class AdminPlatformSettingsService {
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
         // Ausente cai no default do banco, como os outros campos deste ramo.
         businessHoursEnabled: payload.businessHoursEnabled,
+        minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
+        minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
         updatedByUserId,
       },
       include: { updatedBy: true },
@@ -75,6 +85,8 @@ export class AdminPlatformSettingsService {
     dispatchOfferTimeoutSeconds: number | null;
     returnProximityRadiusMeters: number | null;
     businessHoursEnabled: boolean;
+    minMinutesBeforeCollect: number | null;
+    minMinutesBeforeDeliver: number | null;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -86,6 +98,8 @@ export class AdminPlatformSettingsService {
       dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
       businessHoursEnabled: settings.businessHoursEnabled,
+      minMinutesBeforeCollect: settings.minMinutesBeforeCollect,
+      minMinutesBeforeDeliver: settings.minMinutesBeforeDeliver,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

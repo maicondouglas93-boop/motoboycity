@@ -14,6 +14,7 @@ import type {
   DeliveryOperationsQuery,
   DeliveryStageTimesQuery,
   MarkDeliveredPayload,
+  MarkCollectedPayload,
   MarkFailedPayload,
   ReturnToQueuePayload,
   SearchDeliveriesQuery,
@@ -35,6 +36,11 @@ import { PricingService } from '../pricing/pricing.service';
 import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { computeStageTimes } from './delivery-stage-times';
+import {
+  checkRetroactiveMarking,
+  describeDeclaredTime,
+  describeRetroactiveProblem,
+} from './retroactive-marking';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
@@ -776,7 +782,11 @@ export class DeliveriesService {
   /** Ação única pro lote inteiro — "cheguei na empresa, peguei tudo".
    * Exige que todos os itens estejam ACCEPTED: divergência de status entre
    * itens do mesmo lote só começa a existir depois de coletado. */
-  async collect(user: User, id: string): Promise<DeliveryGroupResult> {
+  async collect(
+    user: User,
+    id: string,
+    payload?: MarkCollectedPayload,
+  ): Promise<DeliveryGroupResult> {
     const driver = await this.findDriverForUser(user);
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
     if (!delivery) {
@@ -793,11 +803,27 @@ export class DeliveriesService {
       throw new ConflictException('Todos os itens do pedido precisam estar aceitos para coletar.');
     }
 
+    const settings = await this.platformSettingsService.get();
+    const occurredAt = this.resolveRetroactiveAt(
+      payload?.occurredAt,
+      // O piso e o aceite mais recente do lote: um item aceito depois nao pode
+      // ter coleta declarada antes de existir motoboy nele.
+      new Date(Math.max(...siblings.map((item) => item.statusChangedAt.getTime()))),
+      settings.minMinutesBeforeCollect,
+    );
+    const agora = new Date();
+
     await this.prisma.$transaction(async (tx) => {
       for (const item of siblings) {
         await tx.delivery.update({
           where: { id: item.id },
-          data: { status: 'COLLECTED', statusChangedAt: new Date() },
+          /**
+           * Na marcacao retroativa o carimbo do estado passa a ser o horario
+           * DECLARADO, e nao o do toque. Ele e o relogio operacional — e o que
+           * a fila ao vivo mostra, e o piso da proxima declaracao — enquanto a
+           * prova do registro fica no `changedAt` do historico.
+           */
+          data: { status: 'COLLECTED', statusChangedAt: occurredAt ?? agora },
         });
         await tx.deliveryStatusHistory.create({
           data: {
@@ -805,6 +831,10 @@ export class DeliveriesService {
             fromStatus: 'ACCEPTED',
             toStatus: 'COLLECTED',
             changedByUserId: user.id,
+            ...(occurredAt && {
+              occurredAt,
+              note: `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
+            }),
           },
         });
       }
@@ -919,6 +949,32 @@ export class DeliveriesService {
       );
     }
 
+    /**
+     * Marcacao retroativa nao vale quando o GPS define o preco, e a recusa vem
+     * ANTES de validar o horario de proposito: "nao da para marcar depois" e a
+     * informacao util, e reclamar do horario primeiro mandaria a pessoa corrigir
+     * um campo que nunca seria aceito.
+     *
+     * Nesta entrega e a coordenada DO MOMENTO que vira destino, distancia e
+     * preco. Se o motoboy ja saiu de la, o fix que ele mandaria agora e de outro
+     * lugar — o valor sairia de uma rota que nunca existiu. Declarar so o
+     * horario tambem nao resolve: o preco continuaria vindo da posicao errada.
+     * O caminho aqui e o admin, que tem `forceComplete` com motivo e trilha.
+     */
+    if (!delivery.destinationKnownAtCreation && payload.occurredAt !== undefined) {
+      throw new ConflictException(
+        'Esta entrega tem o valor calculado pela sua localização na hora da entrega, ' +
+          'então não dá para marcá-la depois. Peça ao administrador para concluir o pedido.',
+      );
+    }
+
+    const settings = await this.platformSettingsService.get();
+    const occurredAt = this.resolveRetroactiveAt(
+      payload.occurredAt,
+      delivery.statusChangedAt,
+      settings.minMinutesBeforeDeliver,
+    );
+
     let distanceKm = delivery.distanceKm === null ? null : Number(delivery.distanceKm);
     let totalValue = delivery.totalValue === null ? null : Number(delivery.totalValue);
     let driverValue = delivery.driverValue === null ? null : Number(delivery.driverValue);
@@ -1014,7 +1070,7 @@ export class DeliveriesService {
           where: { id: delivery.id },
           data: {
             status: autoComplete ? 'COMPLETED' : 'DELIVERED',
-            statusChangedAt: new Date(),
+            statusChangedAt: occurredAt ?? new Date(),
             distanceKm,
             totalValue,
             driverValue,
@@ -1031,6 +1087,10 @@ export class DeliveriesService {
             fromStatus: 'COLLECTED',
             toStatus: 'DELIVERED',
             changedByUserId: user.id,
+            ...(occurredAt && {
+              occurredAt,
+              note: `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
+            }),
           },
         });
 
@@ -1041,6 +1101,9 @@ export class DeliveriesService {
               fromStatus: 'DELIVERED',
               toStatus: 'COMPLETED',
               changedByUserId: user.id,
+              // Fecha no mesmo instante da entrega, entao herda a declaracao:
+              // sem isso o pedido teria entrega as 14h e conclusao as 15h.
+              ...(occurredAt && { occurredAt }),
             },
           });
           await this.financeLedgerService.creditDriverRepasse(tx, {
@@ -1260,12 +1323,15 @@ export class DeliveriesService {
       },
       select: {
         statusHistory: {
-          select: { fromStatus: true, toStatus: true, changedAt: true },
+          select: { fromStatus: true, toStatus: true, changedAt: true, occurredAt: true },
         },
       },
     });
 
-    return computeStageTimes(deliveries.map((delivery) => delivery.statusHistory));
+    return computeStageTimes(
+      deliveries.map((delivery) => delivery.statusHistory),
+      { excludeRetroactive: filters.excludeRetroactive },
+    );
   }
 
   private async resolveListScope(user: User): Promise<{ companyId?: string; driverId?: string }> {
@@ -1326,6 +1392,38 @@ export class DeliveriesService {
   ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
     const driver = await this.findDriverForUser(user);
     return this.dispatchService.returnDeliveryToQueue(id, driver.id, payload.reason, user.id);
+  }
+
+  /**
+   * Valida a declaracao de horario de uma marcacao retroativa e devolve a data,
+   * ou null quando a marcacao e na hora (o caso normal).
+   *
+   * O piso e sempre `statusChangedAt` do pedido: o carimbo do estado ATUAL, que
+   * e exatamente a etapa anterior a que esta sendo marcada. Numa declaracao
+   * anterior ele ja guarda o horario DECLARADO, e nao o do toque — e e isso que
+   * faz as declaracoes encadearem certo: quem declarou coleta as 14h consegue
+   * declarar entrega as 14h30, mesmo tendo tocado as duas coisas as 15h.
+   */
+  private resolveRetroactiveAt(
+    declared: string | undefined,
+    previousAt: Date,
+    minMinutes: number | null,
+  ): Date | null {
+    if (declared === undefined) {
+      return null;
+    }
+
+    const declaredAt = new Date(declared);
+    const problema = checkRetroactiveMarking({
+      declaredAt,
+      previousAt,
+      now: new Date(),
+      minMinutes,
+    });
+    if (problema) {
+      throw new ConflictException(describeRetroactiveProblem(problema));
+    }
+    return declaredAt;
   }
 
   private async findDriverForUser(user: User) {

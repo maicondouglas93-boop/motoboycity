@@ -32,6 +32,15 @@ export interface PlatformSettingsItem {
   returnProximityRadiusMeters: number | null;
   /** Liga o bloqueio de pedido fora do horário de funcionamento. */
   businessHoursEnabled: boolean;
+  /**
+   * Intervalo mínimo (minutos) que uma MARCAÇÃO RETROATIVA precisa respeitar
+   * entre uma etapa e a seguinte. Null = sem restrição.
+   *
+   * Não vale para a marcação feita na hora: ali o relógio é o do servidor, e
+   * uma entrega legitimamente rápida não pode ser recusada.
+   */
+  minMinutesBeforeCollect: number | null;
+  minMinutesBeforeDeliver: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -46,6 +55,8 @@ export interface UpdatePlatformSettingsInput {
   businessHoursEnabled?: boolean;
   dispatchOfferTimeoutSeconds?: number;
   returnProximityRadiusMeters?: number;
+  minMinutesBeforeCollect?: number;
+  minMinutesBeforeDeliver?: number;
 }
 
 export type SurchargeType = 'PERCENTAGE' | 'FIXED';

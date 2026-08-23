@@ -20,13 +20,36 @@ export const updatePlatformSettingsSchema = z
       .max(2000, 'O raio de retorno deve ser de no máximo 2000 metros.')
       .optional(),
     businessHoursEnabled: z.boolean().optional(),
+    /**
+     * Intervalo minimo que uma marcacao retroativa precisa respeitar entre uma
+     * etapa e a seguinte.
+     *
+     * Aceita 0, que vale "sem restricao" — e o mesmo efeito de nao configurar,
+     * mas escrito por quem decidiu conscientemente que nao quer trava. O teto
+     * de 240 evita que um erro de digitacao (240 no lugar de 24) transforme a
+     * trava numa recusa permanente.
+     */
+    minMinutesBeforeCollect: z
+      .number()
+      .int('O tempo mínimo deve ser um número inteiro de minutos.')
+      .min(0, 'O tempo mínimo não pode ser negativo.')
+      .max(240, 'O tempo mínimo deve ser de no máximo 240 minutos.')
+      .optional(),
+    minMinutesBeforeDeliver: z
+      .number()
+      .int('O tempo mínimo deve ser um número inteiro de minutos.')
+      .min(0, 'O tempo mínimo não pode ser negativo.')
+      .max(240, 'O tempo mínimo deve ser de no máximo 240 minutos.')
+      .optional(),
   })
   .refine(
     (data) =>
       data.driverCommissionPercentage !== undefined ||
       data.dispatchOfferTimeoutSeconds !== undefined ||
       data.returnProximityRadiusMeters !== undefined ||
-      data.businessHoursEnabled !== undefined,
+      data.businessHoursEnabled !== undefined ||
+      data.minMinutesBeforeCollect !== undefined ||
+      data.minMinutesBeforeDeliver !== undefined,
     { message: 'Informe ao menos um campo para atualizar.' },
   );
 

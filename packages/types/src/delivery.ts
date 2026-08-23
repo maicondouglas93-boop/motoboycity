@@ -147,6 +147,15 @@ export interface MarkDeliveredPayload {
   lng?: number;
   /** Raio de erro do fix em metros — ver mark-delivered.schema.ts. */
   accuracy?: number;
+  /**
+   * Marcação retroativa: o motoboy esqueceu de tocar na hora e informa quando
+   * entregou, em ISO 8601.
+   *
+   * Recusado quando o preço da entrega é definido pelo GPS do momento — ali a
+   * coordenada é o valor, e declarar só o horário deixaria o preço vindo de uma
+   * posição errada.
+   */
+  occurredAt?: string;
 }
 
 export interface CompleteReturnPayload {

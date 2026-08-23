@@ -155,4 +155,53 @@ describe('computeStageTimes', () => {
       expect(computeStageTimes([dez, vinte]).total.medianMinutes).toBe(15);
     });
   });
+
+  describe('marcacao retroativa', () => {
+    /** Coletou as 14h15 mas so tocou o botao as 15h. */
+    const declaradaDepois: StatusTransition[] = [
+      transition('AWAITING_DRIVER', 0),
+      transition('ACCEPTED', 5),
+      { fromStatus: 'ACCEPTED', toStatus: 'COLLECTED', changedAt: at(60), occurredAt: at(15) },
+      transition('DELIVERED', 35),
+    ];
+
+    it('mede pelo horario declarado, nao pelo do toque', () => {
+      // Pelo toque, a coleta teria levado 55min e a entrega teria dado negativo
+      // (entregue antes de coletar). Pelo declarado, a entrega e a que foi.
+      const resultado = computeStageTimes([declaradaDepois]);
+
+      expect(resultado.coleta.averageMinutes).toBe(10);
+      expect(resultado.entrega.averageMinutes).toBe(20);
+    });
+
+    it('ordena pelo horario efetivo, e nao pela ordem de escrita', () => {
+      // A linha da coleta foi escrita DEPOIS da entrega. Ordenar por `changedAt`
+      // faria a coleta parecer a ultima etapa do pedido.
+      const resultado = computeStageTimes([declaradaDepois]);
+
+      expect(resultado.total.averageMinutes).toBe(35);
+    });
+
+    it('exclui a entrega inteira quando pedido', () => {
+      // Um SLA calculado sobre horario declarado pelo proprio interessado nao e
+      // medicao — quem for cobrar meta precisa poder tirar essas do meio.
+      const resultado = computeStageTimes([declaradaDepois, healthy(1000)], {
+        excludeRetroactive: true,
+      });
+
+      expect(resultado.total.samples).toBe(1);
+    });
+
+    it('por padrao inclui — o declarado e a melhor aproximacao disponivel', () => {
+      expect(computeStageTimes([declaradaDepois, healthy(1000)]).total.samples).toBe(2);
+    });
+
+    it('excluir nao derruba quem nunca teve declaracao', () => {
+      const resultado = computeStageTimes([healthy(), healthy(1000)], {
+        excludeRetroactive: true,
+      });
+
+      expect(resultado.total.samples).toBe(2);
+    });
+  });
 });

@@ -4,8 +4,10 @@ import {
   createDeliveryBatchSchema,
   completeReturnSchema,
   markDeliveredSchema,
+  markCollectedSchema,
   markFailedSchema,
   returnToQueueSchema,
+  type MarkCollectedPayload,
   type MarkFailedPayload,
   type ReturnToQueuePayload,
   type CompleteReturnPayload,
@@ -120,10 +122,18 @@ export class DeliveriesController {
     return this.deliveriesService.redispatch(user, id);
   }
 
+  /**
+   * O corpo e opcional: a coleta normal nao manda nada. `occurredAt` so aparece
+   * quando o motoboy esqueceu de tocar na hora e esta declarando o horario.
+   */
   @Patch(':id/collect')
   @UseGuards(DriverOnlyGuard)
-  collect(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryGroupResult> {
-    return this.deliveriesService.collect(user, id);
+  collect(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(markCollectedSchema)) body: MarkCollectedPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryGroupResult> {
+    return this.deliveriesService.collect(user, id, body);
   }
 
   /**

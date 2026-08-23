@@ -81,6 +81,8 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       dispatchOfferTimeoutSeconds: null,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
+      minMinutesBeforeCollect: null,
+      minMinutesBeforeDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -98,6 +100,8 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       dispatchOfferTimeoutSeconds: 60,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
+      minMinutesBeforeCollect: null,
+      minMinutesBeforeDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -123,6 +127,8 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       dispatchOfferTimeoutSeconds: 60,
       returnProximityRadiusMeters: 150,
       businessHoursEnabled: false,
+      minMinutesBeforeCollect: null,
+      minMinutesBeforeDeliver: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });

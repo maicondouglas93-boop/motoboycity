@@ -29,7 +29,25 @@ import { useDispatchStore } from '../store/dispatchStore';
 import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
-type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'return-to-queue' | null;
+type Operation =
+  | 'collect'
+  | 'deliver'
+  | 'return'
+  | 'fail'
+  | 'return-to-queue'
+  | 'collect-forgot'
+  | 'deliver-forgot'
+  | null;
+
+/**
+ * "Ha quantos minutos?" em vez de seletor de data e hora.
+ *
+ * E como a pessoa lembra de verdade — "coletei uns vinte minutos atras" — e
+ * resolve em um toque, de moto, sem teclado. Um seletor de data exigiria
+ * escolher dia, hora e minuto para um evento que quase sempre foi na ultima
+ * meia hora, e ainda abriria a porta para digitar o dia errado.
+ */
+const FORGOT_OPTIONS = [5, 10, 15, 20, 30, 45, 60] as const;
 
 type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
 
@@ -106,6 +124,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [failureNote, setFailureNote] = useState('');
   const [returnOpen, setReturnOpen] = useState(false);
   const [returnReason, setReturnReason] = useState('');
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotMinutes, setForgotMinutes] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<Operation>(null);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -150,6 +170,16 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       if (nextOperation === 'collect') {
         const result = await deliveriesApi.collect(token, delivery.id);
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+      } else if (nextOperation === 'collect-forgot' || nextOperation === 'deliver-forgot') {
+        const occurredAt = new Date(Date.now() - (forgotMinutes ?? 0) * 60_000).toISOString();
+        if (nextOperation === 'collect-forgot') {
+          const result = await deliveriesApi.collect(token, delivery.id, { occurredAt });
+          setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+        } else {
+          setDelivery(await deliveriesApi.deliver(token, delivery.id, { occurredAt }));
+        }
+        setForgotOpen(false);
+        setForgotMinutes(null);
       } else if (nextOperation === 'deliver') {
         const fix = delivery.destinationKnownAtCreation
           ? undefined
@@ -386,6 +416,23 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
                 onPress={busy ? undefined : () => setFailureOpen(true)}
               />
             )}
+            {/*
+              Esqueceu de tocar na hora. Nao aparece quando o preco vem do GPS
+              da entrega: ali a coordenada do momento E o valor, entao o servidor
+              recusa — mostrar um botao que sempre da erro seria pior que nao ter.
+            */}
+            {(delivery.status === 'ACCEPTED' ||
+              (delivery.status === 'COLLECTED' && delivery.destinationKnownAtCreation)) && (
+              <PrimaryButton
+                label={
+                  delivery.status === 'ACCEPTED'
+                    ? 'Esqueci de marcar a coleta'
+                    : 'Esqueci de marcar a entrega'
+                }
+                variant="outline"
+                onPress={busy ? undefined : () => setForgotOpen(true)}
+              />
+            )}
             {/* So antes da coleta: dali em diante a mercadoria esta com ele, e
                 o caminho passa a ser o insucesso, que a devolve para a loja. */}
             {delivery.status === 'ACCEPTED' && (
@@ -461,6 +508,57 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               label="Cancelar"
               variant="outline"
               onPress={busy ? undefined : () => setFailureOpen(false)}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={forgotOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setForgotOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
+            <Text style={[styles.modalTitle, { color: text }]}>Há quanto tempo aconteceu?</Text>
+            <Text style={[styles.modalHint, { color: muted }]}>
+              O horário informado vale para o relatório da operação. O registro guarda também a hora
+              em que você tocou aqui.
+            </Text>
+
+            {FORGOT_OPTIONS.map((minutos) => {
+              const selecionado = forgotMinutes === minutos;
+              return (
+                <Pressable
+                  key={minutos}
+                  onPress={() => setForgotMinutes(minutos)}
+                  style={[styles.reason, selecionado && styles.reasonSelected]}
+                >
+                  <Text
+                    style={[styles.reasonLabel, { color: selecionado ? colors.primary : text }]}
+                  >
+                    {minutos} minutos atrás
+                  </Text>
+                </Pressable>
+              );
+            })}
+
+            <PrimaryButton
+              label={busy ? 'Registrando...' : 'Confirmar'}
+              onPress={
+                busy || forgotMinutes === null
+                  ? undefined
+                  : () =>
+                      runOperation(
+                        delivery.status === 'ACCEPTED' ? 'collect-forgot' : 'deliver-forgot',
+                      )
+              }
+            />
+            <PrimaryButton
+              label="Cancelar"
+              variant="outline"
+              onPress={busy ? undefined : () => setForgotOpen(false)}
             />
           </View>
         </View>

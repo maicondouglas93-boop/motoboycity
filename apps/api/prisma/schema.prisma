@@ -660,6 +660,17 @@ model DeliveryStatusHistory {
   changedByUserId String?
   note            String?
 
+  /// Quando o evento aconteceu DE VERDADE na rua, informado pelo motoboy que
+  /// esqueceu de tocar o botão na hora. Nulo na esmagadora maioria das linhas:
+  /// só existe em marcação retroativa.
+  ///
+  /// `changedAt` continua sendo quando a linha foi ESCRITA. Sobrescrevê-lo com
+  /// o horário declarado faria a trilha de auditoria mentir sobre a própria
+  /// criação, e é justamente a distância entre os dois números que denuncia uma
+  /// declaração esticada. O relatório de etapas usa `occurredAt ?? changedAt`;
+  /// a auditoria usa `changedAt`.
+  occurredAt DateTime?
+
   delivery      Delivery @relation(fields: [deliveryId], references: [id])
   changedByUser User?    @relation(fields: [changedByUserId], references: [id])
 
@@ -983,6 +994,16 @@ model PlatformSettings {
   /// padrão: uma operação que nunca configurou horário não pode acordar um dia
   /// recusando pedidos porque a tabela está vazia.
   businessHoursEnabled Boolean @default(false)
+
+  /// Intervalo mínimo (minutos) que a MARCAÇÃO RETROATIVA precisa respeitar
+  /// entre uma etapa e a seguinte. É o que separa "esqueci de tocar o botão" de
+  /// "declarei coleta e entrega no mesmo minuto e faturei sem sair do lugar".
+  ///
+  /// Não vale para a marcação normal, feita na hora: ali o relógio é o do
+  /// servidor e uma entrega legitimamente rápida não pode ser recusada.
+  /// Null = sem restrição.
+  minMinutesBeforeCollect Int?
+  minMinutesBeforeDeliver Int?
 
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])

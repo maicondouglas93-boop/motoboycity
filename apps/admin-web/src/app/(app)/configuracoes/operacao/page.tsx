@@ -18,6 +18,10 @@ const TIMEOUT_MIN_SECONDS = 10;
 const TIMEOUT_MAX_SECONDS = 600;
 const RADIUS_MIN_METERS = 10;
 const RADIUS_MAX_METERS = 2000;
+// Zero e permitido e vale "sem restricao" — escrito por quem decidiu que nao
+// quer trava, em vez de deixado em branco por esquecimento.
+const MIN_MINUTES_MIN = 0;
+const MIN_MINUTES_MAX = 240;
 
 export default function OperationSettingsPage() {
   const token = session.getToken();
@@ -25,6 +29,8 @@ export default function OperationSettingsPage() {
 
   const [timeoutInput, setTimeoutInput] = useState('');
   const [radiusInput, setRadiusInput] = useState('');
+  const [minCollectInput, setMinCollectInput] = useState('');
+  const [minDeliverInput, setMinDeliverInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const settingsQuery = useQuery({
@@ -40,6 +46,8 @@ export default function OperationSettingsPage() {
       setFormError(null);
       setTimeoutInput('');
       setRadiusInput('');
+      setMinCollectInput('');
+      setMinDeliverInput('');
       void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
     },
     onError: (error) => {
@@ -94,13 +102,31 @@ export default function OperationSettingsPage() {
       RADIUS_MAX_METERS,
     );
 
-    const error = timeout.error ?? radius.error;
+    const minCollect = parseField(
+      minCollectInput,
+      'O tempo mínimo da coleta',
+      MIN_MINUTES_MIN,
+      MIN_MINUTES_MAX,
+    );
+    const minDeliver = parseField(
+      minDeliverInput,
+      'O tempo mínimo da entrega',
+      MIN_MINUTES_MIN,
+      MIN_MINUTES_MAX,
+    );
+
+    const error = timeout.error ?? radius.error ?? minCollect.error ?? minDeliver.error;
     if (error) {
       setFormError(error);
       return;
     }
 
-    if (timeout.value === undefined && radius.value === undefined) {
+    if (
+      timeout.value === undefined &&
+      radius.value === undefined &&
+      minCollect.value === undefined &&
+      minDeliver.value === undefined
+    ) {
       setFormError('Preencha ao menos um dos campos para salvar.');
       return;
     }
@@ -108,6 +134,8 @@ export default function OperationSettingsPage() {
     updateMutation.mutate({
       ...(timeout.value !== undefined && { dispatchOfferTimeoutSeconds: timeout.value }),
       ...(radius.value !== undefined && { returnProximityRadiusMeters: radius.value }),
+      ...(minCollect.value !== undefined && { minMinutesBeforeCollect: minCollect.value }),
+      ...(minDeliver.value !== undefined && { minMinutesBeforeDeliver: minDeliver.value }),
     });
   }
 
@@ -148,6 +176,24 @@ export default function OperationSettingsPage() {
                   )}
                 </dd>
               </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="text-muted-foreground">
+                  Tempo mínimo declarado (coleta / entrega):
+                </dt>
+                <dd>
+                  {/*
+                    Nao configurado aqui NAO e erro, ao contrario dos dois campos
+                    acima: e a operacao dizendo que nao quer trava. Por isso sai
+                    em texto neutro e nao em vermelho.
+                  */}
+                  {settings?.minMinutesBeforeCollect === null &&
+                  settings?.minMinutesBeforeDeliver === null
+                    ? 'sem restrição'
+                    : `${settings?.minMinutesBeforeCollect ?? 0} / ${
+                        settings?.minMinutesBeforeDeliver ?? 0
+                      } minuto(s)`}
+                </dd>
+              </div>
               {settings?.updatedBy && (
                 <div className="flex flex-wrap gap-x-2">
                   <dt className="text-muted-foreground">Última alteração por:</dt>
@@ -185,6 +231,36 @@ export default function OperationSettingsPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Distância em linha reta até o endereço de coleta aceita como “chegou”.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="min-collect">Tempo mínimo até a coleta (minutos)</Label>
+                <Input
+                  id="min-collect"
+                  inputMode="numeric"
+                  placeholder={`${MIN_MINUTES_MIN} a ${MIN_MINUTES_MAX}`}
+                  value={minCollectInput}
+                  onChange={(event) => setMinCollectInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Só vale quando o motoboy esquece de tocar e informa o horário depois. Impede
+                  declarar a coleta no mesmo minuto do aceite.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="min-deliver">Tempo mínimo até a entrega (minutos)</Label>
+                <Input
+                  id="min-deliver"
+                  inputMode="numeric"
+                  placeholder={`${MIN_MINUTES_MIN} a ${MIN_MINUTES_MAX}`}
+                  value={minDeliverInput}
+                  onChange={(event) => setMinDeliverInput(event.target.value)}
+                  className="w-48"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Mesma ideia na entrega. É o que impede faturar uma corrida declarando coleta e
+                  entrega no mesmo minuto.
                 </p>
               </div>
               <Button type="submit" disabled={updateMutation.isPending}>

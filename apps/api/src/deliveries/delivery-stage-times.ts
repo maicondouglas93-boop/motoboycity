@@ -4,6 +4,26 @@ export interface StatusTransition {
   fromStatus: DeliveryStatus | null;
   toStatus: DeliveryStatus;
   changedAt: Date;
+  /**
+   * Horario declarado numa marcacao retroativa. Nulo na marcacao normal.
+   *
+   * Quando existe, e ELE que vale para o tempo por etapa: o motoboy coletou as
+   * 14h e tocou o botao as 15h, entao a coleta levou o que levou — usar o toque
+   * inventaria uma hora de deslocamento que nao aconteceu.
+   */
+  occurredAt?: Date | null;
+}
+
+export interface StageTimesOptions {
+  /**
+   * Descarta entregas que tiveram qualquer marcacao retroativa.
+   *
+   * Existe porque um SLA calculado sobre horario declarado pelo proprio
+   * interessado nao e medicao. Para acompanhar a operacao no dia a dia, o
+   * declarado e a melhor aproximacao disponivel; para cobrar meta de alguem,
+   * so serve o que o servidor carimbou.
+   */
+  excludeRetroactive?: boolean;
 }
 
 export interface StageSummary {
@@ -38,13 +58,20 @@ export interface DeliveryStageTimes {
  * demoram muito somem numa média puxada pelos rápidos. A mediana diz o dia
  * normal; o p90 diz o dia ruim.
  */
-export function computeStageTimes(deliveries: StatusTransition[][]): DeliveryStageTimes {
+export function computeStageTimes(
+  deliveries: StatusTransition[][],
+  options: StageTimesOptions = {},
+): DeliveryStageTimes {
   const aceite: number[] = [];
   const coleta: number[] = [];
   const entrega: number[] = [];
   const total: number[] = [];
 
   for (const history of deliveries) {
+    if (options.excludeRetroactive && history.some((entry) => entry.occurredAt)) {
+      continue;
+    }
+
     const at = firstOccurrenceMap(history);
 
     // A origem do relógio é a entrada na fila de despacho. Um pedido agendado
@@ -79,15 +106,23 @@ export function computeStageTimes(deliveries: StatusTransition[][]): DeliverySta
 function firstOccurrenceMap(history: StatusTransition[]): Map<DeliveryStatus, Date> {
   const at = new Map<DeliveryStatus, Date>();
 
+  // Ordena pelo horario EFETIVO, nao pelo de escrita: uma coleta declarada
+  // para as 14h e registrada as 15h vem antes da entrega das 14h30, mesmo tendo
+  // sido escrita depois.
   for (const entry of [...history].sort(
-    (left, right) => left.changedAt.getTime() - right.changedAt.getTime(),
+    (left, right) => effectiveAt(left).getTime() - effectiveAt(right).getTime(),
   )) {
     if (!at.has(entry.toStatus)) {
-      at.set(entry.toStatus, entry.changedAt);
+      at.set(entry.toStatus, effectiveAt(entry));
     }
   }
 
   return at;
+}
+
+/** O declarado quando existe; senao, o carimbo do servidor. */
+function effectiveAt(entry: StatusTransition): Date {
+  return entry.occurredAt ?? entry.changedAt;
 }
 
 function push(target: number[], from: Date | null, to: Date | null): void {

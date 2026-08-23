@@ -166,10 +166,22 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryDetail>(response);
     },
 
-    async collect(accessToken: string, id: string): Promise<DeliveryGroupResult> {
+    /**
+     * `occurredAt` so aparece quando o motoboy esqueceu de tocar na hora e esta
+     * informando o horario. Sem ele, nao manda corpo nenhum — e o caminho da
+     * esmagadora maioria das coletas.
+     */
+    async collect(
+      accessToken: string,
+      id: string,
+      payload?: { occurredAt: string },
+    ): Promise<DeliveryGroupResult> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/collect`, {
         method: 'PATCH',
-        headers: withAuth(accessToken),
+        headers: payload
+          ? { ...withAuth(accessToken), 'Content-Type': 'application/json' }
+          : withAuth(accessToken),
+        ...(payload && { body: JSON.stringify(payload) }),
       });
       return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
