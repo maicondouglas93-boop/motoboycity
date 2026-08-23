@@ -26,3 +26,16 @@ jest.mock('@react-native-firebase/messaging', () => ({
   requestPermission: jest.fn(() => Promise.resolve(1)),
   setBackgroundMessageHandler: jest.fn(),
 }));
+
+/**
+ * Modulo nativo dos botoes da notificacao.
+ *
+ * Acrescentado ao objeto em vez de mockado com `jest.mock`: mockar o modulo
+ * inteiro exigiria `requireActual`, que aciona a ponte nativa e derruba a suite
+ * com "__fbBatchedBridgeConfig is not set".
+ */
+const { NativeModules } = require('react-native');
+NativeModules.OfferSession = {
+  save: jest.fn(() => Promise.resolve()),
+  clear: jest.fn(() => Promise.resolve()),
+};

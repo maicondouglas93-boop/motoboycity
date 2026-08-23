@@ -4,6 +4,7 @@ import type { AuthUser } from '@motoboycity/types';
 import { colors } from '../theme/colors';
 import { authApi, driverPresenceApi } from '../lib/apiClient';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { limparSessaoNativa } from '../lib/offerSession';
 import { desativarPush } from '../lib/push';
 import { session } from '../lib/session';
 import type { RootStackParamList, ScreenNavigator } from '../navigation/types';
@@ -69,6 +70,7 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
      * numero do pedido na notificacao, que e informacao de outra pessoa.
      */
     await desativarPush();
+    await limparSessaoNativa();
     await session.clearToken();
     onClose();
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });

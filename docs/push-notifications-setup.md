@@ -114,6 +114,22 @@ Suba a API e olhe o log da inicialização:
   encerrado o Android sobe um contexto onde nenhum componente existe ainda.
 - **`OfferMessagingService` em Kotlin**, que recebe a oferta e monta a
   notificação com `setFullScreenIntent`. Precisa ser nativo pelo motivo acima.
+- **Botões "Aceitar" e "Recusar" na própria notificação.** O motoboy responde
+  num toque, sem abrir o aplicativo — que é o ponto: abrir gastaria parte do
+  prazo justamente quando ele está na rua. Um `BroadcastReceiver` chama a API
+  direto e nunca abre tela: a partir do Android 12 é proibido um receiver de
+  notificação iniciar Activity, e abrir seria o oposto do que o botão existe
+  para fazer.
+- **Espelho da sessão no lado nativo.** O receiver não lê o AsyncStorage do
+  JavaScript, então o aplicativo grava a URL da API e o token num
+  `SharedPreferences` privado — a mesma proteção do AsyncStorage, nenhum
+  segredo novo exposto. É limpo ao sair da conta: token esquecido ali deixaria
+  os botões respondendo ofertas em nome de quem já saiu, no mesmo aparelho em
+  que outro motoboy pode entrar depois.
+- **Resposta ao toque, sempre.** Aceitou, recusou, a oferta já tinha ido para
+  outro, ou a rede falhou — cada caso vira um aviso. Silêncio depois do toque
+  seria pior que não ter o botão: ele acharia que aceitou, guardaria o celular,
+  e a corrida iria para outro.
 - **Busca da oferta pendente** (`GET /delivery-offers/pending`) ao abrir e ao
   voltar do segundo plano. Antes disso, uma oferta criada com o aplicativo
   fechado só existia no socket que ninguém estava ouvindo: o motoboy tocava a

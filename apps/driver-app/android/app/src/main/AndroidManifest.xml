@@ -29,6 +29,19 @@
         nativo: mensagem com bloco `notification` e desenhada pelo Android sem
         passar pelo aplicativo, e ai nao ha como pedir tela cheia.
       -->
+      <!--
+        Responde aos botoes de aceitar e recusar da notificacao. `exported`
+        falso: so o proprio aplicativo dispara estas acoes, e deixar aberto
+        permitiria que outro aplicativo respondesse ofertas em nome do motoboy.
+      -->
+      <receiver
+        android:name=".OfferActionReceiver"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="com.motoboycity.driverapp.OFERTA_ACEITAR" />
+          <action android:name="com.motoboycity.driverapp.OFERTA_RECUSAR" />
+        </intent-filter>
+      </receiver>
       <service
         android:name=".OfferMessagingService"
         android:exported="false">

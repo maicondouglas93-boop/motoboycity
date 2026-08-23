@@ -26,6 +26,8 @@ import {
 } from '../lib/location';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { session } from '../lib/session';
+import { API_BASE_URL } from '../lib/config';
+import { salvarSessaoNativa } from '../lib/offerSession';
 import { ativarPush } from '../lib/push';
 import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -134,6 +136,12 @@ export function HomeScreen({ navigation }: Props) {
        * vivo enquanto decide.
        */
       ativarPush().catch(() => undefined);
+
+      /**
+       * Espelha a sessao para o lado nativo, onde vivem os botoes de aceitar e
+       * recusar da notificacao. Sem isto eles apareceriam e nao fariam nada.
+       */
+      salvarSessaoNativa(API_BASE_URL, token).catch(() => undefined);
 
       connectDriverSocket(token, {
         onConnected: () => {

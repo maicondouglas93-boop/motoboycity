@@ -214,6 +214,10 @@ dependencies {
     // NotificationCompat, usado pelo OfferMessagingService. Ja vem transitivo do
     // React Native; declarado aqui para a dependencia ser explicita onde e usada.
     implementation("androidx.core:core-ktx:1.13.1")
+    // OkHttp para os botoes da notificacao responderem a oferta: o
+    // `HttpURLConnection` do Android recusa o metodo PATCH. Ja vem transitivo do
+    // React Native; declarado aqui para a dependencia ser explicita onde e usada.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

@@ -1,6 +1,7 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 import { getToken, onTokenRefresh } from '@react-native-firebase/messaging';
 import { ativarPush, desativarPush } from '../src/lib/push';
+import { limparSessaoNativa, salvarSessaoNativa } from '../src/lib/offerSession';
 import { pushTokensApi } from '../src/lib/apiClient';
 import { session } from '../src/lib/session';
 
@@ -112,5 +113,22 @@ describe('push do app do motoboy', () => {
     await ativarPush();
 
     expect(pushTokensApi.register).not.toHaveBeenCalled();
+  });
+
+  it('espelha a sessão para o lado nativo ao entrar', async () => {
+    // Os botoes de aceitar e recusar da notificacao sao respondidos pelo lado
+    // nativo, que nao le o AsyncStorage. Sem o espelho eles apareceriam e nao
+    // fariam nada.
+    await salvarSessaoNativa('http://api.exemplo', 'acesso-1');
+
+    expect(NativeModules.OfferSession.save).toHaveBeenCalledWith('http://api.exemplo', 'acesso-1');
+  });
+
+  it('limpa a sessão nativa ao sair', async () => {
+    // Token esquecido ali deixaria os botoes respondendo ofertas em nome de
+    // quem ja saiu, no mesmo aparelho em que outro pode entrar depois.
+    await limparSessaoNativa();
+
+    expect(NativeModules.OfferSession.clear).toHaveBeenCalled();
   });
 });

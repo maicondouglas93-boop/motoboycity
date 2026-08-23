@@ -23,6 +23,7 @@ import com.google.firebase.messaging.RemoteMessage
  */
 class OfferMessagingService : FirebaseMessagingService() {
 
+
   override fun onMessageReceived(message: RemoteMessage) {
     super.onMessageReceived(message)
 
@@ -60,7 +61,24 @@ class OfferMessagingService : FirebaseMessagingService() {
         .setContentIntent(pendente)
 
     if (ehOferta) {
+      /**
+       * Os dois botoes na PROPRIA notificacao.
+       *
+       * E o ponto do recurso: o motoboy resolve num toque, com o celular no
+       * bolso, sem abrir o aplicativo. Cada botao dispara o
+       * `OfferActionReceiver`, que chama a API — nao abre tela nenhuma.
+       *
+       * `offerId` no `data` da requisicao do codigo do PendingIntent: sem isso,
+       * duas ofertas seguidas reusariam o mesmo PendingIntent e a segunda
+       * responderia pelo id da primeira.
+       */
+      val offerId = dados["offerId"] ?: ""
+      val aceitar = acaoPendente(OfferActionReceiver.ACTION_ACCEPT, offerId)
+      val recusar = acaoPendente(OfferActionReceiver.ACTION_DECLINE, offerId)
+
       builder
+        .addAction(android.R.drawable.ic_menu_send, "Aceitar", aceitar)
+        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Recusar", recusar)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         /**
          * `CATEGORY_CALL` nao e enfeite: e o que faz o Android tratar a
@@ -82,7 +100,24 @@ class OfferMessagingService : FirebaseMessagingService() {
         .setOngoing(false)
     }
 
-    manager.notify(if (ehOferta) OFFER_NOTIFICATION_ID else corpo.hashCode(), builder.build())
+    manager.notify(
+      if (ehOferta) OfferActionReceiver.OFFER_NOTIFICATION_ID else corpo.hashCode(),
+      builder.build(),
+    )
+  }
+
+  private fun acaoPendente(acao: String, offerId: String): PendingIntent {
+    val intent =
+      Intent(this, OfferActionReceiver::class.java).apply {
+        this.action = acao
+        putExtra(OfferActionReceiver.EXTRA_OFFER_ID, offerId)
+      }
+    return PendingIntent.getBroadcast(
+      this,
+      (acao + offerId).hashCode(),
+      intent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
   }
 
   /**
@@ -93,11 +128,4 @@ class OfferMessagingService : FirebaseMessagingService() {
     super.onNewToken(token)
   }
 
-  companion object {
-    /**
-     * Id fixo para a oferta: uma nova substitui a anterior na bandeja em vez de
-     * empilhar. So existe uma oferta esperando resposta por vez.
-     */
-    private const val OFFER_NOTIFICATION_ID = 1001
-  }
 }
