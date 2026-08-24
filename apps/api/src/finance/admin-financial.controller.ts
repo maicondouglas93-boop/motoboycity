@@ -4,6 +4,7 @@ import {
   adminFinancialOverviewQuerySchema,
   financialStatementQuerySchema,
   financialCycleQuerySchema,
+  financialAuditQuerySchema,
   cashFlowForecastQuerySchema,
   listAdminWalletsQuerySchema,
   listReceiptsQuerySchema,
@@ -12,6 +13,7 @@ import {
   type AdminFinancialOverviewQuery,
   type FinancialStatementQuery,
   type FinancialCycleQuery,
+  type FinancialAuditQuery,
   type CashFlowForecastQuery,
   type ListAdminWalletsQuery,
   type ListReceiptsQuery,
@@ -26,6 +28,7 @@ import type {
   CashPositionItem,
   CashFlowForecastReport,
   FinancialCycleReport,
+  FinancialAuditReport,
   FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
@@ -88,6 +91,14 @@ export class AdminFinancialController {
     @Query(new ZodValidationPipe(cashFlowForecastQuerySchema)) query: CashFlowForecastQuery,
   ): Promise<CashFlowForecastReport> {
     return this.adminFinancialService.cashFlowForecast(query);
+  }
+
+  /** Linha do tempo de ajustes, faturas e saques para auditoria administrativa. */
+  @Get('audit-trail')
+  financialAudit(
+    @Query(new ZodValidationPipe(financialAuditQuerySchema)) query: FinancialAuditQuery,
+  ): Promise<FinancialAuditReport> {
+    return this.adminFinancialService.financialAudit(query);
   }
 
   /**

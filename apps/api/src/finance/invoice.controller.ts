@@ -2,9 +2,11 @@ import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@ne
 import {
   closeInvoicesSchema,
   listInvoicesQuerySchema,
+  cancelInvoiceSchema,
   markInvoicePaidSchema,
   type CloseInvoicesPayload,
   type ListInvoicesQuery,
+  type CancelInvoicePayload,
   type MarkInvoicePaidPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
@@ -33,6 +35,22 @@ export class AdminInvoicesController {
     @CurrentUser() admin: User,
   ): Promise<InvoiceListItem[]> {
     return this.invoiceService.closeOpenInvoices(admin, body);
+  }
+
+  /**
+   * Cancela uma fatura emitida errada, devolvendo as entregas para cobranca.
+   *
+   * `PATCH` e nao `DELETE`: a fatura continua existindo, com numero e
+   * historico. Apagar registro de cobranca deixaria um buraco na numeracao que
+   * ninguem consegue explicar depois.
+   */
+  @Patch(':id/cancel')
+  cancel(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(cancelInvoiceSchema)) body: CancelInvoicePayload,
+    @CurrentUser() admin: User,
+  ): Promise<InvoiceDetail> {
+    return this.invoiceService.cancelInvoice(admin, id, body);
   }
 
   @Get(':id')

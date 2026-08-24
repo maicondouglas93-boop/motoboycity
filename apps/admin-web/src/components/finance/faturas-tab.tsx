@@ -8,6 +8,7 @@ import { AlertTriangle, CalendarClock, Eye, Package } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog';
 import { MetricCard } from '@/components/finance/metric-card';
 import { ReceivablesAging } from '@/components/finance/receivables-aging';
 import { adminFinancialApi, adminInvoicesApi } from '@/lib/api-client';
@@ -218,13 +219,30 @@ export function FaturasTab({ token }: { token: string }) {
                         </Badge>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <Link
-                          href={`/faturas/${fatura.id}`}
-                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
-                        >
-                          <Eye aria-hidden className="size-3.5" />
-                          Ver
-                        </Link>
+                        <div className="flex justify-end gap-2">
+                          {/*
+                            Fatura paga nao mostra o botao: dinheiro que entrou
+                            se estorna, nao se cancela, e a API recusa. Mostrar
+                            um botao que sempre falha ensina a ignorar botao.
+                          */}
+                          {fatura.status !== 'PAID' && fatura.status !== 'CANCELLED' && (
+                            <CancelInvoiceDialog
+                              token={token}
+                              invoiceId={fatura.id}
+                              invoiceNumber={fatura.number}
+                              companyName={fatura.companyName}
+                              totalValue={fatura.totalValue}
+                              deliveryCount={fatura.deliveryCount}
+                            />
+                          )}
+                          <Link
+                            href={`/faturas/${fatura.id}`}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+                          >
+                            <Eye aria-hidden className="size-3.5" />
+                            Ver
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}

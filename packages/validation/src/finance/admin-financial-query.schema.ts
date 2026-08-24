@@ -98,6 +98,24 @@ export const cashFlowForecastQuerySchema = z
   });
 
 /**
+ * Auditoria detalhada devolve eventos individuais de tres trilhas financeiras.
+ * O limite de 31 dias evita carregar historicos append-only sem fronteira.
+ */
+export const financialAuditQuerySchema = z
+  .object({
+    from: dateOnlySchema,
+    to: dateOnlySchema,
+  })
+  .refine((data) => data.from <= data.to, {
+    message: 'A data inicial nao pode ser posterior a data final.',
+    path: ['from'],
+  })
+  .refine((data) => civilDayNumber(data.to) - civilDayNumber(data.from) <= 30, {
+    message: 'A auditoria financeira aceita no maximo 31 dias por consulta.',
+    path: ['to'],
+  });
+
+/**
  * Ajuste manual na carteira do motoboy.
  *
  * O motivo e OBRIGATORIO e tem piso de 10 caracteres. Ajuste sem explicacao e
@@ -138,4 +156,5 @@ export type AdjustDriverWalletPayload = z.infer<typeof adjustDriverWalletSchema>
 export type FinancialStatementQuery = z.infer<typeof financialStatementQuerySchema>;
 export type FinancialCycleQuery = z.infer<typeof financialCycleQuerySchema>;
 export type CashFlowForecastQuery = z.infer<typeof cashFlowForecastQuerySchema>;
+export type FinancialAuditQuery = z.infer<typeof financialAuditQuerySchema>;
 export type ListAdminWalletsQuery = z.infer<typeof listAdminWalletsQuerySchema>;

@@ -3,6 +3,7 @@ import type {
   AdjustDriverWalletPayload,
   AdminFinancialOverviewQuery,
   CashFlowForecastQuery,
+  FinancialAuditQuery,
   FinancialCycleQuery,
   FinancialStatementQuery,
   ListAdminWalletsQuery,
@@ -21,6 +22,8 @@ import type {
   FinancialCycleDeliveryItem,
   FinancialCycleIssue,
   FinancialCycleReport,
+  FinancialAuditEvent,
+  FinancialAuditReport,
   FinancialStatementAdjustmentItem,
   FinancialStatementDayItem,
   FinancialStatementDimensionItem,
@@ -1426,6 +1429,205 @@ export class AdminFinancialService {
       repasses,
       openWithdrawals,
       realizedWithdrawals,
+    };
+  }
+
+  /**
+   * Une as trilhas append-only financeiras em uma cronologia auditavel.
+   * Nenhuma inferencia de autor e feita: `null` significa evento de sistema.
+   */
+  async financialAudit(query: FinancialAuditQuery): Promise<FinancialAuditReport> {
+    const periodFrom = startOfDayInSaoPaulo(query.from);
+    const periodToExclusive = new Date(endOfDayInSaoPaulo(query.to).getTime() + 1);
+    const adjustmentTypes = ['CREDIT_ADJUSTMENT', 'DEBIT_ADJUSTMENT', 'CREDIT_REFUND'] as const;
+
+    const { adjustments, invoiceHistories, withdrawalHistories } = await this.prisma.$transaction(
+      async (tx) => {
+        const [walletEvents, invoiceEvents, withdrawalEvents] = await Promise.all([
+          tx.walletTransaction.findMany({
+            where: {
+              wallet: { driverId: { not: null } },
+              type: { in: [...adjustmentTypes] },
+              createdAt: { gte: periodFrom, lt: periodToExclusive },
+            },
+            select: {
+              id: true,
+              type: true,
+              status: true,
+              amount: true,
+              reason: true,
+              createdAt: true,
+              createdBy: { select: { id: true, name: true } },
+              wallet: {
+                select: {
+                  driver: { select: { id: true, user: { select: { name: true } } } },
+                },
+              },
+            },
+          }),
+          tx.invoiceStatusHistory.findMany({
+            where: { changedAt: { gte: periodFrom, lt: periodToExclusive } },
+            select: {
+              id: true,
+              fromStatus: true,
+              toStatus: true,
+              changedAt: true,
+              note: true,
+              changedByUser: { select: { id: true, name: true } },
+              invoice: {
+                select: {
+                  id: true,
+                  number: true,
+                  totalValue: true,
+                  company: { select: { id: true, tradeName: true } },
+                },
+              },
+            },
+          }),
+          tx.withdrawalRequestStatusHistory.findMany({
+            where: { changedAt: { gte: periodFrom, lt: periodToExclusive } },
+            select: {
+              id: true,
+              fromStatus: true,
+              toStatus: true,
+              changedAt: true,
+              note: true,
+              changedByUser: { select: { id: true, name: true } },
+              withdrawalRequest: {
+                select: {
+                  id: true,
+                  requestedAmount: true,
+                  netAmount: true,
+                  wallet: {
+                    select: {
+                      driver: { select: { id: true, user: { select: { name: true } } } },
+                    },
+                  },
+                },
+              },
+            },
+          }),
+        ]);
+        return {
+          adjustments: walletEvents,
+          invoiceHistories: invoiceEvents,
+          withdrawalHistories: withdrawalEvents,
+        };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+
+    const walletEvents: FinancialAuditEvent[] = adjustments.flatMap((adjustment) => {
+      const driver = adjustment.wallet.driver;
+      if (!driver) return [];
+      return [
+        {
+          id: adjustment.id,
+          kind: 'WALLET_ADJUSTMENT',
+          occurredAt: adjustment.createdAt.toISOString(),
+          actor: adjustment.createdBy,
+          driver: { id: driver.id, name: driver.user.name },
+          transactionType: adjustment.type as
+            'CREDIT_ADJUSTMENT' | 'DEBIT_ADJUSTMENT' | 'CREDIT_REFUND',
+          transactionStatus: adjustment.status,
+          direction: adjustment.type === 'DEBIT_ADJUSTMENT' ? 'DEBIT' : 'CREDIT',
+          amount: numberOrZero(adjustment.amount),
+          reason: adjustment.reason,
+        },
+      ];
+    });
+
+    const invoiceEvents: FinancialAuditEvent[] = invoiceHistories.map((history) => ({
+      id: history.id,
+      kind: 'INVOICE_STATUS_CHANGE',
+      occurredAt: history.changedAt.toISOString(),
+      actor: history.changedByUser,
+      invoice: {
+        id: history.invoice.id,
+        number: history.invoice.number,
+        totalValue: numberOrZero(history.invoice.totalValue),
+        company: {
+          id: history.invoice.company.id,
+          name: history.invoice.company.tradeName,
+        },
+      },
+      fromStatus: history.fromStatus,
+      toStatus: history.toStatus,
+      note: history.note,
+    }));
+
+    const withdrawalEvents: FinancialAuditEvent[] = withdrawalHistories.flatMap((history) => {
+      const driver = history.withdrawalRequest.wallet.driver;
+      if (!driver) return [];
+      return [
+        {
+          id: history.id,
+          kind: 'WITHDRAWAL_STATUS_CHANGE',
+          occurredAt: history.changedAt.toISOString(),
+          actor: history.changedByUser,
+          withdrawal: {
+            id: history.withdrawalRequest.id,
+            requestedAmount: numberOrZero(history.withdrawalRequest.requestedAmount),
+            netAmount: numberOrZero(history.withdrawalRequest.netAmount),
+            driver: { id: driver.id, name: driver.user.name },
+          },
+          fromStatus: history.fromStatus,
+          toStatus: history.toStatus,
+          note: history.note,
+        },
+      ];
+    });
+
+    const events = [...walletEvents, ...invoiceEvents, ...withdrawalEvents].sort(
+      (left, right) =>
+        new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime() ||
+        left.id.localeCompare(right.id),
+    );
+    const activeWalletEvents = walletEvents.filter(
+      (event) => event.kind === 'WALLET_ADJUSTMENT' && event.transactionStatus !== 'CANCELLED',
+    );
+    const walletCredits = activeWalletEvents.filter(
+      (event) => event.kind === 'WALLET_ADJUSTMENT' && event.direction === 'CREDIT',
+    );
+    const walletDebits = activeWalletEvents.filter(
+      (event) => event.kind === 'WALLET_ADJUSTMENT' && event.direction === 'DEBIT',
+    );
+    const paidInvoices = invoiceEvents.filter(
+      (event) => event.kind === 'INVOICE_STATUS_CHANGE' && event.toStatus === 'PAID',
+    );
+    const paidWithdrawals = withdrawalEvents.filter(
+      (event) => event.kind === 'WITHDRAWAL_STATUS_CHANGE' && event.toStatus === 'PAID',
+    );
+
+    return {
+      period: { from: query.from, to: query.to },
+      summary: {
+        totalEventCount: events.length,
+        identifiedActorCount: events.filter((event) => event.actor !== null).length,
+        systemEventCount: events.filter((event) => event.actor === null).length,
+        walletAdjustmentCount: walletEvents.length,
+        walletCreditValue: somarEmCentavos(
+          walletCredits.map((event) => (event.kind === 'WALLET_ADJUSTMENT' ? event.amount : 0)),
+        ),
+        walletDebitValue: somarEmCentavos(
+          walletDebits.map((event) => (event.kind === 'WALLET_ADJUSTMENT' ? event.amount : 0)),
+        ),
+        invoiceStatusChangeCount: invoiceEvents.length,
+        invoicePaidCount: paidInvoices.length,
+        invoicePaidValue: somarEmCentavos(
+          paidInvoices.map((event) =>
+            event.kind === 'INVOICE_STATUS_CHANGE' ? event.invoice.totalValue : 0,
+          ),
+        ),
+        withdrawalStatusChangeCount: withdrawalEvents.length,
+        withdrawalPaidCount: paidWithdrawals.length,
+        withdrawalPaidValue: somarEmCentavos(
+          paidWithdrawals.map((event) =>
+            event.kind === 'WITHDRAWAL_STATUS_CHANGE' ? event.withdrawal.netAmount : 0,
+          ),
+        ),
+      },
+      events,
     };
   }
 

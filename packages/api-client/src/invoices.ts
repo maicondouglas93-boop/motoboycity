@@ -75,6 +75,22 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       return parseJsonOrThrow<InvoiceListItem[]>(response);
     },
 
+    /**
+     * Cancela a fatura e devolve as entregas para cobranca. Motivo obrigatorio.
+     */
+    async cancel(
+      accessToken: string,
+      invoiceId: string,
+      payload: { reason: string },
+    ): Promise<InvoiceDetail> {
+      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/cancel`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<InvoiceDetail>(response);
+    },
+
     async markPaid(
       accessToken: string,
       invoiceId: string,

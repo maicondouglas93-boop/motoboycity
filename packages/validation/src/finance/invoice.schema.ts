@@ -23,6 +23,21 @@ export const closeInvoicesSchema = z.object({
   issueDate: dateOnlySchema,
 });
 
+/**
+ * Cancelamento de fatura.
+ *
+ * O motivo e obrigatorio e vira nota no historico da fatura. Cancelar cobranca
+ * sem explicar por que e o tipo de coisa que ninguem consegue reconstruir seis
+ * meses depois, quando a empresa perguntar por que aquele mes nao foi cobrado.
+ */
+export const cancelInvoiceSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(10, 'Explique o motivo do cancelamento em pelo menos 10 caracteres.')
+    .max(300, 'O motivo deve ter no máximo 300 caracteres.'),
+});
+
 export const markInvoicePaidSchema = z.object({
   paymentDate: dateOnlySchema,
   paymentMethod: z.enum(['BILLED', 'ONLINE']),
@@ -42,4 +57,5 @@ export const listInvoicesQuerySchema = z
 
 export type CloseInvoicesPayload = z.infer<typeof closeInvoicesSchema>;
 export type MarkInvoicePaidPayload = z.infer<typeof markInvoicePaidSchema>;
+export type CancelInvoicePayload = z.infer<typeof cancelInvoiceSchema>;
 export type ListInvoicesQuery = z.infer<typeof listInvoicesQuerySchema>;

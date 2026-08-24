@@ -7,6 +7,7 @@ import {
 import type {
   CloseInvoicesPayload,
   ListInvoicesQuery,
+  CancelInvoicePayload,
   MarkInvoicePaidPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
@@ -230,6 +231,76 @@ export class InvoiceService {
           toStatus: 'PAID',
           changedByUserId: admin.id,
           note: `Pagamento manual confirmado em ${payload.paymentDate}.`,
+        },
+      });
+    });
+
+    return this.getDetail(invoiceId);
+  }
+
+  /**
+   * Cancela uma fatura emitida errada e DEVOLVE as entregas para cobranca.
+   *
+   * O passo de soltar as entregas (`invoiceId: null`) e o que separa cancelar
+   * de perder dinheiro. Sem ele a fatura some, as entregas continuam marcadas
+   * como faturadas, e ninguem nunca mais as cobra — a cobranca seria apagada em
+   * vez de reaberta.
+   *
+   * Fatura PAGA nao se cancela. Dinheiro que entrou se estorna, e estorno e
+   * outra operacao, com outro lancamento; deixar cancelar uma fatura paga
+   * apagaria a receita e deixaria o recebimento orfao no extrato.
+   */
+  async cancelInvoice(
+    admin: User,
+    invoiceId: string,
+    payload: CancelInvoicePayload,
+  ): Promise<InvoiceDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { status: true },
+      });
+      if (!invoice) {
+        throw new NotFoundException('Fatura não encontrada.');
+      }
+      if (invoice.status === 'PAID') {
+        throw new ConflictException(
+          'Esta fatura já foi paga. Pagamento recebido não se cancela: registre um estorno.',
+        );
+      }
+      if (invoice.status === 'CANCELLED') {
+        throw new ConflictException('Esta fatura já está cancelada.');
+      }
+
+      /**
+       * `updateMany` com o status na condicao, e nao `update` pelo id.
+       *
+       * Duas telas cancelando ao mesmo tempo passariam as duas pela leitura
+       * acima; aqui so uma encontra a fatura no estado esperado, e a outra
+       * recebe count 0 e para.
+       */
+      const atualizada = await tx.invoice.updateMany({
+        where: { id: invoiceId, status: invoice.status },
+        data: { status: 'CANCELLED' },
+      });
+      if (atualizada.count !== 1) {
+        throw new ConflictException('A fatura mudou de estado durante o cancelamento.');
+      }
+
+      // As entregas voltam a contar como "sem fatura" e entram no proximo
+      // fechamento.
+      await tx.delivery.updateMany({
+        where: { invoiceId },
+        data: { invoiceId: null },
+      });
+
+      await tx.invoiceStatusHistory.create({
+        data: {
+          invoiceId,
+          fromStatus: invoice.status,
+          toStatus: 'CANCELLED',
+          changedByUserId: admin.id,
+          note: payload.reason,
         },
       });
     });
