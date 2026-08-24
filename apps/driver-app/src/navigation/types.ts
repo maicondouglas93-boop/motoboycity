@@ -3,6 +3,7 @@ export type RootStackParamList = {
   Register: undefined;
   Home: undefined;
   Wallet: undefined;
+  Withdrawal: undefined;
   History: undefined;
   OrderDetail: { orderId: string };
   DeliveryOperation: { deliveryId: string };

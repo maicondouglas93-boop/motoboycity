@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../theme/colors';
 
 type FormFieldProps = {
@@ -26,11 +26,6 @@ export function FormField({
   onChangeText,
   error,
 }: FormFieldProps) {
-  const isDark = useColorScheme() === 'dark';
-  const text = isDark ? colors.textDark : colors.text;
-  const muted = isDark ? colors.mutedDark : colors.muted;
-  const border = isDark ? colors.borderDark : colors.border;
-
   // Sem onChangeText, o campo é só de exibição (telas ainda não wireadas) —
   // usar defaultValue evita o warning do React Native sobre input controlado
   // sem handler de mudança.
@@ -38,17 +33,21 @@ export function FormField({
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, { color: muted }]}>{label}</Text>
+      <Text style={styles.label}>{label}</Text>
       <TextInput
         {...valueProps}
         placeholder={placeholder}
-        placeholderTextColor={muted}
+        placeholderTextColor={colors.inkMuted}
         editable={editable}
         keyboardType={keyboardType}
         secureTextEntry={secureTextEntry}
         autoCorrect={autoCorrect}
         autoCapitalize={autoCapitalize ?? (keyboardType === 'email-address' ? 'none' : 'sentences')}
-        style={[styles.input, { color: text, borderColor: error ? colors.danger : border }]}
+        style={[
+          styles.input,
+          !editable && styles.inputReadOnly,
+          error && styles.inputError,
+        ]}
       />
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
@@ -57,18 +56,26 @@ export function FormField({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 4,
+    gap: 7,
   },
   label: {
-    fontSize: 12,
+    color: colors.inkSoft,
+    fontSize: 14,
+    fontWeight: '600',
   },
   input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+    color: colors.ink,
+    fontSize: 16,
   },
+  inputReadOnly: { backgroundColor: colors.surfaceMuted, color: colors.inkMuted },
+  inputError: { borderColor: colors.danger },
   error: {
     fontSize: 11,
     color: colors.danger,

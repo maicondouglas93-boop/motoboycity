@@ -1,19 +1,13 @@
-import { StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { EmptyIconCircle } from './Icon';
 import { colors } from '../theme/colors';
 
-export function EmptyState({ message }: { message: string }) {
-  const isDark = useColorScheme() === 'dark';
-
+export function EmptyState({ message, description }: { message: string; description?: string }) {
   return (
     <View style={styles.container}>
-      <View
-        style={[styles.iconCircle, { backgroundColor: isDark ? colors.borderDark : colors.border }]}
-      >
-        <Text style={styles.iconText}>🛍️</Text>
-      </View>
-      <Text style={[styles.message, { color: isDark ? colors.mutedDark : colors.muted }]}>
-        {message}
-      </Text>
+      <EmptyIconCircle size={88} />
+      <Text style={styles.message}>{message}</Text>
+      {description ? <Text style={styles.description}>{description}</Text> : null}
     </View>
   );
 }
@@ -23,20 +17,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 48,
-  },
-  iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconText: {
-    fontSize: 24,
+    gap: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 44,
   },
   message: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  description: {
+    color: colors.inkMuted,
     fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

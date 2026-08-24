@@ -240,5 +240,44 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     private const val IDLE_UPDATE_INTERVAL_MS = 60_000L
     private const val IDLE_UPDATE_DISTANCE_METERS = 100f
     private const val NETWORK_TIMEOUT_MS = 15_000
+
+    fun startOrUpdate(
+      context: Context,
+      deliveryIds: Collection<String>,
+      baseUrl: String,
+      accessToken: String,
+      appVersion: String,
+    ): Boolean {
+      val ids = deliveryIds.filter { it.isNotBlank() }.distinct()
+      if (
+        baseUrl.isBlank() ||
+          accessToken.isBlank() ||
+          appVersion.isBlank() ||
+          context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+      ) {
+        return false
+      }
+
+      val intent = Intent(context, DeliveryLocationTrackingService::class.java).apply {
+        action = ACTION_START_OR_UPDATE
+        putStringArrayListExtra(EXTRA_DELIVERY_IDS, ArrayList(ids))
+        putExtra(EXTRA_BASE_URL, baseUrl)
+        putExtra(EXTRA_ACCESS_TOKEN, accessToken)
+        putExtra(EXTRA_APP_VERSION, appVersion)
+      }
+
+      return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          context.startForegroundService(intent)
+        } else {
+          context.startService(intent)
+        }
+        true
+      } catch (error: Exception) {
+        Log.e(TAG, "Não foi possível iniciar o rastreamento nativo", error)
+        false
+      }
+    }
   }
 }

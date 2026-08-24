@@ -6,15 +6,31 @@ type PrimaryButtonProps = {
   onPress?: () => void;
   variant?: 'primary' | 'outline';
   style?: ViewStyle;
+  disabled?: boolean;
 };
 
-export function PrimaryButton({ label, onPress, variant = 'primary', style }: PrimaryButtonProps) {
+export function PrimaryButton({
+  label,
+  onPress,
+  variant = 'primary',
+  style,
+  disabled = false,
+}: PrimaryButtonProps) {
   const isOutline = variant === 'outline';
 
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.button, isOutline ? styles.outlineButton : styles.primaryButton, style]}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [
+        styles.button,
+        isOutline ? styles.outlineButton : styles.primaryButton,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
+        style,
+      ]}
     >
       <Text style={[styles.label, isOutline ? styles.outlineLabel : styles.primaryLabel]}>
         {label}
@@ -25,16 +41,21 @@ export function PrimaryButton({ label, onPress, variant = 'primary', style }: Pr
 
 const styles = StyleSheet.create({
   button: {
-    borderRadius: 8,
-    paddingVertical: 12,
+    minHeight: 52,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryButton: { backgroundColor: colors.primary },
-  outlineButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
+  primaryButton: { backgroundColor: colors.action },
+  outlineButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.divider },
+  pressed: { opacity: 0.86 },
+  disabled: { opacity: 0.45 },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
   },
-  primaryLabel: { color: '#ffffff' },
-  outlineLabel: { color: colors.text },
+  primaryLabel: { color: colors.actionText },
+  outlineLabel: { color: colors.ink },
 });

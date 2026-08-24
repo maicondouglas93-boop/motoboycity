@@ -19,6 +19,10 @@ object OfferSessionStore {
   private const val ARQUIVO = "motoboycity.offer.session"
   private const val CHAVE_URL = "apiUrl"
   private const val CHAVE_TOKEN = "accessToken"
+  private const val CHAVE_OFERTA_ATUAL = "currentOfferId"
+  private const val CHAVE_OFERTA_RESOLVIDA = "resolvedOfferId"
+  private const val CHAVE_OFERTA_RESOLVIDA_EM = "resolvedOfferAt"
+  private const val JANELA_DEDUPLICACAO_MS = 5 * 60 * 1000L
 
   fun salvar(context: Context, apiUrl: String, accessToken: String) {
     prefs(context).edit().putString(CHAVE_URL, apiUrl).putString(CHAVE_TOKEN, accessToken).apply()
@@ -31,6 +35,42 @@ object OfferSessionStore {
   fun apiUrl(context: Context): String? = prefs(context).getString(CHAVE_URL, null)
 
   fun accessToken(context: Context): String? = prefs(context).getString(CHAVE_TOKEN, null)
+
+  fun marcarOfertaApresentada(context: Context, offerId: String) {
+    prefs(context).edit().putString(CHAVE_OFERTA_ATUAL, offerId).apply()
+  }
+
+  fun ofertaAtual(context: Context): String? =
+    prefs(context).getString(CHAVE_OFERTA_ATUAL, null)
+
+  /**
+   * Impede que um push atrasado reabra uma oferta que o motoboy acabou de
+   * aceitar, recusar ou ver expirar na tela JavaScript/nativa.
+   *
+   * O FCM pode entregar duas cópias muito próximas durante reconexão. A
+   * autoridade continua sendo a API; esta janela curta é apenas deduplicação
+   * visual no aparelho.
+   */
+  fun marcarOfertaResolvida(context: Context, offerId: String) {
+    val preferencias = prefs(context)
+    val editor = preferencias
+      .edit()
+      .putString(CHAVE_OFERTA_RESOLVIDA, offerId)
+      .putLong(CHAVE_OFERTA_RESOLVIDA_EM, System.currentTimeMillis())
+
+    if (preferencias.getString(CHAVE_OFERTA_ATUAL, null) == offerId) {
+      editor.remove(CHAVE_OFERTA_ATUAL)
+    }
+
+    editor.apply()
+  }
+
+  fun ofertaFoiResolvidaRecentemente(context: Context, offerId: String): Boolean {
+    val preferencias = prefs(context)
+    if (preferencias.getString(CHAVE_OFERTA_RESOLVIDA, null) != offerId) return false
+    val resolvidaEm = preferencias.getLong(CHAVE_OFERTA_RESOLVIDA_EM, 0L)
+    return System.currentTimeMillis() - resolvidaEm in 0..JANELA_DEDUPLICACAO_MS
+  }
 
   private fun prefs(context: Context) =
     context.getSharedPreferences(ARQUIVO, Context.MODE_PRIVATE)

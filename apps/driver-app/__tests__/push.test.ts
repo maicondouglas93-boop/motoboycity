@@ -1,7 +1,13 @@
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
-import { getToken, onTokenRefresh } from '@react-native-firebase/messaging';
+import { getMessaging, getToken, onTokenRefresh } from '@react-native-firebase/messaging';
 import { ativarPush, desativarPush } from '../src/lib/push';
-import { limparSessaoNativa, salvarSessaoNativa } from '../src/lib/offerSession';
+import {
+  abrirAjusteDeTelaCheia,
+  consultarApresentacaoNativa,
+  dispensarOfertaNativa,
+  limparSessaoNativa,
+  salvarSessaoNativa,
+} from '../src/lib/offerSession';
 import { pushTokensApi } from '../src/lib/apiClient';
 import { session } from '../src/lib/session';
 
@@ -35,7 +41,7 @@ describe('push do app do motoboy', () => {
   });
 
   it('registra o aparelho quando a permissão é concedida', async () => {
-    await ativarPush();
+    await expect(ativarPush()).resolves.toBe(true);
 
     expect(pushTokensApi.register).toHaveBeenCalledWith('acesso-1', {
       token: 'fcm-abc',
@@ -49,7 +55,7 @@ describe('push do app do motoboy', () => {
     // nenhum: o servidor contaria como entregue.
     permissionRequest.mockResolvedValue(PermissionsAndroid.RESULTS.DENIED);
 
-    await ativarPush();
+    await expect(ativarPush()).resolves.toBe(false);
 
     expect(getToken).not.toHaveBeenCalled();
     expect(pushTokensApi.register).not.toHaveBeenCalled();
@@ -110,9 +116,19 @@ describe('push do app do motoboy', () => {
   it('sem sessão válida, não tenta registrar', async () => {
     (session.getToken as jest.Mock).mockResolvedValue(null);
 
-    await ativarPush();
+    await expect(ativarPush()).resolves.toBe(false);
 
     expect(pushTokensApi.register).not.toHaveBeenCalled();
+  });
+
+  it('informa quando o Firebase nativo nao esta disponivel', async () => {
+    (getMessaging as jest.Mock).mockImplementationOnce(() => {
+      throw new Error('Firebase ausente');
+    });
+
+    await expect(ativarPush()).resolves.toBe(false);
+
+    expect(getToken).not.toHaveBeenCalled();
   });
 
   it('espelha a sessão para o lado nativo ao entrar', async () => {
@@ -130,5 +146,23 @@ describe('push do app do motoboy', () => {
     await limparSessaoNativa();
 
     expect(NativeModules.OfferSession.clear).toHaveBeenCalled();
+  });
+
+  it('fecha a apresentação nativa quando a oferta é resolvida no React Native', async () => {
+    await dispensarOfertaNativa('oferta-1');
+
+    expect(NativeModules.OfferSession.dismiss).toHaveBeenCalledWith('oferta-1');
+  });
+
+  it('consulta e abre o acesso especial de tela cheia do Android', async () => {
+    await expect(consultarApresentacaoNativa()).resolves.toEqual({
+      notificationsEnabled: true,
+      fullScreenGranted: true,
+      fullScreenNeedsManualGrant: true,
+    });
+    await abrirAjusteDeTelaCheia();
+
+    expect(NativeModules.OfferSession.presentationStatus).toHaveBeenCalled();
+    expect(NativeModules.OfferSession.openFullScreenSettings).toHaveBeenCalled();
   });
 });

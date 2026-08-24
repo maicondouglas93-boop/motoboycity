@@ -18,6 +18,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { colors } from '../theme/colors';
 import { authApi } from '../lib/apiClient';
 import type { RootStackParamList } from '../navigation/types';
+import { applyDateMask } from '../lib/dateMask';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
@@ -143,7 +144,12 @@ export function RegisterScreen({ navigation }: Props) {
         <FormField
           label="Data de Nascimento"
           value={form.birthDate}
-          onChangeText={(value) => updateField('birthDate', value)}
+          /**
+           * A mascara poe as barras sozinha. O teclado aqui e numerico e nao tem
+           * a tecla `/`, entao sem isto o formato exigido pela validacao seria
+           * impossivel de digitar.
+           */
+          onChangeText={(value) => updateField('birthDate', applyDateMask(value))}
           placeholder="DD/MM/AAAA"
           keyboardType="numeric"
           error={fieldErrors.birthDate}

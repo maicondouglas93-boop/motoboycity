@@ -7,9 +7,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { DeliveryOperationScreen } from './src/screens/DeliveryOperationScreen';
 import { DriverHistoryScreen } from './src/screens/DriverHistoryScreen';
@@ -22,14 +22,27 @@ import { ProfileScreen } from './src/screens/ProfileScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { DriverWalletScreen } from './src/screens/DriverWalletScreen';
+import { WithdrawalScreen } from './src/screens/WithdrawalScreen';
 import { authApi } from './src/lib/apiClient';
 import { session } from './src/lib/session';
 import type { RootStackParamList } from './src/navigation/types';
+import { colors } from './src/theme/colors';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+const navigationTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: colors.surface,
+    card: colors.surface,
+    text: colors.ink,
+    border: colors.divider,
+    primary: colors.actionSoft,
+  },
+};
+
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
   const [initialRoute, setInitialRoute] = useState<'Login' | 'Home' | null>(null);
 
   useEffect(() => {
@@ -68,8 +81,8 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <NavigationContainer>
+      <StatusBar barStyle="dark-content" backgroundColor={colors.surface} />
+      <NavigationContainer theme={navigationTheme}>
         <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
@@ -81,6 +94,7 @@ function App() {
           />
           <Stack.Screen name="AvailableDeliveries" component={AvailableDeliveriesScreen} />
           <Stack.Screen name="Wallet" component={DriverWalletScreen} />
+          <Stack.Screen name="Withdrawal" component={WithdrawalScreen} />
           <Stack.Screen name="History" component={DriverHistoryScreen} />
           <Stack.Screen name="OrderDetail" component={DriverOrderDetailScreen} />
           <Stack.Screen name="DeliveryOperation" component={DeliveryOperationScreen} />
@@ -95,5 +109,10 @@ function App() {
 export default App;
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
 });

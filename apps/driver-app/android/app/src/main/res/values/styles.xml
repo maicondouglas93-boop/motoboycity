@@ -6,4 +6,19 @@
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
+    <!--
+      Janela da oferta sobre o contexto atual. O fundo transparente preserva a
+      Home, outro aplicativo ou a tela bloqueada; a própria Activity aplica a
+      cortina e desenha apenas o cartão interativo.
+    -->
+    <style name="OfferTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:colorAccent">#08444C</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+
 </resources>

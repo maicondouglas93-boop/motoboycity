@@ -3,6 +3,15 @@ import { NativeModules, Platform } from 'react-native';
 interface OfferSessionNativo {
   save(apiUrl: string, accessToken: string): Promise<void>;
   clear(): Promise<void>;
+  dismiss(offerId: string): Promise<void>;
+  presentationStatus(): Promise<NativeOfferPresentationStatus>;
+  openFullScreenSettings(): Promise<void>;
+}
+
+export interface NativeOfferPresentationStatus {
+  notificationsEnabled: boolean;
+  fullScreenGranted: boolean;
+  fullScreenNeedsManualGrant: boolean;
 }
 
 /**
@@ -32,4 +41,20 @@ export async function salvarSessaoNativa(apiUrl: string, accessToken: string): P
 export async function limparSessaoNativa(): Promise<void> {
   if (Platform.OS !== 'android' || !modulo) return;
   await modulo.clear().catch(() => undefined);
+}
+
+/** Remove a faixa/cartão Android depois que o React Native resolveu a oferta. */
+export async function dispensarOfertaNativa(offerId: string): Promise<void> {
+  if (Platform.OS !== 'android' || !modulo) return;
+  await modulo.dismiss(offerId).catch(() => undefined);
+}
+
+export async function consultarApresentacaoNativa(): Promise<NativeOfferPresentationStatus | null> {
+  if (Platform.OS !== 'android' || !modulo) return null;
+  return modulo.presentationStatus().catch(() => null);
+}
+
+export async function abrirAjusteDeTelaCheia(): Promise<void> {
+  if (Platform.OS !== 'android' || !modulo) return;
+  await modulo.openFullScreenSettings().catch(() => undefined);
 }

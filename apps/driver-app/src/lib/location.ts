@@ -77,10 +77,13 @@ function locationErrorMessage(code: number): string {
   return 'Nao foi possivel obter sua localizacao agora. Tente novamente.';
 }
 
-/** Captura unica, precisa e sem rastreamento em segundo plano. */
-export async function captureCurrentLocation(): Promise<LocationFix> {
-  await ensurePreciseLocationPermission();
+type OpcoesDeCaptura = {
+  enableHighAccuracy: boolean;
+  timeout: number;
+  maximumAge: number;
+};
 
+function obterPosicao(opcoes: OpcoesDeCaptura): Promise<LocationFix> {
   return new Promise((resolve, reject) => {
     Geolocation.getCurrentPosition(
       (position) => {
@@ -98,7 +101,66 @@ export async function captureCurrentLocation(): Promise<LocationFix> {
         });
       },
       (error) => reject(new LocationError(locationErrorMessage(error.code))),
-      { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
+      opcoes,
     );
   });
+}
+
+/**
+ * Captura unica, precisa e sem rastreamento em segundo plano.
+ *
+ * Exige posicao nova em folha (`maximumAge: 0`) de proposito: e usada na coleta
+ * e na entrega, onde a posicao serve de comprovacao de presenca fisica. Uma
+ * posicao guardada de minutos atras nao comprova nada.
+ */
+export async function captureCurrentLocation(): Promise<LocationFix> {
+  await ensurePreciseLocationPermission();
+
+  return obterPosicao({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 });
+}
+
+/** Acima disso a posicao e grosseira demais para escolher o motoboy mais proximo. */
+const PRECISAO_MAXIMA_PARA_FICAR_ONLINE = 1_000;
+
+/**
+ * Captura para ficar online — mais tolerante que a de comprovacao.
+ *
+ * Ficar online quase sempre acontece de dentro de casa ou de uma loja, onde o
+ * GPS fino nao fecha nos 20 segundos da captura estrita. Com a regra estrita o
+ * motoboy simplesmente nao consegue comecar a trabalhar, que foi o que travou o
+ * teste no aparelho.
+ *
+ * Entao aqui: aceita posicao do ultimo minuto e, se o GPS fino falhar, cai para
+ * a localizacao aproximada (rede/celula). O rastreamento continuo comeca logo
+ * em seguida e a precisao sobe sozinha.
+ *
+ * O limite de precisao existe porque a localizacao por celula pode errar
+ * quilometros, e essa posicao alimenta a escolha do motoboy mais proximo.
+ */
+export async function capturePresenceLocation(): Promise<LocationFix> {
+  await ensurePreciseLocationPermission();
+
+  let posicao: LocationFix;
+  try {
+    posicao = await obterPosicao({
+      enableHighAccuracy: true,
+      timeout: 15_000,
+      maximumAge: 60_000,
+    });
+  } catch (erroDoGpsFino) {
+    if (!(erroDoGpsFino instanceof LocationError)) throw erroDoGpsFino;
+    posicao = await obterPosicao({
+      enableHighAccuracy: false,
+      timeout: 15_000,
+      maximumAge: 120_000,
+    });
+  }
+
+  if (posicao.accuracy !== undefined && posicao.accuracy > PRECISAO_MAXIMA_PARA_FICAR_ONLINE) {
+    throw new LocationError(
+      'Sua localizacao esta imprecisa demais para ficar online. Va para um local mais aberto e tente de novo.',
+    );
+  }
+
+  return posicao;
 }

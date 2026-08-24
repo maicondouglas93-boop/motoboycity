@@ -14,12 +14,22 @@ import { name as appName } from './app.json';
  * encerrado, o Android sobe um contexto headless em que nenhum componente
  * existe ainda.
  *
- * O corpo e vazio de proposito. A notificacao em si e desenhada pelo proprio
- * Android a partir do bloco `notification` que o servidor manda, e e isso que
- * garante que ela apareca e toque mesmo sem o aplicativo rodar. Este handler
- * so precisa existir para o modulo nativo nao reclamar, e e o lugar de
- * eventuais tarefas de fundo no futuro.
+ * O corpo e vazio de proposito. A oferta chega como mensagem de dados e e
+ * apresentada pelo `OfferMessagingService`, que monta a notificacao nativa com
+ * acoes e tela cheia. Este handler permanece registrado para o ciclo de vida
+ * do modulo React Native e para futuras tarefas headless que nao sejam a
+ * apresentacao da oferta.
  */
-setBackgroundMessageHandler(getMessaging(), async () => {});
+/**
+ * Protegido porque SEM `google-services.json` o Firebase nao inicializa, e
+ * `getMessaging()` lanca aqui — na carga do modulo, antes de qualquer tela.
+ * Isso derrubaria o aplicativo na abertura, trocando "sem push" por "sem
+ * aplicativo".
+ */
+try {
+  setBackgroundMessageHandler(getMessaging(), async () => {});
+} catch {
+  // Sem credencial do Firebase: o aplicativo funciona, so nao recebe push.
+}
 
 AppRegistry.registerComponent(appName, () => App);

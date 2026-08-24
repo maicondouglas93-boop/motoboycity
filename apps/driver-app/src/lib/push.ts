@@ -21,6 +21,15 @@ import { session } from './session';
  * módulo nativo nem existe, e um app que quebra ao subir porque não tem push é
  * pior do que um app sem push.
  */
+function firebaseDisponivel(): boolean {
+  try {
+    getMessaging();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let tokenAtual: string | null = null;
 let cancelarRefresh: (() => void) | null = null;
 
@@ -54,19 +63,30 @@ export async function pedirPermissaoDeNotificacao(): Promise<boolean> {
  * reinstalação. Sem acompanhar a troca, o motoboy simplesmente para de receber
  * oferta e não há nada na tela dizendo isso.
  */
-export async function ativarPush(): Promise<void> {
+export async function ativarPush(): Promise<boolean> {
+  /**
+   * Sem `google-services.json` o Firebase nao inicializa e qualquer chamada
+   * daqui lanca. Sair em silencio e o certo: o aplicativo inteiro continua
+   * util, so nao recebe push.
+   */
+  if (!firebaseDisponivel()) {
+    return false;
+  }
+
   const permitido = await pedirPermissaoDeNotificacao();
   if (!permitido) {
-    return;
+    return false;
   }
 
   const token = await getToken(getMessaging());
-  await registrarToken(token);
+  const registrado = await registrarToken(token);
+  if (!registrado) return false;
 
   cancelarRefresh?.();
   cancelarRefresh = onTokenRefresh(getMessaging(), (novo: string) => {
     registrarToken(novo).catch(() => undefined);
   });
+  return true;
 }
 
 /**
@@ -93,10 +113,10 @@ export async function desativarPush(): Promise<void> {
   await pushTokensApi.unregister(acesso, token).catch(() => undefined);
 }
 
-async function registrarToken(token: string): Promise<void> {
+async function registrarToken(token: string): Promise<boolean> {
   const acesso = await session.getToken();
   if (!acesso) {
-    return;
+    return false;
   }
 
   await pushTokensApi.register(acesso, {
@@ -105,4 +125,5 @@ async function registrarToken(token: string): Promise<void> {
     appVersion,
   });
   tokenAtual = token;
+  return true;
 }

@@ -2,7 +2,6 @@ package com.motoboycity.driverapp
 
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.Manifest
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -30,18 +29,17 @@ class LocationTrackingModule(
       return
     }
 
-    val intent = Intent(reactContext, DeliveryLocationTrackingService::class.java).apply {
-      action = DeliveryLocationTrackingService.ACTION_START_OR_UPDATE
-      putStringArrayListExtra(DeliveryLocationTrackingService.EXTRA_DELIVERY_IDS, ArrayList(ids))
-      putExtra(DeliveryLocationTrackingService.EXTRA_BASE_URL, baseUrl)
-      putExtra(DeliveryLocationTrackingService.EXTRA_ACCESS_TOKEN, accessToken)
-      putExtra(DeliveryLocationTrackingService.EXTRA_APP_VERSION, appVersion)
-    }
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      reactContext.startForegroundService(intent)
-    } else {
-      reactContext.startService(intent)
+    val started =
+      DeliveryLocationTrackingService.startOrUpdate(
+        reactContext,
+        ids,
+        baseUrl,
+        accessToken,
+        appVersion,
+      )
+    if (!started) {
+      promise.reject("tracking_start_failed", "Não foi possível iniciar o rastreamento.")
+      return
     }
     promise.resolve(null)
   }
