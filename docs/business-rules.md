@@ -29,6 +29,18 @@ Percentual, configurável pelo admin — não hardcoded, sem valor padrão fixo
 decidido (isso é configuração de implementação, não decisão de negócio
 bloqueante).
 
+## Preços personalizados por empresa
+
+O admin pode manter uma tabela de preços própria para uma empresa e tipo de
+serviço. Quando existir uma tabela personalizada ativa, ela tem prioridade;
+quando não existir, a empresa usa a tabela geral ativa da sua região.
+
+Uma nova tabela desativa somente a anterior do mesmo escopo (empresa + tipo de
+serviço, ou tabela geral + tipo de serviço). Valores já calculados continuam
+congelados em `Delivery` e nunca são reescritos por uma alteração posterior.
+Comissão da plataforma e taxas adicionais continuam globais; personalizá-las
+exigiria uma decisão de produto separada.
+
 ## Cálculo de distância
 
 Rota real via Google Maps Routes API — explicitamente não é distância em
@@ -75,8 +87,24 @@ automático) planejado ainda.
 
 ## Regiões
 
-Uma região só por enquanto — sem seletor de múltiplas praças em lugar
-nenhum.
+Cada empresa e entregador pertence a uma única região. A operação pode ter
+somente uma praça ativa hoje, mas o cadastro administrativo de entregador exige
+que o admin selecione explicitamente uma região ativa; não existe vínculo
+com várias regiões para o mesmo entregador.
+
+## Cadastro de entregador pelo administrador
+
+Além do autocadastro no aplicativo, o administrador pode criar um entregador na
+aba **Entregadores**. O cadastro exige dados pessoais e de acesso, PIX, região
+ativa e pelo menos uma modalidade ativa. A primeira modalidade selecionada é a
+principal.
+
+O perfil criado pelo admin segue exatamente o mesmo portão operacional do
+autocadastro: nasce com aprovação `PENDING`, conta `ACTIVE` e disponibilidade
+`UNAVAILABLE`. Aprovar continua sendo uma ação administrativa separada; o
+cadastro não autoaprova nem coloca o entregador online. Veículo e documentos não
+fazem parte desta etapa porque ainda não existe fluxo integrado de upload e
+revisão desses itens.
 
 ## Integração com serviço de entrega
 
@@ -136,6 +164,19 @@ confirmação do cliente) nesta fase — o responsável aceitou explicitamente o
 risco de fraude/erro por ora ("Só o GPS mesmo, sem prova adicional"). Não é
 um descuido nem uma lacuna esquecida — se isso for revisitado, é uma
 decisão de produto nova, não uma correção de bug.
+
+## Secretária Virtual administrativa
+
+A primeira versão da Secretária Virtual no admin é **somente leitura**. Ela
+pode consultar operação, relatórios, pedidos, empresas e motoboys por
+ferramentas controladas, mas não pode criar, cancelar, aprovar, bloquear,
+alterar preços ou executar qualquer outra escrita. Ações só podem entrar em uma
+fase posterior, depois de permissões granulares, confirmação explícita,
+idempotência e auditoria de antes/depois.
+
+O texto das conversas não é persistido. A auditoria guarda somente metadados da
+requisição e parâmetros/resultados reduzidos das ferramentas, sem CPF,
+telefone, e-mail, endereço, coordenadas, destinatário ou credenciais.
 
 ---
 

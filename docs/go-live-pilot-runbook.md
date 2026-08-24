@@ -26,9 +26,9 @@ verdes. No estado registrado em 2026-08-20 ainda existem bloqueios objetivos:
 7. timeout de despacho e raio de retorno só podem ser configurados pela API;
 8. ~~não há push nativo; uma oferta não é garantida com o aplicativo
    suspenso~~ — **construído em 2026-08-23**, ver
-   [`push-notifications-setup.md`](push-notifications-setup.md). Falta criar o
-   projeto no Firebase e trazer as credenciais, que é ação do responsável; e
-   nada foi testado em aparelho;
+   [`push-notifications-setup.md`](push-notifications-setup.md). O APK foi
+   instalado em Android físico e permissões/canal foram conferidos; falta a
+   homologação fim a fim com uma oferta real em cada estado do app;
 9. Android/iOS, GPS em segundo plano e ciclo financeiro ainda não foram
    homologados em aparelhos e infraestrutura compartilhada reais.
 
@@ -935,12 +935,13 @@ No Android:
 
 1. faça login;
 2. verifique se o app mostra conexão com o servidor;
-3. toque para ficar online;
-4. conceda localização precisa em primeiro plano;
-5. conceda localização em segundo plano no fluxo solicitado pelo sistema;
-6. confirme a notificação permanente de rastreamento;
-7. confirme no admin que o motoboy aparece online com versão, horário e GPS;
-8. deixe o aplicativo aberto na Home enquanto espera a primeira oferta.
+3. conceda notificações e, no Android 14+, o acesso especial de tela cheia;
+4. toque para ficar online — o app deve bloquear essa ação se qualquer
+   requisito nativo de oferta estiver ausente;
+5. conceda localização precisa em primeiro plano;
+6. conceda localização em segundo plano no fluxo solicitado pelo sistema;
+7. confirme a notificação permanente de rastreamento;
+8. confirme no admin que o motoboy aparece online com versão, horário e GPS.
 
 No Android 11 ou superior, a permissão “o tempo todo” é concedida pela tela de
 configurações, não pelo mesmo diálogo inicial. A documentação recomenda pedir
@@ -986,7 +987,11 @@ Use um pedido avulso, destino conhecido, sem retorno e pré-pago.
 3. confirme `Conectado`;
 4. fique online;
 5. aguarde o admin mostrar GPS recente;
-6. não bloqueie a tela enquanto aguarda a oferta, pois ainda não há push.
+6. crie a primeira oferta com o app aberto e confirme tela React + notificação
+   nativa acionável;
+7. repita com o app em segundo plano e confirme o cartão nativo;
+8. repita com a tela bloqueada e confirme tela acesa, cartão em tela cheia e
+   aceite/recusa sem abrir o React Native.
 
 ### 17.2 Crie o pedido na empresa
 
@@ -1276,7 +1281,8 @@ chave. Preserve sempre o APK anterior e seu checksum.
 
 Mesmo com o piloto aprovado, ainda faltam no mínimo:
 
-- push FCM/APNs idempotente para oferta, cancelamento e bloqueio;
+- homologação FCM Android em app aberto, segundo plano e tela bloqueada, além
+  da implementação/homologação APNs no iOS;
 - publicação e revisão da permissão de localização em segundo plano;
 - tela real de disclosure, termos e política de privacidade;
 - recuperação/rotação de senha, especialmente do admin;

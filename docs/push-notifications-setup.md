@@ -1,4 +1,4 @@
-# Notificações push — o que já está pronto e o que falta você fazer
+# Notificações push nativas — configuração e homologação
 
 Sem push, a oferta de entrega só chega ao motoboy com o **aplicativo aberto na
 tela**. O socket precisa de conexão viva, e o caso que importa é o oposto: o
@@ -6,15 +6,15 @@ motoboy esperando corrida com o celular no bolso. Sem isso, a oferta expira
 sozinha e o pedido volta para a fila sem que ninguém tenha sido avisado de
 verdade.
 
-O caminho inteiro está construído. Falta **uma coisa que só você pode fazer**:
-criar o projeto no Firebase e trazer as credenciais.
+O caminho Android está construído. Cada ambiente ainda precisa das suas
+credenciais Firebase e de homologação com uma oferta real.
 
 ---
 
 ## O que você precisa fazer
 
-Nenhum destes passos eu faço: criar conta, baixar credencial e definir senha são
-ações suas.
+Criar conta, baixar credencial e definir senha são ações do responsável pelo
+ambiente.
 
 ### 1. Criar o projeto no Firebase
 
@@ -88,6 +88,10 @@ Suba a API e olhe o log da inicialização:
 - **Envio na oferta**, junto do socket. Não bloqueia o despacho: se o Firebase
   estiver fora do ar, o pedido segue ofertado e o prazo continua correndo. Push
   indisponível não pode virar pedido não despachado.
+- **Prazo absoluto no FCM.** A oferta tolera uma troca curta de rede, mas o FCM
+  nunca a armazena além do prazo real de resposta.
+- **Push de encerramento** em aceite, recusa, expiração e cancelamento. Assim,
+  todos os aparelhos removem o cartão nativo mesmo sem Socket.IO ativo.
 - **Envio no aviso de motoboy sem posição** — que antes só alcançava o admin,
   porque o socket não chega em aplicativo encerrado, e aplicativo encerrado é
   justamente a causa mais provável de a posição ter sumido.
@@ -101,7 +105,7 @@ Suba a API e olhe o log da inicialização:
 ### No aplicativo
 
 - **Dois canais de notificação**, criados no início do aplicativo:
-  `ofertas` em importância máxima (aparece sobre a tela e toca) e `avisos` em
+  `ofertas` em importância alta (aparece sobre a tela e toca) e `avisos` em
   importância normal. Precisam existir antes da primeira mensagem: a partir do
   Android 8, notificação com canal inexistente é **descartada em silêncio**.
 - **Permissão pedida no Android 13+**, onde o padrão é negado. Abaixo disso, ela
@@ -114,6 +118,12 @@ Suba a API e olhe o log da inicialização:
   encerrado o Android sobe um contexto onde nenhum componente existe ainda.
 - **`OfferMessagingService` em Kotlin**, que recebe a oferta e monta a
   notificação com `setFullScreenIntent`. Precisa ser nativo pelo motivo acima.
+- **Um único serviço de mensagem do aplicativo.** Ele herda o comportamento do
+  React Native Firebase para renovação de token e acrescenta a apresentação
+  nativa, sem disputa entre dois `FirebaseMessagingService`.
+- **Apresentação em todos os estados.** Com o app aberto, permanece uma
+  notificação nativa acionável junto da tela React. Em segundo plano ou com a
+  tela bloqueada, o Android usa o `fullScreenIntent`.
 - **Botões "Aceitar" e "Recusar" na própria notificação.** O motoboy responde
   num toque, sem abrir o aplicativo — que é o ponto: abrir gastaria parte do
   prazo justamente quando ele está na rua. Um `BroadcastReceiver` chama a API
@@ -130,6 +140,12 @@ Suba a API e olhe o log da inicialização:
   outro, ou a rede falhou — cada caso vira um aviso. Silêncio depois do toque
   seria pior que não ter o botão: ele acharia que aceitou, guardaria o celular,
   e a corrida iria para outro.
+- **Aceite nativo inicia/atualiza o rastreamento** com o(s) pedido(s) devolvido(s)
+  pela API, inclusive quando o React Native está suspenso.
+- **Notificação é requisito para ficar online.** Firebase/token, permissão,
+  canal `ofertas` em prioridade alta e, no Android 14+, acesso de tela cheia são
+  verificados antes de marcar o motoboy como disponível. Se ele já estava
+  online e perdeu a capacidade, o app o retira da fila ao reconectar.
 - **Busca da oferta pendente** (`GET /delivery-offers/pending`) ao abrir e ao
   voltar do segundo plano. Antes disso, uma oferta criada com o aplicativo
   fechado só existia no socket que ninguém estava ouvindo: o motoboy tocava a
@@ -139,10 +155,11 @@ Suba a API e olhe o log da inicialização:
 
 ## Limites conhecidos
 
-**Nada disto foi testado em aparelho.** O caminho tem 20 testes automatizados,
-mas eles provam a lógica, não a entrega: o que garante que a notificação apareça
-e toque é a combinação de canal, prioridade e permissão no Android real. O
-primeiro teste de verdade é instalar num celular e lançar um pedido.
+O APK de debug foi compilado e instalado em um Android físico em 2026-08-23. No
+aparelho, `POST_NOTIFICATIONS` e `USE_FULL_SCREEN_INTENT` estavam concedidas e o
+canal `ofertas` estava em `IMPORTANCE_HIGH`. Ainda falta a homologação
+fim a fim criando uma oferta real nos três estados: app aberto, segundo plano e
+tela bloqueada.
 
 **iOS não está configurado.** O modelo já tem o campo de plataforma e o código
 trata o caso, mas falta certificado APNs e o arquivo do projeto. O piloto é
@@ -155,9 +172,9 @@ Para pedir tela cheia, a oferta precisa viajar como mensagem **só de dados**. U
 mensagem com bloco `notification` é desenhada pelo próprio Android sem o
 aplicativo ser chamado — e é só de dentro dele que dá para pedir tela cheia.
 
-A consequência: **se o sistema tiver encerrado o aplicativo à força, nada
-aparece.** Com o formato anterior, a notificação apareceria de qualquer jeito,
-como faixa no topo. Duas coisas compensam isso:
+A consequência incontornável: depois de o usuário executar **Forçar parada**, o
+Android bloqueia a entrega ao aplicativo até ele ser aberto novamente. A
+recuperação cobre esse estado assim:
 
 - o aplicativo **busca a oferta pendente ao abrir e ao voltar do segundo
   plano**, com o tempo que ainda sobra do prazo — então uma oferta perdida
@@ -167,6 +184,6 @@ como faixa no topo. Duas coisas compensam isso:
   roteiro de instalação junto com a permissão de localização.
 
 No Android 14+, a permissão de tela cheia não é concedida automaticamente para
-aplicativos que não são de chamada ou despertador. Quando ela falta, o Android
-**rebaixa sozinho** para notificação com som em vez de descartar — pior que a
-tela cheia, melhor que silêncio.
+aplicativos que não são de chamada ou despertador. Como tela bloqueada é
+requisito do produto, o app não permite ficar online sem essa liberação e abre
+o ajuste especial correto.
