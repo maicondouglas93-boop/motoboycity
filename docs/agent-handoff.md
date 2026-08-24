@@ -5822,3 +5822,21 @@ incorreto do pacote compartilhado.
 Próximo passo concreto: confirmar que um novo build gera
 `apps/api/dist/main.js`, testar o processo de produção localmente e, quando
 autorizado, commitar e enviar a correção para um novo deploy.
+
+## Atualização — 2026-08-24: recuperação do administrador inicial no Neon
+
+Depois do primeiro deploy saudável, `GET /health` respondeu `200` e o CORS
+aceitou os dois domínios da Vercel, mas o login administrativo retornou `401`.
+Uma consulta somente leitura no Neon confirmou que não existia nenhuma linha
+`ADMIN` em `users`; portanto o `initialDeployHook` não havia criado o bootstrap.
+
+Como o plano gratuito não oferece Shell e o hook inicial não se repete em
+deploys comuns, o `buildCommand` executa temporariamente o seed idempotente logo
+após `prisma migrate deploy`. As credenciais continuam vindo exclusivamente de
+`ADMIN_SEED_EMAIL` e `ADMIN_SEED_PASSWORD` no Render; nenhum segredo foi
+adicionado ao repositório. O seed cria a região e o administrador apenas quando
+eles não existem e não redefine contas existentes.
+
+Próximo passo concreto: acompanhar o deploy, confirmar no log a criação do
+administrador, testar o login e então remover `prisma db seed` do build para que
+o bootstrap volte a ser exclusivamente uma operação de inicialização.
