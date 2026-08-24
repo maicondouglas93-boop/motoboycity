@@ -7,7 +7,6 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
-  Building2,
   CircleDollarSign,
   Clock3,
   LockKeyhole,
@@ -17,6 +16,9 @@ import {
   Sparkles,
   Truck,
   UserRound,
+  CalendarRange,
+  Radio,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -240,7 +242,7 @@ export default function VirtualSecretaryPage() {
         </div>
       </section>
 
-      <SecuritySidebar />
+      <SecuritySidebar onPerguntar={sendMessage} desabilitado={chatMutation.isPending} />
     </div>
   );
 }
@@ -286,15 +288,149 @@ function EmptyState({ onShortcut }: { onShortcut: (prompt: string) => void }) {
   );
 }
 
-function SecuritySidebar() {
-  const capabilities = [
-    { icon: PackageSearch, label: 'Pedidos e status' },
-    { icon: CircleDollarSign, label: 'Relatórios e valores' },
-    { icon: Building2, label: 'Empresas cadastradas' },
-    { icon: Truck, label: 'Motoboys e operação atual' },
-  ];
+/**
+ * Perguntas prontas, agrupadas pelo que a secretária REALMENTE consulta.
+ *
+ * Cada grupo corresponde a uma ferramenta que existe do lado do servidor
+ * (`virtual-secretary-tools.service.ts`): resumo de hoje, relatório por
+ * período, operação em tempo real e busca de pedidos, empresas e motoboys.
+ *
+ * Isso não é detalhe de organização: uma sugestão que a IA não consegue
+ * responder é pior do que nenhuma sugestão. O atalho promete, e a resposta
+ * vem dizendo que está fora do escopo — e a pessoa para de confiar na coluna
+ * inteira.
+ *
+ * As comparações entre dois períodos cabem porque o servidor permite até três
+ * consultas encadeadas por pergunta (`MAX_TOOL_EXECUTIONS`).
+ */
+const GRUPOS_DE_PERGUNTAS: Array<{
+  titulo: string;
+  icone: LucideIcon;
+  cor: string;
+  perguntas: string[];
+}> = [
+  {
+    titulo: 'Agora',
+    icone: Radio,
+    cor: 'bg-primary/10 text-primary',
+    perguntas: [
+      'Quantos motoboys estão online agora e quais são eles?',
+      'Como estão as filas neste momento?',
+      'Quais pedidos estão esperando um motoboy aceitar?',
+      'Tem algum pedido em rota há mais tempo que o normal?',
+    ],
+  },
+  {
+    titulo: 'Hoje',
+    icone: Sparkles,
+    cor: 'bg-colete/15 text-colete-escuro',
+    perguntas: [
+      'Faça um resumo administrativo de hoje.',
+      'Quantos pedidos foram concluídos hoje?',
+      'Quantos pedidos foram cancelados hoje e quais empresas tiveram mais cancelamentos?',
+      'Qual foi a receita da plataforma hoje?',
+      'Como hoje está em relação a ontem?',
+    ],
+  },
+  {
+    titulo: 'Semana',
+    icone: CalendarRange,
+    cor: 'bg-status-pagamento/10 text-status-pagamento',
+    perguntas: [
+      'Qual foi o faturamento desta semana?',
+      'Compare esta semana com a semana passada.',
+      'Quais empresas mais pediram nos últimos 7 dias?',
+      'Quantos cancelamentos tivemos nos últimos 7 dias?',
+    ],
+  },
+  {
+    titulo: 'Mês',
+    icone: CircleDollarSign,
+    cor: 'bg-placa/10 text-placa',
+    perguntas: [
+      'Qual foi o faturamento e a receita da plataforma neste mês?',
+      'Quantas entregas foram concluídas neste mês?',
+      'Compare este mês com o mês passado.',
+      'Quais motoboys mais entregaram neste mês?',
+    ],
+  },
+  {
+    titulo: 'Buscar',
+    icone: PackageSearch,
+    cor: 'bg-admin-soft text-admin-deep',
+    perguntas: [
+      'Quais empresas estão cadastradas e qual o volume de cada uma?',
+      'Quais motoboys estão aprovados e em quais modalidades?',
+      'Mostre os últimos pedidos cancelados.',
+      'Mostre os pedidos que não foram entregues nos últimos 7 dias.',
+    ],
+  },
+];
+
+/**
+ * A coluna de perguntas prontas.
+ *
+ * Some quando o chat está esperando resposta: um clique enquanto a anterior
+ * ainda roda seria descartado em silêncio pelo `sendMessage`, e o usuário
+ * concluiria que o botão não funciona.
+ */
+function PerguntasProntas({
+  onPerguntar,
+  desabilitado,
+}: {
+  onPerguntar: (pergunta: string) => void;
+  desabilitado: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-4">
+        <div>
+          <h2 className="font-heading font-semibold text-admin-deep">Perguntas prontas</h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Clique para enviar. Todas usam consultas que a secretária sabe fazer.
+          </p>
+        </div>
+
+        <div className="max-h-[560px] space-y-4 overflow-y-auto pr-1">
+          {GRUPOS_DE_PERGUNTAS.map(({ titulo, icone: Icone, cor, perguntas }) => (
+            <div key={titulo} className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`grid size-6 place-items-center rounded-lg ${cor}`}>
+                  <Icone className="size-3" aria-hidden="true" />
+                </span>
+                <span className="text-xs font-semibold tracking-wide text-admin-deep uppercase">
+                  {titulo}
+                </span>
+              </div>
+              {perguntas.map((pergunta) => (
+                <button
+                  key={pergunta}
+                  type="button"
+                  disabled={desabilitado}
+                  onClick={() => onPerguntar(pergunta)}
+                  className="block w-full rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-left text-xs leading-5 text-muted-foreground transition-colors hover:border-primary/35 hover:bg-admin-soft hover:text-admin-deep disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {pergunta}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SecuritySidebar({
+  onPerguntar,
+  desabilitado,
+}: {
+  onPerguntar: (pergunta: string) => void;
+  desabilitado: boolean;
+}) {
   return (
     <aside className="space-y-4">
+      <PerguntasProntas onPerguntar={onPerguntar} desabilitado={desabilitado} />
       <Card className="bg-gradient-to-br from-admin-deep to-[#0c4650] text-white ring-0 before:hidden">
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">
@@ -320,21 +456,6 @@ function SecuritySidebar() {
               Consultas e ferramentas ficam registradas em auditoria.
             </li>
           </ul>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent>
-          <h2 className="font-heading font-semibold text-admin-deep">O que posso consultar</h2>
-          <div className="mt-4 space-y-3 text-sm text-muted-foreground">
-            {capabilities.map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-2.5">
-                <span className="grid size-8 place-items-center rounded-xl bg-admin-soft text-primary">
-                  <Icon className="size-3.5" aria-hidden="true" />
-                </span>
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
         </CardContent>
       </Card>
     </aside>
