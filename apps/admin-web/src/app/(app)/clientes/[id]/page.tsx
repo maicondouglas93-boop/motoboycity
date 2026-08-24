@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi, adminInvoicesApi, deliveriesApi } from '@/lib/api-client';
@@ -28,6 +29,8 @@ const invoiceStatusLabel: Record<InvoiceStatus, string> = {
   CANCELLED: 'Cancelada',
 };
 
+const ORDER_PAGE_SIZES = [10, 25, 50] as const;
+
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : '—';
 }
@@ -37,6 +40,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const { id: companyId } = use(params);
   const token = session.getToken();
   const [orderStatus, setOrderStatus] = useState<DeliveryStatus | 'ALL'>('ALL');
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderPageSize, setOrderPageSize] = useState<number>(ORDER_PAGE_SIZES[0]);
   const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
 
   const companyQuery = useQuery({
@@ -50,11 +55,21 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     enabled: Boolean(token),
   });
   const ordersQuery = useQuery({
-    queryKey: ['admin', 'company-deliveries', companyId, orderStatus],
+    queryKey: [
+      'admin',
+      'company-deliveries',
+      'paged',
+      companyId,
+      orderStatus,
+      orderPage,
+      orderPageSize,
+    ],
     queryFn: () =>
-      deliveriesApi.list(token as string, {
+      deliveriesApi.search(token as string, {
         companyId,
         ...(orderStatus !== 'ALL' && { status: orderStatus }),
+        page: orderPage,
+        pageSize: orderPageSize,
       }),
     enabled: Boolean(token),
   });
@@ -67,6 +82,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       }),
     enabled: Boolean(token),
   });
+
+  const totalOrders = ordersQuery.data?.total ?? 0;
+  const totalOrderPages = Math.max(1, Math.ceil(totalOrders / orderPageSize));
 
   const deliveryStats = useMemo(() => {
     const deliveries = allOrdersQuery.data ?? [];
@@ -99,8 +117,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   const company = companyQuery.data;
-  const orders = ordersQuery.data ?? [];
+  const orders = ordersQuery.data?.items ?? [];
   const invoices = invoicesQuery.data ?? [];
+  const firstVisibleOrder = totalOrders === 0 ? 0 : (orderPage - 1) * orderPageSize + 1;
+  const lastVisibleOrder = Math.min(orderPage * orderPageSize, totalOrders);
 
   return (
     <div className="space-y-6">
@@ -203,19 +223,39 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <h2 className="font-semibold">Pedidos do cliente</h2>
                 <p className="text-sm text-muted-foreground">Entregas vinculadas a esta empresa.</p>
               </div>
-              <select
-                aria-label="Filtrar pedidos do cliente"
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={orderStatus}
-                onChange={(event) => setOrderStatus(event.target.value as DeliveryStatus | 'ALL')}
-              >
-                <option value="ALL">Todos os status</option>
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Filtrar pedidos do cliente"
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={orderStatus}
+                  onChange={(event) => {
+                    setOrderStatus(event.target.value as DeliveryStatus | 'ALL');
+                    setOrderPage(1);
+                  }}
+                >
+                  <option value="ALL">Todos os status</option>
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Pedidos por página"
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={orderPageSize}
+                  onChange={(event) => {
+                    setOrderPageSize(Number(event.target.value));
+                    setOrderPage(1);
+                  }}
+                >
+                  {ORDER_PAGE_SIZES.map((pageSize) => (
+                    <option key={pageSize} value={pageSize}>
+                      {pageSize} por página
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             {ordersQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Carregando pedidos...</p>
@@ -228,36 +268,71 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-2">
-                {orders.map((delivery) => (
-                  <Card key={delivery.id}>
-                    <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="font-medium">
-                          #{delivery.displayNumber} · {delivery.serviceTypeName}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {formatDate(delivery.createdAt)} ·{' '}
-                          {delivery.distanceKm === null
-                            ? 'distância não calculada'
-                            : `${delivery.distanceKm} km`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <StatusChip status={delivery.status} />
-                          <p className="mt-1 text-sm font-medium">{money(delivery.totalValue)}</p>
+              <div className="space-y-3">
+                <div className="space-y-2" aria-busy={ordersQuery.isFetching}>
+                  {orders.map((delivery) => (
+                    <Card key={delivery.id}>
+                      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                        <div>
+                          <p className="font-medium">
+                            #{delivery.displayNumber} · {delivery.serviceTypeName}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDate(delivery.createdAt)} ·{' '}
+                            {delivery.distanceKm === null
+                              ? 'distância não calculada'
+                              : `${delivery.distanceKm} km`}
+                          </p>
                         </div>
-                        <Link
-                          className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"
-                          href={`/pedidos/${delivery.id}`}
-                        >
-                          Ver detalhes
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <StatusChip status={delivery.status} />
+                            <p className="mt-1 text-sm font-medium">{money(delivery.totalValue)}</p>
+                          </div>
+                          <Link
+                            className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"
+                            href={`/pedidos/${delivery.id}`}
+                          >
+                            Ver detalhes
+                          </Link>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/70 px-4 py-3 text-sm">
+                  <p className="text-muted-foreground" aria-live="polite">
+                    Mostrando {firstVisibleOrder}–{lastVisibleOrder} de {totalOrders} pedidos
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setOrderPage((current) => Math.max(1, current - 1))}
+                      disabled={orderPage <= 1 || ordersQuery.isFetching}
+                    >
+                      <ChevronLeft data-icon="inline-start" aria-hidden="true" />
+                      Anterior
+                    </Button>
+                    <span className="min-w-24 text-center text-xs font-medium text-admin-deep">
+                      Página {orderPage} de {totalOrderPages}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setOrderPage((current) => Math.min(totalOrderPages, current + 1))
+                      }
+                      disabled={orderPage >= totalOrderPages || ordersQuery.isFetching}
+                    >
+                      Próxima
+                      <ChevronRight data-icon="inline-end" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </section>

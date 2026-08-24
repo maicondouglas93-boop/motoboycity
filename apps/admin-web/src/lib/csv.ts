@@ -15,7 +15,22 @@ const BOM = '﻿';
 
 function escapeCell(value: unknown): string {
   if (value === null || value === undefined) return '';
-  const text = String(value);
+  let text = String(value);
+  const withoutLeadingSpaces = text.trimStart();
+  const isLocalizedNumber = /^-?\d+(?:[.,]\d+)?$/.test(withoutLeadingSpaces);
+
+  /**
+   * Excel interpreta células iniciadas por estes caracteres como fórmulas.
+   * Nomes, e-mails e números externos podem vir de usuários, então precisam
+   * chegar como texto. Números negativos legítimos continuam calculáveis.
+   */
+  if (
+    typeof value === 'string' &&
+    (/^[=+@]/.test(withoutLeadingSpaces) ||
+      (withoutLeadingSpaces.startsWith('-') && !isLocalizedNumber))
+  ) {
+    text = `'${text}`;
+  }
   // Só envolve em aspas quando precisa — arquivo mais limpo de ler no editor.
   if (text.includes(SEPARATOR) || text.includes('"') || text.includes('\n')) {
     return `"${text.replaceAll('"', '""')}"`;

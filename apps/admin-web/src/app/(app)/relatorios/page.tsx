@@ -1,311 +1,178 @@
-'use client';
-
 import Link from 'next/link';
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import type { DeliveryStatus } from '@motoboycity/types';
-import { AlertCircle, History } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { DriverRanking } from '@/components/reports/driver-ranking';
-import { PeakHoursChart } from '@/components/reports/peak-hours-chart';
-import { StatCard } from '@/components/stat-card';
-import { adminReportsApi } from '@/lib/api-client';
-import { session } from '@/lib/session';
-import { useMoney } from '@/lib/money';
+  ArrowRight,
+  BarChart3,
+  Building2,
+  CircleDollarSign,
+  Clock3,
+  Layers3,
+  ListChecks,
+  ShieldCheck,
+  TimerReset,
+  Trophy,
+  type LucideIcon,
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
-/**
- * Plural porque sao contagens, nao o estado de um pedido. Vocabulario alinhado
- * a `status-chip.tsx`, para a mesma entrega nao mudar de nome entre telas.
- */
-const statusCountLabel: Record<DeliveryStatus, string> = {
-  SCHEDULED: 'Agendados',
-  AWAITING_DRIVER: 'Buscando motoboy',
-  ACCEPTED: 'A caminho da coleta',
-  COLLECTED: 'Em rota',
-  DELIVERED: 'Voltando à loja',
-  FAILED: 'Não entregues',
-  COMPLETED: 'Concluídos',
-  CANCELLED: 'Cancelados',
-  AWAITING_PAYMENT: 'Aguardando pagamento',
+type ReportLink = {
+  title: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+  tone: string;
 };
 
-export default function AdminReportsPage() {
-  const money = useMoney();
-  const token = session.getToken();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [periodError, setPeriodError] = useState<string | null>(null);
-  const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
-  const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
-    enabled: Boolean(token),
-  });
+type ReportGroup = {
+  title: string;
+  description: string;
+  reports: ReportLink[];
+};
 
-  if (!token) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Faça login como administrador para ver relatórios.
-      </p>
-    );
-  }
+const reportGroups: ReportGroup[] = [
+  {
+    title: 'Visão geral',
+    description: 'Comece pelos indicadores que resumem o comportamento da operação.',
+    reports: [
+      {
+        title: 'Analítico geral',
+        description:
+          'Volume criado, entregas concluídas, ticket médio e comparação entre períodos.',
+        href: '/relatorios/geral',
+        icon: BarChart3,
+        tone: 'bg-sky-500/10 text-sky-600 ring-sky-500/15',
+      },
+      {
+        title: 'Horários de pico',
+        description: 'Pedidos por hora e dia da semana para dimensionar a operação.',
+        href: '/relatorios/horarios-pico',
+        icon: Clock3,
+        tone: 'bg-orange-500/10 text-orange-600 ring-orange-500/15',
+      },
+    ],
+  },
+  {
+    title: 'Pedidos e clientes',
+    description: 'Entenda onde está o volume e quais clientes movimentam a operação.',
+    reports: [
+      {
+        title: 'Consulta de pedidos',
+        description: 'Busca detalhada com filtros, paginação e acesso a cada pedido.',
+        href: '/relatorios/pedidos',
+        icon: ListChecks,
+        tone: 'bg-cyan-500/10 text-cyan-700 ring-cyan-500/15',
+      },
+      {
+        title: 'Desempenho por cliente',
+        description: 'Criados, concluídos, hoje cancelados e valores por empresa.',
+        href: '/relatorios/clientes',
+        icon: Building2,
+        tone: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/15',
+      },
+      {
+        title: 'Modalidades de serviço',
+        description: 'Compare volume e valor concluído entre os tipos de serviço.',
+        href: '/relatorios/modalidades',
+        icon: Layers3,
+        tone: 'bg-indigo-500/10 text-indigo-600 ring-indigo-500/15',
+      },
+    ],
+  },
+  {
+    title: 'Entregadores e SLA',
+    description: 'Compare desempenho e encontre os gargalos de tempo em cada etapa da entrega.',
+    reports: [
+      {
+        title: 'Ranking de entregadores',
+        description: 'Ordene por entregas, conclusão, aceite, tempo médio ou repasse.',
+        href: '/relatorios/entregadores',
+        icon: Trophy,
+        tone: 'bg-amber-500/10 text-amber-700 ring-amber-500/15',
+      },
+      {
+        title: 'Tempos e SLA',
+        description: 'Média, mediana, p90, amostras e comparação com os alertas configurados.',
+        href: '/relatorios/tempos-sla',
+        icon: TimerReset,
+        tone: 'bg-rose-500/10 text-rose-600 ring-rose-500/15',
+      },
+    ],
+  },
+  {
+    title: 'Financeiro',
+    description: 'Acompanhe a divisão dos valores concluídos no período selecionado.',
+    reports: [
+      {
+        title: 'Composição financeira',
+        description: 'Valor concluído, repasse aos entregadores e receita da plataforma.',
+        href: '/relatorios/financeiro',
+        icon: CircleDollarSign,
+        tone: 'bg-green-500/10 text-green-700 ring-green-500/15',
+      },
+    ],
+  },
+];
 
-  const report = reportQuery.data;
-
-  function applyPeriod() {
-    if (from && to && from > to) {
-      setPeriodError('A data inicial não pode ser posterior à data final.');
-      return;
-    }
-    setPeriodError(null);
-    setAppliedPeriod({ ...(from && { from }), ...(to && { to }) });
-  }
-
-  function clearPeriod() {
-    setFrom('');
-    setTo('');
-    setPeriodError(null);
-    setAppliedPeriod({});
-  }
+function ReportCard({ report }: { report: ReportLink }) {
+  const Icon = report.icon;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Relatório operacional e financeiro</h1>
-          <p className="text-sm text-muted-foreground">
-            Pedidos criados e entregas concluídas no período, calculados diretamente dos registros
-            operacionais.
-          </p>
+    <Link
+      href={report.href}
+      className="group flex min-h-32 items-center gap-4 rounded-2xl border border-border/75 bg-card/90 p-5 shadow-[0_1px_2px_rgba(16,37,47,0.05),0_14px_30px_-26px_rgba(15,107,112,0.65)] ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_10px_28px_-20px_rgba(15,107,112,0.45)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+    >
+      <span
+        className={`grid size-14 shrink-0 place-items-center rounded-2xl ring-1 ring-inset ${report.tone}`}
+      >
+        <Icon className="size-7" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-heading text-base font-semibold leading-5 text-admin-deep">
+          {report.title}
+        </span>
+        <span className="mt-1.5 block text-sm leading-5 text-muted-foreground">
+          {report.description}
+        </span>
+      </span>
+      <ArrowRight
+        className="size-5 shrink-0 text-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-primary"
+        aria-hidden="true"
+      />
+    </Link>
+  );
+}
+
+export default function ReportsHubPage() {
+  return (
+    <div className="mx-auto w-full max-w-[1480px] space-y-9 pb-12">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-admin-deep">
+            Central de relatórios
+          </h1>
+          <Badge variant="outline" className="gap-1.5">
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            Dados operacionais reais
+          </Badge>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="report-from">A partir de</Label>
-            <Input
-              id="report-from"
-              type="date"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+          Escolha a análise que precisa consultar. Os relatórios disponíveis usam registros reais de
+          pedidos, clientes, entregadores e valores concluídos.
+        </p>
+      </header>
+
+      {reportGroups.map((group) => (
+        <section key={group.title} className="space-y-4">
+          <div>
+            <h2 className="font-heading text-lg font-semibold text-admin-deep">{group.title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="report-to">Até</Label>
-            <Input
-              id="report-to"
-              type="date"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
-          <Button onClick={applyPeriod}>Aplicar período</Button>
-          <Button variant="outline" onClick={clearPeriod}>
-            Limpar
-          </Button>
-          {periodError && <p className="text-sm text-destructive">{periodError}</p>}
-        </div>
-      </div>
-
-      {reportQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Calculando relatório...</p>
-      )}
-      {reportQuery.isError && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <AlertCircle className="size-4" /> Não foi possível gerar este relatório.
-        </div>
-      )}
-
-      {report && (
-        <>
-          {/*
-            Quando o recorte nao termina hoje, os numeros estao parados. Sem
-            este aviso, alguem decide olhando um numero antigo achando que e o
-            de agora — e a tela nao da nenhuma pista da diferenca.
-          */}
-          {!report.live && (
-            <div className="flex items-start gap-2 rounded-md border border-alerta/40 bg-alerta/5 p-3 text-sm">
-              <History className="mt-0.5 size-4 shrink-0 text-alerta" />
-              <p>
-                <strong className="text-alerta">Histórico.</strong> Este recorte terminou em{' '}
-                {report.period.to} e não atualiza em tempo real.
-              </p>
-            </div>
-          )}
-
-          <p className="text-sm text-muted-foreground">
-            Período considerado: <strong>{report.period.from}</strong> até{' '}
-            <strong>{report.period.to}</strong>. Pedidos são contados pela criação; valores
-            financeiros, pela conclusão. Comparação com{' '}
-            <strong>{report.comparison.period.from}</strong> até{' '}
-            <strong>{report.comparison.period.to}</strong>, janela de mesma duração.
-          </p>
-
-          <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-            <StatCard
-              label="Pedidos criados"
-              value={String(report.ordersCreated.count)}
-              changePercent={report.comparison.changePercent.ordersCreated}
-            />
-            <StatCard
-              label="Entregas concluídas"
-              value={String(report.deliveriesCompleted.count)}
-              changePercent={report.comparison.changePercent.deliveriesCompleted}
-            />
-            <StatCard
-              label="Valor concluído"
-              value={money(report.deliveriesCompleted.totalValue)}
-              changePercent={report.comparison.changePercent.totalValue}
-            />
-            <StatCard
-              label="Repasse aos entregadores"
-              value={money(report.deliveriesCompleted.driverValue)}
-            />
-            <StatCard
-              label="Receita da plataforma"
-              value={money(report.deliveriesCompleted.platformValue)}
-            />
-          </section>
-
-          <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <StatCard
-              label="Ticket médio concluído"
-              value={money(report.deliveriesCompleted.averageTicket)}
-              changePercent={report.comparison.changePercent.averageTicket}
-            />
-            {Object.entries(report.ordersCreated.byCurrentStatus).map(([status, count]) => (
-              <StatCard
-                key={status}
-                label={statusCountLabel[status as DeliveryStatus]}
-                value={String(count)}
-              />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {group.reports.map((report) => (
+              <ReportCard key={report.title} report={report} />
             ))}
-          </section>
-
-          <p className="text-sm">
-            <Link
-              href="/relatorios/historico"
-              className="font-medium underline decoration-colete decoration-2 underline-offset-4"
-            >
-              Ver o histórico detalhado de entregas
-            </Link>{' '}
-            <span className="text-muted-foreground">
-              — entrega por entrega, com filtros e exportação para planilha.
-            </span>
-          </p>
-
-          <PeakHoursChart peakHours={report.peakHours} />
-
-          <section className="space-y-3">
-            <div>
-              <h2 className="font-semibold">Empresas</h2>
-              <p className="text-sm text-muted-foreground">
-                Volume criado, conclusão financeira e cancelamentos do período.
-              </p>
-            </div>
-            <Card>
-              <CardContent className="p-0">
-                {report.companies.length === 0 ? (
-                  <p className="p-8 text-center text-sm text-muted-foreground">
-                    Nenhuma empresa com atividade no período.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Empresa</TableHead>
-                        <TableHead>Criados</TableHead>
-                        <TableHead>Concluídos</TableHead>
-                        <TableHead>Cancelados</TableHead>
-                        <TableHead>Valor concluído</TableHead>
-                        <TableHead>Receita plataforma</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {report.companies.map((company) => (
-                        <TableRow key={company.companyId}>
-                          <TableCell>
-                            <Link
-                              className="font-medium text-primary underline-offset-4 hover:underline"
-                              href={`/clientes/${company.companyId}`}
-                            >
-                              {company.companyName}
-                            </Link>
-                          </TableCell>
-                          <TableCell>{company.createdCount}</TableCell>
-                          <TableCell>{company.completedCount}</TableCell>
-                          <TableCell>{company.cancelledCount}</TableCell>
-                          <TableCell>{money(company.completedTotalValue)}</TableCell>
-                          <TableCell>{money(company.platformValue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </section>
-
-          <section className="grid gap-4 xl:grid-cols-2">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle>Entregadores</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Volume, confiabilidade e agilidade lado a lado — ordene pela coluna que importa
-                  agora.
-                </p>
-              </CardHeader>
-              <CardContent className="p-0">
-                <DriverRanking drivers={report.drivers} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Modalidades</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {report.serviceTypes.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">
-                    Nenhuma modalidade com atividade no período.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Modalidade</TableHead>
-                        <TableHead>Criados</TableHead>
-                        <TableHead>Concluídos</TableHead>
-                        <TableHead>Valor concluído</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {report.serviceTypes.map((serviceType) => (
-                        <TableRow key={serviceType.serviceTypeName}>
-                          <TableCell className="font-medium">
-                            {serviceType.serviceTypeName}
-                          </TableCell>
-                          <TableCell>{serviceType.createdCount}</TableCell>
-                          <TableCell>{serviceType.completedCount}</TableCell>
-                          <TableCell>{money(serviceType.completedTotalValue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </section>
-        </>
-      )}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

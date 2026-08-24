@@ -5,6 +5,7 @@ export interface OperationsReportCompanyItem {
   companyName: string;
   createdCount: number;
   completedCount: number;
+  /** Pedidos criados no recorte cujo estado atual e CANCELLED. */
   cancelledCount: number;
   completedTotalValue: number;
   platformValue: number;

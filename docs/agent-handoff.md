@@ -3272,15 +3272,15 @@ operações, relatórios, `stat-card` e os primitives em `components/ui/`.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado |
-| `pnpm --filter @motoboycity/admin-web lint` | aprovado |
-| `pnpm --filter @motoboycity/admin-web run build` | aprovado; 23 rotas geradas |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | aprovado nos 8 workspaces |
+| Comando / fluxo                                           | Resultado                          |
+| --------------------------------------------------------- | ---------------------------------- |
+| `pnpm --filter @motoboycity/admin-web typecheck`          | aprovado                           |
+| `pnpm --filter @motoboycity/admin-web lint`               | aprovado                           |
+| `pnpm --filter @motoboycity/admin-web run build`          | aprovado; 23 rotas geradas         |
+| `pnpm typecheck`                                          | aprovado nos 8 workspaces          |
+| `pnpm lint`                                               | aprovado nos 8 workspaces          |
 | Hot reload e GET das rotas principais em `localhost:3001` | compilação aprovada; respostas 200 |
-| `git diff --check -- apps/admin-web` | aprovado |
+| `git diff --check -- apps/admin-web`                      | aprovado                           |
 
 ### Limitação e próximo passo
 
@@ -3323,17 +3323,17 @@ primitives em `apps/company-web/src/components/ui/`.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/company-web typecheck` | aprovado |
-| `pnpm --filter @motoboycity/company-web lint` | aprovado |
-| `pnpm --filter @motoboycity/company-web run build` | aprovado; 11 rotas geradas |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| `pnpm typecheck` | falhou apenas em alteração concorrente de `driver-app/src/lib/push.ts`: import de `@react-native-firebase/messaging` sem export default; o `company-web` foi aprovado isoladamente |
-| GET de `/`, login, cadastro, aprovação, pedidos, indicadores, relatórios e faturas em `localhost:3000` | respostas 200 |
-| API, admin e Metro (`3333`, `3001`, `8081`) | respostas 200 após reinício |
-| `git diff --check -- apps/company-web` | aprovado |
-| Guarda de diff para consultas, mutations, handlers, sessão e fetch | nenhuma alteração lógica detectada |
+| Comando / fluxo                                                                                        | Resultado                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @motoboycity/company-web typecheck`                                                     | aprovado                                                                                                                                                                           |
+| `pnpm --filter @motoboycity/company-web lint`                                                          | aprovado                                                                                                                                                                           |
+| `pnpm --filter @motoboycity/company-web run build`                                                     | aprovado; 11 rotas geradas                                                                                                                                                         |
+| `pnpm lint`                                                                                            | aprovado nos 8 workspaces                                                                                                                                                          |
+| `pnpm typecheck`                                                                                       | falhou apenas em alteração concorrente de `driver-app/src/lib/push.ts`: import de `@react-native-firebase/messaging` sem export default; o `company-web` foi aprovado isoladamente |
+| GET de `/`, login, cadastro, aprovação, pedidos, indicadores, relatórios e faturas em `localhost:3000` | respostas 200                                                                                                                                                                      |
+| API, admin e Metro (`3333`, `3001`, `8081`)                                                            | respostas 200 após reinício                                                                                                                                                        |
+| `git diff --check -- apps/company-web`                                                                 | aprovado                                                                                                                                                                           |
+| Guarda de diff para consultas, mutations, handlers, sessão e fetch                                     | nenhuma alteração lógica detectada                                                                                                                                                 |
 
 ### Limitação e próximo passo
 
@@ -3370,12 +3370,12 @@ Arquivos afetados:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado |
-| `pnpm --filter @motoboycity/admin-web lint` | aprovado |
-| `pnpm --filter @motoboycity/admin-web run build` | aprovado |
-| Hot reload e GET de `localhost:3001/` | compilação aprovada; resposta 200 |
+| Comando / fluxo                                  | Resultado                         |
+| ------------------------------------------------ | --------------------------------- |
+| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado                          |
+| `pnpm --filter @motoboycity/admin-web lint`      | aprovado                          |
+| `pnpm --filter @motoboycity/admin-web run build` | aprovado                          |
+| Hot reload e GET de `localhost:3001/`            | compilação aprovada; resposta 200 |
 
 O navegador integrado não estava conectado, então não houve captura
 automatizada na largura de referência. O admin foi reiniciado em
@@ -3418,13 +3418,13 @@ Arquivos afetados:
 
 ### Verificação
 
-| Comando | Resultado |
-| --- | --- |
+| Comando                                                                                                                                                | Resultado                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
 | `pnpm --filter @motoboycity/api exec jest --runInBand src/admin/operations/admin-operations.service.spec.ts src/deliveries/deliveries.service.spec.ts` | aprovado; 2 suítes e 57 testes |
-| `pnpm --filter @motoboycity/api typecheck` | aprovado |
-| `pnpm --filter @motoboycity/api lint` | aprovado |
-| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado |
-| `pnpm --filter @motoboycity/admin-web lint` | aprovado |
+| `pnpm --filter @motoboycity/api typecheck`                                                                                                             | aprovado                       |
+| `pnpm --filter @motoboycity/api lint`                                                                                                                  | aprovado                       |
+| `pnpm --filter @motoboycity/admin-web typecheck`                                                                                                       | aprovado                       |
+| `pnpm --filter @motoboycity/admin-web lint`                                                                                                            | aprovado                       |
 
 Próximo passo concreto: confirmar manualmente, com sessão administrativa, que
 um concluído sai no evento de atualização e que um cancelado desaparece ao
@@ -3488,19 +3488,19 @@ service e testes administrativos; `PricingService`; três chamadas de cotação 
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/api exec prisma validate` | aprovado antes e depois da mudança |
-| `pnpm --filter @motoboycity/validation build` | aprovado |
-| `pnpm --filter @motoboycity/api exec jest --runInBand src/admin/pricing-tables/admin-pricing-tables.service.spec.ts src/pricing/pricing.service.spec.ts src/deliveries/deliveries.service.spec.ts` | aprovado; 3 suítes e 75 testes |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| `pnpm --filter @motoboycity/api run build` | aprovado |
-| `pnpm --filter @motoboycity/admin-web run build` | aprovado; 23 rotas |
-| `prisma migrate deploy` no banco local | migration aplicada com sucesso |
-| GET de company, página de preços do admin, API e Metro | HTTP 200 nos quatro serviços |
-| GET de `/admin/pricing-tables` sem token | HTTP 401, guarda administrativa preservada |
-| `prisma migrate status` após reinício | 23 migrations; banco local atualizado |
+| Comando / fluxo                                                                                                                                                                                    | Resultado                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `pnpm --filter @motoboycity/api exec prisma validate`                                                                                                                                              | aprovado antes e depois da mudança         |
+| `pnpm --filter @motoboycity/validation build`                                                                                                                                                      | aprovado                                   |
+| `pnpm --filter @motoboycity/api exec jest --runInBand src/admin/pricing-tables/admin-pricing-tables.service.spec.ts src/pricing/pricing.service.spec.ts src/deliveries/deliveries.service.spec.ts` | aprovado; 3 suítes e 75 testes             |
+| `pnpm typecheck`                                                                                                                                                                                   | aprovado nos 8 workspaces                  |
+| `pnpm lint`                                                                                                                                                                                        | aprovado nos 8 workspaces                  |
+| `pnpm --filter @motoboycity/api run build`                                                                                                                                                         | aprovado                                   |
+| `pnpm --filter @motoboycity/admin-web run build`                                                                                                                                                   | aprovado; 23 rotas                         |
+| `prisma migrate deploy` no banco local                                                                                                                                                             | migration aplicada com sucesso             |
+| GET de company, página de preços do admin, API e Metro                                                                                                                                             | HTTP 200 nos quatro serviços               |
+| GET de `/admin/pricing-tables` sem token                                                                                                                                                           | HTTP 401, guarda administrativa preservada |
+| `prisma migrate status` após reinício                                                                                                                                                              | 23 migrations; banco local atualizado      |
 
 O navegador integrado não estava disponível (nenhuma instância conectada),
 então ainda falta conferir o seletor com uma sessão administrativa real. Também
@@ -3526,10 +3526,10 @@ Arquivo afetado:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado |
-| `pnpm --filter @motoboycity/admin-web lint` | aprovado |
+| Comando / fluxo                                                              | Resultado          |
+| ---------------------------------------------------------------------------- | ------------------ |
+| `pnpm --filter @motoboycity/admin-web typecheck`                             | aprovado           |
+| `pnpm --filter @motoboycity/admin-web lint`                                  | aprovado           |
 | compilação incremental do Next.js e GET de `/configuracoes/tabela-de-precos` | aprovado; HTTP 200 |
 
 Próximo passo concreto: conferir visualmente a seleção da empresa e o estado
@@ -3585,20 +3585,20 @@ Prisma, página/nav do admin e `docs/SECRETARIA_VIRTUAL.md`.
 
 ### Verificação executada até este registro
 
-| Comando | Resultado |
-| --- | --- |
-| `prisma format`, `prisma validate`, `prisma generate` | aprovados; generate exigiu parar temporariamente a API no Windows |
-| `pnpm --filter @motoboycity/validation build` | aprovado |
-| typecheck de types, validation, api-client, API e admin-web | aprovado |
-| Jest focado em período, allowlist/PII, guardas, service e Gemini sem chave | 5 suítes, 10 testes aprovados |
-| lint de API e admin-web | aprovado |
-| build da API e do admin-web | aprovado; rota `/secretaria-virtual` incluída |
-| HTTP sem token / admin sem chave nova | `401` / `503` controlado |
-| health de admin-web, company-web, API e Metro | HTTP 200 nos quatro serviços após reinício do Metro travado |
-| inspeção visual automatizada | pendente; nenhum navegador estava conectado à sessão |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | API, webs e pacotes aprovados; falhou apenas no driver-app por configuração preexistente do ESLint 8 (`jest/globals` desconhecido) |
-| `pnpm audit --prod --audit-level high` | encontrou 3 altos e 2 moderados em dependências transitivas preexistentes de React Native/Metro, Prisma e Firebase; nenhum caminho vem de `@google/genai` |
+| Comando                                                                    | Resultado                                                                                                                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prisma format`, `prisma validate`, `prisma generate`                      | aprovados; generate exigiu parar temporariamente a API no Windows                                                                                         |
+| `pnpm --filter @motoboycity/validation build`                              | aprovado                                                                                                                                                  |
+| typecheck de types, validation, api-client, API e admin-web                | aprovado                                                                                                                                                  |
+| Jest focado em período, allowlist/PII, guardas, service e Gemini sem chave | 5 suítes, 10 testes aprovados                                                                                                                             |
+| lint de API e admin-web                                                    | aprovado                                                                                                                                                  |
+| build da API e do admin-web                                                | aprovado; rota `/secretaria-virtual` incluída                                                                                                             |
+| HTTP sem token / admin sem chave nova                                      | `401` / `503` controlado                                                                                                                                  |
+| health de admin-web, company-web, API e Metro                              | HTTP 200 nos quatro serviços após reinício do Metro travado                                                                                               |
+| inspeção visual automatizada                                               | pendente; nenhum navegador estava conectado à sessão                                                                                                      |
+| `pnpm typecheck`                                                           | aprovado nos 8 workspaces                                                                                                                                 |
+| `pnpm lint`                                                                | API, webs e pacotes aprovados; falhou apenas no driver-app por configuração preexistente do ESLint 8 (`jest/globals` desconhecido)                        |
+| `pnpm audit --prod --audit-level high`                                     | encontrou 3 altos e 2 moderados em dependências transitivas preexistentes de React Native/Metro, Prisma e Firebase; nenhum caminho vem de `@google/genai` |
 
 Próximo passo concreto: rotacionar a chave exposta, configurar a nova no backend
 e então executar uma consulta real supervisionada. A revisão visual em navegador
@@ -3626,12 +3626,12 @@ seguro foi removido.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `GET /health` após reinício | HTTP 200 |
-| login administrativo + `POST /admin/virtual-secretary/chat` | autenticação aprovada; provedor devolveu `429` e a rota converteu para `502` controlado |
-| `pnpm --filter @motoboycity/api run typecheck` | aprovado |
-| Jest focado em `src/admin/virtual-secretary` e `src/ai/gemini.service.spec.ts` | 5 suítes e 10 testes aprovados |
+| Comando / fluxo                                                                | Resultado                                                                               |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `GET /health` após reinício                                                    | HTTP 200                                                                                |
+| login administrativo + `POST /admin/virtual-secretary/chat`                    | autenticação aprovada; provedor devolveu `429` e a rota converteu para `502` controlado |
+| `pnpm --filter @motoboycity/api run typecheck`                                 | aprovado                                                                                |
+| Jest focado em `src/admin/virtual-secretary` e `src/ai/gemini.service.spec.ts` | 5 suítes e 10 testes aprovados                                                          |
 
 Próximo passo concreto: regularizar os créditos/prepay do projeto Gemini ou
 configurar uma chave de projeto com cota e repetir a consulta real. Nenhuma nova
@@ -3655,8 +3655,7 @@ Uma pergunta real de cancelamentos executou `consultar_relatorio_periodo` em 9
 ms, mas a segunda chamada ao Gemini ultrapassou o limite local anterior de 12
 segundos. Com autorização explícita, somente `GEMINI_TIMEOUT_MS` no
 `apps/api/.env` local foi alterado para 30 segundos; a chave não foi lida,
-modificada nem exibida. A API foi reiniciada e `GET /health` permaneceu em HTTP
-200.
+modificada nem exibida. A API foi reiniciada e `GET /health` permaneceu em HTTP 200.
 
 No reteste seguinte, o provedor recusou a chamada antes da execução da ferramenta.
 Um diagnóstico direto e sanitizado confirmou `429 RESOURCE_EXHAUSTED` com a
@@ -3697,20 +3696,20 @@ de privacidade.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `pnpm --filter @motoboycity/api run typecheck` | aprovado |
-| Jest focado em `src/ai` e `src/admin/virtual-secretary` | 5 suítes e 14 testes aprovados |
-| ESLint focado na API e página da Secretária | aprovado, zero warnings |
-| `pnpm --filter @motoboycity/admin-web run typecheck` | aprovado |
-| `pnpm typecheck` | aprovado nos 8 workspaces |
-| `pnpm lint` | aprovado nos 8 workspaces |
-| builds de API e admin-web | aprovados; 20 rotas no admin, incluindo `/secretaria-virtual` |
-| `GET /health` após reinício | HTTP 200 |
-| login + saudação neutra em `POST /admin/virtual-secretary/chat` | HTTP 200; Groq chamou `responder_sem_consulta` e devolveu a resposta esperada, sem enviar dados operacionais |
-| health final dos serviços | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga `react-native start` travada foi identificada por PID/command line, encerrada e substituída |
-| `pnpm audit --prod --audit-level high` | continuam 3 altos e 2 moderados transitivos preexistentes em React Native/Metro e Prisma; `groq-sdk@1.5.0` não adiciona dependências transitivas |
-| limpeza pós-validação | cache regenerável `.turbo` de aproximadamente 27 GB removido após o disco chegar a zero bytes livres; cerca de 27,2 GB liberados, sem remover código ou dados |
+| Comando / fluxo                                                 | Resultado                                                                                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm --filter @motoboycity/api run typecheck`                  | aprovado                                                                                                                                                           |
+| Jest focado em `src/ai` e `src/admin/virtual-secretary`         | 5 suítes e 14 testes aprovados                                                                                                                                     |
+| ESLint focado na API e página da Secretária                     | aprovado, zero warnings                                                                                                                                            |
+| `pnpm --filter @motoboycity/admin-web run typecheck`            | aprovado                                                                                                                                                           |
+| `pnpm typecheck`                                                | aprovado nos 8 workspaces                                                                                                                                          |
+| `pnpm lint`                                                     | aprovado nos 8 workspaces                                                                                                                                          |
+| builds de API e admin-web                                       | aprovados; 20 rotas no admin, incluindo `/secretaria-virtual`                                                                                                      |
+| `GET /health` após reinício                                     | HTTP 200                                                                                                                                                           |
+| login + saudação neutra em `POST /admin/virtual-secretary/chat` | HTTP 200; Groq chamou `responder_sem_consulta` e devolveu a resposta esperada, sem enviar dados operacionais                                                       |
+| health final dos serviços                                       | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga `react-native start` travada foi identificada por PID/command line, encerrada e substituída |
+| `pnpm audit --prod --audit-level high`                          | continuam 3 altos e 2 moderados transitivos preexistentes em React Native/Metro e Prisma; `groq-sdk@1.5.0` não adiciona dependências transitivas                   |
+| limpeza pós-validação                                           | cache regenerável `.turbo` de aproximadamente 27 GB removido após o disco chegar a zero bytes livres; cerca de 27,2 GB liberados, sem remover código ou dados      |
 
 O navegador integrado continuou indisponível (nenhuma instância conectada), mas
 o build contém o novo selo `Groq` e o admin local responde HTTP 200. A API ficou
@@ -3763,16 +3762,16 @@ Arquivos principais: `packages/validation/src/admin/create-driver.schema.ts`,
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| typecheck de types, validation, api-client, API e admin-web | aprovado |
-| ESLint focado nos arquivos alterados da API e do admin-web | aprovado |
-| Jest focado em `auth.service.spec.ts` e `admin-drivers.service.spec.ts` | 2 suítes e 40 testes aprovados |
-| build da API | aprovado |
-| build do admin-web | aprovado; rota `/entregadores` gerada |
-| E2E de `admin-drivers.e2e-spec.ts` | cobertura ampliada para guardas, criação, hash, configuração inválida e duplicidade; não executado localmente por exigir PostgreSQL e Redis isolados |
-| API/admin após reinício | `GET /health` 200, `/entregadores` 200 e as duas rotas novas sem token retornaram 401 |
-| inspeção visual automatizada | pendente; nenhuma instância de navegador estava conectada à sessão |
+| Comando / fluxo                                                         | Resultado                                                                                                                                            |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck de types, validation, api-client, API e admin-web             | aprovado                                                                                                                                             |
+| ESLint focado nos arquivos alterados da API e do admin-web              | aprovado                                                                                                                                             |
+| Jest focado em `auth.service.spec.ts` e `admin-drivers.service.spec.ts` | 2 suítes e 40 testes aprovados                                                                                                                       |
+| build da API                                                            | aprovado                                                                                                                                             |
+| build do admin-web                                                      | aprovado; rota `/entregadores` gerada                                                                                                                |
+| E2E de `admin-drivers.e2e-spec.ts`                                      | cobertura ampliada para guardas, criação, hash, configuração inválida e duplicidade; não executado localmente por exigir PostgreSQL e Redis isolados |
+| API/admin após reinício                                                 | `GET /health` 200, `/entregadores` 200 e as duas rotas novas sem token retornaram 401                                                                |
+| inspeção visual automatizada                                            | pendente; nenhuma instância de navegador estava conectada à sessão                                                                                   |
 
 Próximo passo concreto: executar esse E2E no ambiente isolado da CI e validar o
 modal visualmente com sessão administrativa antes do deploy conjunto de
@@ -3853,15 +3852,15 @@ as telas `Home`, `AvailableDeliveries`, `DriverWallet`, `Withdrawal`,
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/driver-app lint` | aprovado, zero avisos |
-| `corepack pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 5 suítes e 45 testes aprovados |
-| `gradlew.bat :app:processDebugMainManifest --offline` | aprovado; 43 tarefas, Manifest processado |
-| `git diff --check -- apps/driver-app` | aprovado; somente avisos de normalização LF/CRLF |
-| serviços locais após a validação | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga do Metro que ocupava 8081 sem responder foi confirmada pelo command line, encerrada e substituída |
-| inspeção em aparelho/emulador | não executada: `adb` não está instalado/disponível nesta máquina |
+| Comando / fluxo                                                        | Resultado                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck`             | aprovado                                                                                                                                                                 |
+| `corepack pnpm --filter @motoboycity/driver-app lint`                  | aprovado, zero avisos                                                                                                                                                    |
+| `corepack pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 5 suítes e 45 testes aprovados                                                                                                                                           |
+| `gradlew.bat :app:processDebugMainManifest --offline`                  | aprovado; 43 tarefas, Manifest processado                                                                                                                                |
+| `git diff --check -- apps/driver-app`                                  | aprovado; somente avisos de normalização LF/CRLF                                                                                                                         |
+| serviços locais após a validação                                       | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga do Metro que ocupava 8081 sem responder foi confirmada pelo command line, encerrada e substituída |
+| inspeção em aparelho/emulador                                          | não executada: `adb` não está instalado/disponível nesta máquina                                                                                                         |
 
 Os comandos pnpm precisaram rodar fora do sandbox local porque os junctions do
 `node_modules/.pnpm` retornavam `EPERM` dentro dele; a mesma instalação passou
@@ -3916,18 +3915,18 @@ compartilhado foi alterado neste recorte.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| typecheck do driver-app | aprovado |
-| lint do driver-app | aprovado, zero erros |
-| Jest `__tests__/push.test.ts --runInBand` | 1 suíte e 12 testes aprovados |
-| Jest completo do driver-app | 5 suítes e 48 testes aprovados |
-| typecheck da API | aprovado |
-| Jest focado em push + dispatch da API | 2 suítes e 65 testes aprovados |
-| `gradlew.bat :app:assembleDebug` | aprovado; APK novo gerado |
-| inspeção do Manifest mesclado | serviço RNFB concorrente ausente; serviço do app ativo e fallback Firebase em prioridade `-500` |
-| instalação `adb install -r` | aprovada no aparelho conectado, preservando dados |
-| inspeção do aparelho | `POST_NOTIFICATIONS` e `USE_FULL_SCREEN_INTENT` concedidas; canal `ofertas` em `IMPORTANCE_HIGH` |
+| Comando / fluxo                           | Resultado                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| typecheck do driver-app                   | aprovado                                                                                         |
+| lint do driver-app                        | aprovado, zero erros                                                                             |
+| Jest `__tests__/push.test.ts --runInBand` | 1 suíte e 12 testes aprovados                                                                    |
+| Jest completo do driver-app               | 5 suítes e 48 testes aprovados                                                                   |
+| typecheck da API                          | aprovado                                                                                         |
+| Jest focado em push + dispatch da API     | 2 suítes e 65 testes aprovados                                                                   |
+| `gradlew.bat :app:assembleDebug`          | aprovado; APK novo gerado                                                                        |
+| inspeção do Manifest mesclado             | serviço RNFB concorrente ausente; serviço do app ativo e fallback Firebase em prioridade `-500`  |
+| instalação `adb install -r`               | aprovada no aparelho conectado, preservando dados                                                |
+| inspeção do aparelho                      | `POST_NOTIFICATIONS` e `USE_FULL_SCREEN_INTENT` concedidas; canal `ofertas` em `IMPORTANCE_HIGH` |
 
 Limitações honestas: uma parada forçada explícita bloqueia mensagens até o
 usuário reabrir o app; o aplicativo recupera a oferta pendente nessa abertura.
@@ -3983,13 +3982,13 @@ compartilhado ou arquivo nativo foi alterado.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/driver-app lint` | aprovado, zero erros |
-| Jest focado em pós-aceite | 2 suítes e 7 testes aprovados |
-| Jest completo do driver-app | 7 suítes e 55 testes aprovados |
-| aparelho Android conectado | bundle carregado e Home inspecionada; não havia pedido ativo e nenhum pedido real foi criado/mutado apenas para produzir screenshot |
+| Comando / fluxo                                            | Resultado                                                                                                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado                                                                                                                            |
+| `corepack pnpm --filter @motoboycity/driver-app lint`      | aprovado, zero erros                                                                                                                |
+| Jest focado em pós-aceite                                  | 2 suítes e 7 testes aprovados                                                                                                       |
+| Jest completo do driver-app                                | 7 suítes e 55 testes aprovados                                                                                                      |
+| aparelho Android conectado                                 | bundle carregado e Home inspecionada; não havia pedido ativo e nenhum pedido real foi criado/mutado apenas para produzir screenshot |
 
 Lacuna preexistente encontrada na auditoria e mantida fora deste recorte: a
 rota genérica `PATCH /deliveries/:id/cancel` usa `assertCanAccess`, que também
@@ -4047,14 +4046,14 @@ contratos compartilhados não foram alterados.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/driver-app lint` | aprovado, zero erros |
-| Jest focado em `deliveryOperation.test.ts` | 1 suíte e 6 testes aprovados |
-| Jest completo do driver-app | 7 suítes e 56 testes aprovados |
-| `git diff --check` nos arquivos do recorte | aprovado; apenas avisos de normalização LF/CRLF do Git |
-| aparelho Android conectado em retrato | Home inspecionada com mapa, folha, abas e estado vazio sem sobreposição |
+| Comando / fluxo                                            | Resultado                                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado                                                                |
+| `corepack pnpm --filter @motoboycity/driver-app lint`      | aprovado, zero erros                                                    |
+| Jest focado em `deliveryOperation.test.ts`                 | 1 suíte e 6 testes aprovados                                            |
+| Jest completo do driver-app                                | 7 suítes e 56 testes aprovados                                          |
+| `git diff --check` nos arquivos do recorte                 | aprovado; apenas avisos de normalização LF/CRLF do Git                  |
+| aparelho Android conectado em retrato                      | Home inspecionada com mapa, folha, abas e estado vazio sem sobreposição |
 
 Lacuna de validação: não havia pedido livre nem histórico com dados adequados no
 aparelho, e nenhum pedido real foi criado ou alterado apenas para produzir
@@ -4096,13 +4095,13 @@ nativo de notificação foi alterado.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| typecheck do driver-app | aprovado |
-| lint do driver-app | aprovado, zero erros |
-| Jest focado no card pendente | 1 suíte e 2 testes aprovados |
-| Jest completo do driver-app | 8 suítes e 58 testes aprovados |
-| `git diff --check` no recorte | aprovado; somente aviso de normalização LF/CRLF já existente |
+| Comando / fluxo               | Resultado                                                                                                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck do driver-app       | aprovado                                                                                                                                                               |
+| lint do driver-app            | aprovado, zero erros                                                                                                                                                   |
+| Jest focado no card pendente  | 1 suíte e 2 testes aprovados                                                                                                                                           |
+| Jest completo do driver-app   | 8 suítes e 58 testes aprovados                                                                                                                                         |
+| `git diff --check` no recorte | aprovado; somente aviso de normalização LF/CRLF já existente                                                                                                           |
 | abertura no Android conectado | aplicativo carregou sem tela de erro, mas a sessão estava expirada e permaneceu no login; não foram reutilizadas credenciais nem criados pedidos reais para a inspeção |
 
 Próximo passo concreto: autenticar uma conta de homologação e disponibilizar
@@ -4136,16 +4135,243 @@ Arquivo funcional deste recorte:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/admin-web lint` | aprovado, zero erros |
-| `git diff --check` no arquivo da tela | aprovado; somente aviso de normalização LF/CRLF do Git |
-| `GET http://localhost:3001/configuracoes/operacao` | HTTP 200 com o servidor local ativo |
-| inspeção pelo navegador integrado | não executada; nenhuma sessão de navegador estava disponível no aplicativo |
+| Comando / fluxo                                           | Resultado                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                                   |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                                       |
+| `git diff --check` no arquivo da tela                     | aprovado; somente aviso de normalização LF/CRLF do Git                     |
+| `GET http://localhost:3001/configuracoes/operacao`        | HTTP 200 com o servidor local ativo                                        |
+| inspeção pelo navegador integrado                         | não executada; nenhuma sessão de navegador estava disponível no aplicativo |
 
 Lacuna de validação: o admin web não possui teste automatizado de interface e
 a sessão autenticada não pôde ser inspecionada visualmente nesta execução. O
 próximo passo concreto é abrir a rota com uma conta admin, conferir a composição
 em desktop e mobile e fazer uma alteração controlada para validar as mensagens
 de sucesso e erro sem mudar configurações de produção.
+
+## Atualização — 2026-08-23: filas recolhíveis no painel administrativo
+
+Os cards da visão **Por status** em **Filas operacionais** agora podem ser
+abertos e recolhidos individualmente pelo cabeçalho. A seta comunica o estado,
+o contador permanece visível mesmo com o conteúdo fechado e os controles usam
+`aria-expanded`/`aria-controls` para preservar a navegação assistiva.
+
+Enquanto não houver uma escolha manual do administrador, filas vazias começam
+recolhidas para reduzir a altura da coluna e uma fila abre automaticamente ao
+receber pedido. Depois de aberta ou recolhida manualmente, a escolha permanece
+durante a sessão da página. A visão **Por empresa** já possuía colapso próprio e
+foi preservada.
+
+Arquivo funcional deste recorte: `apps/admin-web/src/app/(app)/page.tsx`.
+Nenhum endpoint, payload, estado do servidor, autorização, schema Prisma,
+migration, `.env`, secret, cliente mobile ou notificação nativa foi alterado.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                           |
+| --------------------------------------------------------- | ----------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                            |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                |
+| `GET http://localhost:3001/`                              | HTTP 200 com o servidor local ativo |
+
+Lacuna de validação: o admin web ainda não possui teste automatizado de
+interface para esse painel. O próximo passo concreto é conferir com uma sessão
+admin a abertura e o recolhimento de filas vazias e cheias em desktop e em uma
+largura estreita.
+
+## Atualização — 2026-08-23: paginação dos pedidos no detalhe do cliente
+
+A seção **Pedidos do cliente** em `/clientes/:id` deixou de renderizar toda a
+lista de uma vez e passou a consumir a paginação real já disponível em
+`GET /deliveries/search`. O padrão é 10 pedidos por página, com opções de 10,
+25 ou 50, total encontrado, intervalo visível e controles **Anterior** e
+**Próxima**. A troca de status ou de tamanho da página retorna à página 1.
+
+O filtro por empresa continua obrigatório na consulta e a autorização segue no
+backend. O contrato existente de busca foi apenas reutilizado; nenhum endpoint,
+payload, validação Zod, tipo compartilhado, schema Prisma ou migration mudou.
+A consulta sem paginação usada pelos indicadores superiores foi preservada para
+não alterar os cálculos já exibidos nesta mesma tela.
+
+Arquivo funcional deste recorte:
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx`. Nenhum `.env`, secret,
+cliente mobile ou notificação nativa foi alterado.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado            |
+| --------------------------------------------------------- | -------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado             |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros |
+
+Lacuna de validação: o admin web não possui teste automatizado de interface
+para essa lista. O próximo passo concreto é conferir com uma sessão admin uma
+empresa com mais de dez pedidos, validando troca de página, tamanho e status.
+
+## Atualização — 2026-08-23: central e detalhamento de relatórios do admin
+
+A rota `/relatorios` foi transformada em uma central inspirada nas referências
+visuais enviadas, com cards amplos, ícones, títulos e descrições agrupados em
+**Visão geral**, **Pedidos e clientes**, **Entregadores** e **Financeiro**.
+Somente análises já suportadas pelo produto foram apresentadas: nenhum card de
+relatório futuro ou sem endpoint foi simulado.
+
+O relatório operacional existente foi movido para
+`/relatorios/operacional` e reorganizado em blocos com mais respiro: filtro de
+período, visão geral, composição financeira, situação dos pedidos, histórico,
+horários de pico, desempenho por cliente, ranking de entregadores e modalidades
+de serviço. Uma navegação interna facilita saltar entre as seções; os atalhos da
+central também aguardam o carregamento dos dados antes de posicionar a seção
+solicitada. O histórico detalhado continua em `/relatorios/historico`.
+
+A consulta real `GET /admin/reports/operations`, filtros, comparações, tabelas,
+gráficos e exportação existentes foram preservados. Nenhum endpoint, payload,
+autorização, validação, tipo compartilhado, schema Prisma, migration, `.env`,
+secret, cliente mobile ou notificação nativa foi alterado.
+
+Arquivos funcionais deste recorte:
+`apps/admin-web/src/app/(app)/relatorios/page.tsx` e
+`apps/admin-web/src/app/(app)/relatorios/operacional/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                                  |
+| --------------------------------------------------------- | ---------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                   |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                       |
+| `GET http://localhost:3001/relatorios`                    | HTTP 200                                                   |
+| `GET http://localhost:3001/relatorios/operacional`        | HTTP 200                                                   |
+| navegador integrado                                       | nenhuma sessão disponível para inspeção visual autenticada |
+
+Lacuna de validação: o admin web não possui testes automatizados de interface e
+as rotas não puderam ser inspecionadas em uma sessão autenticada nesta execução.
+O próximo passo concreto é abrir a central em desktop e largura estreita,
+percorrer cada card e conferir o posicionamento nas seções do relatório.
+
+## Atualização — 2026-08-23: primeiro conjunto de relatórios dedicados
+
+A central `/relatorios` agora abre páginas próprias e completas para o primeiro
+recorte priorizado:
+
+- `/relatorios/geral`: indicadores, comparação com janela anterior, composição
+  financeira e distribuição pelo estado atual;
+- `/relatorios/pedidos`: busca por número/UUID/número externo, filtros por
+  status, cliente, entregador e período, paginação real no servidor, detalhe e
+  exportação explicitamente limitada à página visível;
+- `/relatorios/tempos-sla`: média, mediana, p90 e amostras de aceite, coleta,
+  entrega e ciclo total, comparadas aos alertas operacionais configurados;
+- `/relatorios/clientes`: indicadores, busca, ordenação, paginação local,
+  ranking e CSV do recorte filtrado;
+- `/relatorios/entregadores`: indicadores, busca, ranking ordenável e CSV com
+  volume, conclusão, aceite, tempo e repasse em métricas separadas.
+
+Filtros, cabeçalhos, resumo de período, estados de carregamento/erro e paginação
+foram padronizados em componentes de `apps/admin-web/src/components/reports/`.
+A central deixou de promover o histórico antigo sem paginação e manteve
+`/relatorios/operacional` como visão consolidada para horários de pico,
+modalidades e composição financeira enquanto esses próximos relatórios ainda
+não possuem página dedicada.
+
+O endpoint de tempos já aceitava `excludeRetroactive`; o cliente compartilhado
+agora expõe e serializa o filtro. Nenhuma rota, validação ou tabela de banco foi
+criada. A tela inicia esse relatório em 30 dias para não consultar todo o
+histórico por acidente. Os limites de SLA são apresentados como referência do
+p90: o contrato atual não devolve percentual de pedidos dentro da meta e a UI
+não inventa esse dado.
+
+O ranking operacional foi corrigido no serviço para incluir a união de
+entregadores com corrida encerrada ou oferta recebida, inclusive quem recusou
+todas e não concluiu nenhuma. Antes, a etapa de agregação calculava esses casos,
+mas a resposta só criava linhas no loop de entregas concluídas. O teste unitário
+trava esse cenário. Em clientes, `cancelledCount` foi documentado e rotulado de
+forma precisa: são pedidos criados no recorte cujo estado atual é cancelado,
+não cancelamentos ocorridos necessariamente dentro da janela.
+
+O helper compartilhado de CSV agora neutraliza texto iniciado por caracteres
+de fórmula de planilha, protegendo os relatórios novos e as exportações já
+existentes contra CSV injection. Números negativos legítimos continuam
+calculáveis.
+
+Arquivos principais deste recorte:
+
+- `apps/admin-web/src/app/(app)/relatorios/{page.tsx,geral,pedidos,tempos-sla,clientes,entregadores}`;
+- `apps/admin-web/src/components/reports/{report-filter-card,report-layout,report-pagination,driver-ranking}.tsx`;
+- `apps/admin-web/src/lib/csv.ts`;
+- `apps/api/src/admin/reports/{admin-reports.service.ts,admin-reports.service.spec.ts}`;
+- `packages/api-client/src/deliveries.ts`;
+- `packages/types/src/report.ts`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                               |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                    |
+| `corepack pnpm --filter @motoboycity/api typecheck`       | aprovado                                                |
+| `corepack pnpm --filter @motoboycity/api lint`            | aprovado, zero erros                                    |
+| Jest focado em `admin-reports.service.spec.ts`            | 1 suíte e 11 testes aprovados                           |
+| typecheck/lint de `@motoboycity/api-client`               | aprovados                                               |
+| typecheck/lint de `@motoboycity/types`                    | aprovados                                               |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                                     |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                                     |
+| `git diff --check`                                        | aprovado; somente avisos de normalização LF/CRLF do Git |
+| navegador integrado                                       | indisponível; nenhuma sessão de navegador conectada     |
+| HTTP de `/relatorios` e das cinco rotas dedicadas         | HTTP 200 nas seis rotas com o servidor local ativo      |
+
+Nenhuma migration, alteração de Prisma, `.env`, secret, cliente mobile ou
+notificação nativa foi tocada. A próxima validação concreta é percorrer as cinco
+páginas com uma sessão admin em desktop e largura estreita. O próximo recorte
+funcional recomendado é separar Horários de pico, Modalidades e Financeiro em
+páginas dedicadas, seguido dos relatórios que exigem novas agregações no
+backend.
+
+## Atualização — 2026-08-23: pico, modalidades e financeiro dedicados
+
+O segundo recorte da central de relatórios foi concluído com três páginas
+próprias, todas alimentadas por dados reais já existentes:
+
+- `/relatorios/horarios-pico`: resumo da demanda, pico por hora e dia da
+  semana, gráfico, tabelas completas com médias normalizadas e CSV. A interface
+  explicita que todos os pedidos criados entram na base, inclusive os que foram
+  cancelados depois, pois também ocuparam capacidade operacional;
+- `/relatorios/modalidades`: indicadores, busca, ordenação, participação no
+  volume criado e no valor concluído e CSV por tipo de serviço. Criados e
+  concluídos continuam apresentados como coortes temporais separadas, sem uma
+  taxa de conclusão artificial;
+- `/relatorios/financeiro`: valor concluído no período, comparação com a janela
+  anterior, divisão entre repasse e receita da plataforma, reconciliação da
+  composição, CSV e posição de caixa atual.
+
+No financeiro, a posição de caixa foi deliberadamente isolada do filtro de
+datas. `GET /admin/financial/cash-position` representa o estado do instante:
+trabalho antigo ainda não faturado, faturas abertas e obrigações com
+entregadores não podem desaparecer quando o operador seleciona outro mês. O
+CSV também identifica cada linha como “período filtrado” ou “sem filtro de
+período”.
+
+A central `/relatorios` agora aponta diretamente para as três rotas. A visão
+`/relatorios/operacional` permanece disponível como consolidado legado. Nenhum
+endpoint, payload, validação, pacote compartilhado, schema Prisma, migration,
+`.env`, secret, cliente mobile ou notificação nativa foi alterado neste recorte.
+
+Arquivos funcionais deste recorte:
+
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/horarios-pico/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/modalidades/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/financeiro/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                                     | Resultado                                          |
+| ------------------------------------------------------------------- | -------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck`           | aprovado                                           |
+| `corepack pnpm --filter @motoboycity/admin-web lint`                | aprovado, zero erros                               |
+| `corepack pnpm --filter @motoboycity/admin-web run build`           | aprovado; 29 páginas geradas                       |
+| rotas das três páginas no manifesto do build                        | registradas como páginas estáticas                 |
+| `git diff --check`                                                  | bloqueado por linha em branco em arquivo financeiro concorrente |
+
+Lacuna de validação: não havia servidor local ativo nem sessão de navegador
+autenticada nesta execução. O próximo passo concreto é percorrer as três rotas
+em desktop e largura estreita com dados reais, validar o download dos CSVs e,
+depois, priorizar novos relatórios que exigem agregações específicas no backend.

@@ -26,13 +26,22 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
   return {
     async stageTimes(
       accessToken: string,
-      filters?: { from?: string; to?: string; companyId?: string; driverId?: string },
+      filters?: {
+        from?: string;
+        to?: string;
+        companyId?: string;
+        driverId?: string;
+        excludeRetroactive?: boolean;
+      },
     ): Promise<DeliveryStageTimesResult> {
       const params = new URLSearchParams();
       if (filters?.from) params.set('from', filters.from);
       if (filters?.to) params.set('to', filters.to);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
+      if (filters?.excludeRetroactive !== undefined) {
+        params.set('excludeRetroactive', String(filters.excludeRetroactive));
+      }
       const query = params.toString();
 
       const response = await fetch(`${baseUrl}/deliveries/stage-times${query ? `?${query}` : ''}`, {

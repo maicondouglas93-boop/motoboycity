@@ -102,6 +102,7 @@ export class AdminReportsService {
           select: {
             driverId: true,
             status: true,
+            driver: { include: { user: { select: { name: true, email: true } } } },
             statusHistory: {
               where: { toStatus: { in: ['ACCEPTED', 'COMPLETED'] } },
               select: { toStatus: true, changedAt: true },
@@ -111,7 +112,11 @@ export class AdminReportsService {
         }),
         this.prisma.deliveryOffer.findMany({
           where: { offeredAt: { gte: period.from, lte: period.to } },
-          select: { driverId: true, response: true },
+          select: {
+            driverId: true,
+            response: true,
+            driver: { include: { user: { select: { name: true, email: true } } } },
+          },
         }),
       ]);
 
@@ -183,6 +188,33 @@ export class AdminReportsService {
     const drivers = new Map<string, OperationsReportDriverItem>();
     const serviceTypes = new Map<string, OperationsReportServiceTypeItem>();
 
+    const driverItem = (driver: { id: string; user: { name: string; email: string } }) => {
+      const current = drivers.get(driver.id);
+      if (current) return current;
+      const next: OperationsReportDriverItem = {
+        driverId: driver.id,
+        driverName: driver.user.name,
+        driverEmail: driver.user.email,
+        completedCount: 0,
+        driverValue: 0,
+        ...emptyPerformance(),
+      };
+      drivers.set(driver.id, next);
+      return next;
+    };
+
+    /**
+     * O ranking precisa enxergar também quem só falhou, teve cancelamento após
+     * o aceite ou recusou/expirou todas as ofertas. Criá-lo apenas no loop de
+     * concluídas esconderia justamente os casos que o relatório deve revelar.
+     */
+    for (const delivery of driverDeliveries) {
+      if (delivery.driver) driverItem(delivery.driver);
+    }
+    for (const offer of driverOffers) {
+      if (offer.driver) driverItem(offer.driver);
+    }
+
     const companyItem = (company: { id: string; tradeName: string }) => {
       const current = companies.get(company.id);
       if (current) return current;
@@ -241,17 +273,9 @@ export class AdminReportsService {
       serviceType.completedTotalValue += deliveryTotalValue;
 
       if (delivery.driver) {
-        const current = drivers.get(delivery.driver.id) ?? {
-          driverId: delivery.driver.id,
-          driverName: delivery.driver.user.name,
-          driverEmail: delivery.driver.user.email,
-          completedCount: 0,
-          driverValue: 0,
-          ...emptyPerformance(),
-        };
+        const current = driverItem(delivery.driver);
         current.completedCount += 1;
         current.driverValue += deliveryDriverValue;
-        drivers.set(delivery.driver.id, current);
       }
     }
 

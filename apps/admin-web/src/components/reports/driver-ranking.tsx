@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { OperationsReportDriverItem } from '@motoboycity/types';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -97,17 +97,32 @@ export function DriverRanking({ drivers }: { drivers: OperationsReportDriverItem
           <TableRow>
             <TableHead>Entregador</TableHead>
             {COLUNAS.map((coluna) => (
-              <TableHead key={coluna.key}>
+              <TableHead
+                key={coluna.key}
+                aria-sort={
+                  sortKey === coluna.key
+                    ? coluna.key === 'averageMinutesToComplete'
+                      ? 'ascending'
+                      : 'descending'
+                    : 'none'
+                }
+              >
                 <button
                   type="button"
                   title={coluna.hint}
+                  aria-label={`Ordenar por ${coluna.label}. ${coluna.hint}`}
                   onClick={() => setSortKey(coluna.key)}
                   className={`inline-flex items-center gap-1 whitespace-nowrap ${
                     sortKey === coluna.key ? 'font-semibold text-foreground' : ''
                   }`}
                 >
                   {coluna.label}
-                  {sortKey === coluna.key && <ArrowDown className="size-3" aria-hidden="true" />}
+                  {sortKey === coluna.key &&
+                    (coluna.key === 'averageMinutesToComplete' ? (
+                      <ArrowUp className="size-3" aria-hidden="true" />
+                    ) : (
+                      <ArrowDown className="size-3" aria-hidden="true" />
+                    ))}
                 </button>
               </TableHead>
             ))}

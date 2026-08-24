@@ -111,6 +111,31 @@ describe('AdminReportsService', () => {
     expect(relatorio.peakHours.daysInPeriod).toBe(31);
   });
 
+  it('inclui no ranking quem apenas recebeu e recusou ofertas', async () => {
+    prisma.deliveryOffer.findMany.mockResolvedValue([
+      {
+        driverId: 'entregador-sem-conclusao',
+        response: 'DECLINED',
+        driver: {
+          id: 'entregador-sem-conclusao',
+          user: { name: 'Carlos', email: 'carlos@example.com' },
+        },
+      },
+    ]);
+
+    const relatorio = await service.operations({ from: '2026-08-01', to: '2026-08-31' });
+
+    expect(relatorio.drivers).toEqual([
+      expect.objectContaining({
+        driverId: 'entregador-sem-conclusao',
+        completedCount: 0,
+        offersReceived: 1,
+        offersAccepted: 0,
+        acceptanceRate: 0,
+      }),
+    ]);
+  });
+
   describe('comparação com o período anterior', () => {
     it('consulta uma janela anterior de duração idêntica, colada antes', async () => {
       await service.operations({ from: '2026-08-01', to: '2026-08-31' });

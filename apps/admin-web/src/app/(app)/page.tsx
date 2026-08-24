@@ -9,6 +9,8 @@ import {
   AlertTriangle,
   Bike,
   Building2,
+  ChevronDown,
+  ChevronRight,
   Clock3,
   Layers3,
   ListFilter,
@@ -190,6 +192,9 @@ export default function AdminDashboardPage() {
   const [mode, setMode] = useState<MapMode>('all');
   const [selection, setSelection] = useState<AdminMapSelection>(null);
   const [connected, setConnected] = useState(false);
+  const [collapsedStatusQueues, setCollapsedStatusQueues] = useState<
+    Partial<Record<DeliveryStatus, boolean>>
+  >({});
 
   const operationsQuery = useQuery({
     queryKey: ['admin', 'operations', { query, companyId, driverId, statuses }],
@@ -424,16 +429,42 @@ export default function AdminDashboardPage() {
               ) : (
                 sectionStatuses.map((status) => {
                   const orders = allOrders.filter((order) => order.status === status).slice(0, 8);
+                  const total = data?.counts[status] ?? orders.length;
+                  // Enquanto o administrador não escolhe, fila vazia fica
+                  // compacta e fila que recebeu pedido abre automaticamente.
+                  const collapsed = collapsedStatusQueues[status] ?? total === 0;
+                  const contentId = `status-queue-${status.toLowerCase()}`;
                   return (
                     <div
                       key={status}
                       className="overflow-hidden rounded-xl border border-primary/10 bg-card/70"
                     >
-                      <p className="flex items-center justify-between bg-admin-soft/55 px-3 py-2 text-xs font-semibold text-admin-deep">
-                        {statusLabel(status)}
-                        <Badge variant="secondary">{data?.counts[status] ?? 0}</Badge>
-                      </p>
-                      <div>
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        aria-controls={contentId}
+                        title={collapsed ? 'Expandir fila' : 'Recolher fila'}
+                        onClick={() =>
+                          setCollapsedStatusQueues((current) => ({
+                            ...current,
+                            [status]: !collapsed,
+                          }))
+                        }
+                        className="flex w-full items-center justify-between gap-3 bg-admin-soft/55 px-3 py-2 text-left text-xs font-semibold text-admin-deep transition-colors hover:bg-admin-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary focus-visible:outline-none"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="grid size-5 shrink-0 place-items-center rounded-md bg-card/80 text-primary ring-1 ring-inset ring-primary/10">
+                            {collapsed ? (
+                              <ChevronRight className="size-3.5" aria-hidden="true" />
+                            ) : (
+                              <ChevronDown className="size-3.5" aria-hidden="true" />
+                            )}
+                          </span>
+                          <span className="truncate">{statusLabel(status)}</span>
+                        </span>
+                        <Badge variant="secondary">{total}</Badge>
+                      </button>
+                      <div id={contentId} hidden={collapsed}>
                         {orders.map((order) => (
                           <OperationRow
                             key={order.id}
