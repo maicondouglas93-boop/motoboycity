@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AuthUser } from '@motoboycity/types';
+import { Icon, type IconName } from './Icon';
 import { colors } from '../theme/colors';
-import { authApi, driverPresenceApi } from '../lib/apiClient';
+import { authApi, driverPresenceApi, driverWalletApi } from '../lib/apiClient';
+import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { formatarDinheiro } from '../lib/format';
 import { limparSessaoNativa } from '../lib/offerSession';
 import { desativarPush } from '../lib/push';
 import { session } from '../lib/session';
@@ -15,60 +18,58 @@ type DrawerMenuProps = {
   navigation: ScreenNavigator;
 };
 
-const MENU_ITEMS: { label: string; screen: keyof RootStackParamList }[] = [
-  { label: 'Carteira', screen: 'Wallet' },
-  // Logo abaixo da carteira: e o que o motoboy abre quando quer trabalhar e
-  // nao chegou oferta nenhuma.
-  { label: 'Pedidos disponíveis', screen: 'AvailableDeliveries' },
-  { label: 'Historico de pedidos', screen: 'History' },
-  { label: 'Perfil', screen: 'Profile' },
+type MenuItem = {
+  label: string;
+  icon: IconName;
+  screen: keyof RootStackParamList;
+};
+
+/** Somente destinos que possuem operacao real no app/API. */
+const MENU_ITEMS: MenuItem[] = [
+  { label: 'Pedidos disponíveis', icon: 'clock', screen: 'AvailableDeliveries' },
+  { label: 'Histórico de pedidos', icon: 'pin', screen: 'History' },
+  { label: 'Perfil', icon: 'person', screen: 'Profile' },
 ];
 
 export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
-  const isDark = useColorScheme() === 'dark';
-  const surface = isDark ? colors.surfaceDark : colors.surface;
-  const text = isDark ? colors.textDark : colors.text;
-  const muted = isDark ? colors.mutedDark : colors.muted;
-  const border = isDark ? colors.borderDark : colors.border;
   const [profile, setProfile] = useState<AuthUser | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!visible) return;
     let mounted = true;
 
-    async function loadProfile() {
+    async function load() {
       const token = await session.getToken();
       if (!token) return;
 
-      try {
-        const current = await authApi.me(token);
-        if (mounted) setProfile(current);
-      } catch {
-        // O menu continua navegavel mesmo que a identidade nao possa ser recarregada.
-      }
+      const [currentProfile, wallet] = await Promise.all([
+        authApi.me(token).catch(() => null),
+        driverWalletApi.get(token, { limit: 1 }).catch(() => null),
+      ]);
+
+      if (!mounted) return;
+      if (currentProfile) setProfile(currentProfile);
+      if (wallet) setBalance(wallet.availableBalance);
     }
 
-    loadProfile();
+    load().catch(() => undefined);
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [visible]);
 
-  function go(screen: keyof RootStackParamList) {
+  function open(screen: keyof RootStackParamList) {
     onClose();
     navigation.navigate(screen);
   }
 
-  async function handleSignOut() {
+  async function signOut() {
     const token = await session.getToken();
     if (token) {
       await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
     }
     await stopDeliveryTracking();
-    /**
-     * ANTES de limpar a sessao: desregistrar exige o token de acesso, e sem ele
-     * o aparelho continuaria recebendo as ofertas de quem saiu — inclusive o
-     * numero do pedido na notificacao, que e informacao de outra pessoa.
-     */
     await desativarPush();
     await limparSessaoNativa();
     await session.clearToken();
@@ -76,75 +77,197 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   }
 
+  const initial = profile?.name.trim().charAt(0).toUpperCase() || '?';
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.panel, { backgroundColor: surface }]}>
-          <View style={[styles.profileRow, { borderBottomColor: border }]}>
-            <View style={styles.profileInfo}>
-              <View style={[styles.avatar, { backgroundColor: border }]}>
-                <Text>{profile?.name.charAt(0).toUpperCase() ?? '?'}</Text>
-              </View>
-              <View>
-                <Text style={[styles.profileName, { color: text }]}>
-                  {profile?.name ?? 'Entregador'}
-                </Text>
-                <Text style={[styles.profileEmail, { color: muted }]}>
-                  {profile?.email ?? 'Carregando perfil...'}
-                </Text>
-              </View>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Fechar menu"
+        style={styles.backdrop}
+        onPress={onClose}
+      />
+
+      <View style={styles.panel}>
+        <View style={styles.handle} />
+
+        <View style={styles.topActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Fechar menu"
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.actionButton}
+          >
+            <Icon name="close" size={31} color={colors.ink} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Abrir ajustes"
+            onPress={() => open('Settings')}
+            hitSlop={12}
+            style={styles.actionButton}
+          >
+            <Icon name="settings" size={29} color={colors.ink} />
+          </Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.profile}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initial}</Text>
             </View>
-            <Pressable onPress={() => go('Settings')} hitSlop={12}>
-              <Text style={[styles.settingsLabel, { color: text }]}>Ajustes</Text>
-            </Pressable>
+            <View style={styles.profileText}>
+              <Text style={styles.name} numberOfLines={1}>
+                {profile?.name ?? 'Entregador'}
+              </Text>
+              <Text style={styles.email} numberOfLines={1}>
+                {profile?.email ?? 'Carregando perfil...'}
+              </Text>
+            </View>
           </View>
 
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Abrir carteira"
+            style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+            onPress={() => open('Wallet')}
+          >
+            <View style={styles.iconBox}>
+              <Icon name="wallet" size={25} color={colors.actionSoft} />
+            </View>
+            <Text style={styles.label}>Carteira</Text>
+            {balance !== null ? (
+              <View style={styles.balancePill}>
+                <Text style={styles.balanceText}>{formatarDinheiro(balance)}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+
           {MENU_ITEMS.map((item) => (
-            <Pressable key={item.screen} style={styles.menuItem} onPress={() => go(item.screen)}>
-              <Text style={[styles.menuLabel, { color: text }]}>{item.label}</Text>
-              <Text style={[styles.chevron, { color: muted }]}>&gt;</Text>
+            <Pressable
+              key={item.screen}
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir ${item.label}`}
+              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+              onPress={() => open(item.screen)}
+            >
+              <View style={styles.iconBox}>
+                <Icon name={item.icon} size={25} color={colors.actionSoft} />
+              </View>
+              <Text style={styles.label}>{item.label}</Text>
+              <Icon name="chevron" size={21} color={colors.inkMuted} />
             </Pressable>
           ))}
 
-          <Pressable style={styles.menuItem} onPress={handleSignOut}>
-            <Text style={[styles.signOutLabel, { color: colors.danger }]}>Sair da conta</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sair da conta"
+            style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+            onPress={() => signOut().catch(() => undefined)}
+          >
+            <View style={styles.iconBox}>
+              <Icon name="logout" size={25} color={colors.actionSoft} />
+            </View>
+            <Text style={styles.label}>Sair</Text>
           </Pressable>
-        </View>
+
+          <Text style={styles.version}>Versão {DRIVER_APP_VERSION}</Text>
+        </ScrollView>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)' },
-  panel: { width: '80%', maxWidth: 320, paddingTop: 56, paddingHorizontal: 16, paddingBottom: 16 },
-  profileRow: {
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(18, 25, 31, 0.55)',
+  },
+  panel: {
+    position: 'absolute',
+    top: 92,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    elevation: 18,
+    shadowColor: '#000000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -4 },
+  },
+  handle: {
+    width: 52,
+    height: 5,
+    alignSelf: 'center',
+    marginTop: 10,
+    borderRadius: 3,
+    backgroundColor: '#d7dbe1',
+  },
+  topActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 16,
-    marginBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingTop: 10,
   },
-  profileInfo: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  actionButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingBottom: 28 },
+  profile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 24,
+  },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.actionSoftTint,
+    borderWidth: 2,
+    borderColor: '#d9e1ec',
   },
-  profileName: { fontSize: 14, fontWeight: '600' },
-  profileEmail: { fontSize: 12 },
-  settingsLabel: { fontSize: 12, fontWeight: '700' },
-  menuItem: {
+  avatarText: { color: colors.actionSoft, fontSize: 28, fontWeight: '800' },
+  profileText: { flex: 1, gap: 2 },
+  name: { color: colors.ink, fontSize: 21, fontWeight: '800' },
+  email: { color: colors.inkSoft, fontSize: 14 },
+  item: {
+    minHeight: 62,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
+    gap: 13,
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
   },
-  menuLabel: { fontSize: 15, fontWeight: '600' },
-  chevron: { fontSize: 16, fontWeight: '700' },
-  signOutLabel: { fontSize: 15, fontWeight: '700' },
+  itemPressed: { backgroundColor: colors.surfaceMuted },
+  iconBox: { width: 34, alignItems: 'center' },
+  label: { flex: 1, color: colors.inkSoft, fontSize: 17, fontWeight: '600' },
+  balancePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 9,
+    backgroundColor: colors.success,
+  },
+  balanceText: { color: colors.surface, fontSize: 15, fontWeight: '800' },
+  version: { marginTop: 28, color: '#c8cdd5', fontSize: 14, textAlign: 'center' },
 });

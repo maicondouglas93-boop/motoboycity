@@ -1,24 +1,25 @@
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View, useColorScheme } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
 import type { DeliveryOfferAddress, DeliveryOfferItem } from '@motoboycity/types';
-import { PrimaryButton } from '../components/PrimaryButton';
+import { Icon } from '../components/Icon';
+import { MapBackdrop } from '../components/MapBackdrop';
+import { RouteTimeline, type RouteStop } from '../components/RouteTimeline';
 import { colors } from '../theme/colors';
 import { deliveryOffersApi } from '../lib/apiClient';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
+import { formatarDinheiro } from '../lib/format';
 import { LocationError } from '../lib/location';
+import { dispensarOfertaNativa } from '../lib/offerSession';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'IncomingOffer'>;
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
 function formatAddress(address: DeliveryOfferAddress | null): string {
-  if (!address) return 'Destino informado no momento da entrega';
+  if (!address) return 'Endereço informado no momento da entrega';
   const structured = [
     address.street,
     address.number,
@@ -28,20 +29,61 @@ function formatAddress(address: DeliveryOfferAddress | null): string {
   ]
     .filter(Boolean)
     .join(', ');
-  if (!structured) return 'Endereco nao informado';
+  if (!structured) return 'Endereço não informado';
   return address.referenceNote ? `${structured} - Ref.: ${address.referenceNote}` : structured;
 }
 
 function paymentMethodLabel(paymentMethod: 'BILLED' | 'ONLINE'): string {
-  return paymentMethod === 'ONLINE' ? 'Pago online' : 'Faturado para a empresa';
+  return paymentMethod === 'ONLINE' ? 'Pago online' : 'Faturado';
 }
 
-function deliveryLabel(item: DeliveryOfferItem, isBatch: boolean): string {
-  return isBatch ? `Pedido #${item.displayNumber} - ${item.serviceTypeName}` : item.serviceTypeName;
+/** `00:00:28`, no mesmo formato do cronometro da referencia. */
+function formatarCronometro(segundos: number): string {
+  const seguro = Math.max(0, segundos);
+  const h = Math.floor(seguro / 3600);
+  const m = Math.floor((seguro % 3600) / 60);
+  const s = seguro % 60;
+  return [h, m, s].map((parte) => String(parte).padStart(2, '0')).join(':');
+}
+
+/**
+ * Monta as paradas do pedido para a linha do tempo.
+ *
+ * Em lote, cada pedido entra com o proprio par coleta/entrega, e o numero do
+ * pedido vira rotulo — sem isso o motoboy nao consegue dizer qual endereco e de
+ * qual pedido.
+ */
+function paradasDaOferta(deliveries: readonly DeliveryOfferItem[], emLote: boolean): RouteStop[] {
+  return deliveries.flatMap((delivery) => {
+    const prefixo = emLote ? `Pedido #${delivery.displayNumber} — ` : '';
+    const paradas: RouteStop[] = [
+      {
+        icon: 'store',
+        label: `${prefixo}Coleta`,
+        address: formatAddress(delivery.pickupAddress),
+      },
+      {
+        icon: 'flag',
+        label: `${prefixo}Entrega`,
+        address: delivery.destinationKnownAtCreation
+          ? formatAddress(delivery.dropoffAddress)
+          : 'Endereço informado no momento da entrega',
+      },
+    ];
+
+    if (delivery.requiresReturn) {
+      paradas.push({
+        icon: 'return',
+        label: 'Retorno',
+        address: formatAddress(delivery.pickupAddress),
+      });
+    }
+
+    return paradas;
+  });
 }
 
 export function IncomingOfferScreen({ navigation }: Props) {
-  const isDark = useColorScheme() === 'dark';
   const offer = useDispatchStore((state) => state.incomingOffer);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const [secondsLeft, setSecondsLeft] = useState(offer?.expiresInSeconds ?? 0);
@@ -61,6 +103,7 @@ export function IncomingOfferScreen({ navigation }: Props) {
       setSecondsLeft((current) => {
         if (current <= 1) {
           clearInterval(interval);
+          dispensarOfertaNativa(offer.offerId).catch(() => undefined);
           setIncomingOffer(null);
           return 0;
         }
@@ -83,6 +126,7 @@ export function IncomingOfferScreen({ navigation }: Props) {
     try {
       if (action === 'accept') {
         const accepted = await deliveryOffersApi.accept(token, currentOffer.offerId);
+        await dispensarOfertaNativa(currentOffer.offerId);
         setIncomingOffer(null);
         try {
           await syncDeliveryTracking(
@@ -102,128 +146,168 @@ export function IncomingOfferScreen({ navigation }: Props) {
       }
 
       await deliveryOffersApi.decline(token, currentOffer.offerId);
+      await dispensarOfertaNativa(currentOffer.offerId);
       setIncomingOffer(null);
       navigation.goBack();
     } catch (error) {
       setStatus('idle');
       Alert.alert(
-        'Oferta nao respondida',
-        error instanceof ApiError ? error.message : 'Nao foi possivel responder a esta oferta.',
+        'Oferta não respondida',
+        error instanceof ApiError ? error.message : 'Não foi possível responder a esta oferta.',
       );
     }
   }
 
-  const text = isDark ? colors.textDark : colors.text;
-  const muted = isDark ? colors.mutedDark : colors.muted;
-  const background = isDark ? colors.backgroundDark : colors.background;
-  const surface = isDark ? colors.surfaceDark : colors.surface;
-  const border = isDark ? colors.borderDark : colors.border;
   const busy = status !== 'idle';
-  const isBatch = offer.deliveries.length > 1;
+  const emLote = offer.deliveries.length > 1;
+  const valorACalcular = offer.driverValue === null;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: background }]}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.countdown, { color: colors.primary }]}>{secondsLeft}s</Text>
-        <Text style={[styles.title, { color: text }]}>
-          {isBatch
-            ? `Novo lote - ${offer.deliveries.length} pedidos`
-            : `Novo pedido #${offer.displayNumber}`}
-        </Text>
-        <Text style={[styles.company, { color: muted }]}>{offer.companyName}</Text>
+    <View style={styles.tela}>
+      <MapBackdrop />
+      <View style={styles.cortina} />
 
-        <View style={[styles.summaryCard, { backgroundColor: surface, borderColor: border }]}>
-          <Text style={[styles.summaryLabel, { color: muted }]}>Forma de pagamento</Text>
-          <Text style={[styles.summaryValue, { color: text }]}>
-            {paymentMethodLabel(offer.paymentMethod)}
-          </Text>
-          <Text style={[styles.summaryLabel, { color: muted }]}>Valor total</Text>
-          <Text style={[styles.summaryValue, { color: text }]}>
-            {offer.totalValue === null
-              ? 'A calcular na entrega'
-              : currencyFormatter.format(offer.totalValue)}
-          </Text>
-          <Text style={[styles.summaryLabel, { color: muted }]}>Comissao da plataforma</Text>
-          <Text style={[styles.summaryValue, { color: text }]}>
-            {offer.platformValue === null
-              ? 'A calcular na entrega'
-              : currencyFormatter.format(offer.platformValue)}
-          </Text>
-          <Text style={[styles.earningsLabel, { color: colors.success }]}>Voce recebe</Text>
-          <Text style={[styles.earningsValue, { color: colors.success }]}>
-            {offer.driverValue === null
-              ? 'A calcular na entrega'
-              : currencyFormatter.format(offer.driverValue)}
-          </Text>
-          {offer.distanceKm !== null && (
-            <Text style={[styles.distance, { color: muted }]}>
-              Distancia total: {offer.distanceKm.toFixed(1)} km
-            </Text>
-          )}
-        </View>
-
-        <Text style={[styles.sectionTitle, { color: text }]}>Rota da oferta</Text>
-        {offer.deliveries.map((delivery) => (
-          <View key={delivery.deliveryId} style={[styles.deliveryCard, { borderColor: border }]}>
-            <Text style={[styles.deliveryTitle, { color: text }]}>
-              {deliveryLabel(delivery, isBatch)}
-            </Text>
-            <Text style={[styles.addressLabel, { color: muted }]}>Coleta</Text>
-            <Text style={[styles.address, { color: text }]}>
-              {formatAddress(delivery.pickupAddress)}
-            </Text>
-            <Text style={[styles.addressLabel, { color: muted }]}>Destino</Text>
-            <Text style={[styles.address, { color: text }]}>
-              {delivery.destinationKnownAtCreation
-                ? formatAddress(delivery.dropoffAddress)
-                : 'Destino informado no momento da entrega'}
-            </Text>
-            {delivery.requiresReturn && (
-              <Text style={[styles.returnNotice, { color: colors.warning }]}>
-                Exige retorno a coleta
+      <View style={styles.centro}>
+        <View style={styles.cartao}>
+          <View style={styles.topo}>
+            {valorACalcular ? (
+              <Text style={styles.avisoValor}>
+                O valor será calculado conforme as entregas ocorrerem.
               </Text>
+            ) : (
+              <View style={styles.blocoValor}>
+                <Text style={styles.rotuloValor}>Você recebe</Text>
+                <Text style={styles.valor}>{formatarDinheiro(offer.driverValue)}</Text>
+              </View>
             )}
-          </View>
-        ))}
-      </ScrollView>
 
-      <View style={styles.actions}>
-        <PrimaryButton
-          label={status === 'declining' ? 'Recusando...' : 'Recusar'}
-          variant="outline"
-          onPress={busy ? undefined : () => respond('decline')}
-        />
-        <PrimaryButton
-          label={status === 'accepting' ? 'Aceitando...' : 'Aceitar'}
-          onPress={busy ? undefined : () => respond('accept')}
-        />
+            <View style={styles.quantidade}>
+              <Icon name="pin" size={24} color={colors.link} />
+              <Text style={styles.quantidadeTexto}>
+                {offer.deliveries.length} {offer.deliveries.length === 1 ? 'entrega' : 'entregas'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.identificacao}>
+            <Icon name="person" size={22} color={colors.actionSoft} />
+            <Text style={styles.empresa} numberOfLines={1}>
+              {offer.companyName}
+            </Text>
+            <Text style={styles.cronometro}>{formatarCronometro(secondsLeft)}</Text>
+          </View>
+
+          <View style={styles.separador} />
+
+          <ScrollView style={styles.rota} showsVerticalScrollIndicator={false}>
+            <RouteTimeline stops={paradasDaOferta(offer.deliveries, emLote)} />
+          </ScrollView>
+
+          <View style={styles.separador} />
+
+          <View style={styles.rodape}>
+            <View style={styles.selo}>
+              <Text style={styles.seloTexto}>
+                {paymentMethodLabel(offer.paymentMethod)}
+                {offer.distanceKm !== null ? ` · ${offer.distanceKm.toFixed(1)} km` : ''}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.acoes}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Recusar oferta"
+              disabled={busy}
+              onPress={() => respond('decline')}
+              style={[styles.botao, styles.botaoRecusar, busy && styles.botaoOcupado]}
+            >
+              <Icon name="close" size={40} color={colors.surface} />
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Aceitar oferta"
+              disabled={busy}
+              onPress={() => respond('accept')}
+              style={[styles.botao, styles.botaoAceitar, busy && styles.botaoOcupado]}
+            >
+              <Icon name="check" size={40} color={colors.surface} />
+            </Pressable>
+          </View>
+        </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 20, gap: 12 },
-  countdown: { fontSize: 36, fontWeight: '700', textAlign: 'center' },
-  title: { fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  company: { fontSize: 14, textAlign: 'center' },
-  summaryCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    padding: 16,
-    gap: 3,
+  tela: { flex: 1, backgroundColor: colors.mapBackdrop },
+  cortina: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  summaryLabel: { fontSize: 12, marginTop: 4 },
-  summaryValue: { fontSize: 15, fontWeight: '600' },
-  earningsLabel: { fontSize: 13, fontWeight: '700', marginTop: 8 },
-  earningsValue: { fontSize: 24, fontWeight: '700' },
-  distance: { fontSize: 12, marginTop: 4 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginTop: 4 },
-  deliveryCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 14, gap: 4 },
-  deliveryTitle: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  addressLabel: { fontSize: 12, marginTop: 4 },
-  address: { fontSize: 14, lineHeight: 19 },
-  returnNotice: { fontSize: 12, fontWeight: '700', marginTop: 6 },
-  actions: { padding: 16, gap: 12 },
+  centro: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
+  cartao: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingTop: 16,
+    paddingBottom: 18,
+    maxHeight: '82%',
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  topo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+  },
+  avisoValor: { flex: 1, fontSize: 15, lineHeight: 21, fontWeight: '700', color: colors.danger },
+  blocoValor: { flex: 1 },
+  rotuloValor: { fontSize: 13, fontWeight: '700', color: colors.inkMuted },
+  valor: { fontSize: 28, fontWeight: '700', color: colors.success },
+  quantidade: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  quantidadeTexto: { fontSize: 21, fontWeight: '700', color: colors.ink },
+  identificacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
+  empresa: { flex: 1, fontSize: 20, fontWeight: '700', color: colors.ink },
+  cronometro: { fontSize: 19, fontWeight: '600', color: colors.inkSoft },
+  separador: { height: 1, backgroundColor: colors.divider },
+  rota: { paddingHorizontal: 16, paddingTop: 16 },
+  rodape: { paddingHorizontal: 16, paddingTop: 14 },
+  selo: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  seloTexto: { fontSize: 16, color: colors.inkSoft },
+  acoes: { flexDirection: 'row', justifyContent: 'center', gap: 56, paddingTop: 20 },
+  botao: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botaoRecusar: { backgroundColor: colors.danger },
+  botaoAceitar: { backgroundColor: colors.success },
+  botaoOcupado: { opacity: 0.5 },
 });

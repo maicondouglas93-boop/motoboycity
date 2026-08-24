@@ -1,39 +1,108 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
+  Linking,
+  Platform,
   Pressable,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
+import type { AvailableDeliveryItem } from '@motoboycity/types';
+import { ActiveToggle } from '../components/ActiveToggle';
+import { BottomSheet } from '../components/BottomSheet';
+import { DeliveryCard } from '../components/DeliveryCard';
 import { DrawerMenu } from '../components/DrawerMenu';
-import { EmptyState } from '../components/EmptyState';
+import { EmptyIconCircle, Icon } from '../components/Icon';
+import { MapBackdrop } from '../components/MapBackdrop';
+import { PendingDeliveryCard } from '../components/PendingDeliveryCard';
+import type { RouteStop } from '../components/RouteTimeline';
+import { SegmentedTabs } from '../components/SegmentedTabs';
 import { colors } from '../theme/colors';
 import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
-import { getActiveDeliveries } from '../lib/activeDeliveries';
+import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
+import { findNewlyAcceptedDelivery, getActiveDeliveries } from '../lib/activeDeliveries';
+import { deliveryPaymentLabel, formatDeliveryAddress } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
 import {
-  captureCurrentLocation,
+  capturePresenceLocation,
   ensureBackgroundTrackingPermission,
   LocationError,
 } from '../lib/location';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { session } from '../lib/session';
 import { API_BASE_URL } from '../lib/config';
-import { salvarSessaoNativa } from '../lib/offerSession';
+import {
+  abrirAjusteDeTelaCheia,
+  consultarApresentacaoNativa,
+  dispensarOfertaNativa,
+  salvarSessaoNativa,
+} from '../lib/offerSession';
 import { ativarPush } from '../lib/push';
 import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+
+type Aba = 'andamento' | 'pendentes';
+
+const ABAS = [
+  { value: 'andamento' as const, label: 'Em Andamento' },
+  { value: 'pendentes' as const, label: 'Pendentes' },
+];
+
+type NotificationReadiness = 'ready' | 'unavailable' | 'disabled' | 'full-screen-disabled';
+
+async function verificarNotificacaoObrigatoria(): Promise<NotificationReadiness> {
+  const pushAtivo = await ativarPush().catch(() => false);
+  if (!pushAtivo) return 'unavailable';
+  if (Platform.OS !== 'android') return 'ready';
+
+  const apresentacao = await consultarApresentacaoNativa();
+  if (!apresentacao?.notificationsEnabled) return 'disabled';
+  if (apresentacao.fullScreenNeedsManualGrant && !apresentacao.fullScreenGranted) {
+    return 'full-screen-disabled';
+  }
+  return 'ready';
+}
+
+function mensagemNotificacaoObrigatoria(status: NotificationReadiness): string {
+  if (status === 'full-screen-disabled') {
+    return 'Autorize a tela cheia para as ofertas aparecerem mesmo com o celular bloqueado.';
+  }
+  if (status === 'disabled') {
+    return 'Ative as notificacoes e mantenha o canal Ofertas de entrega em prioridade alta.';
+  }
+  return 'Nao foi possivel ativar e registrar as notificacoes deste aparelho.';
+}
+
+function alertarNotificacaoObrigatoria(status: NotificationReadiness) {
+  const abrirAjustes = () => {
+    if (status === 'full-screen-disabled') {
+      abrirAjusteDeTelaCheia().catch(() => undefined);
+      return;
+    }
+    Linking.openSettings().catch(() => undefined);
+  };
+
+  Alert.alert(
+    'Notificacoes obrigatorias',
+    `${mensagemNotificacaoObrigatoria(status)} Voce so pode ficar online depois de liberar esse acesso.`,
+    [
+      { text: 'Agora nao', style: 'cancel' },
+      { text: 'Abrir ajustes', onPress: abrirAjustes },
+    ],
+  );
+}
 
 function deliveryStatusLabel(status: string): string {
   switch (status) {
@@ -43,17 +112,61 @@ function deliveryStatusLabel(status: string): string {
       return 'Em entrega';
     case 'DELIVERED':
       return 'Retorno pendente';
+    case 'FAILED':
+      return 'Devolução pendente';
     default:
       return status;
   }
 }
 
+function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
+  const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
+  const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
+  const stops: RouteStop[] = [
+    {
+      icon: 'store',
+      label: 'Coleta',
+      address: formatDeliveryAddress(pickup),
+    },
+    {
+      icon: 'flag',
+      label: 'Entrega',
+      address: delivery.destinationKnownAtCreation
+        ? formatDeliveryAddress(dropoff)
+        : 'Endereço definido no momento da entrega',
+    },
+  ];
+
+  if (delivery.requiresReturn) {
+    stops.push({
+      icon: 'return',
+      label: 'Retorno',
+      address: formatDeliveryAddress(pickup),
+    });
+  }
+
+  return stops;
+}
+
 export function HomeScreen({ navigation }: Props) {
-  const isDark = useColorScheme() === 'dark';
+  const isFocused = useIsFocused();
+  const acceptingPendingRef = useRef(false);
+  const pendingListVersionRef = useRef(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [presenceLoading, setPresenceLoading] = useState(true);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [aba, setAba] = useState<Aba>('andamento');
+  const [pendentes, setPendentes] = useState<AvailableDeliveryItem[]>([]);
+  const [carregandoPendentes, setCarregandoPendentes] = useState(false);
+  /**
+   * Quanto da tela a folha esta cobrindo. Vem da propria folha ao arrastar, e
+   * serve para o mapa reposicionar o ponto azul na parte que sobrou a vista.
+   */
+  const [fracaoDaFolha, setFracaoDaFolha] = useState(0.52);
+  const [pendentesError, setPendentesError] = useState<string | null>(null);
+  const [aceitandoPendenteId, setAceitandoPendenteId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const availability = useDispatchStore((state) => state.availability);
   const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
@@ -62,11 +175,6 @@ export function HomeScreen({ navigation }: Props) {
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
-  const text = isDark ? colors.textDark : colors.text;
-  const muted = isDark ? colors.mutedDark : colors.muted;
-  const background = isDark ? colors.backgroundDark : colors.background;
-  const surface = isDark ? colors.surfaceDark : colors.surface;
-  const border = isDark ? colors.borderDark : colors.border;
   const isAvailable = availability === 'AVAILABLE';
 
   async function syncPresence(token: string) {
@@ -83,6 +191,109 @@ export function HomeScreen({ navigation }: Props) {
     }
   }
 
+  async function retirarDaFilaSemNotificacao(
+    token: string,
+    readiness: NotificationReadiness,
+    mostrarAlerta: boolean,
+  ) {
+    if (readiness === 'ready' || useDispatchStore.getState().availability !== 'AVAILABLE') {
+      return;
+    }
+
+    await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
+    await stopDeliveryTracking().catch(() => undefined);
+    setPresence('UNAVAILABLE', null);
+    setPresenceError(mensagemNotificacaoObrigatoria(readiness));
+    if (mostrarAlerta) alertarNotificacaoObrigatoria(readiness);
+  }
+
+  const carregarPendentes = useCallback(async (silencioso = false) => {
+    if (acceptingPendingRef.current) return;
+
+    const listVersion = pendingListVersionRef.current;
+    const token = await session.getToken();
+    if (!token) return;
+    if (!silencioso) setCarregandoPendentes(true);
+    try {
+      const availableDeliveries = await deliveryOffersApi.listAvailable(token);
+      if (listVersion === pendingListVersionRef.current && !acceptingPendingRef.current) {
+        setPendentes(availableDeliveries);
+        setPendentesError(null);
+      }
+    } catch (error) {
+      if (listVersion === pendingListVersionRef.current && !acceptingPendingRef.current) {
+        setPendentesError(
+          error instanceof ApiError
+            ? error.message
+            : 'Não foi possível carregar os pedidos disponíveis.',
+        );
+      }
+    } finally {
+      if (!silencioso) setCarregandoPendentes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (aba !== 'pendentes' || !isFocused) return undefined;
+    carregarPendentes().catch(() => undefined);
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') {
+        carregarPendentes(true).catch(() => undefined);
+      }
+    }, 10_000);
+
+    return () => clearInterval(timer);
+  }, [aba, carregarPendentes, isFocused]);
+
+  async function aceitarPendente(delivery: AvailableDeliveryItem) {
+    if (acceptingPendingRef.current) return;
+
+    const token = await session.getToken();
+    if (!token) {
+      Alert.alert('Sessão expirada', 'Entre novamente para aceitar este pedido.');
+      return;
+    }
+
+    acceptingPendingRef.current = true;
+    pendingListVersionRef.current += 1;
+    setAceitandoPendenteId(delivery.id);
+    try {
+      const result = await deliveryOffersApi.claim(token, delivery.id);
+
+      // Ao assumir uma corrida, a vitrine inteira deixa de ser elegível para
+      // este motoboy. Limpar todos evita oferecer visualmente um segundo pedido.
+      setPendentes([]);
+
+      const deliveries = await getActiveDeliveries(token).catch(() => null);
+      if (deliveries) setActiveDeliveries(deliveries);
+      const trackingIds = deliveries?.map((item) => item.id) ?? [result.deliveryId];
+      syncDeliveryTracking(token, trackingIds)
+        .then(() => setTrackingError(null))
+        .catch((error: unknown) =>
+          setTrackingError(
+            error instanceof LocationError
+              ? error.message
+              : 'Não foi possível ativar o rastreamento da entrega aceita.',
+          ),
+        );
+
+      setAba('andamento');
+      navigation.navigate('DeliveryOperation', { deliveryId: result.deliveryId });
+    } catch (error) {
+      Alert.alert(
+        'Pedido indisponível',
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível aceitar este pedido. Tente novamente.',
+      );
+      acceptingPendingRef.current = false;
+      await carregarPendentes(true);
+    } finally {
+      acceptingPendingRef.current = false;
+      setAceitandoPendenteId(null);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -93,8 +304,25 @@ export function HomeScreen({ navigation }: Props) {
         return;
       }
 
-      const presence = await syncPresence(token);
+      /**
+       * A sessao nativa precisa existir antes de qualquer oferta: sao os
+       * botoes Android que respondem quando o React Native esta suspenso.
+       */
+      await salvarSessaoNativa(API_BASE_URL, token);
+      const notificationReadiness = await verificarNotificacaoObrigatoria();
+
+      let presence = await syncPresence(token);
       if (cancelled) return;
+
+      if (presence?.availability === 'AVAILABLE' && notificationReadiness !== 'ready') {
+        presence = await driverPresenceApi
+          .set(token, { availability: 'UNAVAILABLE' })
+          .catch(() => null);
+        await stopDeliveryTracking().catch(() => undefined);
+        setPresence('UNAVAILABLE', null);
+        setPresenceError(mensagemNotificacaoObrigatoria(notificationReadiness));
+        alertarNotificacaoObrigatoria(notificationReadiness);
+      }
 
       try {
         const deliveries = await getActiveDeliveries(token);
@@ -104,7 +332,7 @@ export function HomeScreen({ navigation }: Props) {
             await syncDeliveryTracking(
               token,
               deliveries.map((delivery) => delivery.id),
-              presence?.availability === 'AVAILABLE',
+              presence?.availability === 'AVAILABLE' && notificationReadiness === 'ready',
             );
             if (!cancelled) setTrackingError(null);
           } catch (error) {
@@ -116,9 +344,6 @@ export function HomeScreen({ navigation }: Props) {
               );
             }
           }
-          if (cancelled) return;
-          const current = deliveries[0];
-          if (current) navigation.navigate('DeliveryOperation', { deliveryId: current.id });
         }
       } catch {
         // A disponibilidade continua utilizavel; a proxima abertura recarrega as entregas ativas.
@@ -126,38 +351,34 @@ export function HomeScreen({ navigation }: Props) {
 
       if (cancelled) return;
 
-      /**
-       * Push junto do socket, e nao no login: o token do FCM pode trocar entre
-       * uma sessao e outra, e reregistrar a cada abertura e barato — o servidor
-       * faz upsert.
-       *
-       * Sem `await` de proposito. Pedir permissao abre um dialogo do sistema, e
-       * segurar a conexao do socket atras dele deixaria o motoboy sem fila ao
-       * vivo enquanto decide.
-       */
-      ativarPush().catch(() => undefined);
-
-      /**
-       * Espelha a sessao para o lado nativo, onde vivem os botoes de aceitar e
-       * recusar da notificacao. Sem isto eles apareceriam e nao fariam nada.
-       */
-      salvarSessaoNativa(API_BASE_URL, token).catch(() => undefined);
-
       connectDriverSocket(token, {
         onConnected: () => {
-          syncPresence(token).catch(() => undefined);
+          verificarNotificacaoObrigatoria()
+            .then(async (readiness) => {
+              await syncPresence(token);
+              await retirarDaFilaSemNotificacao(token, readiness, false);
+            })
+            .catch(() => undefined);
         },
         onOffer: (offer) => {
+          /**
+           * Em segundo plano, o FCM abre o cartão Android nativo. Navegar a
+           * pilha React ao mesmo tempo deixaria outra oferta escondida por
+           * baixo e permitiria uma segunda resposta ao desbloquear.
+           */
+          if (AppState.currentState !== 'active') return;
           setIncomingOffer(offer);
           navigation.navigate('IncomingOffer');
         },
         onOfferExpired: (offerId) => {
           if (useDispatchStore.getState().incomingOffer?.offerId === offerId) {
+            dispensarOfertaNativa(offerId).catch(() => undefined);
             setIncomingOffer(null);
           }
         },
         onOfferCancelled: (offerId) => {
           if (useDispatchStore.getState().incomingOffer?.offerId === offerId) {
+            dispensarOfertaNativa(offerId).catch(() => undefined);
             setIncomingOffer(null);
           }
         },
@@ -176,6 +397,8 @@ export function HomeScreen({ navigation }: Props) {
         },
         onAccountStatusChanged: (accountStatus) => {
           if (accountStatus === 'ACTIVE') return;
+          const offerId = useDispatchStore.getState().incomingOffer?.offerId;
+          if (offerId) dispensarOfertaNativa(offerId).catch(() => undefined);
           setIncomingOffer(null);
           setPresence('UNAVAILABLE', null);
           stopDeliveryTracking().catch(() => undefined);
@@ -222,7 +445,42 @@ export function HomeScreen({ navigation }: Props) {
       if (estado !== 'active') return;
       session
         .getToken()
-        .then((atual) => (atual ? mostrarOfertaPendente(atual) : undefined))
+        .then(async (atual) => {
+          if (!atual) return;
+          /**
+           * O aceite feito pela tela nativa acontece fora do React Native. Ao
+           * fechar aquela Activity, a Home ja montada precisa descobrir o novo
+           * pedido; sem esta consulta ela continuava vazia ate um refresh.
+           */
+          const previousDeliveryIds = new Set(
+            useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+          );
+          const deliveries = await getActiveDeliveries(atual).catch(() => null);
+          if (deliveries && !cancelled) {
+            setActiveDeliveries(deliveries);
+            await syncDeliveryTracking(
+              atual,
+              deliveries.map((delivery) => delivery.id),
+              useDispatchStore.getState().availability === 'AVAILABLE',
+            )
+              .then(() => setTrackingError(null))
+              .catch((error: unknown) =>
+                setTrackingError(
+                  error instanceof LocationError
+                    ? error.message
+                    : 'Não foi possível atualizar o rastreamento das entregas ativas.',
+                ),
+              );
+
+            const newlyAccepted = findNewlyAcceptedDelivery(deliveries, previousDeliveryIds);
+            if (newlyAccepted) {
+              navigation.navigate('DeliveryOperation', { deliveryId: newlyAccepted.id });
+            }
+          }
+          await mostrarOfertaPendente(atual);
+          const readiness = await verificarNotificacaoObrigatoria();
+          await retirarDaFilaSemNotificacao(atual, readiness, true);
+        })
         .catch(() => undefined);
     });
 
@@ -276,8 +534,15 @@ export function HomeScreen({ navigation }: Props) {
         return;
       }
 
+      const notificationReadiness = await verificarNotificacaoObrigatoria();
+      if (notificationReadiness !== 'ready') {
+        setPresenceError(mensagemNotificacaoObrigatoria(notificationReadiness));
+        alertarNotificacaoObrigatoria(notificationReadiness);
+        return;
+      }
+
       await ensureBackgroundTrackingPermission();
-      const location = await captureCurrentLocation();
+      const location = await capturePresenceLocation();
       const result = await driverPresenceApi.set(token, {
         availability: 'AVAILABLE',
         location,
@@ -302,7 +567,7 @@ export function HomeScreen({ navigation }: Props) {
       await syncPresence(token);
       Alert.alert(
         'Disponibilidade nao atualizada',
-        error instanceof ApiError
+        error instanceof ApiError || error instanceof LocationError
           ? error.message
           : 'Nao foi possivel atualizar sua disponibilidade. Tente novamente.',
       );
@@ -311,163 +576,272 @@ export function HomeScreen({ navigation }: Props) {
     }
   }
 
+  function reativarRastreamento() {
+    session.getToken().then((token) => {
+      if (!token) return;
+      syncDeliveryTracking(
+        token,
+        useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+        useDispatchStore.getState().availability === 'AVAILABLE',
+      )
+        .then(() => setTrackingError(null))
+        .catch((error: unknown) =>
+          setTrackingError(
+            error instanceof LocationError
+              ? error.message
+              : 'Não foi possível ativar o rastreamento agora.',
+          ),
+        );
+    });
+  }
+
+  async function refreshCurrentTab() {
+    const token = await session.getToken();
+    if (!token) return;
+
+    setRefreshing(true);
+    try {
+      if (aba === 'pendentes') {
+        await carregarPendentes();
+        return;
+      }
+      setActiveDeliveries(await getActiveDeliveries(token));
+    } catch {
+      // Os avisos persistentes acima continuam sendo a fonte de erro da tela.
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: background }]} edges={['top']}>
-      <View style={styles.header}>
-        <Pressable onPress={() => setDrawerVisible(true)} hitSlop={12}>
-          <Text style={[styles.menuIcon, { color: text }]}>Menu</Text>
-        </Pressable>
-        <View style={styles.connection}>
-          <View
-            style={[
-              styles.connectionDot,
-              { backgroundColor: socketConnected ? colors.success : colors.warning },
-            ]}
-          />
-          <Text style={[styles.connectionText, { color: muted }]}>
-            {socketConnected ? 'Conectado' : 'Reconectando'}
-          </Text>
-        </View>
-      </View>
+    <View style={styles.tela}>
+      <MapBackdrop interactive sheetFraction={fracaoDaFolha} />
 
-      <View style={styles.content}>
-        <View style={[styles.availabilityCard, { backgroundColor: surface, borderColor: border }]}>
-          <View style={styles.availabilityText}>
-            <Text style={[styles.availabilityTitle, { color: text }]}>
-              {isAvailable ? 'Voce esta online' : 'Voce esta offline'}
-            </Text>
-            <Text style={[styles.availabilityDescription, { color: muted }]}>
-              {isAvailable
-                ? 'Disponivel para receber novas ofertas.'
-                : 'Voce nao recebera novas ofertas ate ficar online.'}
-            </Text>
-          </View>
-          <Switch
-            value={isAvailable}
-            onValueChange={handleToggleAvailability}
-            disabled={presenceLoading}
-          />
-        </View>
-
-        {presenceError && (
+      <SafeAreaView style={styles.sobreposicao} edges={['top']} pointerEvents="box-none">
+        <View style={styles.barraSuperior} pointerEvents="box-none">
           <Pressable
-            style={[styles.errorCard, { borderColor: colors.danger }]}
-            onPress={refreshPresence}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir menu"
+            style={styles.botaoMenu}
+            onPress={() => setDrawerVisible(true)}
+            hitSlop={10}
           >
-            <Text style={styles.errorText}>{presenceError}</Text>
-            <Text style={styles.retryText}>Tocar para tentar novamente</Text>
+            <Icon name="menu" size={24} color={colors.ink} />
           </Pressable>
-        )}
 
-        {trackingError && (
-          <Pressable
-            style={[styles.errorCard, { borderColor: colors.warning }]}
-            onPress={() => {
-              session.getToken().then((token) => {
-                if (!token) return;
-                syncDeliveryTracking(
-                  token,
-                  useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
-                  useDispatchStore.getState().availability === 'AVAILABLE',
-                )
-                  .then(() => setTrackingError(null))
-                  .catch((error: unknown) =>
-                    setTrackingError(
-                      error instanceof LocationError
-                        ? error.message
-                        : 'Não foi possível ativar o rastreamento agora.',
-                    ),
-                  );
-              });
-            }}
-          >
-            <Text style={[styles.errorText, { color: colors.warning }]}>{trackingError}</Text>
-            <Text style={styles.retryText}>Tocar para ativar o rastreamento</Text>
-          </Pressable>
-        )}
-
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: text }]}>Entregas em andamento</Text>
-          {presenceLoading && (
-            <Text style={[styles.loadingText, { color: muted }]}>Sincronizando...</Text>
+          {!socketConnected && (
+            <View style={styles.avisoConexao}>
+              <Text style={styles.avisoConexaoTexto}>Reconectando...</Text>
+            </View>
           )}
         </View>
+      </SafeAreaView>
 
-        {activeDeliveries.length > 0 ? (
-          activeDeliveries.map((delivery) => (
-            <Pressable
-              key={delivery.id}
-              style={[styles.deliveryCard, { backgroundColor: surface, borderColor: border }]}
-              onPress={() => navigation.navigate('DeliveryOperation', { deliveryId: delivery.id })}
-            >
-              <Text style={[styles.deliveryNumber, { color: text }]}>
-                Pedido #{delivery.displayNumber}
-              </Text>
-              <Text style={[styles.deliveryStatus, { color: colors.primary }]}>
-                {deliveryStatusLabel(delivery.status)}
-              </Text>
-              <Text style={[styles.deliveryCompany, { color: muted }]}>{delivery.companyName}</Text>
+      <BottomSheet draggable onPositionChange={setFracaoDaFolha}>
+        <View style={styles.conteudo}>
+          <SegmentedTabs options={ABAS} value={aba} onChange={setAba} />
+
+          {aba === 'andamento' && (
+            <View style={styles.areaToggle}>
+              <ActiveToggle
+                value={isAvailable}
+                onChange={handleToggleAvailability}
+                disabled={presenceLoading}
+              />
+            </View>
+          )}
+
+          {presenceError && (
+            <Pressable style={styles.avisoErro} onPress={refreshPresence}>
+              <Text style={styles.avisoErroTexto}>{presenceError}</Text>
+              <Text style={styles.avisoAcao}>Tocar para tentar novamente</Text>
             </Pressable>
-          ))
-        ) : (
-          <EmptyState
-            message={
-              isAvailable
-                ? 'Aguardando uma nova oferta'
-                : 'Fique online quando estiver pronto para receber ofertas'
+          )}
+
+          {trackingError && (
+            <Pressable style={styles.avisoAtencao} onPress={reativarRastreamento}>
+              <Text style={styles.avisoAtencaoTexto}>{trackingError}</Text>
+              <Text style={styles.avisoAcao}>Tocar para ativar o rastreamento</Text>
+            </Pressable>
+          )}
+
+          {aba === 'pendentes' && pendentesError ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar pedidos disponíveis novamente"
+              style={styles.avisoErro}
+              onPress={() => carregarPendentes().catch(() => undefined)}
+            >
+              <Text style={styles.avisoErroTexto}>{pendentesError}</Text>
+              <Text style={styles.avisoAcao}>Tocar para tentar novamente</Text>
+            </Pressable>
+          ) : null}
+
+          <ScrollView
+            style={styles.lista}
+            contentContainerStyle={[
+              styles.listaConteudo,
+              aba === 'pendentes' && styles.listaPendentes,
+            ]}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => refreshCurrentTab().catch(() => undefined)}
+                tintColor={colors.actionSoft}
+                colors={[colors.actionSoft]}
+              />
             }
-          />
-        )}
-      </View>
+          >
+            {aba === 'andamento' ? (
+              activeDeliveries.length > 0 ? (
+                activeDeliveries.map((delivery) => (
+                  <DeliveryCard
+                    key={delivery.id}
+                    time={formatarHora(delivery.statusChangedAt)}
+                    companyName={delivery.companyName}
+                    statusLabel={`${deliveryStatusLabel(delivery.status)} · ${deliveryPaymentLabel(delivery.paymentMethod)}`}
+                    distanceLabel={
+                      delivery.distanceKm === null
+                        ? 'Distância a calcular'
+                        : formatarDistancia(delivery.distanceKm)
+                    }
+                    amountLabel={
+                      delivery.driverValue === null
+                        ? 'A calcular'
+                        : formatarDinheiro(delivery.driverValue)
+                    }
+                    onPress={() =>
+                      navigation.navigate('DeliveryOperation', { deliveryId: delivery.id })
+                    }
+                  />
+                ))
+              ) : (
+                <Vazio
+                  mensagem={
+                    isAvailable
+                      ? 'Aguardando uma nova oferta'
+                      : 'Fique ativo quando estiver pronto para receber ofertas'
+                  }
+                />
+              )
+            ) : pendentes.length > 0 ? (
+              pendentes.map((delivery) => (
+                <PendingDeliveryCard
+                  key={delivery.id}
+                  displayNumber={delivery.displayNumber}
+                  time={formatarHora(delivery.createdAt)}
+                  companyName={delivery.companyName}
+                  serviceTypeName={delivery.serviceTypeName}
+                  distanceLabel={
+                    delivery.destinationKnownAtCreation
+                      ? formatarDistancia(delivery.distanceKm) || 'Distância a calcular'
+                      : 'Destino na entrega'
+                  }
+                  amountLabel={
+                    delivery.driverValue === null
+                      ? 'A calcular'
+                      : formatarDinheiro(delivery.driverValue)
+                  }
+                  stops={availableDeliveryStops(delivery)}
+                  batch={Boolean(delivery.batchId)}
+                  accepting={aceitandoPendenteId === delivery.id}
+                  disabled={aceitandoPendenteId !== null}
+                  onAccept={() => aceitarPendente(delivery).catch(() => undefined)}
+                />
+              ))
+            ) : (
+              !pendentesError && (
+                <Vazio
+                  mensagem={
+                    carregandoPendentes
+                      ? 'Carregando pedidos...'
+                      : 'Você não tem nenhuma entrega pendente'
+                  }
+                />
+              )
+            )}
+          </ScrollView>
+        </View>
+      </BottomSheet>
 
       <DrawerMenu
         visible={drawerVisible}
         onClose={() => setDrawerVisible(false)}
         navigation={navigation}
       />
-    </SafeAreaView>
+    </View>
+  );
+}
+
+function Vazio({ mensagem }: { mensagem: string }) {
+  return (
+    <View style={styles.vazio}>
+      <EmptyIconCircle size={110} />
+      <Text style={styles.vazioTexto}>{mensagem}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
+  tela: { flex: 1, backgroundColor: colors.mapBackdrop },
+  sobreposicao: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  barraSuperior: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  menuIcon: { fontSize: 15, fontWeight: '700' },
-  connection: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  connectionDot: { width: 8, height: 8, borderRadius: 4 },
-  connectionText: { fontSize: 12, fontWeight: '600' },
-  content: { flex: 1, paddingHorizontal: 16, gap: 12 },
-  availabilityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 14,
-    padding: 16,
+    paddingTop: 10,
     gap: 12,
   },
-  availabilityText: { flex: 1, gap: 4 },
-  availabilityTitle: { fontSize: 18, fontWeight: '700' },
-  availabilityDescription: { fontSize: 13, lineHeight: 18 },
-  errorCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 4 },
-  errorText: { color: colors.danger, fontSize: 13, fontWeight: '600' },
-  retryText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { fontSize: 15, fontWeight: '700' },
-  loadingText: { fontSize: 12 },
-  deliveryCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    padding: 14,
-    gap: 3,
+  botaoMenu: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
-  deliveryNumber: { fontSize: 15, fontWeight: '700' },
-  deliveryStatus: { fontSize: 13, fontWeight: '700' },
-  deliveryCompany: { fontSize: 12 },
+  avisoConexao: {
+    backgroundColor: colors.warning,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  avisoConexaoTexto: { color: colors.surface, fontWeight: '700', fontSize: 13 },
+
+  conteudo: { flex: 1, paddingHorizontal: 18 },
+  areaToggle: { paddingVertical: 14 },
+
+  avisoErro: {
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+    marginBottom: 10,
+  },
+  avisoErroTexto: { color: colors.danger, fontSize: 13, fontWeight: '700' },
+  avisoAtencao: {
+    borderWidth: 1,
+    borderColor: colors.warning,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+    marginBottom: 10,
+  },
+  avisoAtencaoTexto: { color: colors.warning, fontSize: 13, fontWeight: '700' },
+  avisoAcao: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+
+  lista: { flex: 1 },
+  listaConteudo: { paddingBottom: 24 },
+  listaPendentes: { gap: 10, paddingTop: 12 },
+  vazio: { alignItems: 'center', paddingTop: 26, gap: 18 },
+  vazioTexto: { fontSize: 17, color: colors.inkSoft, textAlign: 'center' },
 });
