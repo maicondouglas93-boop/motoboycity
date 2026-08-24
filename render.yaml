@@ -51,6 +51,7 @@ services:
     rootDir: .
     buildCommand: >-
       corepack pnpm install --frozen-lockfile &&
+      corepack pnpm --filter @motoboycity/validation build &&
       corepack pnpm --filter @motoboycity/api exec prisma generate &&
       corepack pnpm --filter @motoboycity/api exec prisma migrate deploy &&
       corepack pnpm --filter @motoboycity/api build

@@ -5785,3 +5785,23 @@ fixado em `22.18.0`, a mesma versão usada no CI; a faixa aberta `>=20` do
 Próximo passo concreto: validar a formatação, commitar/pushar a correção e
 acompanhar o sync automático do Blueprint até migrations, build, seed e
 `GET /health` concluírem.
+
+## Atualização — 2026-08-24: build dos contratos antes da API no Render
+
+O segundo build do Render avançou além da instalação e falhou no `nest build`
+porque um clone limpo ainda não possui `packages/validation/dist`. O pacote
+`@motoboycity/validation` publica JavaScript e declarações por esse diretório,
+portanto os imports da API não podiam ser resolvidos mesmo com as dependências
+do workspace instaladas.
+
+O `buildCommand` do Blueprint agora compila `@motoboycity/validation` antes de
+gerar o Prisma Client, aplicar migrations e compilar a API. A migration fica
+antes do build final no comando; por isso o deploy que apresentou o erro pode
+ter alcançado o Neon antes de falhar. A próxima execução de `prisma migrate
+deploy` é idempotente e deve apenas confirmar migrations que já tenham sido
+aplicadas. O `initialDeployHook` ainda não executou, pois depende do primeiro
+deploy bem-sucedido.
+
+Próximo passo concreto: validar os builds de `validation` e da API, commitar e
+pushar a correção quando autorizado e acompanhar o novo sync até o health check
+e o seed inicial concluírem.
