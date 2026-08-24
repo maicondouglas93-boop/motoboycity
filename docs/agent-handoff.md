@@ -4737,17 +4737,17 @@ não pertencem a este recorte e a última é documentada abaixo.
 
 ### Verificação
 
-| Comando / fluxo                                                    | Resultado                                    |
-| ------------------------------------------------------------------ | -------------------------------------------- |
-| `corepack pnpm --filter @motoboycity/validation build`             | aprovado                                     |
-| Jest focado em `admin-financial.service.spec.ts`                   | 1 suíte e 35 testes aprovados                |
-| Jest focado em `admin-financial` e `invoice.service.spec.ts`       | 2 suítes e 42 testes aprovados               |
-| `corepack pnpm typecheck`                                          | 8 pacotes aprovados                          |
-| `corepack pnpm lint`                                               | 8 pacotes aprovados, sem avisos              |
-| `corepack pnpm --filter @motoboycity/api run build`                | aprovado                                     |
-| `corepack pnpm --filter @motoboycity/admin-web run build`          | aprovado; 35 páginas geradas                 |
-| HTTP `/relatorios/auditoria-financeira`                            | `200` no servidor local                      |
-| HTTP `/admin/financial/audit-trail` sem autenticação               | `401`; proteção confirmada                   |
+| Comando / fluxo                                              | Resultado                       |
+| ------------------------------------------------------------ | ------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`       | aprovado                        |
+| Jest focado em `admin-financial.service.spec.ts`             | 1 suíte e 35 testes aprovados   |
+| Jest focado em `admin-financial` e `invoice.service.spec.ts` | 2 suítes e 42 testes aprovados  |
+| `corepack pnpm typecheck`                                    | 8 pacotes aprovados             |
+| `corepack pnpm lint`                                         | 8 pacotes aprovados, sem avisos |
+| `corepack pnpm --filter @motoboycity/api run build`          | aprovado                        |
+| `corepack pnpm --filter @motoboycity/admin-web run build`    | aprovado; 35 páginas geradas    |
+| HTTP `/relatorios/auditoria-financeira`                      | `200` no servidor local         |
+| HTTP `/admin/financial/audit-trail` sem autenticação         | `401`; proteção confirmada      |
 
 Lacuna de validação: não havia sessão administrativa com massa controlada para
 inspeção visual dos três tipos de evento. O próximo passo de homologação é gerar
@@ -4809,12 +4809,12 @@ status, preço, dispatch, GPS ou Socket.IO.
 
 ### Verificação
 
-| Comando | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/company-web lint` | aprovado, sem avisos |
+| Comando                                                     | Resultado                    |
+| ----------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
 | `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 11 páginas geradas |
-| `git diff --check` | aprovado no recorte |
+| `git diff --check`                                          | aprovado no recorte          |
 
 Lacuna de validação: o Company Web não possui teste automatizado de interface.
 Na homologação autenticada, concluir e cancelar um pedido devem removê-lo do
@@ -4862,13 +4862,13 @@ usuário não administrador.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado |
-| `corepack pnpm --filter @motoboycity/company-web lint` | aprovado, sem avisos |
-| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 14 páginas geradas |
-| HTTP `/relatorios`, `/relatorios/pedidos` e `/relatorios/tempos-sla` | `200` nas três rotas |
-| APIs `deliveries/search` e `deliveries/stage-times` sem token | `401` nas duas rotas |
+| Comando / fluxo                                                      | Resultado                    |
+| -------------------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck`          | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`               | aprovado, sem avisos         |
+| `corepack pnpm --filter @motoboycity/company-web run build`          | aprovado; 14 páginas geradas |
+| HTTP `/relatorios`, `/relatorios/pedidos` e `/relatorios/tempos-sla` | `200` nas três rotas         |
+| APIs `deliveries/search` e `deliveries/stage-times` sem token        | `401` nas duas rotas         |
 
 Lacunas conhecidas:
 
@@ -4928,14 +4928,14 @@ dispatch, GPS, mobile ou notificação nativa.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| `corepack pnpm typecheck` | 8 pacotes aprovados |
-| `corepack pnpm lint` | 8 pacotes aprovados, sem avisos |
-| Jest `company-reports.service.spec.ts` | 1 suíte e 8 testes aprovados |
-| `corepack pnpm --filter @motoboycity/validation build` | aprovado |
-| `corepack pnpm --filter @motoboycity/api run build` | aprovado |
-| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 15 páginas geradas |
+| Comando / fluxo                                             | Resultado                       |
+| ----------------------------------------------------------- | ------------------------------- |
+| `corepack pnpm typecheck`                                   | 8 pacotes aprovados             |
+| `corepack pnpm lint`                                        | 8 pacotes aprovados, sem avisos |
+| Jest `company-reports.service.spec.ts`                      | 1 suíte e 8 testes aprovados    |
+| `corepack pnpm --filter @motoboycity/validation build`      | aprovado                        |
+| `corepack pnpm --filter @motoboycity/api run build`         | aprovado                        |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 15 páginas geradas    |
 
 Lacunas conhecidas: ainda falta homologação visual com sessão Company e massa
 controlada; o endpoint genérico `GET /deliveries/search`, usado pelo Histórico,
@@ -4944,3 +4944,124 @@ E2E com duas empresas; e a exportação operacional minimizada continua pendente
 O próximo passo concreto é a Fase 3: criar as páginas `/relatorios/horarios` e
 `/relatorios/modalidades` consumindo `peakHours` e `serviceTypes` já entregues
 pelo novo contrato, sem novo endpoint.
+
+## Atualização — 2026-08-24: Fase 3 dos relatórios do Company Web
+
+A Fase 3 de `docs/plano-relatorios-company-web.md` foi implementada sem novo
+endpoint, schema ou contrato. As duas páginas consomem o
+`GET /company/reports/operations` já protegido e publicado na Fase 2:
+
+- `/relatorios/horarios`: mostra demanda nas 24 horas, média por dia civil,
+  faixas exclusivas de madrugada/manhã/tarde/noite, três horários de maior
+  movimento e dias da semana normalizados pela quantidade de ocorrências no
+  calendário. Pedidos cancelados continuam na demanda porque foram criados e
+  exigiram operação;
+- `/relatorios/modalidades`: oferece busca e ordenação persistidas na URL,
+  participação em volume criado e custo concluído, ticket médio, preço ausente,
+  retorno, cards comparativos e tabela com denominadores. A tela soma em
+  centavos e sinaliza se o total por modalidade não reconciliar com o total do
+  Analítico geral.
+
+Os cards `Horários e demanda` e `Modalidades e custos` só foram publicados na
+central depois que seus destinos ficaram funcionais. Foi criado o hook local
+`useCompanyOperationsReport` para manter período, limite de 366 dias, URL,
+sessão, TanStack Query e `ApiError` iguais nas páginas desta fase. A comparação
+com a janela anterior é exibida apenas para os totais entregues pelo contrato;
+o cliente não inventa séries anteriores por hora ou modalidade.
+
+Arquivos funcionais deste recorte:
+
+- `apps/company-web/src/app/(app)/relatorios/horarios/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/modalidades/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/company-web/src/components/reports/report-layout.tsx`;
+- `apps/company-web/src/components/reports/use-company-operations-report.ts`;
+- `docs/plano-relatorios-company-web.md`.
+
+Não houve alteração de API, Prisma, migration, dado, `.env`, secret, preço,
+financeiro, dispatch, GPS, app mobile ou notificação nativa. A migration e os
+contratos de aviso de pagamento presentes em paralelo no worktree foram
+preservados e não fazem parte desta fase.
+
+### Verificação
+
+| Comando / fluxo                                             | Resultado                    |
+| ----------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 17 páginas geradas |
+
+Lacunas conhecidas: falta inspeção visual com uma sessão Company e massa que
+tenha pedidos em vários horários/modalidades; comparação detalhada por bucket
+anterior exigiria extensão aditiva do contrato; CSV permanece reservado à Fase 6. O próximo passo concreto é a Fase 4: ampliar de forma aditiva os filtros da
+busca e implementar `/relatorios/retornos-lotes`, sem tocar no aviso de
+pagamento concorrente.
+
+## Atualização — 2026-08-24: aviso de pagamento da empresa com confirmação administrativa
+
+Foi concluída a etapa 10 de `docs/plano-financeiro-company-web.md`. A empresa
+agora pode usar **Já paguei** em uma fatura aberta para informar valor, data e
+observação. Essa ação cria `InvoicePaymentNotice` e não altera a fatura. O
+admin recebeu a aba **Avisos de pagamento** no Financeiro, com fila de
+pendentes/confirmados/recusados, diferença contra o total, confirmação e recusa
+com motivo. Ao reabrir **Já paguei**, a empresa vê se já existe aviso pendente
+ou o motivo da última recusa; a consulta só roda quando o diálogo abre, evitando
+uma requisição adicional por linha da tabela.
+
+A baixa continua tendo um único núcleo: `InvoiceService.markPaid`. Ele foi
+extraído para `markPaidWithinTransaction`, usado tanto pela rota manual quanto
+pela confirmação do aviso. Na confirmação, reservar o aviso, marcar a fatura
+como paga e escrever `InvoiceStatusHistory` ocorrem na mesma transação. Uma
+falha em qualquer passo mantém o aviso pendente e a fatura no estado anterior.
+Confirmação e recusa usam atualização condicional para impedir duas decisões
+concorrentes.
+
+A migration aditiva `20260824105857_aviso_de_pagamento_da_loja` cria enum,
+tabela, relações e índices. Foi acrescentado um índice único parcial para
+garantir no PostgreSQL no máximo um aviso `PENDING` por fatura; avisos recusados
+ou confirmados permanecem no histórico e não impedem um novo envio. A API
+também traduz a violação concorrente para HTTP 409. Data civil inválida, valor
+com mais de dois centavos e status de fila desconhecido retornam HTTP 400.
+
+Arquivos principais deste recorte:
+
+- `apps/api/prisma/schema.prisma` e
+  `apps/api/prisma/migrations/20260824105857_aviso_de_pagamento_da_loja/migration.sql`;
+- `apps/api/src/finance/{payment-notice.controller,payment-notice.service,payment-notice.service.spec,invoice.service,finance.module}.ts`;
+- `apps/api/test/payment-notice.e2e-spec.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/validation/src/finance/payment-notice.schema.ts` e seu export;
+- `packages/api-client/src/payment-notice.ts` e seu export;
+- `apps/company-web/src/components/finance/{payment-notice-dialog,faturas-tab}.tsx`;
+- `apps/admin-web/src/components/finance/avisos-tab.tsx` e
+  `apps/admin-web/src/app/(app)/financeiro/page.tsx`;
+- clientes locais dos dois painéis;
+- `docs/business-rules.md` e `docs/plano-financeiro-company-web.md`.
+
+### Verificação
+
+| Comando / fluxo                                                        | Resultado                                                   |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `prisma validate`                                                      | schema válido                                               |
+| `prisma generate`                                                      | Client 6.19.3 gerado                                        |
+| build de `@motoboycity/validation`                                     | aprovado                                                    |
+| TypeScript da API                                                      | aprovado                                                    |
+| TypeScript de `company-web` e `admin-web`                              | aprovados                                                   |
+| lint focado nos 6 pacotes afetados                                     | aprovado, sem avisos                                        |
+| Jest `invoice.service.spec.ts` + `payment-notice.service.spec.ts`      | 2 suítes e 27 testes aprovados                              |
+| migration deploy em `motoboycity_e2e_local`                            | 6 migrations pendentes aplicadas; banco de dev não alterado |
+| Jest `payment-notice.e2e-spec.ts` com PostgreSQL isolado e Redis DB 15 | 1 suíte e 13 testes aprovados                               |
+
+O E2E comprova explicitamente: a empresa não quita a própria dívida; empresa B
+não acessa a fatura da A; duas criações simultâneas resultam em 201/409 e uma
+única linha pendente; confirmação concorrente não duplica baixa; falha da baixa
+desfaz a confirmação; recusa exige motivo e permite novo aviso.
+
+Nenhuma migration foi aplicada em banco compartilhado, staging ou produção;
+antes disso continuam obrigatórios backup/restore, validação em cópia de
+staging e plano de rollback. Nenhum `.env` ou secret foi editado ou exibido. A
+árvore local de dependências precisou ser restaurada em modo `node-linker=hoisted`
+porque a instalação isolada do pnpm ficou presa no Windows; isso alterou apenas
+`node_modules`, não o lockfile. O próximo passo concreto é homologar visualmente
+o diálogo da empresa e a fila do admin com sessões reais e, depois, seguir a
+Fase 4 dos relatórios Company Web.

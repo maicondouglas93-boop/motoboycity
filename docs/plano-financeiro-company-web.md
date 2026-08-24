@@ -12,9 +12,9 @@ O painel do admin já foi refatorado (`docs/plano-refatoracao-financeiro.md` e
 
 A empresa tem **duas rotas financeiras, ambas só de leitura**:
 
-| Rota da API | O que faz |
-| --- | --- |
-| `GET /company/invoices` | Lista as faturas |
+| Rota da API                 | O que faz              |
+| --------------------------- | ---------------------- |
+| `GET /company/invoices`     | Lista as faturas       |
 | `GET /company/invoices/:id` | Detalhe com os pedidos |
 
 E duas telas: `/faturas` (208 linhas) e `/faturas/[id]` (201 linhas).
@@ -75,12 +75,12 @@ Responde as três perguntas que a loja faz.
 
 ### Bloco A: Minha posição
 
-| Cartão | Cor | Origem |
-| --- | --- | --- |
-| A vencer | aguardando | Faturas `PENDING` |
-| Vencido | atrasado | Faturas `OVERDUE` |
+| Cartão             | Cor         | Origem                        |
+| ------------------ | ----------- | ----------------------------- |
+| A vencer           | aguardando  | Faturas `PENDING`             |
+| Vencido            | atrasado    | Faturas `OVERDUE`             |
 | Ainda não faturado | não cobrado | Pedidos concluídos sem fatura |
-| Total em aberto | informativo | Soma dos três |
+| Total em aberto    | informativo | Soma dos três                 |
 
 **"Ainda não faturado" é o cartão mais valioso desta tela.** É o que a loja não
 consegue saber hoje, e o que evita a surpresa de segunda-feira.
@@ -89,8 +89,8 @@ Cada cartão leva à aba correspondente com o filtro aplicado.
 
 ### Bloco B: Próximo fechamento
 
-Uma frase e um número: *"A próxima fatura fecha segunda-feira, dia 31, com os
-pedidos feitos até lá — hoje somam R$ 340,00."*
+Uma frase e um número: _"A próxima fatura fecha segunda-feira, dia 31, com os
+pedidos feitos até lá — hoje somam R$ 340,00."_
 
 Sem isso a regra semanal continua sendo folclore para a loja.
 
@@ -129,11 +129,21 @@ lado da loja.
 
 ```ts
 {
-  notDue:    { count: number; value: number };
-  overdue:   { count: number; value: number; maxOverdueDays: number };
-  unbilled:  { count: number; value: number };
+  notDue: {
+    count: number;
+    value: number;
+  }
+  overdue: {
+    count: number;
+    value: number;
+    maxOverdueDays: number;
+  }
+  unbilled: {
+    count: number;
+    value: number;
+  }
   totalOpen: number;
-  nextClosingDate: string;   // próxima segunda, no fuso da operação
+  nextClosingDate: string; // próxima segunda, no fuso da operação
 }
 ```
 
@@ -162,7 +172,7 @@ problema que 6.2 resolve.
 Separador `;` e decimal com vírgula: é o que o Excel em português abre sem
 pedir importação.
 
-### 6.4 Sinalizar pagamento — DECISÃO DE NEGÓCIO
+### 6.4 Sinalizar pagamento — IMPLEMENTADO
 
 `POST /company/invoices/:id/payment-notice` com data, valor e observação.
 
@@ -170,25 +180,26 @@ pedir importação.
 fila. Só o admin confirma o recebimento — deixar a loja marcar a própria
 fatura como paga seria deixar o devedor dar baixa na própria dívida.
 
-**Isto é decisão do dono da operação, não técnica.** Se ele preferir continuar
-recebendo comprovante por WhatsApp, o item não existe.
+A decisão foi confirmada e o fluxo foi implementado: a empresa sinaliza pelo
+Company Web, o admin recebe uma fila própria no Financeiro e somente a
+confirmação administrativa chama a baixa existente da fatura.
 
 ---
 
 ## 7. Ordem de execução
 
-| # | Etapa | Situação |
-| --- | --- | --- |
-| 1 | Copiar `MetricCard`, tokens de cor e `FinanceTabs` | feito |
-| 2 | `GET /company/financial/position` + testes | feito |
-| 3 | Aba Resumo (blocos A e B) | feito |
-| 4 | Aba Faturas com destaque de vencida | feito |
-| 5 | Redirecionar `/faturas` | feito |
-| 6 | Aba Pedidos sem fatura | feito |
-| 7 | `GET /company/financial/summary` + testes | feito |
-| 8 | Bloco C, e trocar a agregação de `/indicadores` | feito |
-| 9 | Exportação CSV | feito, com um desvio (abaixo) |
-| 10 | Aviso de pagamento | **não feito — decisão do dono** |
+| #   | Etapa                                              | Situação                                     |
+| --- | -------------------------------------------------- | -------------------------------------------- |
+| 1   | Copiar `MetricCard`, tokens de cor e `FinanceTabs` | feito                                        |
+| 2   | `GET /company/financial/position` + testes         | feito                                        |
+| 3   | Aba Resumo (blocos A e B)                          | feito                                        |
+| 4   | Aba Faturas com destaque de vencida                | feito                                        |
+| 5   | Redirecionar `/faturas`                            | feito                                        |
+| 6   | Aba Pedidos sem fatura                             | feito                                        |
+| 7   | `GET /company/financial/summary` + testes          | feito                                        |
+| 8   | Bloco C, e trocar a agregação de `/indicadores`    | feito                                        |
+| 9   | Exportação CSV                                     | feito, com um desvio (abaixo)                |
+| 10  | Aviso de pagamento                                 | feito, com fila administrativa e E2E isolado |
 
 As etapas 1 a 6 já entregam a maior parte do valor. A 8 é a que evita um
 problema de desempenho que ainda não apareceu, mas vai aparecer.
@@ -253,12 +264,14 @@ não como parte entregue.
 o que no servidor significaria varrer todo o histórico da loja — justamente o
 problema que a etapa 7 resolve. Sem filtro, agora são os últimos 30 dias.
 
-### O que a etapa 10 espera
+### Etapa 10 entregue
 
-`POST /company/invoices/:id/payment-notice` continua não existindo. A regra
-"a loja não dá baixa na própria dívida" está mantida: nada na tela nova permite
-a empresa mudar o status de uma fatura. Se o dono decidir que quer o aviso,
-o desenho está na seção 6.4 e não conflita com nada do que foi construído.
+`POST /company/invoices/:id/payment-notice` cria o aviso sem tocar na fatura;
+`GET /company/invoices/:id/payment-notices` permite acompanhar a decisão. O
+admin possui fila filtrável e ações de confirmar ou recusar. Confirmar o aviso,
+baixar a fatura e gravar o histórico formam uma transação única. Um índice
+parcial garante no banco apenas um aviso pendente por fatura, inclusive sob
+requisições simultâneas.
 
 ### Dois defeitos de data achados na conferência
 

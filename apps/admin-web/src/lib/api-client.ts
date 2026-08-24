@@ -15,6 +15,7 @@ import {
   createAuthApi,
   createDeliveriesApi,
   createTrackingApi,
+  createPaymentNoticeApi,
 } from '@motoboycity/api-client';
 
 export const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
@@ -35,3 +36,4 @@ export const adminOperationsApi = createAdminOperationsApi({ baseUrl });
 export const adminVirtualSecretaryApi = createAdminVirtualSecretaryApi({ baseUrl });
 export const deliveriesApi = createDeliveriesApi({ baseUrl });
 export const trackingApi = createTrackingApi({ baseUrl });
+export const paymentNoticeApi = createPaymentNoticeApi({ baseUrl });

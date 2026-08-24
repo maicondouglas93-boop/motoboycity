@@ -85,6 +85,12 @@ Fecha toda segunda-feira, agrupando todos os pedidos entregues desde o
 manual/offline pro lançamento — sem gateway de pagamento (boleto/PIX
 automático) planejado ainda.
 
+A empresa pode usar **Já paguei** para informar valor, data e observação de um
+pagamento manual. Esse aviso não quita nem altera a fatura: somente o
+administrador pode confirmar o recebimento pelo fluxo normal de baixa ou
+recusar informando o motivo. Existe no máximo um aviso pendente por fatura; se
+ele for recusado, a empresa pode corrigir os dados e enviar outro.
+
 ## Regiões
 
 Cada empresa e entregador pertence a uma única região. A operação pode ter

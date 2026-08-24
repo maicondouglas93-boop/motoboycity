@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import {
   ArrowRight,
+  Bike,
+  Clock3,
   LayoutDashboard,
   ListChecks,
   ShieldCheck,
@@ -40,6 +42,14 @@ const reportGroups: ReportGroup[] = [
         icon: LayoutDashboard,
         tone: 'bg-violet-500/10 text-violet-700 ring-violet-500/15',
       },
+      {
+        title: 'Horários e demanda',
+        description:
+          'Volume por hora, faixa do dia e dia da semana, normalizado pelo calendário local.',
+        href: '/relatorios/horarios',
+        icon: Clock3,
+        tone: 'bg-indigo-500/10 text-indigo-700 ring-indigo-500/15',
+      },
     ],
   },
   {
@@ -53,6 +63,14 @@ const reportGroups: ReportGroup[] = [
         href: '/relatorios/pedidos',
         icon: ListChecks,
         tone: 'bg-cyan-500/10 text-cyan-700 ring-cyan-500/15',
+      },
+      {
+        title: 'Modalidades e custos',
+        description:
+          'Participação em volume e custo, ticket médio, retorno e conferência de preços.',
+        href: '/relatorios/modalidades',
+        icon: Bike,
+        tone: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/15',
       },
     ],
   },

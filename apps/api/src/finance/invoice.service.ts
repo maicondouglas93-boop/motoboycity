@@ -10,7 +10,7 @@ import type {
   CancelInvoicePayload,
   MarkInvoicePaidPayload,
 } from '@motoboycity/validation';
-import type { User } from '@prisma/client';
+import type { Prisma, User } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { FinancialClock } from './financial-clock.service';
@@ -211,46 +211,60 @@ export class InvoiceService {
     invoiceId: string,
     payload: MarkInvoicePaidPayload,
   ): Promise<InvoiceDetail> {
-    await this.prisma.$transaction(async (tx) => {
-      let fromStatus: 'PENDING' | 'OVERDUE' | null = null;
-      for (const status of ['PENDING', 'OVERDUE'] as const) {
-        const updated = await tx.invoice.updateMany({
-          where: { id: invoiceId, status },
-          data: {
-            status: 'PAID',
-            paymentDate: this.dateOnly(payload.paymentDate),
-            paymentMethod: payload.paymentMethod,
-          },
-        });
-        if (updated.count === 1) {
-          fromStatus = status;
-          break;
-        }
-      }
-
-      if (!fromStatus) {
-        const invoice = await tx.invoice.findUnique({
-          where: { id: invoiceId },
-          select: { status: true },
-        });
-        if (!invoice) throw new NotFoundException('Fatura não encontrada.');
-        throw new ConflictException(
-          `Esta fatura não pode ser marcada como paga (status: ${invoice.status}).`,
-        );
-      }
-
-      await tx.invoiceStatusHistory.create({
-        data: {
-          invoiceId,
-          fromStatus,
-          toStatus: 'PAID',
-          changedByUserId: admin.id,
-          note: `Pagamento manual confirmado em ${payload.paymentDate}.`,
-        },
-      });
-    });
+    await this.prisma.$transaction((tx) =>
+      this.markPaidWithinTransaction(tx, admin, invoiceId, payload),
+    );
 
     return this.getDetail(invoiceId);
+  }
+
+  /**
+   * A mesma baixa usada pela rota manual, mas dentro de uma transacao que o
+   * chamador ja abriu. O aviso de pagamento usa este ponto para que confirmar
+   * o aviso, quitar a fatura e gravar o historico sejam uma unica operacao.
+   */
+  async markPaidWithinTransaction(
+    tx: Prisma.TransactionClient,
+    admin: User,
+    invoiceId: string,
+    payload: MarkInvoicePaidPayload,
+  ): Promise<void> {
+    let fromStatus: 'PENDING' | 'OVERDUE' | null = null;
+    for (const status of ['PENDING', 'OVERDUE'] as const) {
+      const updated = await tx.invoice.updateMany({
+        where: { id: invoiceId, status },
+        data: {
+          status: 'PAID',
+          paymentDate: this.dateOnly(payload.paymentDate),
+          paymentMethod: payload.paymentMethod,
+        },
+      });
+      if (updated.count === 1) {
+        fromStatus = status;
+        break;
+      }
+    }
+
+    if (!fromStatus) {
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { status: true },
+      });
+      if (!invoice) throw new NotFoundException('Fatura não encontrada.');
+      throw new ConflictException(
+        `Esta fatura não pode ser marcada como paga (status: ${invoice.status}).`,
+      );
+    }
+
+    await tx.invoiceStatusHistory.create({
+      data: {
+        invoiceId,
+        fromStatus,
+        toStatus: 'PAID',
+        changedByUserId: admin.id,
+        note: `Pagamento manual confirmado em ${payload.paymentDate}.`,
+      },
+    });
   }
 
   /**

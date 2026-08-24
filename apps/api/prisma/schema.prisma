@@ -265,6 +265,8 @@ model User {
   platformSettingsEdits   PlatformSettings[]               @relation("PlatformSettingsUpdatedBy")
   virtualSecretaryAudits  VirtualSecretaryAudit[]
   walletAdjustments       WalletTransaction[]              @relation("WalletTransactionCreatedBy")
+  paymentNoticesSent      InvoicePaymentNotice[]           @relation("PaymentNoticeCreatedBy")
+  paymentNoticesReviewed  InvoicePaymentNotice[]           @relation("PaymentNoticeReviewedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -933,15 +935,65 @@ model Invoice {
   driverValueSum   Decimal        @db.Decimal(10, 2)
   platformValueSum Decimal        @db.Decimal(10, 2)
 
-  company       Company                @relation(fields: [companyId], references: [id])
-  deliveries    Delivery[]
-  statusHistory InvoiceStatusHistory[]
+  company        Company                @relation(fields: [companyId], references: [id])
+  deliveries     Delivery[]
+  statusHistory  InvoiceStatusHistory[]
+  paymentNotices InvoicePaymentNotice[]
 
   createdAt DateTime @default(now())
 
   @@index([companyId, status])
   @@index([dueDate, status])
   @@map("invoices")
+}
+
+enum InvoicePaymentNoticeStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+/// Aviso da LOJA de que pagou uma fatura. NÃO é a baixa.
+///
+/// A empresa paga por PIX e hoje avisa por WhatsApp, torcendo para alguém
+/// lembrar de dar baixa. Este modelo troca a torcida por uma fila.
+///
+/// O aviso nunca toca em `Invoice.status`: quem confirma o recebimento é o
+/// admin, pela mesma `markPaid` de sempre. Deixar a loja marcar a própria
+/// fatura como paga seria deixar o devedor dar baixa na própria dívida.
+model InvoicePaymentNotice {
+  id        String @id @default(uuid())
+  invoiceId String
+
+  /// Valor que a loja DIZ ter pago.
+  ///
+  /// Pode divergir do total da fatura — pagamento parcial, ou erro de
+  /// digitação — e é exatamente essa divergência que o admin precisa ver na
+  /// fila antes de confirmar.
+  amount Decimal @db.Decimal(10, 2)
+
+  /// Dia civil informado pela loja, sem hora: ela sabe o dia do PIX, não o
+  /// instante.
+  paidAt DateTime @db.Date
+
+  note String? @db.VarChar(280)
+
+  status InvoicePaymentNoticeStatus @default(PENDING)
+
+  createdByUserId  String
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewNote       String?   @db.VarChar(280)
+
+  invoice        Invoice @relation(fields: [invoiceId], references: [id])
+  createdByUser  User    @relation("PaymentNoticeCreatedBy", fields: [createdByUserId], references: [id])
+  reviewedByUser User?   @relation("PaymentNoticeReviewedBy", fields: [reviewedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([invoiceId])
+  @@map("invoice_payment_notices")
 }
 
 /// Trilha append-only de mudanças da fatura. Permite responder quem fechou,

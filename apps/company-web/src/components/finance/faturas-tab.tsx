@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { companyInvoicesApi } from '@/lib/api-client';
+import { PaymentNoticeDialog } from '@/components/finance/payment-notice-dialog';
 import { formatarData, formatarDinheiro, somarDinheiro } from '@/lib/dinheiro';
 
 const STATUS_LABEL: Record<InvoiceStatus, string> = {
@@ -224,12 +225,26 @@ export function FaturasTab({ token }: { token: string }) {
                         : 'Aguardando pagamento'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Link
-                        href={`/faturas/${fatura.id}`}
-                        className="inline-flex h-8 items-center rounded-lg border border-portal/20 bg-card px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:bg-portal-soft"
-                      >
-                        Ver detalhes
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        {/*
+                          "Ja paguei" so aparece no que ainda esta em aberto.
+                          Fatura paga ou cancelada nao tem o que avisar.
+                        */}
+                        {(fatura.status === 'PENDING' || fatura.status === 'OVERDUE') && (
+                          <PaymentNoticeDialog
+                            token={token}
+                            invoiceId={fatura.id}
+                            invoiceNumber={fatura.number}
+                            invoiceTotal={fatura.totalValue}
+                          />
+                        )}
+                        <Link
+                          href={`/faturas/${fatura.id}`}
+                          className="inline-flex h-8 items-center rounded-lg border border-portal/20 bg-card px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:bg-portal-soft"
+                        >
+                          Ver detalhes
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

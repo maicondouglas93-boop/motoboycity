@@ -643,6 +643,46 @@ export interface CompanyFinancialSummary {
   requiresReturnCount: number;
 }
 
+export type PaymentNoticeStatus = 'PENDING' | 'CONFIRMED' | 'REJECTED';
+
+/**
+ * Aviso da loja de que pagou uma fatura.
+ *
+ * NAO e a baixa. `status` aqui e o do AVISO, nao o da fatura: um aviso
+ * confirmado significa que o admin conferiu e ai sim marcou a fatura como
+ * paga, pelo caminho de sempre.
+ */
+export interface PaymentNotice {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  /** Dia civil informado pela loja, `AAAA-MM-DD`. */
+  paidAt: string;
+  note: string | null;
+  status: PaymentNoticeStatus;
+  createdAt: string;
+  createdBy: { id: string; name: string } | null;
+  reviewedBy: { id: string; name: string } | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+}
+
+/** Um aviso na fila do admin, com o que ele precisa para decidir. */
+export interface PaymentNoticeQueueItem extends PaymentNotice {
+  invoiceNumber: string;
+  invoiceTotalValue: number;
+  invoiceStatus: InvoiceStatus;
+  companyId: string;
+  companyName: string;
+  /**
+   * Diferenca entre o que a loja diz ter pago e o total da fatura.
+   *
+   * Positivo = pagou a mais; negativo = falta. Vem calculado do servidor para
+   * a fila e o detalhe nunca discordarem.
+   */
+  difference: number;
+}
+
 /**
  * Um pedido concluido que ainda nao entrou em fatura.
  *

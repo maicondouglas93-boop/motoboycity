@@ -23,6 +23,7 @@ export * from './driver/register-device-token.schema';
 export * from './finance/list-wallet-transactions-query.schema';
 export * from './finance/admin-financial-query.schema';
 export * from './finance/company-financial-query.schema';
+export * from './finance/payment-notice.schema';
 export * from './reports/company-operations-report-query.schema';
 export * from './finance/invoice.schema';
 export * from './finance/withdrawal.schema';

@@ -1,7 +1,15 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AlertCircle, ArrowLeft, History, Radio } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowDownRight,
+  ArrowLeft,
+  ArrowUpRight,
+  History,
+  Minus,
+  Radio,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -149,4 +157,37 @@ export function ReportQueryState({
   }
 
   return null;
+}
+
+/**
+ * Comparação descritiva, sem pintar aumento como sucesso ou queda como erro.
+ * Em custo e demanda, a direção sozinha não diz se o resultado é bom.
+ */
+export function ReportComparison({
+  value,
+  label = 'contra o período anterior',
+}: {
+  value: number | null;
+  label?: string;
+}) {
+  if (value === null) {
+    return <span className="text-xs text-muted-foreground">Sem base percentual anterior</span>;
+  }
+
+  if (Math.abs(value) < 0.1) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Minus className="size-3.5" aria-hidden="true" /> Sem variação {label}
+      </span>
+    );
+  }
+
+  const Icon = value > 0 ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      <Icon className="size-3.5" aria-hidden="true" />
+      {value > 0 ? '+' : ''}
+      {value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% {label}
+    </span>
+  );
 }

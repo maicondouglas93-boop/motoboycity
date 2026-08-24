@@ -40,9 +40,10 @@ Antes de iniciar código de Relatórios, terminar/commitar esse recorte ou combi
 explicitamente a propriedade dos arquivos compartilhados.
 
 **Atualização de execução em 2026-08-24:** o recorte financeiro foi estabilizado
-no commit `89c9fb6`. As fases 1, 2 e o redirecionamento previsto na fase 7 já
-foram implementados. A central possui páginas reais de Histórico, Tempos/SLA e
-Analítico geral; `/indicadores` redireciona para `/relatorios/geral`.
+no commit `89c9fb6`. As fases 1, 2, 3 e o redirecionamento previsto na fase 7 já
+foram implementados. A central possui páginas reais de Histórico, Tempos/SLA,
+Analítico geral, Horários/Demanda e Modalidades/Custos; `/indicadores`
+redireciona para `/relatorios/geral`.
 
 ---
 
@@ -347,8 +348,8 @@ equipe ou origem manual/Aiqfome exige persistência nova e fica fora deste plano
 | 0 | Encerrar/coordenar o recorte financeiro concorrente | concluída (`89c9fb6`) |
 | 1 | Componentes comuns, central, `/pedidos` paginado e `/tempos-sla` | concluída |
 | 2 | Contrato `/company/reports/operations`, testes e `/geral` | concluída |
-| 3 | `/horarios` e `/modalidades` | próxima fase |
-| 4 | filtros adicionais da busca e `/retornos-lotes` | pendente |
+| 3 | `/horarios` e `/modalidades` | concluída |
+| 4 | filtros adicionais da busca e `/retornos-lotes` | próxima fase |
 | 5 | endpoint e página `/ocorrencias` | pendente |
 | 6 | exportação operacional no servidor | pendente |
 | 7 | redirecionar `/indicadores`, ajustar navegação e homologar | código concluído; falta homologação visual autenticada |
@@ -366,7 +367,7 @@ relatórios no mesmo commit quando tocarem arquivos compartilhados.
 - [x] nenhuma tela de relatório chama `GET /deliveries` para agregar lista inteira;
 - [x] histórico usa paginação real e preserva filtros na URL;
 - [x] períodos atual/anterior têm a mesma duração;
-- [ ] totais por modalidade reconciliam com o Analítico geral;
+- [x] totais por modalidade reconciliam com o Analítico geral;
 - [x] valores indefinidos aparecem separados e não entram como zero;
 - [ ] Company não recebe repasse/margem interna nem dados de outra empresa;
 - [ ] CSV respeita filtros, limite e minimização de PII;

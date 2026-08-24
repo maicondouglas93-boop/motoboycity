@@ -3,14 +3,15 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, FileText, LineChart, Receipt, Wallet } from 'lucide-react';
+import { BarChart3, FileText, HandCoins, LineChart, Receipt, Wallet } from 'lucide-react';
 import { FinanceTabs, type FinanceTab } from '@/components/finance/finance-tabs';
+import { AvisosTab } from '@/components/finance/avisos-tab';
 import { PainelTab } from '@/components/finance/painel-tab';
 import { CarteirasTab } from '@/components/finance/carteiras-tab';
 import { FaturasTab } from '@/components/finance/faturas-tab';
 import { DemonstrativoTab } from '@/components/finance/demonstrativo-tab';
 import { RecebimentosTab } from '@/components/finance/recebimentos-tab';
-import { adminFinancialApi } from '@/lib/api-client';
+import { adminFinancialApi, paymentNoticeApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 /**
@@ -53,6 +54,16 @@ function FinanceArea() {
     enabled: Boolean(token),
   });
 
+  /**
+   * Avisos de pagamento tambem tem prazo: enquanto nao zera, tem loja
+   * esperando resposta sobre dinheiro que ela diz ter mandado.
+   */
+  const avisosPendentesQuery = useQuery({
+    queryKey: ['admin', 'payment-notices', 'PENDING'],
+    queryFn: () => paymentNoticeApi.queue(token as string, 'PENDING'),
+    enabled: Boolean(token),
+  });
+
   if (!token) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -70,6 +81,12 @@ function FinanceArea() {
       badge: saquesPendentesQuery.data?.length,
     },
     { value: 'faturas', label: 'Faturas', icon: FileText },
+    {
+      value: 'avisos',
+      label: 'Avisos de pagamento',
+      icon: HandCoins,
+      badge: avisosPendentesQuery.data?.length,
+    },
     { value: 'recebimentos', label: 'Recebimentos', icon: Receipt },
     { value: 'demonstrativo', label: 'Demonstrativo', icon: LineChart },
   ];
@@ -88,9 +105,9 @@ function FinanceArea() {
       {aba === 'painel' && <PainelTab token={token} />}
       {aba === 'carteiras' && <CarteirasTab token={token} />}
       {aba === 'faturas' && <FaturasTab token={token} />}
+      {aba === 'avisos' && <AvisosTab token={token} />}
       {aba === 'recebimentos' && <RecebimentosTab token={token} />}
       {aba === 'demonstrativo' && <DemonstrativoTab token={token} />}
     </div>
   );
 }
-
