@@ -82,6 +82,13 @@ export default function CompanyHomePage() {
     () => [...(operations?.active ?? []), ...(operations?.recent ?? [])],
     [operations],
   );
+  /**
+   * O histórico recente continua na coluna lateral, mas não pertence ao mapa
+   * operacional. Quando um pedido vira COMPLETED/CANCELLED, a invalidação do
+   * socket (ou o polling de segurança) o move para `recent`; limitar o mapa a
+   * `active` remove imediatamente o destino e a última posição do motoboy.
+   */
+  const mapDeliveries = useMemo(() => operations?.active ?? [], [operations]);
   const selected = visibleOrders.find((order) => order.id === selectedId) ?? null;
   const selectOrder = useCallback((id: string) => setSelectedId(id), []);
   const serviceTypes = useMemo(() => serviceTypesQuery.data ?? [], [serviceTypesQuery.data]);
@@ -140,7 +147,7 @@ export default function CompanyHomePage() {
 
         <CompanyOperationsMap
           pickupAddress={pickupAddress}
-          deliveries={visibleOrders}
+          deliveries={mapDeliveries}
           selectedId={selectedId}
           onSelect={selectOrder}
         />

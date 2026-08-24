@@ -4784,3 +4784,39 @@ typecheck. `apps/api/src/finance/invoice.service.spec.ts` passou a acessar esse 
 somente por uma tipagem interna do teste. Não houve alteração na implementação nem
 na regra de cancelamento; as 2 suítes financeiras focadas fecharam com 42 testes
 aprovados.
+
+## Atualização — 2026-08-24: limpeza dos marcadores na home da empresa
+
+O mapa da central do Company Web recebia a união de `operations.active` com os
+20 pedidos de `operations.recent`. Por isso, pedidos já `COMPLETED` ou
+`CANCELLED` continuavam desenhando o destino e, quando disponível, também a
+última posição do motoboy. A lista lateral “Recentes” é útil; os mesmos itens no
+mapa operacional apenas acumulavam pontos antigos.
+
+`apps/company-web/src/app/(app)/page.tsx` agora mantém dois recortes explícitos:
+
+- `visibleOrders`, com ativos + recentes, preserva seleção, clonagem e a lista
+  lateral;
+- `mapDeliveries`, somente com `operations.active`, alimenta
+  `CompanyOperationsMap`.
+
+Ao concluir ou cancelar um pedido, `delivery:updated` invalida a query e o ponto
+sai do mapa quando a nova resposta chega. Se o evento em tempo real for perdido,
+o `refetchInterval` de 30 segundos continua como segurança. `FAILED`,
+`DELIVERED` e demais estados não terminais permanecem no mapa porque ainda há
+motoboy/mercadoria em operação. Não houve alteração de API, contrato, banco,
+status, preço, dispatch, GPS ou Socket.IO.
+
+### Verificação
+
+| Comando | Resultado |
+| --- | --- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado |
+| `corepack pnpm --filter @motoboycity/company-web lint` | aprovado, sem avisos |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 11 páginas geradas |
+| `git diff --check` | aprovado no recorte |
+
+Lacuna de validação: o Company Web não possui teste automatizado de interface.
+Na homologação autenticada, concluir e cancelar um pedido devem removê-lo do
+mapa sem removê-lo imediatamente da lista “Recentes”; simular perda do socket
+deve confirmar a remoção pelo polling em até 30 segundos.
