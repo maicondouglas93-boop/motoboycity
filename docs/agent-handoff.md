@@ -5840,3 +5840,19 @@ eles não existem e não redefine contas existentes.
 Próximo passo concreto: acompanhar o deploy, confirmar no log a criação do
 administrador, testar o login e então remover `prisma db seed` do build para que
 o bootstrap volte a ser exclusivamente uma operação de inicialização.
+
+## Atualização — 2026-08-24: bootstrap de produção concluído
+
+O deploy de recuperação executou o seed com as credenciais armazenadas no
+Render, criou o administrador ausente no Neon e o login no Admin Web foi
+confirmado manualmente pelo responsável. O comando temporário `prisma db seed`
+foi removido do `buildCommand`; os próximos deploys continuam aplicando apenas
+migrations pendentes e compilando a API, sem repetir o bootstrap.
+
+O usuário administrador e a região criados permanecem no Neon. O
+`initialDeployHook` continua documentando a intenção para novas instâncias do
+Blueprint, mas não é necessário para a instância atual já inicializada.
+
+Próximo passo concreto: acompanhar o deploy de limpeza, confirmar novamente
+`GET /health` e então validar login e navegação essenciais nos dois painéis da
+Vercel contra a API de produção.

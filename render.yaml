@@ -54,7 +54,6 @@ services:
       corepack pnpm --filter @motoboycity/validation build &&
       corepack pnpm --filter @motoboycity/api exec prisma generate &&
       corepack pnpm --filter @motoboycity/api exec prisma migrate deploy &&
-      corepack pnpm --filter @motoboycity/api exec prisma db seed &&
       corepack pnpm --filter @motoboycity/api build
     # Delega ao script do proprio pacote (`node dist/main`), em vez de repetir
     # o caminho aqui: se o build mudar de lugar, o start acompanha sozinho.
