@@ -1,6 +1,7 @@
 {
   "extends": "@motoboycity/config/typescript/nestjs",
   "compilerOptions": {
+    "outDir": "./dist",
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

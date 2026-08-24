@@ -5805,3 +5805,20 @@ deploy bem-sucedido.
 Próximo passo concreto: validar os builds de `validation` e da API, commitar e
 pushar a correção quando autorizado e acompanhar o novo sync até o health check
 e o seed inicial concluírem.
+
+## Atualização — 2026-08-24: saída compilada da API no diretório correto
+
+O build seguinte do Render terminou, mas o processo não iniciou porque
+`apps/api/dist/main.js` não existia. O `outDir` vinha apenas do preset
+compartilhado `packages/config/typescript/nestjs.json`; como caminhos de
+`tsconfig` são resolvidos a partir do arquivo que os declara, o TypeScript
+estava emitindo a API indevidamente em `packages/config/typescript/dist`.
+
+`apps/api/tsconfig.json` agora define explicitamente `outDir: "./dist"`. Isso
+mantém toda a saída dentro de `apps/api/dist` e deixa o script existente
+`start:prod` (`node dist/main`) coerente, sem acoplar o Render a um caminho
+incorreto do pacote compartilhado.
+
+Próximo passo concreto: confirmar que um novo build gera
+`apps/api/dist/main.js`, testar o processo de produção localmente e, quando
+autorizado, commitar e enviar a correção para um novo deploy.
