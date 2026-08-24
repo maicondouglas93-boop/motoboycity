@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -25,6 +26,15 @@
       android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
       <!--
+        Chave do Google Maps. O valor vem do Gradle, que le
+        `android/local.properties` — fora do Git, porque o repositorio e
+        publico. Se vier vazia o aplicativo abre normalmente e o mapa fica
+        cinza.
+      -->
+      <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="${mapsApiKey}" />
+      <!--
         Recebe o push de oferta e monta a notificacao de tela cheia. Precisa ser
         nativo: mensagem com bloco `notification` e desenhada pelo Android sem
         passar pelo aplicativo, e ai nao ha como pedir tela cheia.
@@ -49,23 +59,37 @@
           <action android:name="com.google.firebase.MESSAGING_EVENT" />
         </intent-filter>
       </service>
+      <!--
+        O app precisa de UM unico FirebaseMessagingService. O servico proprio
+        herda o comportamento do React Native Firebase (inclusive renovacao do
+        token) e acrescenta a apresentacao nativa da oferta.
+      -->
+      <service
+        android:name="io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService"
+        tools:node="remove" />
       <service
         android:name=".DeliveryLocationTrackingService"
         android:exported="false"
         android:foregroundServiceType="location" />
       <!--
-        `showWhenLocked` e `turnScreenOn`: a oferta aparece sobre a tela de
-        bloqueio e acende a tela. Ela tem prazo, e esperar o motoboy desbloquear
-        por conta propria gasta esse prazo.
+        Activity translucida exclusiva da oferta. Ela nao aparece nos recentes
+        e nao transforma a Activity principal inteira em uma janela autorizada
+        a cobrir a tela bloqueada.
       -->
+      <activity
+        android:name=".OfferActivity"
+        android:theme="@style/OfferTheme"
+        android:launchMode="singleTop"
+        android:excludeFromRecents="true"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
+        android:exported="false" />
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
         android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
         android:launchMode="singleTask"
         android:windowSoftInputMode="adjustResize"
-        android:showWhenLocked="true"
-        android:turnScreenOn="true"
         android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />

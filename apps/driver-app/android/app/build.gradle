@@ -117,6 +117,37 @@ def resolvedVersionCode = Integer.parseInt(
  */
 def releaseKeystorePath = System.getenv("MOTOBOYCITY_KEYSTORE_FILE")
 
+/**
+ * HTTP local so e permitido no artefato de desenvolvimento. O Manifest usa
+ * este placeholder; sem defini-lo o merge do Android falha antes de compilar.
+ */
+def driverAppEnvironment = (System.getenv("MOTOBOYCITY_APP_ENV") ?: "development").toString()
+def allowCleartextTraffic = driverAppEnvironment == "development"
+
+/**
+ * Chave do Google Maps para Android.
+ *
+ * Vem de `android/local.properties`, que NAO vai para o Git — o repositorio e
+ * publico. Em maquina de build (CI, por exemplo) ela pode vir da variavel de
+ * ambiente MAPS_API_KEY no lugar.
+ *
+ * Ficar vazia nao quebra o build: o app compila e o mapa aparece cinza. Isso e
+ * proposital, para quem clona o projeto conseguir rodar antes de ter a chave.
+ */
+def mapsApiKey = ""
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    def localProperties = new Properties()
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+    mapsApiKey = (localProperties.getProperty("MAPS_API_KEY") ?: "").trim()
+}
+if (!mapsApiKey) {
+    mapsApiKey = (System.getenv("MAPS_API_KEY") ?: "").trim()
+}
+if (!mapsApiKey) {
+    logger.warn("MAPS_API_KEY ausente: o mapa do aplicativo vai aparecer em branco.")
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -129,6 +160,10 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode resolvedVersionCode
         versionName resolvedVersionName
+        manifestPlaceholders = [
+            usesCleartextTraffic: allowCleartextTraffic.toString(),
+            mapsApiKey: mapsApiKey,
+        ]
     }
     signingConfigs {
         debug {
@@ -218,6 +253,21 @@ dependencies {
     // `HttpURLConnection` do Android recusa o metodo PATCH. Ja vem transitivo do
     // React Native; declarado aqui para a dependencia ser explicita onde e usada.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    /**
+     * Firebase Messaging no classpath do PROPRIO modulo do aplicativo.
+     *
+     * O pacote @react-native-firebase/messaging traz a biblioteca para o modulo
+     * DELE, nao para este — e o `OfferMessagingService` daqui precisa herdar de
+     * `FirebaseMessagingService` para montar a notificacao de tela cheia com os
+     * botoes.
+     *
+     * A versao vem do BOM, e o BOM e exatamente o que o react-native-firebase
+     * usa (declarado no package.json dele). Fixar outra versao aqui criaria duas
+     * versoes do Firebase no mesmo APK.
+     */
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
