@@ -5,11 +5,13 @@ import {
   Building2,
   CircleDollarSign,
   Clock3,
+  HandCoins,
   Layers3,
   ListChecks,
   ShieldCheck,
   TimerReset,
   Trophy,
+  WalletCards,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -99,7 +101,7 @@ const reportGroups: ReportGroup[] = [
   },
   {
     title: 'Financeiro',
-    description: 'Acompanhe a divisão dos valores concluídos no período selecionado.',
+    description: 'Acompanhe resultados, contas a receber e a idade das dívidas da operação.',
     reports: [
       {
         title: 'Composição financeira',
@@ -107,6 +109,20 @@ const reportGroups: ReportGroup[] = [
         href: '/relatorios/financeiro',
         icon: CircleDollarSign,
         tone: 'bg-green-500/10 text-green-700 ring-green-500/15',
+      },
+      {
+        title: 'Contas a receber',
+        description: 'Não faturado, a vencer e vencido por faixa de atraso e cliente.',
+        href: '/relatorios/contas-a-receber',
+        icon: HandCoins,
+        tone: 'bg-red-500/10 text-red-600 ring-red-500/15',
+      },
+      {
+        title: 'Repasses e saques',
+        description: 'Saldos, solicitações abertas, idade e conciliação por entregador.',
+        href: '/relatorios/repasses-saques',
+        icon: WalletCards,
+        tone: 'bg-teal-500/10 text-teal-700 ring-teal-500/15',
       },
     ],
   },

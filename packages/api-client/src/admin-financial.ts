@@ -6,6 +6,8 @@ import type {
   WithdrawalRequestItem,
   WithdrawalRequestStatus,
   CashPositionItem,
+  PayoutsAgingReport,
+  ReceivablesAgingReport,
   ReceiptsReport,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
@@ -26,6 +28,22 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CashPositionItem>(response);
+    },
+
+    /** Contas a receber e aging no instante atual, sem filtro de período. */
+    async receivablesAging(accessToken: string): Promise<ReceivablesAgingReport> {
+      const response = await fetch(`${baseUrl}/admin/financial/receivables-aging`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<ReceivablesAgingReport>(response);
+    },
+
+    /** Obrigações, saques abertos e aging atual por entregador. */
+    async payoutsAging(accessToken: string): Promise<PayoutsAgingReport> {
+      const response = await fetch(`${baseUrl}/admin/financial/payouts-aging`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<PayoutsAgingReport>(response);
     },
 
     async overview(

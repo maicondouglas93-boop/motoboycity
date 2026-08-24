@@ -4363,15 +4363,123 @@ Arquivos funcionais deste recorte:
 
 ### Verificação
 
-| Comando / fluxo                                                     | Resultado                                          |
-| ------------------------------------------------------------------- | -------------------------------------------------- |
-| `corepack pnpm --filter @motoboycity/admin-web typecheck`           | aprovado                                           |
-| `corepack pnpm --filter @motoboycity/admin-web lint`                | aprovado, zero erros                               |
-| `corepack pnpm --filter @motoboycity/admin-web run build`           | aprovado; 29 páginas geradas                       |
-| rotas das três páginas no manifesto do build                        | registradas como páginas estáticas                 |
-| `git diff --check`                                                  | bloqueado por linha em branco em arquivo financeiro concorrente |
+| Comando / fluxo                                           | Resultado                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                        |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                            |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; 29 páginas geradas                                    |
+| rotas das três páginas no manifesto do build              | registradas como páginas estáticas                              |
+| `git diff --check`                                        | bloqueado por linha em branco em arquivo financeiro concorrente |
 
 Lacuna de validação: não havia servidor local ativo nem sessão de navegador
 autenticada nesta execução. O próximo passo concreto é percorrer as três rotas
 em desktop e largura estreita com dados reais, validar o download dos CSVs e,
 depois, priorizar novos relatórios que exigem agregações específicas no backend.
+
+## Atualização — 2026-08-23: contas a receber e aging por cliente
+
+O primeiro recorte de controle financeiro avançado foi implementado em
+`/relatorios/contas-a-receber`. A página apresenta a posição atual de contas a
+receber, separando pedidos concluídos ainda sem fatura, faturas a vencer e
+faturas vencidas nas faixas de 1–7, 8–15, 16–30 e mais de 30 dias. Também
+consolida a exposição por cliente, com busca, filtro por tipo, ordenação,
+paginação local, CSV do resultado filtrado e links para cliente e faturas.
+
+O novo `GET /admin/financial/receivables-aging` é somente leitura, protegido
+pelos mesmos `JwtAuthGuard` e `AdminOnlyGuard` do restante da área financeira.
+Não aceita período de propósito: dívida antiga continua existindo hoje. A data
+de referência é calculada no fuso de São Paulo; vencimento no próprio dia ainda
+fica em “a vencer”. Pedidos pagos online não entram como dívida e “sem fatura”
+considera somente entrega `COMPLETED`, cobrança `BILLED` e `invoiceId: null`.
+
+As agregações de pedidos sem fatura, faturas abertas e nomes de empresas são
+lidas numa transação `RepeatableRead`. Isso impede que um fechamento semanal
+concorrente faça o mesmo valor aparecer simultaneamente como sem fatura e já
+faturado. Valores são somados em centavos e cada item entra em exatamente uma
+faixa, permitindo reconciliar total geral, buckets e empresas.
+
+Arquivos funcionais deste recorte:
+
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/contas-a-receber/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+pagamento, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 15 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 30 páginas geradas |
+| typecheck/lint final de `@motoboycity/api`                | aprovados                                    |
+
+Lacuna de validação: não havia sessão administrativa com massa financeira
+controlada para inspeção visual e conferência centavo a centavo. O próximo
+passo concreto é homologar a rota com empresas contendo dívida em cada faixa e,
+depois, criar o relatório de repasses e saques com idade das solicitações.
+
+## Atualização — 2026-08-23: repasses, saques e conciliação por entregador
+
+O segundo recorte de controle financeiro avançado foi concluído em
+`/relatorios/repasses-saques`. A página apresenta a obrigação atual da operação
+com os entregadores, separando saldo disponível, saldo bloqueado e valor já
+reservado para saques. Também mostra solicitações aguardando análise ou já
+aprovadas, idade das solicitações abertas e posição detalhada por entregador,
+com busca, filtros, ordenação, paginação local, CSV e links para o cadastro do
+entregador e a área financeira.
+
+O novo `GET /admin/financial/payouts-aging` é somente leitura e usa os mesmos
+`JwtAuthGuard` e `AdminOnlyGuard` da área financeira. O relatório é uma
+fotografia atual e não aceita período: a obrigação permanece existente até a
+liberação, pagamento ou reversão correspondente. O total é calculado como
+`saldo disponível + saldo bloqueado + valor reservado em saques`. A reserva é
+somada de volta porque o débito pendente já a retirou do disponível, mas ainda
+representa dinheiro devido ao entregador.
+
+Carteiras, grupos do ledger e solicitações `PENDING`/`APPROVED` são lidos em
+uma transação `RepeatableRead`, evitando misturar estados anteriores e
+posteriores a uma aprovação, pagamento ou rejeição concorrente. O relatório
+também confere o saldo em cache contra o ledger e compara o total reservado no
+ledger com o valor solicitado em saques abertos, tanto no consolidado quanto
+por entregador.
+
+As faixas de 0–1, 2–3, 4–7 e 8 dias ou mais são estritamente descritivas. Não
+existe SLA confirmado para pagamento de saques, então a interface usa “aberto
+há” e deixa explícito que idade não significa atraso. Nenhum limite de negócio
+foi inventado.
+
+Arquivos funcionais deste recorte:
+
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/repasses-saques/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, regra de saque, dados
+existentes, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 18 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 31 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: falta abrir a página com uma sessão administrativa e uma
+massa que contenha solicitações nos dois estados e divergências controladas,
+para conferir visualmente os alertas e os valores centavo a centavo. O próximo
+recorte financeiro recomendado é um demonstrativo de resultado por cliente e
+modalidade, separando valor cobrado, repasse, receita da plataforma, ajustes e
+margem operacional sem misturar caixa com competência.

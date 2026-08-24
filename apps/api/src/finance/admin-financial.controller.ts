@@ -12,7 +12,12 @@ import {
 import { AdminOnlyGuard } from '../auth/admin-only.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import type { CashPositionItem, ReceiptsReport } from '@motoboycity/types';
+import type {
+  CashPositionItem,
+  PayoutsAgingReport,
+  ReceivablesAgingReport,
+  ReceiptsReport,
+} from '@motoboycity/types';
 import {
   AdminFinancialService,
   type AdminDriverWalletDetail,
@@ -34,6 +39,18 @@ export class AdminFinancialController {
   @Get('cash-position')
   cashPosition(): Promise<CashPositionItem> {
     return this.adminFinancialService.cashPosition();
+  }
+
+  /** Fotografia atual das contas a receber, separada por idade da dívida. */
+  @Get('receivables-aging')
+  receivablesAging(): Promise<ReceivablesAgingReport> {
+    return this.adminFinancialService.receivablesAging();
+  }
+
+  /** Obrigações atuais, saques abertos e idade por entregador. */
+  @Get('payouts-aging')
+  payoutsAging(): Promise<PayoutsAgingReport> {
+    return this.adminFinancialService.payoutsAging();
   }
 
   /**

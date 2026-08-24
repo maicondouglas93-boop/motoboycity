@@ -5,7 +5,19 @@ import type {
   ListReceiptsQuery,
   ListWalletTransactionsQuery,
 } from '@motoboycity/validation';
-import type { CashPositionItem, ReceiptItem, ReceiptsReport } from '@motoboycity/types';
+import type {
+  CashPositionItem,
+  DriverPayoutPositionItem,
+  PayoutAgingBucketItem,
+  PayoutAgingBucketKey,
+  PayoutsAgingReport,
+  ReceiptItem,
+  ReceivablesAgingBucketItem,
+  ReceivablesAgingBucketKey,
+  ReceivablesAgingReport,
+  ReceivablesCompanyItem,
+  ReceiptsReport,
+} from '@motoboycity/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceService } from './invoice.service';
 import {
@@ -15,6 +27,7 @@ import {
   type WalletTransactionType,
 } from './driver-wallet.service';
 import { dateInSaoPaulo, endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import { FinancialClock } from './financial-clock.service';
 
 export interface AdminFinancialOverview {
   completedDeliveries: {
@@ -70,11 +83,75 @@ function somarEmCentavos(valores: number[]): number {
   return valores.reduce((total, valor) => total + Math.round(valor * 100), 0) / 100;
 }
 
+const RECEIVABLE_BUCKET_ORDER: ReceivablesAgingBucketKey[] = [
+  'UNBILLED',
+  'NOT_DUE',
+  'OVERDUE_1_7',
+  'OVERDUE_8_15',
+  'OVERDUE_16_30',
+  'OVERDUE_31_PLUS',
+];
+
+const PAYOUT_BUCKET_ORDER: PayoutAgingBucketKey[] = [
+  'OPEN_0_1',
+  'OPEN_2_3',
+  'OPEN_4_7',
+  'OPEN_8_PLUS',
+];
+
+function civilDateEpoch(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);
+}
+
+function daysBetweenCivilDates(later: string, earlier: string): number {
+  return Math.max(0, Math.floor((civilDateEpoch(later) - civilDateEpoch(earlier)) / 86_400_000));
+}
+
+function databaseDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function overdueBucket(days: number): ReceivablesAgingBucketKey {
+  if (days <= 7) return 'OVERDUE_1_7';
+  if (days <= 15) return 'OVERDUE_8_15';
+  if (days <= 30) return 'OVERDUE_16_30';
+  return 'OVERDUE_31_PLUS';
+}
+
+function payoutBucket(days: number): PayoutAgingBucketKey {
+  if (days <= 1) return 'OPEN_0_1';
+  if (days <= 3) return 'OPEN_2_3';
+  if (days <= 7) return 'OPEN_4_7';
+  return 'OPEN_8_PLUS';
+}
+
+type ReceivablesCompanyAccumulator = ReceivablesCompanyItem;
+
+function emptyCompany(companyId: string, companyName: string): ReceivablesCompanyAccumulator {
+  return {
+    companyId,
+    companyName,
+    unbilledCount: 0,
+    unbilledValue: 0,
+    oldestUnbilledDate: null,
+    maxUnbilledDays: 0,
+    notDueInvoiceCount: 0,
+    notDueInvoiceValue: 0,
+    overdueInvoiceCount: 0,
+    overdueInvoiceValue: 0,
+    oldestOverdueDate: null,
+    maxOverdueDays: 0,
+    totalReceivable: 0,
+  };
+}
+
 @Injectable()
 export class AdminFinancialService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly invoiceService: InvoiceService,
+    private readonly clock: FinancialClock,
   ) {}
 
   /**
@@ -144,6 +221,363 @@ export class AdminFinancialService {
       driverAvailableBalance: wallets.availableBalance,
       driverBlockedBalance: wallets.blockedBalance,
       pendingWithdrawalValue: wallets.pendingWithdrawalAmount,
+    };
+  }
+
+  /**
+   * Contas a receber no instante atual, classificadas pela idade da dívida.
+   *
+   * Entregas ainda sem fatura formam uma faixa própria. Faturas entram em
+   * exatamente uma faixa pela data civil de vencimento, evitando dupla
+   * contagem entre o total, o cliente e o aging.
+   */
+  async receivablesAging(): Promise<ReceivablesAgingReport> {
+    await this.invoiceService.refreshOverdueInvoices();
+
+    const asOf = dateInSaoPaulo(this.clock.now());
+    const { unbilledGroups, invoiceGroups, companies } = await this.prisma.$transaction(
+      async (tx) => {
+        const [currentUnbilledGroups, currentInvoiceGroups] = await Promise.all([
+          tx.delivery.groupBy({
+            by: ['companyId'],
+            where: { status: 'COMPLETED', paymentMethod: 'BILLED', invoiceId: null },
+            _count: { _all: true },
+            _sum: { totalValue: true },
+            _min: { statusChangedAt: true },
+          }),
+          tx.invoice.groupBy({
+            by: ['companyId', 'status', 'dueDate'],
+            where: { status: { in: ['PENDING', 'OVERDUE'] } },
+            _count: { _all: true },
+            _sum: { totalValue: true },
+          }),
+        ]);
+        const companyIds = [
+          ...new Set([
+            ...currentUnbilledGroups.map((group) => group.companyId),
+            ...currentInvoiceGroups.map((group) => group.companyId),
+          ]),
+        ];
+        const currentCompanies = companyIds.length
+          ? await tx.company.findMany({
+              where: { id: { in: companyIds } },
+              select: { id: true, tradeName: true },
+            })
+          : [];
+        return {
+          unbilledGroups: currentUnbilledGroups,
+          invoiceGroups: currentInvoiceGroups,
+          companies: currentCompanies,
+        };
+      },
+      // Sem este snapshot, um fechamento concorrente poderia fazer o mesmo
+      // valor aparecer como "sem fatura" na primeira consulta e faturado na
+      // segunda. O relatório financeiro precisa reconciliar centavo a centavo.
+      { isolationLevel: 'RepeatableRead' },
+    );
+    const companyNames = new Map(companies.map((company) => [company.id, company.tradeName]));
+    const companyRows = new Map<string, ReceivablesCompanyAccumulator>();
+    const buckets = new Map<ReceivablesAgingBucketKey, { count: number; values: number[] }>(
+      RECEIVABLE_BUCKET_ORDER.map((key) => [key, { count: 0, values: [] }]),
+    );
+
+    const getCompany = (companyId: string): ReceivablesCompanyAccumulator => {
+      const current = companyRows.get(companyId);
+      if (current) return current;
+      const created = emptyCompany(
+        companyId,
+        companyNames.get(companyId) ?? 'Empresa não encontrada',
+      );
+      companyRows.set(companyId, created);
+      return created;
+    };
+
+    for (const group of unbilledGroups) {
+      const count = group._count._all;
+      const value = numberOrZero(group._sum.totalValue);
+      const oldestDate = group._min.statusChangedAt
+        ? dateInSaoPaulo(group._min.statusChangedAt)
+        : null;
+      const company = getCompany(group.companyId);
+      company.unbilledCount += count;
+      company.unbilledValue = somarEmCentavos([company.unbilledValue, value]);
+      company.oldestUnbilledDate = oldestDate;
+      company.maxUnbilledDays = oldestDate ? daysBetweenCivilDates(asOf, oldestDate) : 0;
+      company.totalReceivable = somarEmCentavos([company.totalReceivable, value]);
+
+      const bucket = buckets.get('UNBILLED')!;
+      bucket.count += count;
+      bucket.values.push(value);
+    }
+
+    for (const group of invoiceGroups) {
+      const count = group._count._all;
+      const value = numberOrZero(group._sum.totalValue);
+      const dueDate = databaseDate(group.dueDate);
+      const daysOverdue = daysBetweenCivilDates(asOf, dueDate);
+      const bucketKey = dueDate >= asOf ? 'NOT_DUE' : overdueBucket(daysOverdue);
+      const company = getCompany(group.companyId);
+
+      if (bucketKey === 'NOT_DUE') {
+        company.notDueInvoiceCount += count;
+        company.notDueInvoiceValue = somarEmCentavos([company.notDueInvoiceValue, value]);
+      } else {
+        company.overdueInvoiceCount += count;
+        company.overdueInvoiceValue = somarEmCentavos([company.overdueInvoiceValue, value]);
+        company.maxOverdueDays = Math.max(company.maxOverdueDays, daysOverdue);
+        company.oldestOverdueDate =
+          !company.oldestOverdueDate || dueDate < company.oldestOverdueDate
+            ? dueDate
+            : company.oldestOverdueDate;
+      }
+      company.totalReceivable = somarEmCentavos([company.totalReceivable, value]);
+
+      const bucket = buckets.get(bucketKey)!;
+      bucket.count += count;
+      bucket.values.push(value);
+    }
+
+    const bucketItems: ReceivablesAgingBucketItem[] = RECEIVABLE_BUCKET_ORDER.map((key) => {
+      const bucket = buckets.get(key)!;
+      return { key, count: bucket.count, value: somarEmCentavos(bucket.values) };
+    });
+    const bucketByKey = new Map(bucketItems.map((bucket) => [bucket.key, bucket]));
+    const unbilled = bucketByKey.get('UNBILLED')!;
+    const notDue = bucketByKey.get('NOT_DUE')!;
+    const overdueBuckets = bucketItems.filter((bucket) => bucket.key.startsWith('OVERDUE_'));
+    const overdueCount = overdueBuckets.reduce((total, bucket) => total + bucket.count, 0);
+    const overdueValue = somarEmCentavos(overdueBuckets.map((bucket) => bucket.value));
+    const invoicesValue = somarEmCentavos([notDue.value, overdueValue]);
+
+    return {
+      asOf,
+      totalReceivable: somarEmCentavos([unbilled.value, invoicesValue]),
+      totalCompanies: companyRows.size,
+      unbilled: { count: unbilled.count, value: unbilled.value },
+      invoices: {
+        count: notDue.count + overdueCount,
+        value: invoicesValue,
+        notDueCount: notDue.count,
+        notDueValue: notDue.value,
+        overdueCount,
+        overdueValue,
+      },
+      buckets: bucketItems,
+      companies: [...companyRows.values()].sort(
+        (left, right) =>
+          right.totalReceivable - left.totalReceivable ||
+          left.companyName.localeCompare(right.companyName, 'pt-BR'),
+      ),
+    };
+  }
+
+  /**
+   * Obrigações atuais com entregadores e idade dos saques ainda abertos.
+   *
+   * O saque pendente já foi reservado por um DEBIT_WITHDRAWAL PENDING e,
+   * portanto, já saiu de `availableBalance`. Para não esconder essa obrigação,
+   * o total soma disponível + bloqueado + reservado em saques.
+   */
+  async payoutsAging(): Promise<PayoutsAgingReport> {
+    const asOf = dateInSaoPaulo(this.clock.now());
+    const { wallets, transactionGroups, openWithdrawals } = await this.prisma.$transaction(
+      async (tx) => {
+        const [currentWallets, currentTransactionGroups, currentOpenWithdrawals] =
+          await Promise.all([
+            tx.wallet.findMany({
+              where: { driverId: { not: null } },
+              select: {
+                id: true,
+                cachedAvailableBalance: true,
+                cachedBlockedBalance: true,
+                driver: {
+                  select: {
+                    id: true,
+                    user: { select: { name: true, email: true } },
+                  },
+                },
+              },
+            }),
+            tx.walletTransaction.groupBy({
+              by: ['walletId', 'type', 'status'],
+              where: { wallet: { driverId: { not: null } } },
+              _sum: { amount: true },
+            }),
+            tx.withdrawalRequest.findMany({
+              where: {
+                status: { in: ['PENDING', 'APPROVED'] },
+                wallet: { driverId: { not: null } },
+              },
+              select: {
+                walletId: true,
+                status: true,
+                requestedAmount: true,
+                netAmount: true,
+                createdAt: true,
+              },
+            }),
+          ]);
+        return {
+          wallets: currentWallets,
+          transactionGroups: currentTransactionGroups,
+          openWithdrawals: currentOpenWithdrawals,
+        };
+      },
+      // Aprovar/pagar/rejeitar um saque altera solicitação e ledger na mesma
+      // operação. O relatório precisa enxergar os dois lados do mesmo snapshot.
+      { isolationLevel: 'RepeatableRead' },
+    );
+
+    const transactionsByWallet = new Map<
+      string,
+      { type: WalletTransactionType; status: string; amount: { toString(): string } }[]
+    >();
+    for (const group of transactionGroups) {
+      const transaction = {
+        type: group.type as WalletTransactionType,
+        status: group.status,
+        amount: { toString: () => numberOrZero(group._sum.amount).toString() },
+      };
+      const current = transactionsByWallet.get(group.walletId);
+      if (current) current.push(transaction);
+      else transactionsByWallet.set(group.walletId, [transaction]);
+    }
+
+    const driverByWallet = new Map<string, DriverPayoutPositionItem>();
+    for (const wallet of wallets) {
+      if (!wallet.driver) continue;
+      const balances = calculateWalletBalances(transactionsByWallet.get(wallet.id) ?? []);
+      const row: DriverPayoutPositionItem = {
+        driverId: wallet.driver.id,
+        driverName: wallet.driver.user.name,
+        driverEmail: wallet.driver.user.email,
+        walletId: wallet.id,
+        ...balances,
+        totalObligation: somarEmCentavos([
+          balances.availableBalance,
+          balances.blockedBalance,
+          balances.pendingWithdrawalAmount,
+        ]),
+        openWithdrawalCount: 0,
+        openRequestedValue: 0,
+        openNetValue: 0,
+        pendingRequestCount: 0,
+        pendingNetValue: 0,
+        approvedRequestCount: 0,
+        approvedNetValue: 0,
+        oldestOpenDate: null,
+        maxOpenDays: 0,
+        cacheMatchesLedger:
+          roundCurrency(Number(wallet.cachedAvailableBalance)) === balances.availableBalance &&
+          roundCurrency(Number(wallet.cachedBlockedBalance)) === balances.blockedBalance,
+        withdrawalLedgerDifference: balances.pendingWithdrawalAmount,
+      };
+      driverByWallet.set(wallet.id, row);
+    }
+
+    const buckets = new Map<
+      PayoutAgingBucketKey,
+      { count: number; requestedValues: number[]; netValues: number[] }
+    >(PAYOUT_BUCKET_ORDER.map((key) => [key, { count: 0, requestedValues: [], netValues: [] }]));
+    let pendingCount = 0;
+    const pendingNetValues: number[] = [];
+    let approvedCount = 0;
+    const approvedNetValues: number[] = [];
+
+    for (const withdrawal of openWithdrawals) {
+      const driver = driverByWallet.get(withdrawal.walletId);
+      if (!driver) continue;
+      const requestedValue = numberOrZero(withdrawal.requestedAmount);
+      const netValue = numberOrZero(withdrawal.netAmount);
+      const createdDate = dateInSaoPaulo(withdrawal.createdAt);
+      const openDays = daysBetweenCivilDates(asOf, createdDate);
+
+      driver.openWithdrawalCount += 1;
+      driver.openRequestedValue = somarEmCentavos([driver.openRequestedValue, requestedValue]);
+      driver.openNetValue = somarEmCentavos([driver.openNetValue, netValue]);
+      driver.oldestOpenDate =
+        !driver.oldestOpenDate || createdDate < driver.oldestOpenDate
+          ? createdDate
+          : driver.oldestOpenDate;
+      driver.maxOpenDays = Math.max(driver.maxOpenDays, openDays);
+      driver.withdrawalLedgerDifference = somarEmCentavos([
+        driver.withdrawalLedgerDifference,
+        -requestedValue,
+      ]);
+
+      if (withdrawal.status === 'PENDING') {
+        driver.pendingRequestCount += 1;
+        driver.pendingNetValue = somarEmCentavos([driver.pendingNetValue, netValue]);
+        pendingCount += 1;
+        pendingNetValues.push(netValue);
+      } else {
+        driver.approvedRequestCount += 1;
+        driver.approvedNetValue = somarEmCentavos([driver.approvedNetValue, netValue]);
+        approvedCount += 1;
+        approvedNetValues.push(netValue);
+      }
+
+      const bucket = buckets.get(payoutBucket(openDays))!;
+      bucket.count += 1;
+      bucket.requestedValues.push(requestedValue);
+      bucket.netValues.push(netValue);
+    }
+
+    const bucketItems: PayoutAgingBucketItem[] = PAYOUT_BUCKET_ORDER.map((key) => {
+      const bucket = buckets.get(key)!;
+      return {
+        key,
+        count: bucket.count,
+        requestedValue: somarEmCentavos(bucket.requestedValues),
+        netValue: somarEmCentavos(bucket.netValues),
+      };
+    });
+    const drivers = [...driverByWallet.values()].sort(
+      (left, right) =>
+        right.totalObligation - left.totalObligation ||
+        left.driverName.localeCompare(right.driverName, 'pt-BR'),
+    );
+    const availableBalance = somarEmCentavos(drivers.map((driver) => driver.availableBalance));
+    const blockedBalance = somarEmCentavos(drivers.map((driver) => driver.blockedBalance));
+    const pendingWithdrawalAmount = somarEmCentavos(
+      drivers.map((driver) => driver.pendingWithdrawalAmount),
+    );
+    const requestedValue = somarEmCentavos(drivers.map((driver) => driver.openRequestedValue));
+    const netValue = somarEmCentavos(drivers.map((driver) => driver.openNetValue));
+    const withdrawalLedgerDifference = somarEmCentavos(
+      drivers.map((driver) => driver.withdrawalLedgerDifference),
+    );
+    const oldestOpenDate =
+      drivers
+        .map((driver) => driver.oldestOpenDate)
+        .filter((date): date is string => date !== null)
+        .sort()[0] ?? null;
+    const maxOpenDays = Math.max(0, ...drivers.map((driver) => driver.maxOpenDays));
+
+    return {
+      asOf,
+      totalObligation: somarEmCentavos([availableBalance, blockedBalance, pendingWithdrawalAmount]),
+      wallets: {
+        driverCount: drivers.length,
+        availableBalance,
+        blockedBalance,
+        pendingWithdrawalAmount,
+        divergentCount: drivers.filter((driver) => !driver.cacheMatchesLedger).length,
+      },
+      withdrawals: {
+        openCount: pendingCount + approvedCount,
+        requestedValue,
+        netValue,
+        pendingCount,
+        pendingNetValue: somarEmCentavos(pendingNetValues),
+        approvedCount,
+        approvedNetValue: somarEmCentavos(approvedNetValues),
+        oldestOpenDate,
+        maxOpenDays,
+        withdrawalLedgerDifference,
+      },
+      buckets: bucketItems,
+      drivers,
     };
   }
 

@@ -146,6 +146,117 @@ export interface ReceiptsReport {
   days: ReceiptDayGroup[];
 }
 
+export type ReceivablesAgingBucketKey =
+  'UNBILLED' | 'NOT_DUE' | 'OVERDUE_1_7' | 'OVERDUE_8_15' | 'OVERDUE_16_30' | 'OVERDUE_31_PLUS';
+
+export interface ReceivablesAgingBucketItem {
+  key: ReceivablesAgingBucketKey;
+  count: number;
+  value: number;
+}
+
+/** Exposição financeira atual de uma empresa, sem filtro de período. */
+export interface ReceivablesCompanyItem {
+  companyId: string;
+  companyName: string;
+  unbilledCount: number;
+  unbilledValue: number;
+  oldestUnbilledDate: string | null;
+  maxUnbilledDays: number;
+  notDueInvoiceCount: number;
+  notDueInvoiceValue: number;
+  overdueInvoiceCount: number;
+  overdueInvoiceValue: number;
+  oldestOverdueDate: string | null;
+  maxOverdueDays: number;
+  totalReceivable: number;
+}
+
+/**
+ * Contas a receber no instante atual.
+ *
+ * Não aceita período de propósito: uma dívida antiga continua existindo hoje.
+ * `asOf` é a data civil no fuso da operação usada para calcular os atrasos.
+ */
+export interface ReceivablesAgingReport {
+  asOf: string;
+  totalReceivable: number;
+  totalCompanies: number;
+  unbilled: {
+    count: number;
+    value: number;
+  };
+  invoices: {
+    count: number;
+    value: number;
+    notDueCount: number;
+    notDueValue: number;
+    overdueCount: number;
+    overdueValue: number;
+  };
+  buckets: ReceivablesAgingBucketItem[];
+  companies: ReceivablesCompanyItem[];
+}
+
+export type PayoutAgingBucketKey = 'OPEN_0_1' | 'OPEN_2_3' | 'OPEN_4_7' | 'OPEN_8_PLUS';
+
+export interface PayoutAgingBucketItem {
+  key: PayoutAgingBucketKey;
+  count: number;
+  requestedValue: number;
+  netValue: number;
+}
+
+export interface DriverPayoutPositionItem {
+  driverId: string;
+  driverName: string;
+  driverEmail: string;
+  walletId: string;
+  availableBalance: number;
+  blockedBalance: number;
+  pendingWithdrawalAmount: number;
+  totalObligation: number;
+  openWithdrawalCount: number;
+  openRequestedValue: number;
+  openNetValue: number;
+  pendingRequestCount: number;
+  pendingNetValue: number;
+  approvedRequestCount: number;
+  approvedNetValue: number;
+  oldestOpenDate: string | null;
+  maxOpenDays: number;
+  cacheMatchesLedger: boolean;
+  /** Reservado no ledger menos o valor solicitado em saques abertos. */
+  withdrawalLedgerDifference: number;
+}
+
+/** Fotografia atual das obrigações financeiras com os entregadores. */
+export interface PayoutsAgingReport {
+  asOf: string;
+  totalObligation: number;
+  wallets: {
+    driverCount: number;
+    availableBalance: number;
+    blockedBalance: number;
+    pendingWithdrawalAmount: number;
+    divergentCount: number;
+  };
+  withdrawals: {
+    openCount: number;
+    requestedValue: number;
+    netValue: number;
+    pendingCount: number;
+    pendingNetValue: number;
+    approvedCount: number;
+    approvedNetValue: number;
+    oldestOpenDate: string | null;
+    maxOpenDays: number;
+    withdrawalLedgerDifference: number;
+  };
+  buckets: PayoutAgingBucketItem[];
+  drivers: DriverPayoutPositionItem[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;
