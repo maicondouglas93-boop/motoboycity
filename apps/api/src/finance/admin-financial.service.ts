@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
+  AdjustDriverWalletPayload,
   AdminFinancialOverviewQuery,
+  FinancialStatementQuery,
   ListAdminWalletsQuery,
   ListReceiptsQuery,
   ListWalletTransactionsQuery,
@@ -8,6 +10,12 @@ import type {
 import type {
   CashPositionItem,
   DriverPayoutPositionItem,
+  FinancialStatementAdjustmentItem,
+  FinancialStatementDayItem,
+  FinancialStatementDimensionItem,
+  FinancialStatementPaymentMethodItem,
+  FinancialStatementReport,
+  FinancialStatementTotals,
   PayoutAgingBucketItem,
   PayoutAgingBucketKey,
   PayoutsAgingReport,
@@ -81,6 +89,81 @@ function roundCurrency(value: number): number {
  */
 function somarEmCentavos(valores: number[]): number {
   return valores.reduce((total, valor) => total + Math.round(valor * 100), 0) / 100;
+}
+
+function roundMetric(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function percentChange(current: number, previous: number): number | null {
+  if (previous === 0) return null;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+type FinancialDeliveryRow = {
+  totalValue: { toString(): string } | null;
+  driverValue: { toString(): string } | null;
+  platformValue: { toString(): string } | null;
+};
+
+function financialStatementTotals(rows: FinancialDeliveryRow[]): FinancialStatementTotals {
+  const pricedRows = rows.filter(
+    (
+      row,
+    ): row is FinancialDeliveryRow & {
+      totalValue: { toString(): string };
+      driverValue: { toString(): string };
+      platformValue: { toString(): string };
+    } => row.totalValue !== null && row.driverValue !== null && row.platformValue !== null,
+  );
+  const totalValue = somarEmCentavos(pricedRows.map((row) => Number(row.totalValue)));
+  const driverValue = somarEmCentavos(pricedRows.map((row) => Number(row.driverValue)));
+  const platformValue = somarEmCentavos(pricedRows.map((row) => Number(row.platformValue)));
+
+  return {
+    completedCount: rows.length,
+    pricedCount: pricedRows.length,
+    unpricedCount: rows.length - pricedRows.length,
+    totalValue,
+    driverValue,
+    platformValue,
+    averageTicket: pricedRows.length ? roundCurrency(totalValue / pricedRows.length) : 0,
+    contributionMarginPercent: totalValue ? roundMetric((platformValue / totalValue) * 100) : 0,
+    reconciliationDifference: somarEmCentavos([totalValue, -driverValue, -platformValue]),
+  };
+}
+
+function statementDimensions<T extends FinancialDeliveryRow>(
+  rows: T[],
+  platformTotal: number,
+  identify: (row: T) => { id: string; name: string },
+): FinancialStatementDimensionItem[] {
+  const grouped = new Map<string, { name: string; rows: T[] }>();
+  for (const row of rows) {
+    const dimension = identify(row);
+    const current = grouped.get(dimension.id);
+    if (current) current.rows.push(row);
+    else grouped.set(dimension.id, { name: dimension.name, rows: [row] });
+  }
+
+  return [...grouped.entries()]
+    .map(([id, group]) => {
+      const totals = financialStatementTotals(group.rows);
+      return {
+        id,
+        name: group.name,
+        ...totals,
+        platformRevenueSharePercent: platformTotal
+          ? roundMetric((totals.platformValue / platformTotal) * 100)
+          : 0,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.platformValue - left.platformValue ||
+        right.totalValue - left.totalValue ||
+        left.name.localeCompare(right.name, 'pt-BR'),
+    );
 }
 
 const RECEIVABLE_BUCKET_ORDER: ReceivablesAgingBucketKey[] = [
@@ -581,6 +664,162 @@ export class AdminFinancialService {
     };
   }
 
+  /**
+   * Resultado gerencial por competência.
+   *
+   * A competência nasce quando a entrega chega a COMPLETED. Movimentos de
+   * saque e liberação não entram novamente, pois seriam caixa ou mudança de
+   * disponibilidade da mesma obrigação. Ajustes de carteira ficam visíveis em
+   * bloco separado, sem classificação contábil inventada.
+   */
+  async financialStatement(query: FinancialStatementQuery): Promise<FinancialStatementReport> {
+    const periodFrom = startOfDayInSaoPaulo(query.from);
+    const periodToExclusive = new Date(endOfDayInSaoPaulo(query.to).getTime() + 1);
+    const duration = periodToExclusive.getTime() - periodFrom.getTime();
+    const comparisonToExclusive = periodFrom;
+    const comparisonFrom = new Date(periodFrom.getTime() - duration);
+    const adjustmentTypes = ['CREDIT_ADJUSTMENT', 'DEBIT_ADJUSTMENT', 'CREDIT_REFUND'] as const;
+
+    const { currentDeliveries, comparisonDeliveries, adjustmentGroups } =
+      await this.prisma.$transaction(
+        async (tx) => {
+          const [current, comparison, adjustments] = await Promise.all([
+            tx.delivery.findMany({
+              where: {
+                status: 'COMPLETED',
+                statusChangedAt: { gte: periodFrom, lt: periodToExclusive },
+              },
+              select: {
+                statusChangedAt: true,
+                totalValue: true,
+                driverValue: true,
+                platformValue: true,
+                paymentMethod: true,
+                company: { select: { id: true, tradeName: true } },
+                serviceType: { select: { id: true, name: true } },
+              },
+            }),
+            tx.delivery.findMany({
+              where: {
+                status: 'COMPLETED',
+                statusChangedAt: { gte: comparisonFrom, lt: comparisonToExclusive },
+              },
+              select: {
+                totalValue: true,
+                driverValue: true,
+                platformValue: true,
+              },
+            }),
+            tx.walletTransaction.groupBy({
+              by: ['type', 'status'],
+              where: {
+                wallet: { driverId: { not: null } },
+                type: { in: [...adjustmentTypes] },
+                status: { not: 'CANCELLED' },
+                createdAt: { gte: periodFrom, lt: periodToExclusive },
+              },
+              _count: { _all: true },
+              _sum: { amount: true },
+            }),
+          ]);
+          return {
+            currentDeliveries: current,
+            comparisonDeliveries: comparison,
+            adjustmentGroups: adjustments,
+          };
+        },
+        // Uma conclusão e seu crédito de repasse são gravados na mesma
+        // transação. O demonstrativo precisa ler dimensões e ledger no mesmo
+        // snapshot para não mostrar metades de estados concorrentes.
+        { isolationLevel: 'RepeatableRead' },
+      );
+
+    const totals = financialStatementTotals(currentDeliveries);
+    const comparisonTotals = financialStatementTotals(comparisonDeliveries);
+    const companies = statementDimensions(currentDeliveries, totals.platformValue, (delivery) => ({
+      id: delivery.company.id,
+      name: delivery.company.tradeName,
+    }));
+    const serviceTypes = statementDimensions(
+      currentDeliveries,
+      totals.platformValue,
+      (delivery) => ({ id: delivery.serviceType.id, name: delivery.serviceType.name }),
+    );
+
+    const paymentMethods: FinancialStatementPaymentMethodItem[] = (
+      ['BILLED', 'ONLINE'] as const
+    ).map((paymentMethod) => ({
+      paymentMethod,
+      ...financialStatementTotals(
+        currentDeliveries.filter((delivery) => delivery.paymentMethod === paymentMethod),
+      ),
+    }));
+
+    const rowsByDay = new Map<string, typeof currentDeliveries>();
+    for (const delivery of currentDeliveries) {
+      const day = dateInSaoPaulo(delivery.statusChangedAt);
+      const rows = rowsByDay.get(day);
+      if (rows) rows.push(delivery);
+      else rowsByDay.set(day, [delivery]);
+    }
+    const days: FinancialStatementDayItem[] = [...rowsByDay.entries()]
+      .map(([day, rows]) => ({ day, ...financialStatementTotals(rows) }))
+      .sort((left, right) => left.day.localeCompare(right.day));
+
+    const adjustmentItems: FinancialStatementAdjustmentItem[] = adjustmentGroups
+      .map((group) => ({
+        type: group.type as FinancialStatementAdjustmentItem['type'],
+        status: group.status,
+        direction: (group.type === 'DEBIT_ADJUSTMENT' ? 'DEBIT' : 'CREDIT') as 'CREDIT' | 'DEBIT',
+        count: group._count._all,
+        value: numberOrZero(group._sum.amount),
+      }))
+      .sort(
+        (left, right) =>
+          adjustmentTypes.indexOf(left.type) - adjustmentTypes.indexOf(right.type) ||
+          left.status.localeCompare(right.status),
+      );
+    const creditItems = adjustmentItems.filter((item) => item.direction === 'CREDIT');
+    const debitItems = adjustmentItems.filter((item) => item.direction === 'DEBIT');
+    const creditValue = somarEmCentavos(creditItems.map((item) => item.value));
+    const debitValue = somarEmCentavos(debitItems.map((item) => item.value));
+
+    return {
+      period: { from: query.from, to: query.to },
+      live: query.to === dateInSaoPaulo(this.clock.now()),
+      totals,
+      comparison: {
+        period: {
+          from: dateInSaoPaulo(comparisonFrom),
+          to: dateInSaoPaulo(new Date(comparisonToExclusive.getTime() - 1)),
+        },
+        totals: comparisonTotals,
+        changePercent: {
+          completedCount: percentChange(totals.completedCount, comparisonTotals.completedCount),
+          totalValue: percentChange(totals.totalValue, comparisonTotals.totalValue),
+          driverValue: percentChange(totals.driverValue, comparisonTotals.driverValue),
+          platformValue: percentChange(totals.platformValue, comparisonTotals.platformValue),
+          averageTicket: percentChange(totals.averageTicket, comparisonTotals.averageTicket),
+        },
+        contributionMarginPercentagePointChange: roundMetric(
+          totals.contributionMarginPercent - comparisonTotals.contributionMarginPercent,
+        ),
+      },
+      walletAdjustments: {
+        creditCount: creditItems.reduce((total, item) => total + item.count, 0),
+        creditValue,
+        debitCount: debitItems.reduce((total, item) => total + item.count, 0),
+        debitValue,
+        netDriverObligationImpact: somarEmCentavos([creditValue, -debitValue]),
+        items: adjustmentItems,
+      },
+      companies,
+      serviceTypes,
+      paymentMethods,
+      days,
+    };
+  }
+
   async overview(filters: AdminFinancialOverviewQuery): Promise<AdminFinancialOverview> {
     const completedWhere = {
       status: 'COMPLETED' as const,
@@ -672,6 +911,77 @@ export class AdminFinancialService {
     });
 
     return drivers.map((driver) => this.toDriverWalletItem(driver));
+  }
+
+  /**
+   * Ajuste manual na carteira do motoboy, lancado pelo admin.
+   *
+   * Existe porque erro de repasse, cobranca indevida e acerto combinado
+   * acontecem na primeira semana de operacao real, e sem isto a unica saida e
+   * escrever SQL direto no banco de producao — sem motivo registrado, sem
+   * autor, e sem aparecer no extrato do motoboy.
+   *
+   * O lancamento entra pelo MESMO ledger do repasse, e nao mexendo no saldo:
+   * a carteira nao e um numero mutavel, e a soma das linhas. Escrever o saldo
+   * na mao criaria uma segunda verdade que discordaria do extrato.
+   *
+   * Ajuste nasce RELEASED, e nao PENDING: o repasse fica bloqueado ate a
+   * segunda porque e adiantamento de servico prestado; uma correcao de erro
+   * nosso nao tem por que fazer o motoboy esperar.
+   */
+  async adjustDriverWallet(
+    driverId: string,
+    payload: AdjustDriverWalletPayload,
+    adminUserId: string,
+  ): Promise<AdminDriverWalletDetail> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true },
+    });
+    if (!driver) {
+      throw new NotFoundException('Entregador não encontrado.');
+    }
+
+    const ehCredito = payload.type === 'CREDIT';
+
+    await this.prisma.$transaction(async (tx) => {
+      const wallet = await tx.wallet.upsert({
+        where: { driverId },
+        update: {},
+        create: { driverId },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: ehCredito ? 'CREDIT_ADJUSTMENT' : 'DEBIT_ADJUSTMENT',
+          status: 'RELEASED',
+          amount: payload.amount,
+          reason: payload.reason,
+          createdByUserId: adminUserId,
+        },
+      });
+
+      /**
+       * O cache do saldo acompanha o lancamento na MESMA transacao.
+       *
+       * Debito pode deixar o saldo negativo, e isso e proposital: se o motoboy
+       * recebeu a mais, ele passa a dever, e esconder isso zerando o saldo
+       * apagaria a divida. A tela mostra negativo em vermelho.
+       */
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          cachedAvailableBalance: ehCredito
+            ? { increment: payload.amount }
+            : { decrement: payload.amount },
+        },
+      });
+    });
+
+    // O detalhe recarregado ja inclui o ajuste recem-criado, entao a tela nao
+    // precisa de uma segunda chamada para mostrar o extrato atualizado.
+    return this.getDriverWallet(driverId, { limit: 50 });
   }
 
   async getDriverWallet(

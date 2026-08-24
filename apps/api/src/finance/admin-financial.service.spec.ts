@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminFinancialService } from './admin-financial.service';
@@ -586,5 +587,390 @@ describe('AdminFinancialService.payoutsAging', () => {
     expect(report.buckets.every((bucket) => bucket.count === 0 && bucket.netValue === 0)).toBe(
       true,
     );
+  });
+});
+
+describe('AdminFinancialService.financialStatement', () => {
+  let service: AdminFinancialService;
+  let prisma: {
+    delivery: { findMany: jest.Mock };
+    walletTransaction: { groupBy: jest.Mock };
+    $transaction: jest.Mock;
+  };
+
+  beforeEach(async () => {
+    prisma = {
+      delivery: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { groupBy: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminFinancialService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: { refreshOverdueInvoices: jest.fn() } },
+        { provide: FinancialClock, useValue: { now: () => new Date('2026-08-23T15:00:00Z') } },
+      ],
+    }).compile();
+
+    service = module.get(AdminFinancialService);
+  });
+
+  it('usa janelas sem sobreposição e lê competência e ledger no mesmo snapshot', async () => {
+    await service.financialStatement({ from: '2026-08-20', to: '2026-08-23' });
+
+    expect(prisma.delivery.findMany.mock.calls[0]?.[0]?.where).toEqual({
+      status: 'COMPLETED',
+      statusChangedAt: {
+        gte: new Date('2026-08-20T03:00:00.000Z'),
+        lt: new Date('2026-08-24T03:00:00.000Z'),
+      },
+    });
+    expect(prisma.delivery.findMany.mock.calls[1]?.[0]?.where).toEqual({
+      status: 'COMPLETED',
+      statusChangedAt: {
+        gte: new Date('2026-08-16T03:00:00.000Z'),
+        lt: new Date('2026-08-20T03:00:00.000Z'),
+      },
+    });
+    expect(prisma.walletTransaction.groupBy.mock.calls[0]?.[0]?.where).toEqual({
+      wallet: { driverId: { not: null } },
+      type: { in: ['CREDIT_ADJUSTMENT', 'DEBIT_ADJUSTMENT', 'CREDIT_REFUND'] },
+      status: { not: 'CANCELLED' },
+      createdAt: {
+        gte: new Date('2026-08-20T03:00:00.000Z'),
+        lt: new Date('2026-08-24T03:00:00.000Z'),
+      },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
+    });
+  });
+
+  it('reconcilia valores e consolida cliente, modalidade, pagamento, dia e ajustes', async () => {
+    prisma.delivery.findMany
+      .mockResolvedValueOnce([
+        {
+          statusChangedAt: new Date('2026-08-23T10:00:00Z'),
+          totalValue: 100,
+          driverValue: 70,
+          platformValue: 30,
+          paymentMethod: 'BILLED',
+          company: { id: 'company-1', tradeName: 'Loja Azul' },
+          serviceType: { id: 'service-1', name: 'Motoboy' },
+        },
+        {
+          statusChangedAt: new Date('2026-08-23T20:00:00Z'),
+          totalValue: 50,
+          driverValue: 35,
+          platformValue: 15,
+          paymentMethod: 'ONLINE',
+          company: { id: 'company-1', tradeName: 'Loja Azul' },
+          serviceType: { id: 'service-1', name: 'Motoboy' },
+        },
+        {
+          statusChangedAt: new Date('2026-08-22T12:00:00Z'),
+          totalValue: 80,
+          driverValue: 60,
+          platformValue: 20,
+          paymentMethod: 'BILLED',
+          company: { id: 'company-2', tradeName: 'Loja Verde' },
+          serviceType: { id: 'service-2', name: 'Utilitário' },
+        },
+        {
+          statusChangedAt: new Date('2026-08-22T13:00:00Z'),
+          totalValue: null,
+          driverValue: null,
+          platformValue: null,
+          paymentMethod: 'BILLED',
+          company: { id: 'company-2', tradeName: 'Loja Verde' },
+          serviceType: { id: 'service-2', name: 'Utilitário' },
+        },
+      ])
+      .mockResolvedValueOnce([
+        { totalValue: 100, driverValue: 75, platformValue: 25 },
+        { totalValue: 50, driverValue: 40, platformValue: 10 },
+      ]);
+    prisma.walletTransaction.groupBy.mockResolvedValue([
+      {
+        type: 'CREDIT_ADJUSTMENT',
+        status: 'RELEASED',
+        _count: { _all: 2 },
+        _sum: { amount: 5.25 },
+      },
+      {
+        type: 'CREDIT_REFUND',
+        status: 'PENDING',
+        _count: { _all: 1 },
+        _sum: { amount: 2 },
+      },
+      {
+        type: 'DEBIT_ADJUSTMENT',
+        status: 'RELEASED',
+        _count: { _all: 1 },
+        _sum: { amount: 3.1 },
+      },
+    ]);
+
+    const report = await service.financialStatement({ from: '2026-08-20', to: '2026-08-23' });
+
+    expect(report.period).toEqual({ from: '2026-08-20', to: '2026-08-23' });
+    expect(report.live).toBe(true);
+    expect(report.totals).toEqual({
+      completedCount: 4,
+      pricedCount: 3,
+      unpricedCount: 1,
+      totalValue: 230,
+      driverValue: 165,
+      platformValue: 65,
+      averageTicket: 76.67,
+      contributionMarginPercent: 28.26,
+      reconciliationDifference: 0,
+    });
+    expect(report.comparison).toEqual({
+      period: { from: '2026-08-16', to: '2026-08-19' },
+      totals: {
+        completedCount: 2,
+        pricedCount: 2,
+        unpricedCount: 0,
+        totalValue: 150,
+        driverValue: 115,
+        platformValue: 35,
+        averageTicket: 75,
+        contributionMarginPercent: 23.33,
+        reconciliationDifference: 0,
+      },
+      changePercent: {
+        completedCount: 100,
+        totalValue: 53.3,
+        driverValue: 43.5,
+        platformValue: 85.7,
+        averageTicket: 2.2,
+      },
+      contributionMarginPercentagePointChange: 4.93,
+    });
+    expect(report.walletAdjustments).toEqual({
+      creditCount: 3,
+      creditValue: 7.25,
+      debitCount: 1,
+      debitValue: 3.1,
+      netDriverObligationImpact: 4.15,
+      items: [
+        {
+          type: 'CREDIT_ADJUSTMENT',
+          status: 'RELEASED',
+          direction: 'CREDIT',
+          count: 2,
+          value: 5.25,
+        },
+        {
+          type: 'DEBIT_ADJUSTMENT',
+          status: 'RELEASED',
+          direction: 'DEBIT',
+          count: 1,
+          value: 3.1,
+        },
+        {
+          type: 'CREDIT_REFUND',
+          status: 'PENDING',
+          direction: 'CREDIT',
+          count: 1,
+          value: 2,
+        },
+      ],
+    });
+    expect(report.companies).toEqual([
+      expect.objectContaining({
+        id: 'company-1',
+        name: 'Loja Azul',
+        completedCount: 2,
+        totalValue: 150,
+        driverValue: 105,
+        platformValue: 45,
+        contributionMarginPercent: 30,
+        platformRevenueSharePercent: 69.23,
+      }),
+      expect.objectContaining({
+        id: 'company-2',
+        name: 'Loja Verde',
+        completedCount: 2,
+        pricedCount: 1,
+        unpricedCount: 1,
+        totalValue: 80,
+        platformValue: 20,
+        platformRevenueSharePercent: 30.77,
+      }),
+    ]);
+    expect(report.serviceTypes.map((item) => item.name)).toEqual(['Motoboy', 'Utilitário']);
+    expect(report.paymentMethods).toEqual([
+      expect.objectContaining({
+        paymentMethod: 'BILLED',
+        completedCount: 3,
+        pricedCount: 2,
+        totalValue: 180,
+        platformValue: 50,
+      }),
+      expect.objectContaining({
+        paymentMethod: 'ONLINE',
+        completedCount: 1,
+        pricedCount: 1,
+        totalValue: 50,
+        platformValue: 15,
+      }),
+    ]);
+    expect(report.days).toEqual([
+      expect.objectContaining({ day: '2026-08-22', completedCount: 2, totalValue: 80 }),
+      expect.objectContaining({ day: '2026-08-23', completedCount: 2, totalValue: 150 }),
+    ]);
+  });
+
+  it('devolve estrutura completa e zerada quando não há resultado', async () => {
+    const report = await service.financialStatement({ from: '2026-08-01', to: '2026-08-02' });
+
+    expect(report.totals).toEqual({
+      completedCount: 0,
+      pricedCount: 0,
+      unpricedCount: 0,
+      totalValue: 0,
+      driverValue: 0,
+      platformValue: 0,
+      averageTicket: 0,
+      contributionMarginPercent: 0,
+      reconciliationDifference: 0,
+    });
+    expect(report.companies).toEqual([]);
+    expect(report.serviceTypes).toEqual([]);
+    expect(report.days).toEqual([]);
+    expect(report.paymentMethods).toHaveLength(2);
+    expect(report.walletAdjustments.items).toEqual([]);
+    expect(report.walletAdjustments.netDriverObligationImpact).toBe(0);
+  });
+});
+
+describe('AdminFinancialService.adjustDriverWallet', () => {
+  let service: AdminFinancialService;
+  let prisma: {
+    driver: { findUnique: jest.Mock };
+    wallet: { upsert: jest.Mock; update: jest.Mock };
+    walletTransaction: { create: jest.Mock; findMany: jest.Mock; groupBy: jest.Mock };
+    $transaction: jest.Mock;
+  };
+  let tx: {
+    wallet: { upsert: jest.Mock; update: jest.Mock };
+    walletTransaction: { create: jest.Mock };
+  };
+
+  beforeEach(async () => {
+    tx = {
+      wallet: { upsert: jest.fn().mockResolvedValue({ id: 'wallet-1' }), update: jest.fn() },
+      walletTransaction: { create: jest.fn() },
+    };
+    prisma = {
+      driver: { findUnique: jest.fn().mockResolvedValue({ id: 'driver-1' }) },
+      wallet: { upsert: jest.fn(), update: jest.fn() },
+      walletTransaction: { create: jest.fn(), findMany: jest.fn(), groupBy: jest.fn() },
+      $transaction: jest.fn().mockImplementation(async (cb: (t: unknown) => unknown) => cb(tx)),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminFinancialService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: { refreshOverdueInvoices: jest.fn() } },
+        { provide: FinancialClock, useValue: { now: () => new Date('2026-08-24T12:00:00Z') } },
+      ],
+    }).compile();
+
+    service = module.get(AdminFinancialService);
+    // O detalhe recarregado no fim nao e o objeto deste teste.
+    jest.spyOn(service, 'getDriverWallet').mockResolvedValue({} as never);
+  });
+
+  it('lança CRÉDITO como linha de ledger, já liberada, com motivo e autor', async () => {
+    await service.adjustDriverWallet(
+      'driver-1',
+      { type: 'CREDIT', amount: 40, reason: 'Repasse do pedido #1173 saiu a menos' },
+      'admin-9',
+    );
+
+    expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        walletId: 'wallet-1',
+        type: 'CREDIT_ADJUSTMENT',
+        // RELEASED, e nao PENDING: correcao de erro nosso nao faz o motoboy
+        // esperar ate a segunda-feira.
+        status: 'RELEASED',
+        amount: 40,
+        reason: 'Repasse do pedido #1173 saiu a menos',
+        createdByUserId: 'admin-9',
+      }),
+    });
+  });
+
+  it('crédito soma no saldo DISPONÍVEL, não no bloqueado', async () => {
+    await service.adjustDriverWallet(
+      'driver-1',
+      { type: 'CREDIT', amount: 40, reason: 'Correcao de repasse a menor' },
+      'admin-9',
+    );
+
+    expect(tx.wallet.update).toHaveBeenCalledWith({
+      where: { id: 'wallet-1' },
+      data: { cachedAvailableBalance: { increment: 40 } },
+    });
+  });
+
+  it('débito subtrai, e pode deixar o saldo negativo', async () => {
+    /**
+     * Negativo e proposital: se o motoboy recebeu a mais, ele passa a dever.
+     * Zerar o saldo em vez de deixar negativo apagaria a divida da tela e do
+     * extrato — e ninguem cobraria o que nao aparece.
+     */
+    await service.adjustDriverWallet(
+      'driver-1',
+      { type: 'DEBIT', amount: 500, reason: 'Recebeu em duplicidade o pedido #1174' },
+      'admin-9',
+    );
+
+    expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: 'DEBIT_ADJUSTMENT', amount: 500 }),
+    });
+    expect(tx.wallet.update).toHaveBeenCalledWith({
+      where: { id: 'wallet-1' },
+      data: { cachedAvailableBalance: { decrement: 500 } },
+    });
+  });
+
+  it('lançamento e saldo andam na MESMA transação', async () => {
+    // Se o saldo pudesse ser atualizado fora da transacao do lancamento, uma
+    // falha no meio deixaria extrato e saldo discordando — e a tela de
+    // carteiras marcaria "Divergência" sem ninguem saber por que.
+    await service.adjustDriverWallet(
+      'driver-1',
+      { type: 'CREDIT', amount: 10, reason: 'Acerto combinado por telefone' },
+      'admin-9',
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.walletTransaction.create).not.toHaveBeenCalled();
+    expect(prisma.wallet.update).not.toHaveBeenCalled();
+  });
+
+  it('recusa entregador inexistente antes de mexer em dinheiro', async () => {
+    prisma.driver.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.adjustDriverWallet(
+        'nao-existe',
+        { type: 'CREDIT', amount: 10, reason: 'Qualquer motivo escrito aqui' },
+        'admin-9',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

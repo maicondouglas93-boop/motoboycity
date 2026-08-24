@@ -264,6 +264,7 @@ model User {
   driversReviewed         Driver[]                         @relation("DriverReviewedBy")
   platformSettingsEdits   PlatformSettings[]               @relation("PlatformSettingsUpdatedBy")
   virtualSecretaryAudits  VirtualSecretaryAudit[]
+  walletAdjustments       WalletTransaction[]              @relation("WalletTransactionCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -822,6 +823,19 @@ model WalletTransaction {
 
   releaseAt  DateTime?
   notaFiscal String?
+
+  /// Por que este lancamento existe. Obrigatorio em ajuste manual do admin.
+  ///
+  /// Ajuste sem motivo e movimentacao de dinheiro sem rastro: seis meses
+  /// depois ninguem lembra se aqueles R$ 40 foram acerto combinado, correcao
+  /// de repasse errado ou engano. O texto fica visivel para o motoboy na
+  /// carteira dele, entao e escrito para ele ler.
+  reason String? @db.VarChar(300)
+
+  /// Quem lancou. Nulo nos lancamentos automaticos, que nascem de evento
+  /// operacional e nao de decisao de pessoa.
+  createdByUserId String?
+  createdBy       User?   @relation("WalletTransactionCreatedBy", fields: [createdByUserId], references: [id])
 
   wallet            Wallet             @relation(fields: [walletId], references: [id])
   delivery          Delivery?          @relation(fields: [relatedDeliveryId], references: [id])

@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { WalletAdjustmentDialog } from '@/components/finance/wallet-adjustment-dialog';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarDataHora } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
@@ -215,12 +216,20 @@ export function CarteirasTab({ token }: { token: string }) {
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Link
-                        className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
-                        href={`/entregadores/${carteira.driverId}`}
-                      >
-                        Ver entregador
-                      </Link>
+                      <div className="flex justify-end gap-2">
+                        <WalletAdjustmentDialog
+                          token={token}
+                          driverId={carteira.driverId}
+                          driverName={carteira.driverName}
+                          saldoAtual={carteira.availableBalance}
+                        />
+                        <Link
+                          className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+                          href={`/entregadores/${carteira.driverId}`}
+                        >
+                          Ver
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

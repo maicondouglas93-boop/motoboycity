@@ -6,6 +6,7 @@ import type {
   WithdrawalRequestItem,
   WithdrawalRequestStatus,
   CashPositionItem,
+  FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
   ReceiptsReport,
@@ -46,6 +47,19 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       return parseJsonOrThrow<PayoutsAgingReport>(response);
     },
 
+    /** Resultado por competência das entregas concluídas no intervalo. */
+    async financialStatement(
+      accessToken: string,
+      filters: { from: string; to: string },
+    ): Promise<FinancialStatementReport> {
+      const params = new URLSearchParams({ from: filters.from, to: filters.to });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/financial-statement?${params.toString()}`,
+        { headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<FinancialStatementReport>(response);
+    },
+
     async overview(
       accessToken: string,
       filters?: { from?: string; to?: string },
@@ -75,6 +89,25 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ReceiptsReport>(response);
+    },
+
+    /**
+     * Ajuste manual na carteira. Motivo obrigatorio: o servidor recusa sem ele.
+     */
+    async adjustDriverWallet(
+      accessToken: string,
+      driverId: string,
+      payload: { type: 'CREDIT' | 'DEBIT'; amount: number; reason: string },
+    ): Promise<AdminDriverWalletDetail> {
+      const response = await fetch(
+        `${baseUrl}/admin/financial/driver-wallets/${driverId}/adjustments`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminDriverWalletDetail>(response);
     },
 
     async listDriverWallets(

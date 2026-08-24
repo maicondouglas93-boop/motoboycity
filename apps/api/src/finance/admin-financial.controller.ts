@@ -1,19 +1,26 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import {
+  adjustDriverWalletSchema,
   adminFinancialOverviewQuerySchema,
+  financialStatementQuerySchema,
   listAdminWalletsQuerySchema,
   listReceiptsQuerySchema,
   listWalletTransactionsQuerySchema,
+  type AdjustDriverWalletPayload,
   type AdminFinancialOverviewQuery,
+  type FinancialStatementQuery,
   type ListAdminWalletsQuery,
   type ListReceiptsQuery,
   type ListWalletTransactionsQuery,
 } from '@motoboycity/validation';
+import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../auth/admin-only.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import type {
   CashPositionItem,
+  FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
   ReceiptsReport,
@@ -53,6 +60,14 @@ export class AdminFinancialController {
     return this.adminFinancialService.payoutsAging();
   }
 
+  /** Resultado por competência, dimensões gerenciais e ajustes separados. */
+  @Get('financial-statement')
+  financialStatement(
+    @Query(new ZodValidationPipe(financialStatementQuerySchema)) query: FinancialStatementQuery,
+  ): Promise<FinancialStatementReport> {
+    return this.adminFinancialService.financialStatement(query);
+  }
+
   /**
    * Extrato de recebimentos, agrupado por dia no servidor.
    *
@@ -88,5 +103,21 @@ export class AdminFinancialController {
     query: ListWalletTransactionsQuery,
   ): Promise<AdminDriverWalletDetail> {
     return this.adminFinancialService.getDriverWallet(driverId, query);
+  }
+
+  /**
+   * Ajuste manual na carteira, com motivo obrigatorio e autor registrado.
+   *
+   * `POST` e nao `PATCH`: cada ajuste e um lancamento NOVO no extrato, nao a
+   * edicao de um saldo. Nada aqui apaga ou altera lancamento anterior — um
+   * erro de ajuste se corrige com outro ajuste, e os dois ficam visiveis.
+   */
+  @Post('driver-wallets/:driverId/adjustments')
+  adjustDriverWallet(
+    @Param('driverId') driverId: string,
+    @Body(new ZodValidationPipe(adjustDriverWalletSchema)) body: AdjustDriverWalletPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminDriverWalletDetail> {
+    return this.adminFinancialService.adjustDriverWallet(driverId, body, admin.id);
   }
 }
