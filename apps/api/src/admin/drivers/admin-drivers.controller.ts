@@ -1,18 +1,34 @@
-import { Body, Controller, Get, Param, Patch, Put, Query, UseGuards } from '@nestjs/common';
 import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  createAdminDriverSchema,
   listDriversQuerySchema,
   replaceDriverServiceTypesSchema,
+  type CreateAdminDriverPayload,
   type ListDriversQuery,
   type ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
+import { AuthService, type RegisterDriverResult } from '../../auth/auth.service';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import {
   AdminDriversService,
   type AdminDriverListItem,
+  type AdminDriverRegistrationOptions,
   type DriverAccountStatusResult,
   type DriverReviewResult,
   type DriverServiceTypesResult,
@@ -21,7 +37,36 @@ import {
 @Controller('admin/drivers')
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
 export class AdminDriversController {
-  constructor(private readonly adminDriversService: AdminDriversService) {}
+  constructor(
+    private readonly adminDriversService: AdminDriversService,
+    private readonly authService: AuthService,
+  ) {}
+
+  @Get('registration-options')
+  registrationOptions(): Promise<AdminDriverRegistrationOptions> {
+    return this.adminDriversService.registrationOptions();
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  create(
+    @Body(new ZodValidationPipe(createAdminDriverSchema)) body: CreateAdminDriverPayload,
+  ): Promise<RegisterDriverResult> {
+    return this.authService.registerDriver(
+      {
+        name: body.name,
+        email: body.email,
+        phone: body.phone,
+        cpf: body.cpf,
+        birthDate: body.birthDate,
+        pixKey: body.pixKey,
+        pixKeyType: body.pixKeyType,
+        hasCnpj: body.hasCnpj,
+        password: body.password,
+      },
+      { regionId: body.regionId, serviceTypeIds: body.serviceTypeIds },
+    );
+  }
 
   @Get()
   list(

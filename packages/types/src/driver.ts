@@ -37,6 +37,7 @@ export interface AdminDriverListItem {
   email: string;
   phone: string;
   cpf: string;
+  region: { id: string; name: string };
   approvalStatus: DriverApprovalStatus;
   accountStatus: DriverAccountStatus;
   availability: DriverAvailability;
@@ -55,6 +56,10 @@ export interface AdminDriverListItem {
    * de uma semana ruim — a decisao e de quem conhece as pessoas.
    */
   returnsLast7Days: number;
+}
+
+export interface AdminDriverRegistrationOptions {
+  regions: Array<{ id: string; name: string }>;
 }
 
 export interface DriverServiceTypeItem {

@@ -13,6 +13,7 @@ describe('AdminDriversService', () => {
     driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
     driverPresenceLog: { updateMany: jest.Mock };
     deliveryStatusHistory: { groupBy: jest.Mock };
+    region: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let dispatchService: { releasePendingOffersForDriver: jest.Mock };
@@ -25,6 +26,7 @@ describe('AdminDriversService', () => {
       driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
       driverPresenceLog: { updateMany: jest.fn() },
       deliveryStatusHistory: { groupBy: jest.fn().mockResolvedValue([]) },
+      region: { findMany: jest.fn() },
       $transaction: jest
         .fn()
         .mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma)),
@@ -45,6 +47,24 @@ describe('AdminDriversService', () => {
     service = module.get(AdminDriversService);
   });
 
+  describe('registrationOptions', () => {
+    it('lista somente as regiões ativas em ordem alfabética', async () => {
+      prisma.region.findMany.mockResolvedValue([
+        { id: 'region-2', name: 'Belo Horizonte' },
+        { id: 'region-1', name: 'Lajinha' },
+      ]);
+
+      const result = await service.registrationOptions();
+
+      expect(prisma.region.findMany).toHaveBeenCalledWith({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+      expect(result.regions).toHaveLength(2);
+    });
+  });
+
   describe('list', () => {
     it('mapeia motoboys para o formato de listagem, incluindo quem revisou', async () => {
       prisma.driver.findMany.mockResolvedValue([
@@ -59,6 +79,7 @@ describe('AdminDriversService', () => {
           lastSeenAt: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           user: { name: 'Motoboy Um', email: 'motoboy1@example.com', phone: '33999990000' },
+          region: { id: 'region-1', name: 'Lajinha' },
           reviewedBy: null,
           reviewedAt: null,
           serviceTypes: [],
@@ -74,6 +95,7 @@ describe('AdminDriversService', () => {
           lastSeenAt: new Date('2026-01-02T11:55:00.000Z'),
           createdAt: new Date('2026-01-02T00:00:00.000Z'),
           user: { name: 'Motoboy Dois', email: 'motoboy2@example.com', phone: '33999991111' },
+          region: { id: 'region-1', name: 'Lajinha' },
           reviewedBy: { id: 'admin-1', name: 'Admin Um' },
           reviewedAt: new Date('2026-01-02T12:00:00.000Z'),
           serviceTypes: [
@@ -99,6 +121,7 @@ describe('AdminDriversService', () => {
           email: 'motoboy1@example.com',
           phone: '33999990000',
           cpf: '11122233344',
+          region: { id: 'region-1', name: 'Lajinha' },
           approvalStatus: 'PENDING',
           accountStatus: 'ACTIVE',
           availability: 'UNAVAILABLE',
@@ -116,6 +139,7 @@ describe('AdminDriversService', () => {
           email: 'motoboy2@example.com',
           phone: '33999991111',
           cpf: '55566677788',
+          region: { id: 'region-1', name: 'Lajinha' },
           approvalStatus: 'APPROVED',
           accountStatus: 'SUSPENDED',
           availability: 'UNAVAILABLE',
@@ -152,6 +176,7 @@ describe('AdminDriversService', () => {
           lastSeenAt: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           user: { name: 'Motoboy Um', email: 'm1@example.com', phone: '33999990000' },
+          region: { id: 'region-1', name: 'Lajinha' },
           reviewedBy: null,
           reviewedAt: null,
           serviceTypes: [],

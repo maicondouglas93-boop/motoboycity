@@ -39,6 +39,8 @@ describe('AuthService', () => {
     company: { findUnique: jest.Mock; create: jest.Mock };
     companyTeamMember: { create: jest.Mock; findFirst: jest.Mock };
     driver: { findUnique: jest.Mock; create: jest.Mock };
+    driverServiceType: { createMany: jest.Mock };
+    serviceType: { findMany: jest.Mock };
     region: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -50,9 +52,14 @@ describe('AuthService', () => {
       company: { findUnique: jest.fn(), create: jest.fn() },
       companyTeamMember: { create: jest.fn(), findFirst: jest.fn() },
       driver: { findUnique: jest.fn(), create: jest.fn() },
+      driverServiceType: { createMany: jest.fn() },
+      serviceType: { findMany: jest.fn() },
       region: { findFirst: jest.fn() },
       $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
     jwtService = { signAsync: jest.fn().mockResolvedValue('signed.jwt.token') };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -158,6 +165,70 @@ describe('AuthService', () => {
             regionId: 'region-1',
           }),
         }),
+      );
+    });
+
+    it('cadastro administrativo usa a região escolhida e cria modalidades na mesma transação', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.driver.findUnique.mockResolvedValue(null);
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-2' });
+      prisma.serviceType.findMany.mockResolvedValue([{ id: 'service-1' }, { id: 'service-2' }]);
+      prisma.user.create.mockResolvedValue({ id: 'user-admin-created' });
+      prisma.driver.create.mockResolvedValue({
+        id: 'driver-admin-created',
+        approvalStatus: 'PENDING',
+      });
+
+      const result = await service.registerDriver(validDriverPayload, {
+        regionId: 'region-2',
+        serviceTypeIds: ['service-2', 'service-1'],
+      });
+
+      expect(result).toEqual({
+        driverId: 'driver-admin-created',
+        approvalStatus: 'PENDING',
+      });
+      expect(prisma.region.findFirst).toHaveBeenCalledWith({
+        where: { id: 'region-2', active: true },
+      });
+      expect(prisma.driverServiceType.createMany).toHaveBeenCalledWith({
+        data: [
+          { driverId: 'driver-admin-created', serviceTypeId: 'service-2', isPrimary: true },
+          { driverId: 'driver-admin-created', serviceTypeId: 'service-1', isPrimary: false },
+        ],
+      });
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+      const passwordHash = prisma.user.create.mock.calls[0]?.[0]?.data.passwordHash;
+      expect(passwordHash).not.toBe(validDriverPayload.password);
+      await expect(bcrypt.compare(validDriverPayload.password, passwordHash)).resolves.toBe(true);
+    });
+
+    it('não cria conta quando uma modalidade administrativa está inativa', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.driver.findUnique.mockResolvedValue(null);
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-2' });
+      prisma.serviceType.findMany.mockResolvedValue([{ id: 'service-1' }]);
+
+      await expect(
+        service.registerDriver(validDriverPayload, {
+          regionId: 'region-2',
+          serviceTypeIds: ['service-1', 'service-inactive'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.driver.create).not.toHaveBeenCalled();
+    });
+
+    it('traduz colisão concorrente de e-mail ou CPF para conflito', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.driver.findUnique.mockResolvedValue(null);
+      prisma.$transaction.mockRejectedValue({ code: 'P2002' });
+
+      await expect(service.registerDriver(validDriverPayload)).rejects.toBeInstanceOf(
+        ConflictException,
       );
     });
 

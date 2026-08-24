@@ -11,6 +11,7 @@ import {
   createAdminReportsApi,
   createAdminServiceTypesApi,
   createAdminOperationsApi,
+  createAdminVirtualSecretaryApi,
   createAuthApi,
   createDeliveriesApi,
   createTrackingApi,
@@ -31,5 +32,6 @@ export const adminDeliveriesApi = createAdminDeliveriesApi({ baseUrl });
 export const adminReportsApi = createAdminReportsApi({ baseUrl });
 export const adminPlatformSettingsApi = createAdminPlatformSettingsApi({ baseUrl });
 export const adminOperationsApi = createAdminOperationsApi({ baseUrl });
+export const adminVirtualSecretaryApi = createAdminVirtualSecretaryApi({ baseUrl });
 export const deliveriesApi = createDeliveriesApi({ baseUrl });
 export const trackingApi = createTrackingApi({ baseUrl });

@@ -7,12 +7,13 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import type { RegisterDriverResult as SharedRegisterDriverResult } from '@motoboycity/types';
 import type {
   LoginPayload,
   RegisterCompanyPayload,
   RegisterDriverPayload,
 } from '@motoboycity/validation';
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const PASSWORD_HASH_ROUNDS = 10;
@@ -23,9 +24,11 @@ export interface RegisterCompanyResult {
   status: string;
 }
 
-export interface RegisterDriverResult {
-  driverId: string;
-  approvalStatus: string;
+export type RegisterDriverResult = SharedRegisterDriverResult;
+
+export interface RegisterDriverOptions {
+  regionId?: string;
+  serviceTypeIds?: string[];
 }
 
 export interface LoginResult {
@@ -98,7 +101,10 @@ export class AuthService {
     return { companyId: company.id, status: company.status };
   }
 
-  async registerDriver(payload: RegisterDriverPayload): Promise<RegisterDriverResult> {
+  async registerDriver(
+    payload: RegisterDriverPayload,
+    options: RegisterDriverOptions = {},
+  ): Promise<RegisterDriverResult> {
     const existingUser = await this.prisma.user.findUnique({ where: { email: payload.email } });
     if (existingUser) {
       throw new ConflictException('Este e-mail já está cadastrado.');
@@ -109,40 +115,93 @@ export class AuthService {
       throw new ConflictException('Este CPF já está cadastrado.');
     }
 
-    const region = await this.prisma.region.findFirst({ where: { active: true } });
-    if (!region) {
-      throw new InternalServerErrorException(
-        'Nenhuma região configurada na plataforma. Contate o suporte.',
-      );
+    const passwordHash = await bcrypt.hash(payload.password, PASSWORD_HASH_ROUNDS);
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const driver = await this.prisma.$transaction(
+          async (tx) => {
+            const region = await tx.region.findFirst({
+              where: options.regionId
+                ? { id: options.regionId, active: true }
+                : { active: true },
+            });
+            if (!region) {
+              if (options.regionId) {
+                throw new ConflictException('A região selecionada não existe ou está inativa.');
+              }
+              throw new InternalServerErrorException(
+                'Nenhuma região configurada na plataforma. Contate o suporte.',
+              );
+            }
+
+            const serviceTypeIds = options.serviceTypeIds ?? [];
+            if (serviceTypeIds.length > 0) {
+              const serviceTypes = await tx.serviceType.findMany({
+                where: { id: { in: serviceTypeIds }, active: true },
+                select: { id: true },
+              });
+              if (serviceTypes.length !== serviceTypeIds.length) {
+                throw new ConflictException(
+                  'Todas as modalidades selecionadas devem existir e estar ativas.',
+                );
+              }
+            }
+
+            const user = await tx.user.create({
+              data: {
+                type: 'DRIVER',
+                name: payload.name,
+                email: payload.email,
+                phone: payload.phone,
+                passwordHash,
+              },
+            });
+
+            const createdDriver = await tx.driver.create({
+              data: {
+                userId: user.id,
+                cpf: payload.cpf,
+                birthDate: new Date(payload.birthDate),
+                pixKey: payload.pixKey,
+                pixKeyType: payload.pixKeyType,
+                hasCnpj: payload.hasCnpj,
+                regionId: region.id,
+              },
+            });
+
+            if (serviceTypeIds.length > 0) {
+              await tx.driverServiceType.createMany({
+                data: serviceTypeIds.map((serviceTypeId, index) => ({
+                  driverId: createdDriver.id,
+                  serviceTypeId,
+                  isPrimary: index === 0,
+                })),
+              });
+            }
+
+            return createdDriver;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+
+        return { driverId: driver.id, approvalStatus: driver.approvalStatus };
+      } catch (error) {
+        if (this.isPrismaErrorCode(error, 'P2002')) {
+          throw new ConflictException('Este e-mail ou CPF já está cadastrado.');
+        }
+        if (this.isPrismaErrorCode(error, 'P2034')) {
+          if (attempt < maxAttempts) continue;
+          throw new ConflictException(
+            'Outro cadastro ocorreu ao mesmo tempo. Confira os dados e tente novamente.',
+          );
+        }
+        throw error;
+      }
     }
 
-    const passwordHash = await bcrypt.hash(payload.password, PASSWORD_HASH_ROUNDS);
-
-    const driver = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          type: 'DRIVER',
-          name: payload.name,
-          email: payload.email,
-          phone: payload.phone,
-          passwordHash,
-        },
-      });
-
-      return tx.driver.create({
-        data: {
-          userId: user.id,
-          cpf: payload.cpf,
-          birthDate: new Date(payload.birthDate),
-          pixKey: payload.pixKey,
-          pixKeyType: payload.pixKeyType,
-          hasCnpj: payload.hasCnpj,
-          regionId: region.id,
-        },
-      });
-    });
-
-    return { driverId: driver.id, approvalStatus: driver.approvalStatus };
+    throw new ConflictException('Não foi possível concluir o cadastro do entregador.');
   }
 
   async login(payload: LoginPayload): Promise<LoginResult> {
@@ -219,5 +278,14 @@ export class AuthService {
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
     };
+  }
+
+  private isPrismaErrorCode(error: unknown, code: string): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === code
+    );
   }
 }

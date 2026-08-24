@@ -15,6 +15,7 @@ import { LocationSilenceService } from '../../tracking/location-silence.service'
 import { deliveryStatusEventLabel, offerResponseLabel } from '../../common/status-labels';
 
 const ACTIVE_DRIVER_DELIVERY_STATUSES = ['ACCEPTED', 'COLLECTED', 'DELIVERED'] as const;
+const ADMIN_CANCELLED_RETENTION_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class AdminOperationsService {
@@ -31,8 +32,15 @@ export class AdminOperationsService {
   }
 
   async overview(user: User, filters: DeliveryOperationsQuery): Promise<AdminOperationsResult> {
+    const cancelledSince = new Date(Date.now() - ADMIN_CANCELLED_RETENTION_MS);
     const [deliveries, snapshots] = await Promise.all([
-      this.deliveriesService.operations(user, filters),
+      this.deliveriesService.operations(user, filters, {
+        statuses: ['CANCELLED'],
+        changedSince: cancelledSince,
+        // A janela de 15 minutos ja limita o volume. Um teto por quantidade
+        // faria cancelamentos sumirem cedo em um pico operacional.
+        limit: null,
+      }),
       this.livePresence.listActive(),
     ]);
     const snapshotByDriver = new Map(snapshots.map((snapshot) => [snapshot.driverId, snapshot]));
@@ -60,6 +68,13 @@ export class AdminOperationsService {
 
     return {
       ...deliveries,
+      // Os contadores precisam representar exatamente o que ainda esta na
+      // fila, nao todo o historico terminal armazenado no banco.
+      counts: {
+        ...deliveries.counts,
+        COMPLETED: 0,
+        CANCELLED: deliveries.recent.length,
+      },
       onlineDrivers: drivers.flatMap((driver) => {
         const snapshot = snapshotByDriver.get(driver.id);
         if (!snapshot) return [];

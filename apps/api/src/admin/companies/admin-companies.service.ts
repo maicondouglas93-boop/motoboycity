@@ -50,6 +50,30 @@ export interface AdminCompanyDetail extends AdminCompanyListItem {
 export class AdminCompaniesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Consulta interna e reduzida para consumidores administrativos, sem dados do responsavel. */
+  async searchSummary(query: string, limit = 5) {
+    return this.prisma.company.findMany({
+      where: query
+        ? {
+            OR: [
+              { tradeName: { contains: query, mode: 'insensitive' } },
+              { legalName: { contains: query, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      orderBy: [{ status: 'asc' }, { tradeName: 'asc' }],
+      take: limit,
+      select: {
+        id: true,
+        tradeName: true,
+        legalName: true,
+        status: true,
+        createdAt: true,
+        _count: { select: { deliveries: true } },
+      },
+    });
+  }
+
   async list(status?: CompanyStatus): Promise<AdminCompanyListItem[]> {
     const companies = await this.prisma.company.findMany({
       where: status ? { status } : undefined,

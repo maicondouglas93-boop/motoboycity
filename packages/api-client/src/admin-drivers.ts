@@ -1,12 +1,15 @@
 import type {
   AdminDriverListItem,
+  AdminDriverRegistrationOptions,
   DriverAccountStatus,
   DriverAccountStatusResult,
   DriverApprovalStatus,
   DriverReviewResult,
   DriverServiceTypesResult,
+  RegisterDriverResult,
   ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/types';
+import type { CreateAdminDriverPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminDriversApiConfig {
@@ -19,6 +22,25 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
   }
 
   return {
+    async registrationOptions(accessToken: string): Promise<AdminDriverRegistrationOptions> {
+      const response = await fetch(`${baseUrl}/admin/drivers/registration-options`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverRegistrationOptions>(response);
+    },
+
+    async create(
+      accessToken: string,
+      payload: CreateAdminDriverPayload,
+    ): Promise<RegisterDriverResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<RegisterDriverResult>(response);
+    },
+
     async list(
       accessToken: string,
       filters?: { approvalStatus?: DriverApprovalStatus; accountStatus?: DriverAccountStatus },

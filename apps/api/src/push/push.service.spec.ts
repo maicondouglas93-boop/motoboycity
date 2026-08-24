@@ -104,7 +104,11 @@ describe('PushService', () => {
         kind: 'offer',
         title: 'Nova entrega',
         body: 'Loja X',
-        data: { type: 'offer', offerId: 'o1' },
+        data: {
+          type: 'offer',
+          offerId: 'o1',
+          expiresAtEpochMs: String(Date.now() + 90_000),
+        },
       });
 
       const enviado = send.mock.calls[0]?.[0];
@@ -113,13 +117,33 @@ describe('PushService', () => {
       expect(enviado.data).toEqual({
         type: 'offer',
         offerId: 'o1',
+        expiresAtEpochMs: expect.any(String),
         title: 'Nova entrega',
         body: 'Loja X',
       });
       expect(enviado.android.priority).toBe('high');
-      // Oferta e evento vivo: guardar uma que expirou para entregar depois so
-      // faria o motoboy abrir o app e nao encontrar nada.
-      expect(enviado.android.ttl).toBe(0);
+      // Tolera uma troca curta de rede, mas nunca sobrevive ao prazo real.
+      expect(enviado.android.ttl).toBeGreaterThan(89_000);
+      expect(enviado.android.ttl).toBeLessThanOrEqual(90_000);
+    });
+
+    it('encerramento da oferta tambem vai por dados para fechar a apresentacao nativa', async () => {
+      prisma.deviceToken.findMany.mockResolvedValue([{ token: 't1' }]);
+      service = await montar();
+
+      await service.sendToDriver('driver-1', {
+        kind: 'offer-update',
+        title: 'Oferta atualizada',
+        body: 'Nao esta mais pendente',
+        data: { type: 'offer-resolved', offerId: 'o1', reason: 'expired' },
+      });
+
+      const enviado = send.mock.calls[0]?.[0];
+      expect(enviado.notification).toBeUndefined();
+      expect(enviado.data).toEqual(
+        expect.objectContaining({ type: 'offer-resolved', offerId: 'o1', reason: 'expired' }),
+      );
+      expect(enviado.android).toEqual(expect.objectContaining({ priority: 'high', ttl: 300_000 }));
     });
 
     it('aviso comum mantém o bloco de notificação, que é mais garantido', async () => {

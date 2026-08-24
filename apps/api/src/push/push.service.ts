@@ -13,7 +13,7 @@ export interface PushMessage {
    */
   data?: Record<string, string>;
   /** Oferta usa canal e prioridade próprios — ver `OFFER_CHANNEL_ID`. */
-  kind?: 'offer' | 'general';
+  kind?: 'offer' | 'offer-update' | 'general';
 }
 
 /**
@@ -114,19 +114,22 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
          * nativo `OfferMessagingService` recebe a mensagem e monta a
          * notificação com `setFullScreenIntent`.
          *
-         * O preço: se o sistema tiver ENCERRADO o aplicativo à força, o serviço
-         * não roda e nada aparece — enquanto o bloco `notification` apareceria
-         * de qualquer jeito. É por isso que o aplicativo também busca a oferta
-         * pendente ao abrir, e por isso o motoboy precisa liberar o aplicativo
-         * na economia de bateria.
+         * Se o usuário aplicar "forçar parada", o Android bloqueia a entrega ao
+         * aplicativo. Por isso ele também recupera a oferta pendente ao abrir e
+         * orienta o motoboy a liberar o app na economia de bateria.
          *
          * O resto das mensagens continua com `notification`: nenhuma delas
          * precisa de tela cheia, e ali a entrega mais garantida é o que importa.
          */
         const ehOferta = message.kind === 'offer';
+        const ehMensagemNativa = ehOferta || message.kind === 'offer-update';
+        const expiraEm = Number(message.data?.['expiresAtEpochMs']);
+        const ttlDaOferta = Number.isFinite(expiraEm)
+          ? Math.max(1_000, expiraEm - Date.now())
+          : 60_000;
         const payload: Message = {
           token,
-          ...(ehOferta
+          ...(ehMensagemNativa
             ? {
                 data: {
                   ...(message.data ?? {}),
@@ -145,13 +148,13 @@ export class PushService implements OnModuleInit, OnModuleDestroy {
              * manutenção — e a oferta tem prazo de resposta.
              */
             priority: 'high',
-            ...(ehOferta
+            ...(ehMensagemNativa
               ? {
                   /**
-                   * Oferta é evento vivo: guardar uma que expirou para entregar
-                   * depois só faria o motoboy abrir o app e encontrar nada.
+                   * Tolera uma troca curta de rede, mas nunca mantém uma oferta
+                   * para além do prazo absoluto enviado pelo despacho.
                    */
-                  ttl: 0,
+                  ttl: ehOferta ? ttlDaOferta : 5 * 60 * 1000,
                 }
               : { notification: { channelId: canal } }),
           },

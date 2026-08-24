@@ -6,7 +6,11 @@ import type {
   DriverApprovalStatus,
   DriverAvailability,
 } from '@prisma/client';
-import type { AdminDriverListItem, DriverServiceTypeItem } from '@motoboycity/types';
+import type {
+  AdminDriverListItem,
+  AdminDriverRegistrationOptions,
+  DriverServiceTypeItem,
+} from '@motoboycity/types';
 import { DispatchService } from '../../dispatch/dispatch.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
@@ -19,7 +23,7 @@ import { RealtimeGateway } from '../../realtime/realtime.gateway';
  * para tras. O painel le a compartilhada, entao a copia da API era justamente a
  * que envelheceria sem ninguem notar.
  */
-export type { AdminDriverListItem, DriverServiceTypeItem };
+export type { AdminDriverListItem, AdminDriverRegistrationOptions, DriverServiceTypeItem };
 
 export interface DriverReviewResult {
   driverId: string;
@@ -51,6 +55,45 @@ export class AdminDriversService {
     private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
+  async registrationOptions(): Promise<AdminDriverRegistrationOptions> {
+    const regions = await this.prisma.region.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    return { regions };
+  }
+
+  /** Consulta interna e reduzida: permite localizar por e-mail, mas nunca o devolve ao modelo. */
+  async searchSummary(query: string, limit = 5) {
+    return this.prisma.driver.findMany({
+      where: query
+        ? {
+            user: {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+                { email: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+          }
+        : undefined,
+      orderBy: [{ accountStatus: 'asc' }, { createdAt: 'desc' }],
+      take: limit,
+      select: {
+        id: true,
+        approvalStatus: true,
+        accountStatus: true,
+        availability: true,
+        lastSeenAt: true,
+        user: { select: { name: true } },
+        serviceTypes: {
+          select: { serviceType: { select: { name: true } }, isPrimary: true },
+          orderBy: { serviceType: { name: 'asc' } },
+        },
+      },
+    });
+  }
+
   async list(filters: ListDriversFilters): Promise<AdminDriverListItem[]> {
     const drivers = await this.prisma.driver.findMany({
       where: {
@@ -60,6 +103,7 @@ export class AdminDriversService {
       orderBy: { createdAt: 'desc' },
       include: {
         user: true,
+        region: { select: { id: true, name: true } },
         reviewedBy: true,
         serviceTypes: { include: { serviceType: true }, orderBy: { serviceType: { name: 'asc' } } },
       },
@@ -112,6 +156,7 @@ export class AdminDriversService {
       where: { id: driverId },
       include: {
         user: true,
+        region: { select: { id: true, name: true } },
         reviewedBy: true,
         serviceTypes: { include: { serviceType: true }, orderBy: { serviceType: { name: 'asc' } } },
       },
@@ -136,6 +181,7 @@ export class AdminDriversService {
       createdAt: Date;
       reviewedAt: Date | null;
       user: { name: string; email: string; phone: string };
+      region: { id: string; name: string };
       reviewedBy: { id: string; name: string } | null;
       serviceTypes: {
         isPrimary: boolean;
@@ -151,6 +197,7 @@ export class AdminDriversService {
       email: driver.user.email,
       phone: driver.user.phone,
       cpf: driver.cpf,
+      region: driver.region,
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
       availability: driver.availability,

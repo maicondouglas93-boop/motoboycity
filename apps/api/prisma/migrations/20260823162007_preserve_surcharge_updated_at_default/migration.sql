@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "surcharges" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP;

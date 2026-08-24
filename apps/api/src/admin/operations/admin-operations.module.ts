@@ -9,5 +9,6 @@ import { AdminOperationsService } from './admin-operations.service';
   imports: [DeliveriesModule, LivePresenceModule, TrackingModule],
   controllers: [AdminOperationsController],
   providers: [AdminOperationsService],
+  exports: [AdminOperationsService],
 })
 export class AdminOperationsModule {}
