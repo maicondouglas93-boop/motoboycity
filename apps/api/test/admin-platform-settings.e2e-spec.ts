@@ -87,6 +87,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       slaAlertMinutesToAccept: null,
       slaAlertMinutesToCollect: null,
       slaAlertMinutesToDeliver: null,
+      maxConcurrentDeliveriesPerDriver: null,
+      maxDeliveriesPerBatch: null,
+      deliveryProximityRadiusMeters: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -110,6 +113,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       slaAlertMinutesToAccept: null,
       slaAlertMinutesToCollect: null,
       slaAlertMinutesToDeliver: null,
+      maxConcurrentDeliveriesPerDriver: null,
+      maxDeliveriesPerBatch: null,
+      deliveryProximityRadiusMeters: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });
@@ -141,6 +147,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       slaAlertMinutesToAccept: null,
       slaAlertMinutesToCollect: null,
       slaAlertMinutesToDeliver: null,
+      maxConcurrentDeliveriesPerDriver: null,
+      maxDeliveriesPerBatch: null,
+      deliveryProximityRadiusMeters: null,
       updatedBy: { id: adminUserId, name: expect.any(String) },
       updatedAt: expect.any(String),
     });

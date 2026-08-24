@@ -70,6 +70,11 @@ describe('AdminPricingTablesController (e2e)', () => {
       regionId: expect.any(String),
       serviceTypeId,
       serviceTypeName: 'Serviço Teste Preço E2E',
+      // Tabela GLOBAL: sem empresa, vale para todas. Uma tabela especifica de
+      // empresa traria os dois campos preenchidos e teria precedencia na
+      // cotacao.
+      companyId: null,
+      companyName: null,
       baseFee: 5,
       // Sem bandeirada no payload, a coluna entra com o default do banco — que
       // e o que preserva o comportamento das tabelas criadas antes do campo.

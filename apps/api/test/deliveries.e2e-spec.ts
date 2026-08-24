@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { desligarTaxasAdicionais } from './isolar-taxas';
 
 const uniqueSuffix = Date.now();
 const password = 'senhaSegura123';
@@ -32,6 +33,8 @@ const validDropoff = {
 
 describe('DeliveriesController (e2e)', () => {
   let app: INestApplication<App>;
+  /** Devolve as taxas adicionais ao estado original no fim da suite. */
+  let religarTaxas: () => Promise<void> = async () => undefined;
   let prisma: PrismaService;
 
   let adminToken: string;
@@ -53,6 +56,13 @@ describe('DeliveriesController (e2e)', () => {
     app = moduleFixture.createNestApplication();
     prisma = moduleFixture.get(PrismaService);
     await app.init();
+
+    /**
+     * Esta suite calcula preco esperado a partir da tabela que ela mesma cria.
+     * Taxa adicional ativa no banco de desenvolvimento entraria na conta e faria
+     * a suite passar de dia e falhar de noite.
+     */
+    religarTaxas = await desligarTaxasAdicionais(prisma);
 
     const server = app.getHttpServer();
 
@@ -126,6 +136,7 @@ describe('DeliveriesController (e2e)', () => {
   });
 
   afterAll(async () => {
+    await religarTaxas();
     await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });

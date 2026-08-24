@@ -8,6 +8,7 @@ import { FinancialPayoutService } from './../src/finance/financial-payout.servic
 import { InvoiceService } from './../src/finance/invoice.service';
 import { GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { desligarTaxasAdicionais } from './isolar-taxas';
 import { RealtimeGateway } from './../src/realtime/realtime.gateway';
 import { dateInSaoPaulo } from '../src/common/sao-paulo-time';
 
@@ -51,6 +52,8 @@ type RealtimeGatewayMock = {
 
 describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', () => {
   let app: INestApplication<App>;
+  /** Devolve as taxas adicionais ao estado original no fim da suite. */
+  let religarTaxas: () => Promise<void> = async () => undefined;
   let prisma: PrismaService;
   let realtime: RealtimeGatewayMock;
   let financialClock: FinancialClock;
@@ -164,6 +167,13 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     invoiceService = moduleFixture.get(InvoiceService);
     await app.init();
 
+    /**
+     * Esta suite calcula preco esperado a partir da tabela que ela mesma cria.
+     * Taxa adicional ativa no banco de desenvolvimento entraria na conta e faria
+     * a suite passar de dia e falhar de noite.
+     */
+    religarTaxas = await desligarTaxasAdicionais(prisma);
+
     const server = app.getHttpServer();
 
     const adminLogin = await request(server)
@@ -262,6 +272,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   afterAll(async () => {
+    await religarTaxas();
     await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });

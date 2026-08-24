@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { desligarTaxasAdicionais } from './isolar-taxas';
 import { DispatchService } from './../src/dispatch/dispatch.service';
 import { RealtimeGateway } from './../src/realtime/realtime.gateway';
 
@@ -52,6 +53,8 @@ type RealtimeGatewayMock = {
 
 describe('Despacho em lote — criação, concorrência e realtime (e2e)', () => {
   let app: INestApplication<App>;
+  /** Devolve as taxas adicionais ao estado original no fim da suite. */
+  let religarTaxas: () => Promise<void> = async () => undefined;
   let prisma: PrismaService;
   let dispatchService: DispatchService;
   let realtime: RealtimeGatewayMock;
@@ -140,6 +143,13 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
     realtime = moduleFixture.get(RealtimeGateway) as unknown as RealtimeGatewayMock;
     await app.init();
 
+    /**
+     * Esta suite calcula preco esperado a partir da tabela que ela mesma cria.
+     * Taxa adicional ativa no banco de desenvolvimento entraria na conta e faria
+     * a suite passar de dia e falhar de noite.
+     */
+    religarTaxas = await desligarTaxasAdicionais(prisma);
+
     const server = app.getHttpServer();
 
     const adminLogin = await request(server)
@@ -226,6 +236,7 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
   });
 
   afterAll(async () => {
+    await religarTaxas();
     await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
     await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
