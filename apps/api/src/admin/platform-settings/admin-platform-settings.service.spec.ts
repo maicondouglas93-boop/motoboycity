@@ -37,6 +37,9 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        maxConcurrentDeliveriesPerDriver: null,
+        maxDeliveriesPerBatch: null,
+        deliveryProximityRadiusMeters: null,
         updatedBy: null,
         updatedAt: null,
       });
@@ -57,6 +60,9 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        maxConcurrentDeliveriesPerDriver: null,
+        maxDeliveriesPerBatch: null,
+        deliveryProximityRadiusMeters: null,
         updatedBy: null,
         updatedAt: new Date('2026-08-23T12:00:00.000Z'),
       });

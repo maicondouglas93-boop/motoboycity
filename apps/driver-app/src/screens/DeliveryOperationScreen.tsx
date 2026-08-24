@@ -10,17 +10,27 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
 import type { DeliveryAddressItem, DeliveryDetail } from '@motoboycity/types';
-import { Card } from '../components/Card';
+import { BottomSheet } from '../components/BottomSheet';
+import { Icon } from '../components/Icon';
+import { MapBackdrop } from '../components/MapBackdrop';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { ScreenHeader } from '../components/ScreenHeader';
+import { RouteTimeline } from '../components/RouteTimeline';
+import { SheetHeader } from '../components/SheetHeader';
 import { deliveriesApi } from '../lib/apiClient';
 import { getActiveDeliveries } from '../lib/activeDeliveries';
+import {
+  deliveryOperationCopy,
+  deliveryPaymentLabel,
+  formatDeliveryAddress,
+  formatElapsedTime,
+  formatOperationDateTime,
+  navigationDestination,
+} from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { captureCurrentLocation, LocationError } from '../lib/location';
 import { session } from '../lib/session';
@@ -39,14 +49,6 @@ type Operation =
   | 'deliver-forgot'
   | null;
 
-/**
- * "Ha quantos minutos?" em vez de seletor de data e hora.
- *
- * E como a pessoa lembra de verdade — "coletei uns vinte minutos atras" — e
- * resolve em um toque, de moto, sem teclado. Um seletor de data exigiria
- * escolher dia, hora e minuto para um evento que quase sempre foi na ultima
- * meia hora, e ainda abriria a porta para digitar o dia errado.
- */
 const FORGOT_OPTIONS = [5, 10, 15, 20, 30, 45, 60] as const;
 
 type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
@@ -58,48 +60,10 @@ const FAILURE_REASONS: { value: FailureReason; label: string }[] = [
   { value: 'OTHER', label: 'Outro motivo' },
 ];
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
-function formatAddress(address: DeliveryAddressItem | undefined): string {
-  if (!address) return 'Nao informado';
-  const structured = [address.street, address.number, address.city, address.state]
-    .filter(Boolean)
-    .join(', ');
-  if (structured) return structured;
-  if (address.lat !== null && address.lng !== null) return 'Destino definido no local da entrega';
-  return 'Nao informado';
-}
-
-function navigationDestination(address: DeliveryAddressItem | undefined): string | null {
-  if (!address) return null;
-  if (address.lat !== null && address.lng !== null) return `${address.lat},${address.lng}`;
-  const structured = [
-    address.street,
-    address.number,
-    address.complement,
-    address.city,
-    address.state,
-    address.zip,
-  ]
-    .filter(Boolean)
-    .join(', ');
-  return structured || null;
-}
-
-function labelForStatus(status: DeliveryDetail['status']): string {
-  switch (status) {
-    case 'ACCEPTED':
-      return 'A caminho da coleta';
-    case 'COLLECTED':
-      return 'Em entrega';
-    case 'DELIVERED':
-      return 'Retorno pendente';
-    case 'COMPLETED':
-      return 'Entrega concluida';
-    default:
-      return status;
-  }
-}
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
 
 function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): string {
   switch (method) {
@@ -116,8 +80,18 @@ function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): 
   }
 }
 
+function destinationLabel(
+  delivery: DeliveryDetail,
+  dropoff: DeliveryAddressItem | undefined,
+): string {
+  if (dropoff) return formatDeliveryAddress(dropoff);
+  if (!delivery.destinationKnownAtCreation) {
+    return 'Endereço de entrega definido pela localização no momento da entrega';
+  }
+  return 'Endereço de entrega não informado';
+}
+
 export function DeliveryOperationScreen({ navigation, route }: Props) {
-  const isDark = useColorScheme() === 'dark';
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [failureOpen, setFailureOpen] = useState(false);
   const [failureReason, setFailureReason] = useState<FailureReason | null>(null);
@@ -126,23 +100,27 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [returnReason, setReturnReason] = useState('');
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotMinutes, setForgotMinutes] = useState<number | null>(null);
+  const [deliverConfirmationOpen, setDeliverConfirmationOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<Operation>(null);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
-  const text = isDark ? colors.textDark : colors.text;
-  const muted = isDark ? colors.mutedDark : colors.muted;
-
   const loadDelivery = useCallback(async () => {
     const token = await session.getToken();
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      navigation.popToTop();
+      return;
+    }
 
     try {
       setDelivery(await deliveriesApi.detail(token, route.params.deliveryId));
     } catch (error) {
       Alert.alert(
-        'Pedido indisponivel',
-        error instanceof ApiError ? error.message : 'Nao foi possivel carregar este pedido.',
+        'Pedido indisponível',
+        error instanceof ApiError ? error.message : 'Não foi possível carregar este pedido.',
       );
       navigation.goBack();
     } finally {
@@ -153,6 +131,20 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   useEffect(() => {
     loadDelivery().catch(() => undefined);
   }, [loadDelivery]);
+
+  useEffect(() => {
+    if (delivery?.status !== 'ACCEPTED') return undefined;
+
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [delivery?.status]);
+
+  useEffect(() => {
+    if (!successMessage) return undefined;
+    const timer = setTimeout(() => setSuccessMessage(null), 4_500);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   async function refreshActiveDeliveries(token: string) {
     const deliveries = await getActiveDeliveries(token);
@@ -170,48 +162,50 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       if (nextOperation === 'collect') {
         const result = await deliveriesApi.collect(token, delivery.id);
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+        setSuccessMessage('O pedido foi marcado como coletado!');
       } else if (nextOperation === 'collect-forgot' || nextOperation === 'deliver-forgot') {
         const occurredAt = new Date(Date.now() - (forgotMinutes ?? 0) * 60_000).toISOString();
         if (nextOperation === 'collect-forgot') {
           const result = await deliveriesApi.collect(token, delivery.id, { occurredAt });
           setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+          setSuccessMessage('A coleta foi registrada!');
         } else {
           setDelivery(await deliveriesApi.deliver(token, delivery.id, { occurredAt }));
+          setSuccessMessage('A entrega foi registrada!');
         }
         setForgotOpen(false);
         setForgotMinutes(null);
       } else if (nextOperation === 'deliver') {
-        const fix = delivery.destinationKnownAtCreation
-          ? undefined
-          : await captureCurrentLocation();
+        /**
+         * A posicao vai SEMPRE, e nao so quando o destino e definido por GPS.
+         *
+         * Com destino informado ela serve para o servidor conferir que o
+         * motoboy estava mesmo no endereco. Sem destino informado ela E o
+         * endereco. Sao usos diferentes da mesma captura, e nos dois casos a
+         * ausencia da posicao enfraquece a entrega.
+         */
+        const fix = await captureCurrentLocation();
         setDelivery(
-          await deliveriesApi.deliver(
-            token,
-            delivery.id,
-            fix ? { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy } : {},
-          ),
+          await deliveriesApi.deliver(token, delivery.id, {
+            lat: fix.lat,
+            lng: fix.lng,
+            accuracy: fix.accuracy,
+          }),
         );
+        setDeliverConfirmationOpen(false);
+        setSuccessMessage('O pedido foi marcado como entregue!');
       } else if (nextOperation === 'return-to-queue') {
         await deliveriesApi.returnToQueue(token, delivery.id, { reason: returnReason.trim() });
         setReturnOpen(false);
         setReturnReason('');
-        /**
-         * O pedido deixou de ser dele e voltou para a vitrine. Sair da tela em
-         * vez de ficar mostrando uma entrega que agora e de outro — e o
-         * rastreamento precisa parar junto, senao o app segue mandando posicao
-         * de uma corrida que ele nao esta mais fazendo.
-         */
-        const restantes = await refreshActiveDeliveries(token);
+        const remainingDeliveries = await refreshActiveDeliveries(token);
         await syncDeliveryTracking(
           token,
-          restantes.map((item) => item.id),
+          remainingDeliveries.map((item) => item.id),
         ).catch(() => undefined);
         navigation.popToTop();
         return;
       } else if (nextOperation === 'fail') {
-        // O GPS aqui e a unica prova de que o motoboy chegou ao destino antes
-        // de declarar insucesso — sem ele, "nao consegui entregar" seria
-        // indistinguivel de "nao fui".
         const fix = await captureCurrentLocation();
         setDelivery(
           await deliveriesApi.fail(token, delivery.id, {
@@ -225,11 +219,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         setFailureOpen(false);
         setFailureReason(null);
         setFailureNote('');
+        setSuccessMessage('Ocorrência registrada. Leve a mercadoria de volta à loja.');
       } else {
         const fix = await captureCurrentLocation();
         const result = await deliveriesApi.completeReturn(token, delivery.id, fix);
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+        setSuccessMessage('Retorno concluído!');
       }
+
       const activeDeliveries = await refreshActiveDeliveries(token);
       syncDeliveryTracking(
         token,
@@ -242,6 +239,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             : 'Não foi possível atualizar o rastreamento da entrega.',
         );
       });
+
       if (!activeDeliveries.some((activeDelivery) => activeDelivery.id === delivery.id)) {
         const nextDelivery = activeDeliveries[0];
         if (nextDelivery) {
@@ -250,11 +248,12 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       }
     } catch (error) {
       Alert.alert(
-        'Acao nao concluida',
+        'Ação não concluída',
         error instanceof ApiError || error instanceof LocationError
           ? error.message
-          : 'Nao foi possivel concluir esta acao. Tente novamente.',
+          : 'Não foi possível concluir esta ação. Tente novamente.',
       );
+      await loadDelivery().catch(() => undefined);
     } finally {
       setOperation(null);
     }
@@ -262,34 +261,27 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.centered, isDark ? styles.safeAreaDark : styles.safeAreaLight]}>
-        <ActivityIndicator color={colors.primary} />
+      <SafeAreaView style={styles.loading}>
+        <ActivityIndicator color={colors.action} />
       </SafeAreaView>
     );
   }
 
   if (!delivery) return null;
 
+  const currentDelivery = delivery;
   const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
   const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
   const busy = operation !== null;
+  const copy = deliveryOperationCopy(delivery.status);
   const action =
     delivery.status === 'ACCEPTED'
-      ? { kind: 'collect' as const, label: 'Confirmar coleta' }
+      ? ('collect' as const)
       : delivery.status === 'COLLECTED'
-        ? {
-            kind: 'deliver' as const,
-            label: delivery.destinationKnownAtCreation
-              ? 'Marcar como entregue'
-              : 'Capturar GPS e concluir entrega',
-          }
-        : delivery.status === 'DELIVERED'
-          ? { kind: 'return' as const, label: 'Capturar GPS e concluir retorno' }
-          : delivery.status === 'FAILED'
-            ? // Mesma confirmacao de retorno: a entrega nao deu certo, mas o
-              // pedido so fecha quando a mercadoria voltar para a loja.
-              { kind: 'return' as const, label: 'Confirmar devolução na loja' }
-            : null;
+        ? ('deliver' as const)
+        : delivery.status === 'DELIVERED' || delivery.status === 'FAILED'
+          ? ('return' as const)
+          : null;
   const routeAddress =
     delivery.status === 'COLLECTED'
       ? dropoff
@@ -299,12 +291,16 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         ? pickup
         : undefined;
   const routeDestination = navigationDestination(routeAddress);
-  const routeLabel =
-    delivery.status === 'COLLECTED' ? 'Abrir rota para o destino' : 'Abrir rota para a coleta';
+  const pickupDone = delivery.status !== 'ACCEPTED';
+  const dropoffDone = delivery.status === 'DELIVERED' || delivery.status === 'COMPLETED';
+  const valueLabel =
+    delivery.driverValue === null
+      ? 'A calcular na entrega'
+      : currencyFormatter.format(delivery.driverValue);
 
   async function openExternalNavigation() {
     if (!routeDestination) {
-      Alert.alert('Rota indisponivel', 'Este pedido ainda nao possui um endereco para navegacao.');
+      Alert.alert('Rota indisponível', 'Este pedido ainda não possui um endereço para navegação.');
       return;
     }
     try {
@@ -313,202 +309,344 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       );
     } catch {
       Alert.alert(
-        'Nao foi possivel abrir a navegacao',
+        'Não foi possível abrir a navegação',
         'Verifique se existe um aplicativo de mapas instalado.',
       );
     }
   }
 
+  async function callRecipient() {
+    const phone = currentDelivery.recipientPhone?.replace(/[^+\d]/g, '');
+    if (!phone) return;
+    try {
+      await Linking.openURL(`tel:${phone}`);
+    } catch {
+      Alert.alert('Ligação indisponível', 'Não foi possível abrir o telefone neste aparelho.');
+    }
+  }
+
+  function handlePrimaryAction() {
+    if (!action || busy) return;
+    if (action === 'deliver' && !currentDelivery.destinationKnownAtCreation) {
+      setDeliverConfirmationOpen(true);
+      return;
+    }
+    runOperation(action).catch(() => undefined);
+  }
+
   return (
-    <SafeAreaView style={isDark ? styles.safeAreaDark : styles.safeAreaLight}>
-      <ScreenHeader
-        title={`Pedido #${delivery.displayNumber}`}
-        onBack={delivery.status === 'COMPLETED' ? () => navigation.goBack() : undefined}
-      />
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.statusRow}>
-          <Text style={[styles.status, { color: colors.primary }]}>
-            {labelForStatus(delivery.status)}
-          </Text>
-          {delivery.batchId && <Text style={[styles.batch, { color: muted }]}>Pedido em lote</Text>}
-        </View>
+    <SafeAreaView style={styles.safeArea}>
+      <MapBackdrop />
+      <BottomSheet style={styles.sheet}>
+        <SheetHeader
+          title={`Pedido #${delivery.displayNumber}`}
+          onBack={() => navigation.goBack()}
+        />
 
-        {action && (
-          <Card>
-            <Text style={[styles.sectionTitle, { color: text }]}>Rastreamento da entrega</Text>
-            <Text style={[styles.trackingNotice, { color: muted }]}>
-              Sua localização é compartilhada enquanto você estiver online, inclusive com o
-              aplicativo em segundo plano. Ela para quando você ficar offline.
+        {successMessage ? (
+          <View style={styles.successBanner} accessibilityLiveRegion="polite">
+            <View style={styles.successIcon}>
+              <Icon name="check" size={16} color={colors.success} />
+            </View>
+            <Text style={styles.successText}>{successMessage}</Text>
+          </View>
+        ) : null}
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.dateRow}>
+            <Icon name="calendar" size={24} color={colors.inkMuted} />
+            <Text style={styles.dateText}>
+              {formatOperationDateTime(delivery.statusChangedAt || delivery.createdAt)}
             </Text>
-          </Card>
-        )}
+          </View>
 
-        <Card>
-          <Text style={[styles.sectionTitle, { color: text }]}>Coleta</Text>
-          <Text style={[styles.address, { color: text }]}>{formatAddress(pickup)}</Text>
-          <Text style={[styles.company, { color: muted }]}>{delivery.companyName}</Text>
-        </Card>
+          <View style={styles.statusRow}>
+            <View style={styles.statusGroup}>
+              <Icon name="pin" size={26} color={colors.actionSoft} />
+              <Text style={styles.statusText}>{copy.statusLabel}</Text>
+            </View>
+            <Text style={styles.brand}>motoboy</Text>
+          </View>
 
-        <Card>
-          <Text style={[styles.sectionTitle, { color: text }]}>Destino</Text>
-          <Text style={[styles.address, { color: text }]}>
-            {delivery.destinationKnownAtCreation
-              ? formatAddress(dropoff)
-              : 'Definido pelo GPS no momento da entrega'}
-          </Text>
-        </Card>
+          {delivery.batchId ? <Text style={styles.batchLabel}>Pedido em lote</Text> : null}
 
-        <Card>
-          <Text style={[styles.sectionTitle, { color: text }]}>Dados da entrega</Text>
-          <Text style={[styles.address, { color: text }]}>
-            {delivery.recipientName || 'Destinatário não informado'}
-          </Text>
-          {delivery.recipientPhone && (
-            <Text style={[styles.metadata, { color: muted }]}>{delivery.recipientPhone}</Text>
-          )}
-          {delivery.externalOrderNumber && (
-            <Text style={[styles.metadata, { color: muted }]}>
-              Pedido externo: {delivery.externalOrderNumber}
-            </Text>
-          )}
-          <Text style={[styles.metadata, { color: muted }]}>
-            Pagamento do cliente: {customerPaymentLabel(delivery.customerPaymentMethod)}
-          </Text>
-          {delivery.driverNote && (
-            <Text style={[styles.driverNote, { color: text }]}>{delivery.driverNote}</Text>
-          )}
-        </Card>
+          {delivery.status === 'ACCEPTED' ? (
+            <View style={styles.elapsedPanel}>
+              <View style={styles.elapsedBadge}>
+                <Text style={styles.elapsedValue}>
+                  {formatElapsedTime(delivery.statusChangedAt, nowMs)}
+                </Text>
+              </View>
+              <Text style={styles.elapsedLabel}>Tempo desde o aceite</Text>
+            </View>
+          ) : null}
 
-        <Card>
-          <Text style={[styles.sectionTitle, { color: text }]}>Seu ganho</Text>
-          <Text style={[styles.value, { color: text }]}>
-            {delivery.driverValue === null
-              ? 'A calcular na entrega'
-              : currencyFormatter.format(delivery.driverValue)}
-          </Text>
-          {delivery.distanceKm !== null && (
-            <Text style={{ color: muted }}>{delivery.distanceKm.toFixed(1)} km</Text>
-          )}
-          {delivery.requiresReturn && (
-            <Text style={[styles.returnNotice, { color: colors.warning }]}>
-              Esta entrega exige retorno ao local de coleta.
-            </Text>
-          )}
-        </Card>
-      </ScrollView>
+          {action && copy.primaryActionLabel ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copy.primaryActionLabel}
+              disabled={busy}
+              onPress={handlePrimaryAction}
+              style={({ pressed }) => [
+                styles.heroAction,
+                pressed && !busy && styles.pressed,
+                busy && styles.disabled,
+              ]}
+            >
+              {busy ? (
+                <ActivityIndicator color={colors.actionText} />
+              ) : (
+                <Text style={styles.heroActionText}>{copy.primaryActionLabel}</Text>
+              )}
+            </Pressable>
+          ) : null}
 
-      <View style={styles.actions}>
-        {routeDestination && (
-          <PrimaryButton label={routeLabel} variant="outline" onPress={openExternalNavigation} />
-        )}
-        {action ? (
-          <>
-            <PrimaryButton
-              label={busy ? 'Atualizando...' : action.label}
-              onPress={busy ? undefined : () => runOperation(action.kind)}
+          <OperationSection icon="money" title="Valores">
+            <View style={styles.valueRow}>
+              <Text style={styles.valueLabel}>Valor do entregador</Text>
+              <View style={styles.valueDots} />
+              <Text style={styles.value}>{valueLabel}</Text>
+            </View>
+
+            <Text style={styles.paymentTitle}>Método de pagamento</Text>
+            <View style={styles.paymentRow}>
+              <Icon name="list" size={28} color={colors.actionSoft} />
+              <Text style={styles.paymentValue}>
+                {deliveryPaymentLabel(delivery.paymentMethod)}
+              </Text>
+            </View>
+            {delivery.customerPaymentMethod ? (
+              <Text style={styles.paymentDetail}>
+                Cobrança do cliente: {customerPaymentLabel(delivery.customerPaymentMethod)}
+              </Text>
+            ) : null}
+          </OperationSection>
+
+          <OperationSection icon="pin" title="Endereços">
+            <RouteTimeline
+              stops={[
+                {
+                  icon: 'store',
+                  done: pickupDone,
+                  label: delivery.companyName,
+                  address: formatDeliveryAddress(pickup),
+                },
+                {
+                  icon: 'pin',
+                  done: dropoffDone,
+                  label: 'Entrega',
+                  address: destinationLabel(delivery, dropoff),
+                },
+              ]}
             />
-            {/* So depois de coletar: antes disso nao ha mercadoria em posse do
-                motoboy, entao nao existe o que devolver. */}
-            {delivery.status === 'COLLECTED' && (
-              <PrimaryButton
-                label="Não consegui entregar"
-                variant="outline"
-                onPress={busy ? undefined : () => setFailureOpen(true)}
-              />
-            )}
-            {/*
-              Esqueceu de tocar na hora. Nao aparece quando o preco vem do GPS
-              da entrega: ali a coordenada do momento E o valor, entao o servidor
-              recusa — mostrar um botao que sempre da erro seria pior que nao ter.
-            */}
-            {(delivery.status === 'ACCEPTED' ||
-              (delivery.status === 'COLLECTED' && delivery.destinationKnownAtCreation)) && (
-              <PrimaryButton
-                label={
-                  delivery.status === 'ACCEPTED'
-                    ? 'Esqueci de marcar a coleta'
-                    : 'Esqueci de marcar a entrega'
-                }
-                variant="outline"
-                onPress={busy ? undefined : () => setForgotOpen(true)}
-              />
-            )}
-            {/* So antes da coleta: dali em diante a mercadoria esta com ele, e
-                o caminho passa a ser o insucesso, que a devolve para a loja. */}
-            {delivery.status === 'ACCEPTED' && (
-              <PrimaryButton
-                label="Devolver para a fila"
-                variant="outline"
-                onPress={busy ? undefined : () => setReturnOpen(true)}
-              />
-            )}
-          </>
-        ) : (
-          <>
-            {delivery.status === 'COMPLETED' && (
+
+            {routeDestination && copy.routeLabel ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => openExternalNavigation().catch(() => undefined)}
+                style={({ pressed }) => [styles.routeButton, pressed && styles.pressed]}
+              >
+                <Icon name="pin" size={18} color={colors.actionText} />
+                <Text style={styles.routeButtonText}>{copy.routeLabel}</Text>
+              </Pressable>
+            ) : null}
+          </OperationSection>
+
+          <OperationSection icon="person" title="Cliente">
+            <View style={styles.clientRow}>
+              <Icon name="person" size={22} color={colors.actionSoft} />
+              <Text style={styles.clientName}>
+                {delivery.recipientName || 'Destinatário não informado'}
+              </Text>
+            </View>
+            {delivery.recipientPhone ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Ligar para ${delivery.recipientName || 'o cliente'}`}
+                onPress={() => callRecipient().catch(() => undefined)}
+                style={({ pressed }) => [styles.phoneRow, pressed && styles.pressed]}
+              >
+                <Icon name="phone" size={21} color={colors.link} />
+                <Text style={styles.phoneText}>{delivery.recipientPhone}</Text>
+              </Pressable>
+            ) : null}
+            {delivery.externalOrderNumber ? (
+              <Text style={styles.metadata}>Pedido da loja: {delivery.externalOrderNumber}</Text>
+            ) : null}
+            {delivery.driverNote ? (
+              <Text style={styles.driverNote}>{delivery.driverNote}</Text>
+            ) : null}
+          </OperationSection>
+
+          {delivery.requiresReturn ? (
+            <View style={styles.returnNotice}>
+              <Icon name="return" size={21} color={colors.warning} />
+              <Text style={styles.returnNoticeText}>
+                Esta entrega exige retorno ao local de coleta.
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={styles.trackingNotice}>
+            <Icon name="info" size={18} color={colors.actionSoft} />
+            <Text style={styles.trackingText}>
+              Sua localização é compartilhada durante a operação e para quando você fica offline.
+            </Text>
+          </View>
+
+          {delivery.status === 'COLLECTED' && delivery.destinationKnownAtCreation ? (
+            <Pressable onPress={() => setForgotOpen(true)} disabled={busy}>
+              <Text style={styles.secondaryLink}>Esqueci de marcar a entrega</Text>
+            </Pressable>
+          ) : null}
+
+          {delivery.status === 'COMPLETED' ? (
+            <View style={styles.completedActions}>
               <PrimaryButton
                 label="Ver detalhes e histórico"
                 variant="outline"
                 onPress={() => navigation.navigate('OrderDetail', { orderId: delivery.id })}
               />
-            )}
-            <PrimaryButton label="Voltar para o inicio" onPress={() => navigation.popToTop()} />
-          </>
-        )}
-      </View>
+              <PrimaryButton label="Voltar para o início" onPress={() => navigation.popToTop()} />
+            </View>
+          ) : null}
+        </ScrollView>
+
+        {action && copy.primaryActionLabel ? (
+          <View style={styles.footer}>
+            {delivery.status === 'ACCEPTED' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Devolver para a fila"
+                disabled={busy}
+                onPress={() => setReturnOpen(true)}
+                style={({ pressed }) => [
+                  styles.returnQueueButton,
+                  pressed && !busy && styles.pressed,
+                  busy && styles.disabled,
+                ]}
+              >
+                <Text style={styles.returnQueueText}>Devolver à fila</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copy.primaryActionLabel}
+              disabled={busy}
+              onPress={handlePrimaryAction}
+              style={({ pressed }) => [
+                styles.footerPrimary,
+                pressed && !busy && styles.pressed,
+                busy && styles.disabled,
+              ]}
+            >
+              {busy ? (
+                <ActivityIndicator color={colors.actionText} />
+              ) : (
+                <Text style={styles.footerPrimaryText}>{copy.primaryActionLabel}</Text>
+              )}
+            </Pressable>
+
+            {delivery.status === 'ACCEPTED' || delivery.status === 'COLLECTED' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  delivery.status === 'ACCEPTED'
+                    ? 'Esqueci de marcar a coleta'
+                    : 'Informar problema na entrega'
+                }
+                disabled={busy}
+                onPress={() =>
+                  delivery.status === 'ACCEPTED' ? setForgotOpen(true) : setFailureOpen(true)
+                }
+                style={({ pressed }) => [
+                  styles.warningButton,
+                  pressed && !busy && styles.pressed,
+                  busy && styles.disabled,
+                ]}
+              >
+                <Text style={styles.warningGlyph}>{'⚠'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </BottomSheet>
+
+      <ConfirmationModal
+        visible={deliverConfirmationOpen}
+        title="Confirme a entrega"
+        description="Este pedido foi criado sem endereço de destino. Ao confirmar, sua localização atual será registrada como destino e usada para calcular o valor da entrega."
+        confirmLabel={busy ? 'Capturando GPS...' : 'Confirmar com GPS'}
+        disabled={busy}
+        onConfirm={() => runOperation('deliver').catch(() => undefined)}
+        onCancel={() => setDeliverConfirmationOpen(false)}
+      />
 
       <Modal
         visible={failureOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setFailureOpen(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
-            <Text style={[styles.modalTitle, { color: text }]}>O que aconteceu?</Text>
-            <Text style={[styles.modalHint, { color: muted }]}>
-              A mercadoria volta para a loja e você recebe a corrida normalmente.
-            </Text>
+          <View style={styles.modalCard}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>O que aconteceu?</Text>
+              <Text style={styles.modalHint}>
+                A mercadoria volta para a loja e você recebe a corrida normalmente.
+              </Text>
 
-            {FAILURE_REASONS.map((item) => {
-              const selected = failureReason === item.value;
-              return (
-                <Pressable
-                  key={item.value}
-                  onPress={() => setFailureReason(item.value)}
-                  style={[styles.reason, selected && styles.reasonSelected]}
-                >
-                  <Text style={[styles.reasonLabel, { color: selected ? colors.primary : text }]}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+              <View style={styles.reasonList}>
+                {FAILURE_REASONS.map((item) => {
+                  const selected = failureReason === item.value;
+                  return (
+                    <Pressable
+                      key={item.value}
+                      onPress={() => setFailureReason(item.value)}
+                      style={[styles.reason, selected && styles.reasonSelected]}
+                    >
+                      <Text style={[styles.reasonLabel, selected && styles.reasonLabelSelected]}>
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-            {failureReason === 'OTHER' && (
-              <TextInput
-                style={[styles.noteInput, { color: text }]}
-                placeholder="Descreva o que aconteceu"
-                placeholderTextColor={muted}
-                value={failureNote}
-                onChangeText={setFailureNote}
-                multiline
-              />
-            )}
+              {failureReason === 'OTHER' ? (
+                <TextInput
+                  style={styles.noteInput}
+                  placeholder="Descreva o que aconteceu"
+                  placeholderTextColor={colors.inkMuted}
+                  value={failureNote}
+                  onChangeText={setFailureNote}
+                  multiline
+                />
+              ) : null}
 
-            <PrimaryButton
-              label={busy ? 'Registrando...' : 'Registrar e voltar para a loja'}
-              onPress={
-                busy || !failureReason || (failureReason === 'OTHER' && !failureNote.trim())
-                  ? undefined
-                  : () => runOperation('fail')
-              }
-            />
-            <PrimaryButton
-              label="Cancelar"
-              variant="outline"
-              onPress={busy ? undefined : () => setFailureOpen(false)}
-            />
+              <View style={styles.modalActions}>
+                <PrimaryButton
+                  label={busy ? 'Registrando...' : 'Registrar e voltar à loja'}
+                  style={styles.modalButton}
+                  disabled={
+                    busy || !failureReason || (failureReason === 'OTHER' && !failureNote.trim())
+                  }
+                  onPress={() => runOperation('fail').catch(() => undefined)}
+                />
+                <PrimaryButton
+                  label="Cancelar"
+                  variant="outline"
+                  style={styles.modalButton}
+                  disabled={busy}
+                  onPress={() => setFailureOpen(false)}
+                />
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -516,50 +654,55 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       <Modal
         visible={forgotOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setForgotOpen(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
-            <Text style={[styles.modalTitle, { color: text }]}>Há quanto tempo aconteceu?</Text>
-            <Text style={[styles.modalHint, { color: muted }]}>
-              O horário informado vale para o relatório da operação. O registro guarda também a hora
-              em que você tocou aqui.
-            </Text>
+          <View style={styles.modalCard}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>Há quanto tempo aconteceu?</Text>
+              <Text style={styles.modalHint}>
+                O horário informado vale para o relatório. O registro também guarda a hora em que
+                você confirmou a ação.
+              </Text>
 
-            {FORGOT_OPTIONS.map((minutos) => {
-              const selecionado = forgotMinutes === minutos;
-              return (
-                <Pressable
-                  key={minutos}
-                  onPress={() => setForgotMinutes(minutos)}
-                  style={[styles.reason, selecionado && styles.reasonSelected]}
-                >
-                  <Text
-                    style={[styles.reasonLabel, { color: selecionado ? colors.primary : text }]}
-                  >
-                    {minutos} minutos atrás
-                  </Text>
-                </Pressable>
-              );
-            })}
+              <View style={styles.minutesGrid}>
+                {FORGOT_OPTIONS.map((minutes) => {
+                  const selected = forgotMinutes === minutes;
+                  return (
+                    <Pressable
+                      key={minutes}
+                      onPress={() => setForgotMinutes(minutes)}
+                      style={[styles.minuteOption, selected && styles.reasonSelected]}
+                    >
+                      <Text style={[styles.reasonLabel, selected && styles.reasonLabelSelected]}>
+                        {minutes} min
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-            <PrimaryButton
-              label={busy ? 'Registrando...' : 'Confirmar'}
-              onPress={
-                busy || forgotMinutes === null
-                  ? undefined
-                  : () =>
-                      runOperation(
-                        delivery.status === 'ACCEPTED' ? 'collect-forgot' : 'deliver-forgot',
-                      )
-              }
-            />
-            <PrimaryButton
-              label="Cancelar"
-              variant="outline"
-              onPress={busy ? undefined : () => setForgotOpen(false)}
-            />
+              <View style={styles.modalActions}>
+                <PrimaryButton
+                  label={busy ? 'Registrando...' : 'Confirmar'}
+                  style={styles.modalButton}
+                  disabled={busy || forgotMinutes === null}
+                  onPress={() =>
+                    runOperation(
+                      delivery.status === 'ACCEPTED' ? 'collect-forgot' : 'deliver-forgot',
+                    ).catch(() => undefined)
+                  }
+                />
+                <PrimaryButton
+                  label="Cancelar"
+                  variant="outline"
+                  style={styles.modalButton}
+                  disabled={busy}
+                  onPress={() => setForgotOpen(false)}
+                />
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -567,41 +710,39 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       <Modal
         visible={returnOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setReturnOpen(false)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, isDark ? styles.modalCardDark : styles.modalCardLight]}>
-            <Text style={[styles.modalTitle, { color: text }]}>Devolver para a fila?</Text>
-            <Text style={[styles.modalHint, { color: muted }]}>
-              O pedido volta a ficar disponível para outro motoboy assumir. Conte o que aconteceu —
-              a loja e o administrador veem este motivo.
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Devolver para a fila?</Text>
+            <Text style={styles.modalHint}>
+              O pedido volta a ficar disponível para outro motoboy. A loja e a administração verão o
+              motivo informado.
             </Text>
-
             <TextInput
-              style={[styles.noteInput, { color: text }]}
+              style={styles.noteInput}
               placeholder="Ex.: moto quebrou, a loja não tinha o produto"
-              placeholderTextColor={muted}
+              placeholderTextColor={colors.inkMuted}
               value={returnReason}
               onChangeText={setReturnReason}
               multiline
             />
-
-            <PrimaryButton
-              label={busy ? 'Devolvendo...' : 'Devolver para a fila'}
-              onPress={
-                // O minimo de 5 caracteres e o mesmo que a API exige: barrar
-                // aqui evita uma ida ao servidor so para receber o erro.
-                busy || returnReason.trim().length < 5
-                  ? undefined
-                  : () => runOperation('return-to-queue')
-              }
-            />
-            <PrimaryButton
-              label="Cancelar"
-              variant="outline"
-              onPress={busy ? undefined : () => setReturnOpen(false)}
-            />
+            <View style={styles.modalActions}>
+              <PrimaryButton
+                label={busy ? 'Devolvendo...' : 'Devolver para a fila'}
+                style={styles.modalButton}
+                disabled={busy || returnReason.trim().length < 5}
+                onPress={() => runOperation('return-to-queue').catch(() => undefined)}
+              />
+              <PrimaryButton
+                label="Cancelar"
+                variant="outline"
+                style={styles.modalButton}
+                disabled={busy}
+                onPress={() => setReturnOpen(false)}
+              />
+            </View>
           </View>
         </View>
       </Modal>
@@ -609,45 +750,355 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   );
 }
 
+function OperationSection({
+  icon,
+  title,
+  children,
+}: {
+  icon: 'money' | 'pin' | 'person';
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Icon name={icon} size={28} color={colors.actionSoft} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function ConfirmationModal({
+  visible,
+  title,
+  description,
+  confirmLabel,
+  disabled,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  disabled: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <View style={styles.confirmIcon}>
+            <Icon name="pin" size={30} color={colors.actionSoft} />
+          </View>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <Text style={styles.modalHint}>{description}</Text>
+          <View style={styles.modalActions}>
+            <PrimaryButton
+              label={confirmLabel}
+              style={styles.modalButton}
+              disabled={disabled}
+              onPress={onConfirm}
+            />
+            <PrimaryButton
+              label="Cancelar"
+              variant="outline"
+              style={styles.modalButton}
+              disabled={disabled}
+              onPress={onCancel}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
-  safeAreaLight: { flex: 1, backgroundColor: colors.background },
-  safeAreaDark: { flex: 1, backgroundColor: colors.backgroundDark },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 16, gap: 12 },
-  statusRow: { gap: 4 },
-  status: { fontSize: 20, fontWeight: '700' },
-  batch: { fontSize: 12, fontWeight: '600' },
-  sectionTitle: { fontSize: 13, fontWeight: '700', marginBottom: 6 },
-  address: { fontSize: 15, fontWeight: '600' },
-  company: { fontSize: 13, marginTop: 4 },
-  value: { fontSize: 22, fontWeight: '700' },
-  returnNotice: { fontSize: 13, fontWeight: '600', marginTop: 8 },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  modalCard: { padding: 20, gap: 10, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
-  modalCardLight: { backgroundColor: colors.background },
-  modalCardDark: { backgroundColor: colors.backgroundDark },
-  modalTitle: { fontSize: 18, fontWeight: '700' },
-  modalHint: { fontSize: 13, lineHeight: 18, marginBottom: 4 },
-  reason: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+  safeArea: { flex: 1, backgroundColor: colors.mapBackdrop },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
   },
-  reasonSelected: { borderColor: colors.primary, borderWidth: 2 },
-  reasonLabel: { fontSize: 15, fontWeight: '600' },
-  noteInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
+  sheet: { flex: 1, marginTop: 74, overflow: 'hidden' },
+  scroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingBottom: 28, gap: 18 },
+  successBanner: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    minHeight: 48,
+    borderRadius: 9,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.actionSoft,
+  },
+  successIcon: {
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successText: { flex: 1, color: colors.actionText, fontSize: 14, fontWeight: '700' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dateText: { color: colors.ink, fontSize: 16, fontWeight: '700' },
+  statusRow: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 42,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  statusGroup: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  statusText: { color: colors.ink, fontSize: 18, fontWeight: '700' },
+  brand: { color: colors.danger, fontSize: 19, fontWeight: '800' },
+  batchLabel: {
+    alignSelf: 'center',
+    marginTop: -10,
+    color: colors.inkMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  elapsedPanel: {
+    alignItems: 'center',
+    gap: 8,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  elapsedBadge: {
+    minWidth: 86,
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.countdown,
+  },
+  elapsedValue: {
+    color: colors.actionText,
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  elapsedLabel: { color: colors.ink, fontSize: 17, fontWeight: '700' },
+  heroAction: {
+    minHeight: 64,
     borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    backgroundColor: colors.action,
+  },
+  heroActionText: { color: colors.actionText, fontSize: 21, fontWeight: '800' },
+  section: { gap: 12 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  sectionTitle: { color: colors.ink, fontSize: 23, fontWeight: '800' },
+  valueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
+  valueLabel: { color: colors.ink, fontSize: 15, fontWeight: '700' },
+  valueDots: {
+    flex: 1,
+    borderBottomWidth: 2,
+    borderStyle: 'dotted',
+    borderBottomColor: colors.inkSoft,
+  },
+  value: { maxWidth: '44%', color: colors.ink, fontSize: 16, fontWeight: '800' },
+  paymentTitle: { color: colors.ink, fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  paymentRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  paymentValue: { color: colors.ink, fontSize: 17, fontWeight: '700' },
+  paymentDetail: { color: colors.inkSoft, fontSize: 13, marginLeft: 39 },
+  routeButton: {
+    minHeight: 50,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    paddingHorizontal: 16,
+    backgroundColor: colors.actionSoft,
+  },
+  routeButtonText: { color: colors.actionText, fontSize: 16, fontWeight: '700' },
+  clientRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  clientName: { flex: 1, color: colors.ink, fontSize: 17, fontWeight: '700' },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 31 },
+  phoneText: { color: colors.link, fontSize: 16, fontWeight: '700' },
+  metadata: { color: colors.inkSoft, fontSize: 13, marginLeft: 31 },
+  driverNote: {
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 20,
+    borderRadius: 10,
     padding: 12,
-    minHeight: 72,
+    backgroundColor: colors.surfaceMuted,
+  },
+  returnNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 10,
+    padding: 13,
+    backgroundColor: colors.warningSoft,
+  },
+  returnNoticeText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
+  trackingNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: colors.actionSoftTint,
+  },
+  trackingText: { flex: 1, color: colors.inkSoft, fontSize: 12, lineHeight: 17 },
+  secondaryLink: {
+    color: colors.actionSoft,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+  },
+  completedActions: { gap: 10 },
+  footer: {
+    minHeight: 84,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    backgroundColor: colors.surface,
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: -2 },
+  },
+  returnQueueButton: {
+    flex: 0.9,
+    minHeight: 58,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    backgroundColor: colors.warning,
+  },
+  returnQueueText: {
+    color: colors.actionText,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  footerPrimary: {
+    flex: 1.35,
+    minHeight: 58,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    backgroundColor: colors.action,
+  },
+  footerPrimaryText: {
+    color: colors.actionText,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  warningButton: {
+    width: 58,
+    minHeight: 58,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.warning,
+  },
+  warningGlyph: { color: colors.actionText, fontSize: 27, lineHeight: 30 },
+  pressed: { opacity: 0.82 },
+  disabled: { opacity: 0.5 },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '88%',
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+    backgroundColor: colors.surface,
+  },
+  confirmIcon: {
+    alignSelf: 'center',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.actionSoftTint,
+  },
+  modalTitle: { color: colors.ink, fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  modalHint: {
+    color: colors.inkSoft,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  reasonList: { gap: 8 },
+  reason: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 11,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  reasonSelected: {
+    borderColor: colors.actionSoft,
+    borderWidth: 2,
+    backgroundColor: colors.actionSoftTint,
+  },
+  reasonLabel: { color: colors.ink, fontSize: 15, fontWeight: '600' },
+  reasonLabelSelected: { color: colors.actionSoft, fontWeight: '800' },
+  noteInput: {
+    minHeight: 82,
+    borderRadius: 11,
+    padding: 12,
+    color: colors.ink,
+    backgroundColor: colors.surfaceMuted,
     textAlignVertical: 'top',
     fontSize: 15,
   },
-  trackingNotice: { fontSize: 13, lineHeight: 19 },
-  metadata: { fontSize: 13, marginTop: 4 },
-  driverNote: { fontSize: 13, lineHeight: 19, marginTop: 10 },
-  actions: { padding: 16 },
+  minutesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  minuteOption: {
+    minWidth: 72,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  modalButton: { flex: 1 },
 });

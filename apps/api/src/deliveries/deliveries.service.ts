@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   InternalServerErrorException,
   NotFoundException,
   ServiceUnavailableException,
@@ -61,6 +62,19 @@ const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
 ];
 const RECENT_OPERATION_STATUSES: DeliveryStatus[] = ['COMPLETED', 'CANCELLED'];
+
+/**
+ * Ajusta somente a janela de estados terminais retornada pela central que
+ * consome `operations`. O endpoint da empresa continua usando o padrao acima;
+ * o admin pode aplicar uma janela mais curta sem duplicar a consulta inteira.
+ */
+export interface DeliveryOperationsRecentWindow {
+  statuses: DeliveryStatus[];
+  changedSince?: Date;
+  /** `null` remove o limite por quantidade; `undefined` preserva o padrao 20. */
+  limit?: number | null;
+}
+
 const OPERATIONAL_DELIVERY_INCLUDE = Prisma.validator<Prisma.DeliveryInclude>()({
   company: true,
   serviceType: true,
@@ -85,6 +99,13 @@ type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
  * raio configurado, porque ali o que importa e a checagem nao virar ruido.
  */
 const MAX_LOCATION_ACCURACY_METERS = 100;
+/**
+ * Raio padrao para concluir entrega com destino informado.
+ *
+ * 200 m: abaixo disso o GPS urbano recusa entrega que realmente aconteceu, por
+ * erro do proprio aparelho. O admin pode apertar ou afrouxar nas configuracoes.
+ */
+const DEFAULT_DELIVERY_PROXIMITY_METERS = 200;
 
 export interface DeliveryAddressItem {
   type: string;
@@ -155,8 +176,26 @@ export interface DeliveryGroupResult {
   deliveries: DeliveryDetail[];
 }
 
+export interface AdminDeliverySearchSummary {
+  total: number;
+  items: Array<{
+    id: string;
+    displayNumber: number;
+    companyName: string;
+    serviceTypeName: string;
+    status: DeliveryStatus;
+    distanceKm: number | null;
+    totalValue: number | null;
+    driverName: string | null;
+    statusChangedAt: string;
+    createdAt: string;
+  }>;
+}
+
 @Injectable()
 export class DeliveriesService {
+  private readonly logger = new Logger(DeliveriesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingService: PricingService,
@@ -216,6 +255,7 @@ export class DeliveriesService {
       }
 
       const quote = await this.pricingService.quote({
+        companyId: company.id,
         regionId: company.regionId,
         serviceTypeId: payload.serviceTypeId,
         distanceKm,
@@ -233,6 +273,14 @@ export class DeliveriesService {
     if (initialStatus === 'AWAITING_DRIVER') {
       await this.dispatchService.assertConfigured();
     }
+
+    /**
+     * Fora da transacao de proposito: geocodificar e chamada de rede, e segurar
+     * uma transacao aberta esperando o Google prenderia conexao do banco.
+     */
+    const coordenadaDoDestino = destinationKnownAtCreation
+      ? await this.resolverCoordenadaDoDestino(payload.dropoffAddress!)
+      : { lat: null, lng: null };
 
     const created = await this.prisma.$transaction(async (tx) => {
       const delivery = await tx.delivery.create({
@@ -288,8 +336,8 @@ export class DeliveriesService {
           state: dropoffAddress.state,
           zip: dropoffAddress.zip,
           referenceNote: dropoffAddress.referenceNote,
-          lat: dropoffAddress.lat,
-          lng: dropoffAddress.lng,
+          lat: coordenadaDoDestino.lat,
+          lng: coordenadaDoDestino.lng,
         });
       }
       await tx.deliveryAddress.createMany({ data: addresses });
@@ -333,6 +381,8 @@ export class DeliveriesService {
       throw new ConflictException('A empresa ainda não tem um endereço de coleta cadastrado.');
     }
 
+    await this.assertBatchSizeAllowed(payload.deliveries.length);
+
     // O lote inteiro compartilha o mesmo agendamento, validado em Zod, entao
     // basta olhar o primeiro item.
     await this.assertWithinBusinessHours(company.regionId, payload.deliveries[0]?.scheduledAt);
@@ -364,6 +414,7 @@ export class DeliveriesService {
           );
         }
         const quote = await this.pricingService.quote({
+          companyId: company.id,
           regionId: company.regionId,
           serviceTypeId: item.serviceTypeId,
           distanceKm,
@@ -373,10 +424,23 @@ export class DeliveriesService {
       }),
     );
 
+    /**
+     * Uma geocodificacao por item do lote, todas antes da transacao. Em
+     * paralelo porque sao independentes e o lote pode ter dezenas de itens —
+     * em serie o lancamento ficaria visivelmente lento para a loja.
+     */
+    const coordenadasDosDestinos = await Promise.all(
+      prepared.map(({ item, destinationKnownAtCreation }) =>
+        destinationKnownAtCreation
+          ? this.resolverCoordenadaDoDestino(item.dropoffAddress!)
+          : Promise.resolve({ lat: null, lng: null }),
+      ),
+    );
+
     const batchId = randomUUID();
     const created = await this.prisma.$transaction(async (tx) => {
       const deliveries = [];
-      for (const { item, destinationKnownAtCreation, distanceKm, quote } of prepared) {
+      for (const [indice, { item, destinationKnownAtCreation, distanceKm, quote }] of prepared.entries()) {
         const delivery = await tx.delivery.create({
           data: {
             companyId: company.id,
@@ -418,6 +482,7 @@ export class DeliveriesService {
         ];
         if (destinationKnownAtCreation) {
           const dropoffAddress = item.dropoffAddress!;
+          const coordenada = coordenadasDosDestinos[indice] ?? { lat: null, lng: null };
           addresses.push({
             deliveryId: delivery.id,
             type: 'DROPOFF',
@@ -428,8 +493,8 @@ export class DeliveriesService {
             state: dropoffAddress.state,
             zip: dropoffAddress.zip,
             referenceNote: dropoffAddress.referenceNote,
-            lat: dropoffAddress.lat,
-            lng: dropoffAddress.lng,
+            lat: coordenada.lat,
+            lng: coordenada.lng,
           });
         }
         await tx.deliveryAddress.createMany({ data: addresses });
@@ -503,6 +568,7 @@ export class DeliveriesService {
   async operations(
     user: User,
     filters: DeliveryOperationsQuery,
+    recentWindow?: DeliveryOperationsRecentWindow,
   ): Promise<DeliveryOperationsResult> {
     if (user.type === 'DRIVER') {
       throw new ForbiddenException(
@@ -521,9 +587,11 @@ export class DeliveriesService {
     const activeStatuses = requestedStatuses
       ? ACTIVE_OPERATION_STATUSES.filter((status) => requestedStatuses.includes(status))
       : ACTIVE_OPERATION_STATUSES;
+    const availableRecentStatuses = recentWindow?.statuses ?? RECENT_OPERATION_STATUSES;
     const recentStatuses = requestedStatuses
-      ? RECENT_OPERATION_STATUSES.filter((status) => requestedStatuses.includes(status))
-      : RECENT_OPERATION_STATUSES;
+      ? availableRecentStatuses.filter((status) => requestedStatuses.includes(status))
+      : availableRecentStatuses;
+    const recentLimit = recentWindow?.limit === undefined ? 20 : recentWindow.limit;
     const [active, recent] = await this.prisma.$transaction([
       this.prisma.delivery.findMany({
         where: { ...baseWhere, status: { in: activeStatuses } },
@@ -531,9 +599,15 @@ export class DeliveriesService {
         include: OPERATIONAL_DELIVERY_INCLUDE,
       }),
       this.prisma.delivery.findMany({
-        where: { ...baseWhere, status: { in: recentStatuses } },
+        where: {
+          ...baseWhere,
+          status: { in: recentStatuses },
+          ...(recentWindow?.changedSince
+            ? { statusChangedAt: { gte: recentWindow.changedSince } }
+            : {}),
+        },
         orderBy: { statusChangedAt: 'desc' },
-        take: 20,
+        ...(recentLimit === null ? {} : { take: recentLimit }),
         include: OPERATIONAL_DELIVERY_INCLUDE,
       }),
     ]);
@@ -577,6 +651,57 @@ export class DeliveriesService {
       page: filters.page,
       pageSize: filters.pageSize,
       total,
+    };
+  }
+
+  /**
+   * Busca administrativa enxuta para integrações internas. Não seleciona
+   * destinatário, telefone, observações nem endereços.
+   */
+  async searchAdminSummary(
+    user: User,
+    filters: SearchDeliveriesQuery,
+  ): Promise<AdminDeliverySearchSummary> {
+    if (user.type !== 'ADMIN') {
+      throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+    const scope = await this.resolveListScope(user);
+    const where = this.buildDeliveryWhere(scope, filters);
+    const [total, deliveries] = await this.prisma.$transaction([
+      this.prisma.delivery.count({ where }),
+      this.prisma.delivery.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: filters.pageSize,
+        select: {
+          id: true,
+          displayNumber: true,
+          status: true,
+          distanceKm: true,
+          totalValue: true,
+          statusChangedAt: true,
+          createdAt: true,
+          company: { select: { tradeName: true } },
+          serviceType: { select: { name: true } },
+          driver: { select: { user: { select: { name: true } } } },
+        },
+      }),
+    ]);
+
+    return {
+      total,
+      items: deliveries.map((delivery) => ({
+        id: delivery.id,
+        displayNumber: delivery.displayNumber,
+        companyName: delivery.company.tradeName,
+        serviceTypeName: delivery.serviceType.name,
+        status: delivery.status,
+        distanceKm: delivery.distanceKm === null ? null : Number(delivery.distanceKm),
+        totalValue: delivery.totalValue === null ? null : Number(delivery.totalValue),
+        driverName: delivery.driver?.user.name ?? null,
+        statusChangedAt: delivery.statusChangedAt.toISOString(),
+        createdAt: delivery.createdAt.toISOString(),
+      })),
     };
   }
 
@@ -1028,6 +1153,7 @@ export class DeliveriesService {
       }
 
       const quote = await this.pricingService.quote({
+        companyId: delivery.companyId,
         regionId: delivery.company.regionId,
         serviceTypeId: delivery.serviceTypeId,
         distanceKm: distance.distanceKm,
@@ -1043,6 +1169,8 @@ export class DeliveriesService {
       surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
       capturedLat = payload.lat;
       capturedLng = payload.lng;
+    } else {
+      await this.assertNearDropoff(delivery.id, payload);
     }
 
     const autoComplete = !delivery.requiresReturn;
@@ -1615,6 +1743,144 @@ export class DeliveriesService {
    * Sem horário configurado, ou com o bloqueio desligado, passa direto. Uma
    * operação que nunca mexeu nisso não pode acordar recusando pedidos.
    */
+  /**
+   * O admin decide se a loja pode lancar lote, e de que tamanho.
+   *
+   * `maxDeliveriesPerBatch` igual a 1 desliga o lote — a loja passa a lancar um
+   * pedido por vez. Nulo mantem o teto do proprio formato, que ja e validado no
+   * schema, para nao mudar o comportamento de quem nunca configurou nada.
+   *
+   * A recusa diz o limite. Uma mensagem so com "nao pode" deixaria a loja
+   * tentando adivinhar quantos cabem.
+   */
+  /**
+   * Impede marcar entregue longe do endereco informado.
+   *
+   * So vale para pedido com destino conhecido na criacao. Quando o destino e
+   * definido por GPS na hora, a propria coordenada VIRA o destino, e comparar
+   * ela consigo mesma nao provaria nada — ali quem protege e o limite de
+   * precisao.
+   *
+   * A checagem e PULADA em tres casos, todos deliberados:
+   *
+   * - Marcacao retroativa (`occurredAt`): o motoboy esta dizendo que entregou
+   *   antes, de outro lugar. Exigir proximidade agora tornaria "esqueci de
+   *   marcar" impossivel de usar.
+   * - Endereco sem coordenada: nao ha com o que comparar. Travar o motoboy por
+   *   erro de cadastro da loja o deixaria sem receber por uma entrega feita.
+   * - App antigo que nao envia posicao: a versao anterior so mandava GPS em
+   *   pedido sem destino. Recusar derrubaria toda entrega ate o aplicativo ser
+   *   atualizado no aparelho de cada motoboy.
+   *
+   * Os dois ultimos casos ficam no log, para o admin ver de quais lojas e
+   * aparelhos vem a falta de checagem.
+   */
+  /**
+   * Descobre a coordenada do endereco de entrega.
+   *
+   * Existe porque o endereco chega so como texto: nem o painel da empresa nem
+   * as integracoes mandam coordenada, e sem ela nao ha como conferir se o
+   * motoboy estava mesmo no cliente ao concluir.
+   *
+   * Devolve `null` quando o Google nao encontra o endereco ou quando a
+   * consulta falha. Nenhum dos dois pode impedir a loja de lancar o pedido —
+   * um endereco mal digitado atrasa a conferencia, nao a operacao.
+   */
+  private async resolverCoordenadaDoDestino(endereco: {
+    street: string;
+    number: string;
+    complement?: string | null;
+    city: string;
+    state: string;
+    zip: string;
+    lat?: number;
+    lng?: number;
+  }): Promise<{ lat: number | null; lng: number | null }> {
+    if (endereco.lat !== undefined && endereco.lng !== undefined) {
+      return { lat: endereco.lat, lng: endereco.lng };
+    }
+
+    try {
+      const ponto = await this.googleMapsService.geocode(this.formatAddress(endereco));
+      if (!ponto) {
+        this.logger.warn(
+          `Endereco de entrega sem coordenada: "${this.formatAddress(endereco)}" nao foi ` +
+            'encontrado. A conferencia de proximidade ficara desligada neste pedido.',
+        );
+        return { lat: null, lng: null };
+      }
+      return ponto;
+    } catch (erro) {
+      this.logger.warn(
+        `Falha ao geocodificar "${this.formatAddress(endereco)}": ${String(erro)}. ` +
+          'O pedido segue sem conferencia de proximidade.',
+      );
+      return { lat: null, lng: null };
+    }
+  }
+
+  private async assertNearDropoff(deliveryId: string, payload: MarkDeliveredPayload): Promise<void> {
+    if (payload.occurredAt !== undefined) return;
+
+    const dropoff = await this.prisma.deliveryAddress.findFirst({
+      where: { deliveryId, type: 'DROPOFF' },
+      select: { lat: true, lng: true, street: true, number: true },
+    });
+
+    if (!dropoff || dropoff.lat === null || dropoff.lng === null) {
+      this.logger.warn(
+        `Entrega ${deliveryId} concluida sem conferir proximidade: o endereco ` +
+          `"${dropoff?.street ?? '?'}, ${dropoff?.number ?? '?'}" nao tem coordenada.`,
+      );
+      return;
+    }
+
+    if (payload.lat === undefined || payload.lng === undefined) {
+      this.logger.warn(
+        `Entrega ${deliveryId} concluida sem conferir proximidade: o aplicativo ` +
+          'nao enviou a posicao. Provavelmente uma versao anterior.',
+      );
+      return;
+    }
+
+    const { deliveryProximityRadiusMeters } = await this.platformSettingsService.get();
+    const raio = deliveryProximityRadiusMeters ?? DEFAULT_DELIVERY_PROXIMITY_METERS;
+
+    // Precisao pior que o proprio raio torna a checagem vazia: com raio de 200 m
+    // e um fix de 800 m, "estou no cliente" fica verdadeiro em qualquer lugar do
+    // bairro. Recusar e melhor que aprovar por ruido.
+    if (payload.accuracy !== undefined && payload.accuracy > raio) {
+      throw new ConflictException(
+        `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é maior que o raio aceito ` +
+          `(${raio}m). Aguarde o sinal melhorar e tente de novo.`,
+      );
+    }
+
+    const distancia = haversineDistanceMeters(
+      { lat: payload.lat, lng: payload.lng },
+      { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
+    );
+
+    if (distancia > raio) {
+      throw new ConflictException(
+        `Você precisa estar a até ${raio}m do endereço de entrega para concluir ` +
+          `(está a ${Math.round(distancia)}m).`,
+      );
+    }
+  }
+
+  private async assertBatchSizeAllowed(quantidade: number): Promise<void> {
+    const { maxDeliveriesPerBatch } = await this.platformSettingsService.get();
+    if (maxDeliveriesPerBatch === null || maxDeliveriesPerBatch === undefined) return;
+    if (quantidade <= maxDeliveriesPerBatch) return;
+
+    throw new ConflictException(
+      maxDeliveriesPerBatch === 1
+        ? 'O lançamento em lote está desativado. Lance um pedido por vez.'
+        : `Um lote pode ter no máximo ${maxDeliveriesPerBatch} pedidos.`,
+    );
+  }
+
   private async assertWithinBusinessHours(regionId: string, scheduledAt?: string): Promise<void> {
     const settings = await this.platformSettingsService.get();
     if (!settings.businessHoursEnabled) return;

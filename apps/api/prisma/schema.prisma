@@ -30,6 +30,11 @@ enum UserType {
   ADMIN
 }
 
+enum VirtualSecretaryAuditStatus {
+  SUCCESS
+  ERROR
+}
+
 enum CompanyMemberRole {
   OWNER
   OPERATOR
@@ -258,6 +263,7 @@ model User {
   companiesApproved       Company[]                        @relation("CompanyApprovedBy")
   driversReviewed         Driver[]                         @relation("DriverReviewedBy")
   platformSettingsEdits   PlatformSettings[]               @relation("PlatformSettingsUpdatedBy")
+  virtualSecretaryAudits  VirtualSecretaryAudit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -282,6 +288,30 @@ model AdminUser {
   createdAt DateTime @default(now())
 
   @@map("admin_users")
+}
+
+/// Auditoria append-only da Secretária Virtual. Não armazena a conversa nem
+/// credenciais: somente a ação, a ferramenta permitida, parâmetros/resultados
+/// já reduzidos pelo backend e o status da execução.
+model VirtualSecretaryAudit {
+  id           String                      @id @default(uuid())
+  requestId    String
+  adminId      String
+  action       String                      @db.VarChar(80)
+  toolName     String?                     @db.VarChar(80)
+  parameters   Json?
+  result       Json?
+  status       VirtualSecretaryAuditStatus
+  errorMessage String?                     @db.VarChar(500)
+  durationMs   Int?
+
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([adminId, createdAt])
+  @@map("virtual_secretary_audits")
 }
 
 /// Vínculo entre um User e uma Company, com papel dentro da empresa.
@@ -319,12 +349,13 @@ model Company {
   approvedAt       DateTime?
   approvedBy       User?     @relation("CompanyApprovedBy", fields: [approvedByUserId], references: [id])
 
-  teamMembers  CompanyTeamMember[]
-  addresses    CompanyAddress[]
-  deliveries   Delivery[]
-  wallet       Wallet?
-  invoices     Invoice[]
-  integrations Integration[]
+  teamMembers   CompanyTeamMember[]
+  addresses     CompanyAddress[]
+  deliveries    Delivery[]
+  wallet        Wallet?
+  invoices      Invoice[]
+  integrations  Integration[]
+  pricingTables PricingTable[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -622,9 +653,9 @@ model Delivery {
 /// expirou quando alguém tenta enviar, então um aparelho que sumiu sem
 /// desinstalar ficaria acumulando aqui para sempre.
 model DeviceToken {
-  id         String   @id @default(uuid())
+  id         String  @id @default(uuid())
   driverId   String
-  token      String   @unique
+  token      String  @unique
   platform   String
   appVersion String?
 
@@ -977,6 +1008,9 @@ model PricingTable {
   id            String   @id @default(uuid())
   regionId      String
   serviceTypeId String
+  /// Null = tabela geral da região. Preenchido = preço exclusivo da empresa,
+  /// com fallback para a tabela geral quando ela não tiver uma própria.
+  companyId     String?
   baseFee       Decimal  @db.Decimal(10, 2)
   perKmFee      Decimal  @db.Decimal(10, 2)
   minimumFee    Decimal? @db.Decimal(10, 2)
@@ -991,18 +1025,22 @@ model PricingTable {
   /// região; requiresReturn não pode ser usado em Delivery até isso existir.
   returnFee Decimal? @db.Decimal(10, 2)
 
-  /// Só uma PricingTable por (regionId, serviceTypeId) fica active=true por
-  /// vez — valores são congelados no Delivery na criação, então mudar preço
-  /// é criar uma nova linha e desativar a anterior, nunca editar em lugar.
+  /// Só uma PricingTable por (regionId, serviceTypeId, companyId) fica
+  /// active=true por vez. Índices únicos parciais no banco tratam o escopo
+  /// geral (companyId null) e cada empresa; preços continuam congelados no
+  /// Delivery, então mudar preço cria nova linha e desativa a anterior.
   active Boolean @default(true)
 
   region      Region      @relation(fields: [regionId], references: [id])
   serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
+  company     Company?    @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
 
   @@index([regionId, serviceTypeId])
   @@index([regionId, serviceTypeId, active])
+  @@index([companyId])
+  @@index([regionId, serviceTypeId, companyId, active])
   @@map("pricing_tables")
 }
 
@@ -1061,6 +1099,37 @@ model PlatformSettings {
   slaAlertMinutesToCollect Int?
   slaAlertMinutesToDeliver Int?
 
+  /// Quantas entregas o motoboy pode carregar ao mesmo tempo.
+  ///
+  /// NULO = sem limite, que e o padrao. Em cidade pequena o motoboy junta
+  /// varias entregas na mesma saida, e travar em uma por vez o obrigaria a
+  /// voltar a loja entre cada corrida.
+  ///
+  /// O teto existe para o caso oposto: um motoboy que aceita tudo que aparece e
+  /// segura a fila enquanto entrega devagar. Se isso acontecer, o admin define
+  /// um numero aqui.
+  maxConcurrentDeliveriesPerDriver Int?
+
+  /// Quantos pedidos a empresa pode lancar de uma vez, em lote.
+  ///
+  /// 1 desliga o lote: a loja passa a lancar um pedido por vez. Acima disso, e
+  /// o tamanho maximo do lote.
+  ///
+  /// NULO = o teto do formato (50). Fica nulo por padrao para nao mudar o
+  /// comportamento de quem ja usa lote sem ter configurado nada.
+  maxDeliveriesPerBatch Int?
+
+  /// Raio, em metros, dentro do qual o motoboy pode marcar a entrega como feita
+  /// quando o destino foi informado na criacao.
+  ///
+  /// NULO usa o padrao de 200 m. Existe para o admin apertar ou afrouxar
+  /// conforme a cidade: GPS urbano encosta em falso negativo abaixo de ~100 m.
+  ///
+  /// A checagem so acontece quando o endereco de entrega TEM coordenada. Sem
+  /// coordenada nao ha o que comparar, e travar o motoboy por erro de cadastro
+  /// da loja o deixaria sem receber por uma entrega que fez.
+  deliveryProximityRadiusMeters Int?
+
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
 
@@ -1097,7 +1166,7 @@ model Surcharge {
   schedules SurchargeSchedule[]
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([regionId, active])
   @@map("surcharges")

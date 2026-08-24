@@ -40,6 +40,72 @@ describe('GoogleMapsService', () => {
     fetchSpy.mockRestore();
   });
 
+  describe('geocode', () => {
+    function resultado(locationType: string) {
+      return {
+        status: 'OK',
+        results: [
+          {
+            geometry: {
+              location: { lat: -20.1522, lng: -41.6232 },
+              location_type: locationType,
+            },
+          },
+        ],
+      };
+    }
+
+    it('devolve a coordenada quando o Google acerta o prédio', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse(resultado('ROOFTOP')));
+
+      await expect(service.geocode('Rua X, 1')).resolves.toEqual({
+        lat: -20.1522,
+        lng: -41.6232,
+      });
+    });
+
+    it('aceita coordenada interpolada entre dois números da rua', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse(resultado('RANGE_INTERPOLATED')));
+
+      await expect(service.geocode('Rua X, 1')).resolves.not.toBeNull();
+    });
+
+    it('descarta APPROXIMATE, que é o centro da cidade e não o endereço', async () => {
+      // Aceitar isto seria pior que nao conferir: a regra compararia a posicao
+      // do motoboy com o centro de Lajinha e recusaria entrega que aconteceu.
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse(resultado('APPROXIMATE')));
+
+      await expect(service.geocode('Rua X, 1')).resolves.toBeNull();
+    });
+
+    it('descarta GEOMETRIC_CENTER, que é o centro da rua', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse(resultado('GEOMETRIC_CENTER')));
+
+      await expect(service.geocode('Rua X, 1')).resolves.toBeNull();
+    });
+
+    it('devolve null quando o endereço não existe, sem lançar', async () => {
+      // Endereco mal digitado nao pode impedir a loja de lancar o pedido.
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse({ status: 'ZERO_RESULTS' }));
+
+      await expect(service.geocode('Rua Inexistente, 999')).resolves.toBeNull();
+    });
+
+    it('lança quando o problema é nosso, e não do endereço', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(
+        jsonResponse({ status: 'REQUEST_DENIED', error_message: 'chave sem permissão' }),
+      );
+
+      await expect(service.geocode('Rua X, 1')).rejects.toBeInstanceOf(GoogleMapsApiError);
+    });
+  });
+
   it('lança GoogleMapsNotConfiguredError quando não há chave configurada, sem chamar a API', async () => {
     config.get.mockReturnValue(undefined);
 

@@ -54,7 +54,7 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     displayNumber: 1,
     companyId: 'company-1',
     driverId: null,
-    company: { tradeName: 'Loja Teste' },
+    company: { tradeName: 'Loja Teste', regionId: 'region-1' },
     serviceType: { name: 'Moto' },
     status: 'AWAITING_DRIVER',
     destinationKnownAtCreation: true,
@@ -111,6 +111,7 @@ describe('DeliveriesService', () => {
   let prisma: {
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
+    deliveryAddress: { findFirst: jest.Mock };
     businessHour: { findMany: jest.Mock };
     delivery: { findMany: jest.Mock; findUnique: jest.Mock; update: jest.Mock };
     driver: { findUnique: jest.Mock };
@@ -147,6 +148,12 @@ describe('DeliveriesService', () => {
     prisma = {
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
+      /**
+       * Sem coordenada por padrao: a conferencia de proximidade fica desligada,
+       * que e o estado dos enderecos antigos. Os testes da regra devolvem uma
+       * coordenada explicitamente.
+       */
+      deliveryAddress: { findFirst: jest.fn().mockResolvedValue(null) },
       // Sem horario configurado: a operacao esta sempre aberta, que e o estado
       // padrao de quem nunca mexeu nisso.
       businessHour: { findMany: jest.fn().mockResolvedValue([]) },
@@ -194,7 +201,9 @@ describe('DeliveriesService', () => {
   function mockCompanyMembership(userId: string, companyId: string, status = 'ACTIVE') {
     prisma.companyTeamMember.findFirst.mockImplementation(
       ({ where }: { where: { userId: string } }) =>
-        where.userId === userId ? { company: { id: companyId, status } } : null,
+        where.userId === userId
+          ? { company: { id: companyId, status, regionId: 'region-1' } }
+          : null,
     );
   }
 
@@ -233,6 +242,8 @@ describe('DeliveriesService', () => {
         destination: { address: expect.stringContaining('Rua do Cliente') },
       });
       expect(pricingService.quote).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        regionId: 'region-1',
         serviceTypeId: 'st-1',
         distanceKm: 5,
         requiresReturn: false,
@@ -413,6 +424,42 @@ describe('DeliveriesService', () => {
       );
     });
 
+    it('recusa o lote quando o admin desligou o lançamento em lote', async () => {
+      // 1 significa "um pedido por vez". A mensagem precisa dizer isso, senao a
+      // loja fica tentando adivinhar quantos cabem.
+      platformSettingsService.get.mockResolvedValue({
+        businessHoursEnabled: false,
+        maxDeliveriesPerBatch: 1,
+      });
+
+      await expect(service.createBatch(companyUser, payload)).rejects.toMatchObject({
+        message: 'O lançamento em lote está desativado. Lance um pedido por vez.',
+      });
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa o lote maior que o teto configurado, dizendo o limite', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        businessHoursEnabled: false,
+        maxDeliveriesPerBatch: 1,
+      });
+
+      await expect(service.createBatch(companyUser, payload)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('aceita o lote quando cabe no teto configurado', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        businessHoursEnabled: false,
+        maxDeliveriesPerBatch: 2,
+      });
+
+      const result = await service.createBatch(companyUser, payload);
+
+      expect(result.deliveries).toHaveLength(2);
+    });
+
     it('cria todas as entregas no mesmo batchId e dispara uma única chamada de despacho', async () => {
       const result = await service.createBatch(companyUser, payload);
 
@@ -496,6 +543,56 @@ describe('DeliveriesService', () => {
       expect(prisma.delivery.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { companyId: 'company-1', status: 'CANCELLED' } }),
       );
+    });
+  });
+
+  describe('operations', () => {
+    beforeEach(() => {
+      prisma.delivery.findMany.mockResolvedValue([]);
+      prisma.$transaction.mockImplementation(async (input: unknown) =>
+        Array.isArray(input)
+          ? Promise.all(input)
+          : (input as (transaction: typeof tx) => unknown)(tx),
+      );
+    });
+
+    it('preserva por padrao os 20 concluidos ou cancelados mais recentes', async () => {
+      await service.operations(adminUser, {});
+
+      expect(prisma.delivery.findMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({ status: { in: ['COMPLETED', 'CANCELLED'] } }),
+          orderBy: { statusChangedAt: 'desc' },
+          take: 20,
+        }),
+      );
+    });
+
+    it('aceita uma janela terminal sem limite por quantidade para o admin', async () => {
+      const changedSince = new Date('2026-08-23T15:45:00.000Z');
+
+      await service.operations(
+        adminUser,
+        {},
+        {
+          statuses: ['CANCELLED'],
+          changedSince,
+          limit: null,
+        },
+      );
+
+      const recentQuery = prisma.delivery.findMany.mock.calls[1]?.[0];
+      expect(recentQuery).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: { in: ['CANCELLED'] },
+            statusChangedAt: { gte: changedSince },
+          }),
+          orderBy: { statusChangedAt: 'desc' },
+        }),
+      );
+      expect(recentQuery).not.toHaveProperty('take');
     });
   });
 
@@ -844,6 +941,110 @@ describe('DeliveriesService', () => {
       await expect(service.markDelivered(driverUser, 'delivery-1', {})).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+
+    describe('proximidade do endereço informado', () => {
+      // Lajinha, centro. O segundo ponto fica ~1,5 km ao norte.
+      const DESTINO = { lat: -20.1389, lng: -41.6069 };
+      const LONGE = { lat: -20.1255, lng: -41.6069 };
+
+      function pedidoComDestinoConhecido() {
+        prisma.driver.findUnique.mockResolvedValue(driverRow);
+        prisma.delivery.findUnique.mockResolvedValue(
+          fullDeliveryRow({
+            driverId: 'driver-1',
+            status: 'COLLECTED',
+            destinationKnownAtCreation: true,
+            requiresReturn: false,
+          }),
+        );
+        prisma.deliveryAddress.findFirst.mockResolvedValue({
+          lat: DESTINO.lat,
+          lng: DESTINO.lng,
+          street: 'Rua Sucupira',
+          number: '11',
+        });
+      }
+
+      it('recusa quando o motoboy está longe, dizendo a distância', async () => {
+        pedidoComDestinoConhecido();
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
+        ).rejects.toMatchObject({
+          message: expect.stringContaining('200m do endereço de entrega'),
+        });
+      });
+
+      it('aceita quando está dentro do raio', async () => {
+        pedidoComDestinoConhecido();
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', { ...DESTINO, accuracy: 10 }),
+        ).resolves.toBeDefined();
+      });
+
+      it('recusa quando a precisão do GPS é pior que o próprio raio', async () => {
+        // Com raio de 200 m e fix de 900 m, "estou no cliente" seria verdadeiro
+        // em qualquer lugar do bairro: aprovar por ruido e pior que recusar.
+        pedidoComDestinoConhecido();
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', { ...DESTINO, accuracy: 900 }),
+        ).rejects.toMatchObject({
+          message: expect.stringContaining('precisão do GPS'),
+        });
+      });
+
+      it('não confere na marcação retroativa', async () => {
+        // Quem marca depois ja saiu do lugar. Exigir proximidade aqui tornaria
+        // "esqueci de marcar" impossivel de usar.
+        pedidoComDestinoConhecido();
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', {
+            ...LONGE,
+            accuracy: 10,
+            occurredAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+          }),
+        ).resolves.toBeDefined();
+      });
+
+      it('não confere quando o endereço não tem coordenada', async () => {
+        // Endereco mal digitado e da loja, nao do motoboy: travar ele aqui o
+        // deixaria sem receber por uma entrega que fez.
+        pedidoComDestinoConhecido();
+        prisma.deliveryAddress.findFirst.mockResolvedValue({
+          lat: null,
+          lng: null,
+          street: 'Rua Inexistente',
+          number: '1',
+        });
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
+        ).resolves.toBeDefined();
+      });
+
+      it('não confere quando o app não envia posição', async () => {
+        // Versao anterior do aplicativo so mandava GPS em pedido sem destino.
+        // Recusar derrubaria toda entrega ate o app ser atualizado.
+        pedidoComDestinoConhecido();
+
+        await expect(service.markDelivered(driverUser, 'delivery-1', {})).resolves.toBeDefined();
+      });
+
+      it('respeita o raio configurado pelo admin', async () => {
+        pedidoComDestinoConhecido();
+        platformSettingsService.get.mockResolvedValue({
+          businessHoursEnabled: false,
+          deliveryProximityRadiusMeters: 3000,
+        });
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
+        ).resolves.toBeDefined();
+      });
     });
 
     it('destino conhecido, sem retorno: fecha sozinho (COMPLETED) e registra as duas transições', async () => {

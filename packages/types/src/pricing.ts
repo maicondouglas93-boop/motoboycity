@@ -11,6 +11,9 @@ export interface PricingTableItem {
   regionId: string;
   serviceTypeId: string;
   serviceTypeName: string;
+  /** Null identifica a tabela geral usada como fallback. */
+  companyId: string | null;
+  companyName: string | null;
   baseFee: number;
   /** Distância coberta pela taxa base; o perKmFee só incide acima dela. */
   includedDistanceKm: number;
@@ -53,6 +56,12 @@ export interface PlatformSettingsItem {
   slaAlertMinutesToAccept: number | null;
   slaAlertMinutesToCollect: number | null;
   slaAlertMinutesToDeliver: number | null;
+  /** Teto de entregas simultaneas por motoboy. `null` = sem limite. */
+  maxConcurrentDeliveriesPerDriver: number | null;
+  /** Tamanho maximo do lote. 1 desliga o lote. `null` = teto do formato. */
+  maxDeliveriesPerBatch: number | null;
+  /** Raio para marcar entrega com destino informado. `null` = padrao de 200 m. */
+  deliveryProximityRadiusMeters: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -73,6 +82,9 @@ export interface UpdatePlatformSettingsInput {
   slaAlertMinutesToAccept?: number;
   slaAlertMinutesToCollect?: number;
   slaAlertMinutesToDeliver?: number;
+  maxConcurrentDeliveriesPerDriver?: number;
+  maxDeliveriesPerBatch?: number;
+  deliveryProximityRadiusMeters?: number;
 }
 
 export type SurchargeType = 'PERCENTAGE' | 'FIXED';

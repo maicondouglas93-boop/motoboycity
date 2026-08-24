@@ -13,7 +13,7 @@ import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-p
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
-import { PushService } from '../push/push.service';
+import { PushService, type PushMessage } from '../push/push.service';
 import { buildOfferPayload, remainingSeconds } from './offer-payload';
 
 export const DISPATCH_QUEUE = 'dispatch';
@@ -206,24 +206,27 @@ export class DispatchService {
      * indisponivel nao pode virar pedido nao despachado.
      */
     const quantidade = deliveries.length;
+    const expiresAtEpochMs = Date.now() + timeoutSeconds * 1000;
     const corpo =
       quantidade > 1
-        ? `${quantidade} entregas de ${delivery.company.tradeName}. Toque para ver.`
-        : `${delivery.company.tradeName}. Toque para ver.`;
-    this.pushService
-      .sendToDriver(nextDriverId, {
+        ? `O lote com ${quantidade} entregas está disponível.`
+        : `O pedido #${delivery.displayNumber} está disponível.`;
+    try {
+      await this.pushService.sendToDriver(nextDriverId, {
         kind: 'offer',
-        title: 'Nova entrega para voce',
+        title: 'Pedido disponível',
         body: corpo,
         data: {
           type: 'offer',
           offerId: offers[0]!.id,
           deliveryId: delivery.id,
+          expiresInSeconds: String(timeoutSeconds),
+          expiresAtEpochMs: String(expiresAtEpochMs),
         },
-      })
-      .catch((error: unknown) => {
-        this.logger.warn(`Falha ao enviar push da oferta ${offers[0]!.id}: ${String(error)}`);
       });
+    } catch (error: unknown) {
+      this.logger.warn(`Falha ao enviar push da oferta ${offers[0]!.id}: ${String(error)}`);
+    }
   }
 
   /** Varre pedidos AWAITING_DRIVER sem oferta pendente e tenta despachar
@@ -266,6 +269,7 @@ export class DispatchService {
     });
 
     this.realtimeGateway.emitToDriver(offer.driverId, 'delivery:offer-expired', { offerId });
+    await this.notifyOfferResolved(offer.driverId, [offerId], 'expired');
     this.realtimeGateway.emitAdminActivity(
       'Oferta expirou sem resposta, buscando o próximo motoboy.',
     );
@@ -357,6 +361,7 @@ export class DispatchService {
     this.realtimeGateway.emitToDriver(pendingOffer.driverId, 'delivery:offer-cancelled', {
       offerId: pendingOffer.id,
     });
+    await this.notifyOfferResolved(pendingOffer.driverId, [pendingOffer.id], 'cancelled');
   }
 
   /** Motoboy aceita a oferta. As duas atualizações condicionais (oferta
@@ -420,6 +425,7 @@ export class DispatchService {
     });
 
     await this.cancelOfferTimeout(offerId);
+    await this.notifyOfferResolved(driverId, [offerId], 'accepted');
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} foi aceito por um motoboy.`,
     );
@@ -464,6 +470,7 @@ export class DispatchService {
     }
 
     await this.cancelOfferTimeout(offerId);
+    await this.notifyOfferResolved(driverId, [offerId], 'declined');
     this.realtimeGateway.emitAdminActivity(
       'Motoboy recusou uma oferta, buscando o próximo da fila.',
     );
@@ -523,6 +530,7 @@ export class DispatchService {
     });
 
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    await this.notifyOfferResolved(driverId, offerIds, 'accepted');
     const accepted = deliveries.find((delivery) => delivery.id === deliveryId)!;
     this.realtimeGateway.emitAdminActivity(
       `Lote de ${deliveries.length} pedidos foi aceito por um motoboy.`,
@@ -570,6 +578,7 @@ export class DispatchService {
       return;
     }
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    await this.notifyOfferResolved(driverId, offerIds, 'expired');
     this.realtimeGateway.emitToDriver(driverId, 'delivery:offer-expired', { offerId });
     this.realtimeGateway.emitAdminActivity('Oferta de lote expirou, buscando o próximo motoboy.');
     await this.dispatchDelivery(deliveryId);
@@ -599,8 +608,43 @@ export class DispatchService {
       throw new ConflictException('Este lote não está mais pendente.');
     }
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    await this.notifyOfferResolved(driverId, offerIds, 'declined');
     this.realtimeGateway.emitAdminActivity('Motoboy recusou um lote, buscando o próximo motoboy.');
     await this.dispatchDelivery(deliveryId);
+  }
+
+  /**
+   * Fecha a apresentação nativa em todos os aparelhos do motoboy assim que a
+   * API deixa de considerar a oferta pendente. O socket sozinho não alcança um
+   * processo Android adormecido e deixaria uma notificação antiga acionável.
+   */
+  private async notifyOfferResolved(
+    driverId: string,
+    offerIds: string[],
+    reason: 'accepted' | 'declined' | 'expired' | 'cancelled',
+  ): Promise<void> {
+    const uniqueOfferIds = [...new Set(offerIds)];
+    if (uniqueOfferIds.length === 0) return;
+
+    const message: PushMessage = {
+      kind: 'offer-update',
+      title: 'Oferta atualizada',
+      body: 'A oferta não está mais pendente.',
+      data: {
+        type: 'offer-resolved',
+        offerId: uniqueOfferIds[0]!,
+        offerIds: uniqueOfferIds.join(','),
+        reason,
+      },
+    };
+
+    try {
+      await this.pushService.sendToDriver(driverId, message);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Falha ao sincronizar encerramento da oferta ${uniqueOfferIds[0]}: ${String(error)}`,
+      );
+    }
   }
 
   /**
@@ -623,6 +667,7 @@ export class DispatchService {
     if (!(await this.livePresence.isLive(driverId))) {
       return null;
     }
+    const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     try {
       return await this.prisma.$transaction(
         async (tx) => {
@@ -645,6 +690,15 @@ export class DispatchService {
             select: { id: true },
           });
           if (!eligibleDriver) {
+            return null;
+          }
+
+          /**
+           * O teto e conferido DENTRO da transacao, e nao so na escolha do
+           * motoboy: entre escolher e ofertar, ele pode ter aceitado outra
+           * corrida e estourado o limite.
+           */
+          if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, tx))) {
             return null;
           }
 
@@ -701,14 +755,12 @@ export class DispatchService {
     if (serviceTypeIds.length === 0) return [];
 
     /**
-     * Motoboy que ja esta com uma corrida nao ve a vitrine — a mesma regra que
-     * o despacho automatico usa para nao empilhar entrega em quem esta na rua.
+     * A vitrine some quando o motoboy atinge o teto de entregas simultaneas —
+     * a mesma regra do despacho automatico. Sem teto configurado ela continua
+     * disponivel, porque ele pode juntar varias entregas na mesma saida.
      */
-    const ocupado = await this.prisma.delivery.findFirst({
-      where: { driverId, status: { in: ASSIGNMENT_BLOCKING_STATUSES } },
-      select: { id: true },
-    });
-    if (ocupado) return [];
+    const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
+    if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) return [];
 
     const deliveries = await this.prisma.delivery.findMany({
       where: {
@@ -1000,19 +1052,67 @@ export class DispatchService {
       select: { driverId: true },
     });
 
+    const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     for (const presence of presences) {
-      if (await this.livePresence.isLive(presence.driverId)) return presence.driverId;
+      if (!(await this.livePresence.isLive(presence.driverId))) continue;
+      if (!(await this.cabeMaisUmaEntrega(presence.driverId, limiteSimultaneo))) continue;
+      return presence.driverId;
     }
     return null;
   }
 
+  /**
+   * Quantas entregas o motoboy pode carregar ao mesmo tempo.
+   *
+   * `null` = sem limite, que e o padrao. Em cidade pequena o motoboy junta
+   * varias entregas na mesma saida; travar em uma por vez o obrigaria a voltar
+   * a loja entre cada corrida e derrubaria a capacidade da operacao.
+   */
+  private async limiteDeEntregasSimultaneas(): Promise<number | null> {
+    const settings = await this.platformSettingsService.get();
+    const limite = settings.maxConcurrentDeliveriesPerDriver;
+    return limite === null || limite === undefined ? null : limite;
+  }
+
+  /**
+   * O motoboy ainda cabe mais uma entrega?
+   *
+   * Fica FORA do `where` porque o Prisma nao filtra por contagem de relacao:
+   * `none` responde "tem alguma?", e o que precisamos e "tem menos que N?".
+   * Entao a contagem e feita aqui, no cliente que vier fazer a pergunta.
+   *
+   * Recebe o `tx` para poder rodar dentro da transacao que emite a oferta —
+   * contar fora dela abriria janela para duas ofertas passarem juntas pelo
+   * mesmo teto.
+   */
+  private async cabeMaisUmaEntrega(
+    driverId: string,
+    limiteSimultaneo: number | null,
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<boolean> {
+    if (limiteSimultaneo === null) return true;
+
+    const emAndamento = await tx.delivery.count({
+      where: { driverId, status: { in: ASSIGNMENT_BLOCKING_STATUSES } },
+    });
+    return emAndamento < limiteSimultaneo;
+  }
+
   private eligibleDriverWhere(regionId: string, serviceTypeIds: string[]): Prisma.DriverWhereInput {
+    /**
+     * Sem filtro por entregas em andamento.
+     *
+     * Antes havia `deliveries: { none: ... }`, que travava o motoboy em uma
+     * corrida por vez. Em cidade pequena ele junta varias entregas na mesma
+     * saida, e a regra o obrigava a voltar a loja entre cada uma. O teto, se a
+     * operacao precisar de um, vem de `maxConcurrentDeliveriesPerDriver` e e
+     * aplicado por `cabeMaisUmaEntrega`.
+     */
     return {
       regionId,
       approvalStatus: 'APPROVED',
       accountStatus: 'ACTIVE',
       availability: 'AVAILABLE',
-      deliveries: { none: { status: { in: ASSIGNMENT_BLOCKING_STATUSES } } },
       AND: serviceTypeIds.map((serviceTypeId) => ({
         serviceTypes: {
           some: { serviceTypeId, serviceType: { active: true } },

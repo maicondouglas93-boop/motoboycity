@@ -34,7 +34,12 @@ import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 describe('DispatchService', () => {
   let service: DispatchService;
   let prisma: {
-    delivery: { findUnique: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock };
+    delivery: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      findFirst: jest.Mock;
+      count: jest.Mock;
+    };
     deliveryOffer: {
       findFirst: jest.Mock;
       findMany: jest.Mock;
@@ -77,7 +82,12 @@ describe('DispatchService', () => {
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
     };
     prisma = {
-      delivery: { findUnique: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() },
+      delivery: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
+      },
       deliveryOffer: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -90,7 +100,18 @@ describe('DispatchService', () => {
       driver: { findUnique: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
-    platformSettingsService = { get: jest.fn() };
+    /**
+     * Padrao de producao: sem teto de entregas simultaneas e sem teto de lote.
+     * Os testes que dependem de um valor especifico sobrescrevem com o proprio
+     * `mockResolvedValue`.
+     */
+    platformSettingsService = {
+      get: jest.fn().mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        maxConcurrentDeliveriesPerDriver: null,
+        maxDeliveriesPerBatch: null,
+      }),
+    };
     realtimeGateway = {
       emitToDriver: jest.fn(),
       emitAdminActivity: jest.fn(),
@@ -302,6 +323,18 @@ describe('DispatchService', () => {
         expiresInSeconds: 90,
       });
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalled();
+      expect(push.sendToDriver).toHaveBeenCalledWith('driver-1', {
+        kind: 'offer',
+        title: 'Pedido disponível',
+        body: 'O pedido #7 está disponível.',
+        data: {
+          type: 'offer',
+          offerId: 'offer-1',
+          deliveryId: 'delivery-1',
+          expiresInSeconds: '90',
+          expiresAtEpochMs: expect.any(String),
+        },
+      });
       expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -310,11 +343,9 @@ describe('DispatchService', () => {
               approvalStatus: 'APPROVED',
               accountStatus: 'ACTIVE',
               availability: 'AVAILABLE',
-              // FAILED bloqueia igual: a entrega nao deu certo, mas o motoboy
-              // esta com a mercadoria do cliente voltando para a loja.
-              deliveries: {
-                none: { status: { in: ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'] } },
-              },
+              // Sem filtro por entregas em andamento: o motoboy junta varias
+              // entregas na mesma saida. O teto, quando existe, e aplicado por
+              // contagem depois da consulta.
               AND: [
                 {
                   serviceTypes: {
@@ -666,6 +697,17 @@ describe('DispatchService', () => {
           offerId: 'offer-1',
         },
       );
+      expect(push.sendToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({
+          kind: 'offer-update',
+          data: expect.objectContaining({
+            type: 'offer-resolved',
+            offerId: 'offer-1',
+            reason: 'expired',
+          }),
+        }),
+      );
       expect(prisma.delivery.findUnique).toHaveBeenCalledWith({ where: { id: 'delivery-1' } });
     });
   });
@@ -794,6 +836,13 @@ describe('DispatchService', () => {
         },
       });
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(push.sendToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({
+          kind: 'offer-update',
+          data: expect.objectContaining({ offerId: 'offer-1', reason: 'accepted' }),
+        }),
+      );
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(expect.stringContaining('#9'));
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
     });
@@ -930,6 +979,13 @@ describe('DispatchService', () => {
         data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
       });
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(push.sendToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({
+          kind: 'offer-update',
+          data: expect.objectContaining({ offerId: 'offer-1', reason: 'cancelled' }),
+        }),
+      );
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
         'driver-1',
         'delivery:offer-cancelled',
@@ -954,13 +1010,45 @@ describe('DispatchService', () => {
       expect(prisma.delivery.findMany).not.toHaveBeenCalled();
     });
 
-    it('nao mostra a vitrine para quem ja esta com uma corrida', async () => {
-      // A mesma regra do despacho automatico: nao empilhar entrega em quem ja
-      // esta na rua.
+    it('continua mostrando a vitrine para quem ja esta com uma corrida', async () => {
+      // Sem teto configurado o motoboy junta varias entregas na mesma saida.
+      // Antes a vitrine sumia na primeira corrida, o que o obrigava a voltar a
+      // loja entre uma entrega e outra.
       prisma.driver.findUnique.mockResolvedValue(motoboy);
-      prisma.delivery.findFirst.mockResolvedValue({ id: 'delivery-em-andamento' });
+      prisma.delivery.count.mockResolvedValue(3);
+      prisma.delivery.findMany.mockResolvedValue([]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
 
       await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).toHaveBeenCalled();
+    });
+
+    it('esconde a vitrine ao atingir o teto configurado', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        maxConcurrentDeliveriesPerDriver: 2,
+        maxDeliveriesPerBatch: null,
+      });
+      prisma.driver.findUnique.mockResolvedValue(motoboy);
+      prisma.delivery.count.mockResolvedValue(2);
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+    });
+
+    it('ainda mostra a vitrine com o teto configurado e uma vaga sobrando', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        maxConcurrentDeliveriesPerDriver: 2,
+        maxDeliveriesPerBatch: null,
+      });
+      prisma.driver.findUnique.mockResolvedValue(motoboy);
+      prisma.delivery.count.mockResolvedValue(1);
+      prisma.delivery.findMany.mockResolvedValue([]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).toHaveBeenCalled();
     });
 
     it('filtra por regiao, modalidade e ausencia de oferta pendente', async () => {

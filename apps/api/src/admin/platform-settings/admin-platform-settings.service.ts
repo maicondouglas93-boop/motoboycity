@@ -32,6 +32,9 @@ export class AdminPlatformSettingsService {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        maxConcurrentDeliveriesPerDriver: null,
+        maxDeliveriesPerBatch: null,
+        deliveryProximityRadiusMeters: null,
         updatedBy: null,
         updatedAt: null,
       };
@@ -74,8 +77,20 @@ export class AdminPlatformSettingsService {
         ...(payload.slaAlertMinutesToCollect !== undefined && {
           slaAlertMinutesToCollect: payload.slaAlertMinutesToCollect,
         }),
+        ...(payload.maxConcurrentDeliveriesPerDriver !== undefined && {
+          maxConcurrentDeliveriesPerDriver: payload.maxConcurrentDeliveriesPerDriver,
+        maxDeliveriesPerBatch: payload.maxDeliveriesPerBatch,
+        deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
+        }),
+        ...(payload.maxDeliveriesPerBatch !== undefined && {
+          maxDeliveriesPerBatch: payload.maxDeliveriesPerBatch,
+        }),
+        ...(payload.deliveryProximityRadiusMeters !== undefined && {
+          deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
+        }),
         ...(payload.slaAlertMinutesToDeliver !== undefined && {
           slaAlertMinutesToDeliver: payload.slaAlertMinutesToDeliver,
+        maxConcurrentDeliveriesPerDriver: payload.maxConcurrentDeliveriesPerDriver,
         }),
         updatedByUserId,
       },
@@ -111,6 +126,9 @@ export class AdminPlatformSettingsService {
     slaAlertMinutesToAccept: number | null;
     slaAlertMinutesToCollect: number | null;
     slaAlertMinutesToDeliver: number | null;
+    maxConcurrentDeliveriesPerDriver: number | null;
+    maxDeliveriesPerBatch: number | null;
+    deliveryProximityRadiusMeters: number | null;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -128,6 +146,9 @@ export class AdminPlatformSettingsService {
       slaAlertMinutesToAccept: settings.slaAlertMinutesToAccept,
       slaAlertMinutesToCollect: settings.slaAlertMinutesToCollect,
       slaAlertMinutesToDeliver: settings.slaAlertMinutesToDeliver,
+      maxConcurrentDeliveriesPerDriver: settings.maxConcurrentDeliveriesPerDriver,
+      maxDeliveriesPerBatch: settings.maxDeliveriesPerBatch,
+      deliveryProximityRadiusMeters: settings.deliveryProximityRadiusMeters,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

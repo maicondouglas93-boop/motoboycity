@@ -64,6 +64,46 @@ export const updatePlatformSettingsSchema = z
     slaAlertMinutesToAccept: slaMinutesSchema.optional(),
     slaAlertMinutesToCollect: slaMinutesSchema.optional(),
     slaAlertMinutesToDeliver: slaMinutesSchema.optional(),
+    /**
+     * Teto de entregas simultaneas por motoboy.
+     *
+     * Omitir mantem o valor atual; o padrao do sistema e SEM teto, porque o
+     * motoboy junta varias entregas na mesma saida. Este campo existe para o
+     * caso oposto: alguem que aceita tudo e segura a fila.
+     *
+     * Piso de 1: zero deixaria a operacao inteira sem despacho, e um erro de
+     * digitacao nao pode ter esse poder.
+     */
+    maxConcurrentDeliveriesPerDriver: z
+      .number()
+      .int('O limite de entregas simultaneas deve ser um numero inteiro.')
+      .min(1, 'O limite de entregas simultaneas deve ser de pelo menos 1.')
+      .max(50, 'O limite de entregas simultaneas deve ser de no maximo 50.')
+      .optional(),
+    /**
+     * Tamanho maximo do lote que a empresa pode lancar de uma vez.
+     *
+     * 1 desliga o lote: a loja passa a lancar um pedido por vez. O teto de 50 e
+     * o do proprio formato, e nao um numero escolhido aqui.
+     */
+    maxDeliveriesPerBatch: z
+      .number()
+      .int('O tamanho do lote deve ser um numero inteiro.')
+      .min(1, 'O tamanho do lote deve ser de pelo menos 1.')
+      .max(50, 'O tamanho do lote deve ser de no maximo 50.')
+      .optional(),
+    /**
+     * Raio para marcar entrega com destino informado.
+     *
+     * Piso de 50 m: abaixo disso o GPS urbano recusa entrega feita, porque o
+     * erro do proprio aparelho ja passa do raio.
+     */
+    deliveryProximityRadiusMeters: z
+      .number()
+      .int('O raio de entrega deve ser um numero inteiro de metros.')
+      .min(50, 'O raio de entrega deve ser de pelo menos 50 metros.')
+      .max(5000, 'O raio de entrega deve ser de no maximo 5000 metros.')
+      .optional(),
   })
   .refine(
     (data) =>
@@ -76,7 +116,10 @@ export const updatePlatformSettingsSchema = z
       data.locationSilenceAlertMinutes !== undefined ||
       data.slaAlertMinutesToAccept !== undefined ||
       data.slaAlertMinutesToCollect !== undefined ||
-      data.slaAlertMinutesToDeliver !== undefined,
+      data.slaAlertMinutesToDeliver !== undefined ||
+      data.maxConcurrentDeliveriesPerDriver !== undefined ||
+      data.maxDeliveriesPerBatch !== undefined ||
+      data.deliveryProximityRadiusMeters !== undefined,
     { message: 'Informe ao menos um campo para atualizar.' },
   );
 
