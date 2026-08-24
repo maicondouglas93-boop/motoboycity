@@ -132,3 +132,19 @@ export function endOfDayInSaoPaulo(dateOnly: string): Date {
     ).getTime() - 1,
   );
 }
+
+/**
+ * Le o dia civil de uma coluna `@db.Date`.
+ *
+ * O Postgres guarda `date` sem hora e sem fuso; o Prisma devolve isso como um
+ * `Date` em meia-noite UTC. Serializar com `toISOString()` inteiro inventa uma
+ * hora que nao existe, e quem formatar aquilo no fuso da operacao vai ver o
+ * DIA ANTERIOR — foi o que aconteceu com a data de emissao das faturas, que
+ * aparecia 23/08 numa fatura chamada FAT-20260824.
+ *
+ * Por isso NAO usa `dateInSaoPaulo`: o valor ja e um dia civil, e converter de
+ * fuso um dado que nao tem fuso e justamente o erro.
+ */
+export function civilDateFromDbDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}

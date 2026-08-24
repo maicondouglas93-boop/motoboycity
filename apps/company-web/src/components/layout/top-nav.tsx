@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BarChart3, ClipboardList, FileText, Receipt } from 'lucide-react';
+import { BarChart3, ClipboardList, FileText, Wallet } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +23,7 @@ const NAV_ITEMS = [
   { href: '/pedidos', label: 'Pedidos', icon: ClipboardList },
   { href: '/indicadores', label: 'Indicadores', icon: BarChart3 },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
-  { href: '/faturas', label: 'Faturas', icon: Receipt },
+  { href: '/financeiro', label: 'Financeiro', icon: Wallet },
 ];
 
 export function TopNav() {

@@ -48,7 +48,12 @@ import {
   type WalletTransactionItem,
   type WalletTransactionType,
 } from './driver-wallet.service';
-import { dateInSaoPaulo, endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import {
+  civilDateFromDbDate,
+  dateInSaoPaulo,
+  endOfDayInSaoPaulo,
+  startOfDayInSaoPaulo,
+} from '../common/sao-paulo-time';
 import { FinancialClock } from './financial-clock.service';
 
 export interface AdminFinancialOverview {
@@ -207,10 +212,6 @@ function civilDateEpoch(date: string): number {
 
 function daysBetweenCivilDates(later: string, earlier: string): number {
   return Math.max(0, Math.floor((civilDateEpoch(later) - civilDateEpoch(earlier)) / 86_400_000));
-}
-
-function databaseDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 function overdueBucket(days: number): ReceivablesAgingBucketKey {
@@ -414,7 +415,7 @@ export class AdminFinancialService {
     for (const group of invoiceGroups) {
       const count = group._count._all;
       const value = numberOrZero(group._sum.totalValue);
-      const dueDate = databaseDate(group.dueDate);
+      const dueDate = civilDateFromDbDate(group.dueDate);
       const daysOverdue = daysBetweenCivilDates(asOf, dueDate);
       const bucketKey = dueDate >= asOf ? 'NOT_DUE' : overdueBucket(daysOverdue);
       const company = getCompany(group.companyId);
@@ -982,10 +983,10 @@ export class AdminFinancialService {
           ? {
               id: delivery.invoice.id,
               number: delivery.invoice.number,
-              issueDate: databaseDate(delivery.invoice.issueDate),
-              dueDate: databaseDate(delivery.invoice.dueDate),
+              issueDate: civilDateFromDbDate(delivery.invoice.issueDate),
+              dueDate: civilDateFromDbDate(delivery.invoice.dueDate),
               paymentDate: delivery.invoice.paymentDate
-                ? databaseDate(delivery.invoice.paymentDate)
+                ? civilDateFromDbDate(delivery.invoice.paymentDate)
                 : null,
               status: delivery.invoice.status,
             }
@@ -1243,8 +1244,8 @@ export class AdminFinancialService {
       number: invoice.number,
       company: { id: invoice.company.id, name: invoice.company.tradeName },
       status: invoice.status,
-      dueDate: databaseDate(invoice.dueDate),
-      paymentDate: invoice.paymentDate ? databaseDate(invoice.paymentDate) : null,
+      dueDate: civilDateFromDbDate(invoice.dueDate),
+      paymentDate: invoice.paymentDate ? civilDateFromDbDate(invoice.paymentDate) : null,
       totalValue: numberOrZero(invoice.totalValue),
     });
 

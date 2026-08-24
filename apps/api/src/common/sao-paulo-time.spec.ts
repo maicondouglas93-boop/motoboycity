@@ -1,4 +1,5 @@
 import {
+  civilDateFromDbDate,
   dateInSaoPaulo,
   endOfDayInSaoPaulo,
   saoPauloDateParts,
@@ -57,5 +58,31 @@ describe('fuso operacional', () => {
 
   it('rejeita data mal formada em vez de devolver Invalid Date', () => {
     expect(() => startOfDayInSaoPaulo('22/08/2026')).toThrow(RangeError);
+  });
+});
+
+describe('civilDateFromDbDate', () => {
+  /**
+   * A regressao que este bloco tranca: a fatura `FAT-20260824` aparecia como
+   * 23/08/2026 na tela da loja. A coluna e `@db.Date` — dia civil, sem hora —
+   * e serializa-la como instante fazia a conversao de fuso voltar um dia.
+   */
+  it('devolve o dia civil de uma coluna @db.Date', () => {
+    const doBanco = new Date('2026-08-24T00:00:00.000Z');
+
+    expect(civilDateFromDbDate(doBanco)).toBe('2026-08-24');
+  });
+
+  it('NAO converte de fuso: o dia guardado e o dia devolvido', () => {
+    // Em Sao Paulo (UTC-3), meia-noite UTC do dia 24 e 21h do dia 23. Aplicar
+    // fuso a um dado que nao tem fuso e exatamente o erro que causou o bug.
+    const doBanco = new Date('2026-08-24T00:00:00.000Z');
+
+    expect(civilDateFromDbDate(doBanco)).not.toBe(dateInSaoPaulo(doBanco));
+    expect(dateInSaoPaulo(doBanco)).toBe('2026-08-23');
+  });
+
+  it('atravessa a virada do ano sem escorregar', () => {
+    expect(civilDateFromDbDate(new Date('2027-01-01T00:00:00.000Z'))).toBe('2027-01-01');
   });
 });

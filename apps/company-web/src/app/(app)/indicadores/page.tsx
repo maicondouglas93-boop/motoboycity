@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatCard } from '@/components/stat-card';
-import { deliveriesApi } from '@/lib/api-client';
+import { companyFinancialApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -51,6 +51,16 @@ function formatDuration(minutes: number | null): string {
   return `${Math.floor(rounded / 60)}h ${String(rounded % 60).padStart(2, '0')}min`;
 }
 
+/** Hoje em `AAAA-MM-DD`, no fuso da operacao. */
+function hojeEmSaoPaulo(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
+function trintaDiasAtras(): string {
+  const data = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
+  return data.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
 const STAGES = [
   { key: 'aceite', label: 'Até um motoboy aceitar' },
   { key: 'coleta', label: 'Do aceite até a coleta' },
@@ -64,9 +74,31 @@ export default function IndicatorsPage() {
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
-  const deliveriesQuery = useQuery({
-    queryKey: ['company', 'indicators', appliedPeriod],
-    queryFn: () => deliveriesApi.list(token as string, appliedPeriod),
+  /**
+   * O resumo exige intervalo; a tela nao.
+   *
+   * Sem filtro, o padrao sao os ultimos 30 dias. Aceitar "sem periodo" no
+   * servidor significaria varrer todo o historico da loja, que e exatamente o
+   * problema que este endpoint veio resolver.
+   */
+  const periodoDoResumo = useMemo(
+    () => ({
+      from: appliedPeriod.from ?? trintaDiasAtras(),
+      to: appliedPeriod.to ?? hojeEmSaoPaulo(),
+    }),
+    [appliedPeriod],
+  );
+  /**
+   * O resumo vem AGREGADO DO SERVIDOR.
+   *
+   * Antes esta tela chamava `GET /deliveries` — que nao tem paginacao nem
+   * limite — e somava tudo no navegador. Com 22 entregas funcionava; com um
+   * mes de operacao real seriam milhares de linhas atravessando a rede para
+   * calcular uma media.
+   */
+  const summaryQuery = useQuery({
+    queryKey: ['company', 'indicators', 'summary', periodoDoResumo],
+    queryFn: () => companyFinancialApi.summary(token as string, periodoDoResumo),
     enabled: Boolean(token),
   });
   const stageTimesQuery = useQuery({
@@ -76,44 +108,45 @@ export default function IndicatorsPage() {
   });
 
   const indicators = useMemo(() => {
-    const deliveries = deliveriesQuery.data ?? [];
-    const completed = deliveries.filter((delivery) => delivery.status === 'COMPLETED');
-    const cancelled = deliveries.filter((delivery) => delivery.status === 'CANCELLED');
-    const totalValue = deliveries.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0);
-    const completedValue = completed.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0);
-    const byStatus = Object.fromEntries(
+    const resumo = summaryQuery.data;
+    const vazio = Object.fromEntries(
       Object.keys(statusCountLabel).map((status) => [status, 0]),
     ) as Record<DeliveryStatus, number>;
-    const serviceCounts = new Map<string, number>();
-    const byDate = new Map<string, number>();
 
-    for (const delivery of deliveries) {
-      byStatus[delivery.status] += 1;
-      serviceCounts.set(
-        delivery.serviceTypeName,
-        (serviceCounts.get(delivery.serviceTypeName) ?? 0) + 1,
-      );
-      const date = delivery.createdAt.slice(0, 10);
-      byDate.set(date, (byDate.get(date) ?? 0) + 1);
+    if (!resumo) {
+      return {
+        total: 0,
+        completed: 0,
+        cancelled: 0,
+        totalValue: 0,
+        completedValue: 0,
+        averageTicket: 0,
+        cancellationRate: 0,
+        requiresReturn: 0,
+        byStatus: vazio,
+        mostUsedService: 'Sem pedidos',
+        daily: [] as Array<[string, number]>,
+      };
     }
 
-    const mostUsedService = [...serviceCounts.entries()].sort(
-      (left, right) => right[1] - left[1],
-    )[0];
-    const daily = [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right));
     return {
-      total: deliveries.length,
-      completed: completed.length,
-      cancelled: cancelled.length,
-      totalValue,
-      completedValue,
-      averageTicket: deliveries.length ? totalValue / deliveries.length : 0,
-      cancellationRate: deliveries.length ? (cancelled.length / deliveries.length) * 100 : 0,
-      byStatus,
-      mostUsedService: mostUsedService?.[0] ?? 'Sem pedidos',
-      daily,
+      total: resumo.current.count,
+      completed: resumo.current.completed,
+      cancelled: resumo.current.cancelled,
+      totalValue: resumo.current.value,
+      completedValue: resumo.current.completedValue,
+      averageTicket: resumo.current.averageTicket,
+      cancellationRate: resumo.current.count
+        ? (resumo.current.cancelled / resumo.current.count) * 100
+        : 0,
+      requiresReturn: resumo.requiresReturnCount,
+      // O servidor devolve so os status que ocorreram; a tela mostra todos,
+      // entao os ausentes valem zero.
+      byStatus: { ...vazio, ...resumo.byStatus },
+      mostUsedService: resumo.topServiceType?.name ?? 'Sem pedidos',
+      daily: resumo.daily.map((dia) => [dia.date, dia.count] as [string, number]),
     };
-  }, [deliveriesQuery.data]);
+  }, [summaryQuery.data]);
 
   if (!token) {
     return <p className="text-sm text-muted-foreground">Faça login para ver os indicadores.</p>;
@@ -173,16 +206,16 @@ export default function IndicatorsPage() {
         </CardContent>
       </Card>
 
-      {deliveriesQuery.isLoading && (
+      {summaryQuery.isLoading && (
         <p className="text-sm text-muted-foreground">Calculando indicadores...</p>
       )}
-      {deliveriesQuery.isError && (
+      {summaryQuery.isError && (
         <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertCircle className="size-4" /> Não foi possível carregar os indicadores.
         </div>
       )}
 
-      {!deliveriesQuery.isLoading && !deliveriesQuery.isError && (
+      {!summaryQuery.isLoading && !summaryQuery.isError && (
         <>
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
             <StatCard label="Pedidos" value={String(indicators.total)} />
@@ -200,9 +233,7 @@ export default function IndicatorsPage() {
             <StatCard label="Modalidade mais usada" value={indicators.mostUsedService} />
             <StatCard
               label="Pedidos com retorno"
-              value={String(
-                (deliveriesQuery.data ?? []).filter((delivery) => delivery.requiresReturn).length,
-              )}
+              value={String(indicators.requiresReturn)}
             />
           </section>
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">

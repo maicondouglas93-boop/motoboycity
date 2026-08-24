@@ -12,6 +12,7 @@ export * from './admin-financial';
 export * from './admin-reports';
 export * from './admin-operations';
 export * from './admin-virtual-secretary';
+export * from './company-financial';
 export * from './invoices';
 export * from './deliveries';
 export * from './company-address';

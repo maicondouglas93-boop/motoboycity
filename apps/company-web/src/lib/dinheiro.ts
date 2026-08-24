@@ -1,18 +1,29 @@
 /** Fuso da operação. Resolvido pelo Intl, nunca somando -3 na mão. */
 const FUSO = 'America/Sao_Paulo';
 
+const MOEDA = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 2,
+});
+
 /**
- * NÃO existe formatador de moeda aqui, de propósito.
+ * `R$ 1.661,34`.
  *
- * Quem formata dinheiro no painel é o `useMoney()` de `lib/money.tsx`, e ele
- * precisa ser o único: é ele que aplica a máscara `R$ ••••` quando o dono
- * esconde os valores para mostrar a tela a outra pessoa. Um segundo formatador
- * fura essa máscara em silêncio — o valor aparece justamente onde ele achava
- * que tinha escondido.
+ * Aqui EXISTE formatador de moeda, ao contrário do painel do admin.
  *
- * O que mora aqui é o resto: soma sem erro de arredondamento, datas no fuso da
- * operação, e a chave de agrupamento por dia.
+ * Lá ele é proibido porque o `useMoney()` aplica a máscara `R$ ••••` quando o
+ * dono esconde os valores para mostrar a tela a terceiros, e um segundo
+ * formatador furaria essa máscara em silêncio. A loja olha o próprio dinheiro
+ * na própria tela: o problema não existe deste lado do balcão.
+ *
+ * Aceita `null` porque a API devolve nulo em campo sem valor ainda — entrega
+ * sem destino conhecido, por exemplo.
  */
+export function formatarDinheiro(valor: number | null | undefined): string {
+  if (valor === null || valor === undefined || Number.isNaN(valor)) return '—';
+  return MOEDA.format(valor);
+}
 
 /**
  * Soma valores monetários sem erro de ponto flutuante.

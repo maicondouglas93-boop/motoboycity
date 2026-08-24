@@ -19,7 +19,11 @@ import {
   invoiceClosingCutoff,
   latestInvoiceClosingDateInSaoPaulo,
 } from './finance-release.utils';
-import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import {
+  civilDateFromDbDate,
+  endOfDayInSaoPaulo,
+  startOfDayInSaoPaulo,
+} from '../common/sao-paulo-time';
 
 export interface InvoiceListItem {
   id: string;
@@ -432,9 +436,9 @@ export class InvoiceService {
       number: invoice.number,
       companyId: invoice.companyId,
       companyName: invoice.company.tradeName,
-      issueDate: invoice.issueDate.toISOString(),
-      dueDate: invoice.dueDate.toISOString(),
-      paymentDate: invoice.paymentDate?.toISOString() ?? null,
+      issueDate: civilDateFromDbDate(invoice.issueDate),
+      dueDate: civilDateFromDbDate(invoice.dueDate),
+      paymentDate: invoice.paymentDate ? civilDateFromDbDate(invoice.paymentDate) : null,
       paymentMethod: invoice.paymentMethod,
       status: invoice.status,
       totalValue: Number(invoice.totalValue),

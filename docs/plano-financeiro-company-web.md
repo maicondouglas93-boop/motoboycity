@@ -177,18 +177,18 @@ recebendo comprovante por WhatsApp, o item não existe.
 
 ## 7. Ordem de execução
 
-| # | Etapa | Depende de |
+| # | Etapa | Situação |
 | --- | --- | --- |
-| 1 | Copiar `MetricCard`, tokens de cor e `FinanceTabs` | — |
-| 2 | `GET /company/financial/position` + testes | — |
-| 3 | Aba Resumo (blocos A e B) | 1, 2 |
-| 4 | Aba Faturas com destaque de vencida | 1 |
-| 5 | Redirecionar `/faturas` | 4 |
-| 6 | Aba Pedidos sem fatura | 2 |
-| 7 | `GET /company/financial/summary` + testes | — |
-| 8 | Bloco C, e trocar a agregação de `/indicadores` | 7 |
-| 9 | Exportação CSV | — |
-| 10 | Aviso de pagamento | decisão do dono |
+| 1 | Copiar `MetricCard`, tokens de cor e `FinanceTabs` | feito |
+| 2 | `GET /company/financial/position` + testes | feito |
+| 3 | Aba Resumo (blocos A e B) | feito |
+| 4 | Aba Faturas com destaque de vencida | feito |
+| 5 | Redirecionar `/faturas` | feito |
+| 6 | Aba Pedidos sem fatura | feito |
+| 7 | `GET /company/financial/summary` + testes | feito |
+| 8 | Bloco C, e trocar a agregação de `/indicadores` | feito |
+| 9 | Exportação CSV | feito, com um desvio (abaixo) |
+| 10 | Aviso de pagamento | **não feito — decisão do dono** |
 
 As etapas 1 a 6 já entregam a maior parte do valor. A 8 é a que evita um
 problema de desempenho que ainda não apareceu, mas vai aparecer.
@@ -224,9 +224,70 @@ As mesmas do admin, mais duas específicas deste painel.
 
 ## 9. Verificação
 
-- [ ] `pnpm -r typecheck` e `pnpm -r lint` limpos
-- [ ] Testes da API verdes, incluindo o de isolamento entre empresas
-- [ ] Empresa sem nenhuma fatura não vê `NaN` nem tela quebrada
-- [ ] Link antigo `/faturas` continua abrindo
-- [ ] Testado contra a API rodando, não só com mock
-- [ ] `/indicadores` deixou de baixar a lista inteira de entregas
+- [x] `pnpm -r typecheck` e `pnpm -r lint` limpos
+- [x] Testes da API verdes, incluindo o de isolamento entre empresas
+      (`company-financial.e2e-spec.ts`: a loja A vê zero enquanto a fatura de
+      R$ 250,00 da loja B existe)
+- [x] Empresa sem nenhuma fatura não vê `NaN` nem tela quebrada
+- [x] Link antigo `/faturas` continua abrindo
+- [x] Testado contra a API rodando, não só com mock (16 e2e contra o banco)
+- [x] `/indicadores` deixou de baixar a lista inteira de entregas
+- [x] Conferido na tela, com a loja logada (números batidos contra o banco:
+      22 pedidos, R$ 113,50, ticket R$ 5,16, 1 fatura a vencer)
+
+### Desvios do plano, e por quê
+
+**Etapa 6 precisou de endpoint próprio.** O plano dizia que a aba de pedidos
+sem fatura dependia só da etapa 2, mas a `position` devolve o total, não as
+linhas. Foi criado `GET /company/financial/unbilled`, com a **mesma cláusula**
+do cartão do resumo — se as duas telas divergissem, a loja não saberia em qual
+acreditar.
+
+**Etapa 9 exporta só o período, não a fatura.** O plano previa também
+`GET /company/invoices/:id/export`. O extrato do período é o que a
+contabilidade pede e é o único que não cabe no navegador; a fatura já tem a
+tela de detalhe com os pedidos listados. Fica anotado como pendência barata,
+não como parte entregue.
+
+**A tela de indicadores ganhou um período padrão.** Ela aceitava "sem filtro",
+o que no servidor significaria varrer todo o histórico da loja — justamente o
+problema que a etapa 7 resolve. Sem filtro, agora são os últimos 30 dias.
+
+### O que a etapa 10 espera
+
+`POST /company/invoices/:id/payment-notice` continua não existindo. A regra
+"a loja não dá baixa na própria dívida" está mantida: nada na tela nova permite
+a empresa mudar o status de uma fatura. Se o dono decidir que quer o aviso,
+o desenho está na seção 6.4 e não conflita com nada do que foi construído.
+
+### Dois defeitos de data achados na conferência
+
+Nenhum dos dois foi introduzido aqui; ambos só ficaram visíveis quando a tela
+passou a mostrar datas lado a lado com o número da fatura.
+
+**1. Todo dia civil aparecia um dia atrás.** `issueDate`, `dueDate` e
+`paymentDate` são colunas `@db.Date` — dia, sem hora e sem fuso. A API as
+serializava com `toISOString()` inteiro, inventando meia-noite UTC; formatado
+no fuso da operação, isso volta um dia. A fatura `FAT-20260824` aparecia como
+23/08/2026.
+
+Corrigido em duas camadas, porque as duas estavam erradas:
+`civilDateFromDbDate()` em `sao-paulo-time.ts` (a cópia local que existia no
+`admin-financial.service.ts` virou essa, compartilhada), e `formatarData()` nos
+dois painéis, que agora reconhece `AAAA-MM-DD` e não converte fuso de um dado
+que não tem fuso.
+
+**2. "Próximo fechamento" apontava para um corte que já tinha passado.** O
+corte roda às 00:05 de segunda. A primeira versão devolvia "hoje" quando hoje
+era segunda — então às 10h de segunda a tela dizia "fecha hoje" logo abaixo da
+fatura que fechou de madrugada. Agora `nextInvoiceClosingDateInSaoPaulo()`
+deriva do último corte real, e não do dia da semana.
+
+Os dois têm teste travando a regressão.
+
+### Pendência que é decisão do dono
+
+`invoice.service.ts` faz `const dueDate = issueDate`: a fatura vence no mesmo
+dia em que é emitida, sem prazo e sem configuração. Consequência na tela nova:
+o cartão "Vencido" acende em vermelho no dia seguinte ao fechamento. Se a
+intenção é dar prazo à loja, o prazo precisa existir — hoje ele não existe.

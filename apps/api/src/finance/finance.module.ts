@@ -5,6 +5,8 @@ import { AdminFinancialService } from './admin-financial.service';
 import { DriverWalletController } from './driver-wallet.controller';
 import { DriverWalletService } from './driver-wallet.service';
 import { FinanceLedgerService } from './finance-ledger.service';
+import { CompanyFinancialController } from './company-financial.controller';
+import { CompanyFinancialService } from './company-financial.service';
 import { AdminInvoicesController, CompanyInvoicesController } from './invoice.controller';
 import { InvoiceService } from './invoice.service';
 import { FinancialClock } from './financial-clock.service';
@@ -20,6 +22,7 @@ import { AdminWithdrawalController, DriverWithdrawalController } from './withdra
     AdminFinancialController,
     AdminInvoicesController,
     CompanyInvoicesController,
+    CompanyFinancialController,
     DriverWithdrawalController,
     AdminWithdrawalController,
   ],
@@ -28,6 +31,7 @@ import { AdminWithdrawalController, DriverWithdrawalController } from './withdra
     DriverWalletService,
     FinanceLedgerService,
     InvoiceService,
+    CompanyFinancialService,
     FinancialClock,
     FinancialPayoutService,
     FinancialPayoutProcessor,

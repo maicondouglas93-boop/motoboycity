@@ -99,6 +99,13 @@ export interface AdminDriverWalletDetail extends AdminDriverWalletItem {
 export type InvoiceStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'CANCELLED';
 export type PaymentMethod = 'BILLED' | 'ONLINE';
 
+/**
+ * Fatura na lista.
+ *
+ * `issueDate`, `dueDate` e `paymentDate` sao DIAS CIVIS (`AAAA-MM-DD`), nao
+ * instantes: no banco sao colunas `date`, sem hora e sem fuso. Serializar
+ * com hora fazia quem formatasse no fuso da operacao ver o dia anterior.
+ */
 export interface InvoiceListItem {
   id: string;
   number: string;
@@ -579,6 +586,84 @@ export interface FinancialAuditReport {
     withdrawalPaidValue: number;
   };
   events: FinancialAuditEvent[];
+}
+
+/**
+ * Posição financeira da EMPRESA — o outro lado do `CashPositionItem` do admin.
+ *
+ * Responde "quanto eu devo hoje", que é a pergunta que a loja não conseguia
+ * fazer: a lista de faturas mostrava uma a uma e ninguém somava.
+ */
+export interface CompanyFinancialPosition {
+  /** Faturas emitidas com vencimento ainda no futuro. */
+  notDue: { count: number; value: number };
+  /** Faturas que passaram do vencimento. `maxOverdueDays` é a mais antiga. */
+  overdue: { count: number; value: number; maxOverdueDays: number };
+  /**
+   * Pedidos concluídos que ainda não entraram em fatura.
+   *
+   * É o número que a loja não tinha: ela só descobria o valor na segunda,
+   * quando o fechamento rodava.
+   */
+  unbilled: { count: number; value: number };
+  totalOpen: number;
+  /** Próxima segunda-feira, quando o fechamento semanal roda. */
+  nextClosingDate: string;
+}
+
+/**
+ * Quanto a loja gastou num periodo, e como isso se compara com o anterior.
+ *
+ * Tudo agregado no servidor. A tela de indicadores somava no navegador, o que
+ * exigia baixar a lista inteira de entregas so para calcular uma media.
+ */
+export interface CompanyPeriodTotals {
+  count: number;
+  completed: number;
+  cancelled: number;
+  value: number;
+  /** So o que foi concluido. E o que a loja de fato vai pagar. */
+  completedValue: number;
+  averageTicket: number;
+}
+
+export interface CompanyFinancialSummary {
+  from: string;
+  to: string;
+  current: CompanyPeriodTotals;
+  /** Mesmo numero de dias, imediatamente antes. Nulo se nao houve movimento. */
+  previous: CompanyPeriodTotals | null;
+  /** Modalidade mais usada no periodo, com quantos pedidos. */
+  topServiceType: { name: string; count: number } | null;
+  /** Serie diaria, ja no fuso da operacao. */
+  daily: Array<{ date: string; count: number; value: number }>;
+  /** Quantos pedidos em cada status. Status ausente vale zero. */
+  byStatus: Record<string, number>;
+  /** Pedidos que exigem retorno a loja. */
+  requiresReturnCount: number;
+}
+
+/**
+ * Um pedido concluido que ainda nao entrou em fatura.
+ *
+ * E a linha por tras do cartao "ainda nao faturado": o total sozinho diz
+ * quanto, e a loja tambem precisa saber do que.
+ */
+export interface CompanyUnbilledDelivery {
+  id: string;
+  displayNumber: number;
+  completedAt: string;
+  dropoffAddress: string;
+  serviceTypeName: string | null;
+  totalValue: number;
+}
+
+export interface CompanyUnbilledDeliveries {
+  items: CompanyUnbilledDelivery[];
+  count: number;
+  total: number;
+  /** Proxima segunda: a data em que estes pedidos viram fatura. */
+  closingDate: string;
 }
 
 export interface InvoiceDetail extends InvoiceListItem {

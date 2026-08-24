@@ -53,3 +53,18 @@ export function invoiceClosingCutoff(issueDate: string): Date {
   }
   return saoPauloLocalToUtc(year, month, day, INVOICE_CLOSING_HOUR, INVOICE_CLOSING_MINUTE);
 }
+
+/**
+ * A proxima segunda-feira em que o corte das 00:05 AINDA VAI acontecer.
+ *
+ * Derivada do ultimo corte, e nao do dia da semana: numa segunda as 10h o
+ * corte ja rodou, entao "o proximo" e a segunda seguinte. Deduzir pelo dia da
+ * semana faria a tela da loja dizer "fecha hoje" logo abaixo da fatura de hoje
+ * — que era exatamente o que estava acontecendo.
+ */
+export function nextInvoiceClosingDateInSaoPaulo(date: Date): string {
+  const ultimoCorte = latestInvoiceClosingDateInSaoPaulo(date);
+  const [year, month, day] = ultimoCorte.split('-').map(Number);
+  const proximo = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 7));
+  return `${String(proximo.getUTCFullYear()).padStart(4, '0')}-${String(proximo.getUTCMonth() + 1).padStart(2, '0')}-${String(proximo.getUTCDate()).padStart(2, '0')}`;
+}
