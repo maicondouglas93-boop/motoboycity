@@ -122,8 +122,10 @@ persistir a nova referência, tenta remover a imagem anterior. Se a gravação n
 banco falhar, a imagem nova deve ser removida do provedor para não deixar
 arquivo órfão.
 
-O fluxo atual de interface está disponível no perfil do app do entregador.
-Foto de empresa, veículo e documentos continuam sendo recortes separados.
+O fluxo de interface está disponível no perfil do app do entregador e no
+perfil do usuário autenticado do Company Web. A imagem continua pertencendo ao
+`User`; logotipo compartilhado da empresa, veículo e documentos são recortes
+separados.
 
 ## Integração com serviço de entrega
 

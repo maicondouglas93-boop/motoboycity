@@ -2,16 +2,20 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ClipboardList, FileText, Wallet } from 'lucide-react';
+import { ClipboardList, FileText, LogOut, UserRound, Wallet } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Wordmark } from '@/components/brand/wordmark';
 import { CallDriverDialog } from '@/components/operations/call-driver-dialog';
+import { authUserQueryOptions } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
 
 /**
@@ -28,9 +32,20 @@ const NAV_ITEMS = [
 export function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const token = session.getToken();
+  const userQuery = useQuery(authUserQueryOptions(token));
+  const initials =
+    userQuery.data?.name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'E';
 
   function handleLogout() {
     session.clearToken();
+    queryClient.clear();
     router.replace('/login');
   }
 
@@ -87,14 +102,34 @@ export function TopNav() {
         <DropdownMenu>
           <DropdownMenuTrigger className="ml-auto flex shrink-0 items-center gap-2 rounded-full text-sm text-white/70 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none lg:ml-0">
             <Avatar className="size-9 shadow-[0_6px_18px_-8px_rgba(0,0,0,0.8)] ring-1 ring-white/25">
+              {userQuery.data?.avatarUrl && <AvatarImage src={userQuery.data.avatarUrl} alt="" />}
               <AvatarFallback className="bg-gradient-to-br from-white/18 to-white/7 text-xs font-bold text-white">
-                E
+                {initials}
               </AvatarFallback>
             </Avatar>
             <span className="sr-only">Abrir menu da conta</span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={handleLogout}>Sair</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuLabel className="min-w-0 px-2.5 py-2">
+              <span className="block truncate text-sm font-semibold text-foreground">
+                {userQuery.data?.name ?? 'Conta da empresa'}
+              </span>
+              {userQuery.data?.email && (
+                <span className="mt-0.5 block truncate font-normal text-muted-foreground">
+                  {userQuery.data.email}
+                </span>
+              )}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => router.push('/perfil')}>
+              <UserRound aria-hidden="true" />
+              Meu perfil
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={handleLogout} variant="destructive">
+              <LogOut aria-hidden="true" />
+              Sair
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

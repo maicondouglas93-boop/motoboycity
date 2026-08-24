@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/lib/api-client';
+import { authUserQueryKey } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
 
 type GateStatus = 'checking' | 'authenticated';
@@ -14,23 +16,36 @@ type GateStatus = 'checking' | 'authenticated';
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<GateStatus>('checking');
 
   useEffect(() => {
     const token = session.getToken();
     if (!token) {
+      queryClient.clear();
       router.replace('/login');
       return;
     }
 
+    let active = true;
     authApi
       .me(token)
-      .then(() => setStatus('authenticated'))
+      .then((user) => {
+        if (!active) return;
+        queryClient.setQueryData(authUserQueryKey, user);
+        setStatus('authenticated');
+      })
       .catch(() => {
+        if (!active) return;
         session.clearToken();
+        queryClient.clear();
         router.replace('/login');
       });
-  }, [router]);
+
+    return () => {
+      active = false;
+    };
+  }, [queryClient, router]);
 
   if (status === 'checking') {
     return (

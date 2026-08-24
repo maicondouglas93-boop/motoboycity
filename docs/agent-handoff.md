@@ -5143,3 +5143,61 @@ de foto continua sendo um recorte posterior e poderá reutilizar a mesma rota.
 Se a exclusão best effort de um avatar antigo falhar após o commit, o arquivo
 pode permanecer órfão no ImageKit; uma rotina assíncrona de reconciliação ainda
 é melhoria futura, sem reverter a foto nova já confirmada ao usuário.
+
+## Atualização — 2026-08-24: perfil do usuário da empresa no Company Web
+
+O backend e o app do entregador do recorte anterior foram salvos no commit
+`7da5a23` (`feat(profile): add ImageKit avatar uploads`). Em seguida, o Company
+Web recebeu a rota autenticada `/perfil`, que reutiliza `GET /auth/me` e
+`POST /profile/avatar`. A tela mostra nome e e-mail somente para leitura,
+iniciais quando não existe foto, imagem atual do ImageKit e escolha de JPEG,
+PNG ou WebP com limite local de 5 MB. O arquivo é enviado imediatamente como
+`FormData` no campo `file`; a validação estrutural e de dimensões continua sendo
+responsabilidade definitiva da API.
+
+O avatar do topo passou a mostrar a mesma consulta TanStack Query usada pela
+página, então a nova foto aparece no menu assim que a API confirma o upload.
+O menu da conta agora identifica o usuário e oferece **Meu perfil** e **Sair**.
+Estados de carregamento, erro, excesso de tentativas e sucesso são explícitos;
+o controle de arquivo informa formatos/limite para tecnologia assistiva e a
+imagem decorativa do gatilho não duplica seu nome acessível.
+
+Durante a revisão foi fechado um risco preexistente de troca de empresa no
+mesmo navegador. O `AuthGate` preenche o cache da identidade somente enquanto
+continua montado, e login, logout, token ausente ou autenticação inválida limpam
+todo o `QueryClient`. Assim pedidos, financeiro, relatórios e dados de uma
+empresa não sobrevivem no cache ao entrar com outra. Uma resposta de upload
+atrasada também só atualiza o avatar se o token que iniciou a operação ainda for
+o token da sessão.
+
+Esta é a foto do `User` autenticado da empresa, não um logotipo compartilhado
+entre todos os membros. Um logo corporativo continua exigindo um campo e um
+contrato próprios em `Company`.
+
+Arquivos funcionais:
+
+- `apps/company-web/src/app/(app)/perfil/page.tsx`;
+- `apps/company-web/src/lib/auth-user-query.ts`;
+- `apps/company-web/src/components/layout/top-nav.tsx`;
+- `apps/company-web/src/components/auth/auth-gate.tsx`;
+- `apps/company-web/src/app/login/page.tsx`;
+- `docs/business-rules.md`.
+
+Não houve nova rota de API, contrato compartilhado, Prisma, migration,
+dependência, `.env`, secret, preço, dispatch, GPS ou alteração de notificação.
+
+### Verificação
+
+| Comando / fluxo                                                                                   | Resultado                    |
+| ------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web run build` | aprovado; 18 páginas geradas |
+| revisão independente de sessão, upload e acessibilidade                                           | sem bloqueador remanescente  |
+
+Não foi realizado upload real para evitar criar mídia externa durante a
+validação automatizada. A inspeção visual também ficou pendente porque não
+havia navegador conectado nem servidor local ativo. O próximo passo concreto é
+homologar `/perfil` com uma sessão Company real: trocar a foto, recarregar,
+sair/entrar, alternar entre duas empresas e testar formato inválido e arquivo
+maior que 5 MB.

@@ -3,7 +3,7 @@
 import { useState, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { loginSchema } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { session } from '@/lib/session';
 
 export default function LoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -24,6 +25,8 @@ export default function LoginPage() {
   const mutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (result) => {
+      // Nunca deixa dados de outra empresa sobreviverem a uma troca de conta.
+      queryClient.clear();
       session.setToken(result.accessToken);
       if (result.company && result.company.status !== 'ACTIVE') {
         router.push('/pending-approval');
