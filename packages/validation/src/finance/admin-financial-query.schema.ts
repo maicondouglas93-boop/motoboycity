@@ -59,6 +59,45 @@ export const financialStatementQuerySchema = z
   });
 
 /**
+ * Extrato por ciclo financeiro: cada entrega traz competência, fatura,
+ * recebimento e repasse. O limite menor protege a consulta que precisa ler as
+ * relações detalhadas de cada pedido, e não apenas agregados.
+ */
+export const financialCycleQuerySchema = z
+  .object({
+    from: dateOnlySchema,
+    to: dateOnlySchema,
+  })
+  .refine((data) => data.from <= data.to, {
+    message: 'A data inicial não pode ser posterior à data final.',
+    path: ['from'],
+  })
+  .refine((data) => civilDayNumber(data.to) - civilDayNumber(data.from) <= 92, {
+    message: 'O extrato financeiro aceita no máximo 93 dias por consulta.',
+    path: ['to'],
+  });
+
+/**
+ * Previsao de caixa detalhada por vencimento e liberacao.
+ *
+ * O limite acompanha o extrato financeiro: a resposta devolve as faturas,
+ * repasses e saques que explicam os totais diarios, nao somente agregados.
+ */
+export const cashFlowForecastQuerySchema = z
+  .object({
+    from: dateOnlySchema,
+    to: dateOnlySchema,
+  })
+  .refine((data) => data.from <= data.to, {
+    message: 'A data inicial nao pode ser posterior a data final.',
+    path: ['from'],
+  })
+  .refine((data) => civilDayNumber(data.to) - civilDayNumber(data.from) <= 92, {
+    message: 'A previsao de caixa aceita no maximo 93 dias por consulta.',
+    path: ['to'],
+  });
+
+/**
  * Ajuste manual na carteira do motoboy.
  *
  * O motivo e OBRIGATORIO e tem piso de 10 caracteres. Ajuste sem explicacao e
@@ -78,7 +117,7 @@ export const adjustDriverWalletSchema = z.object({
     .max(100_000, 'Valor acima do limite permitido para ajuste manual.')
     // Dinheiro no banco e Decimal(10,2): mais de duas casas seria arredondado
     // em silencio e o extrato nao fecharia com o que o admin digitou.
-    .refine((valor) => Number.isInteger(Math.round(valor * 100)) && valor * 100 % 1 === 0, {
+    .refine((valor) => Number.isInteger(Math.round(valor * 100)) && (valor * 100) % 1 === 0, {
       message: 'Use no máximo duas casas decimais.',
     }),
   reason: z
@@ -97,4 +136,6 @@ export type AdminFinancialOverviewQuery = z.infer<typeof adminFinancialOverviewQ
 export type ListReceiptsQuery = z.infer<typeof listReceiptsQuerySchema>;
 export type AdjustDriverWalletPayload = z.infer<typeof adjustDriverWalletSchema>;
 export type FinancialStatementQuery = z.infer<typeof financialStatementQuerySchema>;
+export type FinancialCycleQuery = z.infer<typeof financialCycleQuerySchema>;
+export type CashFlowForecastQuery = z.infer<typeof cashFlowForecastQuerySchema>;
 export type ListAdminWalletsQuery = z.infer<typeof listAdminWalletsQuerySchema>;

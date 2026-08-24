@@ -333,6 +333,181 @@ export interface FinancialStatementReport {
   days: FinancialStatementDayItem[];
 }
 
+export type FinancialCycleIssue =
+  | 'UNPRICED'
+  | 'MISSING_DRIVER'
+  | 'MISSING_INVOICE'
+  | 'CANCELLED_INVOICE'
+  | 'PAID_WITHOUT_PAYMENT_DATE'
+  | 'UNEXPECTED_INVOICE_FOR_ONLINE'
+  | 'MISSING_REPASSE'
+  | 'REPASSE_AMOUNT_MISMATCH'
+  | 'DUPLICATE_REPASSE'
+  | 'CANCELLED_REPASSE';
+
+export interface FinancialCycleRepasseItem {
+  transactionId: string;
+  status: WalletTransactionStatus;
+  amount: number;
+  createdAt: string;
+  releaseAt: string | null;
+}
+
+export interface FinancialCycleDeliveryItem {
+  deliveryId: string;
+  displayNumber: number;
+  completedAt: string;
+  company: { id: string; name: string };
+  driver: { id: string; name: string } | null;
+  serviceType: { id: string; name: string };
+  paymentMethod: PaymentMethod;
+  totalValue: number | null;
+  driverValue: number | null;
+  platformValue: number | null;
+  invoice: {
+    id: string;
+    number: string;
+    issueDate: string;
+    dueDate: string;
+    paymentDate: string | null;
+    status: InvoiceStatus;
+  } | null;
+  repasses: FinancialCycleRepasseItem[];
+  issues: FinancialCycleIssue[];
+}
+
+export interface FinancialCycleAdjustmentItem {
+  transactionId: string;
+  type: 'CREDIT_ADJUSTMENT' | 'DEBIT_ADJUSTMENT' | 'CREDIT_REFUND';
+  status: WalletTransactionStatus;
+  direction: 'CREDIT' | 'DEBIT';
+  amount: number;
+  reason: string | null;
+  createdAt: string;
+  driver: { id: string; name: string };
+  createdBy: { id: string; name: string } | null;
+}
+
+/**
+ * Ciclo financeiro de entregas concluídas no período de competência.
+ *
+ * Fatura, pagamento e repasse refletem o estado atual dessas entregas, mesmo
+ * quando ocorreram depois do fim do período. Ajustes são um extrato separado
+ * pelo próprio `createdAt`, para não serem atribuídos artificialmente a um
+ * pedido ou competência.
+ */
+export interface FinancialCycleReport {
+  period: { from: string; to: string };
+  summary: {
+    completedCount: number;
+    pricedCount: number;
+    competencyValue: number;
+    invoicedCount: number;
+    invoicedDeliveryValue: number;
+    unbilledCount: number;
+    unbilledValue: number;
+    receivedCount: number;
+    receivedDeliveryValue: number;
+    openInvoiceCount: number;
+    openInvoiceValue: number;
+    overdueCount: number;
+    overdueValue: number;
+    onlineCount: number;
+    onlineValue: number;
+    repasseRegisteredCount: number;
+    repasseRegisteredValue: number;
+    itemWithIssueCount: number;
+    adjustmentCreditValue: number;
+    adjustmentDebitValue: number;
+  };
+  items: FinancialCycleDeliveryItem[];
+  adjustments: FinancialCycleAdjustmentItem[];
+}
+
+export interface CashFlowForecastInvoiceItem {
+  invoiceId: string;
+  number: string;
+  company: { id: string; name: string };
+  status: InvoiceStatus;
+  dueDate: string;
+  paymentDate: string | null;
+  totalValue: number;
+}
+
+export interface CashFlowForecastRepasseItem {
+  transactionId: string;
+  driver: { id: string; name: string };
+  delivery: { id: string; displayNumber: number } | null;
+  amount: number;
+  releaseDate: string | null;
+  timing: 'OVERDUE_BEFORE_PERIOD' | 'IN_PERIOD' | 'UNSCHEDULED';
+}
+
+export interface CashFlowForecastWithdrawalItem {
+  withdrawalId: string;
+  driver: { id: string; name: string };
+  status: WithdrawalRequestStatus;
+  requestedAmount: number;
+  netAmount: number;
+  createdAt: string;
+  paidAt: string | null;
+}
+
+export interface CashFlowForecastDayItem {
+  day: string;
+  projectedInvoiceInflowCount: number;
+  projectedInvoiceInflowValue: number;
+  scheduledRepasseReleaseCount: number;
+  scheduledRepasseReleaseValue: number;
+  realizedReceiptCount: number;
+  realizedReceiptValue: number;
+  realizedWithdrawalCount: number;
+  realizedWithdrawalValue: number;
+}
+
+/**
+ * Agenda financeira conhecida, sem fabricar saldo bancario futuro.
+ *
+ * Vencimento de fatura e expectativa de entrada; liberacao de repasse e uma
+ * obrigacao que se torna sacavel, nao uma transferencia bancaria. Saques em
+ * aberto ficam fora dos dias porque o produto ainda nao persiste uma data
+ * prometida de pagamento.
+ */
+export interface CashFlowForecastReport {
+  period: { from: string; to: string };
+  asOf: string;
+  summary: {
+    projectedInvoiceCount: number;
+    projectedInvoiceValue: number;
+    overdueBeforePeriodCount: number;
+    overdueBeforePeriodValue: number;
+    unbilledCount: number;
+    unbilledValue: number;
+    scheduledRepasseCount: number;
+    scheduledRepasseValue: number;
+    overdueRepasseCount: number;
+    overdueRepasseValue: number;
+    unscheduledRepasseCount: number;
+    unscheduledRepasseValue: number;
+    openWithdrawalCount: number;
+    openWithdrawalRequestedValue: number;
+    openWithdrawalNetValue: number;
+    approvedWithdrawalCount: number;
+    approvedWithdrawalNetValue: number;
+    realizedReceiptCount: number;
+    realizedReceiptValue: number;
+    realizedWithdrawalCount: number;
+    realizedWithdrawalValue: number;
+  };
+  days: CashFlowForecastDayItem[];
+  projectedInvoices: CashFlowForecastInvoiceItem[];
+  overdueBeforePeriodInvoices: CashFlowForecastInvoiceItem[];
+  realizedReceipts: CashFlowForecastInvoiceItem[];
+  repasses: CashFlowForecastRepasseItem[];
+  openWithdrawals: CashFlowForecastWithdrawalItem[];
+  realizedWithdrawals: CashFlowForecastWithdrawalItem[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;

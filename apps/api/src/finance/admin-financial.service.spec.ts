@@ -974,3 +974,481 @@ describe('AdminFinancialService.adjustDriverWallet', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
+
+describe('AdminFinancialService.financialCycle', () => {
+  let service: AdminFinancialService;
+  let prisma: {
+    delivery: { findMany: jest.Mock };
+    walletTransaction: { findMany: jest.Mock };
+    $transaction: jest.Mock;
+  };
+
+  beforeEach(async () => {
+    prisma = {
+      delivery: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminFinancialService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: { refreshOverdueInvoices: jest.fn() } },
+        { provide: FinancialClock, useValue: { now: () => new Date('2026-08-24T12:00:00Z') } },
+      ],
+    }).compile();
+
+    service = module.get(AdminFinancialService);
+  });
+
+  it('filtra pela competência e lê todas as etapas no mesmo snapshot', async () => {
+    await service.financialCycle({ from: '2026-08-01', to: '2026-08-03' });
+
+    expect(prisma.delivery.findMany.mock.calls[0]?.[0]?.where).toEqual({
+      status: 'COMPLETED',
+      statusChangedAt: {
+        gte: new Date('2026-08-01T03:00:00.000Z'),
+        lt: new Date('2026-08-04T03:00:00.000Z'),
+      },
+    });
+    expect(prisma.walletTransaction.findMany.mock.calls[0]?.[0]?.where).toEqual({
+      wallet: { driverId: { not: null } },
+      type: { in: ['CREDIT_ADJUSTMENT', 'DEBIT_ADJUSTMENT', 'CREDIT_REFUND'] },
+      createdAt: {
+        gte: new Date('2026-08-01T03:00:00.000Z'),
+        lt: new Date('2026-08-04T03:00:00.000Z'),
+      },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
+    });
+  });
+
+  it('relaciona fatura, recebimento e repasse e sinaliza cada quebra do ciclo', async () => {
+    const company = { id: 'company-1', tradeName: 'Loja Azul' };
+    const driver = { id: 'driver-1', user: { name: 'Ana Entregadora' } };
+    const serviceType = { id: 'service-1', name: 'Motoboy' };
+
+    prisma.delivery.findMany.mockResolvedValue([
+      {
+        id: 'delivery-1',
+        displayNumber: 1001,
+        statusChangedAt: new Date('2026-08-03T15:00:00Z'),
+        paymentMethod: 'BILLED',
+        totalValue: 100,
+        driverValue: 70,
+        platformValue: 30,
+        company,
+        driver,
+        serviceType,
+        invoice: {
+          id: 'invoice-1',
+          number: 'FAT-1',
+          issueDate: new Date('2026-08-04T00:00:00Z'),
+          dueDate: new Date('2026-08-04T00:00:00Z'),
+          paymentDate: new Date('2026-08-10T00:00:00Z'),
+          status: 'PAID',
+        },
+        walletTransactions: [
+          {
+            id: 'repasse-1',
+            status: 'PENDING',
+            amount: 70,
+            createdAt: new Date('2026-08-03T15:00:01Z'),
+            releaseAt: new Date('2026-08-10T03:00:00Z'),
+          },
+        ],
+      },
+      {
+        id: 'delivery-2',
+        displayNumber: 1002,
+        statusChangedAt: new Date('2026-08-03T14:00:00Z'),
+        paymentMethod: 'BILLED',
+        totalValue: 50,
+        driverValue: 35,
+        platformValue: 15,
+        company,
+        driver,
+        serviceType,
+        invoice: null,
+        walletTransactions: [],
+      },
+      {
+        id: 'delivery-3',
+        displayNumber: 1003,
+        statusChangedAt: new Date('2026-08-03T13:00:00Z'),
+        paymentMethod: 'ONLINE',
+        totalValue: 80,
+        driverValue: 60,
+        platformValue: 20,
+        company,
+        driver,
+        serviceType,
+        invoice: null,
+        walletTransactions: [
+          {
+            id: 'repasse-3',
+            status: 'RELEASED',
+            amount: 60,
+            createdAt: new Date('2026-08-03T13:00:01Z'),
+            releaseAt: null,
+          },
+        ],
+      },
+      {
+        id: 'delivery-4',
+        displayNumber: 1004,
+        statusChangedAt: new Date('2026-08-03T12:00:00Z'),
+        paymentMethod: 'BILLED',
+        totalValue: 40,
+        driverValue: 30,
+        platformValue: 10,
+        company,
+        driver,
+        serviceType,
+        invoice: {
+          id: 'invoice-4',
+          number: 'FAT-4',
+          issueDate: new Date('2026-08-04T00:00:00Z'),
+          dueDate: new Date('2026-08-04T00:00:00Z'),
+          paymentDate: null,
+          status: 'OVERDUE',
+        },
+        walletTransactions: [
+          {
+            id: 'repasse-4a',
+            status: 'RELEASED',
+            amount: 10,
+            createdAt: new Date('2026-08-03T12:00:01Z'),
+            releaseAt: null,
+          },
+          {
+            id: 'repasse-4b',
+            status: 'PENDING',
+            amount: 10,
+            createdAt: new Date('2026-08-03T12:00:02Z'),
+            releaseAt: new Date('2026-08-10T03:00:00Z'),
+          },
+          {
+            id: 'repasse-4c',
+            status: 'CANCELLED',
+            amount: 5,
+            createdAt: new Date('2026-08-03T12:00:03Z'),
+            releaseAt: null,
+          },
+        ],
+      },
+      {
+        id: 'delivery-5',
+        displayNumber: 1005,
+        statusChangedAt: new Date('2026-08-03T11:00:00Z'),
+        paymentMethod: 'BILLED',
+        totalValue: null,
+        driverValue: null,
+        platformValue: null,
+        company,
+        driver: null,
+        serviceType,
+        invoice: null,
+        walletTransactions: [],
+      },
+    ]);
+    prisma.walletTransaction.findMany.mockResolvedValue([
+      {
+        id: 'adjustment-1',
+        type: 'CREDIT_ADJUSTMENT',
+        status: 'RELEASED',
+        amount: 5,
+        reason: 'Complemento combinado com o entregador',
+        createdAt: new Date('2026-08-03T16:00:00Z'),
+        wallet: { driver },
+        createdBy: { id: 'admin-1', name: 'Administrador' },
+      },
+      {
+        id: 'adjustment-2',
+        type: 'DEBIT_ADJUSTMENT',
+        status: 'RELEASED',
+        amount: 2,
+        reason: 'Correção de crédito lançado em duplicidade',
+        createdAt: new Date('2026-08-03T17:00:00Z'),
+        wallet: { driver },
+        createdBy: { id: 'admin-1', name: 'Administrador' },
+      },
+      {
+        id: 'adjustment-3',
+        type: 'CREDIT_REFUND',
+        status: 'CANCELLED',
+        amount: 7,
+        reason: null,
+        createdAt: new Date('2026-08-03T18:00:00Z'),
+        wallet: { driver },
+        createdBy: null,
+      },
+    ]);
+
+    const report = await service.financialCycle({ from: '2026-08-01', to: '2026-08-03' });
+
+    expect(report.summary).toEqual({
+      completedCount: 5,
+      pricedCount: 4,
+      competencyValue: 270,
+      invoicedCount: 2,
+      invoicedDeliveryValue: 140,
+      unbilledCount: 2,
+      unbilledValue: 50,
+      receivedCount: 1,
+      receivedDeliveryValue: 100,
+      openInvoiceCount: 1,
+      openInvoiceValue: 40,
+      overdueCount: 1,
+      overdueValue: 40,
+      onlineCount: 1,
+      onlineValue: 80,
+      repasseRegisteredCount: 3,
+      repasseRegisteredValue: 150,
+      itemWithIssueCount: 3,
+      adjustmentCreditValue: 5,
+      adjustmentDebitValue: 2,
+    });
+    expect(report.items[0]?.invoice).toEqual({
+      id: 'invoice-1',
+      number: 'FAT-1',
+      issueDate: '2026-08-04',
+      dueDate: '2026-08-04',
+      paymentDate: '2026-08-10',
+      status: 'PAID',
+    });
+    expect(report.items[0]?.issues).toEqual([]);
+    expect(report.items[1]?.issues).toEqual(['MISSING_INVOICE', 'MISSING_REPASSE']);
+    expect(report.items[2]?.issues).toEqual([]);
+    expect(report.items[3]?.issues).toEqual([
+      'CANCELLED_REPASSE',
+      'DUPLICATE_REPASSE',
+      'REPASSE_AMOUNT_MISMATCH',
+    ]);
+    expect(report.items[4]?.issues).toEqual(['UNPRICED', 'MISSING_DRIVER', 'MISSING_INVOICE']);
+    expect(report.adjustments).toEqual([
+      expect.objectContaining({
+        transactionId: 'adjustment-1',
+        direction: 'CREDIT',
+        reason: 'Complemento combinado com o entregador',
+        driver: { id: 'driver-1', name: 'Ana Entregadora' },
+        createdBy: { id: 'admin-1', name: 'Administrador' },
+      }),
+      expect.objectContaining({ transactionId: 'adjustment-2', direction: 'DEBIT' }),
+      expect.objectContaining({ transactionId: 'adjustment-3', status: 'CANCELLED' }),
+    ]);
+  });
+
+  it('devolve ciclo vazio sem nulos nos totais', async () => {
+    const report = await service.financialCycle({ from: '2026-08-01', to: '2026-08-03' });
+
+    expect(report.items).toEqual([]);
+    expect(report.adjustments).toEqual([]);
+    expect(Object.values(report.summary).every((value) => value === 0)).toBe(true);
+  });
+});
+
+describe('AdminFinancialService.cashFlowForecast', () => {
+  let service: AdminFinancialService;
+  let prisma: {
+    invoice: { findMany: jest.Mock };
+    walletTransaction: { findMany: jest.Mock };
+    withdrawalRequest: { findMany: jest.Mock };
+    withdrawalRequestStatusHistory: { findMany: jest.Mock };
+    delivery: { aggregate: jest.Mock };
+    $transaction: jest.Mock;
+  };
+  let invoiceService: { refreshOverdueInvoices: jest.Mock };
+
+  beforeEach(async () => {
+    prisma = {
+      invoice: { findMany: jest.fn().mockResolvedValue([]) },
+      walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
+      withdrawalRequest: { findMany: jest.fn().mockResolvedValue([]) },
+      withdrawalRequestStatusHistory: { findMany: jest.fn().mockResolvedValue([]) },
+      delivery: { aggregate: jest.fn().mockResolvedValue(agregado(0, null)) },
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
+    invoiceService = { refreshOverdueInvoices: jest.fn().mockResolvedValue(undefined) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminFinancialService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: invoiceService },
+        { provide: FinancialClock, useValue: { now: () => new Date('2026-08-24T12:00:00Z') } },
+      ],
+    }).compile();
+
+    service = module.get(AdminFinancialService);
+  });
+
+  it('consulta as datas no fuso operacional e mantem um snapshot unico', async () => {
+    await service.cashFlowForecast({ from: '2026-08-24', to: '2026-08-31' });
+
+    expect(invoiceService.refreshOverdueInvoices).toHaveBeenCalledTimes(1);
+    expect(prisma.invoice.findMany.mock.calls[0]?.[0]?.where).toEqual({
+      status: { in: ['PENDING', 'OVERDUE'] },
+      dueDate: {
+        gte: new Date('2026-08-24T00:00:00.000Z'),
+        lt: new Date('2026-09-01T00:00:00.000Z'),
+      },
+    });
+    expect(prisma.walletTransaction.findMany.mock.calls[0]?.[0]?.where).toEqual({
+      type: 'CREDIT_REPASSE',
+      status: 'PENDING',
+      wallet: { driverId: { not: null } },
+      OR: [{ releaseAt: { lt: new Date('2026-09-01T03:00:00.000Z') } }, { releaseAt: null }],
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
+    });
+  });
+
+  it('separa previsao, compromisso sem data e movimentos realizados', async () => {
+    const company = { id: 'company-1', tradeName: 'Loja Azul' };
+    const driver = { id: 'driver-1', user: { name: 'Ana Entregadora' } };
+    const invoice = (id: string, status: string, dueDate: string, totalValue: number) => ({
+      id,
+      number: `FAT-${id}`,
+      status,
+      dueDate: new Date(`${dueDate}T00:00:00Z`),
+      paymentDate: null,
+      totalValue,
+      company,
+    });
+
+    prisma.invoice.findMany
+      .mockResolvedValueOnce([
+        invoice('1', 'PENDING', '2026-08-25', 100),
+        invoice('2', 'OVERDUE', '2026-08-26', 50.25),
+      ])
+      .mockResolvedValueOnce([invoice('old', 'OVERDUE', '2026-08-10', 80)])
+      .mockResolvedValueOnce([
+        {
+          ...invoice('paid', 'PAID', '2026-08-20', 200),
+          paymentDate: new Date('2026-08-27T00:00:00Z'),
+        },
+      ]);
+    prisma.walletTransaction.findMany.mockResolvedValue([
+      {
+        id: 'repasse-periodo',
+        amount: 70,
+        releaseAt: new Date('2026-08-31T03:00:00Z'),
+        wallet: { driver },
+        delivery: { id: 'delivery-1', displayNumber: 1001 },
+      },
+      {
+        id: 'repasse-atrasado',
+        amount: 30,
+        releaseAt: new Date('2026-08-17T03:00:00Z'),
+        wallet: { driver },
+        delivery: null,
+      },
+      {
+        id: 'repasse-sem-data',
+        amount: 15,
+        releaseAt: null,
+        wallet: { driver },
+        delivery: null,
+      },
+    ]);
+    prisma.withdrawalRequest.findMany.mockResolvedValue([
+      {
+        id: 'withdrawal-pending',
+        status: 'PENDING',
+        requestedAmount: 60,
+        netAmount: 60,
+        createdAt: new Date('2026-08-24T13:00:00Z'),
+        wallet: { driver },
+      },
+      {
+        id: 'withdrawal-approved',
+        status: 'APPROVED',
+        requestedAmount: 40,
+        netAmount: 40,
+        createdAt: new Date('2026-08-24T14:00:00Z'),
+        wallet: { driver },
+      },
+    ]);
+    prisma.withdrawalRequestStatusHistory.findMany.mockResolvedValue([
+      {
+        changedAt: new Date('2026-08-28T16:00:00Z'),
+        withdrawalRequest: {
+          id: 'withdrawal-paid',
+          status: 'PAID',
+          requestedAmount: 35,
+          netAmount: 35,
+          createdAt: new Date('2026-08-24T13:00:00Z'),
+          wallet: { driver },
+        },
+      },
+    ]);
+    prisma.delivery.aggregate.mockResolvedValue(agregado(2, 90));
+
+    const report = await service.cashFlowForecast({ from: '2026-08-24', to: '2026-08-31' });
+
+    expect(report.summary).toEqual({
+      projectedInvoiceCount: 2,
+      projectedInvoiceValue: 150.25,
+      overdueBeforePeriodCount: 1,
+      overdueBeforePeriodValue: 80,
+      unbilledCount: 2,
+      unbilledValue: 90,
+      scheduledRepasseCount: 1,
+      scheduledRepasseValue: 70,
+      overdueRepasseCount: 1,
+      overdueRepasseValue: 30,
+      unscheduledRepasseCount: 1,
+      unscheduledRepasseValue: 15,
+      openWithdrawalCount: 2,
+      openWithdrawalRequestedValue: 100,
+      openWithdrawalNetValue: 100,
+      approvedWithdrawalCount: 1,
+      approvedWithdrawalNetValue: 40,
+      realizedReceiptCount: 1,
+      realizedReceiptValue: 200,
+      realizedWithdrawalCount: 1,
+      realizedWithdrawalValue: 35,
+    });
+    expect(report.days).toHaveLength(8);
+    expect(report.days.find((day) => day.day === '2026-08-25')).toEqual(
+      expect.objectContaining({ projectedInvoiceInflowCount: 1, projectedInvoiceInflowValue: 100 }),
+    );
+    expect(report.days.find((day) => day.day === '2026-08-31')).toEqual(
+      expect.objectContaining({
+        scheduledRepasseReleaseCount: 1,
+        scheduledRepasseReleaseValue: 70,
+      }),
+    );
+    expect(report.days.find((day) => day.day === '2026-08-27')).toEqual(
+      expect.objectContaining({ realizedReceiptCount: 1, realizedReceiptValue: 200 }),
+    );
+    expect(report.days.find((day) => day.day === '2026-08-28')).toEqual(
+      expect.objectContaining({ realizedWithdrawalCount: 1, realizedWithdrawalValue: 35 }),
+    );
+    expect(report.repasses.map((item) => item.timing)).toEqual([
+      'IN_PERIOD',
+      'OVERDUE_BEFORE_PERIOD',
+      'UNSCHEDULED',
+    ]);
+    expect(report.openWithdrawals.every((item) => item.paidAt === null)).toBe(true);
+  });
+
+  it('preenche todos os dias e devolve zero quando nao ha movimentos', async () => {
+    const report = await service.cashFlowForecast({ from: '2026-08-24', to: '2026-08-26' });
+
+    expect(report.days.map((day) => day.day)).toEqual(['2026-08-24', '2026-08-25', '2026-08-26']);
+    expect(Object.values(report.summary).every((value) => value === 0)).toBe(true);
+    expect(report.projectedInvoices).toEqual([]);
+    expect(report.openWithdrawals).toEqual([]);
+  });
+});

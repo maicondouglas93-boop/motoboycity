@@ -3,12 +3,16 @@ import {
   adjustDriverWalletSchema,
   adminFinancialOverviewQuerySchema,
   financialStatementQuerySchema,
+  financialCycleQuerySchema,
+  cashFlowForecastQuerySchema,
   listAdminWalletsQuerySchema,
   listReceiptsQuerySchema,
   listWalletTransactionsQuerySchema,
   type AdjustDriverWalletPayload,
   type AdminFinancialOverviewQuery,
   type FinancialStatementQuery,
+  type FinancialCycleQuery,
+  type CashFlowForecastQuery,
   type ListAdminWalletsQuery,
   type ListReceiptsQuery,
   type ListWalletTransactionsQuery,
@@ -20,6 +24,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import type {
   CashPositionItem,
+  CashFlowForecastReport,
+  FinancialCycleReport,
   FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
@@ -66,6 +72,22 @@ export class AdminFinancialController {
     @Query(new ZodValidationPipe(financialStatementQuerySchema)) query: FinancialStatementQuery,
   ): Promise<FinancialStatementReport> {
     return this.adminFinancialService.financialStatement(query);
+  }
+
+  /** Ciclo detalhado por entrega: competência, cobrança, caixa e repasse. */
+  @Get('financial-cycle')
+  financialCycle(
+    @Query(new ZodValidationPipe(financialCycleQuerySchema)) query: FinancialCycleQuery,
+  ): Promise<FinancialCycleReport> {
+    return this.adminFinancialService.financialCycle(query);
+  }
+
+  /** Agenda conhecida de caixa, sem transformar liberacao em pagamento. */
+  @Get('cash-flow-forecast')
+  cashFlowForecast(
+    @Query(new ZodValidationPipe(cashFlowForecastQuerySchema)) query: CashFlowForecastQuery,
+  ): Promise<CashFlowForecastReport> {
+    return this.adminFinancialService.cashFlowForecast(query);
   }
 
   /**

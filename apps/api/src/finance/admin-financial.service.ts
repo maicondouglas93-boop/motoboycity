@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AdjustDriverWalletPayload,
   AdminFinancialOverviewQuery,
+  CashFlowForecastQuery,
+  FinancialCycleQuery,
   FinancialStatementQuery,
   ListAdminWalletsQuery,
   ListReceiptsQuery,
@@ -9,7 +11,16 @@ import type {
 } from '@motoboycity/validation';
 import type {
   CashPositionItem,
+  CashFlowForecastDayItem,
+  CashFlowForecastInvoiceItem,
+  CashFlowForecastRepasseItem,
+  CashFlowForecastReport,
+  CashFlowForecastWithdrawalItem,
   DriverPayoutPositionItem,
+  FinancialCycleAdjustmentItem,
+  FinancialCycleDeliveryItem,
+  FinancialCycleIssue,
+  FinancialCycleReport,
   FinancialStatementAdjustmentItem,
   FinancialStatementDayItem,
   FinancialStatementDimensionItem,
@@ -89,6 +100,10 @@ function roundCurrency(value: number): number {
  */
 function somarEmCentavos(valores: number[]): number {
   return valores.reduce((total, valor) => total + Math.round(valor * 100), 0) / 100;
+}
+
+function sameCurrency(left: number, right: number): boolean {
+  return Math.round(left * 100) === Math.round(right * 100);
 }
 
 function roundMetric(value: number): number {
@@ -817,6 +832,600 @@ export class AdminFinancialService {
       serviceTypes,
       paymentMethods,
       days,
+    };
+  }
+
+  /**
+   * Rastreia o ciclo financeiro de cada entrega concluída na competência.
+   *
+   * A data do filtro vale apenas para a conclusão. Fatura, pagamento e repasse
+   * são o estado atual daquela mesma entrega — exatamente para revelar o que
+   * ainda não avançou de uma etapa para a próxima.
+   */
+  async financialCycle(query: FinancialCycleQuery): Promise<FinancialCycleReport> {
+    const periodFrom = startOfDayInSaoPaulo(query.from);
+    const periodToExclusive = new Date(endOfDayInSaoPaulo(query.to).getTime() + 1);
+    const adjustmentTypes = ['CREDIT_ADJUSTMENT', 'DEBIT_ADJUSTMENT', 'CREDIT_REFUND'] as const;
+
+    const { deliveries, adjustmentTransactions } = await this.prisma.$transaction(
+      async (tx) => {
+        const [currentDeliveries, currentAdjustments] = await Promise.all([
+          tx.delivery.findMany({
+            where: {
+              status: 'COMPLETED',
+              statusChangedAt: { gte: periodFrom, lt: periodToExclusive },
+            },
+            select: {
+              id: true,
+              displayNumber: true,
+              statusChangedAt: true,
+              paymentMethod: true,
+              totalValue: true,
+              driverValue: true,
+              platformValue: true,
+              company: { select: { id: true, tradeName: true } },
+              driver: { select: { id: true, user: { select: { name: true } } } },
+              serviceType: { select: { id: true, name: true } },
+              invoice: {
+                select: {
+                  id: true,
+                  number: true,
+                  issueDate: true,
+                  dueDate: true,
+                  paymentDate: true,
+                  status: true,
+                },
+              },
+              walletTransactions: {
+                where: { type: 'CREDIT_REPASSE' },
+                select: {
+                  id: true,
+                  status: true,
+                  amount: true,
+                  createdAt: true,
+                  releaseAt: true,
+                },
+                orderBy: { createdAt: 'asc' },
+              },
+            },
+            orderBy: [{ statusChangedAt: 'desc' }, { displayNumber: 'desc' }],
+          }),
+          tx.walletTransaction.findMany({
+            where: {
+              wallet: { driverId: { not: null } },
+              type: { in: [...adjustmentTypes] },
+              createdAt: { gte: periodFrom, lt: periodToExclusive },
+            },
+            select: {
+              id: true,
+              type: true,
+              status: true,
+              amount: true,
+              reason: true,
+              createdAt: true,
+              wallet: {
+                select: {
+                  driver: { select: { id: true, user: { select: { name: true } } } },
+                },
+              },
+              createdBy: { select: { id: true, name: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ]);
+        return { deliveries: currentDeliveries, adjustmentTransactions: currentAdjustments };
+      },
+      // Faturamento e repasse podem mudar enquanto a tela abre. Todas as
+      // etapas precisam refletir o mesmo instante para os alertas serem úteis.
+      { isolationLevel: 'RepeatableRead' },
+    );
+
+    const items: FinancialCycleDeliveryItem[] = deliveries.map((delivery) => {
+      const issues: FinancialCycleIssue[] = [];
+      const priced =
+        delivery.totalValue !== null &&
+        delivery.driverValue !== null &&
+        delivery.platformValue !== null;
+      if (!priced) issues.push('UNPRICED');
+      if (!delivery.driver) issues.push('MISSING_DRIVER');
+      if (delivery.paymentMethod === 'BILLED' && !delivery.invoice) {
+        issues.push('MISSING_INVOICE');
+      }
+      if (delivery.paymentMethod === 'ONLINE' && delivery.invoice) {
+        issues.push('UNEXPECTED_INVOICE_FOR_ONLINE');
+      }
+      if (delivery.invoice?.status === 'CANCELLED') issues.push('CANCELLED_INVOICE');
+      if (delivery.invoice?.status === 'PAID' && !delivery.invoice.paymentDate) {
+        issues.push('PAID_WITHOUT_PAYMENT_DATE');
+      }
+
+      const repasses = delivery.walletTransactions.map((transaction) => ({
+        transactionId: transaction.id,
+        status: transaction.status,
+        amount: numberOrZero(transaction.amount),
+        createdAt: transaction.createdAt.toISOString(),
+        releaseAt: transaction.releaseAt?.toISOString() ?? null,
+      }));
+      const activeRepasses = repasses.filter((repasse) => repasse.status !== 'CANCELLED');
+      if (repasses.some((repasse) => repasse.status === 'CANCELLED')) {
+        issues.push('CANCELLED_REPASSE');
+      }
+      if (priced && delivery.driver) {
+        if (activeRepasses.length === 0) issues.push('MISSING_REPASSE');
+        if (activeRepasses.length > 1) issues.push('DUPLICATE_REPASSE');
+        const registeredValue = somarEmCentavos(activeRepasses.map((repasse) => repasse.amount));
+        if (
+          activeRepasses.length > 0 &&
+          !sameCurrency(registeredValue, Number(delivery.driverValue))
+        ) {
+          issues.push('REPASSE_AMOUNT_MISMATCH');
+        }
+      }
+
+      return {
+        deliveryId: delivery.id,
+        displayNumber: delivery.displayNumber,
+        completedAt: delivery.statusChangedAt.toISOString(),
+        company: { id: delivery.company.id, name: delivery.company.tradeName },
+        driver: delivery.driver
+          ? { id: delivery.driver.id, name: delivery.driver.user.name }
+          : null,
+        serviceType: delivery.serviceType,
+        paymentMethod: delivery.paymentMethod,
+        totalValue: delivery.totalValue === null ? null : Number(delivery.totalValue),
+        driverValue: delivery.driverValue === null ? null : Number(delivery.driverValue),
+        platformValue: delivery.platformValue === null ? null : Number(delivery.platformValue),
+        invoice: delivery.invoice
+          ? {
+              id: delivery.invoice.id,
+              number: delivery.invoice.number,
+              issueDate: databaseDate(delivery.invoice.issueDate),
+              dueDate: databaseDate(delivery.invoice.dueDate),
+              paymentDate: delivery.invoice.paymentDate
+                ? databaseDate(delivery.invoice.paymentDate)
+                : null,
+              status: delivery.invoice.status,
+            }
+          : null,
+        repasses,
+        issues,
+      };
+    });
+
+    const adjustments: FinancialCycleAdjustmentItem[] = adjustmentTransactions.flatMap(
+      (transaction) => {
+        const driver = transaction.wallet.driver;
+        if (!driver) return [];
+        return [
+          {
+            transactionId: transaction.id,
+            type: transaction.type as FinancialCycleAdjustmentItem['type'],
+            status: transaction.status,
+            direction: transaction.type === 'DEBIT_ADJUSTMENT' ? 'DEBIT' : 'CREDIT',
+            amount: numberOrZero(transaction.amount),
+            reason: transaction.reason,
+            createdAt: transaction.createdAt.toISOString(),
+            driver: { id: driver.id, name: driver.user.name },
+            createdBy: transaction.createdBy,
+          },
+        ];
+      },
+    );
+
+    const pricedItems = items.filter(
+      (item) =>
+        item.totalValue !== null && item.driverValue !== null && item.platformValue !== null,
+    );
+    const invoicedItems = items.filter((item) => item.invoice !== null);
+    const unbilledItems = items.filter(
+      (item) => item.paymentMethod === 'BILLED' && item.invoice === null,
+    );
+    const receivedItems = items.filter(
+      (item) => item.invoice?.status === 'PAID' && item.invoice.paymentDate !== null,
+    );
+    const openInvoiceItems = items.filter(
+      (item) => item.invoice?.status === 'PENDING' || item.invoice?.status === 'OVERDUE',
+    );
+    const overdueItems = items.filter((item) => item.invoice?.status === 'OVERDUE');
+    const onlineItems = items.filter((item) => item.paymentMethod === 'ONLINE');
+    const activeRepasses = items.flatMap((item) =>
+      item.repasses.filter((repasse) => repasse.status !== 'CANCELLED'),
+    );
+    const activeAdjustments = adjustments.filter((adjustment) => adjustment.status !== 'CANCELLED');
+    const creditAdjustments = activeAdjustments.filter(
+      (adjustment) => adjustment.direction === 'CREDIT',
+    );
+    const debitAdjustments = activeAdjustments.filter(
+      (adjustment) => adjustment.direction === 'DEBIT',
+    );
+    const itemValue = (item: FinancialCycleDeliveryItem) => item.totalValue ?? 0;
+
+    return {
+      period: { from: query.from, to: query.to },
+      summary: {
+        completedCount: items.length,
+        pricedCount: pricedItems.length,
+        competencyValue: somarEmCentavos(pricedItems.map(itemValue)),
+        invoicedCount: invoicedItems.length,
+        invoicedDeliveryValue: somarEmCentavos(invoicedItems.map(itemValue)),
+        unbilledCount: unbilledItems.length,
+        unbilledValue: somarEmCentavos(unbilledItems.map(itemValue)),
+        receivedCount: receivedItems.length,
+        receivedDeliveryValue: somarEmCentavos(receivedItems.map(itemValue)),
+        openInvoiceCount: openInvoiceItems.length,
+        openInvoiceValue: somarEmCentavos(openInvoiceItems.map(itemValue)),
+        overdueCount: overdueItems.length,
+        overdueValue: somarEmCentavos(overdueItems.map(itemValue)),
+        onlineCount: onlineItems.length,
+        onlineValue: somarEmCentavos(onlineItems.map(itemValue)),
+        repasseRegisteredCount: items.filter((item) =>
+          item.repasses.some((repasse) => repasse.status !== 'CANCELLED'),
+        ).length,
+        repasseRegisteredValue: somarEmCentavos(activeRepasses.map((repasse) => repasse.amount)),
+        itemWithIssueCount: items.filter((item) => item.issues.length > 0).length,
+        adjustmentCreditValue: somarEmCentavos(
+          creditAdjustments.map((adjustment) => adjustment.amount),
+        ),
+        adjustmentDebitValue: somarEmCentavos(
+          debitAdjustments.map((adjustment) => adjustment.amount),
+        ),
+      },
+      items,
+      adjustments,
+    };
+  }
+
+  /**
+   * Monta a agenda financeira conhecida sem afirmar um saldo bancario futuro.
+   *
+   * Vencimentos sao expectativas de entrada. Liberacoes de repasse apenas
+   * tornam saldo sacavel. Saques abertos nao recebem uma data artificial,
+   * porque hoje o produto nao persiste prazo prometido de pagamento.
+   */
+  async cashFlowForecast(query: CashFlowForecastQuery): Promise<CashFlowForecastReport> {
+    await this.invoiceService.refreshOverdueInvoices();
+
+    const instantPeriodFrom = startOfDayInSaoPaulo(query.from);
+    const instantPeriodToExclusive = new Date(endOfDayInSaoPaulo(query.to).getTime() + 1);
+    // Invoice.dueDate/paymentDate sao colunas @db.Date: meia-noite UTC e a
+    // representacao da propria data civil, nao um instante a converter.
+    const civilPeriodFrom = new Date(`${query.from}T00:00:00.000Z`);
+    const civilPeriodToExclusive = new Date(civilDateEpoch(query.to) + 86_400_000);
+
+    const snapshot = await this.prisma.$transaction(
+      async (tx) => {
+        const [
+          projectedInvoices,
+          overdueBeforePeriodInvoices,
+          realizedReceipts,
+          pendingRepasses,
+          openWithdrawals,
+          paidHistories,
+          unbilled,
+        ] = await Promise.all([
+          tx.invoice.findMany({
+            where: {
+              status: { in: ['PENDING', 'OVERDUE'] },
+              dueDate: { gte: civilPeriodFrom, lt: civilPeriodToExclusive },
+            },
+            select: {
+              id: true,
+              number: true,
+              status: true,
+              dueDate: true,
+              paymentDate: true,
+              totalValue: true,
+              company: { select: { id: true, tradeName: true } },
+            },
+            orderBy: [{ dueDate: 'asc' }, { number: 'asc' }],
+          }),
+          tx.invoice.findMany({
+            where: { status: 'OVERDUE', dueDate: { lt: civilPeriodFrom } },
+            select: {
+              id: true,
+              number: true,
+              status: true,
+              dueDate: true,
+              paymentDate: true,
+              totalValue: true,
+              company: { select: { id: true, tradeName: true } },
+            },
+            orderBy: [{ dueDate: 'asc' }, { number: 'asc' }],
+          }),
+          tx.invoice.findMany({
+            where: {
+              status: 'PAID',
+              paymentDate: { gte: civilPeriodFrom, lt: civilPeriodToExclusive },
+            },
+            select: {
+              id: true,
+              number: true,
+              status: true,
+              dueDate: true,
+              paymentDate: true,
+              totalValue: true,
+              company: { select: { id: true, tradeName: true } },
+            },
+            orderBy: [{ paymentDate: 'asc' }, { number: 'asc' }],
+          }),
+          tx.walletTransaction.findMany({
+            where: {
+              type: 'CREDIT_REPASSE',
+              status: 'PENDING',
+              wallet: { driverId: { not: null } },
+              OR: [{ releaseAt: { lt: instantPeriodToExclusive } }, { releaseAt: null }],
+            },
+            select: {
+              id: true,
+              amount: true,
+              releaseAt: true,
+              wallet: {
+                select: {
+                  driver: { select: { id: true, user: { select: { name: true } } } },
+                },
+              },
+              delivery: { select: { id: true, displayNumber: true } },
+            },
+            orderBy: [{ releaseAt: 'asc' }, { createdAt: 'asc' }],
+          }),
+          tx.withdrawalRequest.findMany({
+            where: { status: { in: ['PENDING', 'APPROVED'] } },
+            select: {
+              id: true,
+              status: true,
+              requestedAmount: true,
+              netAmount: true,
+              createdAt: true,
+              wallet: {
+                select: {
+                  driver: { select: { id: true, user: { select: { name: true } } } },
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          }),
+          tx.withdrawalRequestStatusHistory.findMany({
+            where: {
+              toStatus: 'PAID',
+              changedAt: { gte: instantPeriodFrom, lt: instantPeriodToExclusive },
+              withdrawalRequest: { status: 'PAID' },
+            },
+            select: {
+              changedAt: true,
+              withdrawalRequest: {
+                select: {
+                  id: true,
+                  status: true,
+                  requestedAmount: true,
+                  netAmount: true,
+                  createdAt: true,
+                  wallet: {
+                    select: {
+                      driver: { select: { id: true, user: { select: { name: true } } } },
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: { changedAt: 'asc' },
+          }),
+          tx.delivery.aggregate({
+            where: {
+              status: 'COMPLETED',
+              paymentMethod: 'BILLED',
+              invoiceId: null,
+            },
+            _count: { _all: true },
+            _sum: { totalValue: true },
+          }),
+        ]);
+
+        return {
+          projectedInvoices,
+          overdueBeforePeriodInvoices,
+          realizedReceipts,
+          pendingRepasses,
+          openWithdrawals,
+          paidHistories,
+          unbilled,
+        };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+
+    const invoiceItem = (
+      invoice: (typeof snapshot.projectedInvoices)[number],
+    ): CashFlowForecastInvoiceItem => ({
+      invoiceId: invoice.id,
+      number: invoice.number,
+      company: { id: invoice.company.id, name: invoice.company.tradeName },
+      status: invoice.status,
+      dueDate: databaseDate(invoice.dueDate),
+      paymentDate: invoice.paymentDate ? databaseDate(invoice.paymentDate) : null,
+      totalValue: numberOrZero(invoice.totalValue),
+    });
+
+    const projectedInvoices = snapshot.projectedInvoices.map(invoiceItem);
+    const overdueBeforePeriodInvoices = snapshot.overdueBeforePeriodInvoices.map(invoiceItem);
+    const realizedReceipts = snapshot.realizedReceipts.map(invoiceItem);
+
+    const repasses: CashFlowForecastRepasseItem[] = snapshot.pendingRepasses.flatMap(
+      (transaction) => {
+        const driver = transaction.wallet.driver;
+        if (!driver) return [];
+        const releaseDate = transaction.releaseAt ? dateInSaoPaulo(transaction.releaseAt) : null;
+        return [
+          {
+            transactionId: transaction.id,
+            driver: { id: driver.id, name: driver.user.name },
+            delivery: transaction.delivery,
+            amount: numberOrZero(transaction.amount),
+            releaseDate,
+            timing:
+              releaseDate === null
+                ? 'UNSCHEDULED'
+                : releaseDate < query.from
+                  ? 'OVERDUE_BEFORE_PERIOD'
+                  : 'IN_PERIOD',
+          },
+        ];
+      },
+    );
+
+    const openWithdrawals: CashFlowForecastWithdrawalItem[] = snapshot.openWithdrawals.flatMap(
+      (withdrawal) => {
+        const driver = withdrawal.wallet.driver;
+        if (!driver) return [];
+        return [
+          {
+            withdrawalId: withdrawal.id,
+            driver: { id: driver.id, name: driver.user.name },
+            status: withdrawal.status,
+            requestedAmount: numberOrZero(withdrawal.requestedAmount),
+            netAmount: numberOrZero(withdrawal.netAmount),
+            createdAt: withdrawal.createdAt.toISOString(),
+            paidAt: null,
+          },
+        ];
+      },
+    );
+
+    const realizedWithdrawals: CashFlowForecastWithdrawalItem[] = snapshot.paidHistories.flatMap(
+      (history) => {
+        const withdrawal = history.withdrawalRequest;
+        const driver = withdrawal.wallet.driver;
+        if (!driver) return [];
+        return [
+          {
+            withdrawalId: withdrawal.id,
+            driver: { id: driver.id, name: driver.user.name },
+            status: withdrawal.status,
+            requestedAmount: numberOrZero(withdrawal.requestedAmount),
+            netAmount: numberOrZero(withdrawal.netAmount),
+            createdAt: withdrawal.createdAt.toISOString(),
+            paidAt: history.changedAt.toISOString(),
+          },
+        ];
+      },
+    );
+
+    const daysByDate = new Map<string, CashFlowForecastDayItem>();
+    for (
+      let epoch = civilDateEpoch(query.from);
+      epoch <= civilDateEpoch(query.to);
+      epoch += 86_400_000
+    ) {
+      const day = new Date(epoch).toISOString().slice(0, 10);
+      daysByDate.set(day, {
+        day,
+        projectedInvoiceInflowCount: 0,
+        projectedInvoiceInflowValue: 0,
+        scheduledRepasseReleaseCount: 0,
+        scheduledRepasseReleaseValue: 0,
+        realizedReceiptCount: 0,
+        realizedReceiptValue: 0,
+        realizedWithdrawalCount: 0,
+        realizedWithdrawalValue: 0,
+      });
+    }
+
+    const addValue = (
+      day: string,
+      countKey:
+        | 'projectedInvoiceInflowCount'
+        | 'scheduledRepasseReleaseCount'
+        | 'realizedReceiptCount'
+        | 'realizedWithdrawalCount',
+      valueKey:
+        | 'projectedInvoiceInflowValue'
+        | 'scheduledRepasseReleaseValue'
+        | 'realizedReceiptValue'
+        | 'realizedWithdrawalValue',
+      value: number,
+    ) => {
+      const item = daysByDate.get(day);
+      if (!item) return;
+      item[countKey] += 1;
+      item[valueKey] = somarEmCentavos([item[valueKey], value]);
+    };
+
+    for (const invoice of projectedInvoices) {
+      addValue(
+        invoice.dueDate,
+        'projectedInvoiceInflowCount',
+        'projectedInvoiceInflowValue',
+        invoice.totalValue,
+      );
+    }
+    for (const repasse of repasses.filter((item) => item.timing === 'IN_PERIOD')) {
+      addValue(
+        repasse.releaseDate!,
+        'scheduledRepasseReleaseCount',
+        'scheduledRepasseReleaseValue',
+        repasse.amount,
+      );
+    }
+    for (const invoice of realizedReceipts) {
+      addValue(
+        invoice.paymentDate!,
+        'realizedReceiptCount',
+        'realizedReceiptValue',
+        invoice.totalValue,
+      );
+    }
+    for (const withdrawal of realizedWithdrawals) {
+      addValue(
+        dateInSaoPaulo(new Date(withdrawal.paidAt!)),
+        'realizedWithdrawalCount',
+        'realizedWithdrawalValue',
+        withdrawal.netAmount,
+      );
+    }
+
+    const scheduledRepasses = repasses.filter((item) => item.timing === 'IN_PERIOD');
+    const overdueRepasses = repasses.filter((item) => item.timing === 'OVERDUE_BEFORE_PERIOD');
+    const unscheduledRepasses = repasses.filter((item) => item.timing === 'UNSCHEDULED');
+    const approvedWithdrawals = openWithdrawals.filter((item) => item.status === 'APPROVED');
+
+    return {
+      period: { from: query.from, to: query.to },
+      asOf: dateInSaoPaulo(this.clock.now()),
+      summary: {
+        projectedInvoiceCount: projectedInvoices.length,
+        projectedInvoiceValue: somarEmCentavos(projectedInvoices.map((item) => item.totalValue)),
+        overdueBeforePeriodCount: overdueBeforePeriodInvoices.length,
+        overdueBeforePeriodValue: somarEmCentavos(
+          overdueBeforePeriodInvoices.map((item) => item.totalValue),
+        ),
+        unbilledCount: snapshot.unbilled._count._all,
+        unbilledValue: numberOrZero(snapshot.unbilled._sum.totalValue),
+        scheduledRepasseCount: scheduledRepasses.length,
+        scheduledRepasseValue: somarEmCentavos(scheduledRepasses.map((item) => item.amount)),
+        overdueRepasseCount: overdueRepasses.length,
+        overdueRepasseValue: somarEmCentavos(overdueRepasses.map((item) => item.amount)),
+        unscheduledRepasseCount: unscheduledRepasses.length,
+        unscheduledRepasseValue: somarEmCentavos(unscheduledRepasses.map((item) => item.amount)),
+        openWithdrawalCount: openWithdrawals.length,
+        openWithdrawalRequestedValue: somarEmCentavos(
+          openWithdrawals.map((item) => item.requestedAmount),
+        ),
+        openWithdrawalNetValue: somarEmCentavos(openWithdrawals.map((item) => item.netAmount)),
+        approvedWithdrawalCount: approvedWithdrawals.length,
+        approvedWithdrawalNetValue: somarEmCentavos(
+          approvedWithdrawals.map((item) => item.netAmount),
+        ),
+        realizedReceiptCount: realizedReceipts.length,
+        realizedReceiptValue: somarEmCentavos(realizedReceipts.map((item) => item.totalValue)),
+        realizedWithdrawalCount: realizedWithdrawals.length,
+        realizedWithdrawalValue: somarEmCentavos(realizedWithdrawals.map((item) => item.netAmount)),
+      },
+      days: [...daysByDate.values()],
+      projectedInvoices,
+      overdueBeforePeriodInvoices,
+      realizedReceipts,
+      repasses,
+      openWithdrawals,
+      realizedWithdrawals,
     };
   }
 

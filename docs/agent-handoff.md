@@ -4553,3 +4553,142 @@ dimensões, uma composição divergente e um ajuste em cada direção. O próxim
 recorte funcional recomendado é um extrato financeiro unificado que relacione
 competência, faturamento, recebimento e movimentação de carteira sem misturar
 as quatro datas contábeis.
+
+## Atualização — 2026-08-24: extrato financeiro unificado por pedido
+
+O quarto recorte de controle financeiro avançado foi implementado em
+`/relatorios/extrato-financeiro`. A página liga cada entrega concluída à
+fatura, ao recebimento e aos lançamentos de repasse correspondentes, com busca,
+filtros por pendência, paginação, links para pedido/cliente/entregador/fatura e
+CSV auditável. Ajustes de carteira aparecem numa seção separada com valor,
+direção, status, motivo e autor.
+
+O novo `GET /admin/financial/financial-cycle` é somente leitura, protegido por
+`JwtAuthGuard` e `AdminOnlyGuard`, e exige `from`/`to`. O intervalo aceita no
+máximo 93 dias porque a resposta lê relações detalhadas de cada entrega, em vez
+de apenas agregados. As datas são interpretadas no fuso de São Paulo e usam
+intervalo semiaberto (`gte`/`lt`).
+
+O filtro seleciona a competência pela data de conclusão (`statusChangedAt`). A
+fatura, o pagamento e o repasse mostram o estado atual daquelas mesmas
+entregas, mesmo quando foram criados depois do fim da competência. Essa escolha
+é deliberada: o objetivo é localizar onde o ciclo de cada pedido parou, e não
+atribuir artificialmente todas as etapas à mesma data.
+
+O relatório distingue sem dupla contagem:
+
+- valor reconhecido na competência;
+- valor das entregas já vinculadas a fatura;
+- valor das entregas em faturas pagas com `paymentDate` confirmado;
+- créditos de repasse ativos no ledger;
+- pedidos online, que não usam fatura e hoje não possuem data de recebimento
+  persistida;
+- ajustes criados dentro do período selecionado, separados das entregas porque
+  não possuem vínculo obrigatório com um pedido.
+
+Cada pedido pode sinalizar preço incompleto, entregador ausente, fatura ausente
+ou cancelada, fatura paga sem data, fatura inesperada em pagamento online,
+repasse ausente, divergente, duplicado ou cancelado. O valor de repasse é
+comparado em centavos com `driverValue`. Pedidos e ajustes são lidos numa
+transação `RepeatableRead`, evitando alertas formados por estados de instantes
+diferentes.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/extrato-financeiro/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+faturamento, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 29 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 33 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+controlada para conferir visualmente um ciclo pago, um não faturado e cada tipo
+de divergência de repasse. O próximo recorte financeiro recomendado é um fluxo
+de caixa projetado, separando recebimentos previstos por vencimento, obrigações
+com entregadores por liberação/saque e movimentos efetivamente realizados.
+
+## Atualização — 2026-08-24: previsão e compromissos de caixa
+
+O quinto recorte de controle financeiro avançado foi implementado em
+`/relatorios/fluxo-caixa`. O relatório abre por padrão em hoje e nos 29 dias
+seguintes, aceita até 93 dias, exporta CSV e organiza uma agenda diária com
+quatro colunas que não se misturam: faturas a vencer, repasses que ficarão
+sacáveis, recebimentos confirmados e saques efetivamente pagos.
+
+O novo `GET /admin/financial/cash-flow-forecast` é protegido por `JwtAuthGuard`
+e `AdminOnlyGuard`, exige `from`/`to` e devolve tanto os totais quanto as linhas
+que os explicam. A leitura usa uma transação `RepeatableRead` depois de atualizar
+o estado das faturas vencidas. Nenhuma migration ou nova coluna foi necessária.
+
+A semântica evita apresentar um saldo futuro fictício:
+
+- fatura `PENDING`/`OVERDUE` com vencimento no período é expectativa de entrada,
+  não recebimento garantido;
+- repasse `CREDIT_REPASSE/PENDING` com `releaseAt` no período é obrigação que se
+  torna disponível ao entregador, não transferência bancária;
+- saques `PENDING`/`APPROVED` ficam numa fila sem data porque o sistema não
+  persiste prazo prometido de pagamento;
+- recebimento realizado exige fatura `PAID` e `paymentDate` no período;
+- saída realizada usa a entrada `PAID` no histórico append-only do saque;
+- pedidos faturáveis ainda sem fatura, faturas vencidas antes do período,
+  repasses atrasados e repasses legados sem `releaseAt` aparecem como pontos de
+  ação separados da agenda.
+
+`Invoice.dueDate` e `Invoice.paymentDate` são `@db.Date` e, portanto, os filtros
+usam os limites civis armazenados em meia-noite UTC. `releaseAt`, `changedAt` e
+demais timestamps continuam usando os limites do dia operacional de São Paulo.
+Essa separação impede excluir o primeiro dia do intervalo ou deslocar eventos
+com horário.
+
+A página não calcula saldo projetado: hoje não existem saldo bancário inicial,
+despesas operacionais classificadas, data prometida para saque nem data de
+recebimento dos pedidos online. O painel explica essas limitações e mantém os
+valores fora de uma conta que pareceria precisa sem ter base persistida.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/fluxo-caixa/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+faturamento/saque, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 32 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 34 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+financeira controlada para conferir visualmente faturas, repasses e saques
+reais. O próximo passo de homologação é abrir a página com uma fatura a vencer,
+uma vencida anterior, um repasse de cada classificação e um saque pago. Para
+evoluir de agenda conhecida para saldo futuro e DRE completo, o próximo recorte
+exige decisão de produto e persistência de saldo bancário inicial, despesas e
+centros de custo; esses valores não devem ser inferidos do ledger do motoboy.

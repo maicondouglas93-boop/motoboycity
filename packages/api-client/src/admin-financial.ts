@@ -6,6 +6,8 @@ import type {
   WithdrawalRequestItem,
   WithdrawalRequestStatus,
   CashPositionItem,
+  CashFlowForecastReport,
+  FinancialCycleReport,
   FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
@@ -58,6 +60,32 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
         { headers: withAuth(accessToken) },
       );
       return parseJsonOrThrow<FinancialStatementReport>(response);
+    },
+
+    /** Ciclo por pedido: competência, fatura, recebimento e repasse. */
+    async financialCycle(
+      accessToken: string,
+      filters: { from: string; to: string },
+    ): Promise<FinancialCycleReport> {
+      const params = new URLSearchParams({ from: filters.from, to: filters.to });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/financial-cycle?${params.toString()}`,
+        { headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<FinancialCycleReport>(response);
+    },
+
+    /** Agenda de vencimentos, liberacoes, saques abertos e caixa realizado. */
+    async cashFlowForecast(
+      accessToken: string,
+      filters: { from: string; to: string },
+    ): Promise<CashFlowForecastReport> {
+      const params = new URLSearchParams({ from: filters.from, to: filters.to });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/cash-flow-forecast?${params.toString()}`,
+        { headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<CashFlowForecastReport>(response);
     },
 
     async overview(
