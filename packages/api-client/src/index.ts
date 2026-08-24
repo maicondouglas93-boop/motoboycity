@@ -11,6 +11,7 @@ export * from './admin-platform-settings';
 export * from './admin-financial';
 export * from './admin-reports';
 export * from './admin-operations';
+export * from './admin-virtual-secretary';
 export * from './invoices';
 export * from './deliveries';
 export * from './company-address';

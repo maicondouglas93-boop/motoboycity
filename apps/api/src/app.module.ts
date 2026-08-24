@@ -29,6 +29,7 @@ import { ServiceTypesModule } from './service-types/service-types.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { PushModule } from './push/push.module';
 import { LivePresenceModule } from './live-presence/live-presence.module';
+import { VirtualSecretaryModule } from './admin/virtual-secretary/virtual-secretary.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { LivePresenceModule } from './live-presence/live-presence.module';
     AdminReportsModule,
     AdminOperationsModule,
     AdminPlatformSettingsModule,
+    VirtualSecretaryModule,
     PricingModule,
     GoogleMapsModule,
     CompanyAddressModule,

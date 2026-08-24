@@ -8,3 +8,4 @@ export * from './delivery-offer.js';
 export * from './finance.js';
 export * from './report.js';
 export * from './operations.js';
+export * from './virtual-secretary.js';
