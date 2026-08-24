@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -110,23 +111,25 @@ export function TopNav() {
             <span className="sr-only">Abrir menu da conta</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-56">
-            <DropdownMenuLabel className="min-w-0 px-2.5 py-2">
-              <span className="block truncate text-sm font-semibold text-foreground">
-                {userQuery.data?.name ?? 'Conta da empresa'}
-              </span>
-              {userQuery.data?.email && (
-                <span className="mt-0.5 block truncate font-normal text-muted-foreground">
-                  {userQuery.data.email}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="min-w-0 px-2.5 py-2">
+                <span className="block truncate text-sm font-semibold text-foreground">
+                  {userQuery.data?.name ?? 'Conta da empresa'}
                 </span>
-              )}
-            </DropdownMenuLabel>
+                {userQuery.data?.email && (
+                  <span className="mt-0.5 block truncate font-normal text-muted-foreground">
+                    {userQuery.data.email}
+                  </span>
+                )}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push('/perfil')}>
+                <UserRound aria-hidden="true" />
+                Meu perfil
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => router.push('/perfil')}>
-              <UserRound aria-hidden="true" />
-              Meu perfil
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={handleLogout} variant="destructive">
+            <DropdownMenuItem onClick={handleLogout} variant="destructive">
               <LogOut aria-hidden="true" />
               Sair
             </DropdownMenuItem>

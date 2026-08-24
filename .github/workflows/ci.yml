@@ -48,6 +48,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/motoboycity_ci?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/motoboycity_ci?schema=public
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       API_PORT: 3333

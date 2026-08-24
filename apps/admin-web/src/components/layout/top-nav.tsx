@@ -119,7 +119,7 @@ export function TopNav() {
             <span className="sr-only">Abrir menu da conta</span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={handleLogout}>Sair</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout}>Sair</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

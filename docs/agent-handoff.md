@@ -5636,3 +5636,65 @@ Verificação executada:
 
 Próximo passo concreto: gerar/instalar uma nova versão nativa para que o novo
 rótulo apareça no launcher; a instalação anterior não muda sem recompilação.
+
+## Atualização — 2026-08-24: Render com PostgreSQL no Neon
+
+A infraestrutura de produção foi consolidada como Vercel para os dois painéis,
+Render para API e Redis/BullMQ, e Neon para PostgreSQL. O `render.yaml` não
+provisiona mais um Postgres no Render: `DATABASE_URL` e `DIRECT_URL` passaram a
+ser segredos `sync: false`, preenchidos com as URLs pooled e direta do mesmo
+banco Neon. `REDIS_URL` continua ligado automaticamente ao Key Value do Render.
+Como o Neon configurado está em `sa-east-1` e o Render não oferece região no
+Brasil, API e Redis foram alinhados em `virginia`, evitando ainda uma conexão
+privada entre serviços Render de regiões diferentes.
+
+O datasource Prisma 6 agora usa `DATABASE_URL` para o runtime e `DIRECT_URL`
+para migrations e ferramentas administrativas. Os exemplos de ambiente e o CI
+foram atualizados; em desenvolvimento e CI, ambas podem apontar para o mesmo
+PostgreSQL isolado/local. Nenhuma migration nova é necessária porque essa
+mudança altera somente a forma de conexão, não o schema persistido.
+
+Nenhuma conexão, migration, seed, limpeza ou escrita foi executada no Neon. O
+banco local continua sendo `motoboycity_dev` no Docker. Antes do primeiro
+deploy, preencher as duas URLs no Render, aplicar `prisma migrate deploy` pelo
+build e executar o seed uma única vez depois de configurar credenciais fortes
+para o administrador inicial.
+
+Arquivos afetados: `render.yaml`, `.env.example`, `apps/api/.env.example`,
+`apps/api/prisma/schema.prisma`, `.github/workflows/ci.yml` e este handoff.
+
+Verificação executada:
+
+- parse estrutural do `render.yaml`: aprovado, sem Postgres Render, com API e
+  Redis em `virginia` e as duas URLs do Neon como `sync: false`;
+- `prisma validate` e `prisma generate`: aprovados;
+- `prisma migrate status`: 31 migrations, banco local `motoboycity_dev` em
+  `localhost:5434` atualizado; nenhuma conexão ao Neon;
+- typecheck e lint completos: 8/8 workspaces aprovados;
+- build da API: aprovado;
+- `git diff --check`: aprovado.
+
+## Atualização — 2026-08-24: contexto do menu da conta no Company Web
+
+O menu da conta no topo do painel da empresa usava `DropdownMenuLabel`
+diretamente dentro do popup. No Base UI, esse componente representa
+`Menu.GroupLabel` e exige o contexto de um `Menu.Group`; abrir o menu causava o
+erro de runtime `MenuGroupContext is missing`.
+
+O label e a ação **Meu perfil** foram agrupados com `DropdownMenuGroup`, sem
+alterar consulta de usuário, navegação, logout ou estilo. A busca global
+confirmou que este era o único uso de `DropdownMenuLabel` nos dois painéis.
+
+No reteste manual do responsável, **Meu perfil** ainda não navegava. A causa
+era outro resíduo da API Radix: os itens usavam `onSelect`, mas o `Menu.Item` do
+Base UI executa a ação por `onClick`. Perfil e logout do Company Web e logout
+do Admin Web foram alinhados ao evento correto.
+
+Arquivos funcionais afetados:
+`apps/{company-web,admin-web}/src/components/layout/top-nav.tsx`.
+
+Validação: typecheck e lint completos aprovados em 8/8 workspaces; builds de
+produção do Company Web (18 rotas) e Admin Web (35 rotas) aprovados. A
+validação manual por clique não foi executada porque nenhum navegador
+integrado estava disponível nesta sessão. Próximo passo concreto: recarregar o
+painel da empresa, abrir o avatar da conta e testar **Meu perfil** e **Sair**.

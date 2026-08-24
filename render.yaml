@@ -6,8 +6,10 @@
 #
 # COMO USAR
 #   1. Render > New > Blueprint > aponte para este repositorio.
-#   2. Ele cria banco, Redis e a API, e ja liga DATABASE_URL e REDIS_URL.
-#   3. Tudo marcado `sync: false` aparece em branco para voce preencher no
+#   2. Ele cria Redis e a API. O PostgreSQL fica no Neon.
+#   3. Preencha DATABASE_URL com a URL pooled do Neon e DIRECT_URL com a URL
+#      direta do mesmo banco. REDIS_URL e ligado automaticamente pelo Render.
+#   4. Tudo marcado `sync: false` aparece em branco para voce preencher no
 #      painel. Sao os segredos — nenhum deles pode morar neste arquivo, porque
 #      o repositorio e PUBLICO.
 #
@@ -17,13 +19,6 @@
 #   - Rodar `pnpm --filter @motoboycity/api exec prisma db seed` uma vez, para
 #     criar o usuario administrador.
 # =============================================================================
-
-databases:
-  - name: motoboycity-db
-    databaseName: motoboycity
-    plan: free
-    # 15 e a versao do Postgres homologada com o Prisma 6.19 deste projeto.
-    postgresMajorVersion: '15'
 
 services:
   # ---------------------------------------------------------------------------
@@ -37,6 +32,7 @@ services:
   - type: keyvalue
     name: motoboycity-redis
     plan: free
+    region: virginia
     ipAllowList: []
     maxmemoryPolicy: noeviction
 
@@ -47,7 +43,7 @@ services:
     name: motoboycity-api
     runtime: node
     plan: free
-    region: oregon
+    region: virginia
     branch: main
     # Monorepo pnpm: o build roda da RAIZ, porque as dependencias sao do
     # workspace inteiro e a API importa @motoboycity/types e /validation.
@@ -64,12 +60,17 @@ services:
     healthCheckPath: /health
 
     envVars:
-      # --- ligados automaticamente pelo Render -------------------------------
+      # --- Neon (PostgreSQL externo) -----------------------------------------
+      # DATABASE_URL: conexao pooled, usada pela API em runtime.
+      # DIRECT_URL: conexao direta, usada pelo Prisma Migrate durante o build.
+      # O Render solicita os valores na criacao inicial do Blueprint. Se o
+      # Blueprint ja existir, preencha as duas manualmente no painel.
       - key: DATABASE_URL
-        fromDatabase:
-          name: motoboycity-db
-          property: connectionString
+        sync: false
+      - key: DIRECT_URL
+        sync: false
 
+      # --- ligado automaticamente pelo Render --------------------------------
       - key: REDIS_URL
         fromService:
           type: keyvalue
