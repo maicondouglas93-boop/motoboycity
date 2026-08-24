@@ -18,6 +18,7 @@ const optionalNoteSchema = z.string().trim().min(3).max(1_000).optional();
 
 export const requestWithdrawalSchema = z.object({
   amount: moneySchema,
+  idempotencyKey: z.uuid('idempotencyKey deve ser um UUID válido.').optional(),
 });
 
 export const approveWithdrawalSchema = z.object({

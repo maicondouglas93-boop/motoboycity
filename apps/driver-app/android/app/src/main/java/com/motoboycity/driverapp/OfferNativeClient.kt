@@ -101,29 +101,33 @@ object OfferNativeClient {
         .header("Authorization", "Bearer $token")
         .build()
 
-    return try {
-      client.newCall(request).execute().use { response ->
-        when {
-          response.isSuccessful ->
-            if (action == OfferActionReceiver.ACTION_ACCEPT) {
-              startTrackingAcceptedDeliveries(
-                context,
-                apiUrl,
-                token,
-                response.body?.string(),
-              )
-              ActionResult.ACCEPTED
-            } else {
-              ActionResult.DECLINED
-            }
-          response.code == 404 || response.code == 409 -> ActionResult.UNAVAILABLE
-          response.code == 401 || response.code == 403 -> ActionResult.NO_SESSION
-          else -> ActionResult.FAILURE
+    val attempts = if (action == OfferActionReceiver.ACTION_ACCEPT) 2 else 1
+    for (attempt in 0 until attempts) {
+      try {
+        client.newCall(request).execute().use { response ->
+          return when {
+            response.isSuccessful ->
+              if (action == OfferActionReceiver.ACTION_ACCEPT) {
+                startTrackingAcceptedDeliveries(
+                  context,
+                  apiUrl,
+                  token,
+                  response.body?.string(),
+                )
+                ActionResult.ACCEPTED
+              } else {
+                ActionResult.DECLINED
+              }
+            response.code == 404 || response.code == 409 -> ActionResult.UNAVAILABLE
+            response.code == 401 || response.code == 403 -> ActionResult.NO_SESSION
+            else -> ActionResult.FAILURE
+          }
         }
+      } catch (_: Exception) {
+        if (attempt == attempts - 1) return ActionResult.FAILURE
       }
-    } catch (_: Exception) {
-      ActionResult.FAILURE
     }
+    return ActionResult.FAILURE
   }
 
   private fun parseOffer(json: JSONObject): NativeOfferPresentation {

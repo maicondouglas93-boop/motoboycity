@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,8 @@ import { Icon } from '../components/Icon';
 import { RouteTimeline, type RouteStop } from '../components/RouteTimeline';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { deliveryOffersApi } from '../lib/apiClient';
+import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
+import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { formatDeliveryAddress } from '../lib/deliveryOperation';
 import { formatarDinheiro, formatarDistancia } from '../lib/format';
 import { session } from '../lib/session';
@@ -68,6 +70,7 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const claimInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -99,14 +102,29 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
   }, [load]);
 
   async function claim(delivery: AvailableDeliveryItem) {
-    const token = await session.getToken();
-    if (!token) return;
+    if (claimInFlight.current) return;
 
+    claimInFlight.current = true;
     setClaimingId(delivery.id);
+    let token: string | null = null;
     try {
+      token = await session.getToken();
+      if (!token) return;
+
       await deliveryOffersApi.claim(token, delivery.id);
       navigation.replace('DeliveryOperation', { deliveryId: delivery.id });
     } catch (claimError) {
+      const reconciled = token
+        ? await reconcileAcceptedAssignment(token, [delivery.id]).catch(() => null)
+        : null;
+      if (reconciled && token) {
+        await syncDeliveryTracking(
+          token,
+          reconciled.activeDeliveries.map((item) => item.id),
+        ).catch(() => undefined);
+        navigation.replace('DeliveryOperation', { deliveryId: reconciled.delivery.id });
+        return;
+      }
       Alert.alert(
         'Pedido indisponível',
         claimError instanceof ApiError
@@ -115,6 +133,7 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
       );
       await load();
     } finally {
+      claimInFlight.current = false;
       setClaimingId(null);
     }
   }

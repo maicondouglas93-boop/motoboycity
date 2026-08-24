@@ -399,6 +399,55 @@ describe('DispatchService', () => {
       );
     });
 
+    it('tenta o próximo motoboy quando o primeiro ficou ocupado antes do commit', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        destinationKnownAtCreation: true,
+        totalValue: { toString: () => '16.90' },
+        driverValue: { toString: () => '13.52' },
+        platformValue: { toString: () => '3.38' },
+        distanceKm: { toString: () => '5.43' },
+        requiresReturn: false,
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress, offerDropoffAddress],
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany
+        .mockResolvedValueOnce([{ driverId: 'driver-1' }])
+        .mockResolvedValueOnce([{ driverId: 'driver-2' }]);
+      tx.deliveryOffer.findFirst
+        .mockResolvedValueOnce({ id: 'offer-for-another-delivery' })
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-2',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-2',
+      });
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
+      expect(tx.deliveryOffer.findFirst).toHaveBeenCalledWith({
+        where: { driverId: 'driver-1', response: 'PENDING' },
+        select: { id: true },
+      });
+      expect(tx.deliveryOffer.create).toHaveBeenCalledWith({
+        data: { deliveryId: 'delivery-1', driverId: 'driver-2', response: 'PENDING' },
+      });
+      expect(queue.add).toHaveBeenCalledWith(
+        'offer-expire',
+        { offerId: 'offer-2' },
+        expect.objectContaining({ jobId: 'expire-offer-2' }),
+      );
+    });
+
     it('expira a oferta criada quando o timeout não pode ser agendado', async () => {
       prisma.delivery.findUnique.mockResolvedValue({
         id: 'delivery-1',
@@ -591,8 +640,10 @@ describe('DispatchService', () => {
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 60 });
-      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
-      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany
+        .mockResolvedValueOnce([{ driverId: 'driver-1' }])
+        .mockResolvedValueOnce([]);
       tx.driver.findFirst.mockResolvedValue(null);
 
       await service.dispatchDelivery('delivery-1');
@@ -925,6 +976,61 @@ describe('DispatchService', () => {
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(expect.stringContaining('#9'));
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
     });
+
+    it('devolve o mesmo aceite quando a primeira resposta se perdeu', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'ACCEPTED',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        driverId: 'driver-1',
+        batchId: null,
+      });
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+    });
+
+    it('reconcilia o aceite quando perde a corrida para a própria primeira solicitação', async () => {
+      prisma.deliveryOffer.findUnique
+        .mockResolvedValueOnce({
+          id: 'offer-1',
+          driverId: 'driver-1',
+          deliveryId: 'delivery-1',
+          response: 'PENDING',
+        })
+        .mockResolvedValueOnce({
+          id: 'offer-1',
+          driverId: 'driver-1',
+          deliveryId: 'delivery-1',
+          response: 'ACCEPTED',
+        });
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce({ id: 'delivery-1', batchId: null })
+        .mockResolvedValueOnce({
+          id: 'delivery-1',
+          displayNumber: 9,
+          driverId: 'driver-1',
+          batchId: null,
+        });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 0 });
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+    });
   });
 
   describe('batch offer responses', () => {
@@ -1223,6 +1329,22 @@ describe('DispatchService', () => {
       const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
       expect(historico.note).toContain('pedidos disponíveis');
       expect(historico.changedByUserId).toBe('user-1');
+    });
+
+    it('devolve o mesmo claim quando a primeira resposta se perdeu', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 1234,
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        batchId: null,
+      });
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 1234,
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('o lote e assumido inteiro ou nenhum', async () => {

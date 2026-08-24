@@ -136,71 +136,105 @@ export class FinancialPayoutService {
       throw new ForbiddenException('Acesso restrito a entregadores.');
     }
 
-    return this.withSerializableTransaction(async (tx) => {
-      const driver = await tx.driver.findUnique({
-        where: { userId: user.id },
-        select: { id: true, pixKey: true, pixKeyType: true },
-      });
-      if (!driver) {
-        throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
-      }
+    const idempotencyKey = payload.idempotencyKey
+      ? `driver-withdrawal:${user.id}:${payload.idempotencyKey}`
+      : null;
 
-      const wallet = await tx.wallet.findUnique({ where: { driverId: driver.id } });
-      if (!wallet) {
-        throw new UnprocessableEntityException('Não há saldo disponível para saque.');
-      }
+    try {
+      return await this.withSerializableTransaction(async (tx) => {
+        const driver = await tx.driver.findUnique({
+          where: { userId: user.id },
+          select: { id: true, pixKey: true, pixKeyType: true },
+        });
+        if (!driver) {
+          throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
+        }
 
-      const transactions = await tx.walletTransaction.findMany({
-        where: { walletId: wallet.id },
-        select: { type: true, status: true, amount: true },
-      });
-      const balances = calculateWalletBalances(
-        transactions.map((transaction) => ({
-          type: transaction.type as WalletTransactionType,
-          status: transaction.status,
-          amount: transaction.amount,
-        })),
-      );
-      if (roundCurrency(payload.amount) > balances.availableBalance) {
-        throw new UnprocessableEntityException('O valor solicitado supera o saldo disponível.');
-      }
+        const wallet = await tx.wallet.findUnique({ where: { driverId: driver.id } });
+        if (!wallet) {
+          throw new UnprocessableEntityException('Não há saldo disponível para saque.');
+        }
 
-      const walletTransaction = await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: 'DEBIT_WITHDRAWAL',
-          status: 'PENDING',
-          amount: payload.amount,
-        },
-      });
-      const withdrawal = await tx.withdrawalRequest.create({
-        data: {
-          walletId: wallet.id,
-          requestedAmount: payload.amount,
-          feeAmount: 0,
-          netAmount: payload.amount,
-          pixKey: driver.pixKey,
-          pixKeyType: driver.pixKeyType,
-          accountHolderName: user.name,
-          walletTransactionId: walletTransaction.id,
-          statusHistory: {
-            create: {
-              fromStatus: null,
-              toStatus: 'PENDING',
-              changedByUserId: user.id,
-              note: 'Solicitação criada pelo motoboy.',
+        if (idempotencyKey) {
+          const existing = await tx.walletTransaction.findUnique({
+            where: { idempotencyKey },
+            include: { withdrawalRequest: { include: withdrawalInclude } },
+          });
+          if (existing?.walletId === wallet.id && existing.withdrawalRequest) {
+            return this.toWithdrawalRequestItem(existing.withdrawalRequest);
+          }
+        }
+
+        const transactions = await tx.walletTransaction.findMany({
+          where: { walletId: wallet.id },
+          select: { type: true, status: true, amount: true },
+        });
+        const balances = calculateWalletBalances(
+          transactions.map((transaction) => ({
+            type: transaction.type as WalletTransactionType,
+            status: transaction.status,
+            amount: transaction.amount,
+          })),
+        );
+        if (roundCurrency(payload.amount) > balances.availableBalance) {
+          throw new UnprocessableEntityException('O valor solicitado supera o saldo disponível.');
+        }
+
+        const walletTransaction = await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'DEBIT_WITHDRAWAL',
+            status: 'PENDING',
+            amount: payload.amount,
+            idempotencyKey,
+          },
+        });
+        const withdrawal = await tx.withdrawalRequest.create({
+          data: {
+            walletId: wallet.id,
+            requestedAmount: payload.amount,
+            feeAmount: 0,
+            netAmount: payload.amount,
+            pixKey: driver.pixKey,
+            pixKeyType: driver.pixKeyType,
+            accountHolderName: user.name,
+            walletTransactionId: walletTransaction.id,
+            statusHistory: {
+              create: {
+                fromStatus: null,
+                toStatus: 'PENDING',
+                changedByUserId: user.id,
+                note: 'Solicitação criada pelo motoboy.',
+              },
             },
           },
-        },
-        include: withdrawalInclude,
-      });
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { cachedAvailableBalance: { decrement: payload.amount } },
-      });
+          include: withdrawalInclude,
+        });
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: { cachedAvailableBalance: { decrement: payload.amount } },
+        });
 
-      return this.toWithdrawalRequestItem(withdrawal);
-    });
+        return this.toWithdrawalRequestItem(withdrawal);
+      });
+    } catch (error) {
+      const duplicateIdempotencyKey =
+        idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002';
+      if (duplicateIdempotencyKey) {
+        const existing = await this.prisma.walletTransaction.findUnique({
+          where: { idempotencyKey },
+          include: { withdrawalRequest: { include: withdrawalInclude } },
+        });
+        if (
+          existing?.withdrawalRequest?.wallet.driver?.user.id === user.id
+        ) {
+          return this.toWithdrawalRequestItem(existing.withdrawalRequest);
+        }
+      }
+      throw error;
+    }
   }
 
   async listForDriver(user: User): Promise<WithdrawalRequestItem[]> {

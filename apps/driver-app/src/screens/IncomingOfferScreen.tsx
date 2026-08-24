@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
@@ -8,10 +8,12 @@ import { MapBackdrop } from '../components/MapBackdrop';
 import { RouteTimeline, type RouteStop } from '../components/RouteTimeline';
 import { colors } from '../theme/colors';
 import { deliveryOffersApi } from '../lib/apiClient';
+import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { formatarDinheiro } from '../lib/format';
 import { LocationError } from '../lib/location';
 import { dispensarOfertaNativa } from '../lib/offerSession';
+import { offerDeadline, remainingOfferSeconds } from '../lib/offerDeadline';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -88,6 +90,7 @@ export function IncomingOfferScreen({ navigation }: Props) {
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const [secondsLeft, setSecondsLeft] = useState(offer?.expiresInSeconds ?? 0);
   const [status, setStatus] = useState<'idle' | 'accepting' | 'declining'>('idle');
+  const responseInFlight = useRef(false);
 
   useEffect(() => {
     if (!offer) {
@@ -97,19 +100,20 @@ export function IncomingOfferScreen({ navigation }: Props) {
 
   useEffect(() => {
     if (!offer) return;
-    setSecondsLeft(offer.expiresInSeconds);
+    const expiresAt = offerDeadline(offer.expiresInSeconds);
 
-    const interval = setInterval(() => {
-      setSecondsLeft((current) => {
-        if (current <= 1) {
-          clearInterval(interval);
-          dispensarOfertaNativa(offer.offerId).catch(() => undefined);
-          setIncomingOffer(null);
-          return 0;
-        }
-        return current - 1;
-      });
-    }, 1000);
+    const updateCountdown = () => {
+      const remaining = remainingOfferSeconds(expiresAt);
+      setSecondsLeft(remaining);
+      if (remaining === 0) {
+        dispensarOfertaNativa(offer.offerId).catch(() => undefined);
+        setIncomingOffer(null);
+      }
+    };
+
+    updateCountdown();
+
+    const interval = setInterval(updateCountdown, 1_000);
 
     return () => clearInterval(interval);
   }, [offer, setIncomingOffer]);
@@ -118,12 +122,17 @@ export function IncomingOfferScreen({ navigation }: Props) {
 
   async function respond(action: 'accept' | 'decline') {
     const currentOffer = offer;
-    if (!currentOffer) return;
-    const token = await session.getToken();
-    if (!token) return;
-
+    if (!currentOffer || responseInFlight.current) return;
+    responseInFlight.current = true;
     setStatus(action === 'accept' ? 'accepting' : 'declining');
+    let token: string | null = null;
     try {
+      token = await session.getToken();
+      if (!token) {
+        setStatus('idle');
+        return;
+      }
+
       if (action === 'accept') {
         const accepted = await deliveryOffersApi.accept(token, currentOffer.offerId);
         await dispensarOfertaNativa(currentOffer.offerId);
@@ -150,11 +159,29 @@ export function IncomingOfferScreen({ navigation }: Props) {
       setIncomingOffer(null);
       navigation.goBack();
     } catch (error) {
+      if (action === 'accept' && token) {
+        const reconciled = await reconcileAcceptedAssignment(
+          token,
+          currentOffer.deliveries.map((item) => item.deliveryId),
+        ).catch(() => null);
+        if (reconciled) {
+          await dispensarOfertaNativa(currentOffer.offerId);
+          setIncomingOffer(null);
+          await syncDeliveryTracking(
+            token,
+            reconciled.activeDeliveries.map((item) => item.id),
+          ).catch(() => undefined);
+          navigation.replace('DeliveryOperation', { deliveryId: reconciled.delivery.id });
+          return;
+        }
+      }
       setStatus('idle');
       Alert.alert(
         'Oferta não respondida',
         error instanceof ApiError ? error.message : 'Não foi possível responder a esta oferta.',
       );
+    } finally {
+      responseInFlight.current = false;
     }
   }
 

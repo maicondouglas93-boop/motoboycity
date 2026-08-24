@@ -101,7 +101,14 @@ export class LiveDriverPresenceService implements OnModuleInit, OnModuleDestroy 
       if (await this.isLive(driver.id)) continue;
       const now = new Date();
       const update = await this.prisma.driver.updateMany({
-        where: { id: driver.id, availability: 'AVAILABLE' },
+        // Revalida também o relógio: um heartbeat pode chegar depois do
+        // findMany acima e antes deste update. Nesse caso ele vence a corrida
+        // e a presença nova não pode ser sobrescrita como indisponível.
+        where: {
+          id: driver.id,
+          availability: 'AVAILABLE',
+          OR: [{ lastSeenAt: null }, { lastSeenAt: { lt: staleBefore } }],
+        },
         data: { availability: 'UNAVAILABLE' },
       });
       if (update.count === 0) continue;
@@ -115,6 +122,10 @@ export class LiveDriverPresenceService implements OnModuleInit, OnModuleDestroy 
         availability: 'UNAVAILABLE',
         at: now.toISOString(),
         reason: 'HEARTBEAT_EXPIRED',
+      });
+      this.realtimeGateway.emitToDriver(driver.id, 'driver:presence-expired', {
+        reason: 'HEARTBEAT_EXPIRED',
+        at: now.toISOString(),
       });
       this.realtimeGateway.emitAdminActivity({
         type: 'DRIVER_OFFLINE',

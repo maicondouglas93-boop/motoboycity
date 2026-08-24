@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { driverWalletApi } from '../lib/apiClient';
 import { formatarDinheiro } from '../lib/format';
+import { idempotencyAttemptFor, type IdempotencyAttempt } from '../lib/idempotency';
 import { session } from '../lib/session';
 import { isWithdrawalDay, parseWithdrawalAmount } from '../lib/withdrawal';
 import type { RootStackParamList } from '../navigation/types';
@@ -32,6 +33,7 @@ export function WithdrawalScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const withdrawalAttempt = useRef<IdempotencyAttempt | null>(null);
 
   const load = useCallback(async () => {
     const token = await session.getToken();
@@ -80,8 +82,14 @@ export function WithdrawalScreen({ navigation }: Props) {
 
     setSubmitting(true);
     setError(null);
+    const attempt = idempotencyAttemptFor(withdrawalAttempt.current, { amount });
+    withdrawalAttempt.current = attempt;
     try {
-      await driverWalletApi.requestWithdrawal(token, amount);
+      await driverWalletApi.requestWithdrawal(token, {
+        amount,
+        idempotencyKey: attempt.key,
+      });
+      withdrawalAttempt.current = null;
       Alert.alert(
         'Saque solicitado',
         'A solicitação foi enviada para análise. Você pode acompanhar o status na carteira.',

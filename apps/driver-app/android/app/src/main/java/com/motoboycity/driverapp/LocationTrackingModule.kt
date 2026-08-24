@@ -38,7 +38,10 @@ class LocationTrackingModule(
         appVersion,
       )
     if (!started) {
-      promise.reject("tracking_start_failed", "Não foi possível iniciar o rastreamento.")
+      promise.reject(
+        "tracking_start_failed",
+        "Não foi possível iniciar o rastreamento. Verifique se a localização do aparelho está ligada.",
+      )
       return
     }
     promise.resolve(null)

@@ -22,6 +22,8 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Serviço explícito e visível enquanto o entregador estiver online. O mesmo
@@ -31,6 +33,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private lateinit var locationManager: LocationManager
   private val executor: ExecutorService = Executors.newSingleThreadExecutor()
   private val deliveryIds = ConcurrentHashMap.newKeySet<String>()
+  private val pendingLocation = AtomicReference<Location?>(null)
+  private val sendingLocation = AtomicBoolean(false)
 
   @Volatile private var baseUrl: String? = null
   @Volatile private var accessToken: String? = null
@@ -84,50 +88,84 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
       if (receivingUpdates) locationManager.removeUpdates(this)
       val updateInterval = if (deliveryIds.isEmpty()) IDLE_UPDATE_INTERVAL_MS else ACTIVE_UPDATE_INTERVAL_MS
       val updateDistance = if (deliveryIds.isEmpty()) IDLE_UPDATE_DISTANCE_METERS else ACTIVE_UPDATE_DISTANCE_METERS
-      locationManager.requestLocationUpdates(
-        LocationManager.GPS_PROVIDER,
-        updateInterval,
-        updateDistance,
-        this,
-        Looper.getMainLooper(),
-      )
+      val enabledProviders =
+        listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { provider ->
+          runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false)
+        }
+      if (enabledProviders.isEmpty()) {
+        Log.w(TAG, "Rastreamento interrompido: nenhum provedor de localização está ativo")
+        stopTracking()
+        return
+      }
+      enabledProviders.forEach { provider ->
+        locationManager.requestLocationUpdates(
+          provider,
+          updateInterval,
+          updateDistance,
+          this,
+          Looper.getMainLooper(),
+        )
+      }
       receivingUpdates = true
-    } catch (error: IllegalArgumentException) {
-      Log.w(TAG, "GPS indisponível para rastreamento", error)
+    } catch (error: Exception) {
+      Log.w(TAG, "Provedor de localização indisponível para rastreamento", error)
+      stopTracking()
     }
   }
 
   override fun onLocationChanged(location: Location) {
+    pendingLocation.set(Location(location))
+    drainLatestLocation()
+  }
+
+  private fun drainLatestLocation() {
+    if (executor.isShutdown || !sendingLocation.compareAndSet(false, true)) return
+
+    executor.execute {
+      try {
+        while (true) {
+          val location = pendingLocation.getAndSet(null) ?: break
+          sendLocationBatch(location)
+        }
+      } finally {
+        sendingLocation.set(false)
+        if (pendingLocation.get() != null) drainLatestLocation()
+      }
+    }
+  }
+
+  private fun sendLocationBatch(location: Location) {
     val ids = deliveryIds.toList()
     val currentBaseUrl = baseUrl
     val currentAccessToken = accessToken
     val currentAppVersion = appVersion
     if (currentBaseUrl.isNullOrBlank() || currentAccessToken.isNullOrBlank() || currentAppVersion.isNullOrBlank()) return
 
-    executor.execute {
-      val heartbeatStatus = sendPresenceHeartbeat(
-        currentBaseUrl,
-        currentAccessToken,
-        currentAppVersion,
-        location,
-      )
-      if (heartbeatStatus == HttpURLConnection.HTTP_UNAUTHORIZED ||
-        heartbeatStatus == HttpURLConnection.HTTP_FORBIDDEN ||
-        heartbeatStatus == HttpURLConnection.HTTP_CONFLICT
+    val heartbeatStatus = sendPresenceHeartbeat(
+      currentBaseUrl,
+      currentAccessToken,
+      currentAppVersion,
+      location,
+    ) ?: return
+    if (heartbeatStatus == HttpURLConnection.HTTP_UNAUTHORIZED ||
+      heartbeatStatus == HttpURLConnection.HTTP_FORBIDDEN ||
+      heartbeatStatus == HttpURLConnection.HTTP_CONFLICT
+    ) {
+      stopTracking()
+      return
+    }
+    if (heartbeatStatus >= 500 || heartbeatStatus == 429) return
+
+    for (deliveryId in ids) {
+      val status = sendLocation(currentBaseUrl, currentAccessToken, deliveryId, location) ?: break
+      if (status == HttpURLConnection.HTTP_UNAUTHORIZED ||
+        status == HttpURLConnection.HTTP_FORBIDDEN ||
+        status == HttpURLConnection.HTTP_NOT_FOUND ||
+        status == HttpURLConnection.HTTP_CONFLICT
       ) {
-        stopTracking()
-        return@execute
+        deliveryIds.remove(deliveryId)
       }
-      ids.forEach { deliveryId ->
-        val status = sendLocation(currentBaseUrl, currentAccessToken, deliveryId, location)
-        if (status == HttpURLConnection.HTTP_UNAUTHORIZED ||
-          status == HttpURLConnection.HTTP_FORBIDDEN ||
-          status == HttpURLConnection.HTTP_NOT_FOUND ||
-          status == HttpURLConnection.HTTP_CONFLICT
-        ) {
-          deliveryIds.remove(deliveryId)
-        }
-      }
+      if (status >= 500 || status == 429) break
     }
   }
 
@@ -239,7 +277,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     private const val ACTIVE_UPDATE_DISTANCE_METERS = 50f
     private const val IDLE_UPDATE_INTERVAL_MS = 60_000L
     private const val IDLE_UPDATE_DISTANCE_METERS = 100f
-    private const val NETWORK_TIMEOUT_MS = 15_000
+    private const val NETWORK_TIMEOUT_MS = 8_000
 
     fun startOrUpdate(
       context: Context,
@@ -258,6 +296,13 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
       ) {
         return false
       }
+
+      val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+      val hasEnabledProvider =
+        listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).any { provider ->
+          runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false)
+        }
+      if (!hasEnabledProvider) return false
 
       val intent = Intent(context, DeliveryLocationTrackingService::class.java).apply {
         action = ACTION_START_OR_UPDATE

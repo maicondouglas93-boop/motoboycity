@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { Prisma, type DeliveryStatus } from '@prisma/client';
-import type { DeliveryOfferPayload } from '@motoboycity/types';
+import { Prisma, type DeliveryOffer, type DeliveryStatus } from '@prisma/client';
+import type { AcceptOfferResult, DeliveryOfferPayload } from '@motoboycity/types';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +19,10 @@ import { buildOfferPayload, remainingSeconds } from './offer-payload';
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
+
+type PendingOfferCreationResult =
+  | { offers: DeliveryOffer[] }
+  | { retryNextDriver: boolean };
 
 /**
  * Status em que o motoboy ainda tem trabalho em maos e nao pode receber outra
@@ -147,26 +151,37 @@ export class DispatchService {
           select: { driverId: true },
         });
 
-    const nextDriverId = await this.findNextEligibleDriverId({
-      excludeDriverIds: [
-        ...alreadyOffered.map((offer) => offer.driverId),
-        ...(options?.excludeDriverIds ?? []),
-      ],
-      regionId: delivery.company.regionId,
-      serviceTypeIds,
-    });
-    if (!nextDriverId) {
-      return;
-    }
+    const excludedDriverIds = new Set([
+      ...alreadyOffered.map((offer) => offer.driverId),
+      ...(options?.excludeDriverIds ?? []),
+    ]);
+    let nextDriverId: string;
+    let offers: DeliveryOffer[];
 
-    const offers = await this.createPendingOffers({
-      deliveryIds,
-      driverId: nextDriverId,
-      regionId: delivery.company.regionId,
-      serviceTypeIds,
-    });
-    if (!offers) {
-      return;
+    // A seleção acontece antes do lock. Se outro dispatch ocupar esse
+    // motoboy nesse intervalo, tenta o próximo em vez de deixar o pedido
+    // parado até algum gatilho futuro varrer a fila novamente.
+    for (;;) {
+      const candidateDriverId = await this.findNextEligibleDriverId({
+        excludeDriverIds: [...excludedDriverIds],
+        regionId: delivery.company.regionId,
+        serviceTypeIds,
+      });
+      if (!candidateDriverId) return;
+
+      const creation = await this.createPendingOffers({
+        deliveryIds,
+        driverId: candidateDriverId,
+        regionId: delivery.company.regionId,
+        serviceTypeIds,
+      });
+      if ('offers' in creation) {
+        nextDriverId = candidateDriverId;
+        offers = creation.offers;
+        break;
+      }
+      if (!creation.retryNextDriver) return;
+      excludedDriverIds.add(candidateDriverId);
     }
 
     const scheduledTimeouts = await Promise.allSettled(
@@ -419,13 +434,19 @@ export class DispatchService {
     offerId: string,
     driverId: string,
     respondingUserId: string,
-  ): Promise<{ deliveryId: string; displayNumber: number }> {
+  ): Promise<AcceptOfferResult> {
     const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
     if (!offer) {
       throw new NotFoundException('Oferta não encontrada.');
     }
     if (offer.driverId !== driverId) {
       throw new ForbiddenException('Esta oferta não pertence a este motoboy.');
+    }
+
+    const acceptedBeforeRetry = await this.acceptedOfferResult(offer, driverId);
+    if (acceptedBeforeRetry) {
+      await this.finishAcceptedOfferRetry(driverId, acceptedBeforeRetry);
+      return acceptedBeforeRetry;
     }
 
     const offeredDelivery = await this.prisma.delivery.findUnique({
@@ -441,34 +462,46 @@ export class DispatchService {
       );
     }
 
-    const delivery = await this.prisma.$transaction(async (tx) => {
-      const offerUpdate = await tx.deliveryOffer.updateMany({
-        where: { id: offerId, response: 'PENDING' },
-        data: { response: 'ACCEPTED', respondedAt: new Date() },
+    let delivery: { id: string; displayNumber: number; companyId: string };
+    try {
+      delivery = await this.prisma.$transaction(async (tx) => {
+        const offerUpdate = await tx.deliveryOffer.updateMany({
+          where: { id: offerId, response: 'PENDING' },
+          data: { response: 'ACCEPTED', respondedAt: new Date() },
+        });
+        if (offerUpdate.count === 0) {
+          throw new ConflictException('Esta oferta não está mais disponível.');
+        }
+
+        const deliveryUpdate = await tx.delivery.updateMany({
+          where: { id: offer.deliveryId, status: 'AWAITING_DRIVER' },
+          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+        });
+        if (deliveryUpdate.count === 0) {
+          throw new ConflictException('Este pedido já não está mais disponível.');
+        }
+
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: offer.deliveryId,
+            fromStatus: 'AWAITING_DRIVER',
+            toStatus: 'ACCEPTED',
+            changedByUserId: respondingUserId,
+          },
+        });
+
+        return tx.delivery.findUniqueOrThrow({ where: { id: offer.deliveryId } });
       });
-      if (offerUpdate.count === 0) {
-        throw new ConflictException('Esta oferta não está mais disponível.');
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const acceptedDuringRace = await this.acceptedOfferResultById(offerId, driverId);
+        if (acceptedDuringRace) {
+          await this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
+          return acceptedDuringRace;
+        }
       }
-
-      const deliveryUpdate = await tx.delivery.updateMany({
-        where: { id: offer.deliveryId, status: 'AWAITING_DRIVER' },
-        data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
-      });
-      if (deliveryUpdate.count === 0) {
-        throw new ConflictException('Este pedido já não está mais disponível.');
-      }
-
-      await tx.deliveryStatusHistory.create({
-        data: {
-          deliveryId: offer.deliveryId,
-          fromStatus: 'AWAITING_DRIVER',
-          toStatus: 'ACCEPTED',
-          changedByUserId: respondingUserId,
-        },
-      });
-
-      return tx.delivery.findUniqueOrThrow({ where: { id: offer.deliveryId } });
-    });
+      throw error;
+    }
 
     await this.cancelOfferTimeout(offerId);
     await this.notifyOfferResolved(driverId, [offerId], 'accepted');
@@ -550,30 +583,51 @@ export class DispatchService {
     }
     const offerIds = offers.map((offer) => offer.id);
 
-    await this.prisma.$transaction(async (tx) => {
-      const offerUpdate = await tx.deliveryOffer.updateMany({
-        where: { id: { in: offerIds }, response: 'PENDING' },
-        data: { response: 'ACCEPTED', respondedAt: new Date() },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const offerUpdate = await tx.deliveryOffer.updateMany({
+          where: { id: { in: offerIds }, response: 'PENDING' },
+          data: { response: 'ACCEPTED', respondedAt: new Date() },
+        });
+        if (offerUpdate.count !== offerIds.length) {
+          throw new ConflictException('O lote não está mais disponível para aceite.');
+        }
+        const deliveryUpdate = await tx.delivery.updateMany({
+          where: { id: { in: deliveryIds }, status: 'AWAITING_DRIVER' },
+          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+        });
+        if (deliveryUpdate.count !== deliveryIds.length) {
+          throw new ConflictException('O lote já não está mais disponível.');
+        }
+        await tx.deliveryStatusHistory.createMany({
+          data: deliveryIds.map((id) => ({
+            deliveryId: id,
+            fromStatus: 'AWAITING_DRIVER',
+            toStatus: 'ACCEPTED',
+            changedByUserId: respondingUserId,
+          })),
+        });
       });
-      if (offerUpdate.count !== offerIds.length) {
-        throw new ConflictException('O lote não está mais disponível para aceite.');
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const acceptedDuringRace = await this.acceptedOfferResultById(offerId, driverId);
+        if (
+          acceptedDuringRace?.batchId === batchId &&
+          acceptedDuringRace.deliveryIds &&
+          acceptedDuringRace.displayNumbers
+        ) {
+          await this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
+          return {
+            deliveryId: acceptedDuringRace.deliveryId,
+            displayNumber: acceptedDuringRace.displayNumber,
+            batchId,
+            deliveryIds: acceptedDuringRace.deliveryIds,
+            displayNumbers: acceptedDuringRace.displayNumbers,
+          };
+        }
       }
-      const deliveryUpdate = await tx.delivery.updateMany({
-        where: { id: { in: deliveryIds }, status: 'AWAITING_DRIVER' },
-        data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
-      });
-      if (deliveryUpdate.count !== deliveryIds.length) {
-        throw new ConflictException('O lote já não está mais disponível.');
-      }
-      await tx.deliveryStatusHistory.createMany({
-        data: deliveryIds.map((id) => ({
-          deliveryId: id,
-          fromStatus: 'AWAITING_DRIVER',
-          toStatus: 'ACCEPTED',
-          changedByUserId: respondingUserId,
-        })),
-      });
-    });
+      throw error;
+    }
 
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
@@ -598,6 +652,57 @@ export class DispatchService {
       deliveryIds,
       displayNumbers: deliveries.map((delivery) => delivery.displayNumber),
     };
+  }
+
+  private async acceptedOfferResultById(
+    offerId: string,
+    driverId: string,
+  ): Promise<AcceptOfferResult | null> {
+    const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
+    if (!offer || offer.driverId !== driverId) return null;
+    return this.acceptedOfferResult(offer, driverId);
+  }
+
+  private async acceptedOfferResult(
+    offer: { deliveryId: string; driverId: string; response: string },
+    driverId: string,
+  ): Promise<AcceptOfferResult | null> {
+    if (offer.driverId !== driverId || offer.response !== 'ACCEPTED') return null;
+
+    const principal = await this.prisma.delivery.findUnique({ where: { id: offer.deliveryId } });
+    if (!principal || principal.driverId !== driverId) return null;
+    if (!principal.batchId) {
+      return { deliveryId: principal.id, displayNumber: principal.displayNumber };
+    }
+
+    const deliveries = await this.prisma.delivery.findMany({
+      where: { batchId: principal.batchId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (deliveries.length === 0 || deliveries.some((item) => item.driverId !== driverId)) {
+      return null;
+    }
+    return {
+      deliveryId: principal.id,
+      displayNumber: principal.displayNumber,
+      batchId: principal.batchId,
+      deliveryIds: deliveries.map((item) => item.id),
+      displayNumbers: deliveries.map((item) => item.displayNumber),
+    };
+  }
+
+  private async finishAcceptedOfferRetry(
+    driverId: string,
+    result: AcceptOfferResult,
+  ): Promise<void> {
+    const deliveryIds = result.deliveryIds ?? [result.deliveryId];
+    const offers = await this.prisma.deliveryOffer.findMany({
+      where: { driverId, deliveryId: { in: deliveryIds }, response: 'ACCEPTED' },
+      select: { id: true },
+    });
+    const offerIds = offers.map((item) => item.id);
+    await Promise.allSettled(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    await this.notifyOfferResolved(driverId, offerIds, 'accepted');
   }
 
   private async expireBatchOffer(
@@ -709,14 +814,27 @@ export class DispatchService {
     driverId: string;
     regionId: string;
     serviceTypeIds: string[];
-  }) {
+  }): Promise<PendingOfferCreationResult> {
     if (!(await this.livePresence.isLive(driverId))) {
-      return null;
+      return { retryNextDriver: true };
     }
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          // Serializa a escolha do mesmo motoboy entre pedidos diferentes.
+          // O lock das entregas abaixo impede oferta duplicada por pedido; este
+          // segundo eixo impede dois dispatches concorrentes de ocuparem o
+          // mesmo slot de apresentação do aplicativo do entregador.
+          await tx.$queryRaw<Array<{ id: string }>>(
+            Prisma.sql`
+              SELECT "id"
+              FROM "drivers"
+              WHERE "id" = ${driverId}
+              FOR UPDATE
+            `,
+          );
+
           const lockedDeliveries = await tx.$queryRaw<Array<{ id: string }>>(
             Prisma.sql`
               SELECT "id"
@@ -728,7 +846,7 @@ export class DispatchService {
             `,
           );
           if (lockedDeliveries.length !== deliveryIds.length) {
-            return null;
+            return { retryNextDriver: false };
           }
 
           const eligibleDriver = await tx.driver.findFirst({
@@ -736,7 +854,7 @@ export class DispatchService {
             select: { id: true },
           });
           if (!eligibleDriver) {
-            return null;
+            return { retryNextDriver: true };
           }
 
           /**
@@ -745,23 +863,33 @@ export class DispatchService {
            * corrida e estourado o limite.
            */
           if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, tx))) {
-            return null;
+            return { retryNextDriver: true };
+          }
+
+          const pendingOfferForDriver = await tx.deliveryOffer.findFirst({
+            where: { driverId, response: 'PENDING' },
+            select: { id: true },
+          });
+          if (pendingOfferForDriver) {
+            return { retryNextDriver: true };
           }
 
           const pendingOffer = await tx.deliveryOffer.findFirst({
             where: { deliveryId: { in: deliveryIds }, response: 'PENDING' },
           });
           if (pendingOffer) {
-            return null;
+            return { retryNextDriver: false };
           }
 
-          return Promise.all(
-            deliveryIds.map((id) =>
-              tx.deliveryOffer.create({
-                data: { deliveryId: id, driverId, response: 'PENDING' },
-              }),
+          return {
+            offers: await Promise.all(
+              deliveryIds.map((id) =>
+                tx.deliveryOffer.create({
+                  data: { deliveryId: id, driverId, response: 'PENDING' },
+                }),
+              ),
             ),
-          );
+          };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -773,7 +901,7 @@ export class DispatchService {
         this.logger.debug(
           `Corrida de dispatch detectada para ${deliveryIds.join(', ')}; nenhuma oferta duplicada foi emitida.`,
         );
-        return null;
+        return { retryNextDriver: error.code === 'P2034' };
       }
       throw error;
     }
@@ -872,10 +1000,14 @@ export class DispatchService {
     deliveryId: string,
     driverId: string,
     claimingUserId: string,
-  ): Promise<{ deliveryId: string; displayNumber: number }> {
+  ): Promise<AcceptOfferResult> {
     const alvo = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
     if (!alvo) {
       throw new NotFoundException('Pedido não encontrado.');
+    }
+    const claimedBeforeRetry = await this.assignedDeliveryResult(alvo, driverId);
+    if (claimedBeforeRetry) {
+      return claimedBeforeRetry;
     }
     if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
       throw new ConflictException('Este pedido já não está mais disponível.');
@@ -898,29 +1030,44 @@ export class DispatchService {
     }
     const ids = irmaos.map((item) => item.id);
 
-    const delivery = await this.prisma.$transaction(async (tx) => {
-      const atualizadas = await tx.delivery.updateMany({
-        where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
-        data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
-      });
-      if (atualizadas.count !== ids.length) {
-        throw new ConflictException('Este pedido já não está mais disponível.');
-      }
-
-      for (const id of ids) {
-        await tx.deliveryStatusHistory.create({
-          data: {
-            deliveryId: id,
-            fromStatus: 'AWAITING_DRIVER',
-            toStatus: 'ACCEPTED',
-            changedByUserId: claimingUserId,
-            note: 'Assumido pelo motoboy a partir dos pedidos disponíveis.',
-          },
+    let delivery: {
+      id: string;
+      displayNumber: number;
+      companyId: string;
+      status: DeliveryStatus;
+      batchId: string | null;
+    };
+    try {
+      delivery = await this.prisma.$transaction(async (tx) => {
+        const atualizadas = await tx.delivery.updateMany({
+          where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
+          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
         });
-      }
+        if (atualizadas.count !== ids.length) {
+          throw new ConflictException('Este pedido já não está mais disponível.');
+        }
 
-      return tx.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
-    });
+        for (const id of ids) {
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: id,
+              fromStatus: 'AWAITING_DRIVER',
+              toStatus: 'ACCEPTED',
+              changedByUserId: claimingUserId,
+              note: 'Assumido pelo motoboy a partir dos pedidos disponíveis.',
+            },
+          });
+        }
+
+        return tx.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const claimedDuringRace = await this.assignedDeliveryResultById(deliveryId, driverId);
+        if (claimedDuringRace) return claimedDuringRace;
+      }
+      throw error;
+    }
 
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} foi assumido por um motoboy a partir dos pedidos disponíveis.`,
@@ -930,7 +1077,56 @@ export class DispatchService {
       status: delivery.status,
     });
 
-    return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+    if (!delivery.batchId) {
+      return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+    }
+    return {
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      batchId: delivery.batchId,
+      deliveryIds: ids,
+      displayNumbers: irmaos.map((item) => item.displayNumber),
+    };
+  }
+
+  private async assignedDeliveryResultById(
+    deliveryId: string,
+    driverId: string,
+  ): Promise<AcceptOfferResult | null> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!delivery) return null;
+    return this.assignedDeliveryResult(delivery, driverId);
+  }
+
+  private async assignedDeliveryResult(
+    delivery: {
+      id: string;
+      displayNumber: number;
+      batchId: string | null;
+      driverId: string | null;
+      status: DeliveryStatus;
+    },
+    driverId: string,
+  ): Promise<AcceptOfferResult | null> {
+    if (delivery.driverId !== driverId || delivery.status === 'AWAITING_DRIVER') return null;
+    if (!delivery.batchId) {
+      return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
+    }
+
+    const deliveries = await this.prisma.delivery.findMany({
+      where: { batchId: delivery.batchId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (deliveries.length === 0 || deliveries.some((item) => item.driverId !== driverId)) {
+      return null;
+    }
+    return {
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      batchId: delivery.batchId,
+      deliveryIds: deliveries.map((item) => item.id),
+      displayNumbers: deliveries.map((item) => item.displayNumber),
+    };
   }
 
   /**

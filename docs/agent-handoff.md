@@ -5486,3 +5486,127 @@ ou margem interna.
 Validação final deste recorte: typecheck, lint e build de produção do Admin Web
 aprovados; o build gerou 35 páginas. Nenhum `.env`, secret ou arquivo de sessão
 Kotlin faz parte do conjunto preparado para commit.
+
+## Atualização — 2026-08-24: auditoria do aplicativo do motoboy
+
+A auditoria de `apps/driver-app` foi concluída e registrada em
+`docs/auditoria-driver-app.md`. O escopo incluiu as 12 telas React Native, os 13
+arquivos Kotlin, os clientes compartilhados e os serviços de API diretamente
+ligados a sessão, presença, dispatch, transições e saque. Nenhum código da
+aplicação, contrato, schema, migration ou configuração foi alterado; esta rodada
+produziu somente documentação.
+
+Foram confirmados cinco achados altos: uma corrida entre dois dispatches pode
+criar ofertas simultâneas do mesmo motoboy, que se substituem nos três
+apresentadores do app; falha
+transitória em `/auth/me` limpa somente a sessão JavaScript e pode deixar push,
+tracking e sessão nativa ativos; aceite confirmado com resposta perdida não é
+reconciliado; o serviço pode confirmar início do tracking apesar de usar somente
+`GPS_PROVIDER` e não receber posições; saque não possui identidade idempotente e
+pode ser solicitado duas vezes após perda de resposta.
+
+Os achados médios cobrem ambiguidade e concorrência nas transições de coleta e
+entrega, acúmulo serial de envios de GPS em lotes sob rede ruim, ações principais
+irreversíveis no primeiro toque e cronômetro React Native relativo que envelhece
+durante suspensão. A lacuna baixa é específica de cobertura: as oito suítes não
+exercitam os lifecycles e falhas acima, apesar de estarem verdes.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| typecheck de `@motoboycity/driver-app` | aprovado |
+| lint de `@motoboycity/driver-app` | aprovado |
+| Jest do Driver App | 8 suítes e 58 testes aprovados |
+| build Android | não executado, conforme o escopo |
+
+As primeiras execuções dentro do sandbox não conseguiram atravessar os junctions
+do PNPM (`EPERM`/módulos ausentes); os mesmos três comandos foram repetidos fora
+do isolamento e passaram. Alterações paralelas já existentes em Admin Web,
+pricing da API e API client não foram tocadas nem avaliadas como parte desta
+auditoria. Próximo passo concreto: corrigir primeiro a exclusividade/apresentação
+de ofertas por motoboy e a reconciliação idempotente do aceite; em seguida alinhar
+sessão JavaScript/nativa e validar o tracking em aparelho com GPS e rede
+controladamente indisponíveis.
+
+## Atualização — 2026-08-24: correção dos achados do aplicativo do motoboy
+
+Os dez achados registrados em `docs/auditoria-driver-app.md` foram tratados no
+app Android e nos serviços de API que sustentam o fluxo. O documento de
+auditoria agora mantém o diagnóstico original e uma tabela de estado pós-correção.
+
+### Dispatch e aceite
+
+- A criação de oferta passou a bloquear o registro do motoboy dentro da
+  transação serializável e revalidar a ausência de outra oferta pendente. O
+  lock das entregas continua protegendo o outro eixo da concorrência. Se o
+  candidato ficou ocupado entre seleção e commit, o mesmo dispatch tenta o
+  próximo elegível em vez de deixar o pedido parado.
+- Aceitar oferta ou assumir pedido livre agora devolve o resultado persistido
+  quando a mesma atribuição já pertence ao motoboy. Em corrida entre requests,
+  o serviço relê a oferta/entrega depois da operação condicional falhar.
+- Home, vitrine e tela de oferta consultam entregas ativas quando uma resposta
+  de aceite/claim se perde. O cliente Android nativo repete somente `ACCEPT` uma
+  vez; `DECLINE` permanece sem repetição automática.
+
+### Sessão, oferta e tracking
+
+- O bootstrap preserva a credencial em indisponibilidade da API. Apenas
+  `401`/`403` executam a limpeza coordenada de tracking, registro/token FCM,
+  sessão nativa e AsyncStorage, nesta ordem para permitir o desregistro.
+- O cronômetro da oferta React Native usa deadline absoluto. A retomada da Home
+  sempre consulta a oferta pendente e atualiza ou remove o estado local, sem
+  trocar de tela quando a mesma oferta apenas recebeu um prazo atualizado.
+- O foreground service Android valida se GPS ou rede está ativo antes de
+  iniciar, registra ambos os provedores disponíveis e para ao falhar o registro.
+  O envio coalesce fixes, mantendo somente o mais recente, usa timeout de oito
+  segundos e interrompe o lote em erro de rede, `5xx` ou `429`.
+- Quando o TTL de presença expira, a API emite também
+  `driver:presence-expired`. A Home sincroniza o seletor para indisponível, para
+  o tracking e orienta o motoboy a verificar a localização. O update de
+  expiração volta a validar `lastSeenAt`, portanto um heartbeat recebido entre
+  a busca e a gravação vence a corrida e permanece online.
+
+### Dinheiro e operação
+
+- `POST /driver/wallet/withdrawals` aceita `idempotencyKey` UUID opcional. O app
+  sempre cria uma chave por tentativa lógica e a conserva ao repetir o mesmo
+  valor. A API prefixa a chave com o usuário, grava no
+  `WalletTransaction.idempotencyKey` já existente e recupera a solicitação em
+  retry ou colisão `P2002`. Não houve alteração de schema nem migration.
+- Coleta, insucesso, entrega e conclusão de retorno mudam o estado com
+  `updateMany` condicionado ao estado anterior e ao motoboy. Resposta perdida e
+  request concorrente retornam o detalhe/grupo já aplicado sem duplicar
+  histórico, endereço de destino ou repasse.
+- A tela operacional usa trava síncrona contra toque duplo, permanece aberta em
+  erro transitório, relê o estado antes de declarar resultado ambíguo e pede
+  confirmação para coleta, entrega e retorno. A segunda ação principal foi
+  removida.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/{dispatch,deliveries,finance,live-presence}/`;
+- `apps/driver-app/{App.tsx,src/lib,src/screens,__tests__,android/app/src/main/java}/`;
+- `packages/{validation,api-client}/`;
+- `docs/{auditoria-driver-app.md,agent-handoff.md}`.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| build de `@motoboycity/validation` | aprovado |
+| typecheck completo do monorepo | 8 projetos aprovados |
+| lint completo do monorepo | 8 projetos aprovados, sem avisos |
+| Jest completo do Driver App | 12 suítes e 67 testes aprovados |
+| Jest unitário completo da API | 59 suítes e 718 testes aprovados |
+| build da API | aprovado |
+| `:app:compileDebugKotlin` | aprovado; um aviso preexistente de `Notification.Builder` depreciado |
+| `git diff --check` | aprovado antes da atualização final deste handoff |
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhum seed, Docker, `.env`, secret ou arquivo de sessão Kotlin
+foi alterado. O passo concreto seguinte é instalar o build em aparelho Android
+e validar: aceite com resposta cortada; notificação com tela bloqueada,
+desbloqueada e app aberto; sessão expirada; GPS desligado/trocando para rede; e
+lote grande sob rede degradada. Depois, executar os E2E com banco e Redis
+isolados antes de promover o recorte.

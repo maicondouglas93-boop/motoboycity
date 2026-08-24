@@ -81,6 +81,9 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     platformValue: { toString: () => '2.50' },
     requiresReturn: false,
     returnValue: null,
+    failedAt: null,
+    failureReason: null,
+    failureNote: null,
     paymentMethod: 'BILLED',
     recipientName: null,
     recipientPhone: null,
@@ -156,14 +159,18 @@ describe('DeliveriesService', () => {
     emitAdminActivity: jest.Mock;
   };
   let tx: {
-    delivery: { create: jest.Mock; update: jest.Mock };
+    delivery: { create: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
     deliveryAddress: { createMany: jest.Mock; create: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
-      delivery: { create: jest.fn(), update: jest.fn() },
+      delivery: {
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       deliveryAddress: { createMany: jest.fn(), create: jest.fn() },
       deliveryStatusHistory: { create: jest.fn() },
     };
@@ -1308,9 +1315,9 @@ describe('DeliveriesService', () => {
 
       const result = await service.collect(driverUser, 'delivery-1');
 
-      expect(tx.delivery.update).toHaveBeenCalledTimes(2);
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledTimes(2);
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'ACCEPTED', driverId: 'driver-1' },
         data: { status: 'COLLECTED', statusChangedAt: expect.any(Date) },
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
@@ -1323,9 +1330,80 @@ describe('DeliveriesService', () => {
       });
       expect(result.deliveries).toHaveLength(2);
     });
+
+    it('devolve o estado coletado sem criar outro histórico quando a resposta se perdeu', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      const collected = fullDeliveryRow({
+        driverId: 'driver-1',
+        status: 'COLLECTED',
+        batchId: null,
+      });
+      prisma.delivery.findUnique.mockResolvedValue(collected);
+
+      await expect(service.collect(driverUser, 'delivery-1')).resolves.toMatchObject({
+        deliveries: [expect.objectContaining({ id: 'delivery-1', status: 'COLLECTED' })],
+      });
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('markFailed', () => {
+    const failurePayload = {
+      reason: 'RECIPIENT_ABSENT' as const,
+      lat: -20.15,
+      lng: -41.74,
+      accuracy: 10,
+    };
+
+    it('faz a transição com escrita condicional e um único histórico', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'COLLECTED' }),
+      );
+
+      await service.markFailed(driverUser, 'delivery-1', failurePayload);
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
+        data: expect.objectContaining({ status: 'FAILED', failureReason: 'RECIPIENT_ABSENT' }),
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('devolve o insucesso existente sem criar outro histórico no retry', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'FAILED',
+          failedAt: new Date('2026-08-24T12:00:00.000Z'),
+        }),
+      );
+
+      await expect(
+        service.markFailed(driverUser, 'delivery-1', failurePayload),
+      ).resolves.toBeDefined();
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('markDelivered', () => {
+    it('devolve a entrega já concluída sem cobrar ou gravar novamente', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'COMPLETED', failedAt: null }),
+      );
+
+      await expect(service.markDelivered(driverUser, 'delivery-1', {})).resolves.toMatchObject({
+        id: 'delivery-1',
+        status: 'COMPLETED',
+      });
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
+    });
+
     it('rejeita se o pedido não está COLLECTED', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
@@ -1456,8 +1534,8 @@ describe('DeliveriesService', () => {
 
       expect(googleMapsService.getDistance).not.toHaveBeenCalled();
       expect(tx.deliveryAddress.create).not.toHaveBeenCalled();
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
         data: expect.objectContaining({ status: 'COMPLETED' }),
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
@@ -1495,8 +1573,8 @@ describe('DeliveriesService', () => {
 
       await service.markDelivered(driverUser, 'delivery-1', {});
 
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
         data: expect.objectContaining({ status: 'DELIVERED' }),
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
@@ -1554,8 +1632,8 @@ describe('DeliveriesService', () => {
           lng: -41.74,
         }),
       });
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
         data: expect.objectContaining({
           distanceKm: 8,
           totalValue: 17,
@@ -1568,6 +1646,24 @@ describe('DeliveriesService', () => {
 
   describe('completeReturn', () => {
     const nearPickup = { lat: -20.15, lng: -41.74 };
+
+    it('devolve o retorno já concluído sem exigir outro fix de GPS', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COMPLETED',
+          requiresReturn: true,
+          batchId: null,
+        }),
+      );
+
+      await expect(service.completeReturn(driverUser, 'delivery-1', nearPickup)).resolves.toMatchObject({
+        deliveries: [expect.objectContaining({ id: 'delivery-1', status: 'COMPLETED' })],
+      });
+      expect(platformSettingsService.get).not.toHaveBeenCalled();
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+    });
 
     it('rejeita quando o raio de retorno ainda não foi configurado', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
@@ -1689,9 +1785,9 @@ describe('DeliveriesService', () => {
         lng: -41.74,
       });
 
-      expect(tx.delivery.update).toHaveBeenCalledTimes(1);
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'DELIVERED', driverId: 'driver-1' },
         data: { status: 'COMPLETED', statusChangedAt: expect.any(Date) },
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(

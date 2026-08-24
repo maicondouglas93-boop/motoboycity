@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type { DeliveryAddressItem, DeliveryDetail } from '@motoboycity/types';
+import type { DeliveryAddressItem, DeliveryDetail, DeliveryStatus } from '@motoboycity/types';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
@@ -91,6 +91,27 @@ function destinationLabel(
   return 'Endereço de entrega não informado';
 }
 
+function operationWasApplied(operation: Exclude<Operation, null>, delivery: DeliveryDetail): boolean {
+  const hasTransition = (fromStatus: DeliveryStatus, toStatuses: DeliveryStatus[]) =>
+    delivery.statusHistory.some(
+      (item) => item.fromStatus === fromStatus && toStatuses.includes(item.toStatus),
+    );
+
+  if (operation === 'collect' || operation === 'collect-forgot') {
+    return ['COLLECTED', 'DELIVERED', 'FAILED', 'COMPLETED'].includes(delivery.status);
+  }
+  if (operation === 'deliver' || operation === 'deliver-forgot') {
+    return hasTransition('COLLECTED', ['DELIVERED', 'COMPLETED']);
+  }
+  if (operation === 'fail') {
+    return delivery.statusHistory.some((item) => item.toStatus === 'FAILED');
+  }
+  if (operation === 'return') {
+    return hasTransition('DELIVERED', ['COMPLETED']) || hasTransition('FAILED', ['COMPLETED']);
+  }
+  return false;
+}
+
 export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [failureOpen, setFailureOpen] = useState(false);
@@ -104,7 +125,9 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [operation, setOperation] = useState<Operation>(null);
+  const operationInFlight = useRef(false);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
   const loadDelivery = useCallback(async () => {
@@ -117,12 +140,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
     try {
       setDelivery(await deliveriesApi.detail(token, route.params.deliveryId));
+      setLoadError(null);
     } catch (error) {
-      Alert.alert(
-        'Pedido indisponível',
-        error instanceof ApiError ? error.message : 'Não foi possível carregar este pedido.',
-      );
-      navigation.goBack();
+      const message =
+        error instanceof ApiError ? error.message : 'Não foi possível carregar este pedido.';
+      setLoadError(message);
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        Alert.alert('Pedido indisponível', message);
+        navigation.goBack();
+      }
     } finally {
       setLoading(false);
     }
@@ -153,12 +179,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   }
 
   async function runOperation(nextOperation: Exclude<Operation, null>) {
-    if (!delivery || operation) return;
-    const token = await session.getToken();
-    if (!token) return;
-
+    if (!delivery || operationInFlight.current) return;
+    operationInFlight.current = true;
     setOperation(nextOperation);
+    let token: string | null = null;
     try {
+      token = await session.getToken();
+      if (!token) return;
+
       if (nextOperation === 'collect') {
         const result = await deliveriesApi.collect(token, delivery.id);
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
@@ -247,14 +275,46 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         }
       }
     } catch (error) {
+      if (!token) {
+        Alert.alert('Sessão indisponível', 'Entre novamente para atualizar este pedido.');
+        return;
+      }
+      if (nextOperation === 'return-to-queue') {
+        const activeDeliveries = await getActiveDeliveries(token).catch(() => null);
+        if (activeDeliveries && !activeDeliveries.some((item) => item.id === delivery.id)) {
+          setActiveDeliveries(activeDeliveries);
+          await syncDeliveryTracking(
+            token,
+            activeDeliveries.map((item) => item.id),
+          ).catch(() => undefined);
+          navigation.popToTop();
+          return;
+        }
+      } else {
+        const reconciled = await deliveriesApi.detail(token, delivery.id).catch(() => null);
+        if (reconciled && operationWasApplied(nextOperation, reconciled)) {
+          setDelivery(reconciled);
+          const activeDeliveries = await refreshActiveDeliveries(token).catch(() => null);
+          if (activeDeliveries) {
+            await syncDeliveryTracking(
+              token,
+              activeDeliveries.map((item) => item.id),
+            ).catch(() => undefined);
+          }
+          setSuccessMessage('A ação já havia sido confirmada e o pedido foi sincronizado.');
+          return;
+        }
+      }
       Alert.alert(
-        'Ação não concluída',
-        error instanceof ApiError || error instanceof LocationError
-          ? error.message
-          : 'Não foi possível concluir esta ação. Tente novamente.',
+        'Não foi possível confirmar a ação',
+        `${
+          error instanceof ApiError || error instanceof LocationError
+            ? error.message
+            : 'A conexão foi interrompida.'
+        } Atualize o pedido antes de repetir; o servidor aceita a repetição sem duplicar o registro.`,
       );
-      await loadDelivery().catch(() => undefined);
     } finally {
+      operationInFlight.current = false;
       setOperation(null);
     }
   }
@@ -267,7 +327,20 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     );
   }
 
-  if (!delivery) return null;
+  if (!delivery) {
+    return (
+      <SafeAreaView style={styles.loading}>
+        <Text style={styles.loadErrorText}>{loadError ?? 'Pedido indisponível.'}</Text>
+        <PrimaryButton
+          label="Tentar novamente"
+          onPress={() => {
+            setLoading(true);
+            loadDelivery().catch(() => undefined);
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
 
   const currentDelivery = delivery;
   const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
@@ -331,7 +404,32 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       setDeliverConfirmationOpen(true);
       return;
     }
-    runOperation(action).catch(() => undefined);
+
+    const confirmation =
+      action === 'collect'
+        ? {
+            title: 'Confirmar coleta?',
+            message: 'Confirme somente depois de receber todos os itens deste pedido na loja.',
+            label: 'Confirmar coleta',
+          }
+        : action === 'deliver'
+          ? {
+              title: 'Confirmar entrega?',
+              message: 'Sua localização atual será validada antes de concluir a entrega.',
+              label: 'Confirmar entrega',
+            }
+          : {
+              title: 'Confirmar retorno?',
+              message: 'Confirme somente quando estiver novamente no local de coleta.',
+              label: 'Confirmar retorno',
+            };
+    Alert.alert(confirmation.title, confirmation.message, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: confirmation.label,
+        onPress: () => runOperation(action).catch(() => undefined),
+      },
+    ]);
   }
 
   return (
@@ -383,26 +481,6 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               </View>
               <Text style={styles.elapsedLabel}>Tempo desde o aceite</Text>
             </View>
-          ) : null}
-
-          {action && copy.primaryActionLabel ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={copy.primaryActionLabel}
-              disabled={busy}
-              onPress={handlePrimaryAction}
-              style={({ pressed }) => [
-                styles.heroAction,
-                pressed && !busy && styles.pressed,
-                busy && styles.disabled,
-              ]}
-            >
-              {busy ? (
-                <ActivityIndicator color={colors.actionText} />
-              ) : (
-                <Text style={styles.heroActionText}>{copy.primaryActionLabel}</Text>
-              )}
-            </Pressable>
           ) : null}
 
           <OperationSection icon="money" title="Valores">
@@ -823,8 +901,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 16,
+    paddingHorizontal: 24,
     backgroundColor: colors.surface,
   },
+  loadErrorText: { color: colors.danger, fontSize: 15, lineHeight: 21, textAlign: 'center' },
   sheet: { flex: 1, marginTop: 74, overflow: 'hidden' },
   scroll: { flex: 1 },
   content: { paddingHorizontal: 20, paddingBottom: 28, gap: 18 },

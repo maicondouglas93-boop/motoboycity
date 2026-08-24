@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import {
   AuthorizationStatus,
+  deleteToken,
   getMessaging,
   getToken,
   onTokenRefresh,
@@ -96,21 +97,27 @@ export async function ativarPush(): Promise<boolean> {
  * inclusive o número do pedido na notificação, que é informação de outra
  * pessoa.
  */
-export async function desativarPush(): Promise<void> {
+export async function desativarPush(
+  options: { clearLocalToken?: boolean } = {},
+): Promise<void> {
   cancelarRefresh?.();
   cancelarRefresh = null;
 
-  const token = tokenAtual;
+  let token = tokenAtual;
   tokenAtual = null;
-  if (!token) {
-    return;
+  if (!token && options.clearLocalToken && firebaseDisponivel()) {
+    token = await getToken(getMessaging()).catch(() => null);
+  }
+  if (token) {
+    const acesso = await session.getToken();
+    if (acesso) {
+      await pushTokensApi.unregister(acesso, token).catch(() => undefined);
+    }
   }
 
-  const acesso = await session.getToken();
-  if (!acesso) {
-    return;
+  if (options.clearLocalToken && firebaseDisponivel()) {
+    await deleteToken(getMessaging()).catch(() => undefined);
   }
-  await pushTokensApi.unregister(acesso, token).catch(() => undefined);
 }
 
 async function registrarToken(token: string): Promise<boolean> {

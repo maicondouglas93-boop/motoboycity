@@ -62,6 +62,12 @@ const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
 ];
 const RECENT_OPERATION_STATUSES: DeliveryStatus[] = ['COMPLETED', 'CANCELLED'];
+const POST_COLLECTION_STATUSES: DeliveryStatus[] = [
+  'COLLECTED',
+  'DELIVERED',
+  'FAILED',
+  'COMPLETED',
+];
 
 /**
  * Ajusta somente a janela de estados terminais retornada pela central que
@@ -992,10 +998,12 @@ export class DeliveriesService {
     if (delivery.driverId !== driver.id) {
       throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
     }
-
     const siblings = delivery.batchId
       ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
       : [delivery];
+    if (siblings.every((item) => POST_COLLECTION_STATUSES.includes(item.status))) {
+      return this.deliveryGroupResult(user, delivery.batchId, siblings.map((item) => item.id));
+    }
     if (siblings.some((item) => item.status !== 'ACCEPTED')) {
       throw new ConflictException('Todos os itens do pedido precisam estar aceitos para coletar.');
     }
@@ -1010,38 +1018,74 @@ export class DeliveriesService {
     );
     const agora = new Date();
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const item of siblings) {
-        await tx.delivery.update({
-          where: { id: item.id },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (const item of siblings) {
+          const updated = await tx.delivery.updateMany({
+            where: { id: item.id, status: 'ACCEPTED', driverId: driver.id },
           /**
            * Na marcacao retroativa o carimbo do estado passa a ser o horario
            * DECLARADO, e nao o do toque. Ele e o relogio operacional — e o que
            * a fila ao vivo mostra, e o piso da proxima declaracao — enquanto a
            * prova do registro fica no `changedAt` do historico.
            */
-          data: { status: 'COLLECTED', statusChangedAt: occurredAt ?? agora },
-        });
-        await tx.deliveryStatusHistory.create({
-          data: {
-            deliveryId: item.id,
-            fromStatus: 'ACCEPTED',
-            toStatus: 'COLLECTED',
-            changedByUserId: user.id,
-            ...(occurredAt && {
-              occurredAt,
-              note: `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
-            }),
-          },
-        });
+            data: { status: 'COLLECTED', statusChangedAt: occurredAt ?? agora },
+          });
+          if (updated.count !== 1) {
+            throw new ConflictException('A coleta já foi registrada por outra solicitação.');
+          }
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: item.id,
+              fromStatus: 'ACCEPTED',
+              toStatus: 'COLLECTED',
+              changedByUserId: user.id,
+              ...(occurredAt && {
+                occurredAt,
+                note: `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
+              }),
+            },
+          });
+        }
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const collected = await this.collectResultIfApplied(user, id, driver.id);
+        if (collected) return collected;
       }
-    });
+      throw error;
+    }
 
     const details = await Promise.all(siblings.map((item) => this.detail(user, item.id)));
     details.forEach((detail) => this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED'));
     return {
       batchId: delivery.batchId,
       deliveries: details,
+    };
+  }
+
+  private async collectResultIfApplied(
+    user: User,
+    id: string,
+    driverId: string,
+  ): Promise<DeliveryGroupResult | null> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    if (!delivery || delivery.driverId !== driverId) return null;
+    const siblings = delivery.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+      : [delivery];
+    if (!siblings.every((item) => POST_COLLECTION_STATUSES.includes(item.status))) return null;
+    return this.deliveryGroupResult(user, delivery.batchId, siblings.map((item) => item.id));
+  }
+
+  private async deliveryGroupResult(
+    user: User,
+    batchId: string | null,
+    deliveryIds: string[],
+  ): Promise<DeliveryGroupResult> {
+    return {
+      batchId,
+      deliveries: await Promise.all(deliveryIds.map((deliveryId) => this.detail(user, deliveryId))),
     };
   }
 
@@ -1072,6 +1116,12 @@ export class DeliveriesService {
     if (delivery.driverId !== driver.id) {
       throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
     }
+    if (
+      (delivery.status === 'FAILED' || delivery.status === 'COMPLETED') &&
+      delivery.failedAt !== null
+    ) {
+      return this.detail(user, id);
+    }
     // Antes da coleta nao existe mercadoria em posse do motoboy, entao nao ha
     // o que devolver — desistir ali e outro problema (recusa/cancelamento),
     // nao insucesso de entrega.
@@ -1079,27 +1129,44 @@ export class DeliveriesService {
       throw new ConflictException('Só é possível registrar insucesso depois de coletar o pedido.');
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.delivery.update({
-        where: { id },
-        data: {
-          status: 'FAILED',
-          statusChangedAt: new Date(),
-          failedAt: new Date(),
-          failureReason: payload.reason,
-          failureNote: payload.note ?? null,
-        },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.delivery.updateMany({
+          where: { id, status: 'COLLECTED', driverId: driver.id },
+          data: {
+            status: 'FAILED',
+            statusChangedAt: new Date(),
+            failedAt: new Date(),
+            failureReason: payload.reason,
+            failureNote: payload.note ?? null,
+          },
+        });
+        if (updated.count !== 1) {
+          throw new ConflictException('O insucesso já foi registrado por outra solicitação.');
+        }
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: id,
+            fromStatus: 'COLLECTED',
+            toStatus: 'FAILED',
+            changedByUserId: user.id,
+            note: this.describeFailure(payload),
+          },
+        });
       });
-      await tx.deliveryStatusHistory.create({
-        data: {
-          deliveryId: id,
-          fromStatus: 'COLLECTED',
-          toStatus: 'FAILED',
-          changedByUserId: user.id,
-          note: this.describeFailure(payload),
-        },
-      });
-    });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const current = await this.prisma.delivery.findUnique({ where: { id } });
+        if (
+          current?.driverId === driver.id &&
+          (current.status === 'FAILED' || current.status === 'COMPLETED') &&
+          current.failedAt !== null
+        ) {
+          return this.detail(user, id);
+        }
+      }
+      throw error;
+    }
 
     this.realtimeGateway.emitAdminActivity({
       type: 'DELIVERY_STATUS_CHANGED',
@@ -1139,6 +1206,12 @@ export class DeliveriesService {
     }
     if (delivery.driverId !== driver.id) {
       throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
+    }
+    if (
+      (delivery.status === 'DELIVERED' || delivery.status === 'COMPLETED') &&
+      delivery.failedAt === null
+    ) {
+      return this.detail(user, id);
     }
     if (delivery.status !== 'COLLECTED') {
       throw new ConflictException(
@@ -1249,6 +1322,24 @@ export class DeliveriesService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.delivery.updateMany({
+          where: { id: delivery.id, status: 'COLLECTED', driverId: driver.id },
+          data: {
+            status: autoComplete ? 'COMPLETED' : 'DELIVERED',
+            statusChangedAt: occurredAt ?? new Date(),
+            distanceKm,
+            totalValue,
+            driverValue,
+            platformValue,
+            surchargeLabel,
+            surchargeValue,
+            returnValue,
+          },
+        });
+        if (updated.count !== 1) {
+          throw new ConflictException('A entrega já foi registrada por outra solicitação.');
+        }
+
         if (!delivery.destinationKnownAtCreation) {
           await tx.deliveryAddress.create({
             data: {
@@ -1265,21 +1356,6 @@ export class DeliveriesService {
             },
           });
         }
-
-        await tx.delivery.update({
-          where: { id: delivery.id },
-          data: {
-            status: autoComplete ? 'COMPLETED' : 'DELIVERED',
-            statusChangedAt: occurredAt ?? new Date(),
-            distanceKm,
-            totalValue,
-            driverValue,
-            platformValue,
-            surchargeLabel,
-            surchargeValue,
-            returnValue,
-          },
-        });
 
         await tx.deliveryStatusHistory.create({
           data: {
@@ -1314,10 +1390,15 @@ export class DeliveriesService {
         }
       });
     } catch (error) {
-      if (this.isRepasseIdempotencyConflict(error)) {
-        throw new ConflictException(
-          'Esta entrega já foi concluída em outra solicitação. Atualize a tela.',
-        );
+      if (error instanceof ConflictException || this.isRepasseIdempotencyConflict(error)) {
+        const current = await this.prisma.delivery.findUnique({ where: { id } });
+        if (
+          current?.driverId === driver.id &&
+          (current.status === 'DELIVERED' || current.status === 'COMPLETED') &&
+          current.failedAt === null
+        ) {
+          return this.detail(user, id);
+        }
       }
       throw error;
     }
@@ -1342,6 +1423,25 @@ export class DeliveriesService {
     }
     if (delivery.driverId !== driver.id) {
       throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
+    }
+
+    const siblings = delivery.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+      : [delivery];
+    // FAILED entra sem olhar `requiresReturn`: a mercadoria precisa voltar
+    // para a loja de qualquer forma, tenha ou nao sido pedido retorno.
+    const candidates = siblings.filter(
+      (item) => (item.status === 'DELIVERED' && item.requiresReturn) || item.status === 'FAILED',
+    );
+    if (candidates.length === 0) {
+      const completed = siblings.filter(
+        (item) =>
+          item.status === 'COMPLETED' && (item.requiresReturn || item.failedAt !== null),
+      );
+      if (completed.length > 0) {
+        return this.deliveryGroupResult(user, delivery.batchId, completed.map((item) => item.id));
+      }
+      throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
     }
 
     const settings = await this.platformSettingsService.get();
@@ -1381,17 +1481,6 @@ export class DeliveriesService {
       );
     }
 
-    const siblings = delivery.batchId
-      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
-      : [delivery];
-    // FAILED entra sem olhar `requiresReturn`: a mercadoria precisa voltar
-    // para a loja de qualquer forma, tenha ou nao sido pedido retorno.
-    const candidates = siblings.filter(
-      (item) => (item.status === 'DELIVERED' && item.requiresReturn) || item.status === 'FAILED',
-    );
-    if (candidates.length === 0) {
-      throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
-    }
     if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
       throw new InternalServerErrorException(
         'Não foi possível gerar o repasse: há uma entrega de retorno sem entregador ou valor definido.',
@@ -1401,10 +1490,13 @@ export class DeliveriesService {
     try {
       await this.prisma.$transaction(async (tx) => {
         for (const item of candidates) {
-          await tx.delivery.update({
-            where: { id: item.id },
+          const updated = await tx.delivery.updateMany({
+            where: { id: item.id, status: item.status, driverId: driver.id },
             data: { status: 'COMPLETED', statusChangedAt: new Date() },
           });
+          if (updated.count !== 1) {
+            throw new ConflictException('O retorno já foi concluído por outra solicitação.');
+          }
           await tx.deliveryStatusHistory.create({
             data: {
               deliveryId: item.id,
@@ -1424,10 +1516,9 @@ export class DeliveriesService {
         }
       });
     } catch (error) {
-      if (this.isRepasseIdempotencyConflict(error)) {
-        throw new ConflictException(
-          'Este retorno já foi concluído em outra solicitação. Atualize a tela.',
-        );
+      if (error instanceof ConflictException || this.isRepasseIdempotencyConflict(error)) {
+        const completed = await this.completeReturnResultIfApplied(user, id, driver.id);
+        if (completed) return completed;
       }
       throw error;
     }
@@ -1438,6 +1529,27 @@ export class DeliveriesService {
       batchId: delivery.batchId,
       deliveries: details,
     };
+  }
+
+  private async completeReturnResultIfApplied(
+    user: User,
+    id: string,
+    driverId: string,
+  ): Promise<DeliveryGroupResult | null> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    if (!delivery || delivery.driverId !== driverId) return null;
+    const siblings = delivery.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+      : [delivery];
+    const stillPending = siblings.some(
+      (item) => (item.status === 'DELIVERED' && item.requiresReturn) || item.status === 'FAILED',
+    );
+    if (stillPending) return null;
+    const completed = siblings.filter(
+      (item) => item.status === 'COMPLETED' && (item.requiresReturn || item.failedAt !== null),
+    );
+    if (completed.length === 0) return null;
+    return this.deliveryGroupResult(user, delivery.batchId, completed.map((item) => item.id));
   }
 
   private async assertCanAccess(user: User, delivery: Delivery): Promise<void> {

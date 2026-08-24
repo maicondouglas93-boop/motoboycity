@@ -1,5 +1,10 @@
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
-import { getMessaging, getToken, onTokenRefresh } from '@react-native-firebase/messaging';
+import {
+  deleteToken,
+  getMessaging,
+  getToken,
+  onTokenRefresh,
+} from '@react-native-firebase/messaging';
 import { ativarPush, desativarPush } from '../src/lib/push';
 import {
   abrirAjusteDeTelaCheia,
@@ -111,6 +116,13 @@ describe('push do app do motoboy', () => {
     await desativarPush();
 
     expect(pushTokensApi.unregister).not.toHaveBeenCalled();
+  });
+
+  it('remove o token FCM local quando a API invalidou uma sessão restaurada', async () => {
+    await desativarPush({ clearLocalToken: true });
+
+    expect(getToken).toHaveBeenCalled();
+    expect(deleteToken).toHaveBeenCalled();
   });
 
   it('sem sessão válida, não tenta registrar', async () => {

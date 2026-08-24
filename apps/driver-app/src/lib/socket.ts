@@ -10,6 +10,7 @@ export interface DriverSocketHandlers {
   onOfferCancelled: (offerId: string) => void;
   onDeliveryCancelled: (deliveryIds: string[]) => void;
   onAccountStatusChanged: (accountStatus: DriverAccountStatus) => void;
+  onPresenceExpired: () => void;
   /**
    * O servidor percebeu que ele esta com pedido em andamento e parou de mandar
    * posicao.
@@ -56,6 +57,7 @@ export function connectDriverSocket(token: string, handlers: DriverSocketHandler
   socket.on('driver:account-status-changed', (payload: { accountStatus: DriverAccountStatus }) =>
     handlers.onAccountStatusChanged(payload.accountStatus),
   );
+  socket.on('driver:presence-expired', () => handlers.onPresenceExpired());
   socket.on(
     'driver:location-lost',
     (payload: { activeDeliveryCount: number; silentMinutes: number }) =>

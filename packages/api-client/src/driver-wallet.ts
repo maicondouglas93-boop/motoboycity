@@ -3,6 +3,7 @@ import type {
   WalletTransactionStatus,
   WithdrawalRequestItem,
 } from '@motoboycity/types';
+import type { RequestWithdrawalPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 export interface DriverWalletApiConfig {
@@ -35,11 +36,14 @@ export function createDriverWalletApi({ baseUrl }: DriverWalletApiConfig) {
       return parseJsonOrThrow<WithdrawalRequestItem[]>(response);
     },
 
-    async requestWithdrawal(accessToken: string, amount: number): Promise<WithdrawalRequestItem> {
+    async requestWithdrawal(
+      accessToken: string,
+      payload: RequestWithdrawalPayload,
+    ): Promise<WithdrawalRequestItem> {
       const response = await fetch(`${baseUrl}/driver/wallet/withdrawals`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
+        body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<WithdrawalRequestItem>(response);
     },

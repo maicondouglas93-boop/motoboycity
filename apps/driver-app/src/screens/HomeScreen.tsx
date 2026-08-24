@@ -29,6 +29,7 @@ import { colors } from '../theme/colors';
 import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
 import { findNewlyAcceptedDelivery, getActiveDeliveries } from '../lib/activeDeliveries';
+import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { deliveryPaymentLabel, formatDeliveryAddress } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
@@ -247,17 +248,17 @@ export function HomeScreen({ navigation }: Props) {
 
   async function aceitarPendente(delivery: AvailableDeliveryItem) {
     if (acceptingPendingRef.current) return;
-
-    const token = await session.getToken();
-    if (!token) {
-      Alert.alert('Sessão expirada', 'Entre novamente para aceitar este pedido.');
-      return;
-    }
-
     acceptingPendingRef.current = true;
     pendingListVersionRef.current += 1;
     setAceitandoPendenteId(delivery.id);
+    let token: string | null = null;
     try {
+      token = await session.getToken();
+      if (!token) {
+        Alert.alert('Sessão expirada', 'Entre novamente para aceitar este pedido.');
+        return;
+      }
+
       const result = await deliveryOffersApi.claim(token, delivery.id);
 
       // Ao assumir uma corrida, a vitrine inteira deixa de ser elegível para
@@ -280,13 +281,26 @@ export function HomeScreen({ navigation }: Props) {
       setAba('andamento');
       navigation.navigate('DeliveryOperation', { deliveryId: result.deliveryId });
     } catch (error) {
+      const reconciled = token
+        ? await reconcileAcceptedAssignment(token, [delivery.id]).catch(() => null)
+        : null;
+      if (reconciled && token) {
+        setPendentes([]);
+        setActiveDeliveries(reconciled.activeDeliveries);
+        await syncDeliveryTracking(
+          token,
+          reconciled.activeDeliveries.map((item) => item.id),
+        ).catch(() => undefined);
+        setAba('andamento');
+        navigation.navigate('DeliveryOperation', { deliveryId: reconciled.delivery.id });
+        return;
+      }
       Alert.alert(
         'Pedido indisponível',
         error instanceof ApiError
           ? error.message
           : 'Não foi possível aceitar este pedido. Tente novamente.',
       );
-      acceptingPendingRef.current = false;
       await carregarPendentes(true);
     } finally {
       acceptingPendingRef.current = false;
@@ -408,6 +422,17 @@ export function HomeScreen({ navigation }: Props) {
           );
           navigation.popToTop();
         },
+        onPresenceExpired: () => {
+          setPresence('UNAVAILABLE', null);
+          stopDeliveryTracking().catch(() => undefined);
+          setPresenceError(
+            'Você ficou offline porque o servidor parou de receber sua localização. Ligue a localização e fique online novamente.',
+          );
+          Alert.alert(
+            'Você ficou offline',
+            'O servidor parou de receber sua localização. Verifique a localização do aparelho antes de ficar online novamente.',
+          );
+        },
         /**
          * O servidor deixou de receber a posicao dele.
          *
@@ -486,15 +511,27 @@ export function HomeScreen({ navigation }: Props) {
 
     async function mostrarOfertaPendente(token: string) {
       if (cancelled) return;
-      // Ja ha uma oferta na tela: sobrescrever trocaria o cronometro por baixo
-      // de quem esta decidindo.
-      if (useDispatchStore.getState().incomingOffer) return;
-
-      const pendente = await deliveryOffersApi.pending(token).catch(() => null);
-      if (!pendente || cancelled) return;
+      const current = useDispatchStore.getState().incomingOffer;
+      let pendente;
+      try {
+        pendente = await deliveryOffersApi.pending(token);
+      } catch {
+        // Sem resposta, o estado local continua sendo a melhor informação.
+        return;
+      }
+      if (cancelled) return;
+      if (!pendente) {
+        if (current) {
+          await dispensarOfertaNativa(current.offerId);
+          setIncomingOffer(null);
+        }
+        return;
+      }
 
       setIncomingOffer(pendente);
-      navigation.navigate('IncomingOffer');
+      if (!current || current.offerId !== pendente.offerId) {
+        navigation.navigate('IncomingOffer');
+      }
     }
 
     bootstrap().catch(() => {

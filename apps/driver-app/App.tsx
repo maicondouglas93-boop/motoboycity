@@ -23,8 +23,7 @@ import { RegisterScreen } from './src/screens/RegisterScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { DriverWalletScreen } from './src/screens/DriverWalletScreen';
 import { WithdrawalScreen } from './src/screens/WithdrawalScreen';
-import { authApi } from './src/lib/apiClient';
-import { session } from './src/lib/session';
+import { resolveInitialSessionRoute } from './src/lib/bootstrapSession';
 import type { RootStackParamList } from './src/navigation/types';
 import { colors } from './src/theme/colors';
 
@@ -49,18 +48,8 @@ function App() {
     let cancelled = false;
 
     async function resolveInitialRoute() {
-      const token = await session.getToken();
-      if (!token) {
-        if (!cancelled) setInitialRoute('Login');
-        return;
-      }
-      try {
-        await authApi.me(token);
-        if (!cancelled) setInitialRoute('Home');
-      } catch {
-        await session.clearToken();
-        if (!cancelled) setInitialRoute('Login');
-      }
+      const route = await resolveInitialSessionRoute();
+      if (!cancelled) setInitialRoute(route);
     }
 
     resolveInitialRoute().catch(() => undefined);
