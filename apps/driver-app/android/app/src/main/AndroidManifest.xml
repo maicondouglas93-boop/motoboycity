@@ -34,6 +34,20 @@
       <meta-data
         android:name="com.google.android.geo.API_KEY"
         android:value="${mapsApiKey}" />
+      <!-- Solicita ao Google Play Services o backport do Photo Picker em
+           aparelhos compatíveis abaixo do Android 11. -->
+      <service
+        android:name="com.google.android.gms.metadata.ModuleDependencies"
+        android:enabled="false"
+        android:exported="false"
+        tools:ignore="MissingClass">
+        <intent-filter>
+          <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+        </intent-filter>
+        <meta-data
+          android:name="photopicker_activity:0:required"
+          android:value="" />
+      </service>
       <!--
         Recebe o push de oferta e monta a notificacao de tela cheia. Precisa ser
         nativo: mensagem com bloco `notification` e desenhada pelo Android sem

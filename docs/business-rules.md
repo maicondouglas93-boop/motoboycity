@@ -112,6 +112,19 @@ cadastro não autoaprova nem coloca o entregador online. Veículo e documentos n
 fazem parte desta etapa porque ainda não existe fluxo integrado de upload e
 revisão desses itens.
 
+## Foto de perfil
+
+Qualquer usuário autenticado pode substituir a própria foto de perfil. O
+arquivo é enviado pela API ao ImageKit; o PostgreSQL guarda somente
+`avatarExternalFileId` e `avatarUrl`. A API aceita JPEG, PNG ou WebP de até
+5 MB e 4096 x 4096 pixels, valida o conteúdo real do arquivo e, depois de
+persistir a nova referência, tenta remover a imagem anterior. Se a gravação no
+banco falhar, a imagem nova deve ser removida do provedor para não deixar
+arquivo órfão.
+
+O fluxo atual de interface está disponível no perfil do app do entregador.
+Foto de empresa, veículo e documentos continuam sendo recortes separados.
+
 ## Integração com serviço de entrega
 
 Só Aiqfome. As integrações mostradas em dado mock antigo não são escopo

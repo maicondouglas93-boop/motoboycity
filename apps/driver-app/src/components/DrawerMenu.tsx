@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AuthUser } from '@motoboycity/types';
 import { Icon, type IconName } from './Icon';
 import { colors } from '../theme/colors';
@@ -33,6 +33,7 @@ const MENU_ITEMS: MenuItem[] = [
 
 export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
   const [profile, setProfile] = useState<AuthUser | null>(null);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,8 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
   }
 
   const initial = profile?.name.trim().charAt(0).toUpperCase() || '?';
+  const visibleAvatarUrl =
+    profile?.avatarUrl && profile.avatarUrl !== failedAvatarUrl ? profile.avatarUrl : null;
 
   return (
     <Modal
@@ -121,7 +124,15 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.profile}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initial}</Text>
+              {visibleAvatarUrl ? (
+                <Image
+                  source={{ uri: visibleAvatarUrl }}
+                  style={styles.avatarImage}
+                  onError={() => setFailedAvatarUrl(visibleAvatarUrl)}
+                />
+              ) : (
+                <Text style={styles.avatarText}>{initial}</Text>
+              )}
             </View>
             <View style={styles.profileText}>
               <Text style={styles.name} numberOfLines={1}>
@@ -244,7 +255,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.actionSoftTint,
     borderWidth: 2,
     borderColor: '#d9e1ec',
+    overflow: 'hidden',
   },
+  avatarImage: { width: '100%', height: '100%' },
   avatarText: { color: colors.actionSoft, fontSize: 28, fontWeight: '800' },
   profileText: { flex: 1, gap: 2 },
   name: { color: colors.ink, fontSize: 21, fontWeight: '800' },

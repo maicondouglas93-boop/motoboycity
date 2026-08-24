@@ -5,4 +5,5 @@ export interface AuthUser {
   name: string;
   email: string;
   type: UserType;
+  avatarUrl: string | null;
 }

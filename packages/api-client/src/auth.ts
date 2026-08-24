@@ -50,5 +50,14 @@ export function createAuthApi({ baseUrl }: AuthApiConfig) {
       });
       return parseJsonOrThrow<AuthUser>(response);
     },
+
+    async uploadAvatar(accessToken: string, formData: FormData): Promise<AuthUser> {
+      const response = await fetch(`${baseUrl}/profile/avatar`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      return parseJsonOrThrow<AuthUser>(response);
+    },
   };
 }

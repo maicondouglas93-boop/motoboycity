@@ -38,6 +38,8 @@
 	<string>Usamos sua localização precisa enquanto você estiver online e durante as entregas.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Enquanto você estiver online, sua localização continua sendo compartilhada mesmo com o aplicativo fechado. O compartilhamento para ao ficar offline.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Permita acesso às suas fotos para escolher a imagem do perfil.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

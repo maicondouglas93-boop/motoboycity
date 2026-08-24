@@ -53,6 +53,12 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: User) {
-    return { id: user.id, name: user.name, email: user.email, type: user.type };
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      type: user.type,
+      avatarUrl: user.avatarUrl,
+    };
   }
 }

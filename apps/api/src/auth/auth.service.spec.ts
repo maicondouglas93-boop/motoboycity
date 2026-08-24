@@ -285,6 +285,7 @@ describe('AuthService', () => {
         name: 'Maria Silva',
         email: loginPayload.email,
         type: 'COMPANY_MEMBER',
+        avatarUrl: null,
       });
       expect(result.company).toEqual({ id: 'company-1', status: 'PENDING_APPROVAL' });
       expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: 'user-1' });

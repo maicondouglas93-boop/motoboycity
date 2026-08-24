@@ -31,6 +31,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { PushModule } from './push/push.module';
 import { LivePresenceModule } from './live-presence/live-presence.module';
 import { VirtualSecretaryModule } from './admin/virtual-secretary/virtual-secretary.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { VirtualSecretaryModule } from './admin/virtual-secretary/virtual-secret
     ServiceTypesModule,
     TrackingModule,
     PushModule,
+    ProfileModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

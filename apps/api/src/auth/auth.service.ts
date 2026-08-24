@@ -33,7 +33,7 @@ export interface RegisterDriverOptions {
 
 export interface LoginResult {
   accessToken: string;
-  user: { id: string; name: string; email: string; type: string };
+  user: { id: string; name: string; email: string; type: string; avatarUrl: string | null };
   company?: { id: string; status: string };
   driver?: { id: string; approvalStatus: string };
 }
@@ -236,7 +236,13 @@ export class AuthService {
 
     return {
       accessToken,
-      user: { id: user.id, name: user.name, email: user.email, type: user.type },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        type: user.type,
+        avatarUrl: user.avatarUrl ?? null,
+      },
       ...(company && { company }),
       ...(driver && { driver: { id: driver.id, approvalStatus: driver.approvalStatus } }),
     };

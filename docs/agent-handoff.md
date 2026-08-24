@@ -5065,3 +5065,81 @@ porque a instalação isolada do pnpm ficou presa no Windows; isso alterou apena
 `node_modules`, não o lockfile. O próximo passo concreto é homologar visualmente
 o diálogo da empresa e a fila do admin com sessões reais e, depois, seguir a
 Fase 4 dos relatórios Company Web.
+
+## Atualização — 2026-08-24: avatar no ImageKit e perfil do entregador
+
+Foi implementado o primeiro recorte de foto de perfil com armazenamento no
+ImageKit. A nova rota autenticada `POST /profile/avatar` recebe o campo
+multipart `file`, limita o upload a 5 MB e valida os bytes reais de JPEG, PNG
+ou WebP, a estrutura e dimensões de até 4096 x 4096 antes de chamar o provedor.
+A rota tem limite dedicado de cinco tentativas por minuto. Depois do upload,
+a API ainda exige que o ImageKit devolva tipo `image`, largura e altura válidas;
+caso contrário remove o arquivo e rejeita a requisição. A API nunca persiste o
+binário: atualiza somente `User.avatarExternalFileId` e `User.avatarUrl`, campos que já existiam
+no schema e na migration inicial; portanto não houve mudança Prisma nem nova
+migration.
+
+A substituição preserva consistência entre os dois sistemas. A imagem é
+enviada primeiro, a referência do usuário é trocada em transação
+`Serializable` com retry de `P2034`, e a imagem anterior é removida depois do
+commit em modo best effort. Se a transação falhar, a API tenta remover a
+imagem recém-enviada para evitar arquivo órfão. `GET /auth/me` e o resultado de
+login agora incluem `avatarUrl`, e o contrato `AuthUser` e o cliente HTTP
+compartilhado foram atualizados no mesmo recorte.
+
+No app do entregador, a tela **Perfil** permite escolher uma foto da galeria,
+com redução para no máximo 1024 x 1024, qualidade 0,8, validação local de 5 MB,
+estado de envio e mensagens de erro. A foto também aparece no menu lateral.
+O iOS recebeu a descrição de acesso à biblioteca; o Android usa o seletor de
+fotos fornecido por `react-native-image-picker`, sem permissão ampla de
+armazenamento. Para Android 24–29 foram acrescentados AndroidX Activity 1.9.3
+e o gatilho oficial de instalação do Photo Picker por Google Play Services.
+
+Arquivos principais:
+
+- `apps/api/src/media/{imagekit.module,imagekit.service,imagekit.service.spec}.ts`;
+- `apps/api/src/profile/{profile.module,profile.controller,profile.service,profile.service.spec}.ts`;
+- `apps/api/src/auth/{auth.controller,auth.service,auth.service.spec}.ts`;
+- `packages/types/src/user.ts` e `packages/api-client/src/auth.ts`;
+- `apps/driver-app/src/screens/ProfileScreen.tsx`;
+- `apps/driver-app/src/components/DrawerMenu.tsx`;
+- `apps/driver-app/ios/DriverApp/Info.plist`;
+- `apps/driver-app/android/app/build.gradle` e `android/app/src/main/AndroidManifest.xml`;
+- manifests, `pnpm-lock.yaml` e `apps/api/.env.example`.
+
+Com autorização explícita do usuário, somente as quatro variáveis já
+existentes do ImageKit foram descomentadas em `apps/api/.env`; os valores não
+foram exibidos, copiados para documentação nem versionados. O exemplo mantém
+apenas nomes com valores vazios. As dependências novas são
+`@imagekit/nodejs@7.11.0` e `react-native-image-picker@8.2.1`.
+
+Durante a inclusão filtrada das dependências, o pnpm 11.20.0 reescreveu
+contextos de peer dependencies de Jest sem o snapshot correspondente e deixou
+links antigos inacessíveis no Windows. O lockfile original foi preservado em
+backup temporário, regenerado a partir dos manifests e corrigido para manter os
+contextos já válidos; `node_modules` foi reconstruído com o linker padrão
+`isolated` e com scripts desativados. Nenhum `postinstall`, migration, seed,
+Docker ou build nativo foi executado.
+
+### Verificação
+
+| Comando / fluxo                                    | Resultado                               |
+| -------------------------------------------------- | --------------------------------------- |
+| instalação com lock congelado e `--ignore-scripts` | aprovada; 9 projetos, linker `isolated` |
+| typecheck completo do monorepo                     | aprovado nos 8 projetos                 |
+| lint de API, driver-app, api-client e types        | aprovado nos 4 projetos                 |
+| Jest focado em ImageKit, perfil e autenticação     | 3 suítes e 29 testes aprovados          |
+| Jest unitário completo da API                      | 57 suítes e 652 testes aprovados        |
+| Jest completo do driver-app                        | 8 suítes e 58 testes aprovados          |
+| build da API                                       | aprovado                                |
+| `git diff --check`                                 | aprovado                                |
+
+Não foi feito upload real no ImageKit para não criar mídia externa durante a
+validação automatizada, nem build Android/iOS. O próximo passo concreto é
+homologar em aparelho Android com a API local: selecionar JPEG/PNG/WebP,
+confirmar persistência após novo login, verificar a foto no menu e testar
+arquivo inválido/maior que 5 MB. A página de perfil da empresa com interface
+de foto continua sendo um recorte posterior e poderá reutilizar a mesma rota.
+Se a exclusão best effort de um avatar antigo falhar após o commit, o arquivo
+pode permanecer órfão no ImageKit; uma rotina assíncrona de reconciliação ainda
+é melhoria futura, sem reverter a foto nova já confirmada ao usuário.
