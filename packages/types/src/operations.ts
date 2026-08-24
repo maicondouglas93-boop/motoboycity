@@ -38,6 +38,13 @@ export interface AdminOnlineDriverItem {
   id: string;
   name: string;
   phone: string;
+  /**
+   * Foto de perfil, quando o motoboy enviou uma.
+   *
+   * Nulo e o caso comum enquanto o envio de foto e novo — o mapa desenha as
+   * iniciais nesse caso, em vez de um espaco vazio.
+   */
+  avatarUrl: string | null;
   appVersion: string | null;
   availabilitySince: string | null;
   serviceTypes: DriverServiceTypeItem[];

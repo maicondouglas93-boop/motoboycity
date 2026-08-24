@@ -79,7 +79,7 @@ const OPERATIONAL_DELIVERY_INCLUDE = Prisma.validator<Prisma.DeliveryInclude>()(
   company: true,
   serviceType: true,
   addresses: true,
-  driver: { include: { user: { select: { name: true, phone: true } } } },
+  driver: { include: { user: { select: { name: true, phone: true, avatarUrl: true } } } },
   trackingPoints: { orderBy: { capturedAt: 'desc' }, take: 1 },
 });
 type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
@@ -1649,6 +1649,7 @@ export class DeliveriesService {
             id: delivery.driver.id,
             name: delivery.driver.user.name,
             phone: delivery.driver.user.phone,
+            avatarUrl: delivery.driver.user.avatarUrl,
           }
         : null,
       lastLocation: point

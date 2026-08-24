@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CompanyAddressItem, OperationalDeliveryItem } from '@motoboycity/types';
 import { statusHex } from '@/components/orders/status-chip';
+import { retratoDoMotoboy } from '@/lib/marcador-de-motoboy';
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
 import { LAJINHA_CENTER } from '@/lib/operation-area';
 
@@ -29,6 +30,9 @@ interface Props {
   selectedId: string | null;
   onSelect: (deliveryId: string) => void;
 }
+
+/** Verde da placa: a mesma cor que o motoboy ja tinha no mapa. */
+const COR_DO_MOTOBOY = '#0b6e4f';
 
 export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,6 +83,11 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
     if (!ready || !mapRef.current || !window.google) return;
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    /**
+     * O retrato chega depois. Sem esta trava, uma atualizacao que troca os
+     * marcadores deixaria o retrato antigo pousar num marcador ja removido.
+     */
+    let descartado = false;
     const bounds = new google.maps.LatLngBounds();
     const addMarker = (
       position: google.maps.LatLngLiteral,
@@ -103,6 +112,7 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       if (onClick) marker.addListener('click', onClick);
       markersRef.current.push(marker);
       bounds.extend(position);
+      return marker;
     };
 
     if (pickupAddress.lat !== null && pickupAddress.lng !== null) {
@@ -133,13 +143,35 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
         );
       }
       if (delivery.lastLocation) {
-        addMarker(
+        const item = addMarker(
           { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng },
           delivery.driver ? `Motoboy: ${delivery.driver.name}` : 'Posição do motoboy',
-          '#0b6e4f',
+          COR_DO_MOTOBOY,
           () => onSelect(delivery.id),
           7,
         );
+        /*
+          A loja ve o rosto de quem esta com o pedido dela. O ponto verde
+          aparece primeiro e o retrato substitui quando fica pronto — esperar a
+          foto deixaria o mapa vazio enquanto ela carrega.
+        */
+        if (delivery.driver) {
+          const motoboy = delivery.driver;
+          void retratoDoMotoboy({
+            nome: motoboy.name,
+            avatarUrl: motoboy.avatarUrl,
+            cor: COR_DO_MOTOBOY,
+            selecionado: selectedId === delivery.id,
+          }).then((retrato) => {
+            if (descartado || !retrato) return;
+            const lado = selectedId === delivery.id ? 42 : 32;
+            item.setIcon({
+              url: retrato,
+              scaledSize: new google.maps.Size(lado, lado),
+              anchor: new google.maps.Point(lado / 2, lado / 2),
+            });
+          });
+        }
       }
     }
     /**
@@ -160,6 +192,10 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       });
       map.fitBounds(bounds, 64);
     }
+
+    return () => {
+      descartado = true;
+    };
   }, [deliveries, onSelect, pickupAddress.lat, pickupAddress.lng, ready, selectedId]);
 
   return (

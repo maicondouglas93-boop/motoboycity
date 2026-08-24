@@ -52,7 +52,7 @@ export class AdminOperationsService {
         accountStatus: 'ACTIVE',
       },
       include: {
-        user: { select: { name: true, phone: true } },
+        user: { select: { name: true, phone: true, avatarUrl: true } },
         presenceLogs: {
           where: { wentOfflineAt: null },
           orderBy: { wentOnlineAt: 'desc' },
@@ -83,6 +83,7 @@ export class AdminOperationsService {
             id: driver.id,
             name: driver.user.name,
             phone: driver.user.phone,
+            avatarUrl: driver.user.avatarUrl,
             appVersion: snapshot.appVersion,
             availabilitySince: driver.presenceLogs[0]?.wentOnlineAt.toISOString() ?? null,
             serviceTypes: driver.serviceTypes.map((assignment) => ({

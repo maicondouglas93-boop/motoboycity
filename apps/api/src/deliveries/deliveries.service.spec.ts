@@ -556,6 +556,67 @@ describe('DeliveriesService', () => {
       );
     });
 
+    it('entrega a foto do motoboy junto da posicao dele', async () => {
+      /**
+       * E o que o mapa da loja desenha no marcador: a loja ve o rosto de quem
+       * esta com o pedido dela. Sem o campo, o marcador cai para as iniciais —
+       * entao ele precisa chegar, mesmo nulo.
+       */
+      prisma.delivery.findMany.mockResolvedValue([
+        {
+          id: 'pedido-1',
+          displayNumber: 1,
+          companyId: 'empresa-1',
+          company: { tradeName: 'Loja' },
+          serviceType: { name: 'motoboy' },
+          status: 'COLLECTED',
+          statusChangedAt: new Date('2026-08-23T15:00:00.000Z'),
+          createdAt: new Date('2026-08-23T14:00:00.000Z'),
+          scheduledAt: null,
+          distanceKm: null,
+          totalValue: null,
+          driverValue: null,
+          platformValue: null,
+          returnValue: null,
+          surchargeLabel: null,
+          surchargeValue: null,
+          paymentMethod: 'BILLED',
+          customerPaymentMethod: null,
+          requiresReturn: false,
+          requiresDeliveryProof: false,
+          requiresCollectionRecipient: false,
+          destinationKnownAtCreation: true,
+          externalOrderNumber: null,
+          recipientName: null,
+          recipientPhone: null,
+          driverNote: null,
+          failureReason: null,
+          failureNote: null,
+          failedAt: null,
+          batchId: null,
+          invoiceId: null,
+          pickupSurchargeChargedToDriver: false,
+          addresses: [],
+          trackingPoints: [],
+          driver: {
+            id: 'motoboy-1',
+            user: {
+              name: 'Franklim Melo',
+              phone: '33999887766',
+              avatarUrl: 'https://ik.imagekit.io/exemplo/foto.jpg',
+            },
+          },
+        },
+      ]);
+
+      const resultado = await service.operations(adminUser, {});
+
+      const pedido = [...resultado.active, ...resultado.recent][0];
+      expect(pedido?.driver).toEqual(
+        expect.objectContaining({ avatarUrl: 'https://ik.imagekit.io/exemplo/foto.jpg' }),
+      );
+    });
+
     it('preserva por padrao os 20 concluidos ou cancelados mais recentes', async () => {
       await service.operations(adminUser, {});
 

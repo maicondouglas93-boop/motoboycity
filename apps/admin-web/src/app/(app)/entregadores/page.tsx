@@ -1,10 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminDriverListItem, RegisterDriverResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { CircleCheckBig, MapPin, UserPlus } from 'lucide-react';
+import { ChevronRight, CircleCheckBig, MapPin, UserPlus } from 'lucide-react';
 import { CreateDriverDialog } from '@/components/drivers/create-driver-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -231,26 +232,47 @@ export default function DriversPage() {
         {filteredDrivers.map((driver) => (
           <Card key={driver.id} className="entity-card">
             <CardContent className="space-y-3 py-4">
-              <div className="flex items-start justify-between gap-2">
-                <p className="font-medium">{driver.name}</p>
-                <div className="flex flex-wrap justify-end gap-1">
-                  <Badge variant={approvalStatusVariant[driver.approvalStatus]}>
-                    {approvalStatusLabel[driver.approvalStatus]}
-                  </Badge>
-                  {driver.approvalStatus === 'APPROVED' && driver.accountStatus !== 'ACTIVE' && (
-                    <Badge variant="destructive">{accountStatusLabel[driver.accountStatus]}</Badge>
-                  )}
+              {/*
+                A IDENTIDADE do entregador leva à ficha dele. Nao o cartao
+                inteiro: daqui para baixo ele e so controle — caixas de
+                modalidade, salvar, aprovar, bloquear — e um link por cima disso
+                faria cada clique numa caixa navegar junto.
+
+                A regiao clicavel e justamente a que nao tem nada clicavel
+                dentro, entao as duas coisas nunca disputam o mesmo clique.
+              */}
+              <Link
+                href={`/entregadores/${driver.id}`}
+                className="group block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="flex min-w-0 items-center gap-1 font-medium transition-colors group-hover:text-primary">
+                    <span className="truncate">{driver.name}</span>
+                    {/* O sinal de que da para clicar. Sem ele, ninguem descobre. */}
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+                    />
+                  </p>
+                  <div className="flex flex-wrap justify-end gap-1">
+                    <Badge variant={approvalStatusVariant[driver.approvalStatus]}>
+                      {approvalStatusLabel[driver.approvalStatus]}
+                    </Badge>
+                    {driver.approvalStatus === 'APPROVED' && driver.accountStatus !== 'ACTIVE' && (
+                      <Badge variant="destructive">{accountStatusLabel[driver.accountStatus]}</Badge>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-sm text-muted-foreground">{driver.email}</p>
-                <p className="text-sm text-muted-foreground">{driver.phone}</p>
-                <p className="text-xs text-muted-foreground">CPF: {driver.cpf}</p>
-                <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <MapPin className="size-3 text-primary" />
-                  {driver.region?.name ?? 'Região não informada'}
-                </p>
-              </div>
+                <div className="mt-3 space-y-0.5">
+                  <p className="text-sm text-muted-foreground">{driver.email}</p>
+                  <p className="text-sm text-muted-foreground">{driver.phone}</p>
+                  <p className="text-xs text-muted-foreground">CPF: {driver.cpf}</p>
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <MapPin className="size-3 text-primary" />
+                    {driver.region?.name ?? 'Região não informada'}
+                  </p>
+                </div>
+              </Link>
               {driver.reviewedBy && (
                 <p className="text-xs text-muted-foreground">
                   Revisado por {driver.reviewedBy.name}

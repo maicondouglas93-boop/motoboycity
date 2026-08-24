@@ -116,7 +116,11 @@ export interface DeliveryGroupResult {
 
 export interface OperationalDeliveryItem extends DeliveryListItem {
   addresses: DeliveryAddressItem[];
-  driver: { id: string; name: string; phone: string } | null;
+  /**
+   * `avatarUrl` e nulo quando o motoboy nao enviou foto — o caso comum
+   * enquanto o envio e novo. O mapa desenha as iniciais nesse caso.
+   */
+  driver: { id: string; name: string; phone: string; avatarUrl: string | null } | null;
   lastLocation: DeliveryTrackingPoint | null;
 }
 

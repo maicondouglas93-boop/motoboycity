@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AdminOperationsResult } from '@motoboycity/types';
 import { statusHex } from '@/components/orders/status-chip';
 import { loadGoogleMaps, onGoogleMapsAuthFailure } from '@/lib/google-maps';
+import { retratoDoMotoboy } from '@/lib/marcador-de-motoboy';
 import { LAJINHA_CENTER } from '@/lib/operation-area';
 
 export type MapMode = 'orders' | 'drivers' | 'all';
@@ -24,6 +25,9 @@ const DEFAULT_ZOOM = 15;
  * responderia com o zoom maximo. O teto mantem o quarteirao em volta visivel,
  * que e o que diz ao operador onde aquilo fica.
  */
+/** Verde da placa: a mesma cor que o motoboy ja tinha no mapa. */
+const COR_DO_MOTOBOY = '#0b6e4f';
+
 const MAX_AUTO_ZOOM = 16;
 
 interface Props {
@@ -73,6 +77,12 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
     if (!ready || !mapRef.current || !data) return;
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    /**
+     * O retrato do motoboy chega depois (canvas, e as vezes rede). Sem esta
+     * trava, uma atualizacao que troca os marcadores deixaria o retrato antigo
+     * pousar num marcador que ja foi removido do mapa.
+     */
+    let descartado = false;
     const bounds = new google.maps.LatLngBounds();
     const marker = (
       position: google.maps.LatLngLiteral,
@@ -98,6 +108,7 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
       item.addListener('click', click);
       markersRef.current.push(item);
       bounds.extend(position);
+      return item;
     };
 
     if (mode !== 'drivers') {
@@ -126,13 +137,33 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
     }
     if (mode !== 'orders') {
       for (const driver of data.onlineDrivers) {
-        marker(
+        const selecionado = selection?.kind === 'driver' && selection.id === driver.id;
+        const item = marker(
           { lat: driver.location.lat, lng: driver.location.lng },
           driver.name,
-          '#0b6e4f',
-          selection?.kind === 'driver' && selection.id === driver.id,
+          COR_DO_MOTOBOY,
+          selecionado,
           () => onSelect({ kind: 'driver', id: driver.id }),
         );
+        /*
+          O ponto colorido aparece primeiro e o retrato substitui quando fica
+          pronto. Esperar o retrato para so entao criar o marcador deixaria o
+          mapa vazio enquanto as fotos carregam.
+        */
+        void retratoDoMotoboy({
+          nome: driver.name,
+          avatarUrl: driver.avatarUrl,
+          cor: COR_DO_MOTOBOY,
+          selecionado,
+        }).then((retrato) => {
+          if (descartado || !retrato) return;
+          const lado = selecionado ? 44 : 34;
+          item.setIcon({
+            url: retrato,
+            scaledSize: new google.maps.Size(lado, lado),
+            anchor: new google.maps.Point(lado / 2, lado / 2),
+          });
+        });
       }
     }
     /**
@@ -153,6 +184,10 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
       });
       map.fitBounds(bounds, 64);
     }
+
+    return () => {
+      descartado = true;
+    };
   }, [data, mode, onSelect, ready, selection]);
 
   return (

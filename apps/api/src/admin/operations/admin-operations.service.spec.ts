@@ -56,4 +56,65 @@ describe('AdminOperationsService', () => {
     );
     expect(result.counts).toEqual(expect.objectContaining({ COMPLETED: 0, CANCELLED: 0 }));
   });
+
+  describe('foto do motoboy no mapa', () => {
+    function motoboyOnline(avatarUrl: string | null) {
+      livePresenceService.listActive.mockResolvedValue([
+        {
+          driverId: 'motoboy-1',
+          lat: -20.1522,
+          lng: -41.6232,
+          capturedAt: new Date('2026-08-23T15:59:00.000Z'),
+          accuracy: 12,
+          appVersion: '1.0.0',
+        },
+      ]);
+      prisma.driver.findMany.mockResolvedValue([
+        {
+          id: 'motoboy-1',
+          user: { name: 'Franklim Melo', phone: '33999887766', avatarUrl },
+          presenceLogs: [{ wentOnlineAt: new Date('2026-08-23T15:00:00.000Z') }],
+          serviceTypes: [],
+          deliveries: [],
+        },
+      ]);
+    }
+
+    it('pede a foto junto do nome e do telefone', async () => {
+      motoboyOnline(null);
+
+      await service.overview(admin, {});
+
+      expect(prisma.driver.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            user: { select: { name: true, phone: true, avatarUrl: true } },
+          }),
+        }),
+      );
+    });
+
+    it('entrega a foto quando o motoboy tem uma', async () => {
+      motoboyOnline('https://ik.imagekit.io/exemplo/foto.jpg');
+
+      const resultado = await service.overview(admin, {});
+
+      expect(resultado.onlineDrivers[0]?.avatarUrl).toBe(
+        'https://ik.imagekit.io/exemplo/foto.jpg',
+      );
+    });
+
+    it('entrega null quando nao tem, e nao omite o campo', async () => {
+      /**
+       * O mapa distingue "sem foto" de "campo ausente": sem foto ele desenha as
+       * iniciais. Se o campo sumisse do payload, o TypeScript nao acusaria em
+       * tempo de execucao e o marcador ficaria vazio.
+       */
+      motoboyOnline(null);
+
+      const resultado = await service.overview(admin, {});
+
+      expect(resultado.onlineDrivers[0]).toHaveProperty('avatarUrl', null);
+    });
+  });
 });
