@@ -1,53 +1,54 @@
 'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, Search } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { StatCard } from '@/components/stat-card';
+import { BarChart3, FileText, Receipt, Wallet } from 'lucide-react';
+import { FinanceTabs, type FinanceTab } from '@/components/finance/finance-tabs';
+import { PainelTab } from '@/components/finance/painel-tab';
+import { CarteirasTab } from '@/components/finance/carteiras-tab';
+import { FaturasTab } from '@/components/finance/faturas-tab';
+import { RecebimentosTab } from '@/components/finance/recebimentos-tab';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
-import { useMoney } from '@/lib/money';
 
+/**
+ * Área financeira: uma página, quatro abas.
+ *
+ * Antes eram quatro rotas sem ligação entre si — quem estava no caixa não
+ * descobria as faturas, e o número na tela não levava a lugar nenhum. Agora
+ * tudo que é dinheiro mora sob o mesmo teto, e cada cartão abre a lista que
+ * explica o número.
+ *
+ * A aba ativa fica na URL, e não em estado local. Sem isso o admin não
+ * consegue mandar o link da fila de saques para alguém, e o F5 devolve para o
+ * começo.
+ */
 export default function FinancePage() {
-  const money = useMoney();
+  return (
+    // `useSearchParams` exige limite de Suspense no App Router: sem ele a
+    // rota inteira vira dinâmica e o build reclama.
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Carregando financeiro...</p>}>
+      <FinanceArea />
+    </Suspense>
+  );
+}
+
+function FinanceArea() {
   const token = session.getToken();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [periodError, setPeriodError] = useState<string | null>(null);
-  const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
-  const [walletSearch, setWalletSearch] = useState('');
-  const [appliedWalletSearch, setAppliedWalletSearch] = useState('');
+  const searchParams = useSearchParams();
+  const aba = searchParams.get('aba') ?? 'painel';
 
-  const cashQuery = useQuery({
-    queryKey: ['admin', 'financial', 'cash-position'],
-    queryFn: () => adminFinancialApi.cashPosition(token as string),
-    enabled: Boolean(token),
-  });
-
-  const overviewQuery = useQuery({
-    queryKey: ['admin', 'financial', 'overview', appliedPeriod],
-    queryFn: () => adminFinancialApi.overview(token as string, appliedPeriod),
-    enabled: Boolean(token),
-  });
-  const walletsQuery = useQuery({
-    queryKey: ['admin', 'financial', 'driver-wallets', appliedWalletSearch],
-    queryFn: () =>
-      adminFinancialApi.listDriverWallets(token as string, {
-        ...(appliedWalletSearch && { search: appliedWalletSearch }),
-      }),
+  /**
+   * Só a contagem de saques parados alimenta o distintivo.
+   *
+   * É o único número da área com prazo: enquanto ele não zera, tem gente
+   * esperando dinheiro. Contar faturas ou carteiras aqui transformaria o
+   * distintivo em enfeite.
+   */
+  const saquesPendentesQuery = useQuery({
+    queryKey: ['admin', 'financial', 'withdrawals', 'pending-count'],
+    queryFn: () => adminFinancialApi.listWithdrawals(token as string, { status: 'PENDING' }),
     enabled: Boolean(token),
   });
 
@@ -59,256 +60,34 @@ export default function FinancePage() {
     );
   }
 
-  const overview = overviewQuery.data;
-  const caixa = cashQuery.data;
-  const wallets = walletsQuery.data ?? [];
-
-  function applyPeriod() {
-    if (from && to && from > to) {
-      setPeriodError('A data inicial não pode ser posterior à data final.');
-      return;
-    }
-    setPeriodError(null);
-    setAppliedPeriod({ ...(from && { from }), ...(to && { to }) });
-  }
-
-  function clearPeriod() {
-    setFrom('');
-    setTo('');
-    setPeriodError(null);
-    setAppliedPeriod({});
-  }
-
-  function clearWalletSearch() {
-    setWalletSearch('');
-    setAppliedWalletSearch('');
-  }
+  const tabs: FinanceTab[] = [
+    { value: 'painel', label: 'Painel', icon: BarChart3 },
+    {
+      value: 'carteiras',
+      label: 'Carteiras',
+      icon: Wallet,
+      badge: saquesPendentesQuery.data?.length,
+    },
+    { value: 'faturas', label: 'Faturas', icon: FileText },
+    { value: 'recebimentos', label: 'Recebimentos', icon: Receipt },
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Financeiro</h1>
-          <p className="text-sm text-muted-foreground">
-            Visão calculada a partir dos pedidos concluídos, faturas e lançamentos do ledger.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="finance-from">Conclusão a partir de</Label>
-            <Input
-              id="finance-from"
-              type="date"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="finance-to">Conclusão até</Label>
-            <Input
-              id="finance-to"
-              type="date"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
-          <Button onClick={applyPeriod}>Aplicar período</Button>
-          <Button variant="outline" onClick={clearPeriod}>
-            Limpar
-          </Button>
-          {periodError && <p className="text-sm text-destructive">{periodError}</p>}
-        </div>
+      <div>
+        <h1 className="text-xl font-semibold">Financeiro</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Caixa, carteiras, faturas e recebimentos da operação.
+        </p>
       </div>
 
-      {overviewQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Calculando financeiro...</p>
-      )}
-      {overviewQuery.isError && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <AlertCircle className="size-4" />
-          Não foi possível carregar o resumo financeiro. Tente novamente.
-        </div>
-      )}
+      <FinanceTabs tabs={tabs} />
 
-      {/*
-        Caixa PRIMEIRO, e fora do seletor de período.
-
-        Antes, os números de fatura e carteira ficavam logo abaixo do filtro de
-        datas sem serem filtrados por ele — e "concluído sem fatura" era o
-        contrário: filtrado, quando não deveria. As duas coisas juntas faziam a
-        tela mostrar números que ninguém sabia dizer a que recorte pertenciam.
-      */}
-      {caixa && (
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold">Posição de caixa — agora</h2>
-            <p className="text-xs text-muted-foreground">
-              Não muda com o filtro de período abaixo.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <Link href="/pedidos?status=COMPLETED">
-              <StatCard
-                label="Concluído sem fatura"
-                value={money(caixa.unbilledValue)}
-                hint={`${caixa.unbilledCount} entrega(s) feitas e ainda não cobradas`}
-              />
-            </Link>
-            <Link href="/faturas">
-              <StatCard
-                label="Faturas a vencer"
-                value={money(caixa.invoicesDueValue)}
-                hint={`${caixa.invoicesDueCount} fatura(s)`}
-              />
-            </Link>
-            <Link href="/faturas">
-              <StatCard
-                label="Faturas vencidas"
-                value={money(caixa.invoicesOverdueValue)}
-                hint={`${caixa.invoicesOverdueCount} fatura(s)`}
-              />
-            </Link>
-            <StatCard
-              label="Total a receber"
-              value={money(caixa.totalReceivable)}
-              hint="Sem fatura + a vencer + vencidas"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
-            <StatCard
-              label="Disponível nas carteiras"
-              value={money(caixa.driverAvailableBalance)}
-              hint="Os motoboys podem sacar a qualquer hora"
-            />
-            <StatCard
-              label="A liberar nas carteiras"
-              value={money(caixa.driverBlockedBalance)}
-              hint="Ainda dentro do prazo de liberação"
-            />
-            <Link href="/financeiro/saques">
-              <StatCard
-                label="Saques pendentes"
-                value={money(caixa.pendingWithdrawalValue)}
-                hint="Pedidos ainda não pagos"
-              />
-            </Link>
-          </div>
-        </section>
-      )}
-
-      {overview && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            Entregas concluídas no período
-          </h2>
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <StatCard label="Entregas" value={String(overview.completedDeliveries.count)} />
-            <StatCard label="Valor total" value={money(overview.completedDeliveries.totalValue)} />
-            <StatCard
-              label="Repasse aos entregadores"
-              value={money(overview.completedDeliveries.driverValue)}
-            />
-            <StatCard
-              label="Receita da plataforma"
-              value={money(overview.completedDeliveries.platformValue)}
-            />
-          </div>
-        </section>
-      )}
-
-      <Card>
-        <CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Carteiras dos entregadores</CardTitle>
-            <p className="mt-1 text-sm font-normal text-muted-foreground">
-              Saldos calculados do ledger; “a liberar” não está disponível para saque.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
-              href="/financeiro/saques"
-            >
-              Gerenciar saques
-            </Link>
-            <Input
-              aria-label="Buscar entregador"
-              className="w-64"
-              placeholder="Nome ou e-mail"
-              value={walletSearch}
-              onChange={(event) => setWalletSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') setAppliedWalletSearch(walletSearch.trim());
-              }}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setAppliedWalletSearch(walletSearch.trim())}
-            >
-              <Search className="size-4" />
-              <span className="sr-only">Buscar</span>
-            </Button>
-            <Button variant="outline" onClick={clearWalletSearch}>
-              Limpar
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {walletsQuery.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Carregando carteiras...</p>
-          ) : walletsQuery.isError ? (
-            <p className="p-6 text-sm text-destructive">Não foi possível carregar as carteiras.</p>
-          ) : wallets.length === 0 ? (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              Nenhum entregador encontrado.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Entregador</TableHead>
-                  <TableHead>Saldo disponível</TableHead>
-                  <TableHead>Saldo a liberar</TableHead>
-                  <TableHead>Saques pendentes</TableHead>
-                  <TableHead>Conferência</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {wallets.map((wallet) => (
-                  <TableRow key={wallet.driverId}>
-                    <TableCell>
-                      <p className="font-medium">{wallet.driverName}</p>
-                      <p className="text-xs text-muted-foreground">{wallet.driverEmail}</p>
-                    </TableCell>
-                    <TableCell>{money(wallet.availableBalance)}</TableCell>
-                    <TableCell>{money(wallet.blockedBalance)}</TableCell>
-                    <TableCell>{money(wallet.pendingWithdrawalAmount)}</TableCell>
-                    <TableCell>
-                      <span
-                        className={
-                          wallet.cacheMatchesLedger ? 'text-status-entregue' : 'text-destructive'
-                        }
-                      >
-                        {wallet.cacheMatchesLedger ? 'Conferido' : 'Divergência'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Link
-                        className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
-                        href={`/entregadores/${wallet.driverId}`}
-                      >
-                        Ver entregador
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {aba === 'painel' && <PainelTab token={token} />}
+      {aba === 'carteiras' && <CarteirasTab token={token} />}
+      {aba === 'faturas' && <FaturasTab token={token} />}
+      {aba === 'recebimentos' && <RecebimentosTab token={token} />}
     </div>
   );
 }
+

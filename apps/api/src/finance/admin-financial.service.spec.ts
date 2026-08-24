@@ -118,3 +118,105 @@ describe('AdminFinancialService.cashPosition', () => {
     expect(caixa.pendingWithdrawalValue).toBe(50);
   });
 });
+
+describe('AdminFinancialService.receipts', () => {
+  let service: AdminFinancialService;
+  let prisma: { invoice: { findMany: jest.Mock } };
+
+  /** Uma fatura quitada, no formato que o Prisma devolve. */
+  function fatura(numero: string, pagoEm: string, valor: number, metodo = 'BILLED') {
+    return {
+      id: `inv-${numero}`,
+      number: numero,
+      companyId: 'empresa-1',
+      totalValue: valor,
+      paymentDate: new Date(pagoEm),
+      paymentMethod: metodo,
+      company: { tradeName: 'Drogaria Teste' },
+    };
+  }
+
+  beforeEach(async () => {
+    prisma = { invoice: { findMany: jest.fn().mockResolvedValue([]) } };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminFinancialService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: InvoiceService, useValue: { refreshOverdueInvoices: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get(AdminFinancialService);
+  });
+
+  it('agrupa por dia e soma o total de cada um', async () => {
+    prisma.invoice.findMany.mockResolvedValue([
+      fatura('0302', '2026-08-02T15:00:00Z', 429.77),
+      fatura('0315', '2026-08-02T18:00:00Z', 115.45),
+      fatura('0270', '2026-08-03T14:00:00Z', 22.86),
+    ]);
+
+    const extrato = await service.receipts({ from: '2026-08-01', to: '2026-08-03', onlineOnly: false });
+
+    expect(extrato.days).toHaveLength(2);
+    // Mais recente primeiro: quem abre o extrato quer ver ontem.
+    expect(extrato.days[0]?.day).toBe('2026-08-03');
+    expect(extrato.days[1]?.day).toBe('2026-08-02');
+    expect(extrato.days[1]?.total).toBe(545.22);
+    expect(extrato.total).toBe(568.08);
+  });
+
+  it('agrupa pelo dia em SÃO PAULO, e não em UTC', async () => {
+    /**
+     * 03/08 às 00:30 UTC é ainda 02/08 às 21:30 em Lajinha. Agrupar por
+     * `toISOString()` jogaria este recebimento para o dia seguinte, e o total do
+     * dia 2 fecharia errado no fim do mês.
+     */
+    prisma.invoice.findMany.mockResolvedValue([fatura('0400', '2026-08-03T00:30:00Z', 100)]);
+
+    const extrato = await service.receipts({ from: '2026-08-01', to: '2026-08-05', onlineOnly: false });
+
+    expect(extrato.days[0]?.day).toBe('2026-08-02');
+  });
+
+  it('soma sem erro de ponto flutuante', async () => {
+    // 0.1 + 0.2 em float dá 0.30000000000000004.
+    prisma.invoice.findMany.mockResolvedValue([
+      fatura('0500', '2026-08-02T15:00:00Z', 0.1),
+      fatura('0501', '2026-08-02T16:00:00Z', 0.2),
+    ]);
+
+    const extrato = await service.receipts({ from: '2026-08-01', to: '2026-08-03', onlineOnly: false });
+
+    expect(extrato.days[0]?.total).toBe(0.3);
+  });
+
+  it('filtra somente pagamentos online quando pedido', async () => {
+    await service.receipts({ from: '2026-08-01', to: '2026-08-03', onlineOnly: true });
+
+    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ paymentMethod: 'ONLINE' }),
+      }),
+    );
+  });
+
+  it('ignora fatura paga sem data de pagamento em vez de derrubar o extrato', async () => {
+    // Linha inconsistente no banco não pode apagar o extrato inteiro.
+    prisma.invoice.findMany.mockResolvedValue([
+      { ...fatura('0600', '2026-08-02T15:00:00Z', 50), paymentDate: null },
+      fatura('0601', '2026-08-02T16:00:00Z', 70),
+    ]);
+
+    const extrato = await service.receipts({ from: '2026-08-01', to: '2026-08-03', onlineOnly: false });
+
+    expect(extrato.total).toBe(70);
+  });
+
+  it('devolve vazio sem quebrar quando não houve recebimento', async () => {
+    const extrato = await service.receipts({ from: '2026-08-01', to: '2026-08-03', onlineOnly: false });
+
+    expect(extrato).toEqual({ total: 0, days: [] });
+  });
+});

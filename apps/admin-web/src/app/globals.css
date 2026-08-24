@@ -26,6 +26,18 @@
   --color-status-entregue: var(--status-entregue);
   --color-status-cancelado: var(--status-cancelado);
   --color-status-pagamento: var(--status-pagamento);
+  --color-dinheiro-nao-cobrado: var(--dinheiro-nao-cobrado);
+  --color-dinheiro-nao-cobrado-suave: var(--dinheiro-nao-cobrado-suave);
+  --color-dinheiro-aguardando: var(--dinheiro-aguardando);
+  --color-dinheiro-aguardando-suave: var(--dinheiro-aguardando-suave);
+  --color-dinheiro-atrasado: var(--dinheiro-atrasado);
+  --color-dinheiro-atrasado-suave: var(--dinheiro-atrasado-suave);
+  --color-dinheiro-recebido: var(--dinheiro-recebido);
+  --color-dinheiro-recebido-suave: var(--dinheiro-recebido-suave);
+  --color-dinheiro-retido: var(--dinheiro-retido);
+  --color-dinheiro-retido-suave: var(--dinheiro-retido-suave);
+  --color-dinheiro-informativo: var(--dinheiro-informativo);
+  --color-dinheiro-informativo-suave: var(--dinheiro-informativo-suave);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -129,6 +141,35 @@
   --status-entregue: var(--placa);
   --status-cancelado: var(--alerta);
   --status-pagamento: #1d4ed8;
+
+  /**
+   * Estados do DINHEIRO.
+   *
+   * Sao intencoes, nao cores novas: cada uma aponta para um token da paleta que
+   * ja existe, para o financeiro nao virar uma ilha visual dentro do painel.
+   *
+   * Duas regras que fazem a cor continuar significando alguma coisa:
+   *
+   * - Vermelho SO para o que exige acao hoje. Se qualquer numero pode ficar
+   *   vermelho, o vermelho para de avisar.
+   * - Zero nao e verde. "R$ 0,00 vencido" e neutro, nao e conquista — quem
+   *   pinta isso de verde ensina o admin a ignorar a cor.
+   *
+   * Os tons `-suave` sao fundo de cartao. O texto colorido vai sempre sobre o
+   * fundo suave da mesma familia, nunca colorido sobre branco em corpo pequeno.
+   */
+  --dinheiro-nao-cobrado: #a1620a;
+  --dinheiro-nao-cobrado-suave: #fdf5e6;
+  --dinheiro-aguardando: var(--colete-escuro);
+  --dinheiro-aguardando-suave: #fdefe4;
+  --dinheiro-atrasado: var(--alerta);
+  --dinheiro-atrasado-suave: #fdeceb;
+  --dinheiro-recebido: var(--placa);
+  --dinheiro-recebido-suave: #e6f2ed;
+  --dinheiro-retido: var(--status-aguardando);
+  --dinheiro-retido-suave: #f1f3f4;
+  --dinheiro-informativo: var(--status-pagamento);
+  --dinheiro-informativo-suave: #e8eefc;
 
   --chart-1: var(--admin);
   --chart-2: var(--colete);

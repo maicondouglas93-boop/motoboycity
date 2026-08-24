@@ -2,15 +2,17 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   adminFinancialOverviewQuerySchema,
   listAdminWalletsQuerySchema,
+  listReceiptsQuerySchema,
   listWalletTransactionsQuerySchema,
   type AdminFinancialOverviewQuery,
   type ListAdminWalletsQuery,
+  type ListReceiptsQuery,
   type ListWalletTransactionsQuery,
 } from '@motoboycity/validation';
 import { AdminOnlyGuard } from '../auth/admin-only.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import type { CashPositionItem } from '@motoboycity/types';
+import type { CashPositionItem, ReceiptsReport } from '@motoboycity/types';
 import {
   AdminFinancialService,
   type AdminDriverWalletDetail,
@@ -32,6 +34,19 @@ export class AdminFinancialController {
   @Get('cash-position')
   cashPosition(): Promise<CashPositionItem> {
     return this.adminFinancialService.cashPosition();
+  }
+
+  /**
+   * Extrato de recebimentos, agrupado por dia no servidor.
+   *
+   * O periodo e obrigatorio: sem recorte isto devolveria a operacao inteira
+   * desde o primeiro dia, cresce sem limite e nunca e o que alguem quer ver.
+   */
+  @Get('receipts')
+  receipts(
+    @Query(new ZodValidationPipe(listReceiptsQuerySchema)) query: ListReceiptsQuery,
+  ): Promise<ReceiptsReport> {
+    return this.adminFinancialService.receipts(query);
   }
 
   @Get('overview')

@@ -6,6 +6,7 @@ import type {
   WithdrawalRequestItem,
   WithdrawalRequestStatus,
   CashPositionItem,
+  ReceiptsReport,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -39,6 +40,23 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminFinancialOverview>(response);
+    },
+
+    /**
+     * Extrato de recebimentos. Periodo obrigatorio: sem recorte isto devolveria
+     * a operacao inteira desde o primeiro dia.
+     */
+    async receipts(
+      accessToken: string,
+      filters: { from: string; to: string; onlineOnly?: boolean },
+    ): Promise<ReceiptsReport> {
+      const params = new URLSearchParams({ from: filters.from, to: filters.to });
+      if (filters.onlineOnly) params.set('onlineOnly', 'true');
+
+      const response = await fetch(`${baseUrl}/admin/financial/receipts?${params.toString()}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<ReceiptsReport>(response);
     },
 
     async listDriverWallets(

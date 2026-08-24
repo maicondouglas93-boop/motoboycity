@@ -2,9 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AdminFinancialOverviewQuery,
   ListAdminWalletsQuery,
+  ListReceiptsQuery,
   ListWalletTransactionsQuery,
 } from '@motoboycity/validation';
-import type { CashPositionItem } from '@motoboycity/types';
+import type { CashPositionItem, ReceiptItem, ReceiptsReport } from '@motoboycity/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoiceService } from './invoice.service';
 import {
@@ -13,7 +14,7 @@ import {
   type WalletTransactionItem,
   type WalletTransactionType,
 } from './driver-wallet.service';
-import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import { dateInSaoPaulo, endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 export interface AdminFinancialOverview {
   completedDeliveries: {
@@ -56,6 +57,17 @@ function numberOrZero(value: { toString(): string } | null | undefined): number 
 
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Soma em centavos inteiros.
+ *
+ * `0.1 + 0.2` e `0.30000000000000004`. O banco guarda `Decimal(10,2)`, entao
+ * converter para centavo antes de somar devolve exatamente o mesmo numero que
+ * o banco daria.
+ */
+function somarEmCentavos(valores: number[]): number {
+  return valores.reduce((total, valor) => total + Math.round(valor * 100), 0) / 100;
 }
 
 @Injectable()
@@ -322,6 +334,77 @@ export class AdminFinancialService {
    * caia no recorte de quarta: tres horas de todo dia lancadas no dia errado.
    * Quem digita 22/08 no painel quer o dia 22 em Lajinha.
    */
+  /**
+   * Extrato de recebimentos: o que entrou, agrupado por dia.
+   *
+   * O agrupamento acontece AQUI, e nao na tela, por dois motivos. O total do
+   * dia sai de `Decimal(10,2)` somado no servidor — somar float no cliente faz
+   * o numero exibido divergir do real depois de algumas dezenas de linhas. E o
+   * agrupamento por dia usa o fuso da operacao: fazer isso com
+   * `toISOString().slice(0, 10)` jogaria todo recebimento depois das 21h para o
+   * dia seguinte.
+   */
+  async receipts(filters: ListReceiptsQuery): Promise<ReceiptsReport> {
+    const faturas = await this.prisma.invoice.findMany({
+      where: {
+        status: 'PAID',
+        paymentDate: {
+          gte: startOfDayInSaoPaulo(filters.from),
+          lte: endOfDayInSaoPaulo(filters.to),
+        },
+        ...(filters.onlineOnly && { paymentMethod: 'ONLINE' }),
+      },
+      select: {
+        id: true,
+        number: true,
+        companyId: true,
+        totalValue: true,
+        paymentDate: true,
+        paymentMethod: true,
+        company: { select: { tradeName: true } },
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    const porDia = new Map<string, ReceiptItem[]>();
+    for (const fatura of faturas) {
+      // `paymentDate` é obrigatório em fatura PAID, mas o schema o deixa
+      // opcional; sem esta guarda, uma linha inconsistente derrubaria o extrato
+      // inteiro em vez de apenas faltar.
+      if (!fatura.paymentDate) continue;
+
+      const dia = dateInSaoPaulo(fatura.paymentDate);
+      const linha: ReceiptItem = {
+        invoiceId: fatura.id,
+        invoiceNumber: fatura.number,
+        companyId: fatura.companyId,
+        companyName: fatura.company.tradeName,
+        paidAt: fatura.paymentDate.toISOString(),
+        paymentMethod: fatura.paymentMethod,
+        amount: Number(fatura.totalValue),
+      };
+
+      const doDia = porDia.get(dia);
+      if (doDia) doDia.push(linha);
+      else porDia.set(dia, [linha]);
+    }
+
+    const days = [...porDia.entries()]
+      // Mais recente primeiro: quem abre o extrato quer ver ontem, nao o
+      // primeiro dia do mes.
+      .sort(([diaA], [diaB]) => diaB.localeCompare(diaA))
+      .map(([day, receipts]) => ({
+        day,
+        total: somarEmCentavos(receipts.map((r) => r.amount)),
+        receipts,
+      }));
+
+    return {
+      total: somarEmCentavos(days.map((dia) => dia.total)),
+      days,
+    };
+  }
+
   private startOfDay(date: string): Date {
     return startOfDayInSaoPaulo(date);
   }

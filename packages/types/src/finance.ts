@@ -115,6 +115,37 @@ export interface InvoiceListItem {
   deliveryCount: number;
 }
 
+/** Uma fatura quitada, como linha do extrato. */
+export interface ReceiptItem {
+  invoiceId: string;
+  invoiceNumber: string;
+  companyId: string;
+  companyName: string;
+  paidAt: string;
+  paymentMethod: PaymentMethod | null;
+  amount: number;
+}
+
+/**
+ * Um dia do extrato, com o total já somado.
+ *
+ * O total vem do servidor e não é somado na tela: dinheiro é `Decimal(10,2)` no
+ * banco, e somar float no cliente faz o total exibido divergir do real depois
+ * de algumas dezenas de linhas.
+ */
+export interface ReceiptDayGroup {
+  /** `AAAA-MM-DD` no fuso da operação. */
+  day: string;
+  total: number;
+  receipts: ReceiptItem[];
+}
+
+export interface ReceiptsReport {
+  /** Soma de todos os dias do intervalo. */
+  total: number;
+  days: ReceiptDayGroup[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;
