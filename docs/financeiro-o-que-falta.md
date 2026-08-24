@@ -19,34 +19,11 @@ Contexto: a área financeira foi refatorada em `/financeiro`, com quatro abas
 | Envelhecimento da dívida por empresa | `src/components/finance/receivables-aging.tsx` |
 | Ajuste manual de carteira | `POST /admin/financial/driver-wallets/:driverId/adjustments` |
 | Obrigações por entregador | `src/components/finance/payouts-aging.tsx` |
+| Cancelar fatura | `PATCH /admin/financial/invoices/:id/cancel` |
 
 ---
 
-## 1. Cancelar fatura — BACKEND + INTERFACE
-
-**O que existe:** o enum `InvoiceStatus` tem `CANCELLED`, e
-**nenhuma rota o produz**. Fatura emitida errada hoje não tem saída.
-
-**O que falta:**
-
-1. `PATCH /admin/financial/invoices/:id/cancel` em
-   `apps/api/src/finance/invoice.controller.ts`
-2. Schema com **motivo obrigatório** (mesmo padrão de
-   `adjustDriverWalletSchema`: mínimo de 10 caracteres)
-3. No serviço:
-   - Recusar cancelar fatura já `PAID` — dinheiro que entrou não se cancela,
-     se estorna. Devolver `ConflictException` explicando isso.
-   - **Soltar as entregas**: `invoiceId: null` nas entregas vinculadas, senão
-     elas somem do "sem fatura" e nunca mais são cobradas
-   - Gravar em `InvoiceStatusHistory` com o autor
-4. Botão na aba Faturas, com confirmação e o motivo
-
-**Cuidado:** o passo de soltar as entregas é o que impede dinheiro de sumir. Sem
-ele, cancelar a fatura apaga a cobrança em vez de reabri-la.
-
----
-
-## 2. Antecipação de saldo — BACKEND INTEIRO
+## 1. Antecipação de saldo — BACKEND INTEIRO
 
 **O que existe:** o modelo `AdvanceRequest` no schema, com
 `blockedAmountAntecipado`, `feeAmount`, `netAmount`, `status` e
@@ -72,7 +49,7 @@ sem demanda comprovada.
 
 ---
 
-## 3. Demonstrativo por competência — SÓ INTERFACE
+## 2. Demonstrativo por competência — SÓ INTERFACE
 
 **Existe pronto:** `GET /admin/financial/financial-statement?from&to`, exposto
 em `adminFinancialApi.financialStatement(token, { from, to })`.
