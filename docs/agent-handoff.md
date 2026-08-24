@@ -5769,3 +5769,19 @@ quatro expectativas E2E após as mudanças de idempotência; isso precisa ser
 alinhado antes de considerar o backend pronto para produção. Próximo passo
 concreto: validar o Blueprint, confirmar autorização para aplicar as 31
 migrations no Neon limpo e acompanhar o primeiro deploy/health check.
+
+## Atualização — 2026-08-24: correção do primeiro build no Render
+
+O primeiro sync do Blueprint criou `motoboycity-redis`, mas o build da API
+parou antes da instalação de dependências: `corepack enable` tentou substituir
+`/usr/bin/pnpm` no filesystem somente leitura do runtime (`EROFS`). Nenhuma
+migration ou seed chegou a executar.
+
+O Blueprint passou a invocar `corepack pnpm` diretamente no build, start e
+hook inicial, sem criar ou sobrescrever links globais. `NODE_VERSION` foi
+fixado em `22.18.0`, a mesma versão usada no CI; a faixa aberta `>=20` do
+`package.json` havia feito o Render selecionar Node 26.7.0 automaticamente.
+
+Próximo passo concreto: validar a formatação, commitar/pushar a correção e
+acompanhar o sync automático do Blueprint até migrations, build, seed e
+`GET /health` concluírem.

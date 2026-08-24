@@ -50,18 +50,17 @@ services:
     # workspace inteiro e a API importa @motoboycity/types e /validation.
     rootDir: .
     buildCommand: >-
-      corepack enable &&
-      pnpm install --frozen-lockfile &&
-      pnpm --filter @motoboycity/api exec prisma generate &&
-      pnpm --filter @motoboycity/api exec prisma migrate deploy &&
-      pnpm --filter @motoboycity/api build
+      corepack pnpm install --frozen-lockfile &&
+      corepack pnpm --filter @motoboycity/api exec prisma generate &&
+      corepack pnpm --filter @motoboycity/api exec prisma migrate deploy &&
+      corepack pnpm --filter @motoboycity/api build
     # Delega ao script do proprio pacote (`node dist/main`), em vez de repetir
     # o caminho aqui: se o build mudar de lugar, o start acompanha sozinho.
-    startCommand: pnpm --filter @motoboycity/api start:prod
+    startCommand: corepack pnpm --filter @motoboycity/api start:prod
     # O plano gratuito nao oferece Shell. Este hook oficial do Render executa
     # somente depois do primeiro deploy bem-sucedido e torna o bootstrap
     # reproduzivel sem colocar credenciais no repositorio.
-    initialDeployHook: pnpm --filter @motoboycity/api exec prisma db seed
+    initialDeployHook: corepack pnpm --filter @motoboycity/api exec prisma db seed
     healthCheckPath: /health
 
     envVars:
@@ -98,6 +97,10 @@ services:
 
       - key: NODE_ENV
         value: production
+      # A faixa aberta `>=20` do package.json fez o Render escolher Node 26.
+      # Fixamos a mesma versao exercitada pelo CI e pelo desenvolvimento local.
+      - key: NODE_VERSION
+        value: '22.18.0'
 
       # --- ajustes com padrao seguro ----------------------------------------
 
