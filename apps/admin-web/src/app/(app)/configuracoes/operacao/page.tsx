@@ -11,6 +11,7 @@ import {
   BellRing,
   CheckCircle2,
   Clock3,
+  ArrowRight,
   Crosshair,
   LoaderCircle,
   RotateCcw,
@@ -26,6 +27,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { adminPlatformSettingsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import {
+  ESTILO_DO_ESTADO,
+  PilulaDeEstado,
+  TONS,
+  type EstadoDaConfiguracao,
+  type Tom,
+} from '@/components/settings/estado-da-configuracao';
 
 // Os limites espelham `updatePlatformSettingsSchema`; validar aqui evita uma
 // ida ao servidor só para receber o mesmo erro de volta.
@@ -63,6 +71,7 @@ type SettingFieldProps = {
   placeholder: string;
   currentValue: string;
   unit: string;
+  estado?: EstadoDaConfiguracao;
 };
 
 function SettingField({
@@ -74,16 +83,30 @@ function SettingField({
   placeholder,
   currentValue,
   unit,
+  estado = 'definido',
 }: SettingFieldProps) {
+  /**
+   * Campo preenchido = alteração pendente.
+   *
+   * O cabeçalho da tela avisa que "campos em branco mantêm o valor atual", mas
+   * nada dizia QUAIS foram preenchidos. Com oito campos, quem se distrai no
+   * meio do caminho salva sem saber o que está mandando.
+   */
+  const vaiMudar = value.trim().length > 0;
+
   return (
-    <div className="flex min-h-48 flex-col rounded-xl border border-border/70 bg-muted/20 p-4 transition-colors focus-within:border-primary/40 focus-within:bg-primary/[0.025]">
+    <div
+      className={`flex min-h-48 flex-col rounded-xl border p-4 transition-colors ${
+        vaiMudar
+          ? 'border-primary/45 bg-primary/[0.04] ring-1 ring-inset ring-primary/15'
+          : 'border-border/70 bg-muted/20 focus-within:border-primary/40 focus-within:bg-primary/[0.025]'
+      }`}
+    >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <Label htmlFor={id} className="max-w-[75%] leading-5 text-admin-deep">
+        <Label htmlFor={id} className="max-w-[70%] leading-5 text-admin-deep">
           {label}
         </Label>
-        <span className="rounded-md bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground ring-1 ring-border/70">
-          Atual: {currentValue}
-        </span>
+        <PilulaDeEstado estado={estado}>{currentValue}</PilulaDeEstado>
       </div>
 
       <div className="relative">
@@ -102,9 +125,16 @@ function SettingField({
         </span>
       </div>
 
-      <p id={`${id}-description`} className="mt-3 text-xs leading-5 text-muted-foreground">
-        {description}
-      </p>
+      {vaiMudar ? (
+        <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary">
+          <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
+          Vai passar de {currentValue} para {value.trim()} {unit}
+        </p>
+      ) : (
+        <p id={`${id}-description`} className="mt-3 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      )}
     </div>
   );
 }
@@ -113,18 +143,25 @@ function SettingsSection({
   icon: Icon,
   title,
   description,
+  tom,
   children,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  tom: Tom;
   children: ReactNode;
 }) {
+  const cores = TONS[tom];
   return (
-    <Card>
-      <CardHeader className="border-b border-border/70 pb-4">
+    <Card className="relative overflow-hidden">
+      {/* Trilho colorido: separa as quatro secoes de relance, sem pesar a tela. */}
+      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1 ${cores.trilho}`} />
+      <CardHeader className="border-b border-border/70 pb-4 pl-6">
         <div className="flex gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <span
+            className={`flex size-10 shrink-0 items-center justify-center rounded-xl ${cores.icone}`}
+          >
             <Icon className="size-5" aria-hidden="true" />
           </span>
           <div className="space-y-1">
@@ -133,7 +170,7 @@ function SettingsSection({
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pl-6">
         <div className="grid gap-4 md:grid-cols-2">{children}</div>
       </CardContent>
     </Card>
@@ -143,23 +180,36 @@ function SettingsSection({
 function CurrentValueRow({
   label,
   value,
-  critical = false,
+  estado = 'definido',
+  pendente,
 }: {
   label: string;
   value: string;
-  critical?: boolean;
+  estado?: EstadoDaConfiguracao;
+  /** Novo valor digitado no formulário, se houver. */
+  pendente?: string;
 }) {
+  const estilo = ESTILO_DO_ESTADO[estado];
+
   return (
     <div className="flex items-start justify-between gap-4 border-b border-border/60 py-3 first:pt-0 last:border-0 last:pb-0">
       <dt className="text-xs leading-5 text-muted-foreground">{label}</dt>
-      <dd
-        className={
-          critical
-            ? 'max-w-[55%] text-right text-xs font-semibold leading-5 text-destructive'
-            : 'max-w-[55%] text-right text-xs font-semibold leading-5 text-admin-deep'
-        }
-      >
-        {value}
+      <dd className="max-w-[58%] text-right text-xs leading-5">
+        {pendente ? (
+          /*
+            O resumo vira um "de -> para" enquanto ha alteracao pendente. Era a
+            unica lista da tela que dizia o que esta valendo, e ela ficava
+            imovel enquanto o admin digitava — entao nao dava para conferir o
+            que ia ser salvo sem rolar de volta campo por campo.
+          */
+          <span className="inline-flex flex-wrap items-center justify-end gap-1">
+            <span className="text-muted-foreground line-through">{value}</span>
+            <ArrowRight className="size-3 shrink-0 text-primary" aria-hidden="true" />
+            <span className="font-semibold text-primary">{pendente}</span>
+          </span>
+        ) : (
+          <span className={`font-semibold ${estilo.texto}`}>{value}</span>
+        )}
       </dd>
     </div>
   );
@@ -454,6 +504,7 @@ export default function OperationSettingsPage() {
             <div className="space-y-5">
               <SettingsSection
                 icon={Clock3}
+                tom="despacho"
                 title="Despacho e retorno"
                 description="Defina o tempo da oferta e a proximidade necessária para fechar cada etapa."
               >
@@ -469,6 +520,7 @@ export default function OperationSettingsPage() {
                       ? 'não configurado'
                       : `${settings.dispatchOfferTimeoutSeconds}s`
                   }
+                  estado={settings.dispatchOfferTimeoutSeconds === null ? 'faltando' : 'definido'}
                   description="Depois desse prazo, a oferta pode seguir para o próximo motoboy da fila."
                 />
                 <SettingField
@@ -483,6 +535,7 @@ export default function OperationSettingsPage() {
                       ? 'não configurado'
                       : `${settings.returnProximityRadiusMeters}m`
                   }
+                  estado={settings.returnProximityRadiusMeters === null ? 'faltando' : 'definido'}
                   description="Distância em linha reta até a coleta aceita pelo sistema como retorno concluído."
                 />
                 <SettingField
@@ -492,13 +545,21 @@ export default function OperationSettingsPage() {
                   unit="metros"
                   value={deliveryRadiusInput}
                   onValueChange={setDeliveryRadiusInput}
-                  currentValue={`${settings.deliveryProximityRadiusMeters}m`}
+                  currentValue={
+                    settings.deliveryProximityRadiusMeters === null
+                      ? 'não configurado'
+                      : `${settings.deliveryProximityRadiusMeters}m`
+                  }
+                  estado={
+                    settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'
+                  }
                   description="Exige que o motoboy esteja próximo do destino. Pedidos sem coordenadas continuam sem conferência."
                 />
               </SettingsSection>
 
               <SettingsSection
                 icon={Crosshair}
+                tom="horarios"
                 title="Validação de horários"
                 description="Evite que etapas retroativas sejam registradas em intervalos incompatíveis com a entrega."
               >
@@ -510,6 +571,7 @@ export default function OperationSettingsPage() {
                   value={minCollectInput}
                   onValueChange={setMinCollectInput}
                   currentValue={`${settings.minMinutesBeforeCollect ?? 0} min`}
+                  estado={(settings.minMinutesBeforeCollect ?? 0) === 0 ? 'desligado' : 'definido'}
                   description="Aplicado quando o motoboy informa depois o horário em que realizou a coleta."
                 />
                 <SettingField
@@ -520,12 +582,14 @@ export default function OperationSettingsPage() {
                   value={minDeliverInput}
                   onValueChange={setMinDeliverInput}
                   currentValue={`${settings.minMinutesBeforeDeliver ?? 0} min`}
+                  estado={(settings.minMinutesBeforeDeliver ?? 0) === 0 ? 'desligado' : 'definido'}
                   description="Impede registrar coleta e entrega retroativas no mesmo minuto."
                 />
               </SettingsSection>
 
               <SettingsSection
                 icon={BellRing}
+                tom="alertas"
                 title="Alertas operacionais"
                 description="Escolha quando a equipe deve ser avisada sobre atrasos ou ausência de localização."
               >
@@ -541,6 +605,7 @@ export default function OperationSettingsPage() {
                       ? 'desligado'
                       : `${settings.locationSilenceAlertMinutes} min`
                   }
+                  estado={settings.locationSilenceAlertMinutes === null ? 'desligado' : 'definido'}
                   description="Avisa quando um motoboy com pedido em andamento para de enviar sua localização."
                 />
                 <SettingField
@@ -555,6 +620,7 @@ export default function OperationSettingsPage() {
                       ? 'desligado'
                       : `${settings.slaAlertMinutesToAccept} min`
                   }
+                  estado={settings.slaAlertMinutesToAccept === null ? 'desligado' : 'definido'}
                   description="Destaca na fila pedidos que aguardam um motoboy além desse tempo."
                 />
                 <SettingField
@@ -569,6 +635,7 @@ export default function OperationSettingsPage() {
                       ? 'desligado'
                       : `${settings.slaAlertMinutesToCollect} min`
                   }
+                  estado={settings.slaAlertMinutesToCollect === null ? 'desligado' : 'definido'}
                   description="Contado desde o aceite. Use um limite acima do tempo médio de coleta."
                 />
                 <SettingField
@@ -583,12 +650,14 @@ export default function OperationSettingsPage() {
                       ? 'desligado'
                       : `${settings.slaAlertMinutesToDeliver} min`
                   }
+                  estado={settings.slaAlertMinutesToDeliver === null ? 'desligado' : 'definido'}
                   description="Contado desde a coleta. Use um limite acima do tempo médio de entrega."
                 />
               </SettingsSection>
 
               <SettingsSection
                 icon={Truck}
+                tom="capacidade"
                 title="Capacidade da operação"
                 description="Controle quantos pedidos podem ser agrupados por motoboy e por lançamento."
               >
@@ -604,6 +673,7 @@ export default function OperationSettingsPage() {
                       ? 'sem limite'
                       : String(settings.maxConcurrentDeliveriesPerDriver)
                   }
+                  estado={settings.maxConcurrentDeliveriesPerDriver === null ? 'desligado' : 'definido'}
                   description="Limita quantas entregas um motoboy pode manter em andamento ao mesmo tempo."
                 />
                 <SettingField
@@ -618,6 +688,7 @@ export default function OperationSettingsPage() {
                       ? 'sem limite'
                       : String(settings.maxDeliveriesPerBatch)
                   }
+                  estado={settings.maxDeliveriesPerBatch === null ? 'desligado' : 'definido'}
                   description={
                     <>
                       Limita o lançamento da loja. <strong>O valor 1 desliga o lote.</strong>
@@ -651,7 +722,10 @@ export default function OperationSettingsPage() {
                           ? 'Não configurado'
                           : `${settings.dispatchOfferTimeoutSeconds} segundos`
                       }
-                      critical={settings.dispatchOfferTimeoutSeconds === null}
+                      estado={
+                        settings.dispatchOfferTimeoutSeconds === null ? 'faltando' : 'definido'
+                      }
+                      pendente={timeoutInput.trim() ? `${timeoutInput.trim()} segundos` : undefined}
                     />
                     <CurrentValueRow
                       label="Raio de retorno"
@@ -660,17 +734,36 @@ export default function OperationSettingsPage() {
                           ? 'Não configurado'
                           : `${settings.returnProximityRadiusMeters} metros`
                       }
-                      critical={settings.returnProximityRadiusMeters === null}
+                      estado={
+                        settings.returnProximityRadiusMeters === null ? 'faltando' : 'definido'
+                      }
+                      pendente={radiusInput.trim() ? `${radiusInput.trim()} metros` : undefined}
                     />
                     <CurrentValueRow
                       label="Raio de entrega"
-                      value={`${settings.deliveryProximityRadiusMeters} metros`}
+                      value={
+                        settings.deliveryProximityRadiusMeters === null
+                          ? 'Não configurado'
+                          : `${settings.deliveryProximityRadiusMeters} metros`
+                      }
+                      estado={
+                        settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'
+                      }
+                      pendente={
+                        deliveryRadiusInput.trim() ? `${deliveryRadiusInput.trim()} metros` : undefined
+                      }
                     />
                     <CurrentValueRow
                       label="Mínimo coleta / entrega"
                       value={`${settings.minMinutesBeforeCollect ?? 0} / ${
                         settings.minMinutesBeforeDeliver ?? 0
                       } min`}
+                      estado={
+                        (settings.minMinutesBeforeCollect ?? 0) === 0 &&
+                        (settings.minMinutesBeforeDeliver ?? 0) === 0
+                          ? 'desligado'
+                          : 'definido'
+                      }
                     />
                     <CurrentValueRow
                       label="Sem posição"
@@ -679,6 +772,10 @@ export default function OperationSettingsPage() {
                           ? 'Desligado'
                           : `${settings.locationSilenceAlertMinutes} min`
                       }
+                      estado={
+                        settings.locationSilenceAlertMinutes === null ? 'desligado' : 'definido'
+                      }
+                      pendente={silenceInput.trim() ? `${silenceInput.trim()} min` : undefined}
                     />
                     <CurrentValueRow
                       label="Alertas: aceite / coleta / entrega"
@@ -693,12 +790,25 @@ export default function OperationSettingsPage() {
                               settings.slaAlertMinutesToDeliver ?? '—',
                             ].join(' / ') + ' min'
                       }
+                      estado={
+                        settings.slaAlertMinutesToAccept === null &&
+                        settings.slaAlertMinutesToCollect === null &&
+                        settings.slaAlertMinutesToDeliver === null
+                          ? 'desligado'
+                          : 'definido'
+                      }
                     />
                     <CurrentValueRow
                       label="Simultâneas / lote"
                       value={`${settings.maxConcurrentDeliveriesPerDriver ?? 'sem limite'} / ${
                         settings.maxDeliveriesPerBatch ?? 'sem limite'
                       }`}
+                      estado={
+                        settings.maxConcurrentDeliveriesPerDriver === null &&
+                        settings.maxDeliveriesPerBatch === null
+                          ? 'desligado'
+                          : 'definido'
+                      }
                     />
                   </dl>
 

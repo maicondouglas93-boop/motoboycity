@@ -6,8 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryAddressItem, DeliveryStatus } from '@motoboycity/types';
 import { AlertCircle, ChevronLeft } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
+import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-dialog';
 import { StatusChip, statusLabel } from '@/components/orders/status-chip';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
@@ -151,13 +151,14 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
         <div className="flex items-center gap-2">
           <StatusChip status={delivery.status} />
           {cancellableStatuses.includes(delivery.status) && (
-            <Button
-              variant="outline"
-              disabled={cancelMutation.isPending}
-              onClick={() => cancelMutation.mutate()}
-            >
-              {cancelMutation.isPending ? 'Cancelando...' : 'Cancelar pedido'}
-            </Button>
+            <CancelDeliveryDialog
+              token={token}
+              deliveryId={delivery.id}
+              displayNumber={delivery.displayNumber}
+              companyName={delivery.companyName}
+              status={delivery.status}
+              driverName={delivery.driver?.name}
+            />
           )}
         </div>
       </header>

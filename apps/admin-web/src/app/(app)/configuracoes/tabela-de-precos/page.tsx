@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import { Building2, Check, Globe2 } from 'lucide-react';
+import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
+import { Tag } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -147,6 +149,10 @@ export default function PricingTablesPage() {
   const serviceTypes = serviceTypesQuery.data ?? [];
   const companies = companiesQuery.data ?? [];
   const pricingTables = pricingTablesQuery.data ?? [];
+  /** `null` enquanto carrega: melhor nada do que "nenhuma tabela" por um instante. */
+  const tabelasAtivas = pricingTablesQuery.data
+    ? pricingTablesQuery.data.filter((tabela) => tabela.active).length
+    : null;
   const isCustomPricing = pricingScope !== GENERAL_PRICING_SCOPE;
   const selectedCompanyId =
     pricingScope === GENERAL_PRICING_SCOPE || pricingScope === CUSTOM_PRICING_SCOPE
@@ -209,6 +215,23 @@ export default function PricingTablesPage() {
       <Link href="/configuracoes" className="text-sm text-muted-foreground hover:underline">
         ← Configurações
       </Link>
+
+      <CabecalhoDeConfiguracao
+        icon={Tag}
+        tom="precos"
+        titulo="Tabelas de preços"
+        descricao="Os valores congelados na criação de cada pedido. Sem nenhuma tabela ativa, um pedido novo não tem como ser cotado."
+        situacao={
+          tabelasAtivas === null
+            ? null
+            : tabelasAtivas === 0
+              ? { estado: 'faltando', texto: 'Nenhuma tabela ativa' }
+              : {
+                  estado: 'definido',
+                  texto: `${tabelasAtivas} tabela${tabelasAtivas === 1 ? '' : 's'} ativa${tabelasAtivas === 1 ? '' : 's'}`,
+                }
+        }
+      />
 
       <Card>
         <CardHeader>

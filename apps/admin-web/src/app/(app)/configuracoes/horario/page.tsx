@@ -6,6 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type { BusinessHoursResult } from '@motoboycity/types';
 import { Plus, Trash2 } from 'lucide-react';
+import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
+import { CalendarClock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -84,6 +86,21 @@ export default function BusinessHoursPage() {
     return <p className="text-sm text-muted-foreground">Faça login como administrador.</p>;
   }
 
+  /**
+   * Falha de carregamento nao pode virar lista vazia.
+   *
+   * Horario de funcionamento decide se a loja consegue lancar pedido. Tela em
+   * branco aqui parece configuracao ausente.
+   */
+  if (hoursQuery.isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Não foi possível carregar o horário de funcionamento. Recarregue a página
+        antes de alterar qualquer coisa.
+      </p>
+    );
+  }
+
   const data = hoursQuery.data;
 
   return (
@@ -92,12 +109,28 @@ export default function BusinessHoursPage() {
         <Link href="/configuracoes" className="text-sm text-muted-foreground underline">
           ← Configurações
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">Horário de funcionamento</h1>
-        <p className="text-sm text-muted-foreground">
-          Fora do horário, a loja não consegue enviar pedido. Um dia sem faixa nenhuma é um dia
-          fechado, e duas faixas no mesmo dia deixam a pausa do almoço no meio.
-        </p>
       </div>
+
+      <CabecalhoDeConfiguracao
+        icon={CalendarClock}
+        tom="horarios"
+        titulo="Horário de funcionamento"
+        descricao="Fora do horário, a loja não consegue enviar pedido. Um dia sem faixa nenhuma é um dia fechado, e duas faixas no mesmo dia deixam a pausa do almoço no meio."
+        situacao={
+          !data
+            ? null
+            : !data.enabled
+              ? { estado: 'desligado', texto: 'Sem bloqueio de horário' }
+              : data.openNow
+                ? { estado: 'definido', texto: 'Aberto agora' }
+                : {
+                    estado: 'definido',
+                    texto: data.nextOpeningLabel
+                      ? `Fechado · abre ${data.nextOpeningLabel}`
+                      : 'Fechado agora',
+                  }
+        }
+      />
 
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">

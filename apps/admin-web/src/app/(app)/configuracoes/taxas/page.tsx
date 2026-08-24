@@ -7,6 +7,8 @@ import { ApiError } from '@motoboycity/api-client';
 import type { SurchargeItem } from '@motoboycity/types';
 import type { UpsertSurchargePayload } from '@motoboycity/validation';
 import { Plus, Trash2 } from 'lucide-react';
+import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
+import { CloudRain } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -184,7 +186,24 @@ export default function SurchargesPage() {
     });
   }
 
+  /**
+   * Falha de carregamento nao pode virar lista vazia.
+   *
+   * Esta tela mostrando "nenhuma taxa" faz o admin concluir que nada esta sendo
+   * cobrado a mais — quando pode haver taxa noturna ativa cobrando de todo
+   * mundo naquele momento.
+   */
+  if (listQuery.isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Não foi possível carregar as taxas adicionais. Não conclua que não há taxa
+        ativa: recarregue a página.
+      </p>
+    );
+  }
+
   const surcharges = listQuery.data ?? [];
+  const valendoAgora = surcharges.filter((taxa) => taxa.activeNow).length;
 
   return (
     <div className="space-y-6">
@@ -192,12 +211,22 @@ export default function SurchargesPage() {
         <Link href="/configuracoes" className="text-sm text-muted-foreground underline">
           ← Configurações
         </Link>
-        <h1 className="mt-2 text-xl font-semibold">Taxas adicionais</h1>
-        <p className="text-sm text-muted-foreground">
-          Acréscimos para chuva, feriado, madrugada — o nome e a regra são seus. Cada taxa vale pelo
-          interruptor manual ou por uma janela agendada, e basta uma das duas.
-        </p>
       </div>
+
+      <CabecalhoDeConfiguracao
+        icon={CloudRain}
+        tom="alertas"
+        titulo="Taxas adicionais"
+        descricao="Acréscimos para chuva, feriado, madrugada — o nome e a regra são seus. Cada taxa vale pelo interruptor manual ou por uma janela agendada, e basta uma das duas."
+        situacao={
+          valendoAgora === 0
+            ? { estado: 'desligado', texto: 'Nenhuma taxa valendo agora' }
+            : {
+                estado: 'definido',
+                texto: `${valendoAgora} taxa${valendoAgora === 1 ? '' : 's'} valendo agora`,
+              }
+        }
+      />
 
       <Card>
         <CardHeader className="pb-3">

@@ -4,6 +4,8 @@ import { useState, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
+import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
+import { Bike } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -63,6 +65,7 @@ export default function ServiceTypesPage() {
   }
 
   const serviceTypes = serviceTypesQuery.data ?? [];
+  const ativas = serviceTypes.filter((item) => item.active).length;
 
   function handleCreate(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,6 +78,18 @@ export default function ServiceTypesPage() {
       <Link href="/configuracoes" className="text-sm text-muted-foreground hover:underline">
         ← Configurações
       </Link>
+
+      <CabecalhoDeConfiguracao
+        icon={Bike}
+        tom="modalidades"
+        titulo="Tipos de serviços"
+        descricao="As modalidades que podem ser atribuídas aos entregadores. Sem nenhuma ativa, o despacho não tem o que oferecer."
+        situacao={
+          ativas === 0
+            ? { estado: 'faltando', texto: 'Nenhuma modalidade ativa' }
+            : { estado: 'definido', texto: `${ativas} ativa${ativas === 1 ? '' : 's'}` }
+        }
+      />
 
       <Card>
         <CardHeader>

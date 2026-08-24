@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { InvoiceStatus } from '@motoboycity/types';
 import { AlertTriangle, CalendarClock, Eye, Package } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog'
 import { MetricCard } from '@/components/finance/metric-card';
 import { ReceivablesAging } from '@/components/finance/receivables-aging';
 import { adminFinancialApi, adminInvoicesApi } from '@/lib/api-client';
+import { CloseInvoicesDialog } from '@/components/finance/close-invoices-dialog';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
 
@@ -38,9 +39,9 @@ function hojeNaOperacao(): string {
 
 export function FaturasTab({ token }: { token: string }) {
   const money = useMoney();
-  const queryClient = useQueryClient();
   const [statusFiltrado, setStatusFiltrado] = useState<InvoiceStatus | 'ALL'>('ALL');
-  const [erro, setErro] = useState<string | null>(null);
+  /** Quantas faturas o ultimo fechamento gerou. `null` = ainda nao fechou. */
+  const [faturasGeradas, setFaturasGeradas] = useState<number | null>(null);
 
   const caixaQuery = useQuery({
     queryKey: ['admin', 'financial', 'cash-position'],
@@ -55,19 +56,9 @@ export function FaturasTab({ token }: { token: string }) {
       }),
   });
 
-  const fecharMutation = useMutation({
-    mutationFn: () => adminInvoicesApi.close(token, hojeNaOperacao()),
-    onSuccess: () => {
-      setErro(null);
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial'] });
-    },
-    onError: (falha: unknown) => {
-      setErro(falha instanceof Error ? falha.message : 'Não foi possível fechar as faturas.');
-    },
-  });
-
   const caixa = caixaQuery.data;
   const faturas = faturasQuery.data ?? [];
+
   const hojeEhDiaDeFechar = ehSegundaFeira(new Date());
 
   return (
@@ -122,12 +113,14 @@ export function FaturasTab({ token }: { token: string }) {
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              onClick={() => fecharMutation.mutate()}
-              disabled={!hojeEhDiaDeFechar || fecharMutation.isPending}
-            >
-              {fecharMutation.isPending ? 'Fechando...' : 'Fechar faturas da semana'}
-            </Button>
+            <CloseInvoicesDialog
+              token={token}
+              dataDoFechamento={hojeNaOperacao()}
+              valorAFaturar={caixa?.unbilledValue ?? null}
+              entregasAFaturar={caixa?.unbilledCount ?? null}
+              desabilitado={!hojeEhDiaDeFechar}
+              onFechado={setFaturasGeradas}
+            />
             {/*
               O motivo do botão desligado fica escrito. Botão cinza sem
               explicação faz o admin achar que o sistema travou.
@@ -139,12 +132,11 @@ export function FaturasTab({ token }: { token: string }) {
             )}
           </div>
 
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
-          {fecharMutation.isSuccess && (
+          {faturasGeradas !== null && (
             <p className="text-sm text-dinheiro-recebido">
-              {fecharMutation.data.length === 0
+              {faturasGeradas === 0
                 ? 'Nada a fechar: nenhuma entrega em aberto até o corte.'
-                : `${formatarNumero(fecharMutation.data.length)} fatura(s) gerada(s).`}
+                : `${formatarNumero(faturasGeradas)} fatura(s) gerada(s).`}
             </p>
           )}
         </CardContent>

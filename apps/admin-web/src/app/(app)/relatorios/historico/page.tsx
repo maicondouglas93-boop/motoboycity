@@ -109,6 +109,21 @@ export default function DeliveryHistoryPage() {
     setApplied({});
   }
 
+  /**
+   * Falha de carregamento nao pode virar lista vazia.
+   *
+   * Relatorio vazio por falha e indistinguivel de periodo sem movimento — e
+   * alguem exporta esse CSV achando que e o historico real.
+   */
+  if (deliveriesQuery.isError) {
+    return (
+      <p className="text-sm text-destructive">
+        Não foi possível carregar o histórico. O resultado abaixo não é confiável;
+        recarregue a página.
+      </p>
+    );
+  }
+
   const deliveries = deliveriesQuery.data ?? [];
 
   function exportCsv() {
