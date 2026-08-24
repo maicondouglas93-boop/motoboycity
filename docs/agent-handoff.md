@@ -5610,3 +5610,29 @@ e validar: aceite com resposta cortada; notificação com tela bloqueada,
 desbloqueada e app aberto; sessão expirada; GPS desligado/trocando para rede; e
 lote grande sob rede degradada. Depois, executar os E2E com banco e Redis
 isolados antes de promover o recorte.
+
+## Atualização — 2026-08-24: nome de instalação do app do motoboy
+
+O nome visível do aplicativo instalado passou a ser `motoboycity`. A alteração
+foi aplicada ao `displayName` do React Native, ao rótulo do launcher Android e
+ao nome e tela inicial do iOS.
+
+O nome interno `DriverApp`, o `applicationId`/bundle identifier, o componente
+React Native e a configuração Firebase foram preservados. Portanto, a mudança
+não cria um aplicativo separado e não altera sessão, dados ou lógica.
+
+Arquivos afetados:
+
+- `apps/driver-app/app.json`;
+- `apps/driver-app/android/app/src/main/res/values/strings.xml`;
+- `apps/driver-app/ios/DriverApp/{Info.plist,LaunchScreen.storyboard}`.
+
+Verificação executada:
+
+- typecheck e lint de `@motoboycity/driver-app`: aprovados;
+- Jest do Driver App: 12 suítes e 67 testes aprovados;
+- Gradle `:app:processDebugResources`: aprovado;
+- `git diff --check`: aprovado.
+
+Próximo passo concreto: gerar/instalar uma nova versão nativa para que o novo
+rótulo apareça no launcher; a instalação anterior não muda sem recompilação.
