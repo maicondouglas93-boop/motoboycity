@@ -1,15 +1,18 @@
 package com.motoboycity.driverapp
 
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import androidx.core.app.NotificationCompat
-import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService
 
 /**
- * Recebe o push e, para OFERTA, abre a tela cheia sobre o que estiver no
- * aparelho.
+ * Recebe o push e apresenta a OFERTA como notificacao nativa acionavel. Em
+ * segundo plano, pede tela cheia sobre o app atual ou a tela bloqueada.
  *
  * Por que precisa ser aqui e nao no JavaScript: uma mensagem com bloco
  * `notification` e desenhada pelo proprio Android e o aplicativo nunca e
@@ -17,20 +20,33 @@ import com.google.firebase.messaging.RemoteMessage
  * metodo com o aplicativo em segundo plano, e so daqui da para montar a
  * notificacao com `setFullScreenIntent`.
  *
- * O preco dessa escolha esta documentado em docs/push-notifications-setup.md: se
- * o sistema tiver ENCERRADO o aplicativo a forca, este metodo nao roda e nada
- * aparece. E por isso que o aplicativo tambem busca a oferta pendente ao abrir.
+ * A recuperacao da oferta pendente ao abrir cobre o unico bloqueio incontornavel
+ * do Android: uma parada forcada explicita pelo usuario.
  */
-class OfferMessagingService : FirebaseMessagingService() {
-
-
+class OfferMessagingService : ReactNativeFirebaseMessagingService() {
   override fun onMessageReceived(message: RemoteMessage) {
     super.onMessageReceived(message)
 
     val dados = message.data
+    if (dados["type"] == "offer-resolved") {
+      resolverApresentacaoDaOferta(dados)
+      return
+    }
+
     val ehOferta = dados["type"] == "offer"
-    val titulo = dados["title"] ?: if (ehOferta) "Nova entrega para voce" else "MOTOboyCity"
+    val offerId = dados["offerId"].orEmpty()
+    if (ehOferta && (offerId.isBlank() || OfferSessionStore.ofertaFoiResolvidaRecentemente(this, offerId))) {
+      return
+    }
+    val expiresAtMs = dados["expiresAtEpochMs"]?.toLongOrNull()
+    val remainingMs = expiresAtMs?.minus(System.currentTimeMillis())
+    if (ehOferta && remainingMs != null && remainingMs <= 0L) {
+      OfferSessionStore.marcarOfertaResolvida(this, offerId)
+      return
+    }
+    val titulo = dados["title"] ?: if (ehOferta) "Pedido disponível" else "MOTOboyCity"
     val corpo = dados["body"] ?: ""
+    val appEmPrimeiroPlano = aplicativoEmPrimeiroPlano()
 
     val manager = getSystemService(NotificationManager::class.java) ?: return
 
@@ -38,25 +54,30 @@ class OfferMessagingService : FirebaseMessagingService() {
      * Abre o aplicativo na rota da oferta. `singleTask` no manifesto garante que
      * um aplicativo ja aberto seja trazido para frente em vez de duplicado.
      */
+    val destino = if (ehOferta) OfferActivity::class.java else MainActivity::class.java
     val intent =
-      Intent(this, MainActivity::class.java).apply {
+      Intent(this, destino).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         putExtra("abrirOferta", ehOferta)
-        dados["offerId"]?.let { putExtra("offerId", it) }
+        putExtra(OfferActivity.EXTRA_OFFER_ID, offerId)
+        expiresAtMs?.let { putExtra(OfferActivity.EXTRA_EXPIRES_AT_EPOCH_MS, it) }
       }
     val pendente =
       PendingIntent.getActivity(
         this,
-        0,
+        offerId.hashCode(),
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
     val builder =
       NotificationCompat.Builder(this, if (ehOferta) "ofertas" else "avisos")
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setSmallIcon(R.drawable.ic_stat_motoboycity)
+        .setColor(Color.rgb(8, 68, 76))
         .setContentTitle(titulo)
         .setContentText(corpo)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(corpo))
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .setAutoCancel(true)
         .setContentIntent(pendente)
 
@@ -72,32 +93,54 @@ class OfferMessagingService : FirebaseMessagingService() {
        * duas ofertas seguidas reusariam o mesmo PendingIntent e a segunda
        * responderia pelo id da primeira.
        */
-      val offerId = dados["offerId"] ?: ""
-      val aceitar = acaoPendente(OfferActionReceiver.ACTION_ACCEPT, offerId)
-      val recusar = acaoPendente(OfferActionReceiver.ACTION_DECLINE, offerId)
-
       builder
-        .addAction(android.R.drawable.ic_menu_send, "Aceitar", aceitar)
-        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Recusar", recusar)
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setPriority(NotificationCompat.PRIORITY_MAX)
         /**
-         * `CATEGORY_CALL` nao e enfeite: e o que faz o Android tratar a
-         * notificacao como algo que interrompe, inclusive no modo Nao Perturbe
-         * quando o motoboy tiver liberado chamadas.
+         * CATEGORY_CALL, e não CATEGORY_EVENT.
+         *
+         * Do Android 14 em diante o sistema só deixa a tela cheia TOMAR a tela
+         * em notificação de chamada ou alarme. Em qualquer outra categoria ele
+         * rebaixa para faixa no topo, mesmo com `USE_FULL_SCREEN_INTENT`
+         * concedida — foi exatamente o que aconteceu quando isto virou
+         * CATEGORY_EVENT: a oferta chegou como faixa, o motoboy não viu, e ela
+         * expirou sozinha.
+         *
+         * A escolha é deliberada. A oferta tem cronômetro de segundos e o
+         * motoboy está na moto: se ela não interromper, ela não existe. É o
+         * mesmo tratamento que o aplicativo do concorrente dá.
+         *
+         * Consequência a assumir: a Play Store revisa o uso de
+         * `USE_FULL_SCREEN_INTENT` fora de apps de chamada, e pode pedir
+         * justificativa na publicação.
          */
         .setCategory(NotificationCompat.CATEGORY_CALL)
-        /**
-         * `true` no segundo argumento significa "mostre a tela cheia mesmo com o
-         * aparelho desbloqueado".
-         *
-         * Se a permissao de tela cheia nao estiver concedida — no Android 14+ ela
-         * precisa ser liberada a mao para aplicativos que nao sao de chamada —, o
-         * Android REBAIXA sozinho para notificacao normal com som, em vez de
-         * descartar. E a degradacao certa: pior que a tela cheia, melhor que
-         * silencio.
-         */
-        .setFullScreenIntent(pendente, true)
         .setOngoing(false)
+
+      val timeoutMs =
+        remainingMs?.coerceAtLeast(1_000L)
+          ?: dados["expiresInSeconds"]?.toLongOrNull()?.coerceAtLeast(1L)?.times(1_000L)
+      timeoutMs?.let { builder.setTimeoutAfter(it + 5_000L) }
+
+      // Mesmo com o app aberto, a notificacao nativa continua acionavel. Se o
+      // socket estiver reconectando, os botoes ainda respondem pela API.
+      val aceitar = acaoPendente(OfferActionReceiver.ACTION_ACCEPT, offerId)
+      val recusar = acaoPendente(OfferActionReceiver.ACTION_DECLINE, offerId)
+      builder
+        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Recusar", recusar)
+        .addAction(android.R.drawable.ic_menu_send, "Aceitar", aceitar)
+
+      if (!appEmPrimeiroPlano) {
+        builder
+          /**
+           * Em segundo plano, o PendingIntent abre a Activity translúcida sobre
+           * a tela bloqueada ou o app atual. No Android 14+ sem acesso especial,
+           * o sistema degrada para um heads-up expandido; tocar nele abre o mesmo
+           * cartão.
+           */
+          .setFullScreenIntent(pendente, true)
+      }
+
+      OfferSessionStore.marcarOfertaApresentada(this, offerId)
     }
 
     manager.notify(
@@ -118,6 +161,38 @@ class OfferMessagingService : FirebaseMessagingService() {
       intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+  }
+
+  /** Fecha somente a oferta a que a atualizacao do servidor se refere. */
+  private fun resolverApresentacaoDaOferta(dados: Map<String, String>) {
+    val offerIds =
+      dados["offerIds"]
+        ?.split(',')
+        ?.map(String::trim)
+        ?.filter(String::isNotBlank)
+        .orEmpty()
+        .ifEmpty { listOfNotNull(dados["offerId"]?.takeIf(String::isNotBlank)) }
+    if (offerIds.isEmpty()) return
+
+    val atual = OfferSessionStore.ofertaAtual(this)
+    if (atual != null && atual !in offerIds) return
+    val resolvida = atual ?: offerIds.first()
+    OfferSessionStore.marcarOfertaResolvida(this, resolvida)
+    getSystemService(NotificationManager::class.java)?.cancel(
+      OfferActionReceiver.OFFER_NOTIFICATION_ID,
+    )
+    OfferActivity.notifyResolved(this, resolvida)
+  }
+
+  /**
+   * Com o app aberto, o Socket.IO já leva para a tela React Native da oferta.
+   * Abrir a Activity nativa junto criaria dois cartões e duas respostas para o
+   * mesmo id. Nesse estado a notificação fica apenas como faixa do sistema.
+   */
+  private fun aplicativoEmPrimeiroPlano(): Boolean {
+    val info = ActivityManager.RunningAppProcessInfo()
+    ActivityManager.getMyMemoryState(info)
+    return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
   }
 
   /**
