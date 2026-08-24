@@ -816,7 +816,12 @@ export class DeliveriesService {
     return this.detail(user, id);
   }
 
-  async cancel(user: User, id: string): Promise<DeliveryDetail> {
+  /**
+   * `reason` vira a nota do historico. Opcional porque a loja cancela pelo
+   * aplicativo em segundos; o painel do admin pede, porque quem cancela
+   * entrega dos outros precisa deixar dito por que.
+   */
+  async cancel(user: User, id: string, reason?: string): Promise<DeliveryDetail> {
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
@@ -857,6 +862,7 @@ export class DeliveriesService {
             fromStatus: item.status,
             toStatus: 'CANCELLED',
             changedByUserId: user.id,
+            note: reason?.trim() || null,
           },
         });
       }

@@ -27,6 +27,7 @@ export * from './finance/payment-notice.schema';
 export * from './reports/company-operations-report-query.schema';
 export * from './finance/invoice.schema';
 export * from './finance/withdrawal.schema';
+export * from './deliveries/cancel-delivery.schema';
 export * from './deliveries/create-delivery.schema';
 export * from './deliveries/list-deliveries-query.schema';
 export * from './deliveries/delivery-operations-query.schema';

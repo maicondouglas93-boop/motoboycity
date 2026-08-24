@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
 import { io } from 'socket.io-client';
 import {
@@ -45,15 +45,24 @@ import {
   adminOperationsApi,
   adminPlatformSettingsApi,
   baseUrl,
-  deliveriesApi,
 } from '@/lib/api-client';
 import { formatRelativeTime } from '@/lib/format';
 import { session } from '@/lib/session';
+import { useMoney } from '@/lib/money';
 import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 import { operationTime } from '@/lib/operation-clock';
+import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-dialog';
 import { CompanyQueues } from '@/components/operations/company-queues';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
 import { slaAlertMinutesFor } from '@/lib/sla';
+
+/**
+ * Quantos pedidos cada fila lista antes de mandar para a tela de pedidos.
+ *
+ * A coluna e estreita e ha oito filas: listar tudo aqui empurraria as filas de
+ * baixo para fora da tela. O que nao cabe vira um link com a contagem.
+ */
+const LIMITE_POR_FILA = 8;
 
 const filterStatuses = STATUS_OPTIONS.map((option) => option.value).filter(
   (status) => status !== 'COMPLETED',
@@ -68,11 +77,6 @@ const sectionStatuses: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
   'CANCELLED',
 ];
-
-const currencyFormatter = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL',
-});
 
 function OperationRow({
   order,
@@ -96,13 +100,20 @@ function OperationRow({
   /** Minutos a partir dos quais o cronometro acende. Null = sem sinalizacao. */
   slaAlertMinutes?: number | null;
 }) {
+  /**
+   * O MESMO formatador do resto do painel.
+   *
+   * Esta tela tinha o proprio `Intl.NumberFormat` e era a ultima do admin que
+   * ainda tinha: com o botao de esconder valores ligado, todas as outras
+   * mascaravam e a fila de pedidos continuava mostrando dinheiro na tela.
+   */
+  const money = useMoney();
   const destination = order.addresses.find((address) => address.type === 'DROPOFF');
   const addressLabel =
     order.destinationKnownAtCreation && destination?.street
       ? [destination.street, destination.number].filter(Boolean).join(', ')
       : 'Destino definido na entrega';
-  const totalLabel =
-    order.totalValue === null ? 'A calcular' : currencyFormatter.format(order.totalValue);
+  const totalLabel = order.totalValue === null ? 'A calcular' : money(order.totalValue);
 
   return (
     <button
@@ -247,10 +258,6 @@ export default function AdminDashboardPage() {
     };
   }, [queryClient, token]);
 
-  const cancelMutation = useMutation({
-    mutationFn: (deliveryId: string) => deliveriesApi.cancel(token as string, deliveryId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] }),
-  });
   const selectMapItem = useCallback(
     (item: NonNullable<AdminMapSelection>) => setSelection(item),
     [],
@@ -287,6 +294,28 @@ export default function AdminDashboardPage() {
           {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
         </div>
       </header>
+
+      {/*
+        Falha de carregamento precisa aparecer, e nao virar tela vazia.
+        Sem isto, API fora do ar fica identica a manha fraca: filas zeradas,
+        "0 ativos", mapa sem nada — e o admin nao tem como saber a diferenca.
+      */}
+      {operationsQuery.isError && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+          <span>
+            Não foi possível carregar a operação. Os números abaixo podem estar desatualizados.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            onClick={() => void operationsQuery.refetch()}
+          >
+            Tentar de novo
+          </Button>
+        </div>
+      )}
 
       {/* Acima da grade: e alerta, e alerta que some sozinho quando nao ha
           ninguem em silencio. Dentro de uma coluna ele passaria batido. */}
@@ -375,8 +404,9 @@ export default function AdminDashboardPage() {
                   <span className="min-w-0 flex-1">
                     <span className="block">Filas operacionais</span>
                     <span className="mt-0.5 block text-[10px] font-normal tracking-normal text-muted-foreground">
-                      {allOrders.length} pedido{allOrders.length === 1 ? '' : 's'} monitorado
-                      {allOrders.length === 1 ? '' : 's'}
+                      {operationsQuery.isLoading
+                        ? 'carregando...'
+                        : `${allOrders.length} pedido${allOrders.length === 1 ? '' : 's'} monitorado${allOrders.length === 1 ? '' : 's'}`}
                     </span>
                   </span>
                 </span>
@@ -428,8 +458,13 @@ export default function AdminDashboardPage() {
                 />
               ) : (
                 sectionStatuses.map((status) => {
-                  const orders = allOrders.filter((order) => order.status === status).slice(0, 8);
-                  const total = data?.counts[status] ?? orders.length;
+                  const daFila = allOrders.filter((order) => order.status === status);
+                  const orders = daFila.slice(0, LIMITE_POR_FILA);
+                  const total = data?.counts[status] ?? daFila.length;
+                  // Quantos existem alem dos que couberam na lista. O distintivo
+                  // sempre mostrou o total; sem esta conta, uma fila de 20
+                  // exibia "20" e listava 8, sem dizer que escondeu 12.
+                  const ocultos = Math.max(0, total - orders.length);
                   // Enquanto o administrador não escolhe, fila vazia fica
                   // compacta e fila que recebeu pedido abre automaticamente.
                   const collapsed = collapsedStatusQueues[status] ?? total === 0;
@@ -479,6 +514,14 @@ export default function AdminDashboardPage() {
                           <p className="px-3 py-3 text-[10px] text-muted-foreground">
                             Nenhum pedido nesta fila.
                           </p>
+                        )}
+                        {ocultos > 0 && (
+                          <Link
+                            href={`/pedidos?status=${status}`}
+                            className="block border-t border-border/65 px-3 py-2 text-[10px] font-medium text-primary hover:bg-admin-soft/45"
+                          >
+                            + {ocultos} pedido{ocultos === 1 ? '' : 's'} nesta fila — ver todos
+                          </Link>
                         )}
                       </div>
                     </div>
@@ -533,14 +576,14 @@ export default function AdminDashboardPage() {
                         Abrir detalhe
                       </Link>
                       {!['COMPLETED', 'CANCELLED'].includes(selectedOrder.status) && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          disabled={cancelMutation.isPending}
-                          onClick={() => cancelMutation.mutate(selectedOrder.id)}
-                        >
-                          Cancelar
-                        </Button>
+                        <CancelDeliveryDialog
+                          token={token}
+                          deliveryId={selectedOrder.id}
+                          displayNumber={selectedOrder.displayNumber}
+                          companyName={selectedOrder.companyName}
+                          status={selectedOrder.status}
+                          driverName={selectedOrder.driver?.name}
+                        />
                       )}
                     </div>
                   </>

@@ -159,10 +159,18 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       return parseJsonOrThrow<DeliveryBatchDetail>(response);
     },
 
-    async cancel(accessToken: string, id: string): Promise<DeliveryDetail> {
+    /**
+     * `reason` e opcional e vira a nota do historico do pedido.
+     *
+     * A loja cancela pelo aplicativo sem preencher nada; o painel do admin
+     * pede o motivo, porque quem cancela entrega dos outros precisa deixar
+     * dito por que.
+     */
+    async cancel(accessToken: string, id: string, reason?: string): Promise<DeliveryDetail> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/cancel`, {
         method: 'PATCH',
-        headers: withAuth(accessToken),
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(reason ? { reason } : {}),
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
     },

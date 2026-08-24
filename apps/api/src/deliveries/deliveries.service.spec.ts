@@ -722,6 +722,9 @@ describe('DeliveriesService', () => {
           fromStatus: 'AWAITING_DRIVER',
           toStatus: 'CANCELLED',
           changedByUserId: companyUser.id,
+          // A loja cancela sem motivo pelo aplicativo, e isso continua valendo:
+          // o campo existe e fica nulo. Quem exige texto e a tela do admin.
+          note: null,
         },
       });
       expect(result.status).toBe('CANCELLED');

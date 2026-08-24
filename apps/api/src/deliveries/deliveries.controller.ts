@@ -12,12 +12,14 @@ import {
   type ReturnToQueuePayload,
   type CompleteReturnPayload,
   type CreateDeliveryBatchPayload,
+  cancelDeliverySchema,
   listDeliveriesQuerySchema,
   deliveryOperationsQuerySchema,
   searchDeliveriesQuerySchema,
   deliveryStageTimesQuerySchema,
   type DeliveryStageTimesQuery,
   type CreateDeliveryPayload,
+  type CancelDeliveryPayload,
   type ListDeliveriesQuery,
   type DeliveryOperationsQuery,
   type SearchDeliveriesQuery,
@@ -112,9 +114,17 @@ export class DeliveriesController {
     return this.deliveriesService.detail(user, id);
   }
 
+  /**
+   * Corpo opcional: as telas que cancelam sem motivo continuam funcionando.
+   * O painel do admin manda o motivo, e ele vira nota no historico do pedido.
+   */
   @Patch(':id/cancel')
-  cancel(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryDetail> {
-    return this.deliveriesService.cancel(user, id);
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Body(new ZodValidationPipe(cancelDeliverySchema)) payload: CancelDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    return this.deliveriesService.cancel(user, id, payload.reason);
   }
 
   @Patch(':id/redispatch')
