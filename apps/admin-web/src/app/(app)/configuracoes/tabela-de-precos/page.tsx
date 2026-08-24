@@ -126,6 +126,23 @@ export default function PricingTablesPage() {
     },
   });
 
+  /**
+   * Reativar recusa com 409 se ja houver outra ativa no mesmo escopo — e a
+   * mensagem do servidor diz qual. Mostrar essa mensagem crua e melhor do que
+   * traduzir para "erro ao ativar": ela nomeia o que precisa ser desativado.
+   */
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => adminPricingTablesApi.reactivate(token as string, id),
+    onSuccess: () => {
+      setFormError(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'pricing-tables'] });
+    },
+    onError: (error) =>
+      setFormError(
+        error instanceof ApiError ? error.message : 'Não foi possível ativar a tabela.',
+      ),
+  });
+
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => adminPricingTablesApi.deactivate(token as string, id),
     onSuccess: () => {
@@ -580,7 +597,12 @@ export default function PricingTablesPage() {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  {pricingTable.active && (
+                  {/*
+                    Desativar era caminho sem volta: a rota de reativar nem
+                    existia. Quem desativasse sem criar uma substituta deixava a
+                    regiao SEM tabela — e pedido sem tabela nao e cotado.
+                  */}
+                  {pricingTable.active ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -588,6 +610,17 @@ export default function PricingTablesPage() {
                       onClick={() => deactivateMutation.mutate(pricingTable.id)}
                     >
                       Desativar
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      disabled={reactivateMutation.isPending}
+                      onClick={() => reactivateMutation.mutate(pricingTable.id)}
+                    >
+                      {reactivateMutation.isPending &&
+                      reactivateMutation.variables === pricingTable.id
+                        ? 'Ativando...'
+                        : 'Ativar'}
                     </Button>
                   )}
                 </TableCell>

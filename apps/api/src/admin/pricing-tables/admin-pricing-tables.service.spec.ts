@@ -6,7 +6,12 @@ import { AdminPricingTablesService } from './admin-pricing-tables.service';
 describe('AdminPricingTablesService', () => {
   let service: AdminPricingTablesService;
   let tx: {
-    pricingTable: { updateMany: jest.Mock; create: jest.Mock };
+    pricingTable: {
+      updateMany: jest.Mock;
+      create: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
+    };
   };
   let prisma: {
     serviceType: { findUnique: jest.Mock };
@@ -18,7 +23,12 @@ describe('AdminPricingTablesService', () => {
 
   beforeEach(async () => {
     tx = {
-      pricingTable: { updateMany: jest.fn(), create: jest.fn() },
+      pricingTable: {
+        updateMany: jest.fn(),
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn(),
+      },
     };
     prisma = {
       serviceType: { findUnique: jest.fn() },
@@ -332,6 +342,93 @@ describe('AdminPricingTablesService', () => {
       prisma.pricingTable.findUnique.mockResolvedValue(null);
 
       await expect(service.deactivate('inexistente')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('reactivate', () => {
+    const inativa = {
+      id: 'tabela-1',
+      regionId: 'regiao-1',
+      serviceTypeId: 'servico-1',
+      companyId: null,
+      active: false,
+    };
+
+    function tabelaPronta(extra: Record<string, unknown> = {}) {
+      return {
+        ...inativa,
+        active: true,
+        baseFee: 5,
+        perKmFee: 1.5,
+        minimumFee: 5,
+        returnFee: 1,
+        includedDistanceKm: 2,
+        createdAt: new Date('2026-08-24T12:00:00Z'),
+        serviceType: { id: 'servico-1', name: 'motoboy', code: 'MOTOBOY' },
+        company: null,
+        ...extra,
+      };
+    }
+
+    it('volta a tabela para ativa', async () => {
+      prisma.pricingTable.findUnique.mockResolvedValue(inativa);
+      tx.pricingTable.update.mockResolvedValue(tabelaPronta());
+
+      const resultado = await service.reactivate('tabela-1');
+
+      expect(resultado.active).toBe(true);
+      expect(tx.pricingTable.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'tabela-1' }, data: { active: true } }),
+      );
+    });
+
+    it('RECUSA se ja houver outra ativa no mesmo escopo, sem desativa-la', async () => {
+      /**
+       * A regra que justifica este metodo existir do jeito que existe. Trocar
+       * qual tabela governa o preco e decisao de dinheiro: fazer isso como
+       * efeito colateral de um clique em "Ativar" mudaria o preco de todo
+       * pedido novo sem ninguem perceber.
+       */
+      prisma.pricingTable.findUnique.mockResolvedValue(inativa);
+      tx.pricingTable.findFirst.mockResolvedValue({
+        id: 'tabela-2',
+        serviceType: { name: 'motoboy' },
+      });
+
+      await expect(service.reactivate('tabela-1')).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.pricingTable.update).not.toHaveBeenCalled();
+      expect(tx.pricingTable.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('procura a concorrente no MESMO escopo, incluindo a empresa', async () => {
+      // Tabela de empresa nao conflita com a geral: sao escopos diferentes.
+      prisma.pricingTable.findUnique.mockResolvedValue({ ...inativa, companyId: 'empresa-1' });
+      tx.pricingTable.update.mockResolvedValue(tabelaPronta({ companyId: 'empresa-1' }));
+
+      await service.reactivate('tabela-1');
+
+      expect(tx.pricingTable.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            regionId: 'regiao-1',
+            serviceTypeId: 'servico-1',
+            companyId: 'empresa-1',
+            active: true,
+          },
+        }),
+      );
+    });
+
+    it('recusa reativar o que ja esta ativo', async () => {
+      prisma.pricingTable.findUnique.mockResolvedValue({ ...inativa, active: true });
+
+      await expect(service.reactivate('tabela-1')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('erra claro quando a tabela nao existe', async () => {
+      prisma.pricingTable.findUnique.mockResolvedValue(null);
+
+      await expect(service.reactivate('sumiu')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

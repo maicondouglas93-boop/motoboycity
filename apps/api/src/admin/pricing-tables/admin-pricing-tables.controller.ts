@@ -34,4 +34,10 @@ export class AdminPricingTablesController {
   deactivate(@Param('id') id: string): Promise<PricingTableItem> {
     return this.adminPricingTablesService.deactivate(id);
   }
+
+  /** Sem esta rota, desativar era um caminho sem volta. */
+  @Patch(':id/reactivate')
+  reactivate(@Param('id') id: string): Promise<PricingTableItem> {
+    return this.adminPricingTablesService.reactivate(id);
+  }
 }

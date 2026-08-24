@@ -89,6 +89,74 @@ export class AdminPricingTablesService {
     return this.toItem(updated);
   }
 
+
+  /**
+   * Volta uma tabela desativada para o ar.
+   *
+   * A rota nao existia: `desativar` era efeito colateral de criar uma
+   * substituta ("mudar preco cria nova linha e desativa a anterior"), e virou
+   * botao solto na tela. Quem desativasse sem criar outra deixava a regiao SEM
+   * TABELA — e sem caminho de volta, porque reativar nao existia.
+   *
+   * RECUSA se ja houver outra ativa no mesmo escopo, em vez de desativa-la
+   * calada. Trocar qual tabela de preco governa a operacao e decisao de
+   * dinheiro; fazer isso como efeito colateral de um clique em "Ativar"
+   * mudaria o preco de todo pedido novo sem ninguem perceber.
+   */
+  async reactivate(id: string): Promise<PricingTableItem> {
+    const existing = await this.prisma.pricingTable.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Tabela de preços não encontrada.');
+    }
+    if (existing.active) {
+      throw new ConflictException('Esta tabela de preços já está ativa.');
+    }
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const updated = await this.prisma.$transaction(
+          async (tx) => {
+            const emUso = await tx.pricingTable.findFirst({
+              where: {
+                regionId: existing.regionId,
+                serviceTypeId: existing.serviceTypeId,
+                companyId: existing.companyId,
+                active: true,
+              },
+              include: { serviceType: true },
+            });
+            if (emUso) {
+              throw new ConflictException(
+                `Já existe uma tabela ativa para ${emUso.serviceType.name}` +
+                  `${existing.companyId ? ' nesta empresa' : ' na tabela geral'}. ` +
+                  'Desative aquela antes de reativar esta.',
+              );
+            }
+
+            return tx.pricingTable.update({
+              where: { id },
+              data: { active: true },
+              include: { serviceType: true, company: { select: { tradeName: true } } },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+
+        return this.toItem(updated);
+      } catch (error) {
+        if (!this.isRetryableWriteConflict(error)) throw error;
+        if (attempt === maxAttempts) {
+          throw new ConflictException(
+            'Outra atualização de preços ocorreu ao mesmo tempo. Tente novamente.',
+          );
+        }
+      }
+    }
+
+    throw new ConflictException('Não foi possível reativar a tabela de preços.');
+  }
+
   private async createActiveVersion(regionId: string, payload: CreatePricingTablePayload) {
     const maxAttempts = 3;
 

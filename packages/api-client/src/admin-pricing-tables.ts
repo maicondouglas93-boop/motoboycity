@@ -54,5 +54,14 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
       });
       return parseJsonOrThrow<PricingTableItem>(response);
     },
+
+    /** Recusa com 409 se ja houver outra tabela ativa no mesmo escopo. */
+    async reactivate(accessToken: string, id: string): Promise<PricingTableItem> {
+      const response = await fetch(`${baseUrl}/admin/pricing-tables/${id}/reactivate`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<PricingTableItem>(response);
+    },
   };
 }
