@@ -57,7 +57,10 @@ describe('InvoiceService', () => {
       );
       txCancel.invoice.findUnique.mockResolvedValue({ status: 'PENDING' });
       txCancel.invoice.updateMany.mockResolvedValue({ count: 1 });
-      jest.spyOn(service, 'getDetail').mockResolvedValue({} as never);
+      const serviceInternals = service as unknown as {
+        getDetail(invoiceId: string): Promise<unknown>;
+      };
+      jest.spyOn(serviceInternals, 'getDetail').mockResolvedValue({});
     });
 
     it('DEVOLVE as entregas para cobrança ao cancelar', async () => {

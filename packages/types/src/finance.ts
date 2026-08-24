@@ -508,6 +508,79 @@ export interface CashFlowForecastReport {
   realizedWithdrawals: CashFlowForecastWithdrawalItem[];
 }
 
+export interface FinancialAuditActor {
+  id: string;
+  name: string;
+}
+
+export interface FinancialAuditWalletAdjustmentEvent {
+  id: string;
+  kind: 'WALLET_ADJUSTMENT';
+  occurredAt: string;
+  actor: FinancialAuditActor | null;
+  driver: { id: string; name: string };
+  transactionType: 'CREDIT_ADJUSTMENT' | 'DEBIT_ADJUSTMENT' | 'CREDIT_REFUND';
+  transactionStatus: WalletTransactionStatus;
+  direction: 'CREDIT' | 'DEBIT';
+  amount: number;
+  reason: string | null;
+}
+
+export interface FinancialAuditInvoiceEvent {
+  id: string;
+  kind: 'INVOICE_STATUS_CHANGE';
+  occurredAt: string;
+  actor: FinancialAuditActor | null;
+  invoice: {
+    id: string;
+    number: string;
+    totalValue: number;
+    company: { id: string; name: string };
+  };
+  fromStatus: InvoiceStatus | null;
+  toStatus: InvoiceStatus;
+  note: string | null;
+}
+
+export interface FinancialAuditWithdrawalEvent {
+  id: string;
+  kind: 'WITHDRAWAL_STATUS_CHANGE';
+  occurredAt: string;
+  actor: FinancialAuditActor | null;
+  withdrawal: {
+    id: string;
+    requestedAmount: number;
+    netAmount: number;
+    driver: { id: string; name: string };
+  };
+  fromStatus: WithdrawalRequestStatus | null;
+  toStatus: WithdrawalRequestStatus;
+  note: string | null;
+}
+
+export type FinancialAuditEvent =
+  FinancialAuditWalletAdjustmentEvent | FinancialAuditInvoiceEvent | FinancialAuditWithdrawalEvent;
+
+/** Linha do tempo auditavel das trilhas financeiras ja persistidas. */
+export interface FinancialAuditReport {
+  period: { from: string; to: string };
+  summary: {
+    totalEventCount: number;
+    identifiedActorCount: number;
+    systemEventCount: number;
+    walletAdjustmentCount: number;
+    walletCreditValue: number;
+    walletDebitValue: number;
+    invoiceStatusChangeCount: number;
+    invoicePaidCount: number;
+    invoicePaidValue: number;
+    withdrawalStatusChangeCount: number;
+    withdrawalPaidCount: number;
+    withdrawalPaidValue: number;
+  };
+  events: FinancialAuditEvent[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;

@@ -4692,3 +4692,95 @@ uma vencida anterior, um repasse de cada classificação e um saque pago. Para
 evoluir de agenda conhecida para saldo futuro e DRE completo, o próximo recorte
 exige decisão de produto e persistência de saldo bancário inicial, despesas e
 centros de custo; esses valores não devem ser inferidos do ledger do motoboy.
+
+## Atualização — 2026-08-24: auditoria financeira unificada
+
+Depois do commit `1984fd7` (`feat(admin): add financial cycle and cash forecast
+reports`), o sexto recorte de controle financeiro avançado foi implementado em
+`/relatorios/auditoria-financeira`. A página reúne em uma cronologia única os
+eventos append-only que o produto já persistia separadamente:
+
+- ajustes de carteira (`CREDIT_ADJUSTMENT`, `DEBIT_ADJUSTMENT` e
+  `CREDIT_REFUND`), com entregador, direção, estado atual, valor, motivo e autor;
+- mudanças de status de fatura, com transição, empresa, valor congelado, nota e
+  responsável;
+- mudanças de status de saque, com transição, entregador, valor líquido, nota e
+  responsável.
+
+O novo `GET /admin/financial/audit-trail` é protegido por `JwtAuthGuard` e
+`AdminOnlyGuard`, exige `from`/`to` e limita cada consulta a 31 dias, pois retorna
+eventos individuais. As três trilhas são lidas numa transação `RepeatableRead` e
+ordenadas juntas por instante. Autor nulo continua apresentado como `Sistema`;
+o relatório não atribui uma pessoa quando a origem não registrou usuário.
+
+Os totais de crédito/débito de carteira excluem ajustes atualmente cancelados,
+mas esses eventos permanecem visíveis na linha do tempo. Confirmações de
+pagamento são calculadas pelas transições para `PAID`, tanto em faturas quanto
+em saques. A tela permite filtrar por tipo de evento, origem pessoa/sistema,
+buscar referência/pessoa/motivo, paginar e exportar exatamente o recorte visível
+para CSV.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/auditoria-financeira/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, `.env`,
+secret, regra financeira, cliente mobile ou notificação nativa. As mudanças
+paralelas em `apps/admin-web/src/components/finance/carteiras-tab.tsx`,
+`payouts-aging.tsx` e `demonstrativo-tab.tsx` foram preservadas; as duas primeiras
+não pertencem a este recorte e a última é documentada abaixo.
+
+### Verificação
+
+| Comando / fluxo                                                    | Resultado                                    |
+| ------------------------------------------------------------------ | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`             | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`                   | 1 suíte e 35 testes aprovados                |
+| Jest focado em `admin-financial` e `invoice.service.spec.ts`       | 2 suítes e 42 testes aprovados               |
+| `corepack pnpm typecheck`                                          | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                               | 8 pacotes aprovados, sem avisos              |
+| `corepack pnpm --filter @motoboycity/api run build`                | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build`          | aprovado; 35 páginas geradas                 |
+| HTTP `/relatorios/auditoria-financeira`                            | `200` no servidor local                      |
+| HTTP `/admin/financial/audit-trail` sem autenticação               | `401`; proteção confirmada                   |
+
+Lacuna de validação: não havia sessão administrativa com massa controlada para
+inspeção visual dos três tipos de evento. O próximo passo de homologação é gerar
+um ajuste, uma confirmação de fatura e o ciclo completo de um saque, conferir a
+ordem/autores na tela e comparar o CSV. Conciliação bancária real, saldo futuro
+e DRE completo continuam dependendo de contrato novo para saldo bancário,
+despesas e centros de custo; não devem ser simulados com o ledger do entregador.
+
+## Atualização — 2026-08-24: demonstrativo por competência consolidado
+
+O commit `e4384ad` adicionou a quinta aba `Demonstrativo` em
+`/financeiro?aba=demonstrativo`. A interface consome o contrato real já existente
+de `adminFinancialApi.financialStatement`, sem mock e sem criar uma segunda fonte
+de cálculo. O período selecionado apresenta pedidos concluídos por competência,
+receita bruta, repasse de entregadores, resultado da plataforma, ticket/margem,
+pedidos sem preço e ajustes de carteira em bloco separado. Também detalha o
+resultado por empresa e modalidade de serviço.
+
+Arquivos funcionais:
+
+- `apps/admin-web/src/app/(app)/financeiro/page.tsx`;
+- `apps/admin-web/src/components/finance/demonstrativo-tab.tsx`.
+
+A rota `/financeiro?aba=demonstrativo` respondeu `200` no servidor local e foi
+incluída no build aprovado do painel. A inspeção visual autenticada com massa
+financeira ainda depende de um navegador conectado e de uma sessão administrativa
+controlada. O único item do plano financeiro que permanece é antecipação de saldo,
+explicitamente condicionada a decisão/piloto de produto; não deve ser implementada
+por inferência.
+
+Durante a validação combinada, o teste novo de cancelamento de fatura expunha
+`InvoiceService.getDetail`, que é privado, diretamente ao `jest.spyOn` e quebrava o
+typecheck. `apps/api/src/finance/invoice.service.spec.ts` passou a acessar esse seam
+somente por uma tipagem interna do teste. Não houve alteração na implementação nem
+na regra de cancelamento; as 2 suítes financeiras focadas fecharam com 42 testes
+aprovados.

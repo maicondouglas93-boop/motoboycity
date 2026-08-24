@@ -8,6 +8,7 @@ import type {
   CashPositionItem,
   CashFlowForecastReport,
   FinancialCycleReport,
+  FinancialAuditReport,
   FinancialStatementReport,
   PayoutsAgingReport,
   ReceivablesAgingReport,
@@ -86,6 +87,18 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
         { headers: withAuth(accessToken) },
       );
       return parseJsonOrThrow<CashFlowForecastReport>(response);
+    },
+
+    /** Ajustes e mudancas financeiras com autor, motivo e valor. */
+    async financialAudit(
+      accessToken: string,
+      filters: { from: string; to: string },
+    ): Promise<FinancialAuditReport> {
+      const params = new URLSearchParams({ from: filters.from, to: filters.to });
+      const response = await fetch(`${baseUrl}/admin/financial/audit-trail?${params.toString()}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<FinancialAuditReport>(response);
     },
 
     async overview(
