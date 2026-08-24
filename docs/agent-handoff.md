@@ -4820,3 +4820,127 @@ Lacuna de validação: o Company Web não possui teste automatizado de interface
 Na homologação autenticada, concluir e cancelar um pedido devem removê-lo do
 mapa sem removê-lo imediatamente da lista “Recentes”; simular perda do socket
 deve confirmar a remoção pelo polling em até 30 segundos.
+
+## Atualização — 2026-08-24: Fase 1 dos relatórios do Company Web
+
+Foi iniciada a execução de `docs/plano-relatorios-company-web.md` pelo recorte
+que não exige contrato novo. A antiga tela única de `/relatorios`, que baixava
+entregas e faturas completas para somar no navegador, foi substituída por uma
+central de cards. A central anuncia somente os dois destinos já concluídos:
+
+- `/relatorios/pedidos`: usa `GET /deliveries/search`, com busca por
+  número/UUID/número externo, status, período padrão de 30 dias, filtros na URL,
+  paginação real de 10/25/50/100 itens e links para o pedido. O resumo deixa
+  explícito que custo e pedidos sem preço pertencem apenas à página visível;
+- `/relatorios/tempos-sla`: usa `GET /deliveries/stage-times` duas vezes, para
+  o período atual e a janela imediatamente anterior com a mesma duração. Exibe
+  média, mediana, p90, amostras e a opção de excluir horários retroativos.
+
+O Company não possui acesso aos limites administrativos de SLA. Por isso a
+tela faz comparação descritiva e não classifica um resultado como aprovado ou
+reprovado sem uma meta contratual exposta à empresa. `/indicadores` foi mantido
+por enquanto; o redirecionamento só entra depois de `/relatorios/geral`.
+
+Foram criados componentes próprios em
+`apps/company-web/src/components/reports/` para cabeçalho, filtros, estados de
+consulta e paginação. Os filtros aplicados são a fonte de verdade na URL e o
+formulário é remontado em Voltar/Avançar, sem sincronizar estado em efeito. Erros
+de servidor preservam a mensagem de `ApiError`.
+
+Arquivos funcionais:
+
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/pedidos/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/tempos-sla/page.tsx`;
+- `apps/company-web/src/components/reports/{report-filter-card,report-layout,report-pagination}.tsx`;
+- `apps/company-web/src/lib/report-period.ts`.
+
+Não houve alteração de endpoint, backend, validação compartilhada, Prisma,
+migration, `.env`, secret, status, dispatch, preço, mobile ou notificação. A API
+já deriva o escopo da empresa pelo token e rejeita `companyId`/`driverId` para
+usuário não administrador.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado |
+| `corepack pnpm --filter @motoboycity/company-web lint` | aprovado, sem avisos |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 14 páginas geradas |
+| HTTP `/relatorios`, `/relatorios/pedidos` e `/relatorios/tempos-sla` | `200` nas três rotas |
+| APIs `deliveries/search` e `deliveries/stage-times` sem token | `401` nas duas rotas |
+
+Lacunas conhecidas:
+
+- o Company Web não possui teste automatizado de interface nem havia sessão
+  autenticada disponível para percorrer filtros, paginação e Voltar/Avançar;
+- o DTO genérico de `GET /deliveries/search` ainda transporta `driverValue` e
+  `platformValue` para qualquer consumidor. As novas telas nunca renderizam
+  esses campos, mas o próximo recorte de contrato deve criar/usar uma resposta
+  Company minimizada para que repasse e margem interna nem cheguem ao navegador;
+- CSV operacional permanece para a fase de exportação no servidor; não foi
+  criado download parcial no cliente;
+- a Fase 2 (`GET /company/reports/operations` + `/relatorios/geral`) deve começar
+  somente depois que o recorte financeiro concorrente encerrar as alterações em
+  `packages/types`, `packages/validation`, `packages/api-client` e FinanceModule.
+
+## Atualização — 2026-08-24: Fase 2 dos relatórios do Company Web
+
+O recorte financeiro foi estabilizado no commit `89c9fb6` e a Fase 2 de
+`docs/plano-relatorios-company-web.md` foi implementada. A central agora publica
+o card `Analítico geral`, que abre `/relatorios/geral` com filtros de data na
+URL, comparação com a janela anterior, distribuição por status, série diária,
+valores concluídos, pedidos sem preço, retornos e lotes. A página também liga a
+área operacional ao `/financeiro`, sem duplicar posição em aberto ou faturas.
+
+Foi criado `GET /company/reports/operations?from&to`. O endpoint:
+
+- exige `from` e `to`, com limite de 366 dias;
+- usa `JwtAuthGuard` + `CompanyOnlyGuard` e resolve `companyId` exclusivamente
+  pelo vínculo do usuário autenticado;
+- trata pedidos criados (`createdAt`) e entregas concluídas
+  (`statusChangedAt`) como coortes independentes;
+- soma valores em centavos, separa `unpricedCount` e calcula ticket somente com
+  entregas concluídas que possuem preço;
+- agrupa dias e horários em `America/Sao_Paulo`, incluindo dias zerados na
+  série diária;
+- devolve modalidade, retorno e lote, mas nunca `driverValue`,
+  `platformValue`, carteira, oferta ou dados de outra empresa.
+
+`/indicadores` agora redireciona para `/relatorios/geral` e o item duplicado
+“Indicadores” foi removido da navegação. Links antigos continuam válidos.
+
+Arquivos funcionais deste recorte:
+
+- `packages/types/src/report.ts`;
+- `packages/validation/src/reports/company-operations-report-query.schema.ts`;
+- `packages/api-client/src/company-reports.ts`;
+- `apps/api/src/company/reports/company-reports.{module,controller,service,spec}.ts`;
+- `apps/api/src/app.module.ts`;
+- `apps/company-web/src/lib/api-client.ts`;
+- `apps/company-web/src/app/(app)/relatorios/geral/page.tsx`;
+- `apps/company-web/src/app/(app)/indicadores/page.tsx`;
+- `apps/company-web/src/components/layout/top-nav.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve schema Prisma, migration, alteração de dados, `.env`, secret, preço,
+dispatch, GPS, mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| `corepack pnpm typecheck` | 8 pacotes aprovados |
+| `corepack pnpm lint` | 8 pacotes aprovados, sem avisos |
+| Jest `company-reports.service.spec.ts` | 1 suíte e 8 testes aprovados |
+| `corepack pnpm --filter @motoboycity/validation build` | aprovado |
+| `corepack pnpm --filter @motoboycity/api run build` | aprovado |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 15 páginas geradas |
+
+Lacunas conhecidas: ainda falta homologação visual com sessão Company e massa
+controlada; o endpoint genérico `GET /deliveries/search`, usado pelo Histórico,
+ainda transporta campos internos no DTO embora a tela não os renderize; não há
+E2E com duas empresas; e a exportação operacional minimizada continua pendente.
+O próximo passo concreto é a Fase 3: criar as páginas `/relatorios/horarios` e
+`/relatorios/modalidades` consumindo `peakHours` e `serviceTypes` já entregues
+pelo novo contrato, sem novo endpoint.

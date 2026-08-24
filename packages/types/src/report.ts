@@ -123,3 +123,75 @@ export interface AdminOperationsReport {
   serviceTypes: OperationsReportServiceTypeItem[];
   peakHours: DeliveryPeakHours;
 }
+
+/** Modalidade no relatório da empresa, sem repasse ou margem da plataforma. */
+export interface CompanyOperationsReportServiceTypeItem {
+  serviceTypeName: string;
+  createdCount: number;
+  completedCount: number;
+  pricedCompletedCount: number;
+  unpricedCompletedCount: number;
+  completedTotalValue: number;
+  averageTicket: number;
+  createdWithReturnCount: number;
+  completedReturnValue: number;
+}
+
+export interface CompanyOperationsReportDayItem {
+  /** Dia civil no fuso da operação. */
+  date: string;
+  createdCount: number;
+  completedCount: number;
+  completedTotalValue: number;
+}
+
+export interface CompanyOperationsReportComparison {
+  period: { from: string; to: string };
+  ordersCreatedCount: number;
+  deliveriesCompletedCount: number;
+  completedTotalValue: number;
+  averageTicket: number;
+  changePercent: {
+    ordersCreated: number | null;
+    deliveriesCompleted: number | null;
+    completedTotalValue: number | null;
+    averageTicket: number | null;
+  };
+}
+
+/**
+ * Operação vista pela própria empresa.
+ *
+ * Criados e concluídos são coortes independentes. O payload expõe somente o
+ * custo da loja (`totalValue`); repasse do entregador e margem da plataforma
+ * não fazem parte deste contrato.
+ */
+export interface CompanyOperationsReport {
+  period: { from: string; to: string };
+  live: boolean;
+  comparison: CompanyOperationsReportComparison;
+  ordersCreated: {
+    count: number;
+    unpricedCount: number;
+    byCurrentStatus: Record<DeliveryStatus, number>;
+  };
+  deliveriesCompleted: {
+    count: number;
+    pricedCount: number;
+    unpricedCount: number;
+    totalValue: number;
+    averageTicket: number;
+  };
+  daily: CompanyOperationsReportDayItem[];
+  peakHours: DeliveryPeakHours;
+  serviceTypes: CompanyOperationsReportServiceTypeItem[];
+  returns: {
+    createdCount: number;
+    completedCount: number;
+    completedReturnValue: number;
+  };
+  batches: {
+    batchCount: number;
+    deliveryCount: number;
+  };
+}

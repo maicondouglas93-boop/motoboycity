@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BarChart3, ClipboardList, FileText, Wallet } from 'lucide-react';
+import { ClipboardList, FileText, Wallet } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +21,6 @@ import { session } from '@/lib/session';
  */
 const NAV_ITEMS = [
   { href: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { href: '/indicadores', label: 'Indicadores', icon: BarChart3 },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
   { href: '/financeiro', label: 'Financeiro', icon: Wallet },
 ];

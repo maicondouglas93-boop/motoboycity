@@ -1,286 +1,138 @@
-'use client';
-
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import type { InvoiceStatus } from '@motoboycity/types';
-import { AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { StatCard } from '@/components/stat-card';
-import { StatusChip } from '@/components/orders/status-chip';
-import { companyInvoicesApi, deliveriesApi } from '@/lib/api-client';
-import { session } from '@/lib/session';
+  ArrowRight,
+  LayoutDashboard,
+  ListChecks,
+  ShieldCheck,
+  TimerReset,
+  type LucideIcon,
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-
-const invoiceStatusLabel: Record<InvoiceStatus, string> = {
-  PENDING: 'Pendente',
-  PAID: 'Paga',
-  OVERDUE: 'Vencida',
-  CANCELLED: 'Cancelada',
+type ReportLink = {
+  title: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+  tone: string;
 };
 
-function formatCurrency(value: number | null): string {
-  return value === null ? 'A calcular na entrega' : currencyFormatter.format(value);
-}
+type ReportGroup = {
+  title: string;
+  description: string;
+  reports: ReportLink[];
+};
 
-export default function CompanyReportsPage() {
-  const token = session.getToken();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
-  const [filterError, setFilterError] = useState<string | null>(null);
-  const [appliedFilters, setAppliedFilters] = useState<{ from?: string; to?: string }>({});
-  const [appliedInvoiceStatus, setAppliedInvoiceStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
-  const deliveriesQuery = useQuery({
-    queryKey: ['company', 'report-deliveries', appliedFilters],
-    queryFn: () => deliveriesApi.list(token as string, appliedFilters),
-    enabled: Boolean(token),
-  });
-  const invoicesQuery = useQuery({
-    queryKey: ['company', 'report-invoices', appliedFilters, appliedInvoiceStatus],
-    queryFn: () =>
-      companyInvoicesApi.list(token as string, {
-        ...appliedFilters,
-        ...(appliedInvoiceStatus !== 'ALL' && { status: appliedInvoiceStatus }),
-      }),
-    enabled: Boolean(token),
-  });
+/**
+ * A central só anuncia destinos completos. Novos cards entram junto com sua
+ * página e seu contrato real, nunca como promessa clicável para uma tela vazia.
+ */
+const reportGroups: ReportGroup[] = [
+  {
+    title: 'Visão geral',
+    description: 'Acompanhe volume, conclusão, custos e evolução da sua operação em um só lugar.',
+    reports: [
+      {
+        title: 'Analítico geral',
+        description:
+          'Indicadores consolidados, comparação com o período anterior, status e evolução diária.',
+        href: '/relatorios/geral',
+        icon: LayoutDashboard,
+        tone: 'bg-violet-500/10 text-violet-700 ring-violet-500/15',
+      },
+    ],
+  },
+  {
+    title: 'Pedidos e custos',
+    description: 'Localize cada pedido e acompanhe o custo conhecido da sua operação.',
+    reports: [
+      {
+        title: 'Histórico de pedidos',
+        description:
+          'Busca por pedido, filtros de período e status, paginação real e acesso ao detalhe.',
+        href: '/relatorios/pedidos',
+        icon: ListChecks,
+        tone: 'bg-cyan-500/10 text-cyan-700 ring-cyan-500/15',
+      },
+    ],
+  },
+  {
+    title: 'Qualidade da operação',
+    description: 'Encontre gargalos no aceite, na coleta e no percurso até o cliente.',
+    reports: [
+      {
+        title: 'Tempos e SLA',
+        description:
+          'Média, mediana, p90, amostras e comparação com a janela imediatamente anterior.',
+        href: '/relatorios/tempos-sla',
+        icon: TimerReset,
+        tone: 'bg-orange-500/10 text-orange-700 ring-orange-500/15',
+      },
+    ],
+  },
+];
 
-  const summary = useMemo(() => {
-    const deliveries = deliveriesQuery.data ?? [];
-    const invoices = invoicesQuery.data ?? [];
-    const completed = deliveries.filter((delivery) => delivery.status === 'COMPLETED');
-    return {
-      deliveries: deliveries.length,
-      completed: completed.length,
-      cancelled: deliveries.filter((delivery) => delivery.status === 'CANCELLED').length,
-      completedValue: completed.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0),
-      invoices: invoices.length,
-      invoicedValue: invoices.reduce((sum, invoice) => sum + invoice.totalValue, 0),
-      receivable: invoices
-        .filter((invoice) => invoice.status === 'PENDING' || invoice.status === 'OVERDUE')
-        .reduce((sum, invoice) => sum + invoice.totalValue, 0),
-    };
-  }, [deliveriesQuery.data, invoicesQuery.data]);
-
-  if (!token) {
-    return (
-      <p className="text-sm text-muted-foreground">Faça login para consultar os relatórios.</p>
-    );
-  }
-
-  const deliveries = deliveriesQuery.data ?? [];
-  const invoices = invoicesQuery.data ?? [];
-  const loading = deliveriesQuery.isLoading || invoicesQuery.isLoading;
-  const hasError = deliveriesQuery.isError || invoicesQuery.isError;
-
-  function applyFilters() {
-    if (from && to && from > to) {
-      setFilterError('A data inicial não pode ser posterior à data final.');
-      return;
-    }
-    setFilterError(null);
-    setAppliedFilters({ ...(from && { from }), ...(to && { to }) });
-    setAppliedInvoiceStatus(invoiceStatus);
-  }
-
-  function clearFilters() {
-    setFrom('');
-    setTo('');
-    setInvoiceStatus('ALL');
-    setFilterError(null);
-    setAppliedFilters({});
-    setAppliedInvoiceStatus('ALL');
-  }
+function ReportCard({ report }: { report: ReportLink }) {
+  const Icon = report.icon;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Relatório de pedidos e faturamento</h1>
-        <p className="text-sm text-muted-foreground">
-          Consulte os registros reais da empresa por período e estado de cobrança.
-        </p>
-      </div>
-      <Card className="premium-panel">
-        <CardContent className="flex flex-wrap items-end gap-4 pt-6">
-          <div className="space-y-1">
-            <Label htmlFor="report-from">A partir de</Label>
-            <Input
-              id="report-from"
-              type="date"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="report-to">Até</Label>
-            <Input
-              id="report-to"
-              type="date"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="invoice-status">Status da fatura</Label>
-            <select
-              id="invoice-status"
-              className="block h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
-              value={invoiceStatus}
-              onChange={(event) => setInvoiceStatus(event.target.value as InvoiceStatus | 'ALL')}
-            >
-              <option value="ALL">Todos</option>
-              {Object.entries(invoiceStatusLabel).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button onClick={applyFilters}>Aplicar filtros</Button>
-          <Button variant="outline" onClick={clearFilters}>
-            Limpar
-          </Button>
-          {filterError && <p className="text-sm text-destructive">{filterError}</p>}
-        </CardContent>
-      </Card>
+    <Link
+      href={report.href}
+      className="group flex min-h-32 items-center gap-4 rounded-2xl border border-border/75 bg-card/90 p-5 shadow-[0_1px_2px_rgba(16,37,47,0.05),0_14px_30px_-26px_rgba(15,107,112,0.65)] ring-1 ring-white/70 transition-all hover:-translate-y-0.5 hover:border-portal/25 hover:shadow-[0_10px_28px_-20px_rgba(15,107,112,0.45)] focus-visible:ring-2 focus-visible:ring-portal focus-visible:outline-none"
+    >
+      <span
+        className={`grid size-14 shrink-0 place-items-center rounded-2xl ring-1 ring-inset ${report.tone}`}
+      >
+        <Icon className="size-7" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-heading text-base leading-5 font-semibold text-portal-deep">
+          {report.title}
+        </span>
+        <span className="mt-1.5 block text-sm leading-5 text-muted-foreground">
+          {report.description}
+        </span>
+      </span>
+      <ArrowRight
+        className="size-5 shrink-0 text-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-portal"
+        aria-hidden="true"
+      />
+    </Link>
+  );
+}
 
-      {loading && <p className="text-sm text-muted-foreground">Montando relatório...</p>}
-      {hasError && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <AlertCircle className="size-4" /> Não foi possível carregar este relatório.
+export default function ReportsHubPage() {
+  return (
+    <div className="mx-auto w-full max-w-[1480px] space-y-9 pb-12">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-portal-deep">
+            Central de relatórios
+          </h1>
+          <Badge variant="outline" className="gap-1.5">
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            Somente dados da sua empresa
+          </Badge>
         </div>
-      )}
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+          Escolha uma análise para entender seus pedidos e os tempos da operação. Todos os
+          relatórios disponíveis consultam a API real e respeitam a empresa vinculada ao seu acesso.
+        </p>
+      </header>
 
-      {!loading && !hasError && (
-        <>
-          <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <StatCard label="Pedidos" value={String(summary.deliveries)} />
-            <StatCard label="Concluídos" value={String(summary.completed)} />
-            <StatCard label="Cancelados" value={String(summary.cancelled)} />
-            <StatCard label="Valor concluído" value={formatCurrency(summary.completedValue)} />
-          </section>
-          <section className="grid grid-cols-2 gap-4 xl:grid-cols-3">
-            <StatCard label="Faturas no filtro" value={String(summary.invoices)} />
-            <StatCard label="Total faturado" value={formatCurrency(summary.invoicedValue)} />
-            <StatCard label="A pagar" value={formatCurrency(summary.receivable)} />
-          </section>
-          <section className="space-y-3">
-            <div>
-              <h2 className="font-semibold">Faturas</h2>
-              <p className="text-sm text-muted-foreground">
-                Cada item abre os pedidos, valores e histórico de cobrança.
-              </p>
-            </div>
-            <Card className="premium-panel">
-              <CardContent className="p-0">
-                {invoices.length === 0 ? (
-                  <p className="p-8 text-center text-sm text-muted-foreground">
-                    Nenhuma fatura neste filtro.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Número</TableHead>
-                        <TableHead>Emissão</TableHead>
-                        <TableHead>Vencimento</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Pedidos</TableHead>
-                        <TableHead>Valor</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {invoices.map((invoice) => (
-                        <TableRow key={invoice.id}>
-                          <TableCell>
-                            <Link
-                              className="font-medium text-portal underline-offset-4 hover:text-portal-deep hover:underline"
-                              href={`/faturas/${invoice.id}`}
-                            >
-                              {invoice.number}
-                            </Link>
-                          </TableCell>
-                          <TableCell>{invoice.issueDate.slice(0, 10)}</TableCell>
-                          <TableCell>{invoice.dueDate.slice(0, 10)}</TableCell>
-                          <TableCell>{invoiceStatusLabel[invoice.status]}</TableCell>
-                          <TableCell>{invoice.deliveryCount}</TableCell>
-                          <TableCell>{formatCurrency(invoice.totalValue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </section>
-          <section className="space-y-3">
-            <div>
-              <h2 className="font-semibold">Pedidos no período</h2>
-              <p className="text-sm text-muted-foreground">
-                Abra o detalhe para acompanhar o histórico operacional.
-              </p>
-            </div>
-            <Card className="premium-panel">
-              <CardContent className="p-0">
-                {deliveries.length === 0 ? (
-                  <p className="p-8 text-center text-sm text-muted-foreground">
-                    Nenhum pedido neste período.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Pedido</TableHead>
-                        <TableHead>Modalidade</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Distância</TableHead>
-                        <TableHead>Valor</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {deliveries.map((delivery) => (
-                        <TableRow key={delivery.id}>
-                          <TableCell>
-                            <Link
-                              className="font-medium text-portal underline-offset-4 hover:text-portal-deep hover:underline"
-                              href={`/pedidos/${delivery.id}`}
-                            >
-                              #{delivery.displayNumber}
-                            </Link>
-                          </TableCell>
-                          <TableCell>{delivery.serviceTypeName}</TableCell>
-                          <TableCell>
-                            <StatusChip status={delivery.status} />
-                          </TableCell>
-                          <TableCell>
-                            {delivery.distanceKm === null
-                              ? 'A calcular'
-                              : `${delivery.distanceKm} km`}
-                          </TableCell>
-                          <TableCell>{formatCurrency(delivery.totalValue)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          </section>
-        </>
-      )}
+      {reportGroups.map((group) => (
+        <section key={group.title} className="space-y-4">
+          <div>
+            <h2 className="font-heading text-lg font-semibold text-portal-deep">{group.title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {group.reports.map((report) => (
+              <ReportCard key={report.title} report={report} />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

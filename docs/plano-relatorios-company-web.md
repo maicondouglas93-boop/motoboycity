@@ -39,6 +39,11 @@ No momento em que este plano foi escrito, a primeira fase de
 Antes de iniciar código de Relatórios, terminar/commitar esse recorte ou combinar
 explicitamente a propriedade dos arquivos compartilhados.
 
+**Atualização de execução em 2026-08-24:** o recorte financeiro foi estabilizado
+no commit `89c9fb6`. As fases 1, 2 e o redirecionamento previsto na fase 7 já
+foram implementados. A central possui páginas reais de Histórico, Tempos/SLA e
+Analítico geral; `/indicadores` redireciona para `/relatorios/geral`.
+
 ---
 
 ## 2. Objetivo e limites
@@ -247,7 +252,7 @@ em `Delivery.batchId`.
 
 ### 6.2 Agregação operacional da empresa — obrigatória
 
-Criar `GET /company/reports/operations?from&to`, protegido por
+Implementado `GET /company/reports/operations?from&to`, protegido por
 `JwtAuthGuard` e `CompanyOnlyGuard`.
 
 O retorno deve conter:
@@ -264,6 +269,12 @@ O retorno deve conter:
 O serviço pode reaproveitar funções puras do relatório administrativo, mas não
 o controller nem o payload completo do admin. O Company nunca recebe empresas,
 entregadores, repasses ou margem da plataforma.
+
+O contrato implementado exige as duas datas, limita o recorte a 366 dias,
+resolve `companyId` pelo vínculo do usuário e mantém duas coortes independentes:
+criação por `createdAt` e conclusão por `statusChangedAt`. Valores nulos entram
+em `unpricedCount` e ficam fora do ticket médio. A série diária inclui dias sem
+movimento; horários usam `America/Sao_Paulo`.
 
 ### 6.3 Consulta detalhada
 
@@ -331,16 +342,16 @@ equipe ou origem manual/Aiqfome exige persistência nova e fica fora deste plano
 
 ## 8. Ordem de execução
 
-| Fase | Entrega | Dependência |
+| Fase | Entrega | Estado |
 | --- | --- | --- |
-| 0 | Encerrar/coordenar o recorte financeiro concorrente | trabalho atual |
-| 1 | Componentes comuns, central, `/pedidos` paginado e `/tempos-sla` | endpoints existentes |
-| 2 | Contrato `/company/reports/operations`, testes e `/geral` | cadeia compartilhada |
-| 3 | `/horarios` e `/modalidades` | fase 2 |
-| 4 | filtros adicionais da busca e `/retornos-lotes` | contrato aditivo |
-| 5 | endpoint e página `/ocorrencias` | agregação específica |
-| 6 | exportação operacional no servidor | filtros estabilizados |
-| 7 | redirecionar `/indicadores`, ajustar navegação e homologar | páginas concluídas |
+| 0 | Encerrar/coordenar o recorte financeiro concorrente | concluída (`89c9fb6`) |
+| 1 | Componentes comuns, central, `/pedidos` paginado e `/tempos-sla` | concluída |
+| 2 | Contrato `/company/reports/operations`, testes e `/geral` | concluída |
+| 3 | `/horarios` e `/modalidades` | próxima fase |
+| 4 | filtros adicionais da busca e `/retornos-lotes` | pendente |
+| 5 | endpoint e página `/ocorrencias` | pendente |
+| 6 | exportação operacional no servidor | pendente |
+| 7 | redirecionar `/indicadores`, ajustar navegação e homologar | código concluído; falta homologação visual autenticada |
 
 Executar e validar uma fase por vez. Não misturar a fase financeira e a fase de
 relatórios no mesmo commit quando tocarem arquivos compartilhados.
@@ -349,22 +360,22 @@ relatórios no mesmo commit quando tocarem arquivos compartilhados.
 
 ## 9. Critérios de aceite finais
 
-- [ ] `/relatorios` apresenta apenas cards funcionais e organizados por categoria;
-- [ ] cada card abre uma página específica, completa e compartilhável por URL;
-- [ ] `/indicadores` redireciona para `/relatorios/geral`;
-- [ ] nenhuma tela de relatório chama `GET /deliveries` para agregar lista inteira;
-- [ ] histórico usa paginação real e preserva filtros na URL;
-- [ ] períodos atual/anterior têm a mesma duração;
+- [x] `/relatorios` apresenta apenas cards funcionais e organizados por categoria;
+- [x] cada card publicado abre uma página específica, completa e compartilhável por URL;
+- [x] `/indicadores` redireciona para `/relatorios/geral`;
+- [x] nenhuma tela de relatório chama `GET /deliveries` para agregar lista inteira;
+- [x] histórico usa paginação real e preserva filtros na URL;
+- [x] períodos atual/anterior têm a mesma duração;
 - [ ] totais por modalidade reconciliam com o Analítico geral;
-- [ ] valores indefinidos aparecem separados e não entram como zero;
+- [x] valores indefinidos aparecem separados e não entram como zero;
 - [ ] Company não recebe repasse/margem interna nem dados de outra empresa;
 - [ ] CSV respeita filtros, limite e minimização de PII;
 - [ ] estados sem dados, erro e carregamento foram testados;
 - [ ] desktop e largura estreita foram inspecionados com sessão real;
-- [ ] testes unitários cobrem agregação, centavos, fuso e coortes;
+- [x] testes unitários cobrem agregação, centavos, fuso e coortes;
 - [ ] E2E cobre isolamento entre duas empresas;
-- [ ] `pnpm typecheck`, `pnpm lint`, testes da API e build do Company Web passam;
-- [ ] `docs/agent-handoff.md` registra cada fase concluída e suas limitações.
+- [x] `pnpm typecheck`, `pnpm lint`, testes da API e build do Company Web passam;
+- [x] `docs/agent-handoff.md` registra cada fase concluída e suas limitações.
 
 ---
 
