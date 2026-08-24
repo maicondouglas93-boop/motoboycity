@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MetricCard } from '@/components/finance/metric-card';
+import { ReceivablesAging } from '@/components/finance/receivables-aging';
 import { adminFinancialApi, adminInvoicesApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
@@ -147,6 +148,8 @@ export function FaturasTab({ token }: { token: string }) {
           )}
         </CardContent>
       </Card>
+
+      <ReceivablesAging token={token} />
 
       <Card>
         <CardHeader className="gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
