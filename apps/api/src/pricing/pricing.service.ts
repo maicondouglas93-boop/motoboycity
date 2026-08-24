@@ -5,6 +5,8 @@ import { calculatePricing, type PricingCalculatorResult } from './pricing-calcul
 import { isSurchargeActiveAt } from './surcharge-window';
 
 export interface PricingQuoteInput {
+  /** Empresa dona do pedido, usada para resolver uma tabela personalizada. */
+  companyId: string;
   /**
    * Região da EMPRESA dona do pedido (`Company.regionId`), obrigatória.
    *
@@ -50,12 +52,29 @@ export class PricingService {
       );
     }
 
-    const pricingTable = await this.prisma.pricingTable.findFirst({
-      where: { regionId: region.id, serviceTypeId: input.serviceTypeId, active: true },
+    const companyPricingTable = await this.prisma.pricingTable.findFirst({
+      where: {
+        regionId: region.id,
+        serviceTypeId: input.serviceTypeId,
+        companyId: input.companyId,
+        active: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+    const pricingTable =
+      companyPricingTable ??
+      (await this.prisma.pricingTable.findFirst({
+        where: {
+          regionId: region.id,
+          serviceTypeId: input.serviceTypeId,
+          companyId: null,
+          active: true,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }));
     if (!pricingTable) {
       throw new NotFoundException(
-        'Nenhuma tabela de preços ativa para este tipo de serviço nesta região.',
+        'Nenhuma tabela de preços ativa para esta empresa ou para sua região.',
       );
     }
 

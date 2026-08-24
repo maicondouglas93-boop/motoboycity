@@ -5,10 +5,11 @@ import {
   type CreatePricingTablePayload,
   type ListPricingTablesQuery,
 } from '@motoboycity/validation';
+import type { PricingTableItem } from '@motoboycity/types';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { AdminPricingTablesService, type PricingTableItem } from './admin-pricing-tables.service';
+import { AdminPricingTablesService } from './admin-pricing-tables.service';
 
 @Controller('admin/pricing-tables')
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)

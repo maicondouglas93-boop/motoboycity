@@ -34,6 +34,7 @@ describe('PricingService', () => {
   });
 
   const input = {
+    companyId: 'company-1',
     regionId: 'region-1',
     serviceTypeId: 'st-1',
     distanceKm: 5,
@@ -54,7 +55,13 @@ describe('PricingService', () => {
     const result = await service.quote(input);
 
     expect(prisma.pricingTable.findFirst).toHaveBeenCalledWith({
-      where: { regionId: 'region-1', serviceTypeId: 'st-1', active: true },
+      where: {
+        regionId: 'region-1',
+        serviceTypeId: 'st-1',
+        companyId: 'company-1',
+        active: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     expect(result.totalValue).toBe(12.5);
   });
@@ -79,8 +86,39 @@ describe('PricingService', () => {
       where: { id: 'region-2', active: true },
     });
     expect(prisma.pricingTable.findFirst).toHaveBeenCalledWith({
-      where: { regionId: 'region-2', serviceTypeId: 'st-1', active: true },
+      where: {
+        regionId: 'region-2',
+        serviceTypeId: 'st-1',
+        companyId: 'company-1',
+        active: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+  });
+
+  it('usa a tabela geral quando a empresa não tem preço personalizado', async () => {
+    prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+    prisma.pricingTable.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      baseFee: { toString: () => '6' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
+      perKmFee: { toString: () => '2' } as unknown as number,
+      minimumFee: null,
+      returnFee: null,
+    });
+    platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
+
+    const result = await service.quote(input);
+
+    expect(prisma.pricingTable.findFirst).toHaveBeenNthCalledWith(2, {
+      where: {
+        regionId: 'region-1',
+        serviceTypeId: 'st-1',
+        companyId: null,
+        active: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    expect(result.totalValue).toBe(16);
   });
 
   it('rejeita quando a região da empresa não existe ou está inativa', async () => {

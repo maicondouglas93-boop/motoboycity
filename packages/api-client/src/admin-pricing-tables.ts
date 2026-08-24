@@ -13,10 +13,11 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
   return {
     async list(
       accessToken: string,
-      filters?: { serviceTypeId?: string; active?: boolean },
+      filters?: { serviceTypeId?: string; companyId?: string; active?: boolean },
     ): Promise<PricingTableItem[]> {
       const params = new URLSearchParams();
       if (filters?.serviceTypeId) params.set('serviceTypeId', filters.serviceTypeId);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       const query = params.toString() ? `?${params.toString()}` : '';
 
@@ -30,7 +31,9 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
       accessToken: string,
       payload: {
         serviceTypeId: string;
+        companyId?: string;
         baseFee: number;
+        includedDistanceKm?: number;
         perKmFee: number;
         minimumFee?: number;
         returnFee?: number;

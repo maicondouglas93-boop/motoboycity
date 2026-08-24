@@ -10,6 +10,7 @@ describe('AdminPricingTablesService', () => {
   };
   let prisma: {
     serviceType: { findUnique: jest.Mock };
+    company: { findUnique: jest.Mock };
     region: { findFirst: jest.Mock };
     pricingTable: { findMany: jest.Mock; findUnique: jest.Mock; update: jest.Mock };
     $transaction: jest.Mock;
@@ -21,6 +22,7 @@ describe('AdminPricingTablesService', () => {
     };
     prisma = {
       serviceType: { findUnique: jest.fn() },
+      company: { findUnique: jest.fn() },
       region: { findFirst: jest.fn() },
       pricingTable: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
@@ -41,6 +43,8 @@ describe('AdminPricingTablesService', () => {
           regionId: 'region-1',
           serviceTypeId: 'st-1',
           serviceType: { name: 'Moto' },
+          companyId: null,
+          company: null,
           baseFee: { toString: () => '5.00' },
           includedDistanceKm: { toString: () => '0.00' },
           perKmFee: { toString: () => '1.50' },
@@ -59,6 +63,8 @@ describe('AdminPricingTablesService', () => {
           regionId: 'region-1',
           serviceTypeId: 'st-1',
           serviceTypeName: 'Moto',
+          companyId: null,
+          companyName: null,
           baseFee: 5,
           includedDistanceKm: 0,
           perKmFee: 1.5,
@@ -77,6 +83,8 @@ describe('AdminPricingTablesService', () => {
           regionId: 'region-1',
           serviceTypeId: 'st-1',
           serviceType: { name: 'Moto' },
+          companyId: null,
+          company: null,
           baseFee: { toString: () => '5.00' },
           includedDistanceKm: { toString: () => '0.00' },
           perKmFee: { toString: () => '1.50' },
@@ -96,10 +104,12 @@ describe('AdminPricingTablesService', () => {
     it('repassa filtros serviceTypeId e active para a query', async () => {
       prisma.pricingTable.findMany.mockResolvedValue([]);
 
-      await service.list({ serviceTypeId: 'st-1', active: true });
+      await service.list({ serviceTypeId: 'st-1', companyId: 'company-1', active: true });
 
       expect(prisma.pricingTable.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { serviceTypeId: 'st-1', active: true } }),
+        expect.objectContaining({
+          where: { serviceTypeId: 'st-1', companyId: 'company-1', active: true },
+        }),
       );
     });
   });
@@ -121,6 +131,8 @@ describe('AdminPricingTablesService', () => {
         regionId: 'region-1',
         serviceTypeId: 'st-1',
         serviceType: { name: 'Moto' },
+        companyId: null,
+        company: null,
         baseFee: { toString: () => '5.00' },
         includedDistanceKm: { toString: () => '0.00' },
         perKmFee: { toString: () => '1.50' },
@@ -133,7 +145,12 @@ describe('AdminPricingTablesService', () => {
       const result = await service.create(payload);
 
       expect(tx.pricingTable.updateMany).toHaveBeenCalledWith({
-        where: { regionId: 'region-1', serviceTypeId: 'st-1', active: true },
+        where: {
+          regionId: 'region-1',
+          serviceTypeId: 'st-1',
+          companyId: null,
+          active: true,
+        },
         data: { active: false },
       });
       expect(tx.pricingTable.create).toHaveBeenCalledWith(
@@ -141,6 +158,7 @@ describe('AdminPricingTablesService', () => {
           data: expect.objectContaining({
             regionId: 'region-1',
             serviceTypeId: 'st-1',
+            companyId: null,
             baseFee: 5,
             includedDistanceKm: 0,
             perKmFee: 1.5,
@@ -151,6 +169,117 @@ describe('AdminPricingTablesService', () => {
       );
       expect(result.id).toBe('pt-2');
       expect(result.active).toBe(true);
+    });
+
+    it('cria preço personalizado na região da empresa sem desativar a tabela geral', async () => {
+      prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
+      prisma.company.findUnique.mockResolvedValue({
+        id: 'company-1',
+        region: { id: 'region-2', active: true },
+      });
+      tx.pricingTable.create.mockResolvedValue({
+        id: 'pt-company',
+        regionId: 'region-2',
+        serviceTypeId: 'st-1',
+        serviceType: { name: 'Moto' },
+        companyId: 'company-1',
+        company: { tradeName: 'Loja Especial' },
+        baseFee: { toString: () => '4.00' },
+        includedDistanceKm: { toString: () => '2.00' },
+        perKmFee: { toString: () => '1.20' },
+        minimumFee: null,
+        returnFee: null,
+        active: true,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const result = await service.create({
+        ...payload,
+        companyId: 'company-1',
+        includedDistanceKm: 2,
+      });
+
+      expect(prisma.region.findFirst).not.toHaveBeenCalled();
+      expect(tx.pricingTable.updateMany).toHaveBeenCalledWith({
+        where: {
+          regionId: 'region-2',
+          serviceTypeId: 'st-1',
+          companyId: 'company-1',
+          active: true,
+        },
+        data: { active: false },
+      });
+      expect(tx.pricingTable.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            regionId: 'region-2',
+            companyId: 'company-1',
+            includedDistanceKm: 2,
+          }),
+        }),
+      );
+      expect(result.companyName).toBe('Loja Especial');
+    });
+
+    it('repete a transação serializável quando outra atualização concorre no mesmo escopo', async () => {
+      prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+      prisma.$transaction.mockRejectedValueOnce({ code: 'P2034' });
+      tx.pricingTable.create.mockResolvedValue({
+        id: 'pt-retried',
+        regionId: 'region-1',
+        serviceTypeId: 'st-1',
+        serviceType: { name: 'Moto' },
+        companyId: null,
+        company: null,
+        baseFee: { toString: () => '5.00' },
+        includedDistanceKm: { toString: () => '0.00' },
+        perKmFee: { toString: () => '1.50' },
+        minimumFee: { toString: () => '8.00' },
+        returnFee: { toString: () => '3.00' },
+        active: true,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const result = await service.create(payload);
+
+      expect(result.id).toBe('pt-retried');
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+    });
+
+    it('retorna conflito depois de três disputas consecutivas pelo preço ativo', async () => {
+      prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+      prisma.$transaction.mockRejectedValue({ code: 'P2002' });
+
+      await expect(service.create(payload)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    });
+
+    it('rejeita preço personalizado para empresa inexistente', async () => {
+      prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
+      prisma.company.findUnique.mockResolvedValue(null);
+
+      await expect(service.create({ ...payload, companyId: 'company-1' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejeita preço personalizado quando a região da empresa está inativa', async () => {
+      prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
+      prisma.company.findUnique.mockResolvedValue({
+        id: 'company-1',
+        region: { id: 'region-2', active: false },
+      });
+
+      await expect(service.create({ ...payload, companyId: 'company-1' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('rejeita quando o tipo de serviço não existe', async () => {
@@ -176,6 +305,8 @@ describe('AdminPricingTablesService', () => {
         regionId: 'region-1',
         serviceTypeId: 'st-1',
         serviceType: { name: 'Moto' },
+        companyId: null,
+        company: null,
         baseFee: { toString: () => '5.00' },
         includedDistanceKm: { toString: () => '0.00' },
         perKmFee: { toString: () => '1.50' },
