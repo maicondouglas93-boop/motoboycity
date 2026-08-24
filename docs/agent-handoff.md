@@ -5856,3 +5856,16 @@ Blueprint, mas não é necessário para a instância atual já inicializada.
 Próximo passo concreto: acompanhar o deploy de limpeza, confirmar novamente
 `GET /health` e então validar login e navegação essenciais nos dois painéis da
 Vercel contra a API de produção.
+
+## Atualização — 2026-08-24: copiar acesso do painel da empresa no Admin
+
+A página `/clientes` do Admin Web ganhou a ação `Copiar link do painel` ao
+lado de `Cadastrar empresa`. A ação copia
+`https://motoboycity-company-web.vercel.app/login` para a área de transferência,
+troca o rótulo para `Link copiado` quando conclui e mostra um erro acessível se
+o navegador bloquear a cópia. O botão não navega, não altera contratos e não
+modifica dados das empresas.
+
+Validação deste recorte: typecheck e lint de `@motoboycity/admin-web`
+concluíram com sucesso. Próximo passo concreto: revisar visualmente em desktop
+e mobile e publicar o Admin Web quando o commit for autorizado.

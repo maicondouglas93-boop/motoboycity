@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyListItem, RegisterCompanyResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Building2, CircleCheckBig } from 'lucide-react';
+import { Building2, Check, CircleCheckBig, Copy } from 'lucide-react';
 import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,10 +28,13 @@ const statusVariant: Record<AdminCompanyListItem['status'], 'outline' | 'default
     SUSPENDED: 'destructive',
   };
 
+const COMPANY_LOGIN_URL = 'https://motoboycity-company-web.vercel.app/login';
+
 export default function ClientsPage() {
   const [search, setSearch] = useState('');
   const [approveError, setApproveError] = useState<string | null>(null);
   const [createdNotice, setCreatedNotice] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const queryClient = useQueryClient();
 
   const token = session.getToken();
@@ -77,6 +80,15 @@ export default function ClientsPage() {
     );
   }
 
+  async function handleCopyCompanyLogin() {
+    try {
+      await navigator.clipboard.writeText(COMPANY_LOGIN_URL);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+  }
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -86,12 +98,34 @@ export default function ClientsPage() {
             Cadastre, aprove e acompanhe as empresas atendidas pela plataforma.
           </p>
         </div>
-        <CreateCompanyDialog accessToken={token} onCreated={handleCompanyCreated}>
-          <Button className="gap-2 shadow-lg shadow-primary/15">
-            <Building2 className="size-4" /> Cadastrar empresa
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={() => void handleCopyCompanyLogin()}
+            title={COMPANY_LOGIN_URL}
+          >
+            {copyStatus === 'copied' ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            {copyStatus === 'copied' ? 'Link copiado' : 'Copiar link do painel'}
           </Button>
-        </CreateCompanyDialog>
+          <CreateCompanyDialog accessToken={token} onCreated={handleCompanyCreated}>
+            <Button className="gap-2 shadow-lg shadow-primary/15">
+              <Building2 className="size-4" /> Cadastrar empresa
+            </Button>
+          </CreateCompanyDialog>
+        </div>
       </header>
+
+      {copyStatus === 'error' && (
+        <p role="alert" className="text-sm text-destructive">
+          Não foi possível copiar o link. Verifique a permissão da área de transferência.
+        </p>
+      )}
 
       {createdNotice && (
         <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/6 px-4 py-3 text-sm">
