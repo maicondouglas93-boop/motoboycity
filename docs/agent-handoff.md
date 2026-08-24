@@ -5746,3 +5746,26 @@ provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
 Próximo passo concreto: homologar com uma sessão real de `OWNER`, salvar os
 quatro campos e confirmar o novo telefone no diálogo de WhatsApp da fatura;
 depois entrar como `OPERATOR` e confirmar visualização sem permissão de edição.
+
+## Atualização — 2026-08-24: bootstrap do primeiro deploy no Render
+
+O Blueprint da API passou a usar `initialDeployHook` para executar o seed
+mínimo depois do primeiro deploy bem-sucedido. Isso resolve a incompatibilidade
+do procedimento anterior com o plano gratuito do Render, que não oferece Shell:
+a região padrão e o primeiro administrador são criados uma única vez pelo hook,
+com `ADMIN_SEED_EMAIL` e `ADMIN_SEED_PASSWORD` fornecidos como segredos no
+painel. O seed continua idempotente e não sobrescreve região ou administrador
+existentes.
+
+Nenhum deploy, migration, seed ou conexão com o Neon foi executado nesta
+alteração. O `prisma migrate deploy` permanece no build porque o comando de
+pré-deploy não está disponível no plano gratuito. Antes de criar o Blueprint,
+é obrigatório confirmar o alvo Neon e preencher `DATABASE_URL`, `DIRECT_URL`,
+`CORS_ORIGINS` e as credenciais fortes do administrador.
+
+Verificação deste recorte: schema Prisma válido e build da API aprovado fora
+do sandbox do Windows. A execução atual do GitHub Actions continua vermelha em
+quatro expectativas E2E após as mudanças de idempotência; isso precisa ser
+alinhado antes de considerar o backend pronto para produção. Próximo passo
+concreto: validar o Blueprint, confirmar autorização para aplicar as 31
+migrations no Neon limpo e acompanhar o primeiro deploy/health check.

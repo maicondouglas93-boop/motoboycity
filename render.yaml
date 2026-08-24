@@ -13,11 +13,12 @@
 #      painel. Sao os segredos — nenhum deles pode morar neste arquivo, porque
 #      o repositorio e PUBLICO.
 #
-# DEPOIS DO PRIMEIRO DEPLOY, sem falta:
+# ANTES DO PRIMEIRO DEPLOY, sem falta:
 #   - Preencher CORS_ORIGINS com os dominios da Vercel. Sem isso os paineis
 #     carregam e TODA chamada e bloqueada pelo navegador.
-#   - Rodar `pnpm --filter @motoboycity/api exec prisma db seed` uma vez, para
-#     criar o usuario administrador.
+#   - Preencher ADMIN_SEED_EMAIL e ADMIN_SEED_PASSWORD com credenciais fortes.
+#     O `initialDeployHook` cria a regiao inicial e o primeiro administrador
+#     uma unica vez, inclusive no plano gratuito que nao oferece Shell.
 # =============================================================================
 
 services:
@@ -57,6 +58,10 @@ services:
     # Delega ao script do proprio pacote (`node dist/main`), em vez de repetir
     # o caminho aqui: se o build mudar de lugar, o start acompanha sozinho.
     startCommand: pnpm --filter @motoboycity/api start:prod
+    # O plano gratuito nao oferece Shell. Este hook oficial do Render executa
+    # somente depois do primeiro deploy bem-sucedido e torna o bootstrap
+    # reproduzivel sem colocar credenciais no repositorio.
+    initialDeployHook: pnpm --filter @motoboycity/api exec prisma db seed
     healthCheckPath: /health
 
     envVars:
