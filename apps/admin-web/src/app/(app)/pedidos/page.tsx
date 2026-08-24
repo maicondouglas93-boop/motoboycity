@@ -112,7 +112,7 @@ export default function AdminOrdersPage() {
           ) : (
             <div className="grid gap-2 md:grid-cols-2">
               {activeTracking.map((tracking) => (
-                <Card key={tracking.deliveryId}>
+                <Card key={tracking.deliveryId} className="order-list-card">
                   <CardContent className="space-y-1 py-4 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <Link
@@ -165,7 +165,7 @@ export default function AdminOrdersPage() {
 
         <div className="space-y-2">
           {deliveries.map((delivery) => (
-            <Card key={delivery.id}>
+            <Card key={delivery.id} className="order-list-card">
               <CardContent className="flex items-center justify-between py-4">
                 <div>
                   <p className="font-medium">
@@ -209,14 +209,16 @@ export default function AdminOrdersPage() {
         </div>
       </div>
 
-      <Card className="h-fit">
+      <Card className="premium-panel h-fit lg:sticky lg:top-24">
         <CardContent className="space-y-1 pt-6">
           {STATUS_FILTERS.map(({ label, value }) => (
             <button
               key={value}
               onClick={() => setStatusFilter(value)}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent ${
-                statusFilter === value ? 'bg-accent font-medium' : ''
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent ${
+                statusFilter === value
+                  ? 'bg-primary font-semibold text-primary-foreground shadow-sm'
+                  : ''
               }`}
             >
               {label}

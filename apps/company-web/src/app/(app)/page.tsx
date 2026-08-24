@@ -104,7 +104,7 @@ export default function CompanyHomePage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight">Central operacional</h1>
@@ -112,7 +112,7 @@ export default function CompanyHomePage() {
             Chame um motoboy e acompanhe cada entrega até a porta do cliente.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border bg-card px-3 py-1.5 text-xs">
+        <div className="flex items-center gap-2 rounded-full border border-portal/15 bg-card/80 px-3.5 py-2 text-xs font-medium text-portal-deep shadow-sm backdrop-blur">
           {connected ? (
             <Wifi className="size-3.5 text-status-entregue" />
           ) : (
@@ -122,9 +122,9 @@ export default function CompanyHomePage() {
         </div>
       </header>
 
-      <section className="grid min-h-[720px] gap-4 xl:grid-cols-[360px_minmax(0,1fr)_340px]">
-        <Card className="max-h-[calc(100vh-150px)] overflow-hidden">
-          <CardHeader className="border-b py-4">
+      <section className="grid min-h-[720px] gap-5 xl:grid-cols-[360px_minmax(0,1fr)_340px]">
+        <Card className="premium-panel max-h-[calc(100vh-150px)] overflow-hidden">
+          <CardHeader className="border-b border-portal/10 bg-gradient-to-r from-portal-soft/75 to-card py-4">
             <CardTitle className="text-base">Novo pedido</CardTitle>
           </CardHeader>
           <CardContent className="max-h-[calc(100vh-215px)] overflow-y-auto pt-4">
@@ -146,7 +146,7 @@ export default function CompanyHomePage() {
         />
 
         <div className="flex min-h-0 flex-col gap-4">
-          <Card>
+          <Card className="premium-panel">
             <CardContent className="pt-4">
               <div className="relative">
                 <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
@@ -166,7 +166,7 @@ export default function CompanyHomePage() {
                     <Link
                       key={order.id}
                       href={`/pedidos/${order.id}`}
-                      className="block rounded-lg border p-2 text-xs hover:bg-muted"
+                      className="block rounded-xl border border-border/75 bg-card/75 p-2.5 text-xs transition-all hover:border-portal/25 hover:bg-portal-soft/55"
                     >
                       <span className="font-mono font-semibold">#{order.displayNumber}</span> ·{' '}
                       {order.externalOrderNumber ?? statusLabel(order.status)}
@@ -178,7 +178,7 @@ export default function CompanyHomePage() {
           </Card>
 
           {selected && (
-            <Card className="border-asfalto/25">
+            <Card className="border-portal/25 bg-gradient-to-br from-card to-portal-soft/35 shadow-[0_18px_36px_-28px_rgba(15,107,112,0.7)]">
               <CardContent className="space-y-2 pt-4 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <strong className="font-mono">#{selected.displayNumber}</strong>
@@ -205,7 +205,7 @@ export default function CompanyHomePage() {
                     Clonar
                   </Button>
                   <Link
-                    className="font-medium underline decoration-colete decoration-2 underline-offset-4"
+                    className="font-semibold text-portal underline decoration-portal/35 decoration-2 underline-offset-4 transition-colors hover:text-portal-deep"
                     href={`/pedidos/${selected.id}`}
                   >
                     Abrir detalhes
@@ -216,7 +216,7 @@ export default function CompanyHomePage() {
           )}
 
           <Card className="min-h-0 flex-1 overflow-hidden">
-            <CardHeader className="border-b py-3">
+            <CardHeader className="border-b border-portal/10 bg-gradient-to-r from-portal-soft/65 to-card py-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <CircleDot className="size-4 text-status-rota" aria-hidden="true" />
                 Na rua
@@ -239,7 +239,7 @@ export default function CompanyHomePage() {
           </Card>
 
           <Card className="min-h-0 flex-1 overflow-hidden">
-            <CardHeader className="border-b py-3">
+            <CardHeader className="border-b border-portal/10 bg-gradient-to-r from-portal-soft/65 to-card py-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <MapPin className="size-4 text-status-entregue" aria-hidden="true" />
                 Recentes

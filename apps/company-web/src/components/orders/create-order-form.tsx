@@ -118,7 +118,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
     <form className="space-y-4" onSubmit={handleSubmit}>
       <div className="space-y-1.5">
         <Label className="text-xs text-muted-foreground">Coleta no endereço da loja</Label>
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+        <p className="rounded-xl border border-portal/15 bg-portal-soft/45 px-3 py-2.5 text-sm">
           {pickupAddress.street}, {pickupAddress.number}
           {pickupAddress.complement ? ` - ${pickupAddress.complement}` : ''} — {pickupAddress.city}
           {' - '}
@@ -162,7 +162,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
           entrega), não o nome técnico do campo. */}
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">Destino</legend>
-        <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm has-checked:border-primary has-checked:bg-primary/5">
+        <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/80 bg-card/70 p-3 text-sm transition-all has-checked:border-primary/60 has-checked:bg-primary/10 has-checked:shadow-sm">
           <input
             type="radio"
             name="destination-mode"
@@ -177,7 +177,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
             </span>
           </span>
         </label>
-        <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm has-checked:border-primary has-checked:bg-primary/5">
+        <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/80 bg-card/70 p-3 text-sm transition-all has-checked:border-primary/60 has-checked:bg-primary/10 has-checked:shadow-sm">
           <input
             type="radio"
             name="destination-mode"
@@ -196,7 +196,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       </fieldset>
 
       {!destinationKnownAtCreation && (
-        <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-portal/25 bg-portal-soft/35 px-3 py-2.5 text-xs text-muted-foreground">
           Este pedido será criado sem endereço de entrega e sem valor. Os dois passam a existir
           quando o motoboy marcar a entrega como concluída.
         </p>

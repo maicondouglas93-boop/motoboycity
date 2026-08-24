@@ -82,13 +82,13 @@ export default function CompanyInvoicesPage() {
         </p>
       </div>
 
-      <Card>
+      <Card className="premium-panel">
         <CardContent className="flex flex-wrap items-end gap-3 pt-6">
           <div className="space-y-1">
             <Label htmlFor="invoice-status">Status</Label>
             <select
               id="invoice-status"
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
               value={status}
               onChange={(event) => setStatus(event.target.value as InvoiceStatus | 'ALL')}
             >
@@ -141,7 +141,7 @@ export default function CompanyInvoicesPage() {
         </p>
       )}
 
-      <Card>
+      <Card className="premium-panel">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -191,7 +191,7 @@ export default function CompanyInvoicesPage() {
                     <TableCell className="text-right">
                       <Link
                         href={`/faturas/${invoice.id}`}
-                        className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+                        className="inline-flex h-8 items-center rounded-lg border border-portal/20 bg-card px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:bg-portal-soft"
                       >
                         Ver detalhes
                       </Link>

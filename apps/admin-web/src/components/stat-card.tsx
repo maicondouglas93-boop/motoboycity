@@ -23,12 +23,14 @@ export function StatCard({
   changePercent?: number | null;
 }) {
   return (
-    <Card className="h-full">
+    <Card className="metric-card h-full">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-normal text-muted-foreground">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-semibold">{value}</p>
+        <p className="font-mono text-2xl font-semibold tracking-[-0.045em] text-admin-deep tabular-nums">
+          {value}
+        </p>
         {changePercent !== null && (
           <p
             className={`mt-1 text-xs ${changePercent < 0 ? 'text-alerta' : 'text-status-entregue'}`}

@@ -27,11 +27,14 @@ const STATUS: Record<DeliveryStatus, { label: string; tone: Tone; inMotion?: boo
 };
 
 const TONE_CLASS: Record<Tone, string> = {
-  aguardando: 'bg-status-aguardando/10 text-status-aguardando',
-  rota: 'bg-status-rota/15 text-[#8a5200]',
-  entregue: 'bg-status-entregue/10 text-status-entregue',
-  cancelado: 'bg-status-cancelado/10 text-status-cancelado',
-  pagamento: 'bg-status-pagamento/10 text-status-pagamento',
+  aguardando:
+    'bg-status-aguardando/10 text-status-aguardando ring-1 ring-inset ring-status-aguardando/15',
+  rota: 'bg-status-rota/15 text-[#8a5200] ring-1 ring-inset ring-status-rota/25',
+  entregue: 'bg-status-entregue/10 text-status-entregue ring-1 ring-inset ring-status-entregue/18',
+  cancelado:
+    'bg-status-cancelado/10 text-status-cancelado ring-1 ring-inset ring-status-cancelado/18',
+  pagamento:
+    'bg-status-pagamento/10 text-status-pagamento ring-1 ring-inset ring-status-pagamento/18',
 };
 
 const DOT_CLASS: Record<Tone, string> = {
@@ -73,8 +76,8 @@ export function statusRailClass(status: DeliveryStatus): string {
  * Precisa acompanhar `--status-*` em `globals.css`.
  */
 const TONE_HEX: Record<Tone, string> = {
-  aguardando: '#5c626b',
-  rota: '#ff9e00',
+  aguardando: '#64727a',
+  rota: '#fda02e',
   entregue: '#0b6e4f',
   cancelado: '#d92d20',
   pagamento: '#1d4ed8',
@@ -95,7 +98,7 @@ export function StatusChip({
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${TONE_CLASS[tone]} ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.01em] whitespace-nowrap ${TONE_CLASS[tone]} ${className}`}
     >
       <span className={`relative size-1.5 rounded-full ${DOT_CLASS[tone]}`}>
         {inMotion && (

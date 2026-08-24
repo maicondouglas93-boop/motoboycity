@@ -31,14 +31,19 @@ export function LiveActivityWidget() {
 
   return (
     <div className="fixed right-4 bottom-4 z-30 w-72 sm:w-80">
-      <Card className={cn('gap-0 overflow-hidden py-0 shadow-lg', !open && 'border-transparent')}>
+      <Card
+        className={cn(
+          'gap-0 overflow-hidden border-primary/20 py-0 shadow-[0_18px_44px_-20px_rgba(10,53,64,0.7)]',
+          !open && 'border-primary/15',
+        )}
+      >
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          className="flex w-full items-center gap-2 bg-asfalto px-3 py-2.5 text-left text-white transition-colors hover:bg-asfalto/90 focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none"
+          className="flex w-full items-center gap-2 bg-[linear-gradient(110deg,#0a3540,#0f6b70)] px-3 py-2.5 text-left text-white transition-[filter,box-shadow] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset focus-visible:outline-none"
         >
-          <Activity className="size-4 text-white/70" aria-hidden="true" />
+          <Activity className="size-4 text-[#8ed9d4]" aria-hidden="true" />
           <span className="text-sm font-medium">Atividade ao vivo</span>
           <span
             className={cn(

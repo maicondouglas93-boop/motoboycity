@@ -109,7 +109,7 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       addMarker(
         { lat: pickupAddress.lat, lng: pickupAddress.lng },
         'Ponto de coleta',
-        '#111827',
+        '#10252f',
         undefined,
         10,
       );
@@ -136,7 +136,7 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
         addMarker(
           { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng },
           delivery.driver ? `Motoboy: ${delivery.driver.name}` : 'Posição do motoboy',
-          '#22c55e',
+          '#0b6e4f',
           () => onSelect(delivery.id),
           7,
         );
@@ -163,15 +163,16 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
   }, [deliveries, onSelect, pickupAddress.lat, pickupAddress.lng, ready, selectedId]);
 
   return (
-    <div className="relative h-full min-h-[480px] overflow-hidden rounded-2xl border bg-muted">
+    <div className="premium-panel relative h-full min-h-[480px] overflow-hidden rounded-3xl border-2 border-white/85 bg-muted ring-1 ring-portal/10">
       <div ref={containerRef} className="absolute inset-0" />
       {error && (
-        <div className="absolute inset-0 grid place-items-center bg-muted p-6 text-center text-sm text-muted-foreground">
+        <div className="absolute inset-0 grid place-items-center bg-muted/95 p-6 text-center text-sm text-muted-foreground backdrop-blur-sm">
           {error}
         </div>
       )}
-      <div className="absolute top-3 left-3 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
-        <span className="font-semibold">Mapa operacional</span> · {deliveries.length} pedidos
+      <div className="absolute top-4 left-4 rounded-xl border border-white/75 bg-asfalto/88 px-3.5 py-2.5 text-xs text-white shadow-[0_12px_30px_-16px_rgba(3,24,31,0.85)] backdrop-blur-md">
+        <span className="font-semibold text-white">Mapa operacional</span>
+        <span className="text-white/60"> · {deliveries.length} pedidos</span>
       </div>
     </div>
   );

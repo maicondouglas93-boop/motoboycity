@@ -44,7 +44,7 @@ function Bar({ ratio, highlighted }: { ratio: number; highlighted: boolean }) {
 
   return (
     <div
-      className={`w-full rounded-t-sm ${highlighted ? 'bg-colete' : 'bg-asfalto/25'}`}
+      className={`w-full rounded-t-md shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] ${highlighted ? 'bg-gradient-to-t from-colete-escuro to-colete' : 'bg-gradient-to-t from-admin to-[#35b8b2]'}`}
       style={{ height: `${height}%` }}
     />
   );
@@ -186,7 +186,7 @@ export function PeakHoursChart({ peakHours }: { peakHours?: DeliveryPeakHours })
             e legivel por leitor de tela nem por quem precisa do valor exato, e
             quem vai montar escala de entregador quer justamente o numero.
           */}
-          <details className="rounded-md border bg-card">
+          <details className="overflow-hidden rounded-xl border border-primary/10 bg-card/80 shadow-sm">
             <summary className="cursor-pointer px-4 py-2 text-sm font-medium">
               Ver os números
             </summary>

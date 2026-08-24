@@ -5,13 +5,32 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
 import { io } from 'socket.io-client';
-import { AlertTriangle, Radio, Search, Wifi, WifiOff } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bike,
+  Building2,
+  Clock3,
+  Layers3,
+  ListFilter,
+  MapPin,
+  Radio,
+  Route,
+  Search,
+  WalletCards,
+  Wifi,
+  WifiOff,
+} from 'lucide-react';
 import {
   AdminOperationsMap,
   type AdminMapSelection,
   type MapMode,
 } from '@/components/operations/admin-operations-map';
-import { StatusChip, STATUS_OPTIONS, statusLabel } from '@/components/orders/status-chip';
+import {
+  StatusChip,
+  STATUS_OPTIONS,
+  statusLabel,
+  statusRailClass,
+} from '@/components/orders/status-chip';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,19 +53,31 @@ import { CompanyQueues } from '@/components/operations/company-queues';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
 import { slaAlertMinutesFor } from '@/lib/sla';
 
-const filterStatuses = STATUS_OPTIONS.map((option) => option.value);
+const filterStatuses = STATUS_OPTIONS.map((option) => option.value).filter(
+  (status) => status !== 'COMPLETED',
+);
 const sectionStatuses: DeliveryStatus[] = [
+  'SCHEDULED',
   'AWAITING_DRIVER',
   'ACCEPTED',
   'COLLECTED',
   'DELIVERED',
-  'COMPLETED',
+  'FAILED',
+  'AWAITING_PAYMENT',
+  'CANCELLED',
 ];
+
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
 
 function OperationRow({
   order,
   onSelect,
   hideCompany = false,
+  grouped = false,
+  selected = false,
   slaAlertMinutes = null,
 }: {
   order: OperationalDeliveryItem;
@@ -56,31 +87,91 @@ function OperationRow({
    * linha rouba a largura que o nome do motoboy precisa numa tela densa.
    */
   hideCompany?: boolean;
+  /** Remove o efeito de cards empilhados quando a linha ja vive num grupo. */
+  grouped?: boolean;
+  /** Destaca qual pedido esta aberto no mapa/painel lateral. */
+  selected?: boolean;
   /** Minutos a partir dos quais o cronometro acende. Null = sem sinalizacao. */
   slaAlertMinutes?: number | null;
 }) {
+  const destination = order.addresses.find((address) => address.type === 'DROPOFF');
+  const addressLabel =
+    order.destinationKnownAtCreation && destination?.street
+      ? [destination.street, destination.number].filter(Boolean).join(', ')
+      : 'Destino definido na entrega';
+  const totalLabel =
+    order.totalValue === null ? 'A calcular' : currencyFormatter.format(order.totalValue);
+
   return (
     <button
       type="button"
       onClick={onSelect}
-      className="w-full rounded-lg border p-2 text-left text-xs hover:bg-muted"
+      aria-pressed={selected}
+      className={`group/order relative w-full overflow-hidden text-left text-xs transition-all focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${
+        grouped
+          ? 'rounded-none border-0 border-b border-border/65 bg-transparent px-3.5 py-3 last:border-b-0 hover:bg-admin-soft/45'
+          : 'rounded-xl border border-border/80 bg-card/75 px-3.5 py-3 shadow-sm hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card hover:shadow-md'
+      } ${selected ? 'bg-admin-soft/75 ring-1 ring-inset ring-primary/25' : ''}`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-baseline gap-2">
-          <strong className="font-mono">#{order.displayNumber}</strong>
-          {/*
-            A HORA diz quando o pedido entrou; o cronometro, ha quanto tempo ele
-            esta parado neste estado. Uma nao substitui a outra.
-          */}
-          <span className="font-mono text-muted-foreground">{operationTime(order.createdAt)}</span>
-          <ElapsedTime since={order.statusChangedAt} alertAfterMinutes={slaAlertMinutes} />
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-2 left-0 w-0.5 rounded-r-full ${statusRailClass(order.status)}`}
+      />
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <strong className="font-mono text-[13px] text-admin-deep">#{order.displayNumber}</strong>
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-medium whitespace-nowrap text-muted-foreground">
+          <Clock3 className="size-3" aria-hidden="true" />
+          {operationTime(order.createdAt)}
         </span>
-        <StatusChip status={order.status} />
+        <ElapsedTime
+          since={order.statusChangedAt}
+          alertAfterMinutes={slaAlertMinutes}
+          className="rounded-full bg-muted/80 px-2 py-0.5 text-[10px] whitespace-nowrap ring-1 ring-inset ring-foreground/5"
+        />
+        <StatusChip status={order.status} className="ml-auto px-2 py-0.5 text-[10px]" />
       </div>
-      <p className="mt-1 truncate text-muted-foreground">
-        {hideCompany ? (order.driver?.name ?? 'Sem motoboy') : order.companyName}
-        {!hideCompany && order.driver ? ` · ${order.driver.name}` : ''}
+
+      <div className="mt-2 flex min-w-0 items-center gap-2">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-admin-soft text-primary ring-1 ring-inset ring-primary/10">
+          {hideCompany ? (
+            <Bike className="size-3.5" aria-hidden="true" />
+          ) : (
+            <Building2 className="size-3.5" aria-hidden="true" />
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-xs font-semibold text-foreground">
+            {hideCompany ? (order.driver?.name ?? 'Sem motoboy') : order.companyName}
+          </span>
+          <span className="block truncate text-[10px] text-muted-foreground">
+            {hideCompany
+              ? order.serviceTypeName
+              : (order.driver?.name ?? `${order.serviceTypeName} · sem motoboy`)}
+          </span>
+        </span>
+      </div>
+
+      <p className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+        <MapPin className="size-3 shrink-0 text-primary" aria-hidden="true" />
+        <span className="truncate">{addressLabel}</span>
       </p>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <Route className="size-3" aria-hidden="true" />
+          {order.distanceKm === null ? 'Distância pendente' : `${order.distanceKm} km`}
+        </span>
+        <span className="inline-flex items-center gap-1 font-semibold whitespace-nowrap text-foreground">
+          <WalletCards className="size-3 text-status-entregue" aria-hidden="true" />
+          {totalLabel}
+        </span>
+        {order.requiresReturn && (
+          <span className="rounded-full bg-admin-soft px-1.5 py-0.5 font-medium text-primary">
+            Com retorno
+          </span>
+        )}
+      </div>
     </button>
   );
 }
@@ -182,7 +273,7 @@ export default function AdminDashboardPage() {
             Pedidos ativos e motoboys com heartbeat válido.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs">
+        <div className="flex items-center gap-2 rounded-full border border-primary/15 bg-card/85 px-3 py-1.5 text-xs shadow-sm ring-1 ring-white/70 backdrop-blur">
           {connected && activityConnected ? (
             <Wifi className="size-3.5 text-status-entregue" />
           ) : (
@@ -198,7 +289,7 @@ export default function AdminDashboardPage() {
 
       <section className="grid min-h-[760px] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
         <div className="space-y-4">
-          <Card>
+          <Card className="premium-panel">
             <CardHeader className="py-3">
               <CardTitle className="text-sm">Filtros</CardTitle>
             </CardHeader>
@@ -269,10 +360,21 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="py-3">
-              <CardTitle className="flex items-center justify-between gap-2 text-sm">
-                Filas operacionais
+          <Card className="premium-panel gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b border-primary/10 bg-gradient-to-r from-admin-soft/75 to-card px-3 py-3">
+              <CardTitle className="space-y-3 text-sm">
+                <span className="flex items-center gap-2.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                    <Layers3 className="size-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block">Filas operacionais</span>
+                    <span className="mt-0.5 block text-[10px] font-normal tracking-normal text-muted-foreground">
+                      {allOrders.length} pedido{allOrders.length === 1 ? '' : 's'} monitorado
+                      {allOrders.length === 1 ? '' : 's'}
+                    </span>
+                  </span>
+                </span>
                 {/*
                   Duas lentes sobre a mesma fila, e cada uma responde uma
                   pergunta: por status, "o que esta travado agora"; por empresa,
@@ -280,28 +382,31 @@ export default function AdminDashboardPage() {
                   o telefone tocar, e a lista por status nao a mostra porque
                   espalha os pedidos de uma mesma loja por varias secoes.
                 */}
-                <span className="flex rounded-md border p-0.5 text-xs font-normal">
+                <span className="grid grid-cols-2 rounded-xl border border-primary/10 bg-card/80 p-1 text-xs font-normal shadow-inner">
                   {(
                     [
-                      ['status', 'Por status'],
-                      ['company', 'Por empresa'],
+                      ['status', 'Por status', ListFilter],
+                      ['company', 'Por empresa', Building2],
                     ] as const
-                  ).map(([modo, rotulo]) => (
+                  ).map(([modo, rotulo, Icon]) => (
                     <button
                       key={modo}
                       type="button"
                       onClick={() => setQueueMode(modo)}
-                      className={`rounded px-2 py-0.5 transition-colors ${
-                        queueMode === modo ? 'bg-colete font-medium text-asfalto' : ''
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 transition-all ${
+                        queueMode === modo
+                          ? 'bg-primary font-semibold text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:bg-admin-soft hover:text-admin-deep'
                       }`}
                     >
+                      <Icon className="size-3.5" aria-hidden="true" />
                       {rotulo}
                     </button>
                   ))}
                 </span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="max-h-[450px] space-y-3 overflow-y-auto pt-0">
+            <CardContent className="max-h-[520px] space-y-2.5 overflow-y-auto p-2.5">
               {queueMode === 'company' ? (
                 <CompanyQueues
                   orders={allOrders}
@@ -309,6 +414,8 @@ export default function AdminDashboardPage() {
                     <OperationRow
                       order={order}
                       hideCompany
+                      grouped
+                      selected={selection?.kind === 'delivery' && selection.id === order.id}
                       slaAlertMinutes={slaAlertMinutesFor(order.status, slaSettings)}
                       onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
                     />
@@ -318,19 +425,31 @@ export default function AdminDashboardPage() {
                 sectionStatuses.map((status) => {
                   const orders = allOrders.filter((order) => order.status === status).slice(0, 8);
                   return (
-                    <div key={status} className="space-y-1.5">
-                      <p className="flex items-center justify-between text-xs font-semibold">
-                        {statusLabel(status)}{' '}
+                    <div
+                      key={status}
+                      className="overflow-hidden rounded-xl border border-primary/10 bg-card/70"
+                    >
+                      <p className="flex items-center justify-between bg-admin-soft/55 px-3 py-2 text-xs font-semibold text-admin-deep">
+                        {statusLabel(status)}
                         <Badge variant="secondary">{data?.counts[status] ?? 0}</Badge>
                       </p>
-                      {orders.map((order) => (
-                        <OperationRow
-                          key={order.id}
-                          order={order}
-                          slaAlertMinutes={slaAlertMinutesFor(order.status, slaSettings)}
-                          onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
-                        />
-                      ))}
+                      <div>
+                        {orders.map((order) => (
+                          <OperationRow
+                            key={order.id}
+                            order={order}
+                            grouped
+                            selected={selection?.kind === 'delivery' && selection.id === order.id}
+                            slaAlertMinutes={slaAlertMinutesFor(order.status, slaSettings)}
+                            onSelect={() => setSelection({ kind: 'delivery', id: order.id })}
+                          />
+                        ))}
+                        {orders.length === 0 && (
+                          <p className="px-3 py-3 text-[10px] text-muted-foreground">
+                            Nenhum pedido nesta fila.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   );
                 })
@@ -340,7 +459,7 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className="relative">
-          <div className="absolute top-3 right-3 z-10 flex rounded-lg border bg-background/95 p-1 shadow-sm">
+          <div className="absolute top-3 right-3 z-10 flex rounded-xl border border-primary/15 bg-card/90 p-1 shadow-lg ring-1 ring-white/70 backdrop-blur-xl">
             {(['orders', 'drivers', 'all'] as MapMode[]).map((item) => (
               <Button
                 key={item}
@@ -420,7 +539,7 @@ export default function AdminDashboardPage() {
             </Card>
           )}
 
-          <Card>
+          <Card className="premium-panel">
             <CardHeader className="py-3">
               <CardTitle className="flex items-center justify-between text-sm">
                 Motoboys online <Badge variant="secondary">{data?.onlineDrivers.length ?? 0}</Badge>
@@ -459,7 +578,7 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="min-h-0 flex-1 overflow-hidden">
+          <Card className="premium-panel min-h-0 flex-1 overflow-hidden">
             <CardHeader className="py-3">
               <CardTitle className="text-sm">Atividade auditável</CardTitle>
             </CardHeader>

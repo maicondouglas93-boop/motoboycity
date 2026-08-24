@@ -17,8 +17,12 @@
   --color-asfalto: var(--asfalto);
   --color-concreto: var(--concreto);
   --color-colete: var(--colete);
+  --color-colete-escuro: var(--colete-escuro);
   --color-placa: var(--placa);
   --color-alerta: var(--alerta);
+  --color-portal: var(--portal);
+  --color-portal-deep: var(--portal-deep);
+  --color-portal-soft: var(--portal-soft);
   --color-status-aguardando: var(--status-aguardando);
   --color-status-rota: var(--status-rota);
   --color-status-entregue: var(--status-entregue);
@@ -78,8 +82,8 @@
  * na tela, que é justamente o trabalho desta interface.
  */
 :root {
-  --asfalto: #14161a;
-  --concreto: #f2f3f5;
+  --asfalto: #10252f;
+  --concreto: #f4f7f8;
   --papel: #ffffff;
   /* Extraído do logo oficial: o gradiente da marca vai de #ea5505 a #fda02e.
      A ponta clara é a que vira token de interface — tem 8.84:1 com o asfalto
@@ -89,6 +93,9 @@
   --colete-escuro: #ea5505;
   --placa: #0b6e4f;
   --alerta: #d92d20;
+  --portal: #0f6b70;
+  --portal-deep: #0a3540;
+  --portal-soft: #e4f3f2;
 
   --background: var(--concreto);
   --foreground: var(--asfalto);
@@ -101,15 +108,15 @@
   --primary: var(--colete);
   --primary-foreground: var(--asfalto);
 
-  --secondary: #e6e8eb;
+  --secondary: #e8f0f2;
   --secondary-foreground: var(--asfalto);
-  --muted: #e9ebee;
-  --muted-foreground: #5c626b;
-  --accent: #e6e8eb;
-  --accent-foreground: var(--asfalto);
+  --muted: #edf2f4;
+  --muted-foreground: #586a72;
+  --accent: var(--portal-soft);
+  --accent-foreground: var(--portal-deep);
   --destructive: var(--alerta);
-  --border: #d7dade;
-  --input: #d7dade;
+  --border: #d9e3e7;
+  --input: #cfdbdf;
   --ring: var(--colete);
 
   /**
@@ -119,29 +126,29 @@
    * se deslocando — é a mesma regra da paleta, aplicada ao status: âmbar na
    * tela significa "tem motoboy na rua com isso".
    */
-  --status-aguardando: #5c626b;
+  --status-aguardando: #64727a;
   --status-rota: var(--colete);
   --status-entregue: var(--placa);
   --status-cancelado: var(--alerta);
   --status-pagamento: #1d4ed8;
 
-  --chart-1: var(--colete);
-  --chart-2: var(--placa);
-  --chart-3: #1d4ed8;
-  --chart-4: #5c626b;
+  --chart-1: var(--portal);
+  --chart-2: var(--colete);
+  --chart-3: var(--placa);
+  --chart-4: #2563eb;
   --chart-5: var(--alerta);
 
   /* Mais fechado que o padrão do shadcn: lê como instrumento, não como card
      de marketing — sem chegar em canto vivo, que é outro clichê. */
-  --radius: 0.5rem;
+  --radius: 0.75rem;
 
-  --sidebar: var(--asfalto);
-  --sidebar-foreground: #e6e8eb;
+  --sidebar: #0b222c;
+  --sidebar-foreground: #eaf3f4;
   --sidebar-primary: var(--colete);
   --sidebar-primary-foreground: var(--asfalto);
-  --sidebar-accent: #22262d;
+  --sidebar-accent: #143943;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #262b33;
+  --sidebar-border: #1b414b;
   --sidebar-ring: var(--colete);
 }
 
@@ -185,8 +192,227 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 12% -12%, rgb(15 107 112 / 9%), transparent 30rem),
+      radial-gradient(circle at 90% -10%, rgb(253 160 46 / 7%), transparent 25rem);
   }
   html {
     @apply font-sans;
+    background: var(--asfalto);
+  }
+}
+
+@layer components {
+  .company-topbar {
+    background:
+      radial-gradient(circle at 12% -80%, rgb(53 184 178 / 32%), transparent 26rem),
+      linear-gradient(110deg, #091d26 0%, #0b2c36 55%, #0d252f 100%);
+    box-shadow: 0 12px 34px -26px rgb(2 20 28 / 90%);
+  }
+
+  .company-topbar::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    content: '';
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(53 184 178 / 55%) 35%,
+      rgb(253 160 46 / 58%) 72%,
+      transparent
+    );
+  }
+
+  .company-workspace {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--background);
+    background-image:
+      linear-gradient(rgb(15 107 112 / 2.5%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(15 107 112 / 2.5%) 1px, transparent 1px),
+      radial-gradient(circle at 8% 0%, rgb(15 107 112 / 8%), transparent 26rem),
+      radial-gradient(circle at 92% 2%, rgb(253 160 46 / 6%), transparent 22rem);
+    background-size:
+      34px 34px,
+      34px 34px,
+      auto,
+      auto;
+  }
+
+  .company-workspace::before {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: -1;
+    height: 16rem;
+    pointer-events: none;
+    content: '';
+    background: linear-gradient(180deg, rgb(255 255 255 / 52%), transparent);
+  }
+
+  .company-workspace > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .company-workspace h1 {
+    color: var(--portal-deep);
+    font-family: var(--font-archivo), var(--font-geist-sans), sans-serif;
+    font-size: clamp(1.45rem, 1.1rem + 0.7vw, 2rem);
+    font-weight: 760;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .company-workspace h2 {
+    color: var(--portal-deep);
+    letter-spacing: -0.012em;
+  }
+
+  .company-workspace :is(select, input[type='date'], input[type='time'], textarea) {
+    border-color: var(--input);
+    background-color: rgb(255 255 255 / 88%);
+    box-shadow: 0 1px 2px rgb(16 37 47 / 4%);
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .company-workspace :is(select, input[type='date'], input[type='time'], textarea):focus-visible {
+    border-color: var(--ring);
+    outline: none;
+    box-shadow: 0 0 0 3px rgb(253 160 46 / 18%);
+  }
+
+  .metric-card {
+    background:
+      radial-gradient(circle at 100% 0%, rgb(53 184 178 / 14%), transparent 42%),
+      linear-gradient(145deg, #ffffff 35%, #f8fcfc 100%);
+  }
+
+  .metric-card::before {
+    height: 3px !important;
+    background: linear-gradient(90deg, var(--portal), #35b8b2 70%, var(--colete)) !important;
+    opacity: 0.92;
+  }
+
+  .metric-card::after {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 2px solid rgb(15 107 112 / 24%);
+    border-radius: 999px;
+    content: '';
+    box-shadow: 0 0 0 5px rgb(15 107 112 / 5%);
+  }
+
+  .interactive-card,
+  .order-list-card {
+    transition:
+      transform 180ms ease,
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .interactive-card:hover,
+  .order-list-card:hover {
+    border-color: rgb(15 107 112 / 34%);
+    box-shadow:
+      0 2px 4px rgb(16 37 47 / 5%),
+      0 22px 42px -28px rgb(15 107 112 / 50%);
+    transform: translateY(-2px);
+  }
+
+  .premium-panel {
+    border-color: rgb(15 107 112 / 20%);
+    box-shadow:
+      0 1px 2px rgb(16 37 47 / 6%),
+      0 24px 48px -32px rgb(10 53 64 / 55%);
+  }
+
+  .auth-shell {
+    background:
+      radial-gradient(circle at 80% 8%, rgb(253 160 46 / 8%), transparent 24rem),
+      linear-gradient(145deg, #f8fbfb 0%, #eef5f5 100%);
+  }
+
+  .auth-brand-panel {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 18% 18%, rgb(53 184 178 / 30%), transparent 24rem),
+      radial-gradient(circle at 90% 85%, rgb(253 160 46 / 18%), transparent 22rem),
+      linear-gradient(145deg, #071a22, #0b3038 62%, #10252f);
+  }
+
+  .auth-brand-panel::after {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    content: '';
+    background-image:
+      linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px);
+    background-size: 38px 38px;
+    mask-image: linear-gradient(to bottom, black, transparent 86%);
+  }
+
+  .auth-form-panel {
+    border: 1px solid rgb(255 255 255 / 85%);
+    border-radius: 1.5rem;
+    background: rgb(255 255 255 / 82%);
+    box-shadow:
+      0 2px 4px rgb(16 37 47 / 5%),
+      0 30px 70px -42px rgb(10 53 64 / 52%);
+    backdrop-filter: blur(18px);
+  }
+
+  .pac-container {
+    margin-top: 0.35rem;
+    overflow: hidden;
+    border: 1px solid rgb(15 107 112 / 16%) !important;
+    border-radius: 0.85rem;
+    background: rgb(255 255 255 / 97%);
+    box-shadow: 0 20px 44px -22px rgb(10 53 64 / 55%);
+    font-family: var(--font-geist-sans), sans-serif;
+  }
+
+  .pac-item {
+    padding: 0.55rem 0.75rem;
+    border-top-color: rgb(15 107 112 / 8%);
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+
+  .pac-item:hover,
+  .pac-item-selected {
+    background: var(--portal-soft);
+  }
+
+  .pac-item-query {
+    color: var(--portal-deep);
+  }
+}
+
+::selection {
+  color: var(--portal-deep);
+  background: rgb(253 160 46 / 32%);
+}
+
+* {
+  scrollbar-color: rgb(15 107 112 / 38%) transparent;
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive-card,
+  .order-list-card {
+    transition: none;
   }
 }

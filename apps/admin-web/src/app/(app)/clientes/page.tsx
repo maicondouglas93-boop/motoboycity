@@ -98,7 +98,7 @@ export default function ClientsPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredCompanies.map((company) => (
-          <Card key={company.id}>
+          <Card key={company.id} className="entity-card">
             <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">{company.tradeName}</CardTitle>
               <Badge variant={statusVariant[company.status]}>{statusLabel[company.status]}</Badge>
@@ -126,7 +126,7 @@ export default function ClientsPage() {
                 </Button>
               )}
               <Link
-                className="inline-flex h-9 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+                className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-input bg-card px-3 text-sm font-semibold text-admin-deep shadow-sm transition-all hover:border-primary/25 hover:bg-admin-soft"
                 href={`/clientes/${company.id}`}
               >
                 Ver detalhes

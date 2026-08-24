@@ -77,8 +77,8 @@ export default function CompanyOrdersPage() {
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <div className="premium-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/80 bg-card/85 p-3 shadow-sm backdrop-blur">
         <Input
           placeholder="Buscar pedido..."
           className="max-w-xs"
@@ -87,7 +87,7 @@ export default function CompanyOrdersPage() {
         />
         <select
           aria-label="Filtrar status dos pedidos"
-          className="h-9 rounded-md border bg-background px-3 text-sm"
+          className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
           value={statusFilter}
           onChange={(event) => setStatusFilter(event.target.value as DeliveryStatus | 'ALL')}
         >
@@ -111,7 +111,7 @@ export default function CompanyOrdersPage() {
         {trackingQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Carregando rastreamento...</p>
         ) : activeTracking.length === 0 ? (
-          <Card>
+          <Card className="premium-panel">
             <CardContent className="py-4 text-sm text-muted-foreground">
               Nenhuma entrega em andamento com rastreamento.
             </CardContent>
@@ -119,7 +119,7 @@ export default function CompanyOrdersPage() {
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
             {activeTracking.map((tracking) => (
-              <Card key={tracking.deliveryId}>
+              <Card key={tracking.deliveryId} className="interactive-card">
                 <CardContent className="space-y-1 py-4 text-sm">
                   <div className="flex items-center justify-between gap-2">
                     <Link
@@ -135,7 +135,7 @@ export default function CompanyOrdersPage() {
                   </p>
                   {tracking.lastLocation ? (
                     <a
-                      className="text-primary underline-offset-4 hover:underline"
+                      className="text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                       href={mapsUrl(tracking.lastLocation.lat, tracking.lastLocation.lng)}
                       target="_blank"
                       rel="noreferrer"
@@ -164,7 +164,7 @@ export default function CompanyOrdersPage() {
       )}
 
       {deliveriesQuery.isSuccess && filteredDeliveries.length === 0 ? (
-        <Card>
+        <Card className="premium-panel">
           <CardContent className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
             <Package className="size-8" />
             <p className="text-sm">Nenhum registro</p>
@@ -173,8 +173,8 @@ export default function CompanyOrdersPage() {
       ) : (
         <div className="space-y-2">
           {filteredDeliveries.map((delivery) => (
-            <Card key={delivery.id}>
-              <CardContent className="flex items-center justify-between py-4">
+            <Card key={delivery.id} className="order-list-card">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
                 <div>
                   <p className="font-medium">
                     #{delivery.displayNumber} — {delivery.serviceTypeName}
@@ -186,13 +186,13 @@ export default function CompanyOrdersPage() {
                     {delivery.requiresReturn && ' · com retorno'}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <div className="text-right">
                     <StatusChip status={delivery.status} />
                     <p className="font-medium">{formatCurrency(delivery.totalValue)}</p>
                   </div>
                   <Link
-                    className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"
+                    className="inline-flex h-8 items-center rounded-lg border border-portal/20 bg-card px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:bg-portal-soft"
                     href={`/pedidos/${delivery.id}`}
                   >
                     Ver detalhes

@@ -59,11 +59,11 @@ export default function AdminLoginPage() {
   return (
     // Mesmo esqueleto do painel da empresa, com a etiqueta "Admin" para não
     // haver dúvida sobre em qual sistema a pessoa está entrando.
-    <div className="grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
-      <aside className="flex flex-row items-center justify-between gap-4 bg-asfalto px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
+    <div className="grid min-h-screen grid-rows-[auto_1fr] bg-background lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
+      <aside className="relative flex flex-row items-center justify-between gap-4 overflow-hidden bg-[radial-gradient(circle_at_20%_10%,rgba(53,184,178,0.28),transparent_30rem),linear-gradient(145deg,#071b23,#0a3540_60%,#0f4d55)] px-6 py-4 text-white shadow-2xl lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
         <div className="flex items-center gap-2">
           <Wordmark />
-          <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-white/70 uppercase">
+          <span className="rounded-md border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-[#aee8e4] uppercase">
             Admin
           </span>
         </div>
@@ -82,8 +82,8 @@ export default function AdminLoginPage() {
         </p>
       </aside>
 
-      <main className="flex items-center justify-center px-6 py-12 lg:px-12">
-        <div className="w-full max-w-sm">
+      <main className="flex items-center justify-center bg-[radial-gradient(circle_at_85%_5%,rgba(253,160,46,0.10),transparent_22rem),radial-gradient(circle_at_15%_90%,rgba(15,107,112,0.10),transparent_26rem)] px-6 py-12 lg:px-12">
+        <div className="w-full max-w-sm rounded-3xl border border-white/80 bg-card/90 p-7 shadow-[0_24px_64px_-36px_rgba(10,53,64,0.55)] ring-1 ring-asfalto/[0.05] backdrop-blur sm:p-9">
           <h2 className="font-heading text-2xl font-bold tracking-tight">Entrar</h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Acesso administrativo do MOTOboyCity.

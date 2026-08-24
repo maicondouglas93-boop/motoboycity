@@ -244,7 +244,10 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
               ) : (
                 <ul className="space-y-2">
                   {tracked.map((delivery) => (
-                    <li key={delivery.id} className="rounded-lg border p-3">
+                    <li
+                      key={delivery.id}
+                      className="rounded-xl border border-portal/15 bg-gradient-to-br from-card to-portal-soft/35 p-3 shadow-sm"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-baseline gap-2">
                           <span className="font-mono text-sm font-semibold">
@@ -315,7 +318,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                         )}
                         <Link
                           href={`/pedidos/${delivery.id}`}
-                          className="text-xs font-medium underline decoration-colete decoration-2 underline-offset-4"
+                          className="text-xs font-semibold text-portal underline decoration-portal/35 decoration-2 underline-offset-4 transition-colors hover:text-portal-deep"
                         >
                           Abrir detalhes
                         </Link>
@@ -341,7 +344,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
               <div className="space-y-1.5">
                 <Label>Coleta</Label>
                 {pickupAddress ? (
-                  <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                  <div className="rounded-xl border border-portal/15 bg-portal-soft/45 px-3 py-2.5 text-sm">
                     {pickupAddress.street}, {pickupAddress.number} · {pickupAddress.city}/
                     {pickupAddress.state}
                   </div>
@@ -377,7 +380,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                 />
               </div>
 
-              <p className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <p className="flex items-start gap-2 rounded-xl border border-portal/20 bg-portal-soft/65 p-3 text-sm text-portal-deep">
                 <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />O entregador confirma
                 os locais de entrega no ato, direto no aplicativo.
               </p>
@@ -398,7 +401,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                   value={driverNote}
                   onChange={(event) => setDriverNote(event.target.value)}
                   placeholder="Se necessário, informe uma observação para acompanhar o pedido"
-                  className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  className="w-full rounded-lg border border-input bg-card/90 px-3 py-2 text-sm shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15 focus-visible:outline-none"
                 />
               </div>
 
@@ -413,7 +416,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                   {serviceTypes.map((serviceType) => (
                     <label
                       key={serviceType.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm transition-colors has-checked:border-primary has-checked:bg-primary/5"
+                      className="flex cursor-pointer items-center gap-2 rounded-xl border border-border/80 bg-card/70 p-3 text-sm transition-all has-checked:border-primary/60 has-checked:bg-primary/10 has-checked:shadow-sm hover:border-portal/20"
                     >
                       <input
                         type="radio"
@@ -434,7 +437,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                 em toda entrega. Um cartao clicavel aqui prometeria uma opcao que
                 nao existe.
               */}
-              <p className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+              <p className="flex items-center gap-2 rounded-xl border border-dashed border-portal/25 bg-portal-soft/30 px-3 py-2 text-xs text-muted-foreground">
                 <Receipt className="size-4 shrink-0" aria-hidden="true" />
                 Pagamento faturado — entra na fatura da sua loja.
               </p>

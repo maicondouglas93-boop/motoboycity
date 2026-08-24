@@ -44,11 +44,11 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {settings.map((setting) => (
           <Link key={setting.href} href={setting.href}>
-            <Card className="h-full transition-colors hover:bg-accent">
-              <CardContent className="flex gap-3 py-5">
-                <Settings className="size-5 shrink-0 text-muted-foreground" />
+            <Card className="interactive-card h-full hover:bg-card">
+              <CardContent className="flex gap-4 py-6">
+                <Settings className="size-10 shrink-0 rounded-xl bg-primary/10 p-2.5 text-primary ring-1 ring-inset ring-primary/15" />
                 <div>
-                  <p className="font-medium">{setting.title}</p>
+                  <p className="font-heading font-semibold text-admin-deep">{setting.title}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{setting.description}</p>
                 </div>
               </CardContent>

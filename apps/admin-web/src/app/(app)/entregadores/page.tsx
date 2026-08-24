@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AdminDriverListItem } from '@motoboycity/types';
+import type { AdminDriverListItem, RegisterDriverResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
+import { CircleCheckBig, MapPin, UserPlus } from 'lucide-react';
+import { CreateDriverDialog } from '@/components/drivers/create-driver-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -39,6 +41,7 @@ type DriverAction = 'approve' | 'reject' | 'suspend' | 'block' | 'reactivate';
 export default function DriversPage() {
   const [search, setSearch] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [createdNotice, setCreatedNotice] = useState<string | null>(null);
   const [pendingServiceTypeIds, setPendingServiceTypeIds] = useState<Record<string, string[]>>({});
   const queryClient = useQueryClient();
 
@@ -72,7 +75,7 @@ export default function DriversPage() {
       actionFn[action](token as string, driverId),
     onSuccess: () => {
       setActionError(null);
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
     },
     onError: (error) => {
       setActionError(
@@ -91,7 +94,7 @@ export default function DriversPage() {
         delete remaining[variables.driverId];
         return remaining;
       });
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
     },
     onError: (error) => {
       setActionError(
@@ -114,6 +117,15 @@ export default function DriversPage() {
   const filteredDrivers = drivers.filter((driver) =>
     `${driver.name} ${driver.email} ${driver.cpf}`.toLowerCase().includes(search.toLowerCase()),
   );
+
+  function handleDriverCreated(result: RegisterDriverResult) {
+    setCreatedNotice(
+      `Entregador cadastrado com sucesso. O perfil está ${
+        result.approvalStatus === 'PENDING' ? 'pendente de aprovação' : 'criado'
+      }.`,
+    );
+    setActionError(null);
+  }
 
   function isPending(driverId: string, action: DriverAction) {
     return (
@@ -146,9 +158,52 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold tracking-[0.18em] text-primary uppercase">
+            Gestão da operação
+          </p>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Entregadores</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Cadastre, qualifique e acompanhe quem atende as entregas da plataforma.
+          </p>
+        </div>
+        <CreateDriverDialog
+          accessToken={token}
+          serviceTypes={serviceTypesQuery.data ?? []}
+          serviceTypesLoading={serviceTypesQuery.isLoading}
+          serviceTypesError={serviceTypesQuery.isError}
+          onRetryServiceTypes={() => void serviceTypesQuery.refetch()}
+          onCreated={handleDriverCreated}
+        >
+          <Button className="gap-2 shadow-lg shadow-primary/15">
+            <UserPlus className="size-4" />
+            Cadastrar entregador
+          </Button>
+        </CreateDriverDialog>
+      </header>
+
+      {createdNotice && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/7 px-4 py-3 text-sm text-foreground"
+        >
+          <CircleCheckBig className="mt-0.5 size-4 shrink-0 text-primary" />
+          <span>{createdNotice}</span>
+          <button
+            type="button"
+            className="ml-auto text-xs font-semibold text-primary hover:underline"
+            onClick={() => setCreatedNotice(null)}
+          >
+            Fechar
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Total de Entregadores" value={drivers.length} />
         <StatCard label="Entregadores Pendentes" value={pendingCount} />
+        <StatCard label="Fora de operação" value={blockedCount} />
       </div>
 
       <Input
@@ -174,7 +229,7 @@ export default function DriversPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredDrivers.map((driver) => (
-          <Card key={driver.id}>
+          <Card key={driver.id} className="entity-card">
             <CardContent className="space-y-3 py-4">
               <div className="flex items-start justify-between gap-2">
                 <p className="font-medium">{driver.name}</p>
@@ -191,6 +246,10 @@ export default function DriversPage() {
                 <p className="text-sm text-muted-foreground">{driver.email}</p>
                 <p className="text-sm text-muted-foreground">{driver.phone}</p>
                 <p className="text-xs text-muted-foreground">CPF: {driver.cpf}</p>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <MapPin className="size-3 text-primary" />
+                  {driver.region?.name ?? 'Região não informada'}
+                </p>
               </div>
               {driver.reviewedBy && (
                 <p className="text-xs text-muted-foreground">

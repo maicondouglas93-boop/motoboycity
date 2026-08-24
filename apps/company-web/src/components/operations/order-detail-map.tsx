@@ -52,7 +52,7 @@ export function OrderDetailMap({
           new maps.maps.Polyline({
             map,
             path,
-            strokeColor: '#2563eb',
+            strokeColor: '#0f6b70',
             strokeOpacity: 0.8,
             strokeWeight: 4,
           });
@@ -74,10 +74,10 @@ export function OrderDetailMap({
     };
   }, [addresses, points]);
   return (
-    <div className="relative h-80 overflow-hidden rounded-xl border bg-muted">
+    <div className="premium-panel relative h-80 overflow-hidden rounded-3xl border-2 border-white/85 bg-muted ring-1 ring-portal/10">
       <div ref={containerRef} className="absolute inset-0" />
       {error && (
-        <div className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-muted-foreground">
+        <div className="absolute inset-0 grid place-items-center bg-muted/95 p-4 text-center text-sm text-muted-foreground backdrop-blur-sm">
           {error}
         </div>
       )}

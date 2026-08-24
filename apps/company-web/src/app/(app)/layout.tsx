@@ -5,9 +5,9 @@ import { TopNav } from '@/components/layout/top-nav';
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGate>
-      <div className="flex min-h-screen flex-col">
+      <div className="flex min-h-screen flex-col bg-background">
         <TopNav />
-        <main className="flex-1 bg-muted/30 p-6">{children}</main>
+        <main className="company-workspace min-w-0 flex-1 p-4 sm:p-6 xl:p-7">{children}</main>
       </div>
     </AuthGate>
   );

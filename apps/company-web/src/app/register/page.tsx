@@ -101,15 +101,15 @@ export default function RegisterPage() {
   return (
     // Mesmo esqueleto do login: quem vem de lá não pode sentir que trocou de
     // produto no meio do caminho.
-    <div className="grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
-      <aside className="flex flex-row items-center justify-between gap-4 bg-asfalto px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
+    <div className="auth-shell grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
+      <aside className="auth-brand-panel flex flex-row items-center justify-between gap-4 px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
         <Wordmark />
 
         <div className="my-10 hidden lg:block">
-          <h1 className="font-heading max-w-[15ch] text-4xl leading-[1.05] font-extrabold tracking-tight text-balance">
+          <h1 className="font-heading max-w-[15ch] text-5xl leading-[1.02] font-extrabold tracking-[-0.045em] text-balance">
             Sua loja com motoboy na porta.
           </h1>
-          <p className="mt-4 max-w-[38ch] text-sm leading-relaxed text-white/60">
+          <p className="mt-5 max-w-[38ch] text-sm leading-relaxed text-white/66">
             Cadastre a empresa uma vez. Depois é só chamar o entregador e acompanhar cada pedido.
           </p>
           <RouteDiagram className="mt-10" />
@@ -120,9 +120,11 @@ export default function RegisterPage() {
         </p>
       </aside>
 
-      <main className="flex items-center justify-center px-6 py-12 lg:px-12">
-        <div className="w-full max-w-lg">
-          <h2 className="font-heading text-2xl font-bold tracking-tight">Cadastrar empresa</h2>
+      <main className="flex items-center justify-center px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
+        <div className="auth-form-panel w-full max-w-xl p-6 sm:p-8">
+          <h2 className="font-heading text-3xl font-bold tracking-[-0.035em] text-portal-deep">
+            Cadastrar empresa
+          </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Depois de enviar, o cadastro passa por aprovação antes de liberar os pedidos.
           </p>
@@ -160,15 +162,19 @@ export default function RegisterPage() {
               </p>
             )}
 
-            <Button className="h-11 w-full text-[15px]" type="submit" disabled={mutation.isPending}>
+            <Button
+              className="h-11 w-full rounded-xl text-[15px]"
+              type="submit"
+              disabled={mutation.isPending}
+            >
               {mutation.isPending ? 'Enviando...' : 'Enviar cadastro'}
             </Button>
           </form>
 
-          <p className="mt-8 border-t pt-6 text-sm text-muted-foreground">
+          <p className="mt-8 border-t border-portal/10 pt-6 text-sm text-muted-foreground">
             Sua empresa já tem conta?{' '}
             <Link
-              className="font-medium text-foreground underline decoration-colete decoration-2 underline-offset-4"
+              className="font-semibold text-portal underline decoration-portal/35 decoration-2 underline-offset-4 transition-colors hover:text-portal-deep"
               href="/login"
             >
               Entrar

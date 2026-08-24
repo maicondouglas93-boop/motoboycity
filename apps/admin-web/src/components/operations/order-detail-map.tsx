@@ -74,7 +74,7 @@ export function OrderDetailMap({
     };
   }, [addresses, points]);
   return (
-    <div className="relative h-80 overflow-hidden rounded-xl border bg-muted">
+    <div className="premium-panel relative h-80 overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">
       <div ref={containerRef} className="absolute inset-0" />
       {error && (
         <div className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-muted-foreground">

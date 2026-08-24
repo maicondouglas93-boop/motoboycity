@@ -61,17 +61,17 @@ export default function LoginPage() {
   return (
     // No celular: a marca ocupa só o que precisa e o formulário fica com o
     // resto da tela. No desktop volta a ser duas colunas de altura cheia.
-    <div className="grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
+    <div className="auth-shell grid min-h-screen grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-none">
       {/* Painel da marca. No celular vira uma barra compacta: a área acima da
           dobra pertence ao formulário, não à marca. */}
-      <aside className="flex flex-row items-center justify-between gap-4 bg-asfalto px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
+      <aside className="auth-brand-panel flex flex-row items-center justify-between gap-4 px-6 py-4 text-white lg:flex-col lg:items-stretch lg:justify-between lg:px-12 lg:py-14">
         <Wordmark />
 
         <div className="my-10 hidden lg:block">
-          <h1 className="font-heading max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-tight text-balance">
+          <h1 className="font-heading max-w-[14ch] text-5xl leading-[1.02] font-extrabold tracking-[-0.045em] text-balance">
             Chame um motoboy sem sair do balcão.
           </h1>
-          <p className="mt-4 max-w-[38ch] text-sm leading-relaxed text-white/60">
+          <p className="mt-5 max-w-[38ch] text-sm leading-relaxed text-white/66">
             O pedido sai daqui, cai no celular de quem está mais perto e você acompanha até a porta
             do cliente.
           </p>
@@ -83,9 +83,11 @@ export default function LoginPage() {
         </p>
       </aside>
 
-      <main className="flex items-center justify-center px-6 py-12 lg:px-12">
-        <div className="w-full max-w-sm">
-          <h2 className="font-heading text-2xl font-bold tracking-tight">Entrar</h2>
+      <main className="flex items-center justify-center px-5 py-8 sm:px-8 lg:px-12 lg:py-12">
+        <div className="auth-form-panel w-full max-w-md p-6 sm:p-8">
+          <h2 className="font-heading text-3xl font-bold tracking-[-0.035em] text-portal-deep">
+            Entrar
+          </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Use o e-mail cadastrado pela sua empresa.
           </p>
@@ -128,15 +130,19 @@ export default function LoginPage() {
               </p>
             )}
 
-            <Button className="h-11 w-full text-[15px]" type="submit" disabled={mutation.isPending}>
+            <Button
+              className="h-11 w-full rounded-xl text-[15px]"
+              type="submit"
+              disabled={mutation.isPending}
+            >
               {mutation.isPending ? 'Entrando...' : 'Entrar'}
             </Button>
           </form>
 
-          <p className="mt-8 border-t pt-6 text-sm text-muted-foreground">
+          <p className="mt-8 border-t border-portal/10 pt-6 text-sm text-muted-foreground">
             Sua empresa ainda não tem conta?{' '}
             <Link
-              className="font-medium text-foreground underline underline-offset-4 decoration-colete decoration-2"
+              className="font-semibold text-portal underline decoration-portal/35 decoration-2 underline-offset-4 transition-colors hover:text-portal-deep"
               href="/register"
             >
               Cadastrar empresa

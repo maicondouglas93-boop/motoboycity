@@ -145,7 +145,7 @@ export default function IndicatorsPage() {
           Pedidos da sua empresa, filtrados pela data de criação.
         </p>
       </div>
-      <Card>
+      <Card className="premium-panel">
         <CardContent className="flex flex-wrap items-end gap-4 pt-6">
           <div className="space-y-1.5">
             <Label htmlFor="start-date">Data inicial</Label>
@@ -223,9 +223,9 @@ export default function IndicatorsPage() {
                 <p className="text-sm text-muted-foreground">Calculando tempos...</p>
               ) : stageTimesQuery.data ? (
                 <>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-hidden rounded-xl border border-portal/10">
                     <table className="w-full min-w-[520px] text-sm">
-                      <thead>
+                      <thead className="bg-portal-soft/70">
                         <tr className="border-b text-left text-xs text-muted-foreground">
                           <th className="pb-2 font-medium">Etapa</th>
                           <th className="pb-2 text-right font-medium">Normal</th>
@@ -291,7 +291,7 @@ export default function IndicatorsPage() {
                     >
                       <span className="text-xs text-muted-foreground">{value}</span>
                       <div
-                        className="w-full rounded-t bg-primary/70"
+                        className="w-full rounded-t-lg bg-gradient-to-t from-portal to-[#35b8b2] shadow-[0_8px_18px_-10px_rgba(15,107,112,0.8)]"
                         style={{ height: `${(value / maxDaily) * 100}%` }}
                       />
                       <span className="rotate-[-45deg] text-[10px] text-muted-foreground">

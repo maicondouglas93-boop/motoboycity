@@ -247,7 +247,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
       </div>
 
       {clonedFrom !== null && (
-        <div className="rounded-lg border border-colete/40 bg-colete/10 p-3 text-xs">
+        <div className="rounded-xl border border-colete/40 bg-gradient-to-r from-colete/14 to-colete/5 p-3 text-xs shadow-sm">
           <div className="flex items-start justify-between gap-2">
             <p className="flex items-center gap-1.5 font-medium">
               <Copy className="size-3.5" aria-hidden="true" />
@@ -272,7 +272,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
         </div>
       )}
 
-      <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+      <div className="rounded-xl border border-portal/15 bg-portal-soft/40 p-3 text-xs">
         <span className="font-medium">Coleta:</span> {pickupAddress.street}, {pickupAddress.number}{' '}
         · {pickupAddress.city}/{pickupAddress.state}
       </div>
@@ -298,7 +298,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
       </div>
 
       <fieldset className="grid grid-cols-2 gap-2 text-sm">
-        <label className="rounded-lg border p-3 has-checked:border-primary has-checked:bg-primary/5">
+        <label className="rounded-xl border border-border/80 bg-card/65 p-3 transition-all has-checked:border-primary/60 has-checked:bg-primary/10 has-checked:shadow-sm">
           <input
             type="radio"
             name="destination"
@@ -307,7 +307,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
           />
           <span className="ml-2 font-medium">Destino conhecido</span>
         </label>
-        <label className="rounded-lg border p-3 has-checked:border-primary has-checked:bg-primary/5">
+        <label className="rounded-xl border border-border/80 bg-card/65 p-3 transition-all has-checked:border-primary/60 has-checked:bg-primary/10 has-checked:shadow-sm">
           <input
             type="radio"
             name="destination"
@@ -328,7 +328,10 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
 
       <div className="space-y-3">
         {drafts.map((draft, index) => (
-          <section key={draft.key} className="space-y-3 rounded-xl border p-3">
+          <section
+            key={draft.key}
+            className="space-y-3 rounded-2xl border border-portal/15 bg-card/65 p-3 shadow-sm"
+          >
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold">Entrega {index + 1}</p>
               {mode === 'batch' && drafts.length > 2 && (
@@ -363,7 +366,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
                 }
               />
               <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
+                className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
                 value={draft.customerPaymentMethod}
                 onChange={(event) =>
                   updateDraft(index, {

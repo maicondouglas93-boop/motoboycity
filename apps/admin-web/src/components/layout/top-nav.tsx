@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListOrdered,
   Settings,
+  Sparkles,
   Truck,
   Users,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { href: '/pedidos', label: 'Pedidos', icon: ListOrdered },
   { href: '/financeiro', label: 'Financeiro', icon: DollarSign },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
+  { href: '/secretaria-virtual', label: 'Secretária IA', icon: Sparkles },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
@@ -54,20 +56,20 @@ export function TopNav() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/10 bg-asfalto text-white">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 xl:h-14 xl:flex-nowrap xl:gap-6 xl:px-6 xl:py-0">
+    <header className="admin-topbar sticky top-0 z-40 border-b border-white/10 text-white">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 xl:h-16 xl:flex-nowrap xl:gap-6 xl:px-8 xl:py-0">
         <Link
           href="/"
-          className="flex shrink-0 items-center gap-2"
+          className="group flex shrink-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label="MOTOboyCity — Administração"
         >
           <Wordmark />
-          <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-white/70 uppercase">
+          <span className="rounded-md border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-[#9ce2de] uppercase shadow-inner">
             Admin
           </span>
         </Link>
 
-        <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 xl:order-none xl:w-auto xl:min-w-0 xl:flex-1 xl:pb-0">
+        <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 xl:order-none xl:w-auto xl:min-w-0 xl:flex-1 xl:justify-center xl:pb-0">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
             return (
@@ -75,10 +77,10 @@ export function TopNav() {
                 key={href}
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm transition-all ${
                   isActive
-                    ? 'bg-white/10 font-medium text-white'
-                    : 'text-white/60 hover:bg-white/5 hover:text-white'
+                    ? 'bg-white/12 font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_8px_20px_-14px_rgba(53,184,178,0.8)]'
+                    : 'text-white/62 hover:bg-white/[0.06] hover:text-white'
                 }`}
               >
                 <Icon className="size-4" aria-hidden="true" />
@@ -95,7 +97,7 @@ export function TopNav() {
           onClick={toggleMoney}
           aria-pressed={moneyHidden}
           title={moneyHidden ? 'Mostrar valores' : 'Ocultar valores'}
-          className="ml-auto flex shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm text-white/60 transition-colors hover:bg-white/5 hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none xl:ml-0"
+          className="ml-auto flex shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 text-sm text-white/60 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:ml-0"
         >
           {moneyHidden ? (
             <EyeOff className="size-4" aria-hidden="true" />
@@ -108,9 +110,11 @@ export function TopNav() {
         </button>
 
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex shrink-0 items-center gap-2 rounded-md text-sm text-white/70 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none xl:ml-0">
-            <Avatar className="size-8">
-              <AvatarFallback className="bg-white/10 text-xs text-white">A</AvatarFallback>
+          <DropdownMenuTrigger className="flex shrink-0 items-center gap-2 rounded-full text-sm text-white/70 transition-all hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-asfalto focus-visible:outline-none xl:ml-0">
+            <Avatar className="size-9 border border-white/15 shadow-[0_0_0_3px_rgba(53,184,178,0.08)]">
+              <AvatarFallback className="bg-primary/20 text-xs font-semibold text-[#aee8e4]">
+                A
+              </AvatarFallback>
             </Avatar>
             <span className="sr-only">Abrir menu da conta</span>
           </DropdownMenuTrigger>

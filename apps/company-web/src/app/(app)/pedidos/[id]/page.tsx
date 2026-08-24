@@ -116,7 +116,10 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div className="space-y-6">
-      <Link href="/pedidos" className="flex w-fit items-center gap-1 text-sm text-muted-foreground">
+      <Link
+        href="/pedidos"
+        className="flex w-fit items-center gap-1 text-sm font-semibold text-portal transition-colors hover:text-portal-deep"
+      >
         <ChevronLeft className="size-4" /> Voltar para pedidos
       </Link>
 
@@ -191,7 +194,9 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
               {customerPaymentLabel(delivery.customerPaymentMethod)}
             </p>
             {delivery.driverNote && (
-              <p className="rounded-md bg-muted p-2">{delivery.driverNote}</p>
+              <p className="rounded-xl border border-portal/10 bg-portal-soft/45 p-2.5">
+                {delivery.driverNote}
+              </p>
             )}
           </CardContent>
         </Card>
@@ -254,7 +259,7 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
                   {groupQuery.data.deliveries.map((item) => (
                     <Link
                       key={item.id}
-                      className="text-primary hover:underline"
+                      className="text-portal hover:text-portal-deep hover:underline"
                       href={`/pedidos/${item.id}`}
                     >
                       #{item.displayNumber}
@@ -276,7 +281,7 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
               <p className="text-muted-foreground">Fatura vinculada</p>
               {delivery.invoice ? (
                 <Link
-                  className="text-primary underline-offset-4 hover:underline"
+                  className="text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                   href={`/faturas/${delivery.invoice.id}`}
                 >
                   {delivery.invoice.number} · {delivery.invoice.status}
@@ -314,7 +319,7 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
                 <p>
                   Última posição:{' '}
                   <a
-                    className="text-primary underline-offset-4 hover:underline"
+                    className="text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                     href={mapsUrl(
                       trackingQuery.data.lastLocation.lat,
                       trackingQuery.data.lastLocation.lng,
@@ -331,11 +336,11 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
                   {trackingQuery.data.points.length} ponto(s) no período consultado. O histórico é
                   mantido por até 30 dias.
                 </p>
-                <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2 text-xs">
+                <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-portal/12 bg-portal-soft/25 p-2.5 text-xs">
                   {trackingQuery.data.points.map((point) => (
                     <a
                       key={point.id}
-                      className="block text-primary underline-offset-4 hover:underline"
+                      className="block text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                       href={mapsUrl(point.lat, point.lng)}
                       target="_blank"
                       rel="noreferrer"
@@ -368,7 +373,7 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
         ) : (
           <div className="space-y-2">
             {delivery.statusHistory.map((entry, index) => (
-              <Card key={`${entry.changedAt}-${index}`}>
+              <Card key={`${entry.changedAt}-${index}`} className="order-list-card">
                 <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
                   <div>
                     <p className="font-medium">

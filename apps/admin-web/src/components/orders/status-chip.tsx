@@ -27,11 +27,14 @@ const STATUS: Record<DeliveryStatus, { label: string; tone: Tone; inMotion?: boo
 };
 
 const TONE_CLASS: Record<Tone, string> = {
-  aguardando: 'bg-status-aguardando/10 text-status-aguardando',
-  rota: 'bg-status-rota/15 text-[#8a5200]',
-  entregue: 'bg-status-entregue/10 text-status-entregue',
-  cancelado: 'bg-status-cancelado/10 text-status-cancelado',
-  pagamento: 'bg-status-pagamento/10 text-status-pagamento',
+  aguardando:
+    'bg-status-aguardando/10 text-status-aguardando ring-1 ring-inset ring-status-aguardando/20',
+  rota: 'bg-status-rota/15 text-[#8a5200] ring-1 ring-inset ring-status-rota/25',
+  entregue: 'bg-status-entregue/10 text-status-entregue ring-1 ring-inset ring-status-entregue/20',
+  cancelado:
+    'bg-status-cancelado/10 text-status-cancelado ring-1 ring-inset ring-status-cancelado/20',
+  pagamento:
+    'bg-status-pagamento/10 text-status-pagamento ring-1 ring-inset ring-status-pagamento/20',
 };
 
 const DOT_CLASS: Record<Tone, string> = {
@@ -73,8 +76,8 @@ export function statusRailClass(status: DeliveryStatus): string {
  * Precisa acompanhar `--status-*` em `globals.css`.
  */
 const TONE_HEX: Record<Tone, string> = {
-  aguardando: '#5c626b',
-  rota: '#ff9e00',
+  aguardando: '#64727a',
+  rota: '#fda02e',
   entregue: '#0b6e4f',
   cancelado: '#d92d20',
   pagamento: '#1d4ed8',

@@ -113,7 +113,7 @@ export default function CompanyReportsPage() {
           Consulte os registros reais da empresa por período e estado de cobrança.
         </p>
       </div>
-      <Card>
+      <Card className="premium-panel">
         <CardContent className="flex flex-wrap items-end gap-4 pt-6">
           <div className="space-y-1">
             <Label htmlFor="report-from">A partir de</Label>
@@ -137,7 +137,7 @@ export default function CompanyReportsPage() {
             <Label htmlFor="invoice-status">Status da fatura</Label>
             <select
               id="invoice-status"
-              className="block h-9 rounded-md border bg-background px-3 text-sm"
+              className="block h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
               value={invoiceStatus}
               onChange={(event) => setInvoiceStatus(event.target.value as InvoiceStatus | 'ALL')}
             >
@@ -184,7 +184,7 @@ export default function CompanyReportsPage() {
                 Cada item abre os pedidos, valores e histórico de cobrança.
               </p>
             </div>
-            <Card>
+            <Card className="premium-panel">
               <CardContent className="p-0">
                 {invoices.length === 0 ? (
                   <p className="p-8 text-center text-sm text-muted-foreground">
@@ -207,7 +207,7 @@ export default function CompanyReportsPage() {
                         <TableRow key={invoice.id}>
                           <TableCell>
                             <Link
-                              className="font-medium text-primary underline-offset-4 hover:underline"
+                              className="font-medium text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                               href={`/faturas/${invoice.id}`}
                             >
                               {invoice.number}
@@ -233,7 +233,7 @@ export default function CompanyReportsPage() {
                 Abra o detalhe para acompanhar o histórico operacional.
               </p>
             </div>
-            <Card>
+            <Card className="premium-panel">
               <CardContent className="p-0">
                 {deliveries.length === 0 ? (
                   <p className="p-8 text-center text-sm text-muted-foreground">
@@ -255,7 +255,7 @@ export default function CompanyReportsPage() {
                         <TableRow key={delivery.id}>
                           <TableCell>
                             <Link
-                              className="font-medium text-primary underline-offset-4 hover:underline"
+                              className="font-medium text-portal underline-offset-4 hover:text-portal-deep hover:underline"
                               href={`/pedidos/${delivery.id}`}
                             >
                               #{delivery.displayNumber}

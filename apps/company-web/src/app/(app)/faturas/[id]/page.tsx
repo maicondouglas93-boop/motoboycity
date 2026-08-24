@@ -64,7 +64,7 @@ export default function CompanyInvoiceDetailPage() {
     <div className="space-y-5">
       <Link
         href="/faturas"
-        className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-portal hover:text-portal-deep hover:underline"
       >
         <ArrowLeft className="size-4" /> Voltar para faturas
       </Link>
@@ -86,33 +86,33 @@ export default function CompanyInvoiceDetailPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+        <Card className="metric-card">
           <CardHeader>
             <CardTitle className="text-sm">Valor total</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold">
+          <CardContent className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
             {currency.format(invoice.totalValue)}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="metric-card">
           <CardHeader>
             <CardTitle className="text-sm">Repasse aos entregadores</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold">
+          <CardContent className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
             {currency.format(invoice.driverValueSum)}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="metric-card">
           <CardHeader>
             <CardTitle className="text-sm">Receita da plataforma</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold">
+          <CardContent className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
             {currency.format(invoice.platformValueSum)}
           </CardContent>
         </Card>
       </div>
 
-      <Card>
+      <Card className="premium-panel">
         <CardHeader>
           <CardTitle>Datas e pagamento</CardTitle>
         </CardHeader>
@@ -136,7 +136,7 @@ export default function CompanyInvoiceDetailPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="premium-panel">
         <CardHeader>
           <CardTitle>Pedidos faturados ({invoice.deliveries.length})</CardTitle>
         </CardHeader>
@@ -155,7 +155,10 @@ export default function CompanyInvoiceDetailPage() {
               {invoice.deliveries.map((delivery) => (
                 <TableRow key={delivery.id}>
                   <TableCell className="font-medium">
-                    <Link className="text-primary hover:underline" href={`/pedidos/${delivery.id}`}>
+                    <Link
+                      className="text-portal hover:text-portal-deep hover:underline"
+                      href={`/pedidos/${delivery.id}`}
+                    >
                       #{delivery.displayNumber}
                     </Link>
                   </TableCell>
@@ -170,7 +173,7 @@ export default function CompanyInvoiceDetailPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="premium-panel">
         <CardHeader>
           <CardTitle>Histórico financeiro</CardTitle>
         </CardHeader>
@@ -178,7 +181,7 @@ export default function CompanyInvoiceDetailPage() {
           {invoice.statusHistory.map((entry, index) => (
             <div
               key={`${entry.changedAt}-${index}`}
-              className="border-l-2 border-border pl-3 text-sm"
+              className="border-l-2 border-portal/30 pl-3 text-sm"
             >
               <p className="font-medium">
                 {entry.fromStatus ? invoiceStatusLabel[entry.fromStatus] : 'Criação'} →{' '}

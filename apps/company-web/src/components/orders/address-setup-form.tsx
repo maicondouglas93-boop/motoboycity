@@ -123,7 +123,7 @@ export function AddressSetupForm({ token }: { token: string }) {
         </div>
 
         {selected && (
-          <dl className="space-y-0.5 rounded-md border p-3 text-xs text-muted-foreground">
+          <dl className="space-y-0.5 rounded-xl border border-portal/15 bg-portal-soft/40 p-3 text-xs text-muted-foreground">
             <div className="flex gap-2">
               <dt>Cidade/UF:</dt>
               <dd className="text-foreground">

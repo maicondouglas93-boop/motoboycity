@@ -129,7 +129,7 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
         marker(
           { lat: driver.location.lat, lng: driver.location.lng },
           driver.name,
-          '#22c55e',
+          '#0b6e4f',
           selection?.kind === 'driver' && selection.id === driver.id,
           () => onSelect({ kind: 'driver', id: driver.id }),
         );
@@ -156,14 +156,14 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
   }, [data, mode, onSelect, ready, selection]);
 
   return (
-    <div className="relative h-full min-h-[600px] overflow-hidden rounded-2xl border bg-muted">
+    <div className="premium-panel relative h-full min-h-[600px] overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">
       <div ref={containerRef} className="absolute inset-0" />
       {error && (
         <div className="absolute inset-0 grid place-items-center bg-muted p-8 text-center text-sm text-muted-foreground">
           {error}
         </div>
       )}
-      <div className="absolute top-3 left-3 rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+      <div className="absolute top-3 left-3 rounded-xl border border-primary/15 bg-card/90 px-3 py-2 text-xs shadow-lg ring-1 ring-white/70 backdrop-blur-xl">
         <strong>{data?.active.length ?? 0}</strong> ativos ·{' '}
         <strong>{data?.onlineDrivers.length ?? 0}</strong> motoboys online
       </div>
