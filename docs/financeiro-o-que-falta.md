@@ -3,8 +3,8 @@
 Documento de execução, escrito para quem chegar sem contexto. Cada item diz o
 que existe, o que falta e por quê.
 
-Contexto: a área financeira foi refatorada em `/financeiro`, com quatro abas
-(Painel, Carteiras, Faturas, Recebimentos) e a aba ativa na URL. Ver
+Contexto: a área financeira foi refatorada em `/financeiro`, com cinco abas
+(Painel, Carteiras, Faturas, Recebimentos, Demonstrativo) e a aba ativa na URL. Ver
 `docs/plano-refatoracao-financeiro.md` para as decisões já tomadas.
 
 ---
@@ -13,17 +13,18 @@ Contexto: a área financeira foi refatorada em `/financeiro`, com quatro abas
 
 | Entregue | Onde |
 | --- | --- |
-| Quatro abas com estado na URL | `src/app/(app)/financeiro/page.tsx` |
+| Cinco abas com estado na URL | `src/app/(app)/financeiro/page.tsx` |
 | Cartões coloridos por intenção | `src/components/finance/metric-card.tsx` |
 | Extrato de recebimentos + endpoint | `GET /admin/financial/receipts` |
 | Envelhecimento da dívida por empresa | `src/components/finance/receivables-aging.tsx` |
 | Ajuste manual de carteira | `POST /admin/financial/driver-wallets/:driverId/adjustments` |
 | Obrigações por entregador | `src/components/finance/payouts-aging.tsx` |
 | Cancelar fatura | `PATCH /admin/financial/invoices/:id/cancel` |
+| Demonstrativo por competência | `src/components/finance/demonstrativo-tab.tsx` |
 
 ---
 
-## 1. Antecipação de saldo — BACKEND INTEIRO
+## Único item restante — Antecipação de saldo — BACKEND INTEIRO
 
 **O que existe:** o modelo `AdvanceRequest` no schema, com
 `blockedAmountAntecipado`, `feeAmount`, `netAmount`, `status` e
@@ -46,25 +47,6 @@ Contexto: a área financeira foi refatorada em `/financeiro`, com quatro abas
 
 **Só construir se o motoboy pedir no piloto.** É a mais cara da lista e a única
 sem demanda comprovada.
-
----
-
-## 2. Demonstrativo por competência — SÓ INTERFACE
-
-**Existe pronto:** `GET /admin/financial/financial-statement?from&to`, exposto
-em `adminFinancialApi.financialStatement(token, { from, to })`.
-
-Devolve `FinancialStatementReport` com `totals`, `comparison` (período
-anterior), `walletAdjustments` separados, e as dimensões `companies`,
-`serviceTypes`, `paymentMethods` e `days`.
-
-**Onde colocar:** aba nova (`?aba=demonstrativo`) ou dentro do Painel, abaixo do
-bloco de período. Preferir aba nova — o Painel já tem 12 cartões e mais um bloco
-o dilui.
-
-**Por que os ajustes vêm separados:** ajuste manual não é receita nem despesa da
-operação, é correção. Somá-los ao resultado faria um mês com muitas correções
-parecer melhor ou pior do que foi.
 
 ---
 
