@@ -9,10 +9,11 @@ import type { CompanyOperationsReportQuery } from '@motoboycity/validation';
 import {
   dateInSaoPaulo,
   endOfDayInSaoPaulo,
+  saoPauloDateParts,
   startOfDayInSaoPaulo,
 } from '../../common/sao-paulo-time';
 import { PrismaService } from '../../prisma/prisma.service';
-import { computePeakHours } from '../../admin/reports/delivery-peak-hours';
+import { computePeakHoursFromCounts } from '../../admin/reports/delivery-peak-hours';
 import { isLiveWindow, percentChange } from '../../admin/reports/report-window';
 
 const DELIVERY_STATUSES: DeliveryStatus[] = [
@@ -67,36 +68,7 @@ export class CompanyReportsService {
       toExclusive: period.from,
     };
 
-    const [created, completed, previousCreatedCount, previousCompleted] = await Promise.all([
-      this.prisma.delivery.findMany({
-        where: {
-          companyId,
-          createdAt: { gte: period.from, lt: period.toExclusive },
-        },
-        select: {
-          status: true,
-          createdAt: true,
-          totalValue: true,
-          requiresReturn: true,
-          returnValue: true,
-          batchId: true,
-          serviceType: { select: { name: true } },
-        },
-      }),
-      this.prisma.delivery.findMany({
-        where: {
-          companyId,
-          status: 'COMPLETED',
-          statusChangedAt: { gte: period.from, lt: period.toExclusive },
-        },
-        select: {
-          statusChangedAt: true,
-          totalValue: true,
-          requiresReturn: true,
-          returnValue: true,
-          serviceType: { select: { name: true } },
-        },
-      }),
+    const [previousCreatedCount, previousCompleted] = await Promise.all([
       this.prisma.delivery.count({
         where: {
           companyId,
@@ -144,55 +116,68 @@ export class CompanyReportsService {
     };
 
     let createdUnpricedCount = 0;
+    let createdCount = 0;
     let createdWithReturnCount = 0;
     let batchDeliveryCount = 0;
     const batchIds = new Set<string>();
+    const hourCounts = new Array<number>(24).fill(0);
+    const weekdayCounts = new Array<number>(7).fill(0);
 
-    for (const delivery of created) {
-      byCurrentStatus[delivery.status] += 1;
-      if (delivery.totalValue === null) createdUnpricedCount += 1;
-      if (delivery.requiresReturn) createdWithReturnCount += 1;
-      if (delivery.batchId) {
-        batchDeliveryCount += 1;
-        batchIds.add(delivery.batchId);
+    for await (const created of this.createdDeliveryPages(companyId, period)) {
+      for (const delivery of created) {
+        createdCount += 1;
+        byCurrentStatus[delivery.status] += 1;
+        if (delivery.totalValue === null) createdUnpricedCount += 1;
+        if (delivery.requiresReturn) createdWithReturnCount += 1;
+        if (delivery.batchId) {
+          batchDeliveryCount += 1;
+          batchIds.add(delivery.batchId);
+        }
+        const parts = saoPauloDateParts(delivery.createdAt);
+        hourCounts[parts.hour]! += 1;
+        weekdayCounts[parts.weekday]! += 1;
+        const day = daily.get(dateInSaoPaulo(delivery.createdAt));
+        if (day) day.createdCount += 1;
+        const serviceType = serviceTypeItem(delivery.serviceType.name);
+        serviceType.createdCount += 1;
+        if (delivery.requiresReturn) serviceType.createdWithReturnCount += 1;
       }
-      const day = daily.get(dateInSaoPaulo(delivery.createdAt));
-      if (day) day.createdCount += 1;
-      const serviceType = serviceTypeItem(delivery.serviceType.name);
-      serviceType.createdCount += 1;
-      if (delivery.requiresReturn) serviceType.createdWithReturnCount += 1;
     }
 
     let completedTotalCents = 0;
+    let completedCount = 0;
     let completedPricedCount = 0;
     let completedWithReturnCount = 0;
     let completedReturnCents = 0;
 
-    for (const delivery of completed) {
-      const priced = delivery.totalValue !== null;
-      const totalCents = toCents(delivery.totalValue);
-      const returnCents = toCents(delivery.returnValue);
-      completedTotalCents += totalCents;
-      if (priced) completedPricedCount += 1;
-      if (delivery.requiresReturn) completedWithReturnCount += 1;
-      completedReturnCents += returnCents;
+    for await (const completed of this.completedDeliveryPages(companyId, period)) {
+      for (const delivery of completed) {
+        completedCount += 1;
+        const priced = delivery.totalValue !== null;
+        const totalCents = toCents(delivery.totalValue);
+        const returnCents = toCents(delivery.returnValue);
+        completedTotalCents += totalCents;
+        if (priced) completedPricedCount += 1;
+        if (delivery.requiresReturn) completedWithReturnCount += 1;
+        completedReturnCents += returnCents;
 
-      const day = daily.get(dateInSaoPaulo(delivery.statusChangedAt));
-      if (day) {
-        day.completedCount += 1;
-        day.completedTotalValue = fromCents(toCents(day.completedTotalValue) + totalCents);
+        const day = daily.get(dateInSaoPaulo(delivery.statusChangedAt));
+        if (day) {
+          day.completedCount += 1;
+          day.completedTotalValue = fromCents(toCents(day.completedTotalValue) + totalCents);
+        }
+
+        const serviceType = serviceTypeItem(delivery.serviceType.name);
+        serviceType.completedCount += 1;
+        serviceType.completedTotalValue = fromCents(
+          toCents(serviceType.completedTotalValue) + totalCents,
+        );
+        serviceType.completedReturnValue = fromCents(
+          toCents(serviceType.completedReturnValue) + returnCents,
+        );
+        if (priced) serviceType.pricedCompletedCount += 1;
+        else serviceType.unpricedCompletedCount += 1;
       }
-
-      const serviceType = serviceTypeItem(delivery.serviceType.name);
-      serviceType.completedCount += 1;
-      serviceType.completedTotalValue = fromCents(
-        toCents(serviceType.completedTotalValue) + totalCents,
-      );
-      serviceType.completedReturnValue = fromCents(
-        toCents(serviceType.completedReturnValue) + returnCents,
-      );
-      if (priced) serviceType.pricedCompletedCount += 1;
-      else serviceType.unpricedCompletedCount += 1;
     }
 
     const completedTotalValue = fromCents(completedTotalCents);
@@ -216,9 +201,9 @@ export class CompanyReportsService {
         completedTotalValue: previousTotalValue,
         averageTicket: previousAverageTicket,
         changePercent: {
-          ordersCreated: percentChange(created.length, previousCreatedCount),
+          ordersCreated: percentChange(createdCount, previousCreatedCount),
           deliveriesCompleted: percentChange(
-            completed.length,
+            completedCount,
             previousCompleted._count._all,
           ),
           completedTotalValue: percentChange(completedTotalValue, previousTotalValue),
@@ -226,20 +211,21 @@ export class CompanyReportsService {
         },
       },
       ordersCreated: {
-        count: created.length,
+        count: createdCount,
         unpricedCount: createdUnpricedCount,
         byCurrentStatus,
       },
       deliveriesCompleted: {
-        count: completed.length,
+        count: completedCount,
         pricedCount: completedPricedCount,
-        unpricedCount: completed.length - completedPricedCount,
+        unpricedCount: completedCount - completedPricedCount,
         totalValue: completedTotalValue,
         averageTicket,
       },
       daily: [...daily.values()],
-      peakHours: computePeakHours(
-        created.map((delivery) => delivery.createdAt),
+      peakHours: computePeakHoursFromCounts(
+        hourCounts,
+        weekdayCounts,
         { from: period.from, to: inclusiveTo },
       ),
       serviceTypes: [...serviceTypes.values()]
@@ -268,6 +254,66 @@ export class CompanyReportsService {
     };
   }
 
+  private async *createdDeliveryPages(
+    companyId: string,
+    period: { from: Date; toExclusive: Date },
+  ) {
+    let cursor: string | undefined;
+    do {
+      const deliveries = await this.prisma.delivery.findMany({
+        where: {
+          companyId,
+          createdAt: { gte: period.from, lt: period.toExclusive },
+        },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          totalValue: true,
+          requiresReturn: true,
+          batchId: true,
+          serviceType: { select: { name: true } },
+        },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      });
+      yield deliveries;
+      if (deliveries.length < 500) break;
+      cursor = deliveries.at(-1)?.id;
+    } while (cursor);
+  }
+
+  private async *completedDeliveryPages(
+    companyId: string,
+    period: { from: Date; toExclusive: Date },
+  ) {
+    let cursor: string | undefined;
+    do {
+      const deliveries = await this.prisma.delivery.findMany({
+        where: {
+          companyId,
+          status: 'COMPLETED',
+          statusChangedAt: { gte: period.from, lt: period.toExclusive },
+        },
+        select: {
+          id: true,
+          statusChangedAt: true,
+          totalValue: true,
+          requiresReturn: true,
+          returnValue: true,
+          serviceType: { select: { name: true } },
+        },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      });
+      yield deliveries;
+      if (deliveries.length < 500) break;
+      cursor = deliveries.at(-1)?.id;
+    } while (cursor);
+  }
+
   private period(from: string, to: string): { from: Date; toExclusive: Date } {
     return {
       from: startOfDayInSaoPaulo(from),
@@ -280,7 +326,7 @@ export class CompanyReportsService {
       throw new ForbiddenException('Acesso restrito a empresas.');
     }
     const membership = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
       select: { companyId: true },
     });
     if (!membership) {

@@ -283,7 +283,7 @@ export class PaymentNoticeService {
       throw new ForbiddenException('Acesso restrito a empresas.');
     }
     const vinculo = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
       select: { companyId: true },
     });
     if (!vinculo) {

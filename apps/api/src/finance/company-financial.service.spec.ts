@@ -58,7 +58,7 @@ describe('CompanyFinancialService.position', () => {
     await service.position(lojista);
 
     expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'user-1' } }),
+      expect.objectContaining({ where: { userId: 'user-1', active: true } }),
     );
     for (const chamada of prisma.invoice.aggregate.mock.calls) {
       expect(chamada[0].where.companyId).toBe('empresa-1');
@@ -303,6 +303,9 @@ describe('CompanyFinancialService.summary', () => {
 
     expect(prisma.delivery.aggregate).toHaveBeenCalled();
     expect(prisma.delivery.groupBy).toHaveBeenCalled();
+    expect(prisma.delivery.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { id: 'asc' }, take: 500 }),
+    );
   });
 
   it('o período anterior tem a mesma duração, encostado no atual', async () => {

@@ -5350,3 +5350,139 @@ dedicado de cinco chamadas por minuto do `AuthController`. O setup passou a
 obter esses dois tokens diretamente pelo `AuthService`; as verificações HTTP de
 senha anterior, senha nova e login bloqueado por rejeição continuam passando
 pela rota real. Os testes próprios de login permanecem em suítes separadas.
+
+## Atualização — 2026-08-24: vínculo ativo e criação idempotente de pedidos
+
+O acesso de `COMPANY_MEMBER` agora exige um `CompanyTeamMember` ativo. A
+checagem ocorre no login, na validação de todo JWT e nos resolvedores de empresa
+usados por pedidos, endereço, relatórios, financeiro, faturas e avisos de
+pagamento. Assim, desativar o vínculo invalida também sessões já emitidas e não
+deixa rotas antigas dependerem apenas do guard de tipo de usuário. Nenhum
+status, papel ou regra de aprovação da empresa foi alterado.
+
+As criações `POST /deliveries` e `POST /deliveries/batch` aceitam agora o campo
+opcional `idempotencyKey`, validado como UUID. Os dois formulários do Company
+Web geram uma chave por tentativa lógica, reutilizam a mesma chave quando o
+usuário repete o mesmo formulário após erro e geram outra quando o conteúdo
+muda. A API deriva IDs UUID v8 determinísticos, com escopo por empresa e por
+tipo de criação. Portanto, o banco resolve cliques simultâneos pela chave
+primária existente, sem migration, e o retry devolve o pedido ou lote vencedor
+sem criar novos endereços ou entradas de histórico.
+
+Quando o commit ocorreu mas a resposta, o dispatch ou o agendamento falhou, o
+retry retoma somente o efeito externo. `dispatchDelivery` já é idempotente e o
+job de ativação já usa `jobId` baseado no pedido. Uma repetição não republica
+`DELIVERY_CREATED`; a tela invalida suas consultas ao receber a resposta e lê o
+estado persistido atual. O campo permanece opcional para preservar clientes
+existentes, mas os fluxos atuais do Company Web sempre o enviam.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/auth/{auth.service,jwt.strategy}.ts`;
+- resolvedores de empresa em `apps/api/src/{company,deliveries,finance}/`;
+- `apps/api/src/deliveries/deliveries.service.ts`;
+- `packages/validation/src/deliveries/create-delivery.schema.ts`;
+- `packages/types/src/delivery.ts`;
+- formulários de operação e `apps/company-web/src/lib/idempotency.ts`.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| build de `@motoboycity/validation` | aprovado |
+| typecheck completo do monorepo | 8 projetos aprovados |
+| lint completo do monorepo | 8 projetos aprovados |
+| Jest unitário completo da API | 58 suítes e 687 testes aprovados |
+| build da API e build de produção do Company Web | aprovado |
+| `git diff --check` | aprovado antes da atualização deste handoff |
+
+Os testes cobrem vínculo inativo no login e em token existente, retry após
+resposta perdida, reativação de pedido agendado e colisão concorrente `P2002`
+para pedido avulso e lote. E2E não foi executado porque PostgreSQL e Redis
+isolados não foram provisionados. Nenhuma migration, seed, Docker, `.env` ou
+secret foi alterado. Próximo passo concreto: executar os E2E em serviços
+isolados e então seguir pelos achados médios registrados em
+`docs/auditoria-company-web.md`.
+
+## Atualização — 2026-08-24: conclusão da auditoria do Company Web
+
+Os achados médios e baixos de `docs/auditoria-company-web.md` foram corrigidos
+sem alterar migrations ou regras de cobrança. A resposta de faturas da empresa
+agora usa contratos públicos próprios e não contém repasse do entregador nem
+margem da plataforma, inclusive no JSON. As rotas administrativas continuam
+recebendo o contrato financeiro completo. Emissão, vencimento e pagamento são
+tratados como datas civis; o filtro da API compara diretamente os dias
+`@db.Date`, sem deslocamento pelo fuso de São Paulo. Horários operacionais, como
+conclusão e histórico, continuam formatados como instante.
+
+Os estados de erro do endereço, modalidades, central, rastreamento, pedidos e
+faturas não caem mais em mensagens positivas de vazio. Uma falha transitória em
+`/auth/me` preserva a credencial e oferece nova tentativa; o token só é removido
+em `401` ou `403`. Os três cancelamentos do painel pedem confirmação, e o modal
+explicita quando a ação alcança todo o lote.
+
+O acompanhamento logo após criar um pedido consulta somente o `batchId` ou o
+`deliveryId` gerado. Esses filtros são UUIDs validados na rota de operações e
+sempre se combinam com o escopo da empresa. Nesse recorte a API devolve todos os
+terminais recentes, sem o limite global de vinte; por isso um lote de até
+cinquenta itens não pode declarar aceite enquanto faltarem pedidos. O modal
+também distingue erro, carregamento incompleto, cancelamento e aceite parcial.
+O detalhe de pedido atualiza o status principal a cada dez segundos até chegar
+a `COMPLETED` ou `CANCELLED`, permitindo que uma tela aberta antes do aceite
+ative o rastreamento assim que o motoboy assumir a entrega.
+
+A lista `/pedidos` passou a usar busca paginada no servidor, com 25 itens por
+página e filtros de texto/status aplicados na API. A central operacional obtém
+contagens por `groupBy`, em vez de carregar todos os status históricos. O
+endpoint legado `GET /deliveries` permanece sem paginação para compatibilidade,
+mas a tela atual não o usa para o histórico. Relatórios operacionais e a série
+financeira percorrem lotes de quinhentas linhas mantendo somente agregados; o
+SLA também percorre históricos em páginas, guarda apenas amostras necessárias
+ao cálculo exato e limita o intervalo a 366 dias.
+
+As duas somas monetárias apontadas na auditoria passaram a operar em centavos
+inteiros: custo conhecido no relatório e fechamento da fatura. Há testes para
+o caso `0,1 + 0,2`, isolamento do DTO público da fatura, data civil, paginação,
+agregação, limite de SLA, estados operacionais e lote terminal sem truncamento.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/{deliveries,finance,company/reports}/`;
+- `apps/company-web/src/app/(app)/{pedidos,faturas,relatorios}/`;
+- `apps/company-web/src/components/{auth,finance,operations}/`;
+- `packages/{types,validation,api-client}/`.
+
+### Verificação
+
+| Comando / fluxo | Resultado |
+| --- | --- |
+| build de `@motoboycity/validation` | aprovado |
+| typecheck completo do monorepo | 8 projetos aprovados |
+| lint completo do monorepo | 8 projetos aprovados, sem avisos |
+| Jest unitário completo da API | 58 suítes e 699 testes aprovados |
+| build da API | aprovado |
+| build de produção do Company Web | aprovado, 18 rotas |
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
+O próximo passo concreto é executar os E2E nos serviços isolados e fazer um
+smoke test das rotas de pedidos, faturas e relatórios com uma sessão real de
+empresa e lotes de tamanhos 1, 20 e 50.
+
+## Atualização — 2026-08-24: acabamento do widget e da fatura administrativa
+
+O widget “Atividade ao vivo” do Admin Web recolhido ocupa agora somente um
+botão circular de 44 px, com estado de conexão visível e rótulo acessível. O
+conteúdo principal reserva espaço inferior para o botão, evitando que paginação
+e ações de rodapé fiquem cobertas. Aberto, o painel conserva a largura e o feed
+anteriores. A alteração é somente visual e não muda conexão Socket.IO nem a
+lógica do feed.
+
+O detalhe administrativo da fatura marca pedidos que possuem retorno e exibe o
+valor desse componente ao lado do número do pedido. O campo permanece exclusivo
+do contrato administrativo; o contrato público da empresa continua sem repasse
+ou margem interna.
+
+Validação final deste recorte: typecheck, lint e build de produção do Admin Web
+aprovados; o build gerou 35 páginas. Nenhum `.env`, secret ou arquivo de sessão
+Kotlin faz parte do conjunto preparado para commit.

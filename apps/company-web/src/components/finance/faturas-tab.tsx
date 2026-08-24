@@ -191,7 +191,7 @@ export function FaturasTab({ token }: { token: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {demais.length === 0 && !faturasQuery.isLoading ? (
+              {demais.length === 0 && !faturasQuery.isLoading && !faturasQuery.isError ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">

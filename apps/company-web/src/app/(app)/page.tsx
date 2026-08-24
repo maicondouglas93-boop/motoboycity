@@ -96,6 +96,21 @@ export default function CompanyHomePage() {
   if (!token) return <p className="text-sm text-muted-foreground">Faça login para continuar.</p>;
   if (addressQuery.isLoading)
     return <p className="text-sm text-muted-foreground">Carregando central...</p>;
+  if (addressQuery.isError) {
+    return (
+      <Card className="mx-auto max-w-xl border-destructive/30">
+        <CardHeader>
+          <CardTitle>Não foi possível consultar o ponto de coleta</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm text-muted-foreground">
+          <p>O cadastro não foi alterado. Verifique sua conexão e tente novamente.</p>
+          <Button type="button" variant="outline" onClick={() => void addressQuery.refetch()}>
+            Tentar novamente
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
   const pickupAddress = addressQuery.data?.address ?? null;
   if (!pickupAddress) {
     return (
@@ -128,6 +143,18 @@ export default function CompanyHomePage() {
           {connected ? 'Tempo real conectado' : 'Reconectando'}
         </div>
       </header>
+
+      {serviceTypesQuery.isError && (
+        <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          Não foi possível carregar as modalidades. Tente novamente antes de criar um pedido.
+        </p>
+      )}
+      {operationsQuery.isError && (
+        <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          Não foi possível atualizar os pedidos em andamento. Os dados abaixo podem estar
+          desatualizados.
+        </p>
+      )}
 
       <section className="grid min-h-[720px] gap-5 xl:grid-cols-[360px_minmax(0,1fr)_340px]">
         <Card className="premium-panel max-h-[calc(100vh-150px)] overflow-hidden">
@@ -168,6 +195,9 @@ export default function CompanyHomePage() {
                 <div className="mt-3 max-h-52 space-y-2 overflow-y-auto">
                   {searchQuery.isLoading && (
                     <p className="text-xs text-muted-foreground">Buscando...</p>
+                  )}
+                  {searchQuery.isError && (
+                    <p className="text-xs text-destructive">Não foi possível realizar a busca.</p>
                   )}
                   {searchQuery.data?.items.map((order) => (
                     <Link
@@ -227,7 +257,9 @@ export default function CompanyHomePage() {
               <CardTitle className="flex items-center gap-2 text-sm">
                 <CircleDot className="size-4 text-status-rota" aria-hidden="true" />
                 Na rua
-                <Badge variant="secondary">{operations?.active.length ?? 0}</Badge>
+                <Badge variant="secondary">
+                  {operationsQuery.isError ? '—' : (operations?.active.length ?? 0)}
+                </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="max-h-[310px] space-y-2 overflow-y-auto pt-3">
@@ -239,7 +271,7 @@ export default function CompanyHomePage() {
                   onSelect={() => selectOrder(order.id)}
                 />
               ))}
-              {operations?.active.length === 0 && (
+              {operations?.active.length === 0 && !operationsQuery.isError && (
                 <p className="text-sm text-muted-foreground">Nenhum pedido ativo.</p>
               )}
             </CardContent>

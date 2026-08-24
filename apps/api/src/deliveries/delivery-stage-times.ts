@@ -62,37 +62,50 @@ export function computeStageTimes(
   deliveries: StatusTransition[][],
   options: StageTimesOptions = {},
 ): DeliveryStageTimes {
-  const aceite: number[] = [];
-  const coleta: number[] = [];
-  const entrega: number[] = [];
-  const total: number[] = [];
+  const accumulator = new StageTimesAccumulator(options);
+  accumulator.add(deliveries);
+  return accumulator.result();
+}
 
-  for (const history of deliveries) {
-    if (options.excludeRetroactive && history.some((entry) => entry.occurredAt)) {
-      continue;
+/**
+ * Acumula somente as durações necessárias para percentis. Assim o service
+ * pode ler históricos em páginas sem manter todas as entregas na memória.
+ */
+export class StageTimesAccumulator {
+  private readonly aceite: number[] = [];
+  private readonly coleta: number[] = [];
+  private readonly entrega: number[] = [];
+  private readonly total: number[] = [];
+
+  constructor(private readonly options: StageTimesOptions = {}) {}
+
+  add(deliveries: StatusTransition[][]): void {
+    for (const history of deliveries) {
+      if (this.options.excludeRetroactive && history.some((entry) => entry.occurredAt)) {
+        continue;
+      }
+
+      const at = firstOccurrenceMap(history);
+      const origem = at.get('AWAITING_DRIVER') ?? at.get('SCHEDULED') ?? null;
+      const aceito = at.get('ACCEPTED') ?? null;
+      const coletado = at.get('COLLECTED') ?? null;
+      const entregue = at.get('DELIVERED') ?? null;
+
+      push(this.aceite, origem, aceito);
+      push(this.coleta, aceito, coletado);
+      push(this.entrega, coletado, entregue);
+      push(this.total, origem, entregue);
     }
-
-    const at = firstOccurrenceMap(history);
-
-    // A origem do relógio é a entrada na fila de despacho. Um pedido agendado
-    // que ficou parado até a hora marcada nao deve contar como demora.
-    const origem = at.get('AWAITING_DRIVER') ?? at.get('SCHEDULED') ?? null;
-    const aceito = at.get('ACCEPTED') ?? null;
-    const coletado = at.get('COLLECTED') ?? null;
-    const entregue = at.get('DELIVERED') ?? null;
-
-    push(aceite, origem, aceito);
-    push(coleta, aceito, coletado);
-    push(entrega, coletado, entregue);
-    push(total, origem, entregue);
   }
 
-  return {
-    aceite: summarize(aceite),
-    coleta: summarize(coleta),
-    entrega: summarize(entrega),
-    total: summarize(total),
-  };
+  result(): DeliveryStageTimes {
+    return {
+      aceite: summarize(this.aceite),
+      coleta: summarize(this.coleta),
+      entrega: summarize(this.entrega),
+      total: summarize(this.total),
+    };
+  }
 }
 
 /**

@@ -48,6 +48,23 @@ const dropoffPayload = {
   referenceNote: undefined,
 };
 
+const idempotencySinglePayload = {
+  serviceTypeId: 'st-1',
+  destinationKnownAtCreation: true,
+  dropoffAddress: dropoffPayload,
+  requiresReturn: false,
+  requiresDeliveryProof: false,
+  requiresCollectionRecipient: false,
+  pickupSurchargeChargedToDriver: false,
+};
+
+const idempotencyBatchPayload = {
+  deliveries: [
+    idempotencySinglePayload,
+    { ...idempotencySinglePayload, dropoffAddress: { ...dropoffPayload, number: '201' } },
+  ],
+};
+
 function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'delivery-1',
@@ -113,7 +130,12 @@ describe('DeliveriesService', () => {
     companyAddress: { findFirst: jest.Mock };
     deliveryAddress: { findFirst: jest.Mock };
     businessHour: { findMany: jest.Mock };
-    delivery: { findMany: jest.Mock; findUnique: jest.Mock; update: jest.Mock };
+    delivery: {
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
+      groupBy: jest.Mock;
+    };
     driver: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -157,7 +179,12 @@ describe('DeliveriesService', () => {
       // Sem horario configurado: a operacao esta sempre aberta, que e o estado
       // padrao de quem nunca mexeu nisso.
       businessHour: { findMany: jest.fn().mockResolvedValue([]) },
-      delivery: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+      delivery: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        groupBy: jest.fn().mockResolvedValue([]),
+      },
       driver: { findUnique: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
@@ -380,6 +407,139 @@ describe('DeliveriesService', () => {
     });
   });
 
+  it('repetir a mesma chave retoma o despacho sem criar outro pedido', async () => {
+    mockCompanyMembership(companyUser.id, 'company-1');
+    prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+    googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+    pricingService.quote.mockResolvedValue({
+      distanceFee: 7.5,
+      subtotal: 12.5,
+      returnValue: 0,
+      totalValue: 12.5,
+      driverValue: 10,
+      platformValue: 2.5,
+    });
+    const keyedPayload = {
+      ...idempotencySinglePayload,
+      idempotencyKey: '22222222-2222-4222-8222-222222222222',
+    };
+    let createdId: string | null = null;
+    tx.delivery.create.mockImplementation(({ data }: { data: { id: string } }) => {
+      createdId = data.id;
+      return Promise.resolve({ id: data.id });
+    });
+    prisma.delivery.findUnique.mockImplementation(
+      ({ where, select }: { where: { id: string }; select?: unknown }) => {
+        if (select && !createdId) return Promise.resolve(null);
+        if (select) {
+          return Promise.resolve({
+            id: where.id,
+            companyId: 'company-1',
+            status: 'AWAITING_DRIVER',
+            scheduledAt: null,
+          });
+        }
+        return Promise.resolve(fullDeliveryRow({ id: where.id }));
+      },
+    );
+    dispatchService.dispatchDelivery
+      .mockRejectedValueOnce(new Error('resposta perdida depois do commit'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.create(companyUser, keyedPayload)).rejects.toThrow(
+      'resposta perdida depois do commit',
+    );
+    const retried = await service.create(companyUser, keyedPayload);
+
+    expect(createdId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(retried.id).toBe(createdId);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.delivery.create).toHaveBeenCalledTimes(1);
+    expect(googleMapsService.getDistance).toHaveBeenCalledTimes(1);
+    expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
+    expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(2);
+  });
+
+  it('repeticao de pedido agendado recoloca o mesmo job sem recriar o pedido', async () => {
+    mockCompanyMembership(companyUser.id, 'company-1');
+    const scheduledAt = new Date('2026-12-01T10:00:00.000Z');
+    prisma.delivery.findUnique.mockImplementation(
+      ({ where, select }: { where: { id: string }; select?: unknown }) =>
+        Promise.resolve(
+          select
+            ? {
+                id: where.id,
+                companyId: 'company-1',
+                status: 'SCHEDULED',
+                scheduledAt,
+              }
+            : fullDeliveryRow({ id: where.id, status: 'SCHEDULED', scheduledAt }),
+        ),
+    );
+
+    await service.create(companyUser, {
+      ...idempotencySinglePayload,
+      scheduledAt: scheduledAt.toISOString(),
+      idempotencyKey: '33333333-3333-4333-8333-333333333333',
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+    expect(dispatchService.scheduleActivation).toHaveBeenCalledWith(
+      expect.any(String),
+      scheduledAt,
+    );
+  });
+
+  it('uma colisao concorrente devolve o pedido vencedor em vez de falhar', async () => {
+    mockCompanyMembership(companyUser.id, 'company-1');
+    prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+    googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+    pricingService.quote.mockResolvedValue({
+      distanceFee: 7.5,
+      subtotal: 12.5,
+      returnValue: 0,
+      totalValue: 12.5,
+      driverValue: 10,
+      platformValue: 2.5,
+    });
+    let winnerId: string | null = null;
+    tx.delivery.create.mockImplementation(({ data }: { data: { id: string } }) => {
+      winnerId = data.id;
+      return Promise.resolve({ id: data.id });
+    });
+    prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => {
+      await callback(tx);
+      throw { code: 'P2002' };
+    });
+    prisma.delivery.findUnique.mockImplementation(
+      ({ where, select }: { where: { id: string }; select?: unknown }) => {
+        if (select && !winnerId) return Promise.resolve(null);
+        return Promise.resolve(
+          select
+            ? {
+                id: where.id,
+                companyId: 'company-1',
+                status: 'AWAITING_DRIVER',
+                scheduledAt: null,
+              }
+            : fullDeliveryRow({ id: where.id }),
+        );
+      },
+    );
+
+    const result = await service.create(companyUser, {
+      ...idempotencySinglePayload,
+      idempotencyKey: '55555555-5555-4555-8555-555555555555',
+    });
+
+    expect(result.id).toBe(winnerId);
+    expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(1);
+    expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
+  });
+
   describe('createBatch', () => {
     const payload = {
       deliveries: [
@@ -501,6 +661,113 @@ describe('DeliveriesService', () => {
         }),
       );
     });
+  });
+
+  it('repetir a mesma chave retoma o lote sem duplicar nenhum item', async () => {
+    mockCompanyMembership(companyUser.id, 'company-1');
+    prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+    googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+    pricingService.quote.mockResolvedValue({
+      distanceFee: 7.5,
+      subtotal: 12.5,
+      returnValue: 0,
+      totalValue: 12.5,
+      driverValue: 10,
+      platformValue: 2.5,
+    });
+    const keyedPayload = {
+      ...idempotencyBatchPayload,
+      idempotencyKey: '44444444-4444-4444-8444-444444444444',
+    };
+    const persisted: Array<{
+      id: string;
+      companyId: string;
+      batchId: string;
+      status: string;
+    }> = [];
+    tx.delivery.create.mockImplementation(
+      ({ data }: { data: { id: string; companyId: string; batchId: string; status: string } }) => {
+        persisted.push({
+          id: data.id,
+          companyId: data.companyId,
+          batchId: data.batchId,
+          status: data.status,
+        });
+        return Promise.resolve({ id: data.id });
+      },
+    );
+    prisma.delivery.findMany.mockImplementation(() => Promise.resolve(persisted));
+    prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(fullDeliveryRow({ id: where.id, batchId: persisted[0]?.batchId })),
+    );
+    dispatchService.dispatchDelivery
+      .mockRejectedValueOnce(new Error('resposta perdida depois do lote'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.createBatch(companyUser, keyedPayload)).rejects.toThrow(
+      'resposta perdida depois do lote',
+    );
+    const retried = await service.createBatch(companyUser, keyedPayload);
+
+    expect(retried.deliveries.map((delivery) => delivery.id)).toEqual(
+      persisted.map((delivery) => delivery.id),
+    );
+    expect(retried.batchId).toBe(persisted[0]?.batchId);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.delivery.create).toHaveBeenCalledTimes(2);
+    expect(googleMapsService.getDistance).toHaveBeenCalledTimes(2);
+    expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(2);
+    expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(2);
+  });
+
+  it('uma colisao concorrente devolve o lote vencedor completo', async () => {
+    mockCompanyMembership(companyUser.id, 'company-1');
+    prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+    googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+    pricingService.quote.mockResolvedValue({
+      distanceFee: 7.5,
+      subtotal: 12.5,
+      returnValue: 0,
+      totalValue: 12.5,
+      driverValue: 10,
+      platformValue: 2.5,
+    });
+    const winner: Array<{
+      id: string;
+      companyId: string;
+      batchId: string;
+      status: string;
+    }> = [];
+    tx.delivery.create.mockImplementation(
+      ({ data }: { data: { id: string; companyId: string; batchId: string; status: string } }) => {
+        winner.push({
+          id: data.id,
+          companyId: data.companyId,
+          batchId: data.batchId,
+          status: data.status,
+        });
+        return Promise.resolve({ id: data.id });
+      },
+    );
+    prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => {
+      await callback(tx);
+      throw { code: 'P2002' };
+    });
+    prisma.delivery.findMany.mockImplementation(() => Promise.resolve(winner));
+    prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(fullDeliveryRow({ id: where.id, batchId: winner[0]?.batchId })),
+    );
+
+    const result = await service.createBatch(companyUser, {
+      ...idempotencyBatchPayload,
+      idempotencyKey: '66666666-6666-4666-8666-666666666666',
+    });
+
+    expect(result.deliveries.map((delivery) => delivery.id)).toEqual(
+      winner.map((delivery) => delivery.id),
+    );
+    expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(1);
+    expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
   });
 
   describe('list', () => {
@@ -630,6 +897,49 @@ describe('DeliveriesService', () => {
       );
     });
 
+    it('mantem todos os terminais quando a empresa acompanha um lote especifico', async () => {
+      const batchId = '22222222-2222-4222-8222-222222222222';
+      mockCompanyMembership(companyUser.id, 'company-1');
+
+      await service.operations(companyUser, { batchId });
+
+      expect(prisma.delivery.findMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: expect.objectContaining({ companyId: 'company-1', batchId }),
+        }),
+      );
+      const recentQuery = prisma.delivery.findMany.mock.calls[1]?.[0];
+      expect(recentQuery).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({ companyId: 'company-1', batchId }),
+          orderBy: { statusChangedAt: 'desc' },
+        }),
+      );
+      expect(recentQuery).not.toHaveProperty('take');
+      expect(prisma.delivery.groupBy).toHaveBeenCalledWith({
+        by: ['status'],
+        where: { companyId: 'company-1', batchId },
+        _count: { _all: true },
+      });
+    });
+
+    it('agrega as contagens por status no banco sem carregar todo o historico', async () => {
+      prisma.delivery.groupBy.mockResolvedValue([
+        { status: 'AWAITING_DRIVER', _count: { _all: 3 } },
+        { status: 'COMPLETED', _count: { _all: 12 } },
+      ]);
+
+      const result = await service.operations(adminUser, {});
+
+      expect(prisma.delivery.groupBy).toHaveBeenCalledWith({
+        by: ['status'],
+        where: {},
+        _count: { _all: true },
+      });
+      expect(result.counts).toEqual({ AWAITING_DRIVER: 3, COMPLETED: 12 });
+    });
+
     it('aceita uma janela terminal sem limite por quantidade para o admin', async () => {
       const changedSince = new Date('2026-08-23T15:45:00.000Z');
 
@@ -654,6 +964,26 @@ describe('DeliveriesService', () => {
         }),
       );
       expect(recentQuery).not.toHaveProperty('take');
+    });
+  });
+
+  describe('stageTimes', () => {
+    it('le os historicos em paginas limitadas', async () => {
+      prisma.delivery.findMany.mockResolvedValue([]);
+
+      await service.stageTimes(adminUser, {
+        from: '2026-01-01',
+        to: '2026-12-31',
+        excludeRetroactive: false,
+      });
+
+      expect(prisma.delivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { id: 'asc' },
+          take: 500,
+          select: expect.objectContaining({ id: true }),
+        }),
+      );
     });
   });
 

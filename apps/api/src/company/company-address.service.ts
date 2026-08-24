@@ -49,7 +49,7 @@ export class CompanyAddressService {
       throw new ForbiddenException('Acesso restrito a empresas.');
     }
     const membership = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
     });
     if (!membership) {
       throw new ForbiddenException('Usuário não está vinculado a uma empresa.');

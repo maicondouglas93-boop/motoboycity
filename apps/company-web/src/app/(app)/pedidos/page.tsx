@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useDeferredValue, useState } from 'react';
 import { Package } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DeliveryListItem, DeliveryStatus } from '@motoboycity/types';
+import type { DeliveryStatus } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
 import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { session } from '@/lib/session';
 import { useCompanyActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
 
 const CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
+const PAGE_SIZE = 25;
 
 function formatCurrency(value: number | null): string {
   if (value === null) {
@@ -34,7 +35,9 @@ function mapsUrl(lat: number, lng: number): string {
 
 export default function CompanyOrdersPage() {
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
   const [statusFilter, setStatusFilter] = useState<DeliveryStatus | 'ALL'>('ALL');
+  const [page, setPage] = useState(1);
   const [actionError, setActionError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const trackingQuery = useCompanyActiveDeliveryTracking();
@@ -42,12 +45,14 @@ export default function CompanyOrdersPage() {
   const token = session.getToken();
 
   const deliveriesQuery = useQuery({
-    queryKey: ['deliveries', statusFilter],
+    queryKey: ['deliveries', 'search', deferredSearch, statusFilter, page],
     queryFn: () =>
-      deliveriesApi.list(
-        token as string,
-        statusFilter === 'ALL' ? undefined : { status: statusFilter },
-      ),
+      deliveriesApi.search(token as string, {
+        ...(deferredSearch && { q: deferredSearch }),
+        ...(statusFilter !== 'ALL' && { status: statusFilter }),
+        page,
+        pageSize: PAGE_SIZE,
+      }),
     enabled: Boolean(token),
   });
 
@@ -68,13 +73,10 @@ export default function CompanyOrdersPage() {
     return <p className="text-sm text-muted-foreground">Faça login para ver os pedidos.</p>;
   }
 
-  const deliveries = deliveriesQuery.data ?? [];
+  const deliveries = deliveriesQuery.data?.items ?? [];
+  const total = deliveriesQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const activeTracking = trackingQuery.data ?? [];
-  const filteredDeliveries = deliveries.filter((delivery: DeliveryListItem) =>
-    `${delivery.displayNumber} ${delivery.serviceTypeName}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
 
   return (
     <div className="space-y-5">
@@ -83,13 +85,19 @@ export default function CompanyOrdersPage() {
           placeholder="Buscar pedido..."
           className="max-w-xs"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+          }}
         />
         <select
           aria-label="Filtrar status dos pedidos"
           className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
           value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value as DeliveryStatus | 'ALL')}
+          onChange={(event) => {
+            setStatusFilter(event.target.value as DeliveryStatus | 'ALL');
+            setPage(1);
+          }}
         >
           <option value="ALL">Todos os status</option>
           {STATUS_OPTIONS.map((option) => (
@@ -110,6 +118,10 @@ export default function CompanyOrdersPage() {
         </div>
         {trackingQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Carregando rastreamento...</p>
+        ) : trackingQuery.isError ? (
+          <p className="text-sm text-destructive">
+            Não foi possível atualizar o rastreamento ao vivo.
+          </p>
         ) : activeTracking.length === 0 ? (
           <Card className="premium-panel">
             <CardContent className="py-4 text-sm text-muted-foreground">
@@ -163,7 +175,7 @@ export default function CompanyOrdersPage() {
         <p className="text-sm text-destructive">Não foi possível carregar os pedidos.</p>
       )}
 
-      {deliveriesQuery.isSuccess && filteredDeliveries.length === 0 ? (
+      {deliveriesQuery.isSuccess && deliveries.length === 0 ? (
         <Card className="premium-panel">
           <CardContent className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
             <Package className="size-8" />
@@ -172,7 +184,7 @@ export default function CompanyOrdersPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {filteredDeliveries.map((delivery) => (
+          {deliveries.map((delivery) => (
             <Card key={delivery.id} className="order-list-card">
               <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
                 <div>
@@ -202,7 +214,11 @@ export default function CompanyOrdersPage() {
                       variant="outline"
                       size="sm"
                       disabled={cancelMutation.isPending}
-                      onClick={() => cancelMutation.mutate(delivery.id)}
+                      onClick={() => {
+                        if (window.confirm(`Cancelar o pedido #${delivery.displayNumber}?`)) {
+                          cancelMutation.mutate(delivery.id);
+                        }
+                      }}
                     >
                       {cancelMutation.isPending && cancelMutation.variables === delivery.id
                         ? 'Cancelando...'
@@ -213,6 +229,34 @@ export default function CompanyOrdersPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {deliveriesQuery.isSuccess && total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+          <span>
+            {total.toLocaleString('pt-BR')} pedido(s) · página {page} de {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            >
+              Próxima
+            </Button>
+          </div>
         </div>
       )}
     </div>

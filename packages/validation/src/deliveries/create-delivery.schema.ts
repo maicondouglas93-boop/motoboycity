@@ -24,6 +24,7 @@ export const deliveryAddressInputSchema = z
 
 export const createDeliverySchema = z
   .object({
+    idempotencyKey: z.uuid('idempotencyKey deve ser um UUID valido.').optional(),
     serviceTypeId: z.uuid('serviceTypeId deve ser um UUID válido.'),
     // true (padrão): endereço de entrega informado agora, preço calculado na
     // criação, como sempre foi. false: sem endereço — motoboy captura o
@@ -66,6 +67,7 @@ export const createDeliverySchema = z
  * recebem o mesmo motoboy. Por isso não há agendamento parcial do lote.
  */
 export const createDeliveryBatchSchema = z.object({
+  idempotencyKey: z.uuid('idempotencyKey deve ser um UUID valido.').optional(),
   deliveries: z
     .array(createDeliverySchema)
     .min(2, 'Um lote precisa ter pelo menos duas entregas.')

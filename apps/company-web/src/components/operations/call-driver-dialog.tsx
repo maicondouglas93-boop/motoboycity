@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type SubmitEvent } from 'react';
+import { useRef, useState, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
 import { StatusChip } from '@/components/orders/status-chip';
 import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
+import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import { session } from '@/lib/session';
 
 /**
@@ -41,12 +42,14 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   const [requiresReturn, setRequiresReturn] = useState(false);
   const [driverNote, setDriverNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const creationAttempt = useRef<IdempotencyAttempt | null>(null);
   /**
    * Ids das entregas recem-criadas. Enquanto houver algum aqui, o modal deixa
    * de ser formulario e vira painel de acompanhamento — o momento de espera e
    * justamente quando a pessoa mais quer olhar a tela.
    */
   const [trackedIds, setTrackedIds] = useState<string[]>([]);
+  const [trackedBatchId, setTrackedBatchId] = useState<string | null>(null);
 
   const addressQuery = useQuery({
     queryKey: ['company', 'address'],
@@ -60,26 +63,27 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   });
 
   /**
-   * Reaproveita a consulta da central: mesma chave de cache, uma requisicao so
-   * para todas as entregas em vez de uma por id.
-   *
-   * Sondagem em vez de socket porque o painel nao tem um hook compartilhado de
-   * tempo real — abrir uma segunda conexao aqui duplicaria o socket que a
-   * central ja mantem. Tres segundos e imperceptivel para "alguem aceitou?", e
-   * o TanStack usa o menor intervalo entre os observadores ativos, entao isso
-   * so acelera enquanto o modal esta aberto.
+   * Consulta somente o lote ou pedido criado. Nesse recorte a API não limita
+   * os terminais recentes; assim um lote grande nunca perde cancelados nem
+   * declara aceite sem ter confirmado todos os pedidos.
    */
-  const operationsQuery = useQuery({
-    queryKey: ['company', 'operations'],
-    queryFn: () => deliveriesApi.operations(token as string),
+  const trackedOperationsQuery = useQuery({
+    queryKey: ['deliveries', 'tracked-operations', trackedBatchId ?? trackedIds[0]],
+    queryFn: () =>
+      deliveriesApi.operations(token as string, {
+        ...(trackedBatchId
+          ? { batchId: trackedBatchId }
+          : { deliveryId: trackedIds[0] as string }),
+      }),
     enabled: Boolean(token) && trackedIds.length > 0,
     refetchInterval: 3_000,
   });
 
   const tracked = [
-    ...(operationsQuery.data?.active ?? []),
-    ...(operationsQuery.data?.recent ?? []),
+    ...(trackedOperationsQuery.data?.active ?? []),
+    ...(trackedOperationsQuery.data?.recent ?? []),
   ].filter((delivery) => trackedIds.includes(delivery.id));
+  const trackingIncomplete = tracked.length !== trackedIds.length;
 
   /**
    * Quantas ainda procuram entregador.
@@ -92,6 +96,31 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     (delivery) => delivery.status === 'AWAITING_DRIVER' || delivery.status === 'SCHEDULED',
   ).length;
   const cancelledCount = tracked.filter((delivery) => delivery.status === 'CANCELLED').length;
+
+  function trackingMessage(): string {
+    if (trackedOperationsQuery.isError) {
+      return 'Não foi possível consultar o andamento. Tente novamente.';
+    }
+    if (trackedOperationsQuery.isLoading || trackingIncomplete) {
+      return 'Atualizando o andamento de todos os pedidos...';
+    }
+    if (cancelledCount === trackedIds.length) {
+      return trackedIds.length === 1 ? 'Pedido cancelado.' : 'Pedidos cancelados.';
+    }
+    if (pendingCount === 0) {
+      if (cancelledCount > 0) {
+        const acceptedCount = trackedIds.length - cancelledCount;
+        return `${acceptedCount} aceito(s) e ${cancelledCount} cancelado(s).`;
+      }
+      return tracked.length === 1 ? 'Entregador a caminho.' : 'Todos os pedidos foram aceitos.';
+    }
+    if (pendingCount === trackedIds.length) {
+      return trackedIds.length === 1
+        ? 'Pedido criado. Acompanhe abaixo até um entregador aceitar.'
+        : `${trackedIds.length} pedidos criados. Acompanhe abaixo até um entregador aceitar.`;
+    }
+    return `${pendingCount} de ${trackedIds.length} ainda procurando entregador.`;
+  }
 
   const pickupAddress = addressQuery.data?.address ?? null;
   const serviceTypes = serviceTypesQuery.data ?? [];
@@ -112,18 +141,31 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
         ...(driverNote.trim() && { driverNote: driverNote.trim() }),
       };
 
-      return parsedQuantity === 1
-        ? deliveriesApi.create(token as string, delivery)
+      const request =
+        parsedQuantity === 1
+          ? { kind: 'single' as const, delivery }
+          : {
+              kind: 'batch' as const,
+              deliveries: Array.from({ length: parsedQuantity }, () => delivery),
+            };
+      const attempt = idempotencyAttemptFor(creationAttempt.current, request);
+      creationAttempt.current = attempt;
+
+      return request.kind === 'single'
+        ? deliveriesApi.create(token as string, { ...delivery, idempotencyKey: attempt.key })
         : deliveriesApi.createBatch(token as string, {
-            deliveries: Array.from({ length: parsedQuantity }, () => delivery),
+            idempotencyKey: attempt.key,
+            deliveries: request.deliveries,
           });
     },
     onSuccess: (result) => {
+      creationAttempt.current = null;
       void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
       void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
       setTrackedIds(
         'deliveries' in result ? result.deliveries.map((item) => item.id) : [result.id],
       );
+      setTrackedBatchId('deliveries' in result ? result.batchId : null);
       setError(null);
     },
     onError: (mutationError) => {
@@ -187,7 +229,9 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   });
 
   function reset() {
+    creationAttempt.current = null;
     setTrackedIds([]);
+    setTrackedBatchId(null);
     setQuantity('1');
     setRequiresReturn(false);
     setDriverNote('');
@@ -220,23 +264,18 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                 aceitar" depois que ja aceitaram seria a tela mentindo para quem
                 esta olhando justamente para saber disso.
               */}
-              <p className="text-sm text-muted-foreground">
-                {cancelledCount === trackedIds.length
-                  ? trackedIds.length === 1
-                    ? 'Pedido cancelado.'
-                    : 'Pedidos cancelados.'
-                  : pendingCount === 0
-                    ? tracked.length === 1
-                      ? 'Entregador a caminho.'
-                      : 'Todos os pedidos foram aceitos.'
-                    : pendingCount === trackedIds.length
-                      ? trackedIds.length === 1
-                        ? 'Pedido criado. Acompanhe abaixo até um entregador aceitar.'
-                        : `${trackedIds.length} pedidos criados. Acompanhe abaixo até um entregador aceitar.`
-                      : `${pendingCount} de ${trackedIds.length} ainda procurando entregador.`}
-              </p>
+              <p className="text-sm text-muted-foreground">{trackingMessage()}</p>
 
-              {tracked.length === 0 ? (
+              {trackedOperationsQuery.isError ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void trackedOperationsQuery.refetch()}
+                >
+                  Tentar novamente
+                </Button>
+              ) : tracked.length === 0 ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                   Carregando...
@@ -307,7 +346,15 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                               variant="outline"
                               className="text-destructive hover:text-destructive"
                               disabled={actingOnId === delivery.id}
-                              onClick={() => cancelMutation.mutate(delivery.id)}
+                              onClick={() => {
+                                const message =
+                                  delivery.batchId && trackedIds.length > 1
+                                    ? `Cancelar os ${trackedIds.length} pedidos deste lote?`
+                                    : `Cancelar o pedido #${delivery.displayNumber}?`;
+                                if (window.confirm(message)) {
+                                  cancelMutation.mutate(delivery.id);
+                                }
+                              }}
                             >
                               <X className="mr-1.5 size-3.5" aria-hidden="true" />
                               {delivery.batchId && trackedIds.length > 1

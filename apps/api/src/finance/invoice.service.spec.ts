@@ -10,7 +10,11 @@ describe('InvoiceService', () => {
     invoiceStatusHistory: { create: jest.fn() },
   };
   // `getListItem` roda FORA da transacao, relendo a fatura recem-criada.
-  const prisma = { $transaction: jest.fn(), invoice: { findUnique: jest.fn() } };
+  const prisma = {
+    $transaction: jest.fn(),
+    invoice: { findUnique: jest.fn(), findMany: jest.fn() },
+    companyTeamMember: { findFirst: jest.fn() },
+  };
   const clock = { now: jest.fn() };
   const service = new InvoiceService(prisma as never, clock as FinancialClock);
   const admin = { id: 'admin-1' } as User;
@@ -25,6 +29,8 @@ describe('InvoiceService', () => {
     tx.invoice.create.mockResolvedValue({ id: 'fatura-1' });
     tx.invoice.findMany.mockResolvedValue([]);
     tx.invoiceStatusHistory.create.mockResolvedValue({});
+    prisma.invoice.findMany.mockResolvedValue([]);
+    prisma.companyTeamMember.findFirst.mockResolvedValue({ companyId: 'empresa-1' });
     prisma.invoice.findUnique.mockResolvedValue({
       id: 'fatura-1',
       companyId: 'empresa-1',
@@ -91,6 +97,122 @@ describe('InvoiceService', () => {
     const criada = tx.invoice.create.mock.calls[0]?.[0].data;
     expect(criada.issueDate.toISOString().slice(0, 10)).toBe('2026-08-24');
     expect(criada.dueDate.getTime()).toBe(criada.issueDate.getTime());
+  });
+
+  it('filtra a data civil da fatura sem deslocar o dia pelo fuso', async () => {
+    await service.listForAdmin({ from: '2026-08-24', to: '2026-08-24' });
+
+    expect(prisma.invoice.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          issueDate: {
+            gte: new Date('2026-08-24T00:00:00.000Z'),
+            lte: new Date('2026-08-24T00:00:00.000Z'),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('fecha os totais monetarios em centavos inteiros', async () => {
+    tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+    tx.delivery.findMany.mockResolvedValue([
+      {
+        id: 'entrega-1',
+        companyId: 'empresa-1',
+        totalValue: 0.1,
+        driverValue: 0.03,
+        platformValue: 0.07,
+      },
+      {
+        id: 'entrega-2',
+        companyId: 'empresa-1',
+        totalValue: 0.2,
+        driverValue: 0.06,
+        platformValue: 0.14,
+      },
+    ]);
+
+    await service.closeScheduledInvoices(new Date('2026-08-24T12:00:00.000Z'));
+
+    expect(tx.invoice.create.mock.calls[0]?.[0].data).toEqual(
+      expect.objectContaining({ totalValue: 0.3, driverValueSum: 0.09, platformValueSum: 0.21 }),
+    );
+  });
+
+  describe('contrato visivel pela empresa', () => {
+    const companyUser = { id: 'company-user-1', type: 'COMPANY_MEMBER' } as User;
+
+    function detailedInvoice() {
+      return {
+        id: 'fatura-1',
+        companyId: 'empresa-1',
+        number: 'FAT-20260824-TESTE',
+        status: 'PENDING',
+        issueDate: new Date('2026-08-24T00:00:00.000Z'),
+        dueDate: new Date('2026-08-24T00:00:00.000Z'),
+        paymentDate: null,
+        paymentMethod: null,
+        totalValue: 12.5,
+        driverValueSum: 9.2,
+        platformValueSum: 3.3,
+        company: { tradeName: 'Loja Teste' },
+        deliveries: [
+          {
+            id: 'entrega-1',
+            displayNumber: 1170,
+            totalValue: 12.5,
+            driverValue: 9.2,
+            platformValue: 3.3,
+            statusChangedAt: new Date('2026-08-23T18:00:00.000Z'),
+          },
+        ],
+        statusHistory: [],
+      };
+    }
+
+    it('remove repasse e margem do detalhe da empresa', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(detailedInvoice());
+
+      const detail = await service.detailForCompany(companyUser, 'fatura-1');
+      const serialized = JSON.stringify(detail);
+
+      expect(serialized).not.toContain('driverValue');
+      expect(serialized).not.toContain('platformValue');
+      expect(detail.totalValue).toBe(12.5);
+      expect(detail.deliveries[0]).toEqual({
+        id: 'entrega-1',
+        displayNumber: 1170,
+        totalValue: 12.5,
+        completedAt: '2026-08-23T18:00:00.000Z',
+      });
+    });
+
+    it('remove os totais internos tambem da listagem da empresa', async () => {
+      const invoice = detailedInvoice();
+      prisma.invoice.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ...invoice, _count: { deliveries: 1 } }]);
+
+      const [item] = await service.listForCompany(companyUser, {});
+
+      expect(item).not.toHaveProperty('driverValueSum');
+      expect(item).not.toHaveProperty('platformValueSum');
+      expect(item?.totalValue).toBe(12.5);
+    });
+
+    it('mantem os valores internos no detalhe administrativo', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(detailedInvoice());
+
+      const detail = await service.detailForAdmin('fatura-1');
+
+      expect(detail.driverValueSum).toBe(9.2);
+      expect(detail.platformValueSum).toBe(3.3);
+      expect(detail.deliveries[0]).toEqual(
+        expect.objectContaining({ driverValue: 9.2, platformValue: 3.3 }),
+      );
+    });
   });
 
   describe('cancelInvoice', () => {

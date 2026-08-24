@@ -714,6 +714,14 @@ export interface InvoiceDetail extends InvoiceListItem {
     driverValue: number;
     platformValue: number;
     completedAt: string;
+    /**
+     * Valor do retorno ao local de coleta, quando o pedido exige um.
+     *
+     * Vai 100% para o motoboy, sem comissao da plataforma — e por isso que um
+     * pedido com retorno aparece com o dobro do total e a MESMA comissao dos
+     * outros. Sem este campo, a linha parece anomalia na fatura.
+     */
+    returnValue: number | null;
   }>;
   statusHistory: Array<{
     fromStatus: InvoiceStatus | null;
@@ -722,4 +730,20 @@ export interface InvoiceDetail extends InvoiceListItem {
     changedBy: { id: string; name: string } | null;
     note: string | null;
   }>;
+}
+
+/** Fatura visível pela empresa, sem repasse ou margem interna da plataforma. */
+export type CompanyInvoiceListItem = Omit<
+  InvoiceListItem,
+  'driverValueSum' | 'platformValueSum'
+>;
+
+export interface CompanyInvoiceDetail extends CompanyInvoiceListItem {
+  deliveries: Array<{
+    id: string;
+    displayNumber: number;
+    totalValue: number;
+    completedAt: string;
+  }>;
+  statusHistory: InvoiceDetail['statusHistory'];
 }

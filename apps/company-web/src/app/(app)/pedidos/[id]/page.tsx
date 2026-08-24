@@ -70,6 +70,10 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
     queryKey: ['company', 'delivery', id],
     queryFn: () => deliveriesApi.detail(token as string, id),
     enabled: Boolean(token),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'COMPLETED' || status === 'CANCELLED' ? false : 10_000;
+    },
   });
   const trackingQuery = useQuery({
     queryKey: ['company', 'tracking', id],
@@ -136,7 +140,11 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
             <Button
               variant="outline"
               disabled={cancelMutation.isPending}
-              onClick={() => cancelMutation.mutate()}
+              onClick={() => {
+                if (window.confirm(`Cancelar o pedido #${delivery.displayNumber}?`)) {
+                  cancelMutation.mutate();
+                }
+              }}
             >
               {cancelMutation.isPending ? 'Cancelando...' : 'Cancelar pedido'}
             </Button>

@@ -1,5 +1,9 @@
 import type { DeliveryStatus } from '@prisma/client';
-import { computeStageTimes, type StatusTransition } from './delivery-stage-times';
+import {
+  computeStageTimes,
+  StageTimesAccumulator,
+  type StatusTransition,
+} from './delivery-stage-times';
 
 const BASE = new Date('2026-08-22T12:00:00.000Z').getTime();
 
@@ -38,6 +42,14 @@ describe('computeStageTimes', () => {
       entrega: { samples: 0, averageMinutes: null, medianMinutes: null, p90Minutes: null },
       total: { samples: 0, averageMinutes: null, medianMinutes: null, p90Minutes: null },
     });
+  });
+
+  it('preserva o resultado ao acumular paginas separadas', () => {
+    const accumulator = new StageTimesAccumulator();
+    accumulator.add([healthy()]);
+    accumulator.add([healthy(1000)]);
+
+    expect(accumulator.result()).toEqual(computeStageTimes([healthy(), healthy(1000)]));
   });
 
   it('ignora a etapa que nao chegou ao fim, sem descartar as anteriores', () => {

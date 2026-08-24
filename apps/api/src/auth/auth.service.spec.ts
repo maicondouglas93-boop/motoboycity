@@ -340,10 +340,29 @@ describe('AuthService', () => {
         avatarUrl: null,
       });
       expect(result.company).toEqual({ id: 'company-1', status: 'PENDING_APPROVAL' });
+      expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith({
+        where: { userId: 'user-1', active: true },
+        include: { company: true },
+      });
       expect(jwtService.signAsync).toHaveBeenCalledWith({
         sub: 'user-1',
         credentialVersion: credentialFingerprint(passwordHash),
       });
+    });
+
+    it('rejeita login de membro cujo vínculo com a empresa está inativo', async () => {
+      const passwordHash = await bcrypt.hash(loginPayload.password, 4);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        name: 'Maria Silva',
+        email: loginPayload.email,
+        type: 'COMPANY_MEMBER',
+        passwordHash,
+      });
+      prisma.companyTeamMember.findFirst.mockResolvedValue(null);
+
+      await expect(service.login(loginPayload)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
 
     it('rejeita quando o e-mail não existe', async () => {

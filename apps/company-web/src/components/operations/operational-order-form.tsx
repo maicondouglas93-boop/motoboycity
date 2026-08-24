@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type SubmitEvent } from 'react';
+import { useRef, useState, type SubmitEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type {
@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { deliveriesApi } from '@/lib/api-client';
+import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import type { CloneSeed } from './clone-delivery';
 import {
   GoogleAddressAutocomplete,
@@ -108,6 +109,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
   const [cloneWarnings, setCloneWarnings] = useState<string[]>(clone?.seed.warnings ?? []);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const creationAttempt = useRef<IdempotencyAttempt | null>(null);
 
   function discardClone() {
     setClonedFrom(null);
@@ -165,11 +167,26 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
   }
 
   const mutation = useMutation({
-    mutationFn: async () =>
-      mode === 'batch'
-        ? deliveriesApi.createBatch(token, { deliveries: drafts.map(payloadFor) })
-        : deliveriesApi.create(token, payloadFor(drafts[0]!)),
+    mutationFn: async () => {
+      const request =
+        mode === 'batch'
+          ? { kind: 'batch' as const, deliveries: drafts.map(payloadFor) }
+          : { kind: 'single' as const, delivery: payloadFor(drafts[0]!) };
+      const attempt = idempotencyAttemptFor(creationAttempt.current, request);
+      creationAttempt.current = attempt;
+
+      return request.kind === 'batch'
+        ? deliveriesApi.createBatch(token, {
+            idempotencyKey: attempt.key,
+            deliveries: request.deliveries,
+          })
+        : deliveriesApi.create(token, {
+            ...request.delivery,
+            idempotencyKey: attempt.key,
+          });
+    },
     onSuccess: (result) => {
+      creationAttempt.current = null;
       const count = 'deliveries' in result ? result.deliveries.length : 1;
       setMessage(
         count === 1 ? 'Pedido criado e enviado ao despacho.' : `${count} pedidos criados.`,
@@ -192,6 +209,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
   });
 
   function changeMode(nextMode: 'single' | 'batch') {
+    creationAttempt.current = null;
     setMode(nextMode);
     setDrafts((current) =>
       nextMode === 'batch'

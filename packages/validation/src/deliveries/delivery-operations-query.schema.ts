@@ -14,6 +14,8 @@ export const deliveryOperationsQuerySchema = z.object({
     .optional(),
   companyId: z.uuid().optional(),
   driverId: z.uuid().optional(),
+  batchId: z.uuid().optional(),
+  deliveryId: z.uuid().optional(),
 });
 
 export const searchDeliveriesQuerySchema = z

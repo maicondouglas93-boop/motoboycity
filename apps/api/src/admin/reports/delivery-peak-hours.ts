@@ -58,6 +58,15 @@ export function computePeakHours(
     weekdayCounts[parts.weekday]! += 1;
   }
 
+  return computePeakHoursFromCounts(hourCounts, weekdayCounts, period);
+}
+
+/** Mesma conta, para relatórios que agregam linhas em páginas no servidor. */
+export function computePeakHoursFromCounts(
+  hourCounts: ReadonlyArray<number>,
+  weekdayCounts: ReadonlyArray<number>,
+  period: { from: Date; to: Date },
+): DeliveryPeakHours {
   const occurrences = weekdayOccurrences(dateInSaoPaulo(period.from), dateInSaoPaulo(period.to));
   const daysInPeriod = occurrences.reduce((total, value) => total + value, 0);
 
@@ -80,7 +89,7 @@ export function computePeakHours(
    * não premiar o dia que apareceu mais vezes no calendário. Empate fica com
    * o primeiro, só para a resposta ser estável entre execuções.
    */
-  const totalConsidered = createdAt.length;
+  const totalConsidered = hourCounts.reduce((total, count) => total + count, 0);
   const busiestHour =
     totalConsidered === 0
       ? null

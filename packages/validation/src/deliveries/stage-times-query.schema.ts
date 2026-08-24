@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { dateOnlySchema } from './list-deliveries-query.schema';
 
+function civilDayNumber(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return Math.floor(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1) / 86_400_000);
+}
+
 /**
  * Consulta de tempo por etapa. Mesmo recorte da listagem, sem `status`:
  * filtrar por um status só tornaria a maioria das etapas vazia, já que cada
@@ -30,6 +35,14 @@ export const deliveryStageTimesQuerySchema = z
   .refine((data) => !data.from || !data.to || data.from <= data.to, {
     message: 'A data inicial nao pode ser posterior a data final.',
     path: ['from'],
-  });
+  })
+  .refine(
+    (data) =>
+      !data.from || !data.to || civilDayNumber(data.to) - civilDayNumber(data.from) <= 365,
+    {
+      message: 'O relatório aceita no máximo 366 dias por consulta.',
+      path: ['to'],
+    },
+  );
 
 export type DeliveryStageTimesQuery = z.infer<typeof deliveryStageTimesQuerySchema>;

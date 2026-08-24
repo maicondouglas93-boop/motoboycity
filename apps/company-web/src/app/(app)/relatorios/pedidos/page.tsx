@@ -31,6 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { deliveriesApi } from '@/lib/api-client';
+import { somarDinheiro } from '@/lib/dinheiro';
 import { defaultReportPeriod, isReportDate } from '@/lib/report-period';
 import { session } from '@/lib/session';
 
@@ -136,7 +137,7 @@ function OrdersReportView() {
   const pageSummary = useMemo(() => {
     const items = ordersQuery.data?.items ?? [];
     return {
-      knownValue: items.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0),
+      knownValue: somarDinheiro(items.map((delivery) => delivery.totalValue)),
       pendingPrice: items.filter((delivery) => delivery.totalValue === null).length,
     };
   }, [ordersQuery.data?.items]);

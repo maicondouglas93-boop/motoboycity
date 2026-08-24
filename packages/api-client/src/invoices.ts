@@ -1,4 +1,6 @@
 import type {
+  CompanyInvoiceDetail,
+  CompanyInvoiceListItem,
   InvoiceDetail,
   InvoiceListItem,
   InvoiceStatus,
@@ -27,18 +29,18 @@ export interface CompanyInvoicesApiConfig {
 
 export function createCompanyInvoicesApi({ baseUrl }: CompanyInvoicesApiConfig) {
   return {
-    async list(accessToken: string, filters?: InvoiceFilters): Promise<InvoiceListItem[]> {
+    async list(accessToken: string, filters?: InvoiceFilters): Promise<CompanyInvoiceListItem[]> {
       const response = await fetch(`${baseUrl}/company/invoices${queryFromFilters(filters)}`, {
         headers: withAuth(accessToken),
       });
-      return parseJsonOrThrow<InvoiceListItem[]>(response);
+      return parseJsonOrThrow<CompanyInvoiceListItem[]>(response);
     },
 
-    async detail(accessToken: string, invoiceId: string): Promise<InvoiceDetail> {
+    async detail(accessToken: string, invoiceId: string): Promise<CompanyInvoiceDetail> {
       const response = await fetch(`${baseUrl}/company/invoices/${invoiceId}`, {
         headers: withAuth(accessToken),
       });
-      return parseJsonOrThrow<InvoiceDetail>(response);
+      return parseJsonOrThrow<CompanyInvoiceDetail>(response);
     },
   };
 }

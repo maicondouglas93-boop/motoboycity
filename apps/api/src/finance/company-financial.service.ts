@@ -1,5 +1,4 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import type { User } from '@prisma/client';
 import type {
   CompanyFinancialPosition,
@@ -181,7 +180,7 @@ export class CompanyFinancialService {
     // que nao quer dizer nada.
     const inicioAnterior = new Date(inicio.getTime() - duracao);
 
-    const [atual, anterior, porModalidade, pedidosDoPeriodo, porStatus, comRetorno] =
+    const [atual, anterior, porModalidade, serieDiaria, porStatus, comRetorno] =
       await Promise.all([
       this.totaisDoPeriodo(companyId, inicio, fimExclusivo),
       this.totaisDoPeriodo(companyId, inicioAnterior, inicio),
@@ -192,11 +191,7 @@ export class CompanyFinancialService {
         orderBy: { _count: { serviceTypeId: 'desc' } },
         take: 1,
       }),
-      this.prisma.delivery.findMany({
-        where: { companyId, createdAt: { gte: inicio, lt: fimExclusivo } },
-        select: { createdAt: true, totalValue: true },
-        orderBy: { createdAt: 'asc' },
-      }),
+      this.serieDiariaDoPeriodo(companyId, inicio, fimExclusivo),
       this.prisma.delivery.groupBy({
         by: ['status'],
         where: { companyId, createdAt: { gte: inicio, lt: fimExclusivo } },
@@ -225,7 +220,7 @@ export class CompanyFinancialService {
       // tela mostrar "+100%" para a primeira semana de uso da loja.
       previous: anterior.count === 0 ? null : anterior,
       topServiceType: modalidade,
-      daily: this.serieDiaria(pedidosDoPeriodo),
+      daily: serieDiaria,
       byStatus: Object.fromEntries(
         porStatus.map((linha) => [linha.status, linha._count._all]),
       ),
@@ -277,18 +272,34 @@ export class CompanyFinancialService {
    * Agrupar por data UTC jogaria todo pedido feito depois das 21h para o dia
    * seguinte — justamente o horario de pico da entrega.
    */
-  private serieDiaria(
-    pedidos: ReadonlyArray<{ createdAt: Date; totalValue: Prisma.Decimal | null }>,
-  ): Array<{ date: string; count: number; value: number }> {
+  private async serieDiariaDoPeriodo(
+    companyId: string,
+    inicio: Date,
+    fimExclusivo: Date,
+  ): Promise<Array<{ date: string; count: number; value: number }>> {
     const porDia = new Map<string, { count: number; centavos: number }>();
+    let cursor: string | undefined;
 
-    for (const pedido of pedidos) {
-      const dia = dateInSaoPaulo(pedido.createdAt);
-      const acumulado = porDia.get(dia) ?? { count: 0, centavos: 0 };
-      acumulado.count += 1;
-      acumulado.centavos += Math.round(Number(pedido.totalValue ?? 0) * 100);
-      porDia.set(dia, acumulado);
-    }
+    do {
+      const pedidos = await this.prisma.delivery.findMany({
+        where: { companyId, createdAt: { gte: inicio, lt: fimExclusivo } },
+        select: { id: true, createdAt: true, totalValue: true },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      });
+
+      for (const pedido of pedidos) {
+        const dia = dateInSaoPaulo(pedido.createdAt);
+        const acumulado = porDia.get(dia) ?? { count: 0, centavos: 0 };
+        acumulado.count += 1;
+        acumulado.centavos += Math.round(Number(pedido.totalValue ?? 0) * 100);
+        porDia.set(dia, acumulado);
+      }
+
+      if (pedidos.length < 500) break;
+      cursor = pedidos.at(-1)?.id;
+    } while (cursor);
 
     return [...porDia.entries()]
       .sort(([esquerda], [direita]) => esquerda.localeCompare(direita))
@@ -368,7 +379,7 @@ export class CompanyFinancialService {
       throw new ForbiddenException('Acesso restrito a empresas.');
     }
     const vinculo = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
       select: { companyId: true },
     });
     if (!vinculo) {

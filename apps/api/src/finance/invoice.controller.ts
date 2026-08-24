@@ -15,7 +15,13 @@ import { CompanyOnlyGuard } from '../auth/company-only.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { InvoiceService, type InvoiceDetail, type InvoiceListItem } from './invoice.service';
+import {
+  InvoiceService,
+  type CompanyInvoiceDetail,
+  type CompanyInvoiceListItem,
+  type InvoiceDetail,
+  type InvoiceListItem,
+} from './invoice.service';
 
 @Controller('admin/financial/invoices')
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
@@ -77,12 +83,15 @@ export class CompanyInvoicesController {
   list(
     @Query(new ZodValidationPipe(listInvoicesQuerySchema)) query: ListInvoicesQuery,
     @CurrentUser() companyUser: User,
-  ): Promise<InvoiceListItem[]> {
+  ): Promise<CompanyInvoiceListItem[]> {
     return this.invoiceService.listForCompany(companyUser, query);
   }
 
   @Get(':id')
-  detail(@Param('id') id: string, @CurrentUser() companyUser: User): Promise<InvoiceDetail> {
+  detail(
+    @Param('id') id: string,
+    @CurrentUser() companyUser: User,
+  ): Promise<CompanyInvoiceDetail> {
     return this.invoiceService.detailForCompany(companyUser, id);
   }
 }

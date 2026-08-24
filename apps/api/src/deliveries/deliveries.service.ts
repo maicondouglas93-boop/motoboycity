@@ -7,7 +7,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   CompleteReturnPayload,
   CreateDeliveryBatchPayload,
@@ -36,7 +36,7 @@ import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
 import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
-import { computeStageTimes } from './delivery-stage-times';
+import { StageTimesAccumulator } from './delivery-stage-times';
 import {
   checkRetroactiveMarking,
   describeDeclaredTime,
@@ -215,6 +215,16 @@ export class DeliveriesService {
       throw new ForbiddenException('Sua empresa precisa estar aprovada para lançar pedidos.');
     }
 
+    const idempotentDeliveryId = payload.idempotencyKey
+      ? this.deterministicUuid(`delivery:${company.id}:${payload.idempotencyKey}`)
+      : null;
+    if (idempotentDeliveryId) {
+      const existing = await this.resumeSingleCreation(user, company.id, idempotentDeliveryId);
+      if (existing) {
+        return existing;
+      }
+    }
+
     const pickupAddress = await this.prisma.companyAddress.findFirst({
       where: { companyId: company.id, isPrimary: true },
     });
@@ -282,77 +292,89 @@ export class DeliveriesService {
       ? await this.resolverCoordenadaDoDestino(payload.dropoffAddress!)
       : { lat: null, lng: null };
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const delivery = await tx.delivery.create({
-        data: {
-          companyId: company.id,
-          serviceTypeId: payload.serviceTypeId,
-          status: initialStatus,
-          scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
-          destinationKnownAtCreation,
-          distanceKm,
-          totalValue,
-          driverValue,
-          platformValue,
-          surchargeLabel,
-          surchargeValue,
-          paymentMethod: 'BILLED',
-          recipientName: payload.recipientName,
-          recipientPhone: payload.recipientPhone,
-          externalOrderNumber: payload.externalOrderNumber,
-          driverNote: payload.driverNote,
-          customerPaymentMethod: payload.customerPaymentMethod,
-          requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
-          requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
-          pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
-          requiresReturn: payload.requiresReturn ?? false,
-          returnValue,
-        },
-      });
-
-      const addresses: Prisma.DeliveryAddressCreateManyInput[] = [
-        {
-          deliveryId: delivery.id,
-          type: 'PICKUP',
-          street: pickupAddress.street,
-          number: pickupAddress.number,
-          complement: pickupAddress.complement,
-          city: pickupAddress.city,
-          state: pickupAddress.state,
-          zip: pickupAddress.zip,
-          lat: pickupAddress.lat,
-          lng: pickupAddress.lng,
-        },
-      ];
-      if (destinationKnownAtCreation) {
-        const dropoffAddress = payload.dropoffAddress!;
-        addresses.push({
-          deliveryId: delivery.id,
-          type: 'DROPOFF',
-          street: dropoffAddress.street,
-          number: dropoffAddress.number,
-          complement: dropoffAddress.complement,
-          city: dropoffAddress.city,
-          state: dropoffAddress.state,
-          zip: dropoffAddress.zip,
-          referenceNote: dropoffAddress.referenceNote,
-          lat: coordenadaDoDestino.lat,
-          lng: coordenadaDoDestino.lng,
+    let created: Delivery;
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+        const delivery = await tx.delivery.create({
+          data: {
+            ...(idempotentDeliveryId && { id: idempotentDeliveryId }),
+            companyId: company.id,
+            serviceTypeId: payload.serviceTypeId,
+            status: initialStatus,
+            scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
+            destinationKnownAtCreation,
+            distanceKm,
+            totalValue,
+            driverValue,
+            platformValue,
+            surchargeLabel,
+            surchargeValue,
+            paymentMethod: 'BILLED',
+            recipientName: payload.recipientName,
+            recipientPhone: payload.recipientPhone,
+            externalOrderNumber: payload.externalOrderNumber,
+            driverNote: payload.driverNote,
+            customerPaymentMethod: payload.customerPaymentMethod,
+            requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
+            requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
+            pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
+            requiresReturn: payload.requiresReturn ?? false,
+            returnValue,
+          },
         });
-      }
-      await tx.deliveryAddress.createMany({ data: addresses });
 
-      await tx.deliveryStatusHistory.create({
-        data: {
-          deliveryId: delivery.id,
-          fromStatus: null,
-          toStatus: initialStatus,
-          changedByUserId: user.id,
-        },
+        const addresses: Prisma.DeliveryAddressCreateManyInput[] = [
+          {
+            deliveryId: delivery.id,
+            type: 'PICKUP',
+            street: pickupAddress.street,
+            number: pickupAddress.number,
+            complement: pickupAddress.complement,
+            city: pickupAddress.city,
+            state: pickupAddress.state,
+            zip: pickupAddress.zip,
+            lat: pickupAddress.lat,
+            lng: pickupAddress.lng,
+          },
+        ];
+        if (destinationKnownAtCreation) {
+          const dropoffAddress = payload.dropoffAddress!;
+          addresses.push({
+            deliveryId: delivery.id,
+            type: 'DROPOFF',
+            street: dropoffAddress.street,
+            number: dropoffAddress.number,
+            complement: dropoffAddress.complement,
+            city: dropoffAddress.city,
+            state: dropoffAddress.state,
+            zip: dropoffAddress.zip,
+            referenceNote: dropoffAddress.referenceNote,
+            lat: coordenadaDoDestino.lat,
+            lng: coordenadaDoDestino.lng,
+          });
+        }
+        await tx.deliveryAddress.createMany({ data: addresses });
+
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: delivery.id,
+            fromStatus: null,
+            toStatus: initialStatus,
+            changedByUserId: user.id,
+          },
+        });
+
+        return delivery;
       });
-
-      return delivery;
-    });
+    } catch (error) {
+      if (idempotentDeliveryId && this.isUniqueConstraintError(error)) {
+        const existing = await this.resumeSingleCreation(user, company.id, idempotentDeliveryId);
+        if (existing) {
+          return existing;
+        }
+      }
+      throw error;
+    }
 
     if (initialStatus === 'AWAITING_DRIVER') {
       await this.dispatchService.dispatchDelivery(created.id);
@@ -372,6 +394,26 @@ export class DeliveriesService {
     }
     if (company.status !== 'ACTIVE') {
       throw new ForbiddenException('Sua empresa precisa estar aprovada para lançar pedidos.');
+    }
+
+    const batchId = payload.idempotencyKey
+      ? this.deterministicUuid(`delivery-batch:${company.id}:${payload.idempotencyKey}`)
+      : randomUUID();
+    const idempotentDeliveryIds = payload.idempotencyKey
+      ? payload.deliveries.map((_, index) =>
+          this.deterministicUuid(`delivery-batch-item:${batchId}:${index}`),
+        )
+      : null;
+    if (idempotentDeliveryIds) {
+      const existing = await this.resumeBatchCreation(
+        user,
+        company.id,
+        batchId,
+        idempotentDeliveryIds,
+      );
+      if (existing) {
+        return existing;
+      }
     }
 
     const pickupAddress = await this.prisma.companyAddress.findFirst({
@@ -437,80 +479,99 @@ export class DeliveriesService {
       ),
     );
 
-    const batchId = randomUUID();
-    const created = await this.prisma.$transaction(async (tx) => {
-      const deliveries = [];
-      for (const [indice, { item, destinationKnownAtCreation, distanceKm, quote }] of prepared.entries()) {
-        const delivery = await tx.delivery.create({
-          data: {
-            companyId: company.id,
-            serviceTypeId: item.serviceTypeId,
-            batchId,
-            status: 'AWAITING_DRIVER',
-            destinationKnownAtCreation,
-            distanceKm,
-            totalValue: quote ? quote.totalValue : null,
-            driverValue: quote ? quote.driverValue : null,
-            platformValue: quote ? quote.platformValue : null,
-            paymentMethod: 'BILLED',
-            recipientName: item.recipientName,
-            recipientPhone: item.recipientPhone,
-            externalOrderNumber: item.externalOrderNumber,
-            driverNote: item.driverNote,
-            customerPaymentMethod: item.customerPaymentMethod,
-            requiresDeliveryProof: item.requiresDeliveryProof ?? false,
-            requiresCollectionRecipient: item.requiresCollectionRecipient ?? false,
-            pickupSurchargeChargedToDriver: item.pickupSurchargeChargedToDriver ?? false,
-            requiresReturn: item.requiresReturn ?? false,
-            returnValue: quote && quote.returnValue > 0 ? quote.returnValue : null,
-          },
-        });
-
-        const addresses: Prisma.DeliveryAddressCreateManyInput[] = [
-          {
-            deliveryId: delivery.id,
-            type: 'PICKUP',
-            street: pickupAddress.street,
-            number: pickupAddress.number,
-            complement: pickupAddress.complement,
-            city: pickupAddress.city,
-            state: pickupAddress.state,
-            zip: pickupAddress.zip,
-            lat: pickupAddress.lat,
-            lng: pickupAddress.lng,
-          },
-        ];
-        if (destinationKnownAtCreation) {
-          const dropoffAddress = item.dropoffAddress!;
-          const coordenada = coordenadasDosDestinos[indice] ?? { lat: null, lng: null };
-          addresses.push({
-            deliveryId: delivery.id,
-            type: 'DROPOFF',
-            street: dropoffAddress.street,
-            number: dropoffAddress.number,
-            complement: dropoffAddress.complement,
-            city: dropoffAddress.city,
-            state: dropoffAddress.state,
-            zip: dropoffAddress.zip,
-            referenceNote: dropoffAddress.referenceNote,
-            lat: coordenada.lat,
-            lng: coordenada.lng,
+    let created: Delivery[];
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+        const deliveries = [];
+        for (const [
+          indice,
+          { item, destinationKnownAtCreation, distanceKm, quote },
+        ] of prepared.entries()) {
+          const delivery = await tx.delivery.create({
+            data: {
+              ...(idempotentDeliveryIds?.[indice] && { id: idempotentDeliveryIds[indice] }),
+              companyId: company.id,
+              serviceTypeId: item.serviceTypeId,
+              batchId,
+              status: 'AWAITING_DRIVER',
+              destinationKnownAtCreation,
+              distanceKm,
+              totalValue: quote ? quote.totalValue : null,
+              driverValue: quote ? quote.driverValue : null,
+              platformValue: quote ? quote.platformValue : null,
+              paymentMethod: 'BILLED',
+              recipientName: item.recipientName,
+              recipientPhone: item.recipientPhone,
+              externalOrderNumber: item.externalOrderNumber,
+              driverNote: item.driverNote,
+              customerPaymentMethod: item.customerPaymentMethod,
+              requiresDeliveryProof: item.requiresDeliveryProof ?? false,
+              requiresCollectionRecipient: item.requiresCollectionRecipient ?? false,
+              pickupSurchargeChargedToDriver: item.pickupSurchargeChargedToDriver ?? false,
+              requiresReturn: item.requiresReturn ?? false,
+              returnValue: quote && quote.returnValue > 0 ? quote.returnValue : null,
+            },
           });
-        }
-        await tx.deliveryAddress.createMany({ data: addresses });
 
-        await tx.deliveryStatusHistory.create({
-          data: {
-            deliveryId: delivery.id,
-            fromStatus: null,
-            toStatus: 'AWAITING_DRIVER',
-            changedByUserId: user.id,
-          },
-        });
-        deliveries.push(delivery);
+          const addresses: Prisma.DeliveryAddressCreateManyInput[] = [
+            {
+              deliveryId: delivery.id,
+              type: 'PICKUP',
+              street: pickupAddress.street,
+              number: pickupAddress.number,
+              complement: pickupAddress.complement,
+              city: pickupAddress.city,
+              state: pickupAddress.state,
+              zip: pickupAddress.zip,
+              lat: pickupAddress.lat,
+              lng: pickupAddress.lng,
+            },
+          ];
+          if (destinationKnownAtCreation) {
+            const dropoffAddress = item.dropoffAddress!;
+            const coordenada = coordenadasDosDestinos[indice] ?? { lat: null, lng: null };
+            addresses.push({
+              deliveryId: delivery.id,
+              type: 'DROPOFF',
+              street: dropoffAddress.street,
+              number: dropoffAddress.number,
+              complement: dropoffAddress.complement,
+              city: dropoffAddress.city,
+              state: dropoffAddress.state,
+              zip: dropoffAddress.zip,
+              referenceNote: dropoffAddress.referenceNote,
+              lat: coordenada.lat,
+              lng: coordenada.lng,
+            });
+          }
+          await tx.deliveryAddress.createMany({ data: addresses });
+
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: delivery.id,
+              fromStatus: null,
+              toStatus: 'AWAITING_DRIVER',
+              changedByUserId: user.id,
+            },
+          });
+          deliveries.push(delivery);
+        }
+        return deliveries;
+      });
+    } catch (error) {
+      if (idempotentDeliveryIds && this.isUniqueConstraintError(error)) {
+        const existing = await this.resumeBatchCreation(
+          user,
+          company.id,
+          batchId,
+          idempotentDeliveryIds,
+        );
+        if (existing) {
+          return existing;
+        }
       }
-      return deliveries;
-    });
+      throw error;
+    }
 
     const firstCreated = created[0];
     if (!firstCreated) {
@@ -591,7 +652,12 @@ export class DeliveriesService {
     const recentStatuses = requestedStatuses
       ? availableRecentStatuses.filter((status) => requestedStatuses.includes(status))
       : availableRecentStatuses;
-    const recentLimit = recentWindow?.limit === undefined ? 20 : recentWindow.limit;
+    const recentLimit =
+      recentWindow?.limit === undefined
+        ? filters.batchId || filters.deliveryId
+          ? null
+          : 20
+        : recentWindow.limit;
     const [active, recent] = await this.prisma.$transaction([
       this.prisma.delivery.findMany({
         where: { ...baseWhere, status: { in: activeStatuses } },
@@ -611,14 +677,14 @@ export class DeliveriesService {
         include: OPERATIONAL_DELIVERY_INCLUDE,
       }),
     ]);
-    const statuses = await this.prisma.delivery.findMany({
+    const statusGroups = await this.prisma.delivery.groupBy({
+      by: ['status'],
       where: baseWhere,
-      select: { status: true },
+      _count: { _all: true },
     });
-    const counts = statuses.reduce<Record<string, number>>((result, delivery) => {
-      result[delivery.status] = (result[delivery.status] ?? 0) + 1;
-      return result;
-    }, {});
+    const counts = Object.fromEntries(
+      statusGroups.map((group) => [group.status, group._count._all]),
+    );
 
     return {
       active: active.map((delivery) => this.toOperationalItem(delivery)),
@@ -1440,32 +1506,125 @@ export class DeliveriesService {
 
     const scope = await this.resolveListScope(user);
 
-    const deliveries = await this.prisma.delivery.findMany({
-      where: {
-        ...scope,
-        ...(filters.driverId && { driverId: filters.driverId }),
-        ...(filters.companyId && { companyId: filters.companyId }),
-        status: { not: 'CANCELLED' },
-        ...(filters.from || filters.to
-          ? {
-              createdAt: {
-                ...(filters.from && { gte: this.startOfDay(filters.from) }),
-                ...(filters.to && { lte: this.endOfDay(filters.to) }),
-              },
-            }
-          : {}),
-      },
-      select: {
-        statusHistory: {
-          select: { fromStatus: true, toStatus: true, changedAt: true, occurredAt: true },
-        },
-      },
+    const accumulator = new StageTimesAccumulator({
+      excludeRetroactive: filters.excludeRetroactive,
     });
+    let cursor: string | undefined;
 
-    return computeStageTimes(
-      deliveries.map((delivery) => delivery.statusHistory),
-      { excludeRetroactive: filters.excludeRetroactive },
-    );
+    do {
+      const deliveries = await this.prisma.delivery.findMany({
+        where: {
+          ...scope,
+          ...(filters.driverId && { driverId: filters.driverId }),
+          ...(filters.companyId && { companyId: filters.companyId }),
+          status: { not: 'CANCELLED' },
+          ...(filters.from || filters.to
+            ? {
+                createdAt: {
+                  ...(filters.from && { gte: this.startOfDay(filters.from) }),
+                  ...(filters.to && { lte: this.endOfDay(filters.to) }),
+                },
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          statusHistory: {
+            select: { fromStatus: true, toStatus: true, changedAt: true, occurredAt: true },
+          },
+        },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      });
+
+      accumulator.add(deliveries.map((delivery) => delivery.statusHistory));
+      if (deliveries.length < 500) break;
+      cursor = deliveries.at(-1)?.id;
+    } while (cursor);
+
+    return accumulator.result();
+  }
+
+  /**
+   * Uma chave de repeticao vira um UUID estavel, sem guardar dado novo no
+   * banco. O escopo inclui a empresa e o tipo de criacao, portanto a mesma
+   * chave pode ser usada por lojas diferentes sem colisao.
+   */
+  private deterministicUuid(scope: string): string {
+    const bytes = createHash('sha256').update(scope).digest().subarray(0, 16);
+    // UUID v8 e reservado para esquemas deterministas definidos pela aplicacao.
+    bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
+    bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+    const hex = bytes.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  private isUniqueConstraintError(error: unknown): boolean {
+    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
+  }
+
+  /**
+   * Se o banco confirmou a criacao mas a resposta ou o despacho falhou, a
+   * repeticao retoma apenas o efeito externo. Nao recria endereco nem
+   * historico e nao republica DELIVERY_CREATED.
+   */
+  private async resumeSingleCreation(
+    user: User,
+    companyId: string,
+    deliveryId: string,
+  ): Promise<DeliveryDetail | null> {
+    const existing = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      select: { id: true, companyId: true, status: true, scheduledAt: true },
+    });
+    if (!existing) {
+      return null;
+    }
+    if (existing.companyId !== companyId) {
+      throw new ConflictException('A chave de repeticao ja foi usada em outro pedido.');
+    }
+
+    if (existing.status === 'AWAITING_DRIVER') {
+      await this.dispatchService.dispatchDelivery(existing.id);
+    } else if (existing.status === 'SCHEDULED' && existing.scheduledAt) {
+      await this.dispatchService.scheduleActivation(existing.id, existing.scheduledAt);
+    }
+    return this.detail(user, existing.id);
+  }
+
+  private async resumeBatchCreation(
+    user: User,
+    companyId: string,
+    batchId: string,
+    expectedDeliveryIds: string[],
+  ): Promise<DeliveryBatchDetail | null> {
+    const existing = await this.prisma.delivery.findMany({
+      where: { batchId },
+      select: { id: true, companyId: true, status: true },
+    });
+    if (existing.length === 0) {
+      return null;
+    }
+
+    const byId = new Map(existing.map((delivery) => [delivery.id, delivery]));
+    const matchesOriginalBatch =
+      existing.length === expectedDeliveryIds.length &&
+      existing.every((delivery) => delivery.companyId === companyId) &&
+      expectedDeliveryIds.every((id) => byId.has(id));
+    if (!matchesOriginalBatch) {
+      throw new ConflictException('A chave de repeticao ja foi usada em outro lote.');
+    }
+
+    const ordered = expectedDeliveryIds.map((id) => byId.get(id)!);
+    const awaitingDispatch = ordered.find((delivery) => delivery.status === 'AWAITING_DRIVER');
+    if (awaitingDispatch) {
+      await this.dispatchService.dispatchDelivery(awaitingDispatch.id);
+    }
+    return {
+      batchId,
+      deliveries: await Promise.all(ordered.map((delivery) => this.detail(user, delivery.id))),
+    };
   }
 
   private async resolveListScope(user: User): Promise<{ companyId?: string; driverId?: string }> {
@@ -1493,7 +1652,7 @@ export class DeliveriesService {
       return null;
     }
     const membership = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
       include: { company: true },
     });
     if (!membership) {
@@ -1590,6 +1749,8 @@ export class DeliveriesService {
       statuses?: DeliveryStatus[];
       companyId?: string;
       driverId?: string;
+      batchId?: string;
+      deliveryId?: string;
       from?: string;
       to?: string;
     },
@@ -1604,6 +1765,7 @@ export class DeliveriesService {
       ? {
           OR: [
             { externalOrderNumber: { contains: query, mode: 'insensitive' } },
+            { serviceType: { name: { contains: query, mode: 'insensitive' } } },
             ...(parsedDisplayNumber === null ? [] : [{ displayNumber: parsedDisplayNumber }]),
             ...(isUuid ? [{ id: query }] : []),
           ],
@@ -1616,6 +1778,8 @@ export class DeliveriesService {
       ...(filters.statuses?.length && { status: { in: filters.statuses } }),
       ...(filters.driverId && { driverId: filters.driverId }),
       ...(filters.companyId && { companyId: filters.companyId }),
+      ...(filters.batchId && { batchId: filters.batchId }),
+      ...(filters.deliveryId && { id: filters.deliveryId }),
       ...(filters.from || filters.to
         ? {
             createdAt: {

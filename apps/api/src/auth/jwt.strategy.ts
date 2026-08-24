@@ -31,6 +31,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (payload.credentialVersion !== credentialFingerprint(user.passwordHash)) {
       throw new UnauthorizedException('Sua sessão expirou. Entre novamente.');
     }
+    if (user.type === 'COMPANY_MEMBER') {
+      const activeMembership = await this.prisma.companyTeamMember.findFirst({
+        where: { userId: user.id, active: true },
+        select: { id: true },
+      });
+      if (!activeMembership) {
+        throw new UnauthorizedException(
+          'Seu acesso à empresa não está ativo. Entre em contato com o suporte.',
+        );
+      }
+    }
     return user;
   }
 }

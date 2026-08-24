@@ -85,6 +85,7 @@ export interface DeliveryAddressInput {
 }
 
 export interface CreateDeliveryPayload {
+  idempotencyKey?: string;
   serviceTypeId: string;
   destinationKnownAtCreation?: boolean;
   dropoffAddress?: DeliveryAddressInput;
@@ -101,6 +102,7 @@ export interface CreateDeliveryPayload {
 }
 
 export interface CreateDeliveryBatchPayload {
+  idempotencyKey?: string;
   deliveries: CreateDeliveryPayload[];
 }
 

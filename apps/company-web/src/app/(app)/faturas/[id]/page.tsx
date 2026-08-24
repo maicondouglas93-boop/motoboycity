@@ -15,10 +15,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { companyInvoicesApi } from '@/lib/api-client';
+import { formatarData, formatarDataHora } from '@/lib/dinheiro';
 import { session } from '@/lib/session';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 
 /**
  * Status de fatura em português. O mesmo mapa da listagem — a linha do tempo
@@ -85,7 +85,7 @@ export default function CompanyInvoiceDetailPage() {
         </Badge>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card className="metric-card">
           <CardHeader>
             <CardTitle className="text-sm">Valor total</CardTitle>
@@ -96,18 +96,10 @@ export default function CompanyInvoiceDetailPage() {
         </Card>
         <Card className="metric-card">
           <CardHeader>
-            <CardTitle className="text-sm">Repasse aos entregadores</CardTitle>
+            <CardTitle className="text-sm">Pedidos faturados</CardTitle>
           </CardHeader>
           <CardContent className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
-            {currency.format(invoice.driverValueSum)}
-          </CardContent>
-        </Card>
-        <Card className="metric-card">
-          <CardHeader>
-            <CardTitle className="text-sm">Receita da plataforma</CardTitle>
-          </CardHeader>
-          <CardContent className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
-            {currency.format(invoice.platformValueSum)}
+            {invoice.deliveryCount}
           </CardContent>
         </Card>
       </div>
@@ -119,17 +111,17 @@ export default function CompanyInvoiceDetailPage() {
         <CardContent className="grid gap-4 text-sm md:grid-cols-3">
           <div>
             <p className="text-muted-foreground">Emissão</p>
-            <p className="font-medium">{date.format(new Date(invoice.issueDate))}</p>
+            <p className="font-medium">{formatarData(invoice.issueDate)}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Vencimento</p>
-            <p className="font-medium">{date.format(new Date(invoice.dueDate))}</p>
+            <p className="font-medium">{formatarData(invoice.dueDate)}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Pagamento</p>
             <p className="font-medium">
               {invoice.paymentDate
-                ? `${date.format(new Date(invoice.paymentDate))} · ${invoice.paymentMethod === 'ONLINE' ? 'Online' : 'Manual'}`
+                ? `${formatarData(invoice.paymentDate)} · ${invoice.paymentMethod === 'ONLINE' ? 'Online' : 'Manual'}`
                 : 'Aguardando confirmação'}
             </p>
           </div>
@@ -146,8 +138,6 @@ export default function CompanyInvoiceDetailPage() {
               <TableRow>
                 <TableHead>Pedido</TableHead>
                 <TableHead>Concluído em</TableHead>
-                <TableHead>Repasse</TableHead>
-                <TableHead>Plataforma</TableHead>
                 <TableHead>Total</TableHead>
               </TableRow>
             </TableHeader>
@@ -162,9 +152,7 @@ export default function CompanyInvoiceDetailPage() {
                       #{delivery.displayNumber}
                     </Link>
                   </TableCell>
-                  <TableCell>{date.format(new Date(delivery.completedAt))}</TableCell>
-                  <TableCell>{currency.format(delivery.driverValue)}</TableCell>
-                  <TableCell>{currency.format(delivery.platformValue)}</TableCell>
+                  <TableCell>{formatarDataHora(delivery.completedAt)}</TableCell>
                   <TableCell>{currency.format(delivery.totalValue)}</TableCell>
                 </TableRow>
               ))}
@@ -188,7 +176,7 @@ export default function CompanyInvoiceDetailPage() {
                 {invoiceStatusLabel[entry.toStatus] ?? entry.toStatus}
               </p>
               <p className="text-muted-foreground">
-                {date.format(new Date(entry.changedAt))}
+                {formatarDataHora(entry.changedAt)}
                 {entry.changedBy ? ` · ${entry.changedBy.name}` : ' · Atualização automática'}
               </p>
               {entry.note && <p className="mt-1 text-muted-foreground">{entry.note}</p>}

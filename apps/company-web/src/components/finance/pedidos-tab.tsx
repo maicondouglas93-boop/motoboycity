@@ -57,7 +57,7 @@ export function PedidosTab({ token }: { token: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pedidos.length === 0 && !pedidosQuery.isLoading ? (
+              {pedidos.length === 0 && !pedidosQuery.isLoading && !pedidosQuery.isError ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">

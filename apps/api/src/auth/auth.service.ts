@@ -285,6 +285,11 @@ export class AuthService {
     }
 
     const company = await this.findCompanyForUser(user);
+    if (user.type === 'COMPANY_MEMBER' && !company) {
+      throw new ForbiddenException(
+        'Seu acesso à empresa não está ativo. Entre em contato com o suporte.',
+      );
+    }
     if (company?.status === 'SUSPENDED') {
       throw new ForbiddenException('Sua empresa está suspensa. Entre em contato com o suporte.');
     }
@@ -328,7 +333,7 @@ export class AuthService {
     }
 
     const membership = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
       include: { company: true },
     });
 

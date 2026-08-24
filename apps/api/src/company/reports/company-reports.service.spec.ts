@@ -71,7 +71,7 @@ describe('CompanyReportsService.operations', () => {
     await service.operations(companyUser, period);
 
     expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith({
-      where: { userId: 'user-company' },
+      where: { userId: 'user-company', active: true },
       select: { companyId: true },
     });
     for (const call of prisma.delivery.findMany.mock.calls) {
@@ -110,6 +110,16 @@ describe('CompanyReportsService.operations', () => {
     expect(report.ordersCreated.count).toBe(2);
     expect(report.ordersCreated.byCurrentStatus.CANCELLED).toBe(1);
     expect(report.deliveriesCompleted.count).toBe(1);
+  });
+
+  it('processa as linhas do periodo em paginas limitadas', async () => {
+    await service.operations(companyUser, period);
+
+    for (const call of prisma.delivery.findMany.mock.calls) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({ orderBy: { id: 'asc' }, take: 500 }),
+      );
+    }
   });
 
   it('soma dinheiro em centavos e exclui sem preço do ticket médio', async () => {

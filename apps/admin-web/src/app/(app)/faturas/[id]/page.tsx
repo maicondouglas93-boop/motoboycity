@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -158,9 +158,26 @@ export default function AdminInvoiceDetailPage() {
               {invoice.deliveries.map((delivery) => (
                 <TableRow key={delivery.id}>
                   <TableCell className="font-medium">
-                    <Link className="text-primary hover:underline" href={`/pedidos/${delivery.id}`}>
-                      #{delivery.displayNumber}
-                    </Link>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Link
+                        className="text-primary hover:underline"
+                        href={`/pedidos/${delivery.id}`}
+                      >
+                        #{delivery.displayNumber}
+                      </Link>
+                      {/*
+                        Sem esta marca, um pedido com retorno parece anomalia na
+                        fatura: mesma distancia, mesma comissao e o DOBRO do
+                        total. A explicacao existe, mas so no documento de
+                        regras — e quem confere o fechamento nao vai ler.
+                      */}
+                      {delivery.returnValue !== null && delivery.returnValue > 0 && (
+                        <Badge variant="outline" className="gap-1 text-[10px] font-medium">
+                          <RotateCcw aria-hidden className="size-3" />
+                          retorno {money(delivery.returnValue)}
+                        </Badge>
+                      )}
+                    </span>
                   </TableCell>
                   <TableCell>{date.format(new Date(delivery.completedAt))}</TableCell>
                   <TableCell>{money(delivery.driverValue)}</TableCell>

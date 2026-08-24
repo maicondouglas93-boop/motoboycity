@@ -19,11 +19,7 @@ import {
   invoiceClosingCutoff,
   latestInvoiceClosingDateInSaoPaulo,
 } from './finance-release.utils';
-import {
-  civilDateFromDbDate,
-  endOfDayInSaoPaulo,
-  startOfDayInSaoPaulo,
-} from '../common/sao-paulo-time';
+import { civilDateFromDbDate } from '../common/sao-paulo-time';
 
 export interface InvoiceListItem {
   id: string;
@@ -59,8 +55,33 @@ export interface InvoiceDetail extends InvoiceListItem {
   }>;
 }
 
+export type CompanyInvoiceListItem = Omit<
+  InvoiceListItem,
+  'driverValueSum' | 'platformValueSum'
+>;
+
+export interface CompanyInvoiceDetail extends CompanyInvoiceListItem {
+  deliveries: Array<{
+    id: string;
+    displayNumber: number;
+    totalValue: number;
+    completedAt: string;
+  }>;
+  statusHistory: InvoiceDetail['statusHistory'];
+}
+
 function numberOrZero(value: { toString(): string } | null): number {
   return value === null ? 0 : Number(value);
+}
+
+function sumMoney(values: ReadonlyArray<{ toString(): string } | null>): number {
+  return (
+    values.reduce<number>(
+      (totalCents, value) => totalCents + Math.round(numberOrZero(value) * 100),
+      0,
+    ) /
+    100
+  );
 }
 
 @Injectable()
@@ -157,17 +178,12 @@ export class InvoiceService {
             number: this.invoiceNumber(input.issueDate),
             issueDate,
             dueDate,
-            totalValue: companyDeliveries.reduce(
-              (sum, delivery) => sum + numberOrZero(delivery.totalValue),
-              0,
+            totalValue: sumMoney(companyDeliveries.map((delivery) => delivery.totalValue)),
+            driverValueSum: sumMoney(
+              companyDeliveries.map((delivery) => delivery.driverValue),
             ),
-            driverValueSum: companyDeliveries.reduce(
-              (sum, delivery) => sum + numberOrZero(delivery.driverValue),
-              0,
-            ),
-            platformValueSum: companyDeliveries.reduce(
-              (sum, delivery) => sum + numberOrZero(delivery.platformValue),
-              0,
+            platformValueSum: sumMoney(
+              companyDeliveries.map((delivery) => delivery.platformValue),
             ),
           },
         });
@@ -342,9 +358,10 @@ export class InvoiceService {
     return this.list(query, query.companyId);
   }
 
-  async listForCompany(user: User, query: ListInvoicesQuery): Promise<InvoiceListItem[]> {
+  async listForCompany(user: User, query: ListInvoicesQuery): Promise<CompanyInvoiceListItem[]> {
     await this.refreshOverdueInvoices();
-    return this.list(query, await this.resolveCompanyId(user));
+    const invoices = await this.list(query, await this.resolveCompanyId(user));
+    return invoices.map((invoice) => this.toCompanyListItem(invoice));
   }
 
   async detailForAdmin(invoiceId: string): Promise<InvoiceDetail> {
@@ -352,14 +369,43 @@ export class InvoiceService {
     return this.getDetail(invoiceId);
   }
 
-  async detailForCompany(user: User, invoiceId: string): Promise<InvoiceDetail> {
+  async detailForCompany(user: User, invoiceId: string): Promise<CompanyInvoiceDetail> {
     await this.refreshOverdueInvoices();
     const companyId = await this.resolveCompanyId(user);
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Fatura não encontrada.');
     if (invoice.companyId !== companyId)
       throw new ForbiddenException('Você não tem acesso a esta fatura.');
-    return this.getDetail(invoiceId);
+    return this.toCompanyDetail(await this.getDetail(invoiceId));
+  }
+
+  private toCompanyListItem(invoice: InvoiceListItem): CompanyInvoiceListItem {
+    return {
+      id: invoice.id,
+      number: invoice.number,
+      companyId: invoice.companyId,
+      companyName: invoice.companyName,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      paymentDate: invoice.paymentDate,
+      paymentMethod: invoice.paymentMethod,
+      status: invoice.status,
+      totalValue: invoice.totalValue,
+      deliveryCount: invoice.deliveryCount,
+    };
+  }
+
+  private toCompanyDetail(invoice: InvoiceDetail): CompanyInvoiceDetail {
+    return {
+      ...this.toCompanyListItem(invoice),
+      deliveries: invoice.deliveries.map((delivery) => ({
+        id: delivery.id,
+        displayNumber: delivery.displayNumber,
+        totalValue: delivery.totalValue,
+        completedAt: delivery.completedAt,
+      })),
+      statusHistory: invoice.statusHistory,
+    };
   }
 
   private async list(query: ListInvoicesQuery, companyId?: string): Promise<InvoiceListItem[]> {
@@ -370,8 +416,8 @@ export class InvoiceService {
         ...(query.from || query.to
           ? {
               issueDate: {
-                ...(query.from && { gte: this.startOfDayLocal(query.from) }),
-                ...(query.to && { lte: this.endOfDay(query.to) }),
+                ...(query.from && { gte: this.dateOnly(query.from) }),
+                ...(query.to && { lte: this.dateOnly(query.to) }),
               },
             }
           : {}),
@@ -409,6 +455,7 @@ export class InvoiceService {
             totalValue: true,
             driverValue: true,
             platformValue: true,
+            returnValue: true,
             statusChangedAt: true,
           },
           orderBy: { displayNumber: 'asc' },
@@ -429,6 +476,9 @@ export class InvoiceService {
         totalValue: numberOrZero(delivery.totalValue),
         driverValue: numberOrZero(delivery.driverValue),
         platformValue: numberOrZero(delivery.platformValue),
+        // Nulo quando nao ha retorno: zero e "retorno de R$ 0,00", que nao
+        // existe. A tela usa a diferenca para decidir se marca a linha.
+        returnValue: delivery.returnValue === null ? null : Number(delivery.returnValue),
         completedAt: delivery.statusChangedAt.toISOString(),
       })),
       statusHistory: invoice.statusHistory.map((history) => ({
@@ -511,7 +561,7 @@ export class InvoiceService {
   private async resolveCompanyId(user: User): Promise<string> {
     if (user.type !== 'COMPANY_MEMBER') throw new ForbiddenException('Acesso restrito a empresas.');
     const membership = await this.prisma.companyTeamMember.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, active: true },
     });
     if (!membership) throw new ForbiddenException('Usuário não está vinculado a uma empresa.');
     return membership.companyId;
@@ -532,15 +582,4 @@ export class InvoiceService {
     return new Date(`${value}T00:00:00.000Z`);
   }
 
-  /**
-   * Ja o filtro da listagem e lido no relogio da operacao, igual ao resto do
-   * produto: quem digita 22/08 no painel quer o dia 22 em Lajinha.
-   */
-  private startOfDayLocal(value: string): Date {
-    return startOfDayInSaoPaulo(value);
-  }
-
-  private endOfDay(value: string): Date {
-    return endOfDayInSaoPaulo(value);
-  }
 }

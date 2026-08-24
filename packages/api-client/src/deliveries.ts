@@ -57,6 +57,8 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         statuses?: DeliveryStatus[];
         companyId?: string;
         driverId?: string;
+        batchId?: string;
+        deliveryId?: string;
       },
     ): Promise<DeliveryOperationsResult> {
       const params = new URLSearchParams();
@@ -64,6 +66,8 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
+      if (filters?.batchId) params.set('batchId', filters.batchId);
+      if (filters?.deliveryId) params.set('deliveryId', filters.deliveryId);
       const query = params.toString() ? `?${params.toString()}` : '';
       const response = await fetch(`${baseUrl}/deliveries/operations${query}`, {
         headers: withAuth(accessToken),
