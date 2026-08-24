@@ -4,6 +4,8 @@ export * from './auth/login.schema';
 export * from './admin/list-companies-query.schema';
 export * from './admin/list-drivers-query.schema';
 export * from './admin/create-driver.schema';
+export * from './admin/create-company.schema';
+export * from './admin/change-password.schema';
 export * from './admin/operations-report-query.schema';
 export * from './admin/admin-operations-query.schema';
 export * from './admin/list-service-types-query.schema';

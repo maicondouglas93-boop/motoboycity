@@ -85,6 +85,14 @@ Fecha toda segunda-feira, agrupando todos os pedidos entregues desde o
 manual/offline pro lançamento — sem gateway de pagamento (boleto/PIX
 automático) planejado ainda.
 
+No detalhe administrativo da fatura, o painel pode abrir o WhatsApp do
+responsável `OWNER` ativo com uma mensagem pré-preenchida contendo somente
+empresa, número da fatura, valor, vencimento e quantidade de pedidos. Se houver
+mais de um responsável ativo, o administrador escolhe o destinatário. O painel
+normaliza telefones brasileiros para `55 + DDD + número`; o envio final é
+manual no WhatsApp. Não há anexo automático, PDF, token, link autenticado ou
+dado pessoal na mensagem.
+
 A empresa pode usar **Já paguei** para informar valor, data e observação de um
 pagamento manual. Esse aviso não quita nem altera a fatura: somente o
 administrador pode confirmar o recebimento pelo fluxo normal de baixa ou
@@ -111,6 +119,37 @@ autocadastro: nasce com aprovação `PENDING`, conta `ACTIVE` e disponibilidade
 cadastro não autoaprova nem coloca o entregador online. Veículo e documentos não
 fazem parte desta etapa porque ainda não existe fluxo integrado de upload e
 revisão desses itens.
+
+## Cadastro de empresa e redefinição de senha pelo administrador
+
+O administrador pode cadastrar uma empresa diretamente na aba **Empresas**.
+O cadastro exige responsável, contato/WhatsApp, CPF ou CNPJ, razão social,
+nome fantasia, senha inicial e seleção explícita de uma região ativa. A criação
+é atômica (`User` + `Company` + vínculo `OWNER`) e mantém o mesmo portão do
+autocadastro: a empresa nasce `PENDING_APPROVAL` e a aprovação continua sendo
+uma ação separada.
+
+O administrador pode redefinir a senha de um entregador e de um responsável
+`OWNER` ativo escolhido explicitamente dentro da empresa. Operadores, membros
+inativos e usuários sem vínculo com o alvo não podem ser usados por essas
+rotas. A nova senha tem no mínimo oito caracteres, nunca é devolvida nem
+registrada em texto, e encerra imediatamente os tokens REST e conexões realtime
+emitidos para a credencial anterior. A revogação usa uma impressão SHA-256 do
+hash bcrypt no JWT, sem armazenar sessões no servidor e sem alterar a decisão
+arquitetural de JWT em `localStorage`.
+
+Ao redefinir a senha de um entregador, o sistema também o deixa indisponível,
+fecha a presença operacional, remove o heartbeat do Redis e devolve ofertas
+pendentes para a fila. Hash novo, indisponibilidade e fechamento do log são uma
+única transação de banco. Redis e fila usam operações idempotentes com
+retentativa; o timeout da oferta só é removido depois que o redespacho termina.
+Uma requisição de presença que tenha começado antes da troca só pode gravar
+enquanto a credencial autenticada ainda corresponde ao hash atual; assim ela
+não religa o entregador depois do reset.
+
+Tokens emitidos antes da introdução dessa impressão são rejeitados uma única
+vez após o deploy; os usuários precisam entrar novamente. Isso evita que um
+token legado sobreviva a uma redefinição administrativa.
 
 ## Foto de perfil
 

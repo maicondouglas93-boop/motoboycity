@@ -1,6 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AuthService } from '../../auth/auth.service';
 import { DispatchService } from '../../dispatch/dispatch.service';
+import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AdminDriversService } from './admin-drivers.service';
@@ -8,7 +10,7 @@ import { AdminDriversService } from './admin-drivers.service';
 describe('AdminDriversService', () => {
   let service: AdminDriversService;
   let prisma: {
-    driver: { findUnique: jest.Mock; update: jest.Mock; findMany: jest.Mock };
+    driver: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock; findMany: jest.Mock };
     serviceType: { findMany: jest.Mock };
     driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
     driverPresenceLog: { updateMany: jest.Mock };
@@ -17,11 +19,23 @@ describe('AdminDriversService', () => {
     $transaction: jest.Mock;
   };
   let dispatchService: { releasePendingOffersForDriver: jest.Mock };
-  let realtimeGateway: { emitToDriver: jest.Mock; emitAdminActivity: jest.Mock };
+  let authService: { replacePassword: jest.Mock };
+  let livePresence: { remove: jest.Mock };
+  let realtimeGateway: {
+    emitToDriver: jest.Mock;
+    emitDriverPresence: jest.Mock;
+    emitAdminActivity: jest.Mock;
+    disconnectUser: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
-      driver: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
+      driver: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        findMany: jest.fn(),
+      },
       serviceType: { findMany: jest.fn() },
       driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
       driverPresenceLog: { updateMany: jest.fn() },
@@ -33,18 +47,101 @@ describe('AdminDriversService', () => {
     };
 
     dispatchService = { releasePendingOffersForDriver: jest.fn().mockResolvedValue(0) };
-    realtimeGateway = { emitToDriver: jest.fn(), emitAdminActivity: jest.fn() };
+    authService = {
+      replacePassword: jest.fn().mockImplementation(
+        async (
+          userId: string,
+          _password: string,
+          options?: {
+            mutateInSameTransaction?: (tx: typeof prisma) => Promise<void>;
+          },
+        ) => {
+          await options?.mutateInSameTransaction?.(prisma);
+          return { userId };
+        },
+      ),
+    };
+    livePresence = { remove: jest.fn().mockResolvedValue(undefined) };
+    realtimeGateway = {
+      emitToDriver: jest.fn(),
+      emitDriverPresence: jest.fn(),
+      emitAdminActivity: jest.fn(),
+      disconnectUser: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminDriversService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuthService, useValue: authService },
         { provide: DispatchService, useValue: dispatchService },
+        { provide: LiveDriverPresenceService, useValue: livePresence },
         { provide: RealtimeGateway, useValue: realtimeGateway },
       ],
     }).compile();
 
     service = module.get(AdminDriversService);
+  });
+
+  describe('changePassword', () => {
+    it('resolve o usuário do motoboy, troca a senha e encerra conexões antigas', async () => {
+      prisma.driver.findFirst.mockResolvedValue({ userId: 'driver-user-1' });
+
+      await expect(service.changePassword('driver-1', 'senhaNova123')).resolves.toEqual({
+        userId: 'driver-user-1',
+      });
+      expect(prisma.driver.findFirst).toHaveBeenCalledWith({
+        where: { id: 'driver-1', user: { type: 'DRIVER' } },
+        select: { userId: true },
+      });
+      expect(authService.replacePassword).toHaveBeenCalledWith('driver-user-1', 'senhaNova123', {
+        mutateInSameTransaction: expect.any(Function),
+      });
+      expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('driver-user-1');
+      expect(prisma.driver.update).toHaveBeenCalledWith({
+        where: { id: 'driver-1' },
+        data: { availability: 'UNAVAILABLE' },
+      });
+      expect(prisma.driverPresenceLog.updateMany).toHaveBeenCalledWith({
+        where: { driverId: 'driver-1', wentOfflineAt: null },
+        data: { wentOfflineAt: expect.any(Date) },
+      });
+      expect(livePresence.remove).toHaveBeenCalledWith('driver-1');
+      expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledWith('driver-1');
+      expect(realtimeGateway.emitDriverPresence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverId: 'driver-1',
+          availability: 'UNAVAILABLE',
+          reason: 'PASSWORD_RESET',
+        }),
+      );
+    });
+
+    it('mantém o reset concluído quando Redis e fila falham após a transação', async () => {
+      prisma.driver.findFirst.mockResolvedValue({ userId: 'driver-user-1' });
+      livePresence.remove.mockRejectedValue(new Error('redis offline'));
+      dispatchService.releasePendingOffersForDriver.mockRejectedValue(new Error('queue offline'));
+      (service as unknown as { logger: { warn: jest.Mock } }).logger = { warn: jest.fn() };
+
+      await expect(service.changePassword('driver-1', 'senhaNova123')).resolves.toEqual({
+        userId: 'driver-user-1',
+      });
+
+      expect(livePresence.remove).toHaveBeenCalledTimes(3);
+      expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledTimes(3);
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        expect.stringContaining('limpeza externa pendente'),
+      );
+    });
+
+    it('retorna 404 sem alterar credenciais quando o motoboy não existe', async () => {
+      prisma.driver.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.changePassword('driver-inexistente', 'senhaNova123'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(authService.replacePassword).not.toHaveBeenCalled();
+    });
   });
 
   describe('registrationOptions', () => {
@@ -311,6 +408,7 @@ describe('AdminDriversService', () => {
       await service.block('driver-1');
 
       expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledWith('driver-1');
+      expect(livePresence.remove).toHaveBeenCalledWith('driver-1');
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
         'driver-1',
         'driver:account-status-changed',

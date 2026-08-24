@@ -1,16 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError } from '@motoboycity/api-client';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -19,15 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { adminInvoicesApi } from '@/lib/api-client';
+import { adminCompaniesApi, adminInvoicesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
+import { MarkPaidDialog } from '@/components/finance/mark-paid-dialog';
+import { InvoiceWhatsAppDialog } from '@/components/finance/invoice-whatsapp-dialog';
 
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /**
  * Status de fatura em português. O mesmo mapa da listagem — a linha do tempo
@@ -44,28 +37,15 @@ export default function AdminInvoiceDetailPage() {
   const money = useMoney();
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
-  const queryClient = useQueryClient();
-  const [paymentDate, setPaymentDate] = useState(today);
-  const [paymentMethod, setPaymentMethod] = useState<'BILLED' | 'ONLINE'>('BILLED');
-  const [actionError, setActionError] = useState<string | null>(null);
   const invoiceQuery = useQuery({
     queryKey: ['admin', 'invoice', id],
     queryFn: () => adminInvoicesApi.detail(token as string, id),
     enabled: Boolean(token && id),
   });
-  const markPaidMutation = useMutation({
-    mutationFn: () =>
-      adminInvoicesApi.markPaid(token as string, id, { paymentDate, paymentMethod }),
-    onSuccess: () => {
-      setActionError(null);
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'invoice', id] });
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'invoices'] });
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'financial'] });
-    },
-    onError: (error) =>
-      setActionError(
-        error instanceof ApiError ? error.message : 'Não foi possível confirmar o pagamento.',
-      ),
+  const companyQuery = useQuery({
+    queryKey: ['admin', 'company', invoiceQuery.data?.companyId],
+    queryFn: () => adminCompaniesApi.detail(token as string, invoiceQuery.data!.companyId),
+    enabled: Boolean(token && invoiceQuery.data?.companyId),
   });
   if (!token)
     return <p className="text-sm text-muted-foreground">Faça login para consultar esta fatura.</p>;
@@ -74,6 +54,13 @@ export default function AdminInvoiceDetailPage() {
   if (invoiceQuery.isError || !invoiceQuery.data)
     return <p className="text-sm text-destructive">Não foi possível carregar esta fatura.</p>;
   const invoice = invoiceQuery.data;
+  const whatsappContacts = (companyQuery.data?.teamMembers ?? [])
+    .filter((member) => member.active && member.role === 'OWNER')
+    .map((member) => ({
+      memberId: member.id,
+      name: member.user.name,
+      phone: member.user.phone,
+    }));
   const statusTone =
     invoice.status === 'PAID'
       ? 'secondary'
@@ -95,7 +82,18 @@ export default function AdminInvoiceDetailPage() {
             {invoice.companyName} · {invoice.deliveryCount} pedido(s)
           </p>
         </div>
-        <Badge variant={statusTone}>{invoiceStatusLabel[invoice.status] ?? invoice.status}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <InvoiceWhatsAppDialog
+            invoice={invoice}
+            contacts={whatsappContacts}
+            contactsLoading={
+              companyQuery.isLoading || (!companyQuery.data && companyQuery.isFetching)
+            }
+            contactsError={companyQuery.isError}
+            onRetryContacts={() => void companyQuery.refetch()}
+          />
+          <Badge variant={statusTone}>{invoiceStatusLabel[invoice.status] ?? invoice.status}</Badge>
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -124,32 +122,20 @@ export default function AdminInvoiceDetailPage() {
           <CardHeader>
             <CardTitle>Confirmar pagamento manual</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="paid-at">Data</Label>
-              <Input
-                id="paid-at"
-                type="date"
-                value={paymentDate}
-                onChange={(event) => setPaymentDate(event.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="paid-method">Forma</Label>
-              <select
-                id="paid-method"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                value={paymentMethod}
-                onChange={(event) => setPaymentMethod(event.target.value as 'BILLED' | 'ONLINE')}
-              >
-                <option value="BILLED">Manual / faturado</option>
-                <option value="ONLINE">Online</option>
-              </select>
-            </div>
-            <Button disabled={markPaidMutation.isPending} onClick={() => markPaidMutation.mutate()}>
-              {markPaidMutation.isPending ? 'Confirmando...' : 'Marcar como paga'}
-            </Button>
-            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+          <CardContent>
+            {/*
+              A data, a forma e a confirmacao mudaram para dentro do dialogo.
+              Aqui era um botao solto: um clique e a divida da empresa sumia,
+              sem pergunta, sem repetir o valor e sem desfazer.
+            */}
+            <MarkPaidDialog
+              token={token}
+              invoiceId={invoice.id}
+              invoiceNumber={invoice.number}
+              companyName={invoice.companyName}
+              totalValue={invoice.totalValue}
+              deliveryCount={invoice.deliveryCount}
+            />
           </CardContent>
         </Card>
       )}

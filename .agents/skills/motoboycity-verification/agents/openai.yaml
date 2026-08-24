@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verification"
+  short_description: "Review regressions, tests, and security risks"
+  default_prompt: "Use $motoboycity-verification to audit this change and report evidence-based risks."
+policy:
+  allow_implicit_invocation: true

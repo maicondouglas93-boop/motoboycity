@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { credentialFingerprint } from './credential-fingerprint';
 import { AuthService } from './auth.service';
 
 const validPayload = {
@@ -35,7 +36,7 @@ const validDriverPayload = {
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: {
-    user: { findUnique: jest.Mock; create: jest.Mock };
+    user: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock };
     company: { findUnique: jest.Mock; create: jest.Mock };
     companyTeamMember: { create: jest.Mock; findFirst: jest.Mock };
     driver: { findUnique: jest.Mock; create: jest.Mock };
@@ -48,7 +49,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     prisma = {
-      user: { findUnique: jest.fn(), create: jest.fn() },
+      user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
       company: { findUnique: jest.fn(), create: jest.fn() },
       companyTeamMember: { create: jest.fn(), findFirst: jest.fn() },
       driver: { findUnique: jest.fn(), create: jest.fn() },
@@ -112,6 +113,26 @@ describe('AuthService', () => {
 
       await expect(service.registerCompany(validPayload)).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.company.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('cadastro administrativo usa somente a região ativa escolhida', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.company.findUnique.mockResolvedValue(null);
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-2' });
+      prisma.user.create.mockResolvedValue({ id: 'user-2' });
+      prisma.company.create.mockResolvedValue({
+        id: 'company-2',
+        status: 'PENDING_APPROVAL',
+      });
+
+      await service.registerCompany(validPayload, { regionId: 'region-2' });
+
+      expect(prisma.region.findFirst).toHaveBeenCalledWith({
+        where: { id: 'region-2', active: true },
+      });
+      expect(prisma.company.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ regionId: 'region-2' }) }),
+      );
     });
 
     it('rejeita quando o CPF/CNPJ já está cadastrado', async () => {
@@ -261,6 +282,37 @@ describe('AuthService', () => {
     });
   });
 
+  describe('replacePassword', () => {
+    it('salva apenas o hash bcrypt e nunca devolve a credencial', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+
+      await expect(service.replacePassword('user-1', 'senhaNova123')).resolves.toEqual({
+        userId: 'user-1',
+      });
+
+      const update = prisma.user.update.mock.calls[0]?.[0];
+      expect(update.where).toEqual({ id: 'user-1' });
+      expect(update.select).toEqual({ id: true });
+      expect(update.data.passwordHash).not.toBe('senhaNova123');
+      await expect(bcrypt.compare('senhaNova123', update.data.passwordHash)).resolves.toBe(true);
+    });
+
+    it('executa mutações relacionadas na mesma transação da credencial', async () => {
+      prisma.user.update.mockResolvedValue({ id: 'user-1' });
+      const mutateInSameTransaction = jest.fn().mockResolvedValue(undefined);
+
+      await expect(
+        service.replacePassword('user-1', 'senhaNova123', { mutateInSameTransaction }),
+      ).resolves.toEqual({ userId: 'user-1' });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mutateInSameTransaction).toHaveBeenCalledWith(prisma);
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'user-1' }, select: { id: true } }),
+      );
+    });
+  });
+
   describe('login', () => {
     const loginPayload = { email: 'maria@empresa.com.br', password: 'senhaSegura123' };
 
@@ -288,7 +340,10 @@ describe('AuthService', () => {
         avatarUrl: null,
       });
       expect(result.company).toEqual({ id: 'company-1', status: 'PENDING_APPROVAL' });
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: 'user-1' });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({
+        sub: 'user-1',
+        credentialVersion: credentialFingerprint(passwordHash),
+      });
     });
 
     it('rejeita quando o e-mail não existe', async () => {

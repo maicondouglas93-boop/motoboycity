@@ -1,0 +1,154 @@
+# =============================================================================
+# MOTOboyCity — infraestrutura da API no Render
+#
+# O Render le este arquivo do repositorio e cria os servicos sozinho (Blueprint).
+# Os dois paineis web NAO estao aqui: eles vao para a Vercel.
+#
+# COMO USAR
+#   1. Render > New > Blueprint > aponte para este repositorio.
+#   2. Ele cria banco, Redis e a API, e ja liga DATABASE_URL e REDIS_URL.
+#   3. Tudo marcado `sync: false` aparece em branco para voce preencher no
+#      painel. Sao os segredos — nenhum deles pode morar neste arquivo, porque
+#      o repositorio e PUBLICO.
+#
+# DEPOIS DO PRIMEIRO DEPLOY, sem falta:
+#   - Preencher CORS_ORIGINS com os dominios da Vercel. Sem isso os paineis
+#     carregam e TODA chamada e bloqueada pelo navegador.
+#   - Rodar `pnpm --filter @motoboycity/api exec prisma db seed` uma vez, para
+#     criar o usuario administrador.
+# =============================================================================
+
+databases:
+  - name: motoboycity-db
+    databaseName: motoboycity
+    plan: free
+    # 15 e a versao do Postgres homologada com o Prisma 6.19 deste projeto.
+    postgresMajorVersion: '15'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis — filas do BullMQ (despacho, repasse financeiro).
+  #
+  # `noeviction` NAO e detalhe de performance: o BullMQ guarda o estado dos jobs
+  # no Redis, e uma politica que descarta chave por falta de memoria faria uma
+  # oferta de entrega simplesmente sumir. O proprio BullMQ recusa iniciar com
+  # outra politica.
+  # ---------------------------------------------------------------------------
+  - type: keyvalue
+    name: motoboycity-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  # ---------------------------------------------------------------------------
+  # A API (NestJS).
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: motoboycity-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    # Monorepo pnpm: o build roda da RAIZ, porque as dependencias sao do
+    # workspace inteiro e a API importa @motoboycity/types e /validation.
+    rootDir: .
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @motoboycity/api exec prisma generate &&
+      pnpm --filter @motoboycity/api exec prisma migrate deploy &&
+      pnpm --filter @motoboycity/api build
+    # Delega ao script do proprio pacote (`node dist/main`), em vez de repetir
+    # o caminho aqui: se o build mudar de lugar, o start acompanha sozinho.
+    startCommand: pnpm --filter @motoboycity/api start:prod
+    healthCheckPath: /health
+
+    envVars:
+      # --- ligados automaticamente pelo Render -------------------------------
+      - key: DATABASE_URL
+        fromDatabase:
+          name: motoboycity-db
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: motoboycity-redis
+          property: connectionString
+
+      # --- obrigatorios ------------------------------------------------------
+
+      # A API NAO SOBE sem isto: o modulo de autenticacao usa `getOrThrow`.
+      # Deixe o Render gerar — assim o valor nunca passa por lugar nenhum.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Dominios dos dois paineis na Vercel, separados por virgula e SEM barra
+      # no final. Vazio faz a API cair para localhost, e o navegador bloqueia
+      # tudo em producao.
+      # Ex.: https://admin.seudominio.com,https://loja.seudominio.com
+      - key: CORS_ORIGINS
+        sync: false
+
+      - key: NODE_ENV
+        value: production
+
+      # --- ajustes com padrao seguro ----------------------------------------
+
+      # Limite de requisicoes por janela. Os valores abaixo sao os mesmos do
+      # desenvolvimento; ajuste depois de ver trafego real.
+      - key: THROTTLE_LIMIT
+        value: '120'
+      - key: THROTTLE_TTL_MS
+        value: '60000'
+
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_TIMEOUT_MS
+        value: '30000'
+
+      # --- segredos: preencher no painel do Render --------------------------
+      #
+      # Cada um destes desliga uma parte do produto se ficar vazio. Nenhum
+      # impede a API de subir, exceto onde anotado.
+
+      # Geocodificacao no servidor. Sem ela, pedido com endereco informado nao
+      # ganha coordenada — e a trava de "so finaliza perto do destino" para de
+      # valer, em silencio.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+
+      # Secretaria Virtual. Sem ela, a tela responde erro.
+      - key: GROQ_API_KEY
+        sync: false
+
+      # Notificacao de oferta no celular do motoboy. Sem isso, ele so ve a
+      # oferta se estiver com o aplicativo aberto na tela.
+      #
+      # FIREBASE_PRIVATE_KEY e uma chave privada de verdade. Cole no painel do
+      # Render, com as quebras de linha como `\n`, e em lugar nenhum mais.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      # Foto de perfil. Hoje so a chave privada e lida pelo servidor; as outras
+      # tres estao no `.env.example` e entram quando o envio pelo painel
+      # precisar delas.
+      - key: IMAGEKIT_PRIVATE_KEY
+        sync: false
+      - key: IMAGEKIT_ID
+        sync: false
+      - key: IMAGEKIT_URL_ENDPOINT
+        sync: false
+      - key: IMAGEKIT_PUBLIC_KEY
+        sync: false
+
+      # Administrador criado pelo `prisma db seed`, na primeira vez.
+      # Escolha uma senha forte: e o acesso ao painel inteiro.
+      - key: ADMIN_SEED_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false

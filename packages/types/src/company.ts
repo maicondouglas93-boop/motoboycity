@@ -1,5 +1,9 @@
 export type CompanyStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED';
 
+export interface AdminCompanyRegistrationOptions {
+  regions: Array<{ id: string; name: string }>;
+}
+
 export interface AdminCompanyListItem {
   id: string;
   legalName: string;

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Delivery Core"
+  short_description: "Safely change orders, pricing, and dispatch"
+  default_prompt: "Use $motoboycity-delivery-core to trace and safely change the delivery flow."
+policy:
+  allow_implicit_invocation: true

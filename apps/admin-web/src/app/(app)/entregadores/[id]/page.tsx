@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, WalletTransactionStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft } from 'lucide-react';
+import { AlertCircle, ChevronLeft, KeyRound } from 'lucide-react';
+import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
 import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { StatCard } from '@/components/stat-card';
 import { adminDriversApi, adminFinancialApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { somarDinheiro } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -58,6 +60,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
   const [walletStatus, setWalletStatus] = useState<WalletTransactionStatus | 'ALL'>('ALL');
   const [walletFrom, setWalletFrom] = useState('');
   const [walletTo, setWalletTo] = useState('');
+  const [passwordChanged, setPasswordChanged] = useState(false);
   const [appliedWalletFilters, setAppliedWalletFilters] = useState<{
     status?: WalletTransactionStatus;
     from?: string;
@@ -97,7 +100,9 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
       total: deliveries.length,
       completed: completed.length,
       cancelled: deliveries.filter((delivery) => delivery.status === 'CANCELLED').length,
-      repasse: completed.reduce((sum, delivery) => sum + (delivery.driverValue ?? 0), 0),
+      // Em centavos inteiros: este e o numero que o motoboy vai comparar com o
+      // proprio extrato, e centavo que nao bate vira conversa.
+      repasse: somarDinheiro(completed.map((delivery) => delivery.driverValue)),
     };
   }, [allOrdersQuery.data]);
 
@@ -131,6 +136,12 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         </div>
       )}
 
+      {passwordChanged && (
+        <div className="rounded-2xl border border-primary/20 bg-primary/6 px-4 py-3 text-sm">
+          Senha alterada. As sessões anteriores deste entregador foram encerradas.
+        </div>
+      )}
+
       {driver && (
         <>
           <header className="flex flex-wrap items-start justify-between gap-3">
@@ -140,13 +151,27 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                 {driver.email} · {driver.phone}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant={driver.approvalStatus === 'APPROVED' ? 'default' : 'outline'}>
-                Cadastro {approvalLabel[driver.approvalStatus] ?? driver.approvalStatus}
-              </Badge>
-              <Badge variant={driver.accountStatus === 'ACTIVE' ? 'secondary' : 'destructive'}>
-                Conta {accountLabel[driver.accountStatus] ?? driver.accountStatus}
-              </Badge>
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={driver.approvalStatus === 'APPROVED' ? 'default' : 'outline'}>
+                  Cadastro {approvalLabel[driver.approvalStatus] ?? driver.approvalStatus}
+                </Badge>
+                <Badge variant={driver.accountStatus === 'ACTIVE' ? 'secondary' : 'destructive'}>
+                  Conta {accountLabel[driver.accountStatus] ?? driver.accountStatus}
+                </Badge>
+              </div>
+              <ChangePasswordDialog
+                targetName={driver.name}
+                targetEmail={driver.email}
+                changePassword={(password) =>
+                  adminDriversApi.changePassword(token, driver.id, { password })
+                }
+                onChanged={() => setPasswordChanged(true)}
+              >
+                <Button variant="outline" size="sm">
+                  <KeyRound className="size-3.5" /> Alterar senha
+                </Button>
+              </ChangePasswordDialog>
             </div>
           </header>
 

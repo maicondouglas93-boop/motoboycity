@@ -1,6 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type {
+  AdminCompanyRegistrationOptions,
+  AdminPasswordChangeResult,
+} from '@motoboycity/types';
 import type { CompanyStatus } from '@prisma/client';
+import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
 export interface ApproveCompanyResult {
   companyId: string;
@@ -48,7 +54,20 @@ export interface AdminCompanyDetail extends AdminCompanyListItem {
 
 @Injectable()
 export class AdminCompaniesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+    private readonly realtimeGateway: RealtimeGateway,
+  ) {}
+
+  async registrationOptions(): Promise<AdminCompanyRegistrationOptions> {
+    const regions = await this.prisma.region.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    return { regions };
+  }
 
   /** Consulta interna e reduzida para consumidores administrativos, sem dados do responsavel. */
   async searchSummary(query: string, limit = 5) {
@@ -159,6 +178,38 @@ export class AdminCompaniesService {
       approvedByUserId,
       approvedAt: approvedAt.toISOString(),
     };
+  }
+
+  async changeMemberPassword(
+    companyId: string,
+    memberId: string,
+    password: string,
+  ): Promise<AdminPasswordChangeResult> {
+    const membership = await this.prisma.companyTeamMember.findFirst({
+      where: {
+        id: memberId,
+        companyId,
+        active: true,
+        role: 'OWNER',
+        user: { type: 'COMPANY_MEMBER' },
+      },
+      select: { userId: true },
+    });
+
+    if (!membership) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) {
+        throw new NotFoundException('Empresa não encontrada.');
+      }
+      throw new NotFoundException('Responsável ativo não encontrado nesta empresa.');
+    }
+
+    const result = await this.authService.replacePassword(membership.userId, password);
+    this.realtimeGateway.disconnectUser(membership.userId);
+    return result;
   }
 
   private toListItem(company: {

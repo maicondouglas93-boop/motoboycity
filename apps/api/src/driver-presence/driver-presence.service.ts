@@ -1,8 +1,4 @@
-import {
-  ForbiddenException,
-  Injectable,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type {
   DriverPresenceHeartbeatPayload,
   SetDriverPresencePayload,
@@ -36,7 +32,10 @@ export class DriverPresenceService {
     return this.buildItem(driver.id, driver.availability);
   }
 
-  async setAvailability(user: User, payload: SetDriverPresencePayload): Promise<DriverPresenceItem> {
+  async setAvailability(
+    user: User,
+    payload: SetDriverPresencePayload,
+  ): Promise<DriverPresenceItem> {
     const driver = await this.findDriverForUser(user);
 
     if (payload.availability === 'AVAILABLE') {
@@ -44,7 +43,9 @@ export class DriverPresenceService {
         throw new ForbiddenException('Motoboy precisa estar aprovado para ficar disponível.');
       }
       if (driver.accountStatus !== 'ACTIVE') {
-        throw new ForbiddenException('Motoboy precisa estar com a conta ativa para ficar disponível.');
+        throw new ForbiddenException(
+          'Motoboy precisa estar com a conta ativa para ficar disponível.',
+        );
       }
       const now = new Date();
       try {
@@ -57,8 +58,11 @@ export class DriverPresenceService {
           appVersion: payload.appVersion,
         });
         await this.prisma.$transaction(async (tx) => {
-          await tx.driver.update({
-            where: { id: driver.id },
+          const update = await tx.driver.updateMany({
+            where: {
+              id: driver.id,
+              user: { id: user.id, passwordHash: user.passwordHash },
+            },
             data: {
               availability: 'AVAILABLE',
               lastKnownLat: payload.location.lat,
@@ -67,6 +71,9 @@ export class DriverPresenceService {
               appVersion: payload.appVersion,
             },
           });
+          if (update.count === 0) {
+            throw new ForbiddenException('Sua sessão expirou. Entre novamente.');
+          }
           const openLog = await tx.driverPresenceLog.findFirst({
             where: { driverId: driver.id, wentOfflineAt: null },
           });
@@ -86,6 +93,9 @@ export class DriverPresenceService {
             data: { wentOfflineAt: now },
           }),
         ]);
+        if (error instanceof ForbiddenException) {
+          throw error;
+        }
         throw new ServiceUnavailableException(
           'Não foi possível iniciar o compartilhamento de localização.',
           { cause: error },
@@ -134,8 +144,11 @@ export class DriverPresenceService {
       capturedAt: now.toISOString(),
       appVersion: payload.appVersion,
     });
-    await this.prisma.driver.update({
-      where: { id: driver.id },
+    const update = await this.prisma.driver.updateMany({
+      where: {
+        id: driver.id,
+        user: { id: user.id, passwordHash: user.passwordHash },
+      },
       data: {
         lastKnownLat: payload.lat,
         lastKnownLng: payload.lng,
@@ -143,6 +156,10 @@ export class DriverPresenceService {
         appVersion: payload.appVersion,
       },
     });
+    if (update.count === 0) {
+      await this.livePresence.remove(driver.id);
+      throw new ForbiddenException('Sua sessão expirou. Entre novamente.');
+    }
     this.realtimeGateway.emitDriverLocation({
       driverId: driver.id,
       lat: payload.lat,
@@ -164,11 +181,7 @@ export class DriverPresenceService {
     return driver;
   }
 
-  private emitPresence(
-    driverId: string,
-    availability: DriverAvailability,
-    at: Date,
-  ): void {
+  private emitPresence(driverId: string, availability: DriverAvailability, at: Date): void {
     this.realtimeGateway.emitDriverPresence({
       driverId,
       availability,

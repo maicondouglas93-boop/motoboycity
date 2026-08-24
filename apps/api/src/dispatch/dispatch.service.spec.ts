@@ -150,6 +150,46 @@ describe('DispatchService', () => {
     });
   });
 
+  describe('releasePendingOffersForDriver', () => {
+    it('redespacha de forma idempotente uma oferta que já ficou EXPIRED', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        response: 'EXPIRED',
+        deliveryId: 'delivery-1',
+      });
+      const dispatch = jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
+
+      await service.handleOfferExpired('offer-1');
+
+      expect(dispatch).toHaveBeenCalledWith('delivery-1');
+    });
+
+    it('mantém o timeout como compensação quando a expiração falha', async () => {
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+      jest.spyOn(service, 'handleOfferExpired').mockRejectedValue(new Error('database offline'));
+
+      await expect(service.releasePendingOffersForDriver('driver-1')).rejects.toThrow(
+        'database offline',
+      );
+
+      expect(queue.remove).not.toHaveBeenCalled();
+    });
+
+    it('retoma o redespacho quando a oferta já expirou antes da falha', async () => {
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+      prisma.deliveryOffer.findUnique.mockResolvedValue({ response: 'EXPIRED' });
+      const expiration = jest
+        .spyOn(service, 'handleOfferExpired')
+        .mockRejectedValueOnce(new Error('redespacho falhou'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(service.releasePendingOffersForDriver('driver-1')).resolves.toBe(1);
+
+      expect(expiration).toHaveBeenCalledTimes(2);
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+    });
+  });
+
   describe('scheduleActivation', () => {
     it('agenda o job com delay calculado a partir de scheduledAt', async () => {
       const scheduledAt = new Date(Date.now() + 60_000);
@@ -357,6 +397,45 @@ describe('DispatchService', () => {
           }),
         }),
       );
+    });
+
+    it('expira a oferta criada quando o timeout não pode ser agendado', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        displayNumber: 7,
+        destinationKnownAtCreation: true,
+        totalValue: { toString: () => '16.90' },
+        driverValue: { toString: () => '13.52' },
+        platformValue: { toString: () => '3.38' },
+        distanceKm: { toString: () => '5.43' },
+        requiresReturn: false,
+        paymentMethod: 'BILLED',
+        company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+        serviceType: { name: 'Motofrete' },
+        addresses: [offerPickupAddress, offerDropoffAddress],
+        serviceTypeId: 'service-1',
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      platformSettingsService.get.mockResolvedValue({ dispatchOfferTimeoutSeconds: 90 });
+      prisma.deliveryOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-1',
+      });
+      queue.add.mockRejectedValueOnce(new Error('redis indisponivel'));
+
+      await expect(service.dispatchDelivery('delivery-1')).rejects.toThrow('redis indisponivel');
+
+      expect(prisma.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['offer-1'] }, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
+      });
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+      expect(push.sendToDriver).not.toHaveBeenCalled();
     });
 
     it('sem destino conhecido: emite driverValue/distanceKm null em vez de 0 (Number(null) seria 0)', async () => {

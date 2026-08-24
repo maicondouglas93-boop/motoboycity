@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AdminCompanyListItem } from '@motoboycity/types';
+import type { AdminCompanyListItem, RegisterCompanyResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
+import { Building2, CircleCheckBig } from 'lucide-react';
+import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +31,7 @@ const statusVariant: Record<AdminCompanyListItem['status'], 'outline' | 'default
 export default function ClientsPage() {
   const [search, setSearch] = useState('');
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [createdNotice, setCreatedNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const token = session.getToken();
@@ -66,13 +69,40 @@ export default function ClientsPage() {
       .includes(search.toLowerCase()),
   );
 
+  function handleCompanyCreated(result: RegisterCompanyResult) {
+    setCreatedNotice(
+      result.status === 'PENDING_APPROVAL'
+        ? 'Empresa cadastrada. Revise os dados e aprove o acesso quando estiver pronta para operar.'
+        : 'Empresa cadastrada com sucesso.',
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="grid grid-cols-2 gap-4">
-          <StatCard label="Total de Clientes" value={companies.length} />
-          <StatCard label="Clientes Pendentes" value={pendingCount} />
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-2xl font-semibold">Empresas</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Cadastre, aprove e acompanhe as empresas atendidas pela plataforma.
+          </p>
         </div>
+        <CreateCompanyDialog accessToken={token} onCreated={handleCompanyCreated}>
+          <Button className="gap-2 shadow-lg shadow-primary/15">
+            <Building2 className="size-4" /> Cadastrar empresa
+          </Button>
+        </CreateCompanyDialog>
+      </header>
+
+      {createdNotice && (
+        <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/6 px-4 py-3 text-sm">
+          <CircleCheckBig className="mt-0.5 size-4 shrink-0 text-primary" />
+          <p>{createdNotice}</p>
+        </div>
+      )}
+
+      <div className="grid max-w-xl grid-cols-2 gap-4">
+        <StatCard label="Total de Clientes" value={companies.length} />
+        <StatCard label="Clientes Pendentes" value={pendingCount} />
       </div>
 
       <Input

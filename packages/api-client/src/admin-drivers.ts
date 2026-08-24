@@ -1,6 +1,7 @@
 import type {
   AdminDriverListItem,
   AdminDriverRegistrationOptions,
+  AdminPasswordChangeResult,
   DriverAccountStatus,
   DriverAccountStatusResult,
   DriverApprovalStatus,
@@ -9,7 +10,7 @@ import type {
   RegisterDriverResult,
   ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/types';
-import type { CreateAdminDriverPayload } from '@motoboycity/validation';
+import type { ChangeAdminPasswordPayload, CreateAdminDriverPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminDriversApiConfig {
@@ -101,6 +102,19 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DriverAccountStatusResult>(response);
+    },
+
+    async changePassword(
+      accessToken: string,
+      driverId: string,
+      payload: ChangeAdminPasswordPayload,
+    ): Promise<AdminPasswordChangeResult> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/password`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminPasswordChangeResult>(response);
     },
 
     async replaceServiceTypes(

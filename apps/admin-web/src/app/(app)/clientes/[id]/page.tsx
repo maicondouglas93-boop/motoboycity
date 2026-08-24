@@ -4,14 +4,16 @@ import Link from 'next/link';
 import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react';
 import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
+import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi, adminInvoicesApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { somarDinheiro } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -43,6 +45,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [orderPage, setOrderPage] = useState(1);
   const [orderPageSize, setOrderPageSize] = useState<number>(ORDER_PAGE_SIZES[0]);
   const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
+  const [passwordChangedFor, setPasswordChangedFor] = useState<string | null>(null);
 
   const companyQuery = useQuery({
     queryKey: ['admin', 'company', companyId],
@@ -93,18 +96,23 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       total: deliveries.length,
       completed: completed.length,
       cancelled: deliveries.filter((delivery) => delivery.status === 'CANCELLED').length,
-      totalValue: deliveries.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0),
-      platformValue: completed.reduce((sum, delivery) => sum + (delivery.platformValue ?? 0), 0),
+      // Em centavos inteiros. Somar dinheiro em float acumula sobra ao longo
+      // de centenas de entregas, e este e o numero que se olha antes de
+      // negociar preco com a loja.
+      totalValue: somarDinheiro(deliveries.map((delivery) => delivery.totalValue)),
+      platformValue: somarDinheiro(completed.map((delivery) => delivery.platformValue)),
     };
   }, [allOrdersQuery.data]);
 
   const invoiceStats = useMemo(() => {
     const invoices = invoicesQuery.data ?? [];
     return {
-      total: invoices.reduce((sum, invoice) => sum + invoice.totalValue, 0),
-      receivable: invoices
-        .filter((invoice) => invoice.status === 'PENDING' || invoice.status === 'OVERDUE')
-        .reduce((sum, invoice) => sum + invoice.totalValue, 0),
+      total: somarDinheiro(invoices.map((invoice) => invoice.totalValue)),
+      receivable: somarDinheiro(
+        invoices
+          .filter((invoice) => invoice.status === 'PENDING' || invoice.status === 'OVERDUE')
+          .map((invoice) => invoice.totalValue),
+      ),
     };
   }, [invoicesQuery.data]);
 
@@ -137,6 +145,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       {companyQuery.isError && (
         <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertCircle className="size-4" /> Não foi possível carregar este cliente.
+        </div>
+      )}
+
+      {passwordChangedFor && (
+        <div className="rounded-2xl border border-primary/20 bg-primary/6 px-4 py-3 text-sm">
+          Senha de {passwordChangedFor} alterada. As sessões anteriores foram encerradas.
         </div>
       )}
 
@@ -458,10 +472,28 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                           Entrou em {formatDate(member.joinedAt)}
                         </p>
                       </div>
-                      <Badge variant={member.active ? 'secondary' : 'destructive'}>
-                        {member.role === 'OWNER' ? 'Responsável' : 'Operador'} ·{' '}
-                        {member.active ? 'ativo' : 'inativo'}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge variant={member.active ? 'secondary' : 'destructive'}>
+                          {member.role === 'OWNER' ? 'Responsável' : 'Operador'} ·{' '}
+                          {member.active ? 'ativo' : 'inativo'}
+                        </Badge>
+                        {member.role === 'OWNER' && member.active && (
+                          <ChangePasswordDialog
+                            targetName={member.user.name}
+                            targetEmail={member.user.email}
+                            changePassword={(password) =>
+                              adminCompaniesApi.changeMemberPassword(token, company.id, member.id, {
+                                password,
+                              })
+                            }
+                            onChanged={() => setPasswordChangedFor(member.user.name)}
+                          >
+                            <Button variant="outline" size="sm">
+                              <KeyRound className="size-3.5" /> Alterar senha
+                            </Button>
+                          </ChangePasswordDialog>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}

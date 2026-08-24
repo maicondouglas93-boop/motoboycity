@@ -13,6 +13,7 @@ const driverPassword = 'senhaSegura123';
 const adminCreatedEmail = `teste.admin.drivers.created.${uniqueSuffix}@example.com`;
 const adminCreatedCpf = `555${String(uniqueSuffix).slice(-8)}`;
 const adminCreatedPassword = 'senhaInicial456';
+const changedAdminCreatedPassword = 'senhaNovaEntregador789';
 const invalidConfigEmail = `teste.admin.drivers.invalid.${uniqueSuffix}@example.com`;
 const invalidConfigCpf = `666${String(uniqueSuffix).slice(-8)}`;
 
@@ -37,19 +38,17 @@ describe('AdminDriversController (e2e)', () => {
     prisma = moduleFixture.get(PrismaService);
     await app.init();
 
-    const registerResponse = await request(app.getHttpServer())
-      .post('/auth/register/driver')
-      .send({
-        name: 'Admin Drivers Teste E2E',
-        email: testEmail,
-        phone: '33999887766',
-        cpf: testCpf,
-        birthDate: '1990-05-20',
-        pixKey: testEmail,
-        pixKeyType: 'EMAIL',
-        hasCnpj: false,
-        password: driverPassword,
-      });
+    const registerResponse = await request(app.getHttpServer()).post('/auth/register/driver').send({
+      name: 'Admin Drivers Teste E2E',
+      email: testEmail,
+      phone: '33999887766',
+      cpf: testCpf,
+      birthDate: '1990-05-20',
+      pixKey: testEmail,
+      pixKeyType: 'EMAIL',
+      hasCnpj: false,
+      password: driverPassword,
+    });
     driverId = registerResponse.body.driverId;
 
     const adminLogin = await request(app.getHttpServer())
@@ -198,6 +197,43 @@ describe('AdminDriversController (e2e)', () => {
       .expect(409);
   });
 
+  it('admin redefine a senha do motoboy e revoga a sessão anterior', async () => {
+    const oldLogin = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: adminCreatedEmail, password: adminCreatedPassword })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/admin/drivers/${adminCreatedDriverId}/password`)
+      .send({ password: changedAdminCreatedPassword })
+      .expect(401);
+    await request(app.getHttpServer())
+      .patch(`/admin/drivers/${adminCreatedDriverId}/password`)
+      .set('Authorization', `Bearer ${driverOwnToken}`)
+      .send({ password: changedAdminCreatedPassword })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/admin/drivers/${adminCreatedDriverId}/password`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ password: changedAdminCreatedPassword })
+      .expect(200)
+      .expect(({ body }) => expect(body).toEqual({ userId: expect.any(String) }));
+
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${oldLogin.body.accessToken}`)
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: adminCreatedEmail, password: adminCreatedPassword })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: adminCreatedEmail, password: changedAdminCreatedPassword })
+      .expect(200);
+  });
+
   it('não deixa resíduos quando a configuração operacional é inválida', async () => {
     const serviceType = await prisma.serviceType.findFirst({
       where: { active: true },
@@ -335,19 +371,17 @@ describe('AdminDriversController (e2e)', () => {
     const rejectedEmail = `teste.admin.drivers.rejected.${uniqueSuffix}@example.com`;
     const rejectedCpf = `444${String(uniqueSuffix).slice(-8)}`;
 
-    const registerResponse = await request(app.getHttpServer())
-      .post('/auth/register/driver')
-      .send({
-        name: 'Motoboy Rejeitado E2E',
-        email: rejectedEmail,
-        phone: '33999887755',
-        cpf: rejectedCpf,
-        birthDate: '1990-05-20',
-        pixKey: rejectedEmail,
-        pixKeyType: 'EMAIL',
-        hasCnpj: false,
-        password: driverPassword,
-      });
+    const registerResponse = await request(app.getHttpServer()).post('/auth/register/driver').send({
+      name: 'Motoboy Rejeitado E2E',
+      email: rejectedEmail,
+      phone: '33999887755',
+      cpf: rejectedCpf,
+      birthDate: '1990-05-20',
+      pixKey: rejectedEmail,
+      pixKeyType: 'EMAIL',
+      hasCnpj: false,
+      password: driverPassword,
+    });
     const rejectedDriverId = registerResponse.body.driverId;
 
     const response = await request(app.getHttpServer())

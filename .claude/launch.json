@@ -1,0 +1,58 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "company-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@motoboycity/company-web",
+        "exec",
+        "next",
+        "dev",
+        "--port",
+        "3000"
+      ],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@motoboycity/admin-web",
+        "exec",
+        "next",
+        "dev",
+        "--port",
+        "3001"
+      ],
+      "port": 3001,
+      "autoPort": false
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@motoboycity/api",
+        "exec",
+        "nest",
+        "start"
+      ],
+      "port": 3333,
+      "autoPort": false
+    }
+  ]
+}

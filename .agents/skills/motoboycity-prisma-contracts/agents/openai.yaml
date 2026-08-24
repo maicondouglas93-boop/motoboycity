@@ -1,0 +1,6 @@
+interface:
+  display_name: "Prisma Contracts"
+  short_description: "Protect database and shared API contracts"
+  default_prompt: "Use $motoboycity-prisma-contracts to plan this schema and API contract change safely."
+policy:
+  allow_implicit_invocation: true

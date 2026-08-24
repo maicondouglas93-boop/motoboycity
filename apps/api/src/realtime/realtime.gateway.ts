@@ -11,6 +11,7 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { getAllowedOrigins } from '../common/cors';
 import type { JwtPayload } from '../auth/jwt.strategy';
+import { credentialFingerprint } from '../auth/credential-fingerprint';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -28,6 +29,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   private readonly logger = new Logger(RealtimeGateway.name);
   private readonly socketDriverId = new Map<string, string>();
+  private readonly socketUserId = new Map<string, string>();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -49,9 +51,21 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return;
     }
 
+    // Registra antes da consulta para o reset de senha conseguir encerrar tambem
+    // um handshake que esteja em andamento. Sem isso, havia uma janela entre a
+    // leitura do hash antigo e a inclusao no mapa de sockets.
+    this.socketUserId.set(client.id, payload.sub);
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) {
-      client.disconnect(true);
+      this.disconnectClient(client);
+      return;
+    }
+    if (this.isDisconnected(client)) {
+      this.forgetSocket(client.id);
+      return;
+    }
+    if (payload.credentialVersion !== credentialFingerprint(user.passwordHash)) {
+      this.disconnectClient(client);
       return;
     }
 
@@ -63,8 +77,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     if (user.type === 'DRIVER') {
       const driver = await this.prisma.driver.findUnique({ where: { userId: user.id } });
+      if (this.isDisconnected(client)) {
+        this.forgetSocket(client.id);
+        return;
+      }
       if (!driver) {
-        client.disconnect(true);
+        this.disconnectClient(client);
         return;
       }
       this.socketDriverId.set(client.id, driver.id);
@@ -78,8 +96,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         where: { userId: user.id, active: true },
         select: { companyId: true },
       });
+      if (this.isDisconnected(client)) {
+        this.forgetSocket(client.id);
+        return;
+      }
       if (memberships.length === 0) {
-        client.disconnect(true);
+        this.disconnectClient(client);
         return;
       }
       await Promise.all(
@@ -91,7 +113,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   async handleDisconnect(client: Socket): Promise<void> {
     const driverId = this.socketDriverId.get(client.id);
-    this.socketDriverId.delete(client.id);
+    this.forgetSocket(client.id);
     if (!driverId) {
       return;
     }
@@ -101,6 +123,34 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitToDriver(driverId: string, event: string, payload: unknown): void {
     this.server.to(this.driverRoom(driverId)).emit(event, payload);
+  }
+
+  /** Encerra conexoes que ainda carregam uma credencial anterior do usuario. */
+  disconnectUser(userId: string): number {
+    const socketIds = [...this.socketUserId.entries()]
+      .filter(([, connectedUserId]) => connectedUserId === userId)
+      .map(([socketId]) => socketId);
+
+    for (const socketId of socketIds) {
+      this.socketUserId.delete(socketId);
+      this.socketDriverId.delete(socketId);
+      this.server.sockets.sockets.get(socketId)?.disconnect(true);
+    }
+    return socketIds.length;
+  }
+
+  private disconnectClient(client: Socket): void {
+    this.forgetSocket(client.id);
+    client.disconnect(true);
+  }
+
+  private forgetSocket(socketId: string): void {
+    this.socketDriverId.delete(socketId);
+    this.socketUserId.delete(socketId);
+  }
+
+  private isDisconnected(client: Socket): boolean {
+    return client.connected === false;
   }
 
   emitAdminActivity(
@@ -154,5 +204,4 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     return null;
   }
-
 }

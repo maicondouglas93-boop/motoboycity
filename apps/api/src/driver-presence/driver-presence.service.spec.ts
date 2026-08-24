@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { DriverPresenceService } from './driver-presence.service';
 
-const driverUser = { id: 'user-1', type: 'DRIVER' } as User;
+const driverUser = { id: 'user-1', type: 'DRIVER', passwordHash: 'hash-current' } as User;
 const companyUser = { id: 'user-2', type: 'COMPANY_MEMBER' } as User;
 const availablePayload = {
   availability: 'AVAILABLE' as const,
@@ -19,7 +19,7 @@ const availablePayload = {
 describe('DriverPresenceService', () => {
   let service: DriverPresenceService;
   let prisma: {
-    driver: { findUnique: jest.Mock; update: jest.Mock };
+    driver: { findUnique: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
     driverPresenceLog: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -36,23 +36,29 @@ describe('DriverPresenceService', () => {
     reconcileExpired: jest.Mock;
   };
   let tx: {
-    driver: { update: jest.Mock };
+    driver: { updateMany: jest.Mock };
     driverPresenceLog: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
   };
 
   beforeEach(async () => {
     tx = {
-      driver: { update: jest.fn() },
+      driver: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       driverPresenceLog: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     };
     prisma = {
-      driver: { findUnique: jest.fn(), update: jest.fn() },
+      driver: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       driverPresenceLog: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
-      $transaction: jest.fn().mockImplementation(async (input: unknown) =>
-        typeof input === 'function'
-          ? (input as (tx: unknown) => unknown)(tx)
-          : Promise.all(input as Promise<unknown>[]),
-      ),
+      $transaction: jest
+        .fn()
+        .mockImplementation(async (input: unknown) =>
+          typeof input === 'function'
+            ? (input as (tx: unknown) => unknown)(tx)
+            : Promise.all(input as Promise<unknown>[]),
+        ),
     };
     dispatchService = { dispatchAvailableDeliveries: jest.fn().mockResolvedValue(undefined) };
     realtimeGateway = {
@@ -170,8 +176,11 @@ describe('DriverPresenceService', () => {
 
       const result = await service.setAvailability(driverUser, availablePayload);
 
-      expect(tx.driver.update).toHaveBeenCalledWith({
-        where: { id: 'driver-1' },
+      expect(tx.driver.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'driver-1',
+          user: { id: 'user-1', passwordHash: 'hash-current' },
+        },
         data: expect.objectContaining({
           availability: 'AVAILABLE',
           lastKnownLat: -23.5,
@@ -187,6 +196,23 @@ describe('DriverPresenceService', () => {
         expect.objectContaining({ type: 'DRIVER_ONLINE' }),
       );
       expect(result.availability).toBe('AVAILABLE');
+    });
+
+    it('não religa o motoboy quando a senha muda durante a requisição', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'UNAVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      tx.driver.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.setAvailability(driverUser, availablePayload)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+
+      expect(livePresence.remove).toHaveBeenCalledWith('driver-1');
+      expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
     });
 
     it('fica indisponível: fecha o presence log e NÃO dispara o scan de despacho', async () => {
@@ -237,8 +263,11 @@ describe('DriverPresenceService', () => {
           appVersion: '1.0.1',
         }),
       );
-      expect(prisma.driver.update).toHaveBeenCalledWith({
-        where: { id: 'driver-1' },
+      expect(prisma.driver.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'driver-1',
+          user: { id: 'user-1', passwordHash: 'hash-current' },
+        },
         data: expect.objectContaining({ lastKnownLat: -20.154, lastKnownLng: -41.623 }),
       });
       expect(realtimeGateway.emitDriverLocation).toHaveBeenCalledWith(
@@ -266,6 +295,27 @@ describe('DriverPresenceService', () => {
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(livePresence.upsert).not.toHaveBeenCalled();
+    });
+
+    it('remove o heartbeat quando a senha muda antes da gravação', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'AVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      prisma.driver.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.heartbeat(driverUser, {
+          lat: -20.154,
+          lng: -41.623,
+          appVersion: '1.0.1',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(livePresence.remove).toHaveBeenCalledWith('driver-1');
+      expect(realtimeGateway.emitDriverLocation).not.toHaveBeenCalled();
     });
   });
 });

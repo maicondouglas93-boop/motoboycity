@@ -5201,3 +5201,129 @@ havia navegador conectado nem servidor local ativo. O próximo passo concreto é
 homologar `/perfil` com uma sessão Company real: trocar a foto, recarregar,
 sair/entrar, alternar entre duas empresas e testar formato inválido e arquivo
 maior que 5 MB.
+
+## Atualização — 2026-08-24: cadastro de empresa, redefinição de senha e WhatsApp de fatura
+
+Foram adicionados ao Admin Web os três fluxos administrativos solicitados. A
+aba **Empresas** agora abre um diálogo de cadastro com razão social, nome
+fantasia, CPF/CNPJ, região ativa, responsável, e-mail, WhatsApp e senha
+inicial. A API expõe `GET /admin/companies/registration-options` e
+`POST /admin/companies`, ambos protegidos por JWT + `AdminOnlyGuard`. A criação
+reutiliza a transação de autenticação, agora com região explícita, isolamento
+`Serializable`, retry de conflito e tradução de duplicidade. Empresa e
+responsável são gravados juntos e o status inicial permanece
+`PENDING_APPROVAL`.
+
+As páginas de detalhe do entregador e da empresa passaram a oferecer
+**Alterar senha**. As novas rotas são
+`PATCH /admin/drivers/:id/password` e
+`PATCH /admin/companies/:id/team-members/:memberId/password`. No caso da
+empresa, somente um `OWNER` ativo e pertencente ao `companyId` informado pode
+ser alvo. A API recebe apenas `{ password }`, aplica bcrypt e devolve somente o
+`userId`; senha e hash não entram na resposta ou em eventos.
+
+Tokens novos carregam `credentialVersion`, um SHA-256 do hash bcrypt atual.
+`JwtStrategy` e o handshake Socket.IO comparam essa impressão com a credencial
+persistida; a troca do hash revoga os tokens anteriores sem migration e a API
+derruba sockets já conectados ao usuário. Tokens legados sem a claim também
+são rejeitados, produzindo um logout único após a implantação desta versão.
+Não houve alteração na decisão de JWT em `localStorage`, prazo de sete dias ou
+ausência de refresh token.
+
+No reset de motoboy, a API também grava `availability=UNAVAILABLE`, fecha logs
+de presença, remove a presença viva do Redis e devolve ofertas pendentes para o
+dispatch. Hash novo, `UNAVAILABLE` e fechamento do log pertencem à mesma
+transação. Redis e fila são limpos depois do commit, com até três tentativas;
+uma falha externa não transforma um reset já confirmado em resposta enganosa de
+erro. A expiração de oferta é idempotente também quando `EXPIRED` já foi
+persistido: ela retoma o redespacho, e o job de timeout só é removido ao final.
+Ao criar uma oferta, todos os jobs de timeout precisam ser confirmados; se
+qualquer `queue.add` falhar, todas as ofertas recém-criadas são movidas
+condicionalmente de `PENDING` para `EXPIRED`, jobs parciais são removidos em
+best effort e o erro original é relançado. Assim uma falha do Redis não deixa
+pedido bloqueado por uma oferta sem prazo.
+
+O handshake Socket.IO registra o usuário antes da consulta da credencial,
+permitindo que um reset encerre também uma conexão ainda em autenticação.
+`setAvailability` e `heartbeat` usam escrita condicional pelo hash que
+autenticou a requisição, fechando a corrida em que um request antigo poderia
+religar a presença depois da troca.
+
+No detalhe administrativo da fatura, o painel consulta os membros da empresa,
+seleciona somente responsáveis ativos com telefone brasileiro válido e abre
+`wa.me` com mensagem revisável. Havendo mais de um responsável, o admin escolhe
+explicitamente o contato antes de liberar o botão. Falha ao carregar os contatos
+é mostrada como erro recuperável, e não como telefone ausente. A mensagem inclui
+somente empresa, número, valor, vencimento e quantidade de pedidos; inclusive a
+saudação não leva o nome pessoal. Não há token ou link autenticado. O WhatsApp
+exige confirmação manual do envio e não anexa PDF. Refetch em segundo plano
+mantém o botão disponível quando já existem contatos em cache; o estado de
+carregamento bloqueia a ação somente quando ainda não há dados utilizáveis.
+
+Cadastro de empresa e redefinições de senha registram nos logs da API o ID do
+administrador e os IDs dos alvos, sem senha ou hash. O schema ainda não possui
+uma trilha genérica append-only para ações de segurança; criar essa persistência
+exige decisão de retenção e uma migration aditiva separada.
+
+Os dois recortes de avatar pedidos nesta mesma sequência já estavam completos:
+`/perfil` no Company Web e upload/visualização no app do entregador, ambos via
+`POST /profile/avatar` e ImageKit. Não foram duplicados nem alterados aqui.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/admin/{companies,drivers}/`;
+- `apps/api/src/auth/{auth.service,credential-fingerprint,jwt.strategy}.ts`;
+- `apps/api/src/realtime/realtime.gateway.ts`;
+- `apps/api/src/driver-presence/driver-presence.service.ts`;
+- `packages/validation/src/admin/{create-company,change-password}.schema.ts`;
+- `packages/types/src/{company,user}.ts` e clientes HTTP administrativos;
+- `apps/admin-web/src/components/companies/create-company-dialog.tsx`;
+- `apps/admin-web/src/components/users/change-password-dialog.tsx`;
+- `apps/admin-web/src/components/finance/invoice-whatsapp-dialog.tsx`;
+- `apps/admin-web/src/lib/whatsapp.ts`.
+
+### Verificação
+
+| Comando / fluxo                               | Resultado                        |
+| --------------------------------------------- | -------------------------------- |
+| typecheck completo do monorepo                | 8 projetos aprovados             |
+| lint completo do monorepo                     | 8 projetos aprovados             |
+| Jest unitário completo da API                 | 58 suítes e 677 testes aprovados |
+| testes de normalização/mensagem WhatsApp      | 3 testes aprovados               |
+| build da API e build de produção do Admin Web | aprovado                         |
+| `git diff --check`                            | aprovado                         |
+
+Foram acrescentados E2E para guards, criação administrativa, região inválida
+sem resíduo, troca de senha, rejeição da senha anterior e revogação do token.
+Eles não foram executados nesta sessão porque PostgreSQL e Redis isolados não
+foram provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi
+alterado. A API local foi reiniciada e voltou a escutar na porta 3333; os dois
+painéis permaneceram nas portas 3000 e 3001. O próximo passo concreto é
+homologar os três diálogos com uma sessão administrativa real e executar os
+dois E2E em banco/Redis isolados.
+
+## Atualização — 2026-08-24: Blueprint de infraestrutura para o Render
+
+O arquivo raiz `render.yaml`, criado em sessão concorrente e incluído no mesmo
+push a pedido do usuário, descreve PostgreSQL 15, Redis com política
+`noeviction` e a API NestJS no plano gratuito do Render. O build parte da raiz
+do monorepo, instala com lockfile congelado, gera o Prisma Client, executa
+`prisma migrate deploy` e compila a API; o processo de execução reutiliza o
+script `start:prod` do pacote. Os dois painéis web continuam fora do Blueprint
+e estão destinados à Vercel.
+
+`DATABASE_URL` e `REDIS_URL` são ligados pelos serviços do próprio Blueprint,
+e `JWT_SECRET` é gerado pelo Render. CORS, Google Maps, Groq, Firebase,
+ImageKit e credenciais do administrador inicial aparecem apenas como
+`sync: false`: os valores precisam ser preenchidos manualmente no painel e não
+foram adicionados ao repositório público. Os únicos valores persistidos no YAML
+são configurações não secretas, como `NODE_ENV`, throttling, modelo e timeout
+do Groq.
+
+O Blueprint não foi aplicado nesta sessão e nenhum recurso externo, banco,
+migration ou seed foi criado. Se ele já estiver conectado ao repositório, um
+push em `main` pode iniciar o fluxo automático configurado no Render; antes de
+usar dados compartilhados continuam obrigatórios backup/restore e validação da
+migration em cópia de staging. Após o primeiro provisionamento ainda será
+necessário informar `CORS_ORIGINS`, preencher os segredos no painel e executar
+o seed administrativo uma única vez.

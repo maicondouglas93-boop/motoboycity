@@ -169,7 +169,7 @@ export class DispatchService {
       return;
     }
 
-    await Promise.all(
+    const scheduledTimeouts = await Promise.allSettled(
       offers.map((offer) =>
         this.dispatchQueue.add(
           OFFER_EXPIRE_JOB,
@@ -178,6 +178,27 @@ export class DispatchService {
         ),
       ),
     );
+    const schedulingFailure = scheduledTimeouts.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (schedulingFailure) {
+      const offerIds = offers.map((offer) => offer.id);
+
+      // A oferta so pode continuar PENDING se todos os jobs que a expiram
+      // existirem. Sem esta compensacao, uma indisponibilidade do Redis deixa
+      // o pedido preso para sempre: novas tentativas encontram a oferta
+      // pendente e retornam, mas nenhum timeout existe para libera-la.
+      await this.prisma.deliveryOffer.updateMany({
+        where: { id: { in: offerIds }, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: new Date() },
+      });
+
+      // Em lote, alguns jobs podem ter sido criados antes de outro falhar.
+      // Remove os que chegaram ao Redis; uma remocao que falhar e inofensiva,
+      // pois handleOfferExpired e idempotente para ofertas ja EXPIRED.
+      await Promise.allSettled(offerIds.map((offerId) => this.cancelOfferTimeout(offerId)));
+      throw schedulingFailure.reason;
+    }
 
     this.realtimeGateway.emitToDriver(
       nextDriverId,
@@ -246,7 +267,17 @@ export class DispatchService {
 
   async handleOfferExpired(offerId: string): Promise<void> {
     const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
-    if (!offer || offer.response !== 'PENDING') {
+    if (!offer) {
+      return;
+    }
+    if (offer.response === 'EXPIRED') {
+      // A expiração pode ter sido persistida antes de uma falha no redespacho.
+      // Repetir o job precisa retomar essa segunda metade, e dispatchDelivery e
+      // idempotente quando o pedido ja mudou ou ganhou outra oferta.
+      await this.dispatchDelivery(offer.deliveryId);
+      return;
+    }
+    if (offer.response !== 'PENDING') {
       return;
     }
 
@@ -296,9 +327,24 @@ export class DispatchService {
     });
 
     for (const offer of pending) {
-      await this.cancelOfferTimeout(offer.id);
       // Idempotente: se a oferta saiu de PENDING nesse meio-tempo, ela nao faz nada.
-      await this.handleOfferExpired(offer.id);
+      // Expira antes de remover o timeout: se a operacao falhar, o job segue
+      // ativo como compensacao e tenta novamente no prazo normal da oferta.
+      try {
+        await this.handleOfferExpired(offer.id);
+      } catch (error) {
+        const current = await this.prisma.deliveryOffer.findUnique({
+          where: { id: offer.id },
+          select: { response: true },
+        });
+        if (current?.response !== 'EXPIRED') {
+          throw error;
+        }
+        // Se apenas o redespacho falhou depois do EXPIRED, a segunda chamada
+        // entra no ramo idempotente acima e conclui sem esperar o timeout.
+        await this.handleOfferExpired(offer.id);
+      }
+      await this.cancelOfferTimeout(offer.id);
     }
 
     return pending.length;

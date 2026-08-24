@@ -1,0 +1,6 @@
+interface:
+  display_name: "Driver Mobile"
+  short_description: "Safely change the React Native driver app"
+  default_prompt: "Use $motoboycity-driver-mobile to trace and change this driver-app flow safely."
+policy:
+  allow_implicit_invocation: true

@@ -3,9 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import { credentialFingerprint } from './credential-fingerprint';
 
 export interface JwtPayload {
   sub: string;
+  credentialVersion?: string;
 }
 
 @Injectable()
@@ -25,6 +27,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) {
       throw new UnauthorizedException('Usuário não encontrado.');
+    }
+    if (payload.credentialVersion !== credentialFingerprint(user.passwordHash)) {
+      throw new UnauthorizedException('Sua sessão expirou. Entre novamente.');
     }
     return user;
   }

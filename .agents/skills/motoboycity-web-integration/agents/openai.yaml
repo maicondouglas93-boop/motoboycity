@@ -1,0 +1,6 @@
+interface:
+  display_name: "Web Integration"
+  short_description: "Safely connect company and admin web flows"
+  default_prompt: "Use $motoboycity-web-integration to implement this web flow with the real API."
+policy:
+  allow_implicit_invocation: true

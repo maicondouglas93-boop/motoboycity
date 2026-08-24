@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ReplaceDriverServiceTypesPayload } from '@motoboycity/validation';
 import type {
   Driver,
@@ -9,9 +9,12 @@ import type {
 import type {
   AdminDriverListItem,
   AdminDriverRegistrationOptions,
+  AdminPasswordChangeResult,
   DriverServiceTypeItem,
 } from '@motoboycity/types';
+import { AuthService } from '../../auth/auth.service';
 import { DispatchService } from '../../dispatch/dispatch.service';
+import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
@@ -49,10 +52,14 @@ export interface ListDriversFilters {
 
 @Injectable()
 export class AdminDriversService {
+  private readonly logger = new Logger(AdminDriversService.name);
+
   constructor(
     private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
     private readonly dispatchService: DispatchService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly livePresence: LiveDriverPresenceService,
   ) {}
 
   async registrationOptions(): Promise<AdminDriverRegistrationOptions> {
@@ -246,6 +253,53 @@ export class AdminDriversService {
     return this.setAccountStatus(driverId, 'ACTIVE');
   }
 
+  async changePassword(driverId: string, password: string): Promise<AdminPasswordChangeResult> {
+    const driver = await this.prisma.driver.findFirst({
+      where: { id: driverId, user: { type: 'DRIVER' } },
+      select: { userId: true },
+    });
+    if (!driver) {
+      throw new NotFoundException('Motoboy não encontrado.');
+    }
+
+    const wentOfflineAt = new Date();
+    const result = await this.authService.replacePassword(driver.userId, password, {
+      mutateInSameTransaction: async (tx) => {
+        await tx.driver.update({
+          where: { id: driverId },
+          data: { availability: 'UNAVAILABLE' },
+        });
+        await tx.driverPresenceLog.updateMany({
+          where: { driverId, wentOfflineAt: null },
+          data: { wentOfflineAt },
+        });
+      },
+    });
+    this.realtimeGateway.disconnectUser(driver.userId);
+
+    const redisCleanup = await this.tryOperationalCleanup('presença Redis', () =>
+      this.livePresence.remove(driverId),
+    );
+    const offerCleanup = await this.tryOperationalCleanup('ofertas pendentes', () =>
+      this.dispatchService.releasePendingOffersForDriver(driverId),
+    );
+    const releasedOffers = offerCleanup.ok ? offerCleanup.value : 0;
+    this.realtimeGateway.emitDriverPresence({
+      driverId,
+      availability: 'UNAVAILABLE',
+      at: wentOfflineAt.toISOString(),
+      reason: 'PASSWORD_RESET',
+    });
+    this.realtimeGateway.emitAdminActivity(
+      !redisCleanup.ok || !offerCleanup.ok
+        ? 'Senha de motoboy redefinida; limpeza externa pendente, com bloqueio seguro no banco.'
+        : releasedOffers > 0
+          ? `Senha de motoboy redefinida: ${releasedOffers} oferta(s) devolvida(s) para a fila.`
+          : 'Senha de motoboy redefinida; sessões e presença encerradas.',
+    );
+    return result;
+  }
+
   async replaceServiceTypes(
     driverId: string,
     payload: ReplaceDriverServiceTypesPayload,
@@ -350,6 +404,7 @@ export class AdminDriversService {
     });
 
     if (deveEncerrarOperacao) {
+      await this.livePresence.remove(driverId);
       const soltas = await this.dispatchService.releasePendingOffersForDriver(driverId);
       this.realtimeGateway.emitToDriver(driverId, 'driver:account-status-changed', {
         accountStatus,
@@ -370,6 +425,22 @@ export class AdminDriversService {
       throw new NotFoundException('Motoboy não encontrado.');
     }
     return driver;
+  }
+
+  private async tryOperationalCleanup<T>(
+    label: string,
+    operation: () => Promise<T>,
+  ): Promise<{ ok: true; value: T } | { ok: false }> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return { ok: true, value: await operation() };
+      } catch (error) {
+        this.logger.warn(
+          `Falha ao limpar ${label} após reset de senha (tentativa ${attempt}/3): ${String(error)}`,
+        );
+      }
+    }
+    return { ok: false };
   }
 
   private toServiceTypeItem(
