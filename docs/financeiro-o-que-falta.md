@@ -18,35 +18,11 @@ Contexto: a área financeira foi refatorada em `/financeiro`, com quatro abas
 | Extrato de recebimentos + endpoint | `GET /admin/financial/receipts` |
 | Envelhecimento da dívida por empresa | `src/components/finance/receivables-aging.tsx` |
 | Ajuste manual de carteira | `POST /admin/financial/driver-wallets/:driverId/adjustments` |
+| Obrigações por entregador | `src/components/finance/payouts-aging.tsx` |
 
 ---
 
-## 1. Obrigações por entregador — SÓ INTERFACE
-
-**Existe pronto e nenhuma tela usa:** `GET /admin/financial/payouts-aging`,
-já exposto no `adminFinancialApi.payoutsAging(token)`.
-
-Devolve `PayoutsAgingReport` (`packages/types/src/finance.ts`):
-
-- `totalObligation` — tudo que a operação deve aos motoboys agora
-- `wallets.divergentCount` — carteiras cujo cache discorda do ledger
-- `withdrawals.maxOpenDays` e `oldestOpenDate` — há quanto tempo alguém espera
-- `buckets` — faixas `OPEN_0_1`, `OPEN_2_3`, `OPEN_4_7`, `OPEN_8_PLUS`
-- `drivers` — `DriverPayoutPositionItem[]` com `totalObligation` por motoboy
-
-**Onde colocar:** dentro da aba Carteiras
-(`src/components/finance/carteiras-tab.tsx`), acima da tabela de carteiras.
-
-**Como desenhar:** espelhar `receivables-aging.tsx` — as faixas como cartões e a
-lista por motoboy abaixo. Ordenar por **dias de espera**, não por valor: quem
-espera há 8 dias é um problema; quem pediu hoje é fluxo normal.
-
-`divergentCount` maior que zero merece destaque em vermelho — é erro de
-contabilidade, não detalhe.
-
----
-
-## 2. Cancelar fatura — BACKEND + INTERFACE
+## 1. Cancelar fatura — BACKEND + INTERFACE
 
 **O que existe:** o enum `InvoiceStatus` tem `CANCELLED`, e
 **nenhuma rota o produz**. Fatura emitida errada hoje não tem saída.
@@ -70,7 +46,7 @@ ele, cancelar a fatura apaga a cobrança em vez de reabri-la.
 
 ---
 
-## 3. Antecipação de saldo — BACKEND INTEIRO
+## 2. Antecipação de saldo — BACKEND INTEIRO
 
 **O que existe:** o modelo `AdvanceRequest` no schema, com
 `blockedAmountAntecipado`, `feeAmount`, `netAmount`, `status` e
@@ -96,7 +72,7 @@ sem demanda comprovada.
 
 ---
 
-## 4. Demonstrativo por competência — SÓ INTERFACE
+## 3. Demonstrativo por competência — SÓ INTERFACE
 
 **Existe pronto:** `GET /admin/financial/financial-statement?from&to`, exposto
 em `adminFinancialApi.financialStatement(token, { from, to })`.
