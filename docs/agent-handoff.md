@@ -5327,3 +5327,18 @@ usar dados compartilhados continuam obrigatórios backup/restore e validação d
 migration em cópia de staging. Após o primeiro provisionamento ainda será
 necessário informar `CORS_ORIGINS`, preencher os segredos no painel e executar
 o seed administrativo uma única vez.
+
+## Atualização — 2026-08-24: isolamento do E2E de cadastro de entregador
+
+O primeiro CI após o recorte administrativo chegou aos E2E com migrations e
+seed aprovados, mas `admin-drivers.e2e-spec.ts` assumia que existia uma
+modalidade ativa criada pelo seed. O seed mínimo cria somente a região padrão e
+o administrador; por isso cinco casos da mesma suíte falharam em cascata,
+enquanto as outras 21 suítes passaram.
+
+A suíte agora cria uma modalidade exclusiva no próprio `beforeAll`, usa seu ID
+nos casos de cadastro e configuração inválida e a remove no `afterAll`, depois
+de apagar os vínculos dos entregadores de teste. A mudança é somente de fixture
+E2E: não altera schema, rota, regra de negócio ou dado de produção. A validação
+definitiva continua no workflow com PostgreSQL e Redis isolados; nenhum banco
+local ou compartilhado foi usado para reproduzir o teste.

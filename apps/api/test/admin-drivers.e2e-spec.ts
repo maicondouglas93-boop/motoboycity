@@ -16,6 +16,7 @@ const adminCreatedPassword = 'senhaInicial456';
 const changedAdminCreatedPassword = 'senhaNovaEntregador789';
 const invalidConfigEmail = `teste.admin.drivers.invalid.${uniqueSuffix}@example.com`;
 const invalidConfigCpf = `666${String(uniqueSuffix).slice(-8)}`;
+const testServiceTypeCode = `ADMIN_DRIVER_${uniqueSuffix}`;
 
 const adminEmail = process.env['ADMIN_SEED_EMAIL'] ?? 'admin@motoboycity.local';
 const adminPassword = process.env['ADMIN_SEED_PASSWORD'] ?? 'admin_dev_only_change_me';
@@ -28,6 +29,7 @@ describe('AdminDriversController (e2e)', () => {
   let adminUserId: string;
   let driverOwnToken: string;
   let adminCreatedDriverId: string;
+  let serviceTypeId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -37,6 +39,12 @@ describe('AdminDriversController (e2e)', () => {
     app = moduleFixture.createNestApplication();
     prisma = moduleFixture.get(PrismaService);
     await app.init();
+
+    const serviceType = await prisma.serviceType.create({
+      data: { code: testServiceTypeCode, name: 'Modalidade Admin Driver E2E' },
+      select: { id: true },
+    });
+    serviceTypeId = serviceType.id;
 
     const registerResponse = await request(app.getHttpServer()).post('/auth/register/driver').send({
       name: 'Admin Drivers Teste E2E',
@@ -78,6 +86,7 @@ describe('AdminDriversController (e2e)', () => {
     }
     await prisma.driver.deleteMany({ where: { id: { in: cleanupDriverIds } } });
     await prisma.user.deleteMany({ where: { email: { in: cleanupEmails } } });
+    await prisma.serviceType.deleteMany({ where: { code: testServiceTypeCode } });
     await app.close();
   });
 
@@ -93,12 +102,11 @@ describe('AdminDriversController (e2e)', () => {
   });
 
   it('protege o cadastro administrativo contra acesso sem token ou de entregador', async () => {
-    const [region, serviceType] = await Promise.all([
-      prisma.region.findFirst({ where: { active: true }, select: { id: true } }),
-      prisma.serviceType.findFirst({ where: { active: true }, select: { id: true } }),
-    ]);
+    const region = await prisma.region.findFirst({
+      where: { active: true },
+      select: { id: true },
+    });
     expect(region).not.toBeNull();
-    expect(serviceType).not.toBeNull();
 
     const payload = {
       name: 'Entregador cadastrado pelo admin',
@@ -111,7 +119,7 @@ describe('AdminDriversController (e2e)', () => {
       hasCnpj: false,
       password: adminCreatedPassword,
       regionId: region!.id,
-      serviceTypeIds: [serviceType!.id],
+      serviceTypeIds: [serviceTypeId],
     };
 
     await request(app.getHttpServer()).post('/admin/drivers').send(payload).expect(401);
@@ -141,12 +149,11 @@ describe('AdminDriversController (e2e)', () => {
   });
 
   it('admin cria conta, perfil e modalidade em estado pendente numa única operação', async () => {
-    const [region, serviceType] = await Promise.all([
-      prisma.region.findFirst({ where: { active: true }, select: { id: true } }),
-      prisma.serviceType.findFirst({ where: { active: true }, select: { id: true } }),
-    ]);
+    const region = await prisma.region.findFirst({
+      where: { active: true },
+      select: { id: true },
+    });
     expect(region).not.toBeNull();
-    expect(serviceType).not.toBeNull();
 
     const payload = {
       name: 'Entregador cadastrado pelo admin',
@@ -159,7 +166,7 @@ describe('AdminDriversController (e2e)', () => {
       hasCnpj: false,
       password: adminCreatedPassword,
       regionId: region!.id,
-      serviceTypeIds: [serviceType!.id],
+      serviceTypeIds: [serviceTypeId],
     };
 
     const response = await request(app.getHttpServer())
@@ -183,7 +190,7 @@ describe('AdminDriversController (e2e)', () => {
       accountStatus: 'ACTIVE',
       availability: 'UNAVAILABLE',
       regionId: region!.id,
-      serviceTypes: [{ serviceTypeId: serviceType!.id, isPrimary: true }],
+      serviceTypes: [{ serviceTypeId, isPrimary: true }],
     });
     expect(created?.user.passwordHash).not.toBe(adminCreatedPassword);
     await expect(
@@ -235,12 +242,6 @@ describe('AdminDriversController (e2e)', () => {
   });
 
   it('não deixa resíduos quando a configuração operacional é inválida', async () => {
-    const serviceType = await prisma.serviceType.findFirst({
-      where: { active: true },
-      select: { id: true },
-    });
-    expect(serviceType).not.toBeNull();
-
     await request(app.getHttpServer())
       .post('/admin/drivers')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -255,7 +256,7 @@ describe('AdminDriversController (e2e)', () => {
         hasCnpj: false,
         password: adminCreatedPassword,
         regionId: '00000000-0000-4000-8000-000000000000',
-        serviceTypeIds: [serviceType!.id],
+        serviceTypeIds: [serviceTypeId],
       })
       .expect(409);
 
