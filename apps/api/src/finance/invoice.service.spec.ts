@@ -5,9 +5,12 @@ import { InvoiceService } from './invoice.service';
 
 describe('InvoiceService', () => {
   const tx = {
-    delivery: { findMany: jest.fn() },
+    delivery: { findMany: jest.fn(), updateMany: jest.fn() },
+    invoice: { create: jest.fn(), findMany: jest.fn() },
+    invoiceStatusHistory: { create: jest.fn() },
   };
-  const prisma = { $transaction: jest.fn() };
+  // `getListItem` roda FORA da transacao, relendo a fatura recem-criada.
+  const prisma = { $transaction: jest.fn(), invoice: { findUnique: jest.fn() } };
   const clock = { now: jest.fn() };
   const service = new InvoiceService(prisma as never, clock as FinancialClock);
   const admin = { id: 'admin-1' } as User;
@@ -18,6 +21,25 @@ describe('InvoiceService', () => {
       callback(tx),
     );
     tx.delivery.findMany.mockResolvedValue([]);
+    tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+    tx.invoice.create.mockResolvedValue({ id: 'fatura-1' });
+    tx.invoice.findMany.mockResolvedValue([]);
+    tx.invoiceStatusHistory.create.mockResolvedValue({});
+    prisma.invoice.findUnique.mockResolvedValue({
+      id: 'fatura-1',
+      companyId: 'empresa-1',
+      number: 'FAT-20260824-TESTE',
+      status: 'PENDING',
+      issueDate: new Date('2026-08-24T00:00:00.000Z'),
+      dueDate: new Date('2026-08-24T00:00:00.000Z'),
+      paymentDate: null,
+      paymentMethod: null,
+      totalValue: 12.5,
+      driverValueSum: 9.2,
+      platformValueSum: 3.3,
+      company: { tradeName: 'Loja Teste' },
+      _count: { deliveries: 1 },
+    });
   });
 
   it('recusa antecipar o fechamento manual antes do corte confirmado', async () => {
@@ -41,6 +63,34 @@ describe('InvoiceService', () => {
         }),
       }),
     );
+  });
+
+
+  it('emite a fatura vencendo NO MESMO DIA, de propósito', async () => {
+    /**
+     * Regra do negócio confirmada pelo dono, não descuido: o ciclo inteiro cabe
+     * na segunda-feira. O corte roda 00:05, a fatura nasce vencendo no mesmo
+     * dia, e como o `refreshOverdueInvoices` compara com `dueDate < hoje`, ela
+     * só vira OVERDUE na terça — um dia útil cheio para pagar.
+     *
+     * Este teste existe para que ninguém "conserte" o `dueDate = issueDate`
+     * achando que faltou somar um prazo.
+     */
+    tx.delivery.findMany.mockResolvedValue([
+      {
+        id: 'entrega-1',
+        companyId: 'empresa-1',
+        totalValue: 12.5,
+        driverValue: 9.2,
+        platformValue: 3.3,
+      },
+    ]);
+
+    await service.closeScheduledInvoices(new Date('2026-08-24T12:00:00.000Z'));
+
+    const criada = tx.invoice.create.mock.calls[0]?.[0].data;
+    expect(criada.issueDate.toISOString().slice(0, 10)).toBe('2026-08-24');
+    expect(criada.dueDate.getTime()).toBe(criada.issueDate.getTime());
   });
 
   describe('cancelInvoice', () => {

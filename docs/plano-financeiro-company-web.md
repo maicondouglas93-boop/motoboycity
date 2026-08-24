@@ -285,9 +285,16 @@ deriva do último corte real, e não do dia da semana.
 
 Os dois têm teste travando a regressão.
 
-### Pendência que é decisão do dono
+### Decidido pelo dono: a fatura vence no mesmo dia
 
-`invoice.service.ts` faz `const dueDate = issueDate`: a fatura vence no mesmo
-dia em que é emitida, sem prazo e sem configuração. Consequência na tela nova:
-o cartão "Vencido" acende em vermelho no dia seguinte ao fechamento. Se a
-intenção é dar prazo à loja, o prazo precisa existir — hoje ele não existe.
+`invoice.service.ts` faz `const dueDate = issueDate`. Isso **é regra**,
+confirmado em 24/08/2026, e não descuido: o ciclo inteiro cabe na
+segunda-feira. O corte roda 00:05, a fatura nasce vencendo no mesmo dia, e como
+o `refreshOverdueInvoices` compara com `dueDate < hoje`, ela só vira `OVERDUE`
+na terça de madrugada — a loja tem o dia útil inteiro para pagar.
+
+Está documentado no código e travado por teste (`invoice.service.spec.ts`,
+"emite a fatura vencendo NO MESMO DIA"), porque a linha sem explicação parecia
+um prazo esquecido — foi lida como defeito na primeira conferência.
+
+Se um dia existir prazo, ele vira configuração e passa por ali.

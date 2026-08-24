@@ -110,6 +110,17 @@ export class InvoiceService {
   }): Promise<InvoiceListItem[]> {
     const issueDate = this.dateOnly(input.issueDate);
 
+    /**
+     * A fatura vence NO DIA em que e emitida. E regra do negocio, nao descuido.
+     *
+     * O ciclo inteiro cabe na segunda-feira: o corte roda 00:05, a fatura nasce
+     * com vencimento no mesmo dia, e a loja paga ao longo do expediente. Como o
+     * `refreshOverdueInvoices` compara com `dueDate < hoje`, ela so vira
+     * OVERDUE na terca de madrugada — ou seja, um dia util cheio para pagar.
+     *
+     * Se algum dia existir prazo, ele vira configuracao e passa por aqui. Ate
+     * la, isto NAO e um `dueDate` esquecido esperando conserto.
+     */
     const dueDate = issueDate;
     const invoiceIds = await this.prisma.$transaction(async (tx) => {
       const deliveries = await tx.delivery.findMany({
