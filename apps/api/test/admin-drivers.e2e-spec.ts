@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { AuthService } from './../src/auth/auth.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 
 const uniqueSuffix = Date.now();
@@ -23,6 +24,7 @@ const adminPassword = process.env['ADMIN_SEED_PASSWORD'] ?? 'admin_dev_only_chan
 
 describe('AdminDriversController (e2e)', () => {
   let app: INestApplication<App>;
+  let authService: AuthService;
   let prisma: PrismaService;
   let driverId: string;
   let adminToken: string;
@@ -37,6 +39,7 @@ describe('AdminDriversController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    authService = moduleFixture.get(AuthService);
     prisma = moduleFixture.get(PrismaService);
     await app.init();
 
@@ -59,16 +62,12 @@ describe('AdminDriversController (e2e)', () => {
     });
     driverId = registerResponse.body.driverId;
 
-    const adminLogin = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: adminEmail, password: adminPassword });
-    adminToken = adminLogin.body.accessToken;
-    adminUserId = adminLogin.body.user.id;
+    const adminLogin = await authService.login({ email: adminEmail, password: adminPassword });
+    adminToken = adminLogin.accessToken;
+    adminUserId = adminLogin.user.id;
 
-    const driverLogin = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: testEmail, password: driverPassword });
-    driverOwnToken = driverLogin.body.accessToken;
+    const driverLogin = await authService.login({ email: testEmail, password: driverPassword });
+    driverOwnToken = driverLogin.accessToken;
   });
 
   afterAll(async () => {

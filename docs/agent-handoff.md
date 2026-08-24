@@ -5342,3 +5342,11 @@ de apagar os vínculos dos entregadores de teste. A mudança é somente de fixtu
 E2E: não altera schema, rota, regra de negócio ou dado de produção. A validação
 definitiva continua no workflow com PostgreSQL e Redis isolados; nenhum banco
 local ou compartilhado foi usado para reproduzir o teste.
+
+O segundo CI confirmou a correção da modalidade (os cinco casos anteriores
+avançaram), mas o último login da suíte recebeu `429`: os dois logins usados
+apenas para montar os tokens de admin e entregador já consumiam parte do limite
+dedicado de cinco chamadas por minuto do `AuthController`. O setup passou a
+obter esses dois tokens diretamente pelo `AuthService`; as verificações HTTP de
+senha anterior, senha nova e login bloqueado por rejeição continuam passando
+pela rota real. Os testes próprios de login permanecem em suítes separadas.
