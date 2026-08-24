@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { PayoutsAging } from '@/components/finance/payouts-aging';
 import { WalletAdjustmentDialog } from '@/components/finance/wallet-adjustment-dialog';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarDataHora } from '@/lib/dinheiro';
@@ -128,6 +129,8 @@ export function CarteirasTab({ token }: { token: string }) {
           )}
         </CardContent>
       </Card>
+
+      <PayoutsAging token={token} />
 
       <Card>
         <CardHeader className="gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
