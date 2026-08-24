@@ -257,6 +257,82 @@ export interface PayoutsAgingReport {
   drivers: DriverPayoutPositionItem[];
 }
 
+export type FinancialStatementAdjustmentType =
+  'CREDIT_ADJUSTMENT' | 'DEBIT_ADJUSTMENT' | 'CREDIT_REFUND';
+
+export interface FinancialStatementTotals {
+  completedCount: number;
+  pricedCount: number;
+  unpricedCount: number;
+  totalValue: number;
+  driverValue: number;
+  platformValue: number;
+  averageTicket: number;
+  contributionMarginPercent: number;
+  reconciliationDifference: number;
+}
+
+export interface FinancialStatementDimensionItem extends FinancialStatementTotals {
+  id: string;
+  name: string;
+  platformRevenueSharePercent: number;
+}
+
+export interface FinancialStatementPaymentMethodItem extends FinancialStatementTotals {
+  paymentMethod: PaymentMethod;
+}
+
+export interface FinancialStatementDayItem extends FinancialStatementTotals {
+  day: string;
+}
+
+export interface FinancialStatementAdjustmentItem {
+  type: FinancialStatementAdjustmentType;
+  status: WalletTransactionStatus;
+  direction: 'CREDIT' | 'DEBIT';
+  count: number;
+  value: number;
+}
+
+/**
+ * Demonstrativo gerencial por competência das entregas concluídas.
+ *
+ * `platformValue` é margem de contribuição antes de despesas operacionais,
+ * impostos e ajustes de carteira. Os ajustes são informativos e permanecem
+ * separados porque o ledger não possui classificação contábil suficiente para
+ * incorporá-los automaticamente ao resultado da plataforma.
+ */
+export interface FinancialStatementReport {
+  period: { from: string; to: string };
+  live: boolean;
+  totals: FinancialStatementTotals;
+  comparison: {
+    period: { from: string; to: string };
+    totals: FinancialStatementTotals;
+    changePercent: {
+      completedCount: number | null;
+      totalValue: number | null;
+      driverValue: number | null;
+      platformValue: number | null;
+      averageTicket: number | null;
+    };
+    contributionMarginPercentagePointChange: number;
+  };
+  walletAdjustments: {
+    creditCount: number;
+    creditValue: number;
+    debitCount: number;
+    debitValue: number;
+    /** Créditos menos débitos: quanto os ajustes aumentaram a obrigação com entregadores. */
+    netDriverObligationImpact: number;
+    items: FinancialStatementAdjustmentItem[];
+  };
+  companies: FinancialStatementDimensionItem[];
+  serviceTypes: FinancialStatementDimensionItem[];
+  paymentMethods: FinancialStatementPaymentMethodItem[];
+  days: FinancialStatementDayItem[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;

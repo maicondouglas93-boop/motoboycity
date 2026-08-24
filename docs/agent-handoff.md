@@ -4483,3 +4483,73 @@ para conferir visualmente os alertas e os valores centavo a centavo. O próximo
 recorte financeiro recomendado é um demonstrativo de resultado por cliente e
 modalidade, separando valor cobrado, repasse, receita da plataforma, ajustes e
 margem operacional sem misturar caixa com competência.
+
+## Atualização — 2026-08-23: resultado por competência e margem de contribuição
+
+O terceiro recorte de controle financeiro avançado foi implementado em
+`/relatorios/resultado-operacional`. A página apresenta o resultado gerencial
+das entregas concluídas, com valor cobrado, repasse direto, receita da
+plataforma, margem de contribuição e ticket médio. Também inclui comparação
+com a janela imediatamente anterior, ponte de reconciliação, ajustes de
+carteira separados, busca/ordenação/paginação por cliente, modalidades, formas
+de cobrança, evolução diária e CSV completo.
+
+O novo `GET /admin/financial/financial-statement` é somente leitura, protegido
+por `JwtAuthGuard` e `AdminOnlyGuard`, e exige `from`/`to`. O contrato limita o
+intervalo a 366 dias porque a API lê as entregas concluídas para montar as
+dimensões e a série diária. As pontas são interpretadas no fuso de São Paulo e
+usam intervalos semiabertos (`gte`/`lt`), evitando que o instante de fronteira
+seja contado simultaneamente no período atual e no anterior.
+
+A competência é a data em que a entrega chegou a `COMPLETED`, representada por
+`statusChangedAt`. Somente entregas com `totalValue`, `driverValue` e
+`platformValue` simultaneamente preenchidos entram nos valores e no ticket
+médio. Entrega concluída com composição incompleta continua na contagem
+operacional e aparece como `unpricedCount`; não é transformada silenciosamente
+em R$ 0,00.
+
+`platformValue` é apresentado como margem de contribuição antes de despesas
+operacionais e impostos, e não como lucro líquido. O relatório reconcilia
+`totalValue - driverValue - platformValue` no total, em clientes,
+modalidades, formas de cobrança e dias. Ajustes `CREDIT_ADJUSTMENT`,
+`DEBIT_ADJUSTMENT` e `CREDIT_REFUND` não cancelados são agrupados por tipo e
+status, mas permanecem fora da margem: o ledger atual informa direção e valor,
+porém não possui classificação contábil suficiente para afirmar que todo
+ajuste é receita ou despesa da plataforma. Saques, liberações e créditos de
+repasse também não são somados novamente, pois representam caixa ou mudança de
+disponibilidade de uma obrigação já reconhecida.
+
+Entregas atuais, comparação e ajustes são lidos numa transação
+`RepeatableRead`. Nenhuma tabela ou coluna nova foi necessária.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/resultado-operacional/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+preço, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 21 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 32 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+financeira controlada para inspeção visual e conferência centavo a centavo. O
+próximo passo de homologação é abrir o demonstrativo com entregas em todas as
+dimensões, uma composição divergente e um ajuste em cada direção. O próximo
+recorte funcional recomendado é um extrato financeiro unificado que relacione
+competência, faturamento, recebimento e movimentação de carteira sem misturar
+as quatro datas contábeis.
