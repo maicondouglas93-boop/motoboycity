@@ -20,6 +20,7 @@ export * from './admin/update-platform-settings.schema';
 export * from './admin/replace-driver-service-types.schema';
 export * from './admin/virtual-secretary.schema';
 export * from './company/upsert-company-address.schema';
+export * from './company/update-company-profile.schema';
 export * from './driver/set-driver-presence.schema';
 export * from './driver/register-device-token.schema';
 export * from './finance/list-wallet-transactions-query.schema';

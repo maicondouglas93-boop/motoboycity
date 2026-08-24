@@ -1,5 +1,16 @@
 export type CompanyStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED';
 
+export interface CompanyProfile {
+  companyId: string;
+  tradeName: string;
+  legalName: string;
+  document: string;
+  fullName: string;
+  email: string;
+  whatsapp: string;
+  canEdit: boolean;
+}
+
 export interface AdminCompanyRegistrationOptions {
   regions: Array<{ id: string; name: string }>;
 }

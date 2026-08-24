@@ -7,7 +7,11 @@ import { ApiError } from '@motoboycity/api-client';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { authApi } from '@/lib/api-client';
+import {
+  CompanyDataForm,
+  companyProfileQueryKey,
+} from '@/components/profile/company-data-form';
+import { authApi, companyProfileApi } from '@/lib/api-client';
 import { authUserQueryKey, authUserQueryOptions } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
 
@@ -35,6 +39,11 @@ function uploadErrorMessage(error: unknown): string {
   return 'Não foi possível enviar a foto. Verifique sua conexão e tente novamente.';
 }
 
+function profileLoadErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  return 'Não foi possível carregar os dados da empresa.';
+}
+
 export default function CompanyProfilePage() {
   const token = session.getToken();
   const queryClient = useQueryClient();
@@ -42,6 +51,15 @@ export default function CompanyProfilePage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const userQuery = useQuery(authUserQueryOptions(token));
+  const companyProfileQuery = useQuery({
+    queryKey: companyProfileQueryKey,
+    queryFn: () => {
+      if (!token) throw new Error('Sessão ausente.');
+      return companyProfileApi.get(token);
+    },
+    enabled: Boolean(token),
+    retry: false,
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -95,7 +113,7 @@ export default function CompanyProfilePage() {
           Meu perfil
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Gerencie a foto e confira os dados da sua conta de acesso à empresa.
+          Gerencie sua identidade e os dados comerciais da empresa.
         </p>
       </div>
 
@@ -215,11 +233,41 @@ export default function CompanyProfilePage() {
                 </div>
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Nome, e-mail e senha ainda são administrados pela equipe MOTOboyCity.
+                O e-mail de acesso e a senha continuam protegidos e não são alterados neste
+                formulário.
               </p>
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {user && companyProfileQuery.isPending && (
+        <Card>
+          <CardContent className="py-10 text-sm text-muted-foreground">
+            Carregando dados da empresa...
+          </CardContent>
+        </Card>
+      )}
+
+      {user && companyProfileQuery.isError && (
+        <Card>
+          <CardContent className="space-y-3 py-8">
+            <p className="text-sm text-destructive">
+              {profileLoadErrorMessage(companyProfileQuery.error)}
+            </p>
+            <Button variant="outline" onClick={() => companyProfileQuery.refetch()}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {user && companyProfileQuery.data && (
+        <CompanyDataForm
+          key={companyProfileQuery.data.companyId}
+          token={token}
+          profile={companyProfileQuery.data}
+        />
       )}
     </div>
   );

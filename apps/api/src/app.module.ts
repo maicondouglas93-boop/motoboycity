@@ -14,6 +14,7 @@ import { AdminOperationsModule } from './admin/operations/admin-operations.modul
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
+import { CompanyProfileModule } from './company/profile/company-profile.module';
 import { CompanyReportsModule } from './company/reports/company-reports.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
@@ -73,6 +74,7 @@ import { ProfileModule } from './profile/profile.module';
     PricingModule,
     GoogleMapsModule,
     CompanyAddressModule,
+    CompanyProfileModule,
     CompanyReportsModule,
     DispatchModule,
     DriverPresenceModule,

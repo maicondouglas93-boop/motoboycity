@@ -5698,3 +5698,51 @@ produção do Company Web (18 rotas) e Admin Web (35 rotas) aprovados. A
 validação manual por clique não foi executada porque nenhum navegador
 integrado estava disponível nesta sessão. Próximo passo concreto: recarregar o
 painel da empresa, abrir o avatar da conta e testar **Meu perfil** e **Sair**.
+
+## Atualização — 2026-08-24: edição dos dados da empresa no perfil
+
+A rota `/perfil` do Company Web agora permite ao responsável ativo editar nome
+fantasia, razão social, nome completo e WhatsApp. E-mail e CPF/CNPJ permanecem
+visíveis somente para conferência, e senha/foto continuam em seus fluxos já
+existentes. A atualização bem-sucedida também troca imediatamente o nome do
+usuário no cache compartilhado do topo do painel.
+
+A API passou a expor `GET /company/profile` para qualquer membro ativo e
+`PUT /company/profile` para membros ativos com papel `OWNER`. Operadores podem
+consultar os dados, mas recebem os campos bloqueados na interface e também são
+impedidos no backend de alterá-los. O `PUT` atualiza `Company.legalName`,
+`Company.tradeName`, `User.name` e `User.phone` na mesma transação. Assim, o
+WhatsApp novo também passa a ser o contato usado pelo fluxo administrativo de
+envio de fatura.
+
+Os quatro campos já existiam no schema e na migration inicial; não houve
+alteração Prisma nem migration, e os dados existentes não precisam de
+backfill. O novo schema Zod normaliza o WhatsApp para 10 ou 11 dígitos e limita
+os tamanhos dos nomes. Contrato compartilhado, API client, controller, service
+e consumidor web foram atualizados juntos.
+
+Arquivos principais:
+
+- `apps/api/src/company/profile/` e `apps/api/src/app.module.ts`;
+- `packages/validation/src/company/update-company-profile.schema.ts`;
+- `packages/types/src/company.ts`;
+- `packages/api-client/src/company-profile.ts`;
+- `apps/company-web/src/components/profile/company-data-form.tsx`;
+- `apps/company-web/src/app/(app)/perfil/page.tsx`.
+
+Verificação executada:
+
+- build de `@motoboycity/validation`: aprovado;
+- testes focados de serviço/autorização e validação: 2 suítes e 6 testes
+  aprovados;
+- suíte unitária completa da API antes do último teste de validação: 60 suítes
+  e 722 testes aprovados;
+- typecheck e lint completos: 8/8 workspaces aprovados;
+- builds da API e do Company Web: aprovados; o painel gerou 18 rotas;
+- `git diff --check`: aprovado antes desta atualização do handoff.
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
+Próximo passo concreto: homologar com uma sessão real de `OWNER`, salvar os
+quatro campos e confirmar o novo telefone no diálogo de WhatsApp da fatura;
+depois entrar como `OPERATOR` e confirmar visualização sem permissão de edição.
