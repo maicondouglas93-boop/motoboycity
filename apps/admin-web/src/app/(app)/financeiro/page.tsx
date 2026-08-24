@@ -3,11 +3,12 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, FileText, Receipt, Wallet } from 'lucide-react';
+import { BarChart3, FileText, LineChart, Receipt, Wallet } from 'lucide-react';
 import { FinanceTabs, type FinanceTab } from '@/components/finance/finance-tabs';
 import { PainelTab } from '@/components/finance/painel-tab';
 import { CarteirasTab } from '@/components/finance/carteiras-tab';
 import { FaturasTab } from '@/components/finance/faturas-tab';
+import { DemonstrativoTab } from '@/components/finance/demonstrativo-tab';
 import { RecebimentosTab } from '@/components/finance/recebimentos-tab';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -70,6 +71,7 @@ function FinanceArea() {
     },
     { value: 'faturas', label: 'Faturas', icon: FileText },
     { value: 'recebimentos', label: 'Recebimentos', icon: Receipt },
+    { value: 'demonstrativo', label: 'Demonstrativo', icon: LineChart },
   ];
 
   return (
@@ -87,6 +89,7 @@ function FinanceArea() {
       {aba === 'carteiras' && <CarteirasTab token={token} />}
       {aba === 'faturas' && <FaturasTab token={token} />}
       {aba === 'recebimentos' && <RecebimentosTab token={token} />}
+      {aba === 'demonstrativo' && <DemonstrativoTab token={token} />}
     </div>
   );
 }
