@@ -53,11 +53,14 @@ export function CancelInvoiceDialog({
 
   const cancelar = useMutation({
     mutationFn: () => adminInvoicesApi.cancel(token, invoiceId, { reason: motivo.trim() }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial'] });
+    onSuccess: async () => {
       setAberto(false);
       setMotivo('');
       setErro(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin', 'financial'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin', 'invoice', invoiceId] }),
+      ]);
     },
     onError: (falha: unknown) => {
       setErro(falha instanceof Error ? falha.message : 'Não foi possível cancelar a fatura.');
@@ -97,9 +100,7 @@ export function CancelInvoiceDialog({
                   reaberta.
                 </>
               ) : (
-                <>
-                  A fatura fica cancelada e mantém número e histórico. Nada é apagado do sistema.
-                </>
+                <>A fatura fica cancelada e mantém número e histórico. Nada é apagado do sistema.</>
               )}
             </p>
           </div>

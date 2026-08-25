@@ -20,6 +20,7 @@ import { useMoney } from '@/lib/money';
 import { MarkPaidDialog } from '@/components/finance/mark-paid-dialog';
 import { InvoiceWhatsAppDialog } from '@/components/finance/invoice-whatsapp-dialog';
 import { UpdateInvoiceDueDateDialog } from '@/components/finance/update-invoice-due-date-dialog';
+import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog';
 import { formatarData } from '@/lib/dinheiro';
 
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
@@ -101,15 +102,25 @@ export default function AdminInvoiceDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
-            <UpdateInvoiceDueDateDialog
-              token={token}
-              invoiceId={invoice.id}
-              invoiceNumber={invoice.number}
-              companyName={invoice.companyName}
-              issueDate={invoice.issueDate}
-              currentDueDate={invoice.dueDate}
-              status={invoice.status}
-            />
+            <>
+              <UpdateInvoiceDueDateDialog
+                token={token}
+                invoiceId={invoice.id}
+                invoiceNumber={invoice.number}
+                companyName={invoice.companyName}
+                issueDate={invoice.issueDate}
+                currentDueDate={invoice.dueDate}
+                status={invoice.status}
+              />
+              <CancelInvoiceDialog
+                token={token}
+                invoiceId={invoice.id}
+                invoiceNumber={invoice.number}
+                companyName={invoice.companyName}
+                totalValue={invoice.totalValue}
+                deliveryCount={invoice.deliveryCount}
+              />
+            </>
           )}
           <InvoiceWhatsAppDialog
             invoice={invoice}

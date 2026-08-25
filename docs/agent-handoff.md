@@ -6521,3 +6521,24 @@ Company Web. Tudo passou. O smoke test autenticado ainda nao foi executado.
 Proximo passo concreto: publicar primeiro a API, depois Admin Web e Company Web;
 em homologacao, prorrogar uma fatura vencida e antecipar outra para uma data
 passada, conferindo status, motivo e autor nos detalhes e na auditoria.
+
+## Atualizacao - 2026-08-25: cancelamento no detalhe da fatura
+
+O detalhe da fatura no Admin passou a oferecer `Cancelar` para faturas
+`PENDING` e `OVERDUE`, ao lado da alteracao de vencimento. A acao reutiliza o
+mesmo dialogo auditavel da listagem: exige motivo, preserva numero e historico
+e explica que os pedidos vinculados voltam para o proximo fechamento. Faturas
+pagas ou ja canceladas continuam sem a opcao.
+
+O dialogo tambem passou a invalidar a consulta especifica
+`['admin', 'invoice', invoiceId]` depois do sucesso. Assim, quando usado no
+detalhe, status, historico e acoes mudam imediatamente sem recarregar a pagina.
+Nao houve rota, contrato, logica financeira, schema Prisma ou migration novos.
+
+Arquivos alterados:
+`apps/admin-web/src/components/finance/cancel-invoice-dialog.tsx` e
+`apps/admin-web/src/app/(app)/faturas/[id]/page.tsx`. Validacoes executadas:
+typecheck, lint e build de producao do Admin Web; tudo passou. O smoke test
+autenticado ainda nao foi executado. Proximo passo concreto: abrir uma fatura
+pendente no Admin, cancelar pelo detalhe e confirmar a troca imediata de status,
+o motivo na auditoria e o retorno dos pedidos ao fechamento seguinte.
