@@ -31,6 +31,17 @@ const invoiceStatusLabel: Record<string, string> = {
   CANCELLED: 'Cancelada',
 };
 
+function invoiceHistoryTitle(
+  fromStatus: string | null,
+  toStatus: string,
+  note: string | null,
+): string {
+  if (fromStatus === toStatus && note?.startsWith('Vencimento alterado')) {
+    return 'Vencimento alterado';
+  }
+  return `${fromStatus ? invoiceStatusLabel[fromStatus] : 'Criação'} → ${invoiceStatusLabel[toStatus] ?? toStatus}`;
+}
+
 export default function CompanyInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
@@ -172,8 +183,7 @@ export default function CompanyInvoiceDetailPage() {
               className="border-l-2 border-portal/30 pl-3 text-sm"
             >
               <p className="font-medium">
-                {entry.fromStatus ? invoiceStatusLabel[entry.fromStatus] : 'Criação'} →{' '}
-                {invoiceStatusLabel[entry.toStatus] ?? entry.toStatus}
+                {invoiceHistoryTitle(entry.fromStatus, entry.toStatus, entry.note)}
               </p>
               <p className="text-muted-foreground">
                 {formatarDataHora(entry.changedAt)}

@@ -8,9 +8,12 @@ import type {
   CloseInvoicesPayload,
   ListInvoicesQuery,
   CancelInvoicePayload,
+  ManualInvoiceEligibleQuery,
+  ManualInvoicePayload,
   MarkInvoicePaidPayload,
+  UpdateInvoiceDueDatePayload,
 } from '@motoboycity/validation';
-import type { Prisma, User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { FinancialClock } from './financial-clock.service';
@@ -37,6 +40,39 @@ export interface InvoiceListItem {
   deliveryCount: number;
 }
 
+export interface ManualInvoiceCandidate {
+  id: string;
+  displayNumber: number;
+  externalOrderNumber: string | null;
+  completedAt: string;
+  serviceTypeName: string;
+  totalValue: number;
+  driverValue: number;
+  platformValue: number;
+}
+
+export interface ManualInvoicePreview {
+  company: { id: string; tradeName: string; document: string };
+  issueDate: string;
+  dueDate: string;
+  deliveryCount: number;
+  totalValue: number;
+  driverValueSum: number;
+  platformValueSum: number;
+  deliveries: ManualInvoiceCandidate[];
+}
+
+interface ManualInvoiceDeliveryRow {
+  id: string;
+  displayNumber: number;
+  externalOrderNumber: string | null;
+  statusChangedAt: Date;
+  totalValue: { toString(): string } | null;
+  driverValue: { toString(): string } | null;
+  platformValue: { toString(): string } | null;
+  serviceType: { name: string };
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;
@@ -55,10 +91,7 @@ export interface InvoiceDetail extends InvoiceListItem {
   }>;
 }
 
-export type CompanyInvoiceListItem = Omit<
-  InvoiceListItem,
-  'driverValueSum' | 'platformValueSum'
->;
+export type CompanyInvoiceListItem = Omit<InvoiceListItem, 'driverValueSum' | 'platformValueSum'>;
 
 export interface CompanyInvoiceDetail extends CompanyInvoiceListItem {
   deliveries: Array<{
@@ -79,8 +112,7 @@ function sumMoney(values: ReadonlyArray<{ toString(): string } | null>): number 
     values.reduce<number>(
       (totalCents, value) => totalCents + Math.round(numberOrZero(value) * 100),
       0,
-    ) /
-    100
+    ) / 100
   );
 }
 
@@ -121,6 +153,77 @@ export class InvoiceService {
       changedByUserId: null,
       automatic: true,
     });
+  }
+
+  async listManualCandidates(query: ManualInvoiceEligibleQuery): Promise<ManualInvoiceCandidate[]> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: query.companyId },
+      select: { id: true },
+    });
+    if (!company) throw new NotFoundException('Empresa nao encontrada.');
+
+    const deliveries = await this.prisma.delivery.findMany({
+      where: this.manualInvoiceEligibility(query.companyId),
+      select: this.manualInvoiceDeliverySelect(),
+      orderBy: [{ statusChangedAt: 'asc' }, { displayNumber: 'asc' }],
+    });
+
+    return deliveries.map((delivery) => this.toManualInvoiceCandidate(delivery));
+  }
+
+  async previewManualInvoice(payload: ManualInvoicePayload): Promise<ManualInvoicePreview> {
+    this.assertManualInvoiceDates(payload);
+    const selection = await this.loadManualInvoiceSelection(this.prisma, payload);
+    return this.toManualInvoicePreview(payload, selection.company, selection.deliveries);
+  }
+
+  async createManualInvoice(admin: User, payload: ManualInvoicePayload): Promise<InvoiceDetail> {
+    this.assertManualInvoiceDates(payload);
+
+    const invoiceId = await this.prisma.$transaction(
+      async (tx) => {
+        const selection = await this.loadManualInvoiceSelection(tx, payload);
+        const totals = this.manualInvoiceTotals(selection.deliveries);
+        const invoice = await tx.invoice.create({
+          data: {
+            companyId: payload.companyId,
+            number: this.invoiceNumber(payload.issueDate),
+            issueDate: this.dateOnly(payload.issueDate),
+            dueDate: this.dateOnly(payload.dueDate),
+            totalValue: totals.totalValue,
+            driverValueSum: totals.driverValueSum,
+            platformValueSum: totals.platformValueSum,
+          },
+        });
+
+        const linked = await tx.delivery.updateMany({
+          where: {
+            ...this.manualInvoiceEligibility(payload.companyId),
+            id: { in: payload.deliveryIds },
+          },
+          data: { invoiceId: invoice.id },
+        });
+        if (linked.count !== payload.deliveryIds.length) {
+          throw new ConflictException(
+            'Um ou mais pedidos deixaram de estar disponiveis para faturamento. Atualize a selecao e tente novamente.',
+          );
+        }
+
+        await tx.invoiceStatusHistory.create({
+          data: {
+            invoiceId: invoice.id,
+            fromStatus: null,
+            toStatus: 'PENDING',
+            changedByUserId: admin.id,
+            note: `Fatura personalizada de ${payload.deliveryIds.length} pedido(s), selecionados pelo administrador.`,
+          },
+        });
+        return invoice.id;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return this.getDetail(invoiceId);
   }
 
   private async closeInvoices(input: {
@@ -179,12 +282,8 @@ export class InvoiceService {
             issueDate,
             dueDate,
             totalValue: sumMoney(companyDeliveries.map((delivery) => delivery.totalValue)),
-            driverValueSum: sumMoney(
-              companyDeliveries.map((delivery) => delivery.driverValue),
-            ),
-            platformValueSum: sumMoney(
-              companyDeliveries.map((delivery) => delivery.platformValue),
-            ),
+            driverValueSum: sumMoney(companyDeliveries.map((delivery) => delivery.driverValue)),
+            platformValueSum: sumMoney(companyDeliveries.map((delivery) => delivery.platformValue)),
           },
         });
 
@@ -230,6 +329,63 @@ export class InvoiceService {
     await this.prisma.$transaction((tx) =>
       this.markPaidWithinTransaction(tx, admin, invoiceId, payload),
     );
+
+    return this.getDetail(invoiceId);
+  }
+
+  async updateDueDate(
+    admin: User,
+    invoiceId: string,
+    payload: UpdateInvoiceDueDatePayload,
+  ): Promise<InvoiceDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        select: { status: true, issueDate: true, dueDate: true },
+      });
+      if (!invoice) throw new NotFoundException('Fatura nao encontrada.');
+      if (invoice.status === 'PAID') {
+        throw new ConflictException('O vencimento de uma fatura paga nao pode ser alterado.');
+      }
+      if (invoice.status === 'CANCELLED') {
+        throw new ConflictException('O vencimento de uma fatura cancelada nao pode ser alterado.');
+      }
+
+      const dueDate = this.dateOnly(payload.dueDate);
+      if (dueDate.getTime() < invoice.issueDate.getTime()) {
+        throw new ConflictException('O vencimento nao pode ser anterior a emissao.');
+      }
+      if (dueDate.getTime() === invoice.dueDate.getTime()) {
+        throw new ConflictException('Informe uma data diferente do vencimento atual.');
+      }
+
+      const today = this.dateOnly(dateInSaoPaulo(this.clock.now()));
+      const nextStatus: 'PENDING' | 'OVERDUE' =
+        dueDate.getTime() < today.getTime() ? 'OVERDUE' : 'PENDING';
+      const updated = await tx.invoice.updateMany({
+        where: {
+          id: invoiceId,
+          status: invoice.status,
+          dueDate: invoice.dueDate,
+        },
+        data: { dueDate, status: nextStatus },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          'A fatura foi alterada por outra tela. Atualize os dados e tente novamente.',
+        );
+      }
+
+      await tx.invoiceStatusHistory.create({
+        data: {
+          invoiceId,
+          fromStatus: invoice.status,
+          toStatus: nextStatus,
+          changedByUserId: admin.id,
+          note: `Vencimento alterado de ${civilDateFromDbDate(invoice.dueDate)} para ${payload.dueDate}. Motivo: ${payload.reason.trim()}`,
+        },
+      });
+    });
 
     return this.getDetail(invoiceId);
   }
@@ -567,6 +723,117 @@ export class InvoiceService {
     return membership.companyId;
   }
 
+  private manualInvoiceEligibility(companyId: string): Prisma.DeliveryWhereInput {
+    return {
+      companyId,
+      status: 'COMPLETED',
+      paymentMethod: 'BILLED',
+      invoiceId: null,
+      totalValue: { not: null },
+      driverValue: { not: null },
+      platformValue: { not: null },
+    };
+  }
+
+  private manualInvoiceDeliverySelect() {
+    return {
+      id: true,
+      displayNumber: true,
+      externalOrderNumber: true,
+      statusChangedAt: true,
+      totalValue: true,
+      driverValue: true,
+      platformValue: true,
+      serviceType: { select: { name: true } },
+    } as const;
+  }
+
+  private async loadManualInvoiceSelection(
+    client: Pick<Prisma.TransactionClient, 'company' | 'delivery'>,
+    payload: ManualInvoicePayload,
+  ) {
+    const company = await client.company.findUnique({
+      where: { id: payload.companyId },
+      select: { id: true, tradeName: true, document: true },
+    });
+    if (!company) throw new NotFoundException('Empresa nao encontrada.');
+
+    const deliveries = await client.delivery.findMany({
+      where: {
+        ...this.manualInvoiceEligibility(payload.companyId),
+        id: { in: payload.deliveryIds },
+      },
+      select: this.manualInvoiceDeliverySelect(),
+      orderBy: [{ statusChangedAt: 'asc' }, { displayNumber: 'asc' }],
+    });
+    if (deliveries.length !== payload.deliveryIds.length) {
+      throw new ConflictException(
+        'Um ou mais pedidos selecionados nao estao concluidos, sao cobrados online ou ja pertencem a outra fatura.',
+      );
+    }
+
+    return { company, deliveries };
+  }
+
+  private toManualInvoiceCandidate(delivery: ManualInvoiceDeliveryRow): ManualInvoiceCandidate {
+    return {
+      id: delivery.id,
+      displayNumber: delivery.displayNumber,
+      externalOrderNumber: delivery.externalOrderNumber,
+      completedAt: delivery.statusChangedAt.toISOString(),
+      serviceTypeName: delivery.serviceType.name,
+      totalValue: numberOrZero(delivery.totalValue),
+      driverValue: numberOrZero(delivery.driverValue),
+      platformValue: numberOrZero(delivery.platformValue),
+    };
+  }
+
+  private manualInvoiceTotals(
+    deliveries: ReadonlyArray<{
+      totalValue: { toString(): string } | null;
+      driverValue: { toString(): string } | null;
+      platformValue: { toString(): string } | null;
+    }>,
+  ) {
+    return {
+      totalValue: sumMoney(deliveries.map((delivery) => delivery.totalValue)),
+      driverValueSum: sumMoney(deliveries.map((delivery) => delivery.driverValue)),
+      platformValueSum: sumMoney(deliveries.map((delivery) => delivery.platformValue)),
+    };
+  }
+
+  private toManualInvoicePreview(
+    payload: ManualInvoicePayload,
+    company: { id: string; tradeName: string; document: string },
+    deliveries: ReadonlyArray<ManualInvoiceDeliveryRow>,
+  ): ManualInvoicePreview {
+    const totals = this.manualInvoiceTotals(deliveries);
+    return {
+      company,
+      issueDate: payload.issueDate,
+      dueDate: payload.dueDate,
+      deliveryCount: deliveries.length,
+      ...totals,
+      deliveries: deliveries.map((delivery) => this.toManualInvoiceCandidate(delivery)),
+    };
+  }
+
+  private assertManualInvoiceDates(payload: ManualInvoicePayload): void {
+    if (payload.deliveryIds.length === 0) {
+      throw new ConflictException('Selecione pelo menos um pedido para faturar.');
+    }
+    if (new Set(payload.deliveryIds).size !== payload.deliveryIds.length) {
+      throw new ConflictException('A selecao possui pedidos repetidos.');
+    }
+    if (payload.dueDate < payload.issueDate) {
+      throw new ConflictException('O vencimento nao pode ser anterior a emissao.');
+    }
+    const today = dateInSaoPaulo(this.clock.now());
+    if (payload.issueDate > today) {
+      throw new ConflictException('A data de emissao nao pode estar no futuro.');
+    }
+  }
+
   private invoiceNumber(issueDate: string): string {
     return `FAT-${issueDate.replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
   }
@@ -581,5 +848,4 @@ export class InvoiceService {
   private dateOnly(value: string): Date {
     return new Date(`${value}T00:00:00.000Z`);
   }
-
 }

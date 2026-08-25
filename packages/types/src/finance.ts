@@ -122,6 +122,34 @@ export interface InvoiceListItem {
   deliveryCount: number;
 }
 
+/** Pedido concluido e faturavel que o admin pode incluir numa fatura manual. */
+export interface ManualInvoiceCandidate {
+  id: string;
+  displayNumber: number;
+  externalOrderNumber: string | null;
+  completedAt: string;
+  serviceTypeName: string;
+  totalValue: number;
+  driverValue: number;
+  platformValue: number;
+}
+
+/** Previa calculada pelo servidor com os mesmos valores congelados da emissao. */
+export interface ManualInvoicePreview {
+  company: {
+    id: string;
+    tradeName: string;
+    document: string;
+  };
+  issueDate: string;
+  dueDate: string;
+  deliveryCount: number;
+  totalValue: number;
+  driverValueSum: number;
+  platformValueSum: number;
+  deliveries: ManualInvoiceCandidate[];
+}
+
 /** Uma fatura quitada, como linha do extrato. */
 export interface ReceiptItem {
   invoiceId: string;
@@ -733,10 +761,7 @@ export interface InvoiceDetail extends InvoiceListItem {
 }
 
 /** Fatura visível pela empresa, sem repasse ou margem interna da plataforma. */
-export type CompanyInvoiceListItem = Omit<
-  InvoiceListItem,
-  'driverValueSum' | 'platformValueSum'
->;
+export type CompanyInvoiceListItem = Omit<InvoiceListItem, 'driverValueSum' | 'platformValueSum'>;
 
 export interface CompanyInvoiceDetail extends CompanyInvoiceListItem {
   deliveries: Array<{

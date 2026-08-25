@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -20,9 +21,13 @@ import {
   changeAdminPasswordSchema,
   createAdminCompanySchema,
   listCompaniesQuerySchema,
+  updateCompanyProfileSchema,
+  upsertCompanyAddressSchema,
   type ChangeAdminPasswordPayload,
   type CreateAdminCompanyPayload,
   type ListCompaniesQuery,
+  type UpdateCompanyProfilePayload,
+  type UpsertCompanyAddressPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -86,9 +91,51 @@ export class AdminCompaniesController {
     return this.adminCompaniesService.detail(id);
   }
 
+  @Put(':id/profile')
+  async updateProfile(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(updateCompanyProfileSchema)) body: UpdateCompanyProfilePayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    const result = await this.adminCompaniesService.updateProfile(id, body);
+    this.logger.log(`Admin ${admin.id} atualizou o cadastro da empresa ${id}.`);
+    return result;
+  }
+
+  @Put(':id/address')
+  async upsertPrimaryAddress(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(upsertCompanyAddressSchema)) body: UpsertCompanyAddressPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    const result = await this.adminCompaniesService.upsertPrimaryAddress(id, body);
+    this.logger.log(`Admin ${admin.id} atualizou o endereco principal da empresa ${id}.`);
+    return result;
+  }
+
   @Patch(':id/approve')
   approve(@Param('id') id: string, @CurrentUser() admin: User): Promise<ApproveCompanyResult> {
     return this.adminCompaniesService.approve(id, admin.id);
+  }
+
+  @Patch(':id/suspend')
+  async suspend(
+    @Param('id') id: string,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    const result = await this.adminCompaniesService.suspend(id);
+    this.logger.warn(`Admin ${admin.id} suspendeu a empresa ${id}.`);
+    return result;
+  }
+
+  @Patch(':id/reactivate')
+  async reactivate(
+    @Param('id') id: string,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    const result = await this.adminCompaniesService.reactivate(id);
+    this.logger.warn(`Admin ${admin.id} reativou a empresa ${id}.`);
+    return result;
   }
 
   @Patch(':id/team-members/:memberId/password')

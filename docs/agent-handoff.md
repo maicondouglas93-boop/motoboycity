@@ -6399,3 +6399,125 @@ sessao. Proximo passo concreto: instalar com atualizacao sobre o piloto 2 e
 validar login, mapa/GPS, presenca parada por mais de 3 minutos, push/oferta em
 foreground/background/tela bloqueada e o fluxo completo de aceitar, devolver,
 cancelar, registrar problema, coletar e concluir.
+
+## Atualizacao — 2026-08-25: manutencao administrativa de empresas
+
+O responsavel pelo produto confirmou que o sistema nao tera funcionarios no
+painel: existe somente o administrador com acesso total. Por isso, gestao de
+administradores, cargos e permissoes saiu do roadmap deste recorte.
+
+O detalhe de cliente no Admin ganhou `Editar empresa`, com duas gravacoes
+independentes. O Admin pode alterar nome fantasia, razao social, nome e WhatsApp
+do responsavel ativo; tambem pode cadastrar ou atualizar o endereco principal.
+Alterar o texto do endereco remove coordenadas antigas para impedir que uma
+coleta continue apontando para o local anterior. CNPJ, e-mail de login, regiao
+e equipe nao sao editados neste lote.
+
+Empresas ativas podem ser suspensas e empresas suspensas podem ser reativadas,
+sempre com confirmacao que explica o efeito e informa que nenhum dado sera
+excluido. A troca usa update condicional para recusar concorrencia. Suspender
+desconecta os membros ativos do Socket.IO; alem disso, a estrategia JWT passou
+a consultar o status da empresa em toda requisicao, invalidando tambem uma
+sessao que ja estava aberta. Pedidos, faturas, enderecos e historico ficam
+preservados; nao existe hard delete.
+
+Foram adicionadas as rotas Admin protegidas `PUT /admin/companies/:id/profile`,
+`PUT /admin/companies/:id/address`, `PATCH /admin/companies/:id/suspend` e
+`PATCH /admin/companies/:id/reactivate`. Elas reutilizam os schemas Zod ja
+existentes do perfil e endereco da empresa; nao houve alteracao Prisma nem
+migration.
+
+Arquivos principais: `apps/api/src/admin/companies/`,
+`apps/api/src/auth/jwt.strategy.ts`, `packages/api-client/src/admin-companies.ts`,
+`apps/admin-web/src/components/companies/edit-company-dialog.tsx`,
+`apps/admin-web/src/components/companies/company-status-dialog.tsx` e
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx`.
+
+Validacoes executadas: 20 testes focados de empresas e JWT; typecheck e lint
+dos oito workspaces; builds de producao da API e do Admin Web; tudo passou. O
+navegador integrado nao estava disponivel, portanto ainda falta smoke test
+manual do dialogo contra uma API segura. Proximo passo concreto: implementar a
+geracao manual e seletiva de faturas por empresa, mantendo cancelamento e
+estorno em vez de exclusao financeira.
+
+## Atualizacao - 2026-08-25: fatura personalizada e seletiva por empresa
+
+A aba `Financeiro > Faturas` ganhou a acao `Criar fatura personalizada`. O
+Admin seleciona uma empresa, escolhe um ou mais pedidos, informa data de emissao
+e vencimento, solicita uma previa calculada pela API e so depois confirma a
+emissao. A previa mostra total da empresa, repasse aos entregadores e receita da
+plataforma usando os valores monetarios ja congelados em cada pedido.
+
+Somente pedidos `COMPLETED`, com cobranca `BILLED`, valores completos e
+`invoiceId` nulo aparecem na selecao. A API recusa IDs repetidos, selecao vazia,
+vencimento anterior a emissao e emissao futura. Na confirmacao, ela rele todos
+os pedidos dentro de transacao `Serializable`, cria uma unica fatura para a
+empresa, vincula os pedidos com `updateMany` condicional e grava o autor na
+trilha `InvoiceStatusHistory`. Se qualquer pedido for faturado por outra tela
+entre a previa e a confirmacao, toda a operacao falha sem deixar fatura parcial
+ou dupla cobranca.
+
+O fechamento automatico semanal e o botao de recuperacao de segunda-feira nao
+foram alterados. Pedidos nao selecionados continuam abertos para o proximo
+fechamento. Tambem nao existe hard delete: a fatura continua usando o fluxo de
+cancelamento auditavel, que devolve seus pedidos para cobranca. Nao houve
+alteracao de schema Prisma nem migration.
+
+Foram adicionadas as rotas Admin protegidas
+`GET /admin/financial/invoices/manual/candidates`,
+`POST /admin/financial/invoices/manual/preview` e
+`POST /admin/financial/invoices/manual`, com contratos sincronizados em
+`packages/validation`, `packages/types` e `packages/api-client`.
+
+Arquivos principais: `apps/api/src/finance/invoice.controller.ts`,
+`apps/api/src/finance/invoice.service.ts`, seus specs,
+`packages/validation/src/finance/invoice.schema.ts`,
+`packages/types/src/finance.ts`, `packages/api-client/src/invoices.ts`,
+`apps/admin-web/src/components/finance/manual-invoice-dialog.tsx` e
+`apps/admin-web/src/components/finance/faturas-tab.tsx`.
+
+Validacoes executadas: 20 testes focados de fatura e validacao e, depois, os 62
+suites/767 testes unitarios completos da API; typecheck e lint dos oito
+workspaces; builds de producao da API e do Admin Web; tudo passou. O smoke test
+autenticado ainda nao foi executado. Proximo passo concreto: publicar
+primeiro a API no Render e depois o Admin Web na Vercel; em seguida emitir uma
+fatura de homologacao com um pedido e confirmar detalhe, cancelamento e retorno
+do pedido para a lista de disponiveis.
+
+## Atualizacao - 2026-08-25: alteracao auditavel do vencimento de fatura
+
+O detalhe de fatura no Admin ganhou a acao `Alterar vencimento`. Ela fica
+disponivel somente para faturas `PENDING` ou `OVERDUE` e exige nova data e um
+motivo de 10 a 300 caracteres. Faturas pagas ou canceladas sao imutaveis por
+essa rota; o vencimento nao pode anteceder a emissao nem repetir a data atual.
+
+Ao salvar, a API recalcula o status armazenado pela data civil de Sao Paulo:
+vencimento anterior a hoje resulta em `OVERDUE`; hoje ou futuro resulta em
+`PENDING`. Assim, prorrogar uma fatura vencida tambem a reabre corretamente.
+O update usa `updateMany` condicionado ao status e vencimento lidos para
+recusar duas alteracoes concorrentes. A trilha `InvoiceStatusHistory` registra
+data anterior, nova data, motivo e Admin autor, inclusive quando o status nao
+muda. Nesses casos, os detalhes de fatura dos paineis Admin e Empresa e o
+relatorio de auditoria exibem `Vencimento alterado`, em vez de uma transicao
+como `Pendente -> Pendente`.
+
+Foi adicionada a rota Admin protegida
+`PATCH /admin/financial/invoices/:id/due-date` e o contrato
+`updateInvoiceDueDateSchema`, sincronizado com o api-client. Nao houve alteracao
+de schema Prisma nem migration.
+
+Arquivos principais: `apps/api/src/finance/invoice.controller.ts`,
+`apps/api/src/finance/invoice.service.ts` e seus specs,
+`packages/validation/src/finance/invoice.schema.ts`,
+`packages/api-client/src/invoices.ts`,
+`apps/admin-web/src/components/finance/update-invoice-due-date-dialog.tsx`,
+`apps/admin-web/src/app/(app)/faturas/[id]/page.tsx`,
+`apps/admin-web/src/app/(app)/relatorios/auditoria-financeira/page.tsx` e
+`apps/company-web/src/app/(app)/faturas/[id]/page.tsx`.
+
+Validacoes executadas: 62 suites/775 testes unitarios completos da API;
+typecheck e lint dos oito workspaces; builds de producao da API, Admin Web e
+Company Web. Tudo passou. O smoke test autenticado ainda nao foi executado.
+Proximo passo concreto: publicar primeiro a API, depois Admin Web e Company Web;
+em homologacao, prorrogar uma fatura vencida e antecipar outra para uma data
+passada, conferindo status, motivo e autor nos detalhes e na auditoria.

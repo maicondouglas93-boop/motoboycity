@@ -10,6 +10,8 @@ import type {
 import type {
   ChangeAdminPasswordPayload,
   CreateAdminCompanyPayload,
+  UpdateCompanyProfilePayload,
+  UpsertCompanyAddressPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
@@ -63,6 +65,48 @@ export function createAdminCompaniesApi({ baseUrl }: AdminCompaniesApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ApproveCompanyResult>(response);
+    },
+
+    async updateProfile(
+      accessToken: string,
+      companyId: string,
+      payload: UpdateCompanyProfilePayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/profile`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async upsertPrimaryAddress(
+      accessToken: string,
+      companyId: string,
+      payload: UpsertCompanyAddressPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/address`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async suspend(accessToken: string, companyId: string): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/suspend`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async reactivate(accessToken: string, companyId: string): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/reactivate`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
     },
 
     async changeMemberPassword(

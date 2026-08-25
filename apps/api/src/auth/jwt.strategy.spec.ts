@@ -29,7 +29,10 @@ describe('JwtStrategy', () => {
   it('aceita membro de empresa somente quando o vínculo está ativo', async () => {
     const user = { id: 'user-company', type: 'COMPANY_MEMBER', passwordHash };
     prisma.user.findUnique.mockResolvedValue(user);
-    prisma.companyTeamMember.findFirst.mockResolvedValue({ id: 'membership-1' });
+    prisma.companyTeamMember.findFirst.mockResolvedValue({
+      id: 'membership-1',
+      company: { status: 'ACTIVE' },
+    });
 
     await expect(
       strategy.validate({
@@ -40,8 +43,27 @@ describe('JwtStrategy', () => {
 
     expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith({
       where: { userId: user.id, active: true },
-      select: { id: true },
+      select: { id: true, company: { select: { status: true } } },
     });
+  });
+
+  it('invalida uma sessao aberta quando a empresa e suspensa', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-company',
+      type: 'COMPANY_MEMBER',
+      passwordHash,
+    });
+    prisma.companyTeamMember.findFirst.mockResolvedValue({
+      id: 'membership-1',
+      company: { status: 'SUSPENDED' },
+    });
+
+    await expect(
+      strategy.validate({
+        sub: 'user-company',
+        credentialVersion: credentialFingerprint(passwordHash),
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('invalida a sessão quando o vínculo com a empresa foi desativado', async () => {

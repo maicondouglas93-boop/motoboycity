@@ -19,6 +19,8 @@ import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 import { MarkPaidDialog } from '@/components/finance/mark-paid-dialog';
 import { InvoiceWhatsAppDialog } from '@/components/finance/invoice-whatsapp-dialog';
+import { UpdateInvoiceDueDateDialog } from '@/components/finance/update-invoice-due-date-dialog';
+import { formatarData } from '@/lib/dinheiro';
 
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -32,6 +34,17 @@ const invoiceStatusLabel: Record<string, string> = {
   OVERDUE: 'Vencida',
   CANCELLED: 'Cancelada',
 };
+
+function invoiceHistoryTitle(
+  fromStatus: string | null,
+  toStatus: string,
+  note: string | null,
+): string {
+  if (fromStatus === toStatus && note?.startsWith('Vencimento alterado')) {
+    return 'Vencimento alterado';
+  }
+  return `${fromStatus ? invoiceStatusLabel[fromStatus] : 'Criação'} → ${invoiceStatusLabel[toStatus] ?? toStatus}`;
+}
 
 export default function AdminInvoiceDetailPage() {
   const money = useMoney();
@@ -81,8 +94,23 @@ export default function AdminInvoiceDetailPage() {
           <p className="text-sm text-muted-foreground">
             {invoice.companyName} · {invoice.deliveryCount} pedido(s)
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Emitida em {formatarData(invoice.issueDate)} / Vencimento{' '}
+            {formatarData(invoice.dueDate)}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {(invoice.status === 'PENDING' || invoice.status === 'OVERDUE') && (
+            <UpdateInvoiceDueDateDialog
+              token={token}
+              invoiceId={invoice.id}
+              invoiceNumber={invoice.number}
+              companyName={invoice.companyName}
+              issueDate={invoice.issueDate}
+              currentDueDate={invoice.dueDate}
+              status={invoice.status}
+            />
+          )}
           <InvoiceWhatsAppDialog
             invoice={invoice}
             contacts={whatsappContacts}
@@ -200,8 +228,7 @@ export default function AdminInvoiceDetailPage() {
               className="border-l-2 border-border pl-3 text-sm"
             >
               <p className="font-medium">
-                {entry.fromStatus ? invoiceStatusLabel[entry.fromStatus] : 'Criação'} →{' '}
-                {invoiceStatusLabel[entry.toStatus] ?? entry.toStatus}
+                {invoiceHistoryTitle(entry.fromStatus, entry.toStatus, entry.note)}
               </p>
               <p className="text-muted-foreground">
                 {date.format(new Date(entry.changedAt))}

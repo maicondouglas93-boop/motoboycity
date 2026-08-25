@@ -4,8 +4,11 @@ import type {
   InvoiceDetail,
   InvoiceListItem,
   InvoiceStatus,
+  ManualInvoiceCandidate,
+  ManualInvoicePreview,
   PaymentMethod,
 } from '@motoboycity/types';
+import type { ManualInvoicePayload, UpdateInvoiceDueDatePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 type InvoiceFilters = { status?: InvoiceStatus; from?: string; to?: string; companyId?: string };
@@ -77,6 +80,39 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       return parseJsonOrThrow<InvoiceListItem[]>(response);
     },
 
+    async manualCandidates(
+      accessToken: string,
+      companyId: string,
+    ): Promise<ManualInvoiceCandidate[]> {
+      const params = new URLSearchParams({ companyId });
+      const response = await fetch(
+        `${baseUrl}/admin/financial/invoices/manual/candidates?${params.toString()}`,
+        { headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<ManualInvoiceCandidate[]>(response);
+    },
+
+    async previewManual(
+      accessToken: string,
+      payload: ManualInvoicePayload,
+    ): Promise<ManualInvoicePreview> {
+      const response = await fetch(`${baseUrl}/admin/financial/invoices/manual/preview`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<ManualInvoicePreview>(response);
+    },
+
+    async createManual(accessToken: string, payload: ManualInvoicePayload): Promise<InvoiceDetail> {
+      const response = await fetch(`${baseUrl}/admin/financial/invoices/manual`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<InvoiceDetail>(response);
+    },
+
     /**
      * Cancela a fatura e devolve as entregas para cobranca. Motivo obrigatorio.
      */
@@ -99,6 +135,19 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       payload: { paymentDate: string; paymentMethod: PaymentMethod },
     ): Promise<InvoiceDetail> {
       const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/mark-paid`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<InvoiceDetail>(response);
+    },
+
+    async updateDueDate(
+      accessToken: string,
+      invoiceId: string,
+      payload: UpdateInvoiceDueDatePayload,
+    ): Promise<InvoiceDetail> {
+      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/due-date`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

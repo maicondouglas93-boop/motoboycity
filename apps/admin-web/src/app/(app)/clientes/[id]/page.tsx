@@ -16,6 +16,8 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
+import { CompanyStatusDialog } from '@/components/companies/company-status-dialog';
+import { EditCompanyDialog } from '@/components/companies/edit-company-dialog';
 import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -173,17 +175,21 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 {company.legalName} · {company.document}
               </p>
             </div>
-            <Badge
-              variant={
-                company.status === 'ACTIVE'
-                  ? 'default'
-                  : company.status === 'SUSPENDED'
-                    ? 'destructive'
-                    : 'outline'
-              }
-            >
-              {companyStatusLabel[company.status] ?? company.status}
-            </Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Badge
+                variant={
+                  company.status === 'ACTIVE'
+                    ? 'default'
+                    : company.status === 'SUSPENDED'
+                      ? 'destructive'
+                      : 'outline'
+                }
+              >
+                {companyStatusLabel[company.status] ?? company.status}
+              </Badge>
+              <EditCompanyDialog company={company} token={token} />
+              <CompanyStatusDialog company={company} token={token} />
+            </div>
           </header>
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">

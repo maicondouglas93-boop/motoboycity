@@ -34,11 +34,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (user.type === 'COMPANY_MEMBER') {
       const activeMembership = await this.prisma.companyTeamMember.findFirst({
         where: { userId: user.id, active: true },
-        select: { id: true },
+        select: { id: true, company: { select: { status: true } } },
       });
       if (!activeMembership) {
         throw new UnauthorizedException(
           'Seu acesso à empresa não está ativo. Entre em contato com o suporte.',
+        );
+      }
+      if (activeMembership.company.status === 'SUSPENDED') {
+        throw new UnauthorizedException(
+          'Sua empresa esta suspensa. Entre em contato com o suporte.',
         );
       }
     }

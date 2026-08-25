@@ -4,12 +4,13 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { InvoiceStatus } from '@motoboycity/types';
-import { AlertTriangle, CalendarClock, Eye, Package } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Eye, FilePlus2, Package } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog';
 import { MetricCard } from '@/components/finance/metric-card';
+import { ManualInvoiceDialog } from '@/components/finance/manual-invoice-dialog';
 import { ReceivablesAging } from '@/components/finance/receivables-aging';
 import { adminFinancialApi, adminInvoicesApi } from '@/lib/api-client';
 import { CloseInvoicesDialog } from '@/components/finance/close-invoices-dialog';
@@ -42,6 +43,10 @@ export function FaturasTab({ token }: { token: string }) {
   const [statusFiltrado, setStatusFiltrado] = useState<InvoiceStatus | 'ALL'>('ALL');
   /** Quantas faturas o ultimo fechamento gerou. `null` = ainda nao fechou. */
   const [faturasGeradas, setFaturasGeradas] = useState<number | null>(null);
+  const [faturaPersonalizada, setFaturaPersonalizada] = useState<{
+    id: string;
+    number: string;
+  } | null>(null);
 
   const caixaQuery = useQuery({
     queryKey: ['admin', 'financial', 'cash-position'],
@@ -63,6 +68,40 @@ export function FaturasTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-6">
+      <Card className="overflow-hidden border-primary/20 bg-gradient-to-r from-primary/8 via-card to-card">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="rounded-xl bg-primary/10 p-2.5 text-primary">
+              <FilePlus2 aria-hidden className="size-5" />
+            </span>
+            <div>
+              <p className="font-heading font-semibold">Fatura personalizada</p>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Selecione uma empresa, escolha os pedidos concluidos e defina emissao e vencimento.
+                Os demais pedidos continuam aguardando o fechamento semanal.
+              </p>
+            </div>
+          </div>
+          <ManualInvoiceDialog
+            token={token}
+            onCreated={(invoice) =>
+              setFaturaPersonalizada({ id: invoice.id, number: invoice.number })
+            }
+          />
+        </CardContent>
+        {faturaPersonalizada && (
+          <div className="border-t border-primary/15 bg-primary/5 px-5 py-3 text-sm">
+            Fatura <strong>{faturaPersonalizada.number}</strong> emitida com sucesso.{' '}
+            <Link
+              className="font-medium text-primary underline"
+              href={`/faturas/${faturaPersonalizada.id}`}
+            >
+              Abrir fatura
+            </Link>
+          </div>
+        )}
+      </Card>
+
       {/*
         Este bloco existe porque o fechamento aqui NÃO é por seleção de pedidos.
         A regra do sistema é semanal e automática: roda toda segunda-feira a

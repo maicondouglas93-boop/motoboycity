@@ -3,6 +3,10 @@ import type {
   AdminCompanyRegistrationOptions,
   AdminPasswordChangeResult,
 } from '@motoboycity/types';
+import type {
+  UpdateCompanyProfilePayload,
+  UpsertCompanyAddressPayload,
+} from '@motoboycity/validation';
 import type { CompanyStatus } from '@prisma/client';
 import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -178,6 +182,135 @@ export class AdminCompaniesService {
       approvedByUserId,
       approvedAt: approvedAt.toISOString(),
     };
+  }
+
+  async updateProfile(
+    companyId: string,
+    payload: UpdateCompanyProfilePayload,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) {
+        throw new NotFoundException('Empresa nao encontrada.');
+      }
+
+      const owner = await tx.companyTeamMember.findFirst({
+        where: {
+          companyId,
+          active: true,
+          role: 'OWNER',
+          user: { type: 'COMPANY_MEMBER' },
+        },
+        orderBy: { joinedAt: 'asc' },
+        select: { userId: true },
+      });
+      if (!owner) {
+        throw new ConflictException(
+          'A empresa nao possui um responsavel ativo para receber a atualizacao.',
+        );
+      }
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: { tradeName: payload.tradeName, legalName: payload.legalName },
+      });
+      await tx.user.update({
+        where: { id: owner.userId },
+        data: { name: payload.fullName, phone: payload.whatsapp },
+      });
+    });
+
+    return this.detail(companyId);
+  }
+
+  async upsertPrimaryAddress(
+    companyId: string,
+    payload: UpsertCompanyAddressPayload,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) {
+        throw new NotFoundException('Empresa nao encontrada.');
+      }
+
+      const existing = await tx.companyAddress.findFirst({
+        where: { companyId, isPrimary: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      const addressData = {
+        ...payload,
+        label: payload.label || null,
+        complement: payload.complement || null,
+        lat: payload.lat ?? null,
+        lng: payload.lng ?? null,
+        isPrimary: true,
+      };
+
+      if (existing) {
+        await tx.companyAddress.update({ where: { id: existing.id }, data: addressData });
+        await tx.companyAddress.updateMany({
+          where: { companyId, isPrimary: true, id: { not: existing.id } },
+          data: { isPrimary: false },
+        });
+      } else {
+        await tx.companyAddress.create({ data: { ...addressData, companyId } });
+      }
+    });
+
+    return this.detail(companyId);
+  }
+
+  suspend(companyId: string): Promise<AdminCompanyDetail> {
+    return this.setStatus(companyId, 'ACTIVE', 'SUSPENDED');
+  }
+
+  reactivate(companyId: string): Promise<AdminCompanyDetail> {
+    return this.setStatus(companyId, 'SUSPENDED', 'ACTIVE');
+  }
+
+  private async setStatus(
+    companyId: string,
+    expectedStatus: CompanyStatus,
+    nextStatus: CompanyStatus,
+  ): Promise<AdminCompanyDetail> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        status: true,
+        teamMembers: { where: { active: true }, select: { userId: true } },
+      },
+    });
+    if (!company) {
+      throw new NotFoundException('Empresa nao encontrada.');
+    }
+    if (company.status !== expectedStatus) {
+      throw new ConflictException(
+        `A empresa precisa estar ${expectedStatus} para mudar para ${nextStatus}.`,
+      );
+    }
+
+    const updated = await this.prisma.company.updateMany({
+      where: { id: companyId, status: expectedStatus },
+      data: { status: nextStatus },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException('O status da empresa mudou durante a operacao. Atualize a tela.');
+    }
+
+    if (nextStatus === 'SUSPENDED') {
+      for (const member of company.teamMembers) {
+        this.realtimeGateway.disconnectUser(member.userId);
+      }
+    }
+
+    return this.detail(companyId);
   }
 
   async changeMemberPassword(

@@ -5,13 +5,21 @@ import { InvoiceService } from './invoice.service';
 
 describe('InvoiceService', () => {
   const tx = {
+    company: { findUnique: jest.fn() },
     delivery: { findMany: jest.fn(), updateMany: jest.fn() },
-    invoice: { create: jest.fn(), findMany: jest.fn() },
+    invoice: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      updateMany: jest.fn(),
+    },
     invoiceStatusHistory: { create: jest.fn() },
   };
   // `getListItem` roda FORA da transacao, relendo a fatura recem-criada.
   const prisma = {
     $transaction: jest.fn(),
+    company: { findUnique: jest.fn() },
+    delivery: { findMany: jest.fn() },
     invoice: { findUnique: jest.fn(), findMany: jest.fn() },
     companyTeamMember: { findFirst: jest.fn() },
   };
@@ -28,8 +36,25 @@ describe('InvoiceService', () => {
     tx.delivery.updateMany.mockResolvedValue({ count: 1 });
     tx.invoice.create.mockResolvedValue({ id: 'fatura-1' });
     tx.invoice.findMany.mockResolvedValue([]);
+    tx.invoice.findUnique.mockResolvedValue({
+      status: 'PENDING',
+      issueDate: new Date('2026-08-24T00:00:00.000Z'),
+      dueDate: new Date('2026-08-25T00:00:00.000Z'),
+    });
+    tx.invoice.updateMany.mockResolvedValue({ count: 1 });
     tx.invoiceStatusHistory.create.mockResolvedValue({});
     prisma.invoice.findMany.mockResolvedValue([]);
+    prisma.company.findUnique.mockResolvedValue({
+      id: 'empresa-1',
+      tradeName: 'Loja Teste',
+      document: '12345678000199',
+    });
+    prisma.delivery.findMany.mockResolvedValue([]);
+    tx.company.findUnique.mockResolvedValue({
+      id: 'empresa-1',
+      tradeName: 'Loja Teste',
+      document: '12345678000199',
+    });
     prisma.companyTeamMember.findFirst.mockResolvedValue({ companyId: 'empresa-1' });
     prisma.invoice.findUnique.mockResolvedValue({
       id: 'fatura-1',
@@ -70,7 +95,6 @@ describe('InvoiceService', () => {
       }),
     );
   });
-
 
   it('emite a fatura vencendo NO MESMO DIA, de propósito', async () => {
     /**
@@ -139,6 +163,242 @@ describe('InvoiceService', () => {
     expect(tx.invoice.create.mock.calls[0]?.[0].data).toEqual(
       expect.objectContaining({ totalValue: 0.3, driverValueSum: 0.09, platformValueSum: 0.21 }),
     );
+  });
+
+  describe('fatura personalizada', () => {
+    const payload = {
+      companyId: 'empresa-1',
+      deliveryIds: ['entrega-1', 'entrega-2'],
+      issueDate: '2026-08-25',
+      dueDate: '2026-08-30',
+    };
+    const deliveries = [
+      {
+        id: 'entrega-1',
+        displayNumber: 11,
+        externalOrderNumber: null,
+        statusChangedAt: new Date('2026-08-24T12:00:00.000Z'),
+        totalValue: 0.1,
+        driverValue: 0.03,
+        platformValue: 0.07,
+        serviceType: { name: 'Motoboy' },
+      },
+      {
+        id: 'entrega-2',
+        displayNumber: 12,
+        externalOrderNumber: 'LOJA-22',
+        statusChangedAt: new Date('2026-08-24T13:00:00.000Z'),
+        totalValue: 0.2,
+        driverValue: 0.06,
+        platformValue: 0.14,
+        serviceType: { name: 'Motoboy' },
+      },
+    ];
+
+    beforeEach(() => {
+      clock.now.mockReturnValue(new Date('2026-08-25T15:00:00.000Z'));
+      prisma.delivery.findMany.mockResolvedValue(deliveries);
+      tx.delivery.findMany.mockResolvedValue(deliveries);
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+    });
+
+    it('mostra uma previa calculada com os valores congelados', async () => {
+      const preview = await service.previewManualInvoice(payload);
+
+      expect(preview).toEqual(
+        expect.objectContaining({
+          issueDate: '2026-08-25',
+          dueDate: '2026-08-30',
+          deliveryCount: 2,
+          totalValue: 0.3,
+          driverValueSum: 0.09,
+          platformValueSum: 0.21,
+        }),
+      );
+      expect(preview.deliveries.map((delivery) => delivery.displayNumber)).toEqual([11, 12]);
+    });
+
+    it('emite apenas os pedidos selecionados e registra autor e motivo', async () => {
+      const internals = service as unknown as {
+        getDetail(invoiceId: string): Promise<unknown>;
+      };
+      const detailSpy = jest
+        .spyOn(internals, 'getDetail')
+        .mockResolvedValueOnce({ id: 'fatura-1' });
+
+      await service.createManualInvoice(admin, payload);
+
+      expect(tx.invoice.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          companyId: 'empresa-1',
+          issueDate: new Date('2026-08-25T00:00:00.000Z'),
+          dueDate: new Date('2026-08-30T00:00:00.000Z'),
+          totalValue: 0.3,
+          driverValueSum: 0.09,
+          platformValueSum: 0.21,
+        }),
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          companyId: 'empresa-1',
+          id: { in: ['entrega-1', 'entrega-2'] },
+          status: 'COMPLETED',
+          paymentMethod: 'BILLED',
+          invoiceId: null,
+        }),
+        data: { invoiceId: 'fatura-1' },
+      });
+      expect(tx.invoiceStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          changedByUserId: 'admin-1',
+          note: expect.stringMatching(/selecionados pelo administrador/i),
+        }),
+      });
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable',
+      });
+      detailSpy.mockRestore();
+    });
+
+    it('recusa quando outro fechamento vinculou um pedido durante a emissao', async () => {
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.createManualInvoice(admin, payload)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('recusa emissao futura', async () => {
+      await expect(
+        service.previewManualInvoice({
+          ...payload,
+          issueDate: '2026-08-26',
+          dueDate: '2026-08-30',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('alteracao de vencimento', () => {
+    const payload = {
+      dueDate: '2026-08-30',
+      reason: 'Prazo renegociado com a empresa.',
+    };
+
+    beforeEach(() => {
+      clock.now.mockReturnValue(new Date('2026-08-25T15:00:00.000Z'));
+    });
+
+    it('altera a data e registra o motivo com o administrador', async () => {
+      const internals = service as unknown as {
+        getDetail(invoiceId: string): Promise<unknown>;
+      };
+      const detailSpy = jest
+        .spyOn(internals, 'getDetail')
+        .mockResolvedValueOnce({ id: 'fatura-1' });
+
+      await service.updateDueDate(admin, 'fatura-1', payload);
+
+      expect(tx.invoice.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'fatura-1',
+          status: 'PENDING',
+          dueDate: new Date('2026-08-25T00:00:00.000Z'),
+        },
+        data: {
+          dueDate: new Date('2026-08-30T00:00:00.000Z'),
+          status: 'PENDING',
+        },
+      });
+      expect(tx.invoiceStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          invoiceId: 'fatura-1',
+          fromStatus: 'PENDING',
+          toStatus: 'PENDING',
+          changedByUserId: 'admin-1',
+          note: 'Vencimento alterado de 2026-08-25 para 2026-08-30. Motivo: Prazo renegociado com a empresa.',
+        },
+      });
+      detailSpy.mockRestore();
+    });
+
+    it('devolve uma fatura vencida para pendente ao prorrogar o prazo', async () => {
+      tx.invoice.findUnique.mockResolvedValue({
+        status: 'OVERDUE',
+        issueDate: new Date('2026-08-20T00:00:00.000Z'),
+        dueDate: new Date('2026-08-24T00:00:00.000Z'),
+      });
+      const internals = service as unknown as {
+        getDetail(invoiceId: string): Promise<unknown>;
+      };
+      const detailSpy = jest
+        .spyOn(internals, 'getDetail')
+        .mockResolvedValueOnce({ id: 'fatura-1' });
+
+      await service.updateDueDate(admin, 'fatura-1', payload);
+
+      expect(tx.invoice.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'PENDING' }) }),
+      );
+      expect(tx.invoiceStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ fromStatus: 'OVERDUE', toStatus: 'PENDING' }),
+      });
+      detailSpy.mockRestore();
+    });
+
+    it('marca como vencida imediatamente quando a nova data ja passou', async () => {
+      tx.invoice.findUnique.mockResolvedValue({
+        status: 'PENDING',
+        issueDate: new Date('2026-08-20T00:00:00.000Z'),
+        dueDate: new Date('2026-08-25T00:00:00.000Z'),
+      });
+      const internals = service as unknown as {
+        getDetail(invoiceId: string): Promise<unknown>;
+      };
+      const detailSpy = jest
+        .spyOn(internals, 'getDetail')
+        .mockResolvedValueOnce({ id: 'fatura-1' });
+
+      await service.updateDueDate(admin, 'fatura-1', {
+        ...payload,
+        dueDate: '2026-08-24',
+      });
+
+      expect(tx.invoice.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'OVERDUE' }) }),
+      );
+      detailSpy.mockRestore();
+    });
+
+    it('recusa vencimento anterior a emissao', async () => {
+      await expect(
+        service.updateDueDate(admin, 'fatura-1', { ...payload, dueDate: '2026-08-23' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.invoice.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each(['PAID', 'CANCELLED'] as const)('recusa fatura em status %s', async (status) => {
+      tx.invoice.findUnique.mockResolvedValue({
+        status,
+        issueDate: new Date('2026-08-24T00:00:00.000Z'),
+        dueDate: new Date('2026-08-25T00:00:00.000Z'),
+      });
+
+      await expect(service.updateDueDate(admin, 'fatura-1', payload)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.invoice.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('recusa quando outra tela alterou a mesma fatura primeiro', async () => {
+      tx.invoice.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.updateDueDate(admin, 'fatura-1', payload)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.invoiceStatusHistory.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('contrato visivel pela empresa', () => {

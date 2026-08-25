@@ -8,19 +8,48 @@ import { AdminCompaniesService } from './admin-companies.service';
 describe('AdminCompaniesService', () => {
   let service: AdminCompaniesService;
   let prisma: {
-    company: { findUnique: jest.Mock; update: jest.Mock; findMany: jest.Mock };
+    company: {
+      findUnique: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+      findMany: jest.Mock;
+    };
     companyTeamMember: { findFirst: jest.Mock };
+    companyAddress: {
+      findFirst: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    user: { update: jest.Mock };
     region: { findMany: jest.Mock };
+    $transaction: jest.Mock;
   };
   let authService: { replacePassword: jest.Mock };
   let realtimeGateway: { disconnectUser: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
-      company: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
+      company: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        findMany: jest.fn(),
+      },
       companyTeamMember: { findFirst: jest.fn() },
+      companyAddress: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      user: { update: jest.fn() },
       region: { findMany: jest.fn() },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (operation: (tx: typeof prisma) => unknown) =>
+      operation(prisma),
+    );
     authService = { replacePassword: jest.fn() };
     realtimeGateway = { disconnectUser: jest.fn() };
 
@@ -172,6 +201,93 @@ describe('AdminCompaniesService', () => {
     prisma.company.findUnique.mockResolvedValue({ id: 'company-1', status: 'SUSPENDED' });
 
     await expect(service.approve('company-1', 'admin-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  describe('manutencao administrativa', () => {
+    it('atualiza empresa e responsavel na mesma transacao', async () => {
+      prisma.company.findUnique.mockResolvedValue({ id: 'company-1' });
+      prisma.companyTeamMember.findFirst.mockResolvedValue({ userId: 'owner-user-1' });
+      jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
+
+      await service.updateProfile('company-1', {
+        tradeName: 'Nova Farma',
+        legalName: 'Nova Farma LTDA',
+        fullName: 'Maria Responsavel',
+        whatsapp: '33999990000',
+      });
+
+      expect(prisma.company.update).toHaveBeenCalledWith({
+        where: { id: 'company-1' },
+        data: { tradeName: 'Nova Farma', legalName: 'Nova Farma LTDA' },
+      });
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'owner-user-1' },
+        data: { name: 'Maria Responsavel', phone: '33999990000' },
+      });
+    });
+
+    it('atualiza o endereco principal e limpa coordenadas antigas', async () => {
+      prisma.company.findUnique.mockResolvedValue({ id: 'company-1' });
+      prisma.companyAddress.findFirst.mockResolvedValue({ id: 'address-1' });
+      jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
+
+      await service.upsertPrimaryAddress('company-1', {
+        street: 'Rua Nova',
+        number: '25',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980000',
+      });
+
+      expect(prisma.companyAddress.update).toHaveBeenCalledWith({
+        where: { id: 'address-1' },
+        data: {
+          street: 'Rua Nova',
+          number: '25',
+          city: 'Lajinha',
+          state: 'MG',
+          zip: '36980000',
+          label: null,
+          complement: null,
+          lat: null,
+          lng: null,
+          isPrimary: true,
+        },
+      });
+      expect(prisma.companyAddress.updateMany).toHaveBeenCalledWith({
+        where: { companyId: 'company-1', isPrimary: true, id: { not: 'address-1' } },
+        data: { isPrimary: false },
+      });
+    });
+
+    it('suspende a empresa de forma condicional e encerra as sessoes ativas', async () => {
+      prisma.company.findUnique.mockResolvedValue({
+        status: 'ACTIVE',
+        teamMembers: [{ userId: 'owner-user-1' }, { userId: 'operator-user-1' }],
+      });
+      prisma.company.updateMany.mockResolvedValue({ count: 1 });
+      jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
+
+      await service.suspend('company-1');
+
+      expect(prisma.company.updateMany).toHaveBeenCalledWith({
+        where: { id: 'company-1', status: 'ACTIVE' },
+        data: { status: 'SUSPENDED' },
+      });
+      expect(realtimeGateway.disconnectUser).toHaveBeenCalledTimes(2);
+      expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-user-1');
+      expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('operator-user-1');
+    });
+
+    it('recusa suspender uma empresa que nao esta ativa', async () => {
+      prisma.company.findUnique.mockResolvedValue({
+        status: 'PENDING_APPROVAL',
+        teamMembers: [],
+      });
+
+      await expect(service.suspend('company-1')).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.company.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('changeMemberPassword', () => {

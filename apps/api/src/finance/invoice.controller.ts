@@ -3,11 +3,17 @@ import {
   closeInvoicesSchema,
   listInvoicesQuerySchema,
   cancelInvoiceSchema,
+  manualInvoiceEligibleQuerySchema,
+  manualInvoiceSchema,
   markInvoicePaidSchema,
+  updateInvoiceDueDateSchema,
   type CloseInvoicesPayload,
   type ListInvoicesQuery,
   type CancelInvoicePayload,
+  type ManualInvoiceEligibleQuery,
+  type ManualInvoicePayload,
   type MarkInvoicePaidPayload,
+  type UpdateInvoiceDueDatePayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../auth/admin-only.guard';
@@ -21,6 +27,8 @@ import {
   type CompanyInvoiceListItem,
   type InvoiceDetail,
   type InvoiceListItem,
+  type ManualInvoiceCandidate,
+  type ManualInvoicePreview,
 } from './invoice.service';
 
 @Controller('admin/financial/invoices')
@@ -41,6 +49,29 @@ export class AdminInvoicesController {
     @CurrentUser() admin: User,
   ): Promise<InvoiceListItem[]> {
     return this.invoiceService.closeOpenInvoices(admin, body);
+  }
+
+  @Get('manual/candidates')
+  manualCandidates(
+    @Query(new ZodValidationPipe(manualInvoiceEligibleQuerySchema))
+    query: ManualInvoiceEligibleQuery,
+  ): Promise<ManualInvoiceCandidate[]> {
+    return this.invoiceService.listManualCandidates(query);
+  }
+
+  @Post('manual/preview')
+  previewManual(
+    @Body(new ZodValidationPipe(manualInvoiceSchema)) body: ManualInvoicePayload,
+  ): Promise<ManualInvoicePreview> {
+    return this.invoiceService.previewManualInvoice(body);
+  }
+
+  @Post('manual')
+  createManual(
+    @Body(new ZodValidationPipe(manualInvoiceSchema)) body: ManualInvoicePayload,
+    @CurrentUser() admin: User,
+  ): Promise<InvoiceDetail> {
+    return this.invoiceService.createManualInvoice(admin, body);
   }
 
   /**
@@ -72,6 +103,16 @@ export class AdminInvoicesController {
   ): Promise<InvoiceDetail> {
     return this.invoiceService.markPaid(admin, id, body);
   }
+
+  @Patch(':id/due-date')
+  updateDueDate(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(updateInvoiceDueDateSchema))
+    body: UpdateInvoiceDueDatePayload,
+    @CurrentUser() admin: User,
+  ): Promise<InvoiceDetail> {
+    return this.invoiceService.updateDueDate(admin, id, body);
+  }
 }
 
 @Controller('company/invoices')
@@ -88,10 +129,7 @@ export class CompanyInvoicesController {
   }
 
   @Get(':id')
-  detail(
-    @Param('id') id: string,
-    @CurrentUser() companyUser: User,
-  ): Promise<CompanyInvoiceDetail> {
+  detail(@Param('id') id: string, @CurrentUser() companyUser: User): Promise<CompanyInvoiceDetail> {
     return this.invoiceService.detailForCompany(companyUser, id);
   }
 }

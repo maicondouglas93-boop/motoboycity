@@ -125,6 +125,9 @@ function eventChange(event: FinancialAuditEvent): string {
     return `${direction} · ${event.transactionStatus === 'CANCELLED' ? 'Cancelado' : 'Ativo'}`;
   }
   if (event.kind === 'INVOICE_STATUS_CHANGE') {
+    if (event.fromStatus === event.toStatus && event.note?.startsWith('Vencimento alterado')) {
+      return 'Vencimento alterado';
+    }
     return `${event.fromStatus ? INVOICE_STATUS[event.fromStatus] : 'Criada'} → ${INVOICE_STATUS[event.toStatus]}`;
   }
   return `${event.fromStatus ? WITHDRAWAL_STATUS[event.fromStatus] : 'Criado'} → ${WITHDRAWAL_STATUS[event.toStatus]}`;

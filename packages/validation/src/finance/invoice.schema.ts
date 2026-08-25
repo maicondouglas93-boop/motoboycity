@@ -23,6 +23,36 @@ export const closeInvoicesSchema = z.object({
   issueDate: dateOnlySchema,
 });
 
+export const manualInvoiceEligibleQuerySchema = z.object({
+  companyId: z.string().uuid(),
+});
+
+/**
+ * Emissao extraordinaria de uma fatura para uma unica empresa.
+ *
+ * A selecao explicita evita que o botao manual alcance outras empresas ou
+ * pedidos que o administrador nao revisou. IDs repetidos tambem sao recusados:
+ * somar o mesmo pedido duas vezes na previa seria uma cobranca enganosa.
+ */
+export const manualInvoiceSchema = z
+  .object({
+    companyId: z.string().uuid(),
+    deliveryIds: z
+      .array(z.string().uuid())
+      .min(1, 'Selecione pelo menos um pedido para faturar.')
+      .max(500, 'Selecione no maximo 500 pedidos por fatura.'),
+    issueDate: dateOnlySchema,
+    dueDate: dateOnlySchema,
+  })
+  .refine((data) => new Set(data.deliveryIds).size === data.deliveryIds.length, {
+    message: 'A selecao possui pedidos repetidos.',
+    path: ['deliveryIds'],
+  })
+  .refine((data) => data.dueDate >= data.issueDate, {
+    message: 'O vencimento nao pode ser anterior a emissao.',
+    path: ['dueDate'],
+  });
+
 /**
  * Cancelamento de fatura.
  *
@@ -43,6 +73,15 @@ export const markInvoicePaidSchema = z.object({
   paymentMethod: z.enum(['BILLED', 'ONLINE']),
 });
 
+export const updateInvoiceDueDateSchema = z.object({
+  dueDate: dateOnlySchema,
+  reason: z
+    .string()
+    .trim()
+    .min(10, 'Explique o motivo da alteracao em pelo menos 10 caracteres.')
+    .max(300, 'O motivo deve ter no maximo 300 caracteres.'),
+});
+
 export const listInvoicesQuerySchema = z
   .object({
     status: z.enum(invoiceStatusValues).optional(),
@@ -56,6 +95,9 @@ export const listInvoicesQuerySchema = z
   });
 
 export type CloseInvoicesPayload = z.infer<typeof closeInvoicesSchema>;
+export type ManualInvoiceEligibleQuery = z.infer<typeof manualInvoiceEligibleQuerySchema>;
+export type ManualInvoicePayload = z.infer<typeof manualInvoiceSchema>;
 export type MarkInvoicePaidPayload = z.infer<typeof markInvoicePaidSchema>;
+export type UpdateInvoiceDueDatePayload = z.infer<typeof updateInvoiceDueDateSchema>;
 export type CancelInvoicePayload = z.infer<typeof cancelInvoiceSchema>;
 export type ListInvoicesQuery = z.infer<typeof listInvoicesQuerySchema>;
