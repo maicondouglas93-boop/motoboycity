@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { useDeferredValue, useState } from 'react';
-import { Package } from 'lucide-react';
+import { CalendarClock, Package, ReceiptText, Route, RotateCcw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
+import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,15 @@ function formatCurrency(value: number | null): string {
 const trackingDateFormatter = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
   minute: '2-digit',
+  timeZone: 'America/Sao_Paulo',
+});
+
+const orderDateFormatter = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'America/Sao_Paulo',
 });
 
 function mapsUrl(lat: number, lng: number): string {
@@ -183,28 +192,81 @@ export default function CompanyOrdersPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {deliveries.map((delivery) => (
-            <Card key={delivery.id} className="order-list-card">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div>
-                  <p className="font-medium">
-                    #{delivery.displayNumber} — {delivery.serviceTypeName}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {delivery.distanceKm !== null
-                      ? `${delivery.distanceKm} km`
-                      : 'Distância não calculada'}
-                    {delivery.requiresReturn && ' · com retorno'}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-3">
-                  <div className="text-right">
-                    <StatusChip status={delivery.status} />
-                    <p className="font-medium">{formatCurrency(delivery.totalValue)}</p>
+            <Card
+              key={delivery.id}
+              className="order-list-card relative h-full overflow-hidden border-border/70 bg-card/90"
+            >
+              <span
+                aria-hidden="true"
+                className={`absolute inset-y-0 left-0 w-1 ${statusRailClass(delivery.status)}`}
+              />
+              <CardContent className="flex h-full flex-col gap-4 p-4 pl-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-sm font-bold text-foreground">
+                      #{delivery.displayNumber}
+                    </p>
+                    <h3 className="mt-1 truncate text-sm font-semibold">
+                      {delivery.serviceTypeName}
+                    </h3>
                   </div>
+                  <StatusChip status={delivery.status} />
+                </div>
+
+                {delivery.externalOrderNumber && (
+                  <p className="-mt-2 truncate text-xs text-muted-foreground">
+                    Referência: {delivery.externalOrderNumber}
+                  </p>
+                )}
+
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <CalendarClock className="size-3.5 shrink-0 text-portal" />
+                  <span className="truncate">
+                    {delivery.scheduledAt ? 'Agendado para ' : 'Criado em '}
+                    {orderDateFormatter.format(
+                      new Date(delivery.scheduledAt ?? delivery.createdAt),
+                    )}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-border/65 bg-muted/35 p-2.5">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Route className="size-3.5 text-portal" /> Distância
+                    </div>
+                    <p className="mt-1 text-sm font-semibold">
+                      {delivery.distanceKm !== null ? `${delivery.distanceKm} km` : 'A calcular'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border/65 bg-muted/35 p-2.5">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <RotateCcw className="size-3.5 text-portal" /> Retorno
+                    </div>
+                    <p className="mt-1 text-sm font-semibold">
+                      {delivery.requiresReturn ? 'Incluído' : 'Não'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-auto flex items-end justify-between gap-3 border-t border-border/60 pt-3">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <ReceiptText className="size-3.5 text-portal" />
+                      {delivery.paymentMethod === 'BILLED' ? 'Faturado' : 'Online'}
+                    </div>
+                    <p className="mt-1 text-base font-bold text-foreground">
+                      {formatCurrency(delivery.totalValue)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
                   <Link
-                    className="inline-flex h-8 items-center rounded-lg border border-portal/20 bg-card px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:bg-portal-soft"
+                    className={`inline-flex h-9 items-center justify-center rounded-lg border border-portal/20 bg-portal-soft px-3 text-xs font-semibold text-portal-deep shadow-sm transition-colors hover:border-portal/35 hover:bg-portal/15 ${
+                      CANCELLABLE_STATUSES.includes(delivery.status) ? '' : 'col-span-2'
+                    }`}
                     href={`/pedidos/${delivery.id}`}
                   >
                     Ver detalhes
@@ -213,6 +275,7 @@ export default function CompanyOrdersPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="w-full"
                       disabled={cancelMutation.isPending}
                       onClick={() => {
                         if (window.confirm(`Cancelar o pedido #${delivery.displayNumber}?`)) {

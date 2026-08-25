@@ -6705,3 +6705,24 @@ porque depende de PostgreSQL e Redis isolados; deve rodar na CI preparada para
 esse fim. Proximo passo concreto: em homologacao, aprovar, pagar e rejeitar
 saques de teste, conferindo carteira, aging e trilha auditavel; a antecipacao
 de saldo permanece fora do escopo ate existir demanda confirmada no piloto.
+
+## Atualizacao - 2026-08-25: pedidos da empresa em grid de cards
+
+A listagem de `Company Web > Pedidos` foi convertida de linhas horizontais
+para um grid responsivo de cards, com uma coluna no celular e ate cinco em
+telas grandes. Cada card preserva o trilho de cor do status e mostra numero,
+modalidade, referencia externa, criacao ou agendamento, distancia, retorno,
+forma de cobranca e valor. As acoes existentes de abrir detalhes e cancelar
+continuam usando os mesmos endpoints e regras; busca, filtro, rastreamento ao
+vivo e paginacao tambem foram preservados.
+
+Nao houve mudanca de contrato, API, autorizacao, banco ou logica operacional.
+O horario exibido na listagem e no rastreamento passou a declarar
+`America/Sao_Paulo` explicitamente. Arquivo alterado:
+`apps/company-web/src/app/(app)/pedidos/page.tsx`.
+
+Validacoes executadas: formatacao do arquivo alterado, typecheck, lint e build
+de producao do Company Web. Tudo passou. O smoke visual autenticado nao foi
+executado nesta sessao. Proximo passo concreto: abrir `/pedidos` com uma conta
+de empresa em desktop e celular, conferir cards com e sem retorno, pedidos
+agendados e o cancelamento dos estados permitidos.
