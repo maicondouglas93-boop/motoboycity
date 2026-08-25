@@ -26,6 +26,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 
 type AddressForm = {
   label: string;
@@ -201,9 +203,9 @@ export function EditCompanyDialog({
         </DialogHeader>
         <DialogBody className="space-y-6">
           {success && (
-            <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">
+            <ActionFeedback tone="success" title="Alterações salvas">
               {success}
-            </p>
+            </ActionFeedback>
           )}
 
           <form className="space-y-4" onSubmit={submitProfile}>
@@ -270,10 +272,16 @@ export function EditCompanyDialog({
                 />
               </div>
             </div>
-            {profileError && <p className="text-sm text-destructive">{profileError}</p>}
+            {profileError && (
+              <ActionFeedback tone="error" title="Revise o cadastro">
+                {profileError}
+              </ActionFeedback>
+            )}
             <div className="flex justify-end">
               <Button type="submit" disabled={profileMutation.isPending}>
-                {profileMutation.isPending ? 'Salvando...' : 'Salvar cadastro'}
+                <PendingButtonLabel pending={profileMutation.isPending} pendingLabel="Salvando...">
+                  Salvar cadastro
+                </PendingButtonLabel>
               </Button>
             </div>
           </form>
@@ -349,14 +357,16 @@ export function EditCompanyDialog({
               Ao alterar o texto do endereco, coordenadas antigas sao removidas para nao apontar a
               coleta para o local anterior.
             </p>
-            {addressError && <p className="text-sm text-destructive">{addressError}</p>}
+            {addressError && (
+              <ActionFeedback tone="error" title="Revise o endereço">
+                {addressError}
+              </ActionFeedback>
+            )}
             <div className="flex justify-end">
               <Button type="submit" disabled={addressMutation.isPending}>
-                {addressMutation.isPending
-                  ? 'Salvando...'
-                  : primaryAddressId
-                    ? 'Salvar endereco'
-                    : 'Cadastrar endereco'}
+                <PendingButtonLabel pending={addressMutation.isPending} pendingLabel="Salvando...">
+                  {primaryAddressId ? 'Salvar endereco' : 'Cadastrar endereco'}
+                </PendingButtonLabel>
               </Button>
             </div>
           </form>

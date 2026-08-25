@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QueryState } from '@/components/ui/query-state';
 import { MetricCard } from '@/components/finance/metric-card';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarNumero } from '@/lib/dinheiro';
@@ -72,9 +73,20 @@ export function PainelTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent>
           {caixaQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Carregando a posição de caixa...</p>
+            <QueryState
+              compact
+              kind="loading"
+              title="Atualizando a posição de caixa"
+              description="Consultando faturas, saldos e valores a receber."
+            />
           ) : caixaQuery.isError || !caixa ? (
-            <p className="text-sm text-destructive">Não foi possível carregar a posição de caixa.</p>
+            <QueryState
+              compact
+              kind="error"
+              title="A posição de caixa está indisponível"
+              description="Os indicadores foram ocultados para não parecerem zerados por engano."
+              onAction={() => void caixaQuery.refetch()}
+            />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard
@@ -211,9 +223,20 @@ export function PainelTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent>
           {periodoQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Carregando o período...</p>
+            <QueryState
+              compact
+              kind="loading"
+              title="Calculando o movimento do período"
+              description="Somando entregas, repasses e receita da plataforma."
+            />
           ) : periodoQuery.isError || !periodo ? (
-            <p className="text-sm text-destructive">Não foi possível carregar o período.</p>
+            <QueryState
+              compact
+              kind="error"
+              title="Não foi possível calcular o período"
+              description="Os totais não foram exibidos para evitar valores incorretos."
+              onAction={() => void periodoQuery.refetch()}
+            />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard

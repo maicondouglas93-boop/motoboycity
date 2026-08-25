@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
 import {
   Table,
   TableBody,
@@ -63,10 +64,33 @@ export default function AdminInvoiceDetailPage() {
   });
   if (!token)
     return <p className="text-sm text-muted-foreground">Faça login para consultar esta fatura.</p>;
-  if (invoiceQuery.isLoading)
-    return <p className="text-sm text-muted-foreground">Carregando detalhes...</p>;
-  if (invoiceQuery.isError || !invoiceQuery.data)
-    return <p className="text-sm text-destructive">Não foi possível carregar esta fatura.</p>;
+  if (invoiceQuery.isLoading) {
+    return (
+      <QueryState
+        kind="loading"
+        title="Carregando os detalhes da fatura"
+        description="Consultando valores, pedidos e trilha de auditoria."
+      />
+    );
+  }
+  if (invoiceQuery.isError || !invoiceQuery.data) {
+    return (
+      <div className="space-y-4">
+        <QueryState
+          kind="error"
+          title="Não foi possível carregar esta fatura"
+          description="Tente novamente. Se a falha continuar, volte para a lista de faturas."
+          onAction={() => void invoiceQuery.refetch()}
+        />
+        <Link
+          href="/faturas"
+          className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+        >
+          <ArrowLeft className="size-4" /> Voltar para faturas
+        </Link>
+      </div>
+    );
+  }
   const invoice = invoiceQuery.data;
   const whatsappContacts = (companyQuery.data?.teamMembers ?? [])
     .filter((member) => member.active && member.role === 'OWNER')

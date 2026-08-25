@@ -6,6 +6,7 @@ import { ApiError } from '@motoboycity/api-client';
 import type { InvoiceDetail, ManualInvoicePreview } from '@motoboycity/types';
 import type { ManualInvoicePayload } from '@motoboycity/validation';
 import { Building2, CalendarDays, FilePlus2, ReceiptText } from 'lucide-react';
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -20,6 +21,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
+import { QueryState } from '@/components/ui/query-state';
 import {
   Select,
   SelectContent,
@@ -85,7 +88,7 @@ export function ManualInvoiceDialog({
       setError(null);
     },
     onError: (requestError) =>
-      setError(explain(requestError, 'Nao foi possivel calcular a previa da fatura.')),
+      setError(explain(requestError, 'Não foi possível calcular a prévia da fatura.')),
   });
 
   const createMutation = useMutation({
@@ -102,7 +105,7 @@ export function ManualInvoiceDialog({
       setError(
         explain(
           requestError,
-          'Nao foi possivel emitir a fatura. Atualize os pedidos e tente novamente.',
+          'Não foi possível emitir a fatura. Atualize os pedidos e tente novamente.',
         ),
       );
     },
@@ -176,45 +179,47 @@ export function ManualInvoiceDialog({
           </Button>
         }
       />
-      <DialogContent closeDisabled={busy}>
+      <DialogContent closeDisabled={busy} className="sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ReceiptText aria-hidden className="size-5 text-primary" />
             Criar fatura personalizada
           </DialogTitle>
           <DialogDescription>
-            Escolha uma empresa e exatamente quais pedidos concluidos entrarao nesta cobranca.
+            Escolha uma empresa e exatamente quais pedidos concluídos entrarão nesta cobrança.
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="space-y-5">
-          <div className="space-y-1.5">
-            <Label>Empresa</Label>
-            <Select items={companyLabels} value={companyId} onValueChange={changeCompany}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Selecione a empresa" />
-              </SelectTrigger>
-              <SelectContent>
-                {companies.map((company) => (
-                  <SelectItem key={company.id} value={company.id}>
-                    <Building2 className="size-4" />
-                    {company.tradeName}
-                    <span className="text-xs text-muted-foreground">{company.document}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {companiesQuery.isError && (
-              <p className="text-xs text-destructive">Nao foi possivel carregar as empresas.</p>
-            )}
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+        <DialogBody className="space-y-4">
+          <div className="grid gap-4 rounded-2xl border border-border/80 bg-muted/25 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)]">
             <div className="space-y-1.5">
-              <Label htmlFor="manual-invoice-issue-date">Data de emissao</Label>
+              <Label htmlFor="manual-invoice-company">Empresa</Label>
+              <Select
+                items={companyLabels}
+                value={companyId}
+                onValueChange={changeCompany}
+                disabled={companiesQuery.isLoading || companiesQuery.isError}
+              >
+                <SelectTrigger id="manual-invoice-company" className="w-full bg-card">
+                  <SelectValue placeholder="Selecione a empresa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>
+                      <Building2 className="size-4" />
+                      {company.tradeName}
+                      <span className="text-xs text-muted-foreground">{company.document}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="manual-invoice-issue-date">Data de emissão</Label>
               <Input
                 id="manual-invoice-issue-date"
                 type="date"
+                className="bg-card"
                 max={today}
                 value={issueDate}
                 onChange={(event) => changeIssueDate(event.target.value)}
@@ -225,20 +230,46 @@ export function ManualInvoiceDialog({
               <Input
                 id="manual-invoice-due-date"
                 type="date"
+                className="bg-card"
                 min={issueDate}
                 value={dueDate}
                 onChange={(event) => changeDueDate(event.target.value)}
               />
             </div>
+
+            {companiesQuery.isLoading ? (
+              <div className="lg:col-span-3">
+                <QueryState compact kind="loading" title="Carregando empresas" />
+              </div>
+            ) : companiesQuery.isError ? (
+              <div className="lg:col-span-3">
+                <QueryState
+                  compact
+                  kind="error"
+                  title="Não foi possível carregar as empresas"
+                  description="A seleção fica bloqueada até a consulta ser recuperada."
+                  onAction={() => void companiesQuery.refetch()}
+                />
+              </div>
+            ) : companies.length === 0 ? (
+              <div className="lg:col-span-3">
+                <QueryState
+                  compact
+                  kind="empty"
+                  title="Nenhuma empresa disponível"
+                  description="Cadastre e aprove uma empresa antes de emitir uma fatura personalizada."
+                />
+              </div>
+            ) : null}
           </div>
 
           {companyId && (
             <section className="overflow-hidden rounded-2xl border border-border/80">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/35 px-4 py-3">
                 <div>
-                  <p className="font-medium">Pedidos disponiveis</p>
+                  <p className="font-medium">Pedidos disponíveis</p>
                   <p className="text-xs text-muted-foreground">
-                    Somente concluidos, cobrados por fatura e ainda nao faturados.
+                    Somente concluídos, cobrados por fatura e ainda não faturados.
                   </p>
                 </div>
                 {candidates.length > 0 && (
@@ -249,15 +280,28 @@ export function ManualInvoiceDialog({
               </div>
 
               {candidatesQuery.isLoading ? (
-                <p className="p-6 text-sm text-muted-foreground">Carregando pedidos...</p>
+                <div className="p-4">
+                  <QueryState compact kind="loading" title="Carregando pedidos faturáveis" />
+                </div>
               ) : candidatesQuery.isError ? (
-                <p className="p-6 text-sm text-destructive">
-                  Nao foi possivel carregar os pedidos faturaveis.
-                </p>
+                <div className="p-4">
+                  <QueryState
+                    compact
+                    kind="error"
+                    title="Não foi possível carregar os pedidos faturáveis"
+                    description="A lista não será mostrada como vazia enquanto a consulta estiver indisponível."
+                    onAction={() => void candidatesQuery.refetch()}
+                  />
+                </div>
               ) : candidates.length === 0 ? (
-                <p className="p-6 text-sm text-muted-foreground">
-                  Esta empresa nao possui pedido concluido aguardando fatura.
-                </p>
+                <div className="p-4">
+                  <QueryState
+                    compact
+                    kind="empty"
+                    title="Nenhum pedido aguardando fatura"
+                    description="Esta empresa não possui entrega concluída e ainda não faturada."
+                  />
+                </div>
               ) : (
                 <div className="max-h-72 divide-y divide-border overflow-y-auto">
                   {candidates.map((candidate) => (
@@ -285,7 +329,7 @@ export function ManualInvoiceDialog({
                           )}
                         </span>
                         <span className="mt-1 block text-xs text-muted-foreground">
-                          Concluido em {formatarDataHora(candidate.completedAt)}
+                          Concluído em {formatarDataHora(candidate.completedAt)}
                         </span>
                       </span>
                       <span className="text-right">
@@ -304,16 +348,16 @@ export function ManualInvoiceDialog({
           )}
 
           {deliveryIds.length > 0 && !preview && (
-            <p className="text-sm text-muted-foreground">
-              {formatarNumero(deliveryIds.length)} pedido(s) selecionado(s). Gere a previa para
-              conferir os valores antes da emissao.
-            </p>
+            <ActionFeedback tone="info" compact>
+              {formatarNumero(deliveryIds.length)} pedido(s) selecionado(s). Gere a prévia para
+              conferir os valores antes da emissão.
+            </ActionFeedback>
           )}
 
           {preview && (
             <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
               <div className="flex items-center gap-2 font-semibold">
-                <CalendarDays className="size-4 text-primary" /> Previa confirmada pelo servidor
+                <CalendarDays className="size-4 text-primary" /> Prévia confirmada pelo servidor
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <div>
@@ -330,13 +374,21 @@ export function ManualInvoiceDialog({
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                {formatarNumero(preview.deliveryCount)} pedido(s). A emissao sera refeita de forma
-                atomica; se outro fechamento usar um deles antes, o sistema cancela toda a acao.
+                {formatarNumero(preview.deliveryCount)} pedido(s). A emissão será refeita de forma
+                atômica; se outro fechamento usar um deles antes, o sistema cancela toda a ação.
               </p>
             </section>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <ActionFeedback
+              tone="error"
+              title="Não foi possível concluir a operação"
+              onDismiss={() => setError(null)}
+            >
+              {error}
+            </ActionFeedback>
+          )}
         </DialogBody>
 
         <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
@@ -349,7 +401,12 @@ export function ManualInvoiceDialog({
               disabled={createMutation.isPending}
               onClick={() => createMutation.mutate()}
             >
-              {createMutation.isPending ? 'Emitindo...' : 'Emitir fatura agora'}
+              <PendingButtonLabel
+                pending={createMutation.isPending}
+                pendingLabel="Emitindo fatura..."
+              >
+                Emitir fatura agora
+              </PendingButtonLabel>
             </Button>
           ) : (
             <Button
@@ -357,7 +414,12 @@ export function ManualInvoiceDialog({
               disabled={!canPreview || previewMutation.isPending}
               onClick={() => previewMutation.mutate()}
             >
-              {previewMutation.isPending ? 'Calculando...' : 'Gerar previa'}
+              <PendingButtonLabel
+                pending={previewMutation.isPending}
+                pendingLabel="Calculando prévia..."
+              >
+                Gerar prévia
+              </PendingButtonLabel>
             </Button>
           )}
         </DialogFooter>

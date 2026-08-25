@@ -27,7 +27,15 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { adminDriversApi } from '@/lib/api-client';
 
 const pixKeyTypeLabels: Record<PixKeyType, string> = {
@@ -156,8 +164,7 @@ export function CreateDriverDialog({
   });
 
   const createMutation = useMutation({
-    mutationFn: (payload: CreateAdminDriverPayload) =>
-      adminDriversApi.create(accessToken, payload),
+    mutationFn: (payload: CreateAdminDriverPayload) => adminDriversApi.create(accessToken, payload),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
       onCreated(result);
@@ -374,14 +381,9 @@ export function CreateDriverDialog({
                     value={form.birthDate}
                     onChange={(event) => updateField('birthDate', event.target.value)}
                     aria-invalid={Boolean(fieldErrors.birthDate)}
-                    aria-describedby={
-                      fieldErrors.birthDate ? fieldErrorId('birthDate') : undefined
-                    }
+                    aria-describedby={fieldErrors.birthDate ? fieldErrorId('birthDate') : undefined}
                   />
-                  <FieldError
-                    id={fieldErrorId('birthDate')}
-                    message={fieldErrors.birthDate}
-                  />
+                  <FieldError id={fieldErrorId('birthDate')} message={fieldErrors.birthDate} />
                 </div>
               </div>
             </section>
@@ -404,9 +406,7 @@ export function CreateDriverDialog({
                     id="driver-region"
                     className="h-10 w-full"
                     aria-invalid={Boolean(fieldErrors.regionId)}
-                    aria-describedby={
-                      fieldErrors.regionId ? fieldErrorId('regionId') : undefined
-                    }
+                    aria-describedby={fieldErrors.regionId ? fieldErrorId('regionId') : undefined}
                   >
                     <SelectValue placeholder="Selecione a região" />
                   </SelectTrigger>
@@ -548,9 +548,7 @@ export function CreateDriverDialog({
                     onChange={(event) => updateField('password', event.target.value)}
                     autoComplete="new-password"
                     aria-invalid={Boolean(fieldErrors.password)}
-                    aria-describedby={
-                      fieldErrors.password ? fieldErrorId('password') : undefined
-                    }
+                    aria-describedby={fieldErrors.password ? fieldErrorId('password') : undefined}
                     placeholder="Mínimo de 8 caracteres"
                   />
                   <FieldError id={fieldErrorId('password')} message={fieldErrors.password} />
@@ -592,14 +590,14 @@ export function CreateDriverDialog({
             </section>
 
             {formError && (
-              <div
+              <ActionFeedback
                 id="create-driver-error"
-                role="alert"
                 tabIndex={-1}
-                className="rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm font-medium text-destructive"
+                tone="error"
+                title="Não foi possível criar o entregador"
               >
                 {formError}
-              </div>
+              </ActionFeedback>
             )}
           </form>
         </DialogBody>
@@ -629,7 +627,9 @@ export function CreateDriverDialog({
                 serviceTypes.length === 0
               }
             >
-              {createMutation.isPending ? 'Cadastrando...' : 'Criar cadastro'}
+              <PendingButtonLabel pending={createMutation.isPending} pendingLabel="Cadastrando...">
+                Criar cadastro
+              </PendingButtonLabel>
             </Button>
           </div>
         </DialogFooter>

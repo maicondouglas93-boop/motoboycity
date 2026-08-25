@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import {
   Select,
   SelectContent,
@@ -365,12 +367,9 @@ export function CreateCompanyDialog({
             </section>
 
             {formError && (
-              <div
-                role="alert"
-                className="rounded-xl border border-destructive/25 bg-destructive/8 px-4 py-3 text-sm text-destructive"
-              >
+              <ActionFeedback tone="error" title="Não foi possível criar a empresa">
                 {formError}
-              </div>
+              </ActionFeedback>
             )}
           </form>
         </DialogBody>
@@ -393,7 +392,9 @@ export function CreateCompanyDialog({
               form="create-company-form"
               disabled={createMutation.isPending || optionsQuery.isLoading || regions.length === 0}
             >
-              {createMutation.isPending ? 'Cadastrando...' : 'Criar empresa'}
+              <PendingButtonLabel pending={createMutation.isPending} pendingLabel="Cadastrando...">
+                Criar empresa
+              </PendingButtonLabel>
             </Button>
           </div>
         </DialogFooter>

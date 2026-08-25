@@ -18,6 +18,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminInvoicesApi } from '@/lib/api-client';
 import { formatarData } from '@/lib/dinheiro';
 
@@ -163,16 +165,20 @@ export function UpdateInvoiceDueDateDialog({
             </p>
           )}
           {becomesOverdue && !sameDate && (
-            <p className="rounded-xl bg-dinheiro-atrasado-suave p-3 text-sm text-dinheiro-atrasado">
+            <ActionFeedback tone="warning" compact title="A fatura ficará vencida">
               Essa data ja passou. Ao salvar, a fatura sera marcada como vencida.
-            </p>
+            </ActionFeedback>
           )}
           {returnsToPending && !sameDate && (
-            <p className="rounded-xl bg-dinheiro-aguardando-suave p-3 text-sm text-dinheiro-aguardando">
+            <ActionFeedback tone="info" compact title="A fatura voltará para pendente">
               O novo prazo ainda esta aberto. A fatura voltara para pendente.
-            </p>
+            </ActionFeedback>
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <ActionFeedback tone="error" title="Não foi possível alterar o vencimento">
+              {error}
+            </ActionFeedback>
+          )}
         </DialogBody>
 
         <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
@@ -183,7 +189,9 @@ export function UpdateInvoiceDueDateDialog({
             disabled={!dueDate || sameDate || invalidReason || update.isPending}
             onClick={() => update.mutate()}
           >
-            {update.isPending ? 'Salvando...' : 'Confirmar novo vencimento'}
+            <PendingButtonLabel pending={update.isPending} pendingLabel="Salvando...">
+              Confirmar novo vencimento
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

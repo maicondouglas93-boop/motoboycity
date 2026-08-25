@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, FileText, HandCoins, LineChart, Receipt, Wallet } from 'lucide-react';
 import { FinanceTabs, type FinanceTab } from '@/components/finance/finance-tabs';
+import { AdminPageHeader } from '@/components/layout/admin-page-header';
+import { QueryState } from '@/components/ui/query-state';
 import { AvisosTab } from '@/components/finance/avisos-tab';
 import { PainelTab } from '@/components/finance/painel-tab';
 import { CarteirasTab } from '@/components/finance/carteiras-tab';
@@ -30,7 +32,16 @@ export default function FinancePage() {
   return (
     // `useSearchParams` exige limite de Suspense no App Router: sem ele a
     // rota inteira vira dinâmica e o build reclama.
-    <Suspense fallback={<p className="text-sm text-muted-foreground">Carregando financeiro...</p>}>
+    <Suspense
+      fallback={
+        <QueryState
+          compact
+          kind="loading"
+          title="Abrindo o Financeiro"
+          description="Preparando as filas e indicadores da área."
+        />
+      }
+    >
       <FinanceArea />
     </Suspense>
   );
@@ -93,12 +104,13 @@ function FinanceArea() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Financeiro</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Caixa, carteiras, faturas e recebimentos da operação.
-        </p>
-      </div>
+      <AdminPageHeader
+        icon={Wallet}
+        eyebrow="Controle financeiro"
+        title="Financeiro"
+        description="Caixa, carteiras, faturas, repasses e recebimentos da operação."
+        tone="finance"
+      />
 
       <FinanceTabs tabs={tabs} />
 

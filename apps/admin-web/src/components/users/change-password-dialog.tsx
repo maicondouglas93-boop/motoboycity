@@ -19,6 +19,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 
 interface ChangePasswordDialogProps {
   children: ReactElement;
@@ -165,9 +167,9 @@ export function ChangePasswordDialog({
               </p>
             )}
             {formError && (
-              <p role="alert" className="text-sm text-destructive">
+              <ActionFeedback tone="error" title="Não foi possível alterar a senha">
                 {formError}
-              </p>
+              </ActionFeedback>
             )}
           </form>
         </DialogBody>
@@ -182,7 +184,9 @@ export function ChangePasswordDialog({
             Cancelar
           </Button>
           <Button type="submit" form={formId} disabled={mutation.isPending}>
-            {mutation.isPending ? 'Alterando...' : 'Confirmar nova senha'}
+            <PendingButtonLabel pending={mutation.isPending} pendingLabel="Alterando...">
+              Confirmar nova senha
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

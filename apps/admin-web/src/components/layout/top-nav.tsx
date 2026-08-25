@@ -9,15 +9,20 @@ import {
   FileText,
   LayoutDashboard,
   ListOrdered,
+  Menu,
   Settings,
   Sparkles,
   Truck,
   Users,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -25,16 +30,56 @@ import { useMoneyVisibility } from '@/lib/money';
 import { Wordmark } from '@/components/brand/wordmark';
 import { session } from '@/lib/session';
 
-const NAV_ITEMS = [
-  { href: '/', label: 'Visão geral', icon: LayoutDashboard },
-  { href: '/clientes', label: 'Clientes', icon: Users },
-  { href: '/entregadores', label: 'Entregadores', icon: Truck },
-  { href: '/pedidos', label: 'Pedidos', icon: ListOrdered },
-  { href: '/financeiro', label: 'Financeiro', icon: DollarSign },
-  { href: '/relatorios', label: 'Relatórios', icon: FileText },
-  { href: '/secretaria-virtual', label: 'Secretária IA', icon: Sparkles },
-  { href: '/configuracoes', label: 'Configurações', icon: Settings },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+type NavGroup = {
+  label: string;
+  tone: string;
+  items: readonly NavItem[];
+};
+
+const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    label: 'Operação',
+    tone: 'text-colete-escuro bg-colete/15',
+    items: [
+      { href: '/', label: 'Visão geral', icon: LayoutDashboard },
+      { href: '/pedidos', label: 'Pedidos', icon: ListOrdered },
+      { href: '/entregadores', label: 'Entregadores', icon: Truck },
+    ],
+  },
+  {
+    label: 'Comercial',
+    tone: 'text-status-entregue bg-status-entregue/10',
+    items: [
+      { href: '/clientes', label: 'Clientes', icon: Users },
+      { href: '/financeiro', label: 'Financeiro', icon: DollarSign },
+    ],
+  },
+  {
+    label: 'Análise',
+    tone: 'text-status-pagamento bg-status-pagamento/10',
+    items: [
+      { href: '/relatorios', label: 'Relatórios', icon: FileText },
+      { href: '/secretaria-virtual', label: 'Secretária IA', icon: Sparkles },
+    ],
+  },
+  {
+    label: 'Sistema',
+    tone: 'text-primary bg-primary/10',
+    items: [{ href: '/configuracoes', label: 'Configurações', icon: Settings }],
+  },
 ];
+
+const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
+
+function isNavItemActive(pathname: string, href: string): boolean {
+  return href === '/' ? pathname === '/' : pathname.startsWith(href);
+}
 
 /**
  * Sem botão de ação em âmbar aqui, ao contrário do painel da empresa: o admin
@@ -49,6 +94,7 @@ export function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { hidden: moneyHidden, toggle: toggleMoney } = useMoneyVisibility();
+  const currentItem = NAV_ITEMS.find((item) => isNavItemActive(pathname, item.href));
 
   function handleLogout() {
     session.clearToken();
@@ -57,7 +103,7 @@ export function TopNav() {
 
   return (
     <header className="admin-topbar sticky top-0 z-40 border-b border-white/10 text-white">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 xl:h-16 xl:flex-nowrap xl:gap-6 xl:px-8 xl:py-0">
+      <div className="flex min-h-16 items-center gap-2 px-4 py-2.5 xl:h-16 xl:gap-6 xl:px-8 xl:py-0">
         <Link
           href="/"
           className="group flex shrink-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -69,9 +115,9 @@ export function TopNav() {
           </span>
         </Link>
 
-        <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 xl:order-none xl:w-auto xl:min-w-0 xl:flex-1 xl:justify-center xl:pb-0">
+        <nav className="hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
+            const isActive = isNavItemActive(pathname, href);
             return (
               <Link
                 key={href}
@@ -90,6 +136,53 @@ export function TopNav() {
           })}
         </nav>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger className="ml-auto inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:hidden">
+            <Menu className="size-4 text-[#aee8e4]" aria-hidden="true" />
+            <span className="hidden sm:inline">{currentItem?.label ?? 'Menu'}</span>
+            <span className="sr-only sm:hidden">Abrir navegação</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-2">
+            <div className="px-2 pt-1 pb-2">
+              <p className="font-heading text-sm font-semibold text-admin-deep">Navegação</p>
+              <p className="text-xs text-muted-foreground">Escolha uma área do painel.</p>
+            </div>
+            <DropdownMenuSeparator />
+            {NAV_GROUPS.map((group, index) => (
+              <DropdownMenuGroup key={group.label}>
+                <DropdownMenuLabel className="px-2 pt-2 text-[11px] font-bold tracking-[0.12em] uppercase">
+                  {group.label}
+                </DropdownMenuLabel>
+                {group.items.map(({ href, label, icon: Icon }) => {
+                  const active = isNavItemActive(pathname, href);
+                  return (
+                    <DropdownMenuItem
+                      key={href}
+                      aria-current={active ? 'page' : undefined}
+                      onClick={() => router.push(href)}
+                      className={`gap-3 px-2.5 py-2.5 ${active ? 'bg-admin-soft font-semibold text-admin-deep' : ''}`}
+                    >
+                      <span
+                        className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${group.tone}`}
+                      >
+                        <Icon className="size-4" aria-hidden="true" />
+                      </span>
+                      <span>{label}</span>
+                      {active && (
+                        <span
+                          className="ml-auto size-2 rounded-full bg-primary"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
+                {index < NAV_GROUPS.length - 1 && <DropdownMenuSeparator className="my-1.5" />}
+              </DropdownMenuGroup>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {/* Ao lado da conta e sempre visivel: quem precisa esconder valores
             costuma precisar disso NA HORA, com alguem ja olhando a tela. */}
         <button
@@ -97,7 +190,7 @@ export function TopNav() {
           onClick={toggleMoney}
           aria-pressed={moneyHidden}
           title={moneyHidden ? 'Mostrar valores' : 'Ocultar valores'}
-          className="ml-auto flex shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 text-sm text-white/60 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:ml-0"
+          className="flex shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 text-sm text-white/60 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
         >
           {moneyHidden ? (
             <EyeOff className="size-4" aria-hidden="true" />

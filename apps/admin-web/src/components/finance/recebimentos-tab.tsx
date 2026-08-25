@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QueryState } from '@/components/ui/query-state';
 import { MetricCard } from '@/components/finance/metric-card';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
@@ -55,7 +56,8 @@ export function RecebimentosTab({ token }: { token: string }) {
   }
 
   const extrato = extratoQuery.data;
-  const quantidadeDeLinhas = extrato?.days.reduce((soma, dia) => soma + dia.receipts.length, 0) ?? 0;
+  const quantidadeDeLinhas =
+    extrato?.days.reduce((soma, dia) => soma + dia.receipts.length, 0) ?? 0;
 
   return (
     <div className="space-y-6">
@@ -121,16 +123,27 @@ export function RecebimentosTab({ token }: { token: string }) {
       </Card>
 
       {extratoQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Carregando o extrato...</p>
+        <QueryState
+          compact
+          kind="loading"
+          title="Carregando o extrato de recebimentos"
+          description="Organizando as faturas pela data de pagamento."
+        />
       ) : extratoQuery.isError ? (
-        <p className="text-sm text-destructive">Não foi possível carregar o extrato.</p>
+        <QueryState
+          compact
+          kind="error"
+          title="Não foi possível carregar o extrato"
+          description="Os totais foram ocultados para não parecerem zerados."
+          onAction={() => void extratoQuery.refetch()}
+        />
       ) : !extrato || extrato.days.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-10 text-center">
-          <p className="text-sm font-medium">Nenhum recebimento neste período.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Só entram faturas com pagamento confirmado. Fatura em aberto aparece na aba Faturas.
-          </p>
-        </div>
+        <QueryState
+          compact
+          kind="empty"
+          title="Nenhum recebimento neste período"
+          description="Só entram faturas com pagamento confirmado. Faturas em aberto aparecem na aba Faturas."
+        />
       ) : (
         <div className="space-y-4">
           {extrato.days.map((dia) => (

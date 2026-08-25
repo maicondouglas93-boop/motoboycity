@@ -5,14 +5,17 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminDriverListItem, RegisterDriverResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { ChevronRight, CircleCheckBig, MapPin, UserPlus } from 'lucide-react';
+import { ChevronRight, MapPin, UserPlus } from 'lucide-react';
 import { CreateDriverDialog } from '@/components/drivers/create-driver-dialog';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
+import { AdminPageHeader } from '@/components/layout/admin-page-header';
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { QueryState } from '@/components/ui/query-state';
 import { StatCard } from '@/components/stat-card';
 import { adminDriversApi, adminServiceTypesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -36,6 +39,12 @@ const accountStatusLabel: Record<AdminDriverListItem['accountStatus'], string> =
   ACTIVE: 'Ativo',
   SUSPENDED: 'Suspenso',
   BLOCKED: 'Bloqueado',
+};
+
+const driverCardClass: Record<AdminDriverListItem['accountStatus'], string> = {
+  ACTIVE: 'border-status-entregue/20 bg-gradient-to-br from-card to-dinheiro-recebido-suave/50',
+  SUSPENDED: 'border-status-rota/25 bg-gradient-to-br from-card to-dinheiro-nao-cobrado-suave/60',
+  BLOCKED: 'border-status-cancelado/20 bg-gradient-to-br from-card to-dinheiro-atrasado-suave/55',
 };
 
 type DriverAction = 'approve' | 'reject' | 'suspend' | 'block' | 'reactivate';
@@ -152,53 +161,46 @@ export default function DriversPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.18em] text-primary uppercase">
-            Gestão da operação
-          </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">Entregadores</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Cadastre, qualifique e acompanhe quem atende as entregas da plataforma.
-          </p>
-        </div>
-        <CreateDriverDialog
-          accessToken={token}
-          serviceTypes={serviceTypesQuery.data ?? []}
-          serviceTypesLoading={serviceTypesQuery.isLoading}
-          serviceTypesError={serviceTypesQuery.isError}
-          onRetryServiceTypes={() => void serviceTypesQuery.refetch()}
-          onCreated={handleDriverCreated}
-        >
-          <Button className="gap-2 shadow-lg shadow-primary/15">
-            <UserPlus className="size-4" />
-            Cadastrar entregador
-          </Button>
-        </CreateDriverDialog>
-      </header>
+      <AdminPageHeader
+        icon={UserPlus}
+        eyebrow="Equipe de campo"
+        title="Entregadores"
+        description="Cadastre, qualifique e acompanhe quem atende as entregas da plataforma."
+        tone="operation"
+        actions={
+          <CreateDriverDialog
+            accessToken={token}
+            serviceTypes={serviceTypesQuery.data ?? []}
+            serviceTypesLoading={serviceTypesQuery.isLoading}
+            serviceTypesError={serviceTypesQuery.isError}
+            onRetryServiceTypes={() => void serviceTypesQuery.refetch()}
+            onCreated={handleDriverCreated}
+          >
+            <Button className="gap-2 shadow-lg shadow-primary/15">
+              <UserPlus className="size-4" />
+              Cadastrar entregador
+            </Button>
+          </CreateDriverDialog>
+        }
+      />
 
       {createdNotice && (
-        <div
-          role="status"
-          className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/7 px-4 py-3 text-sm text-foreground"
+        <ActionFeedback
+          tone="success"
+          title="Entregador cadastrado"
+          onDismiss={() => setCreatedNotice(null)}
         >
-          <CircleCheckBig className="mt-0.5 size-4 shrink-0 text-primary" />
-          <span>{createdNotice}</span>
-          <button
-            type="button"
-            className="ml-auto text-xs font-semibold text-primary hover:underline"
-            onClick={() => setCreatedNotice(null)}
-          >
-            Fechar
-          </button>
-        </div>
+          {createdNotice}
+        </ActionFeedback>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Total de Entregadores" value={drivers.length} />
-        <StatCard label="Entregadores Pendentes" value={pendingCount} />
-        <StatCard label="Fora de operação" value={blockedCount} />
-      </div>
+      {driversQuery.isSuccess && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard label="Total de Entregadores" value={drivers.length} />
+          <StatCard label="Entregadores Pendentes" value={pendingCount} />
+          <StatCard label="Fora de operação" value={blockedCount} />
+        </div>
+      )}
 
       <Input
         placeholder="Buscar entregador..."
@@ -207,23 +209,40 @@ export default function DriversPage() {
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+      {actionError && (
+        <ActionFeedback tone="error" title="Não foi possível concluir a ação">
+          {actionError}
+        </ActionFeedback>
+      )}
 
       {driversQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Carregando entregadores...</p>
+        <QueryState
+          kind="loading"
+          title="Carregando entregadores"
+          description="Consultando aprovações, modalidades e situação das contas."
+        />
       )}
 
       {driversQuery.isError && (
-        <p className="text-sm text-destructive">Não foi possível carregar os entregadores.</p>
+        <QueryState
+          kind="error"
+          title="Não foi possível carregar os entregadores"
+          description="Os indicadores ficam ocultos para não confundir uma falha com zero entregadores."
+          onAction={() => void driversQuery.refetch()}
+        />
       )}
 
       {driversQuery.isSuccess && filteredDrivers.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhum entregador encontrado.</p>
+        <QueryState
+          kind="empty"
+          title="Nenhum entregador encontrado"
+          description="Revise o nome, e-mail ou CPF informado na busca."
+        />
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredDrivers.map((driver) => (
-          <Card key={driver.id} className="entity-card">
+          <Card key={driver.id} className={`entity-card ${driverCardClass[driver.accountStatus]}`}>
             <CardContent className="space-y-3 py-4">
               {/*
                 A IDENTIDADE do entregador leva à ficha dele. Nao o cartao

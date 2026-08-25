@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReceivablesAgingBucketKey, ReceivablesCompanyItem } from '@motoboycity/types';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
@@ -20,12 +21,36 @@ const FAIXAS: Array<{
   rotulo: string;
   classe: string;
 }> = [
-  { key: 'UNBILLED', rotulo: 'Sem fatura', classe: 'bg-dinheiro-nao-cobrado-suave text-dinheiro-nao-cobrado' },
-  { key: 'NOT_DUE', rotulo: 'No prazo', classe: 'bg-dinheiro-aguardando-suave text-dinheiro-aguardando' },
-  { key: 'OVERDUE_1_7', rotulo: '1 a 7 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
-  { key: 'OVERDUE_8_15', rotulo: '8 a 15 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
-  { key: 'OVERDUE_16_30', rotulo: '16 a 30 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
-  { key: 'OVERDUE_31_PLUS', rotulo: 'Mais de 31 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
+  {
+    key: 'UNBILLED',
+    rotulo: 'Sem fatura',
+    classe: 'bg-dinheiro-nao-cobrado-suave text-dinheiro-nao-cobrado',
+  },
+  {
+    key: 'NOT_DUE',
+    rotulo: 'No prazo',
+    classe: 'bg-dinheiro-aguardando-suave text-dinheiro-aguardando',
+  },
+  {
+    key: 'OVERDUE_1_7',
+    rotulo: '1 a 7 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
+  {
+    key: 'OVERDUE_8_15',
+    rotulo: '8 a 15 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
+  {
+    key: 'OVERDUE_16_30',
+    rotulo: '16 a 30 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
+  {
+    key: 'OVERDUE_31_PLUS',
+    rotulo: 'Mais de 31 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
 ];
 
 /**
@@ -66,9 +91,15 @@ export function ReceivablesAging({ token }: { token: string }) {
       </CardHeader>
       <CardContent className="space-y-5">
         {agingQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">Carregando o envelhecimento...</p>
+          <QueryState compact kind="loading" title="Calculando a idade dos valores a receber" />
         ) : agingQuery.isError || !relatorio ? (
-          <p className="text-sm text-destructive">Não foi possível carregar o envelhecimento.</p>
+          <QueryState
+            compact
+            kind="error"
+            title="Não foi possível carregar os valores a receber"
+            description="As faixas e empresas foram ocultadas para não parecerem zeradas."
+            onAction={() => void agingQuery.refetch()}
+          />
         ) : (
           <>
             <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -77,7 +108,8 @@ export function ReceivablesAging({ token }: { token: string }) {
                 const valor = dados?.value ?? 0;
                 // Faixa zerada fica neutra: pintar de vermelho um zero ensina o
                 // admin a ignorar o vermelho.
-                const classe = valor === 0 ? 'bg-dinheiro-retido-suave text-muted-foreground' : faixa.classe;
+                const classe =
+                  valor === 0 ? 'bg-dinheiro-retido-suave text-muted-foreground' : faixa.classe;
                 return (
                   <div key={faixa.key} className={`rounded-lg p-3 ${classe}`}>
                     <p className="text-xs">{faixa.rotulo}</p>

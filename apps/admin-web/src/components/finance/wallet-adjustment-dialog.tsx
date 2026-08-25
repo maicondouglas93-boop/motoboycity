@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminFinancialApi } from '@/lib/api-client';
 import { useMoney } from '@/lib/money';
 
@@ -187,7 +189,11 @@ export function WalletAdjustmentDialog({
             </div>
           )}
 
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
+          {erro && (
+            <ActionFeedback tone="error" title="Não foi possível lançar o ajuste">
+              {erro}
+            </ActionFeedback>
+          )}
         </div>
 
         <DialogFooter>
@@ -198,7 +204,9 @@ export function WalletAdjustmentDialog({
             onClick={() => ajustar.mutate()}
             disabled={!valorValido || !motivoValido || ajustar.isPending}
           >
-            {ajustar.isPending ? 'Lançando...' : 'Lançar ajuste'}
+            <PendingButtonLabel pending={ajustar.isPending} pendingLabel="Lançando...">
+              Lançar ajuste
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

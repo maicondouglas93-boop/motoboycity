@@ -18,6 +18,8 @@ import {
 import { adminInvoicesApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 
 /**
  * Fechar as faturas da semana, com confirmação.
@@ -60,9 +62,7 @@ export function CloseInvoicesDialog({
       onFechado(faturas.length);
     },
     onError: (error) =>
-      setErro(
-        error instanceof ApiError ? error.message : 'Não foi possível fechar as faturas.',
-      ),
+      setErro(error instanceof ApiError ? error.message : 'Não foi possível fechar as faturas.'),
   });
 
   /** Sem entrega pendente, o fechamento não tem o que cobrar. */
@@ -106,24 +106,30 @@ export function CloseInvoicesDialog({
           <div className="rounded-lg bg-dinheiro-aguardando-suave p-3 text-sm">
             <p className="font-medium text-dinheiro-aguardando">O que acontece</p>
             <p className="mt-1 text-muted-foreground">
-              Cada empresa recebe uma fatura com os pedidos dela, vencendo hoje mesmo. Para
-              desfazer é preciso <strong>cancelar fatura por fatura</strong> — o cancelamento
-              devolve os pedidos para cobrança, mas o número da fatura fica registrado.
+              Cada empresa recebe uma fatura com os pedidos dela, vencendo hoje mesmo. Para desfazer
+              é preciso <strong>cancelar fatura por fatura</strong> — o cancelamento devolve os
+              pedidos para cobrança, mas o número da fatura fica registrado.
             </p>
           </div>
 
           {nadaAFaturar && (
-            <p className="text-sm text-muted-foreground">
+            <ActionFeedback tone="info" compact title="Nenhuma entrega disponível">
               Não há entrega aguardando fatura. Fechar agora não gera nada.
-            </p>
+            </ActionFeedback>
           )}
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
+          {erro && (
+            <ActionFeedback tone="error" title="Não foi possível fechar as faturas">
+              {erro}
+            </ActionFeedback>
+          )}
         </div>
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline">Voltar</Button>} />
           <Button onClick={() => fechar.mutate()} disabled={fechar.isPending || nadaAFaturar}>
-            {fechar.isPending ? 'Fechando...' : 'Confirmar fechamento'}
+            <PendingButtonLabel pending={fechar.isPending} pendingLabel="Fechando...">
+              Confirmar fechamento
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

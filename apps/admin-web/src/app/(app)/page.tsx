@@ -15,12 +15,14 @@ import {
   Layers3,
   ListFilter,
   MapPin,
+  RadioTower,
   Route,
   Search,
   WalletCards,
   Wifi,
   WifiOff,
 } from 'lucide-react';
+import { AdminPageHeader } from '@/components/layout/admin-page-header';
 import {
   AdminOperationsMap,
   type AdminMapSelection,
@@ -294,22 +296,23 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Operação global</h1>
-          <p className="text-sm text-muted-foreground">
-            Pedidos ativos e motoboys com heartbeat válido.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 rounded-full border border-primary/15 bg-card/85 px-3 py-1.5 text-xs shadow-sm ring-1 ring-white/70 backdrop-blur">
-          {connected && activityConnected ? (
-            <Wifi className="size-3.5 text-status-entregue" />
-          ) : (
-            <WifiOff className="size-3.5 text-status-cancelado" />
-          )}
-          {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
-        </div>
-      </header>
+      <AdminPageHeader
+        icon={RadioTower}
+        eyebrow="Central operacional"
+        title="Operação global"
+        description="Pedidos ativos, filas de atendimento e motoboys com heartbeat válido."
+        tone="operation"
+        actions={
+          <div className="flex items-center gap-2 rounded-full border border-primary/15 bg-card/85 px-3 py-1.5 text-xs shadow-sm ring-1 ring-white/70 backdrop-blur">
+            {connected && activityConnected ? (
+              <Wifi className="size-3.5 text-status-entregue" aria-hidden="true" />
+            ) : (
+              <WifiOff className="size-3.5 text-status-cancelado" aria-hidden="true" />
+            )}
+            {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
+          </div>
+        }
+      />
 
       {/*
         Falha de carregamento precisa aparecer, e nao virar tela vazia.

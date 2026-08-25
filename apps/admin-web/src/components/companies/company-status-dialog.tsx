@@ -7,6 +7,8 @@ import { ApiError } from '@motoboycity/api-client';
 import { Ban, RotateCcw } from 'lucide-react';
 import { adminCompaniesApi } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import {
   Dialog,
   DialogBody,
@@ -64,12 +66,16 @@ export function CompanyStatusDialog({
               : `A empresa ${company.tradeName} voltara a acessar o painel e criar pedidos.`}
           </DialogDescription>
         </DialogHeader>
-        <DialogBody>
-          <p className="text-sm text-muted-foreground">
+        <DialogBody className="space-y-3">
+          <ActionFeedback tone={suspending ? 'warning' : 'info'} title="Dados preservados">
             Pedidos, faturas, enderecos e historico permanecem preservados. Esta acao nao exclui
             nenhum dado.
-          </p>
-          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+          </ActionFeedback>
+          {error && (
+            <ActionFeedback tone="error" title="Não foi possível alterar o status">
+              {error}
+            </ActionFeedback>
+          )}
         </DialogBody>
         <DialogFooter className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => setOpen(false)} disabled={mutation.isPending}>
@@ -80,11 +86,9 @@ export function CompanyStatusDialog({
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
-            {mutation.isPending
-              ? 'Salvando...'
-              : suspending
-                ? 'Confirmar suspensao'
-                : 'Confirmar reativacao'}
+            <PendingButtonLabel pending={mutation.isPending} pendingLabel="Salvando...">
+              {suspending ? 'Confirmar suspensao' : 'Confirmar reativacao'}
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

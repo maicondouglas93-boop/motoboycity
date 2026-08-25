@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { AdminPageHeader } from '@/components/layout/admin-page-header';
 
 type ReportLink = {
   title: string;
@@ -207,21 +208,19 @@ function ReportCard({ report }: { report: ReportLink }) {
 export default function ReportsHubPage() {
   return (
     <div className="mx-auto w-full max-w-[1480px] space-y-9 pb-12">
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-admin-deep">
-            Central de relatórios
-          </h1>
-          <Badge variant="outline" className="gap-1.5">
+      <AdminPageHeader
+        icon={BarChart3}
+        eyebrow="Inteligência da operação"
+        title="Central de relatórios"
+        description="Consulte análises construídas com dados reais de pedidos, clientes, entregadores e valores concluídos."
+        tone="reports"
+        actions={
+          <Badge variant="outline" className="gap-1.5 bg-card/75">
             <ShieldCheck className="size-3.5" aria-hidden="true" />
             Dados operacionais reais
           </Badge>
-        </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Escolha a análise que precisa consultar. Os relatórios disponíveis usam registros reais de
-          pedidos, clientes, entregadores e valores concluídos.
-        </p>
-      </header>
+        }
+      />
 
       {reportGroups.map((group) => (
         <section key={group.title} className="space-y-4">

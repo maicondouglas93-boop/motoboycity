@@ -5,9 +5,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Bike, CalendarClock, CloudRain, MapPinned, SlidersHorizontal, Tag } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
+import { AdminPageHeader } from '@/components/layout/admin-page-header';
 import {
   IconeDaArea,
   LinhaDeEstado,
+  TONS,
   type EstadoDaConfiguracao,
   type Tom,
 } from '@/components/settings/estado-da-configuracao';
@@ -87,6 +90,14 @@ export default function SettingsPage() {
   const taxas = taxasQuery.data;
   const operacao = operacaoQuery.data;
   const regioesAtivas = regioesQuery.data?.filter((item) => item.active).length ?? null;
+  const hasQueryError = [
+    modalidadesQuery,
+    tabelasQuery,
+    horariosQuery,
+    taxasQuery,
+    operacaoQuery,
+    regioesQuery,
+  ].some((query) => query.isError);
 
   /**
    * Quantos limites da tela de Operação estão sem valor.
@@ -209,16 +220,39 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Configurações operacionais</h1>
-        <p className="text-sm text-muted-foreground">
-          Apenas configurações que possuem rota e operação real estão disponíveis aqui.
-        </p>
-      </div>
+      <AdminPageHeader
+        icon={SlidersHorizontal}
+        eyebrow="Governança do sistema"
+        title="Configurações operacionais"
+        description="Revise preços, regiões, horários e regras que controlam a operação real."
+        tone="settings"
+      />
+      {hasQueryError && (
+        <QueryState
+          compact
+          kind="error"
+          title="Algumas situações não puderam ser consultadas"
+          description="Os atalhos continuam disponíveis, mas indicadores incompletos não significam configuração vazia."
+          onAction={() => {
+            void Promise.all([
+              modalidadesQuery.refetch(),
+              tabelasQuery.refetch(),
+              horariosQuery.refetch(),
+              taxasQuery.refetch(),
+              operacaoQuery.refetch(),
+              regioesQuery.refetch(),
+            ]);
+          }}
+        />
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {areas.map((area) => (
           <Link key={area.href} href={area.href}>
             <Card className="interactive-card h-full hover:bg-card">
+              <span
+                aria-hidden="true"
+                className={`absolute inset-y-0 left-0 w-1 ${TONS[area.tom].trilho}`}
+              />
               <CardContent className="flex gap-4 py-6">
                 <IconeDaArea icon={area.icon} tom={area.tom} />
                 <div className="min-w-0">

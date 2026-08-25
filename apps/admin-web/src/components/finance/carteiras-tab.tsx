@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { QueryState } from '@/components/ui/query-state';
 import {
   Table,
   TableBody,
@@ -82,13 +83,28 @@ export function CarteirasTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent className="p-0">
           {pendentesQuery.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Carregando a fila...</p>
+            <div className="p-4">
+              <QueryState compact kind="loading" title="Atualizando saques pendentes" />
+            </div>
           ) : pendentesQuery.isError ? (
-            <p className="p-6 text-sm text-destructive">Não foi possível carregar a fila.</p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="error"
+                title="Não foi possível carregar os saques pendentes"
+                description="A fila não será mostrada como vazia enquanto a consulta estiver indisponível."
+                onAction={() => void pendentesQuery.refetch()}
+              />
+            </div>
           ) : pendentes.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              Nenhum saque esperando. Nada a fazer aqui agora.
-            </p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="empty"
+                title="Nenhum saque aguardando pagamento"
+                description="A fila está conferida e não exige ação agora."
+              />
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -168,13 +184,32 @@ export function CarteirasTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent className="p-0">
           {carteirasQuery.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Carregando carteiras...</p>
+            <div className="p-4">
+              <QueryState compact kind="loading" title="Carregando carteiras dos entregadores" />
+            </div>
           ) : carteirasQuery.isError ? (
-            <p className="p-6 text-sm text-destructive">Não foi possível carregar as carteiras.</p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="error"
+                title="Não foi possível carregar as carteiras"
+                description="Os saldos foram ocultados para não parecerem zerados."
+                onAction={() => void carteirasQuery.refetch()}
+              />
+            </div>
           ) : carteiras.length === 0 ? (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              Nenhum entregador encontrado.
-            </p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="empty"
+                title="Nenhum entregador encontrado"
+                description={
+                  buscaAplicada
+                    ? 'Revise o nome ou e-mail usado na busca.'
+                    : 'Ainda não há carteiras de entregadores para exibir.'
+                }
+              />
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -263,11 +298,22 @@ export function CarteirasTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent className="p-0">
           {historicoQuery.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Carregando histórico...</p>
+            <div className="p-4">
+              <QueryState compact kind="loading" title="Carregando histórico de saques" />
+            </div>
+          ) : historicoQuery.isError ? (
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="error"
+                title="Não foi possível carregar o histórico de saques"
+                onAction={() => void historicoQuery.refetch()}
+              />
+            </div>
           ) : historico.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              Nenhum saque decidido ainda.
-            </p>
+            <div className="p-4">
+              <QueryState compact kind="empty" title="Nenhum saque decidido ainda" />
+            </div>
           ) : (
             <Table>
               <TableHeader>

@@ -8,6 +8,7 @@ import { AlertTriangle, CalendarClock, Eye, FilePlus2, Package } from 'lucide-re
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
 import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog';
 import { MetricCard } from '@/components/finance/metric-card';
 import { ManualInvoiceDialog } from '@/components/finance/manual-invoice-dialog';
@@ -124,6 +125,18 @@ export function FaturasTab({ token }: { token: string }) {
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          {caixaQuery.isLoading && (
+            <QueryState compact kind="loading" title="Atualizando o fechamento financeiro" />
+          )}
+          {(caixaQuery.isError || (!caixa && !caixaQuery.isLoading)) && (
+            <QueryState
+              compact
+              kind="error"
+              title="Não foi possível consultar os valores do fechamento"
+              description="Os indicadores foram ocultados para não parecerem zerados."
+              onAction={() => void caixaQuery.refetch()}
+            />
+          )}
           {caixa && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <MetricCard
@@ -201,13 +214,28 @@ export function FaturasTab({ token }: { token: string }) {
         </CardHeader>
         <CardContent className="p-0">
           {faturasQuery.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Carregando faturas...</p>
+            <div className="p-4">
+              <QueryState compact kind="loading" title="Carregando faturas" />
+            </div>
           ) : faturasQuery.isError ? (
-            <p className="p-6 text-sm text-destructive">Não foi possível carregar as faturas.</p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="error"
+                title="Não foi possível carregar as faturas"
+                description="A lista não será mostrada como vazia enquanto a consulta estiver indisponível."
+                onAction={() => void faturasQuery.refetch()}
+              />
+            </div>
           ) : faturas.length === 0 ? (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              Nenhuma fatura neste filtro.
-            </p>
+            <div className="p-4">
+              <QueryState
+                compact
+                kind="empty"
+                title="Nenhuma fatura neste filtro"
+                description="Escolha outro status ou emita uma fatura personalizada."
+              />
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PaymentNoticeQueueItem } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { CheckCircle2, HandCoins, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, TriangleAlert, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QueryState } from '@/components/ui/query-state';
 import { paymentNoticeApi } from '@/lib/api-client';
 import { formatarData, formatarDataHora } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
@@ -60,26 +61,37 @@ export function AvisosTab({ token }: { token: string }) {
         ))}
       </div>
 
-      {avisosQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Carregando avisos...</p>
-      )}
-      {avisosQuery.isError && (
-        <p className="text-sm text-destructive">Não foi possível carregar a fila.</p>
-      )}
-
-      {!avisosQuery.isLoading && avisos.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
-            <HandCoins className="size-8" />
-            {situacao === 'PENDING' ? 'Nenhum aviso aguardando conferência.' : 'Nada por aqui.'}
-          </CardContent>
-        </Card>
-      )}
+      {avisosQuery.isLoading ? (
+        <QueryState compact kind="loading" title="Carregando avisos de pagamento" />
+      ) : avisosQuery.isError ? (
+        <QueryState
+          compact
+          kind="error"
+          title="Não foi possível carregar os avisos"
+          description="A fila não será mostrada como vazia enquanto a consulta estiver indisponível."
+          onAction={() => void avisosQuery.refetch()}
+        />
+      ) : avisos.length === 0 ? (
+        <QueryState
+          compact
+          kind="empty"
+          title={
+            situacao === 'PENDING'
+              ? 'Nenhum aviso aguardando conferência'
+              : 'Nenhum aviso neste status'
+          }
+          description={
+            situacao === 'PENDING'
+              ? 'Não há pagamentos enviados por empresas esperando análise.'
+              : 'Escolha outro status para consultar o histórico.'
+          }
+        />
+      ) : null}
 
       <div className="space-y-3">
-        {avisos.map((aviso) => (
-          <CartaoDoAviso key={aviso.id} token={token} aviso={aviso} />
-        ))}
+        {!avisosQuery.isLoading &&
+          !avisosQuery.isError &&
+          avisos.map((aviso) => <CartaoDoAviso key={aviso.id} token={token} aviso={aviso} />)}
       </div>
     </div>
   );

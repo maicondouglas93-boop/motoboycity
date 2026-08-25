@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminInvoicesApi } from '@/lib/api-client';
 import { useMoney } from '@/lib/money';
 
@@ -62,8 +64,7 @@ export function MarkPaidDialog({
   const queryClient = useQueryClient();
 
   const confirmar = useMutation({
-    mutationFn: () =>
-      adminInvoicesApi.markPaid(token, invoiceId, { paymentDate, paymentMethod }),
+    mutationFn: () => adminInvoicesApi.markPaid(token, invoiceId, { paymentDate, paymentMethod }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'invoice', invoiceId] });
       void queryClient.invalidateQueries({ queryKey: ['admin', 'invoices'] });
@@ -146,17 +147,23 @@ export function MarkPaidDialog({
           </div>
 
           {dataNoFuturo && (
-            <p className="text-sm text-dinheiro-atrasado">
+            <ActionFeedback tone="warning" compact title="Confira a data">
               A data do pagamento está no futuro. Confira antes de confirmar.
-            </p>
+            </ActionFeedback>
           )}
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
+          {erro && (
+            <ActionFeedback tone="error" title="Não foi possível confirmar o recebimento">
+              {erro}
+            </ActionFeedback>
+          )}
         </div>
 
         <DialogFooter>
           <DialogClose render={<Button variant="outline">Voltar</Button>} />
           <Button onClick={() => confirmar.mutate()} disabled={confirmar.isPending || dataNoFuturo}>
-            {confirmar.isPending ? 'Confirmando...' : 'Confirmar recebimento'}
+            <PendingButtonLabel pending={confirmar.isPending} pendingLabel="Confirmando...">
+              Confirmar recebimento
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

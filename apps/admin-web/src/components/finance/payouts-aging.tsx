@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { DriverPayoutPositionItem, PayoutAgingBucketKey } from '@motoboycity/types';
 import { AlertTriangle, Clock, Scale } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
@@ -15,10 +16,26 @@ import { useMoney } from '@/lib/money';
  * esperando. Não há prazo contratual aqui, mas há um limite do que é razoável.
  */
 const FAIXAS: Array<{ key: PayoutAgingBucketKey; rotulo: string; classe: string }> = [
-  { key: 'OPEN_0_1', rotulo: 'Até 1 dia', classe: 'bg-dinheiro-recebido-suave text-dinheiro-recebido' },
-  { key: 'OPEN_2_3', rotulo: '2 a 3 dias', classe: 'bg-dinheiro-aguardando-suave text-dinheiro-aguardando' },
-  { key: 'OPEN_4_7', rotulo: '4 a 7 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
-  { key: 'OPEN_8_PLUS', rotulo: 'Mais de 8 dias', classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado' },
+  {
+    key: 'OPEN_0_1',
+    rotulo: 'Até 1 dia',
+    classe: 'bg-dinheiro-recebido-suave text-dinheiro-recebido',
+  },
+  {
+    key: 'OPEN_2_3',
+    rotulo: '2 a 3 dias',
+    classe: 'bg-dinheiro-aguardando-suave text-dinheiro-aguardando',
+  },
+  {
+    key: 'OPEN_4_7',
+    rotulo: '4 a 7 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
+  {
+    key: 'OPEN_8_PLUS',
+    rotulo: 'Mais de 8 dias',
+    classe: 'bg-dinheiro-atrasado-suave text-dinheiro-atrasado',
+  },
 ];
 
 /**
@@ -58,9 +75,15 @@ export function PayoutsAging({ token }: { token: string }) {
       </CardHeader>
       <CardContent className="space-y-5">
         {agingQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">Carregando as obrigações...</p>
+          <QueryState compact kind="loading" title="Calculando as obrigações com entregadores" />
         ) : agingQuery.isError || !relatorio ? (
-          <p className="text-sm text-destructive">Não foi possível carregar as obrigações.</p>
+          <QueryState
+            compact
+            kind="error"
+            title="Não foi possível carregar as obrigações"
+            description="Os saldos e faixas de espera foram ocultados para não parecerem zerados."
+            onAction={() => void agingQuery.refetch()}
+          />
         ) : (
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QueryState } from '@/components/ui/query-state';
 import { MetricCard } from '@/components/finance/metric-card';
 import { adminFinancialApi } from '@/lib/api-client';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
@@ -97,9 +98,20 @@ export function DemonstrativoTab({ token }: { token: string }) {
           {erro && <p className="text-sm text-destructive">{erro}</p>}
 
           {statementQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Carregando o demonstrativo...</p>
+            <QueryState
+              compact
+              kind="loading"
+              title="Calculando o demonstrativo"
+              description="Comparando entregas, repasses e receita do período."
+            />
           ) : statementQuery.isError || !dados ? (
-            <p className="text-sm text-destructive">Não foi possível carregar o demonstrativo.</p>
+            <QueryState
+              compact
+              kind="error"
+              title="Não foi possível calcular o demonstrativo"
+              description="Os totais e comparativos foram ocultados para não exibir números incorretos."
+              onAction={() => void statementQuery.refetch()}
+            />
           ) : (
             <>
               {/*
@@ -228,8 +240,8 @@ export function DemonstrativoTab({ token }: { token: string }) {
               totais acima.
             */}
             <p className="text-sm font-normal text-muted-foreground">
-              Ficam fora do resultado acima de propósito: ajuste é correção, não receita nem
-              despesa da operação.
+              Ficam fora do resultado acima de propósito: ajuste é correção, não receita nem despesa
+              da operação.
             </p>
           </CardHeader>
           <CardContent>

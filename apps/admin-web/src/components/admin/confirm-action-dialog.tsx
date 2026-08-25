@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, type ReactElement, type ReactNode } from 'react';
-import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import {
   Dialog,
   DialogBody,
@@ -76,18 +77,23 @@ export function ConfirmActionDialog({
 
         <DialogBody className="space-y-4">
           {consequence && (
-            <div className="flex gap-3 rounded-xl border border-amber-300/70 bg-amber-50 p-4 text-sm text-amber-950">
-              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
-              <div>{consequence}</div>
-            </div>
+            <ActionFeedback tone="warning" title="Antes de confirmar">
+              {consequence}
+            </ActionFeedback>
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <ActionFeedback tone="error" title="Não foi possível concluir">
+              {error}
+            </ActionFeedback>
+          )}
         </DialogBody>
 
         <DialogFooter className="flex justify-end gap-2">
           <DialogClose render={<Button variant="outline">Voltar</Button>} />
           <Button variant={variant} onClick={() => void handleConfirm()} disabled={pending}>
-            {pending ? pendingLabel : confirmLabel}
+            <PendingButtonLabel pending={pending} pendingLabel={pendingLabel}>
+              {confirmLabel}
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

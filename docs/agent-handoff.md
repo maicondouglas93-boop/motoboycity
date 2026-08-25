@@ -6923,3 +6923,276 @@ loja ou um ponto de rastreamento inferido. Proximo passo concreto: publicar API
 e novo APK em conjunto e testar em aparelho real um pedido com destino
 conhecido e outro por GPS, do problema ate a confirmacao da devolucao e o
 credito na carteira.
+
+## Atualizacao - 2026-08-25: release Android pilot.5 para problema na entrega
+
+O Driver App foi promovido para `0.1.0-pilot.5`, com `versionCode` `5`, para
+distribuir o fluxo corrigido de problema na entrega descrito acima. O APK usa
+`applicationId` `com.motoboycity.driverapp`, `minSdk` 24, `targetSdk` 36 e
+label `motoboycity`.
+
+Para evitar o limite de caminho do CMake/Ninja no Windows, o build foi feito
+em uma copia fisica curta em `C:\m5`; a chave oficial foi copiada apenas para
+`C:\m5\k.jks` durante a compilacao. Depois da preservacao e conferencia do
+artefato, a copia temporaria e a chave foram removidas; `C:\m5` nao existe
+mais. O pacote
+`@motoboycity/validation` foi compilado antes do `assembleRelease`.
+
+O APK final tem 75.018.469 bytes e SHA-256
+`FFF8A42C64D343945787716A02EF60BA06FA32575F5081577219A9BC22129010`.
+O `apksigner` confirmou APK Signature Scheme v2 e o certificado oficial com
+SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O bundle contem `https://motoboycity-api.onrender.com` e nao contem endpoint
+de desenvolvimento (`localhost:3333`, `127.0.0.1` ou `10.0.2.2`); existe uma
+unica palavra generica `localhost` trazida pelo codigo empacotado, sem URL ou
+porta. O manifesto inclui o metadado do Google Maps. O artefato foi preservado
+em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.5-vc5.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.5-vc5.apk`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; build de `@motoboycity/validation`; `clean assembleRelease`; verificacao
+de assinatura, certificado, package, versao, SDKs, label, URL de producao,
+endpoints locais e metadado do Google Maps. Tudo passou. O primeiro disparo
+paralelo do Jest encontrou uma contencao `EPERM` na DLL do Prisma durante
+instalacoes PNPM simultaneas; a repeticao isolada passou integralmente e nao
+indicou regressao do aplicativo. O APK ainda nao foi instalado nesta sessao.
+Proximo passo concreto: instalar o pilot.5 sobre o pilot.4 e testar em aparelho
+real um pedido com destino conhecido e outro definido por GPS, desde
+`Problema na entrega` ate a devolucao na loja e o credito correto na carteira.
+
+## Atualizacao - 2026-08-25: ferramenta protegida para limpar dados de teste
+
+Foi preparada uma rotina administrativa de pre-producao para remover o
+movimento operacional e financeiro de teste antes da entrada das empresas
+reais. A rotina preserva usuarios, administradores, empresas, membros,
+motoboys, documentos, veiculos, tokens do app, regioes, modalidades, tabelas
+de preco, taxas e configuracoes. Ela remove pedidos e filhos, faturas e
+filhos, saques, antecipacoes, lancamentos de carteira, notificacoes/auditorias
+diretamente relacionadas e logs de presenca; as carteiras ficam zeradas e os
+motoboys offline. No Redis, somente a fila `dispatch` e as chaves efemeras de
+presenca sao limpas.
+
+O comando `data:reset:preproduction` e dry-run por padrao. A escrita exige
+confirmacao textual, declaracao de backup, API/workers parados, confirmacao do
+reset financeiro, alvo exato do PostgreSQL e do Redis (protocolo TLS, host,
+porta, banco/schema ou indice) e fingerprints separados dos dois snapshots. A fila e pausada,
+revalidada, obliterada sem `force` e sempre reativada em `finally`; qualquer
+corrida interrompe a operacao. Existe `--redis-only` para recuperacao seletiva
+se o PostgreSQL tiver sido efetivado e a etapa Redis falhar. O reinicio da
+numeracao visual para `#1` continua opcional e ocorre dentro da transacao do
+banco.
+
+Arquivos: `apps/api/scripts/reset-preproduction-data.cjs`, seu teste Node,
+scripts em `apps/api/package.json`, o runbook
+`docs/runbooks/preproduction-data-reset.md` e uma etapa dedicada em
+`.github/workflows/ci.yml`. Validacoes executadas: `node --check` nos dois
+scripts; 11/11 testes de seguranca (incluindo corrida, limpeza seletiva,
+ausencia de `force` e retomada da fila); comando pelo PNPM; Prettier; `git diff
+--check`; typecheck da API; e verificacao local dos metodos usados pela versao
+instalada do BullMQ. Tudo passou. Nao houve conexao, dry-run nem exclusao no
+Neon/Redis de producao nesta sessao. O dry-run foi tentado com a configuracao
+local, mas parou antes de qualquer leitura/escrita porque ela aponta para
+`localhost:6379`, que estava indisponivel. O tratamento de erro do ioredis e
+BullMQ foi endurecido para essa falha terminar de forma controlada, sem uma
+segunda excecao nao tratada. Tambem nao houve teste integrado destrutivo, pois ele
+exige PostgreSQL e Redis descartaveis. Proximo passo concreto: criar e validar
+um restore point/branch no Neon, parar API, workers e apps de teste, executar o
+dry-run contra producao e revisar alvos, contagens e hashes antes de solicitar
+separadamente a execucao destrutiva.
+
+## Atualizacao - 2026-08-25: filtro por empresa nos pedidos do Admin
+
+A pagina `Admin Web > Pedidos` agora permite selecionar uma empresa ou voltar
+para `Todas as empresas`. O filtro usa a listagem administrativa real de
+empresas e envia `companyId` para a busca paginada existente no servidor. Ao
+trocar a empresa, a navegacao retorna para a primeira pagina para evitar uma
+pagina vazia fora do novo universo filtrado.
+
+O mesmo recorte tambem e aplicado ao bloco de rastreamento ao vivo exibido no
+topo da pagina, para que os cards e o contador nao misturem entregas de outra
+empresa enquanto o filtro estiver ativo. Empresas suspensas ou pendentes
+continuam disponiveis no seletor, pois seus pedidos historicos ainda precisam
+ser consultados. Falhas ao carregar o seletor sao mostradas ao administrador.
+
+Nao houve mudanca de API, contrato, autorizacao, banco ou schema: o endpoint
+`GET /deliveries/search` e o cliente compartilhado ja aceitavam `companyId`
+para usuarios `ADMIN`. Arquivo funcional alterado:
+`apps/admin-web/src/app/(app)/pedidos/page.tsx`.
+
+Validacoes executadas: Prettier no arquivo alterado; typecheck, lint e build de
+producao do Admin Web. Tudo passou. O smoke visual autenticado nao foi
+executado nesta sessao. Proximo passo concreto: abrir `/pedidos`, alternar
+entre duas empresas com pedidos e combinar o seletor com os filtros de status,
+conferindo cards, contador de rastreamento e paginacao.
+
+## Atualizacao - 2026-08-25: primeiro lote da auditoria de UX do Admin
+
+O primeiro lote da auditoria de UX foi aplicado nas telas mais operacionais do
+Admin Web. Em `Pedidos`, os filtros de empresa, status e pagina agora vivem na
+URL (`empresa`, `status` e `pagina`). Isso corrige o atalho da home que ja abria
+`/pedidos?status=...`, mas antes era ignorado pela listagem, e preserva o
+contexto ao atualizar, voltar pelo navegador ou compartilhar o link. O status
+`FAILED` tambem passou a existir no filtro. Os controles foram movidos para o
+topo da pagina, antes da grade, para permanecerem acessiveis no celular.
+
+A pagina de Pedidos ganhou hierarquia visual e cores semanticas: cabecalho
+operacional em azul-petroleo, status em cinza/ambar/verde/vermelho/azul conforme
+o ciclo real, rastreamento em verde e valores em azul informativo. O grid de ate
+sete cards foi preservado. Textos funcionais de 10 px foram elevados para 12 px
+nos cards alterados. Carregamento, erro e vazio agora usam um componente comum
+com rotulo explicito, icone, cor e acao de nova tentativa; falha no rastreamento
+deixou de parecer simplesmente uma operacao sem entregas ativas.
+
+O mesmo componente foi aplicado a `Clientes` e `Entregadores`. Seus indicadores
+deixaram de mostrar zero quando a consulta falha e os cards receberam fundos
+suaves conforme situacao ativa, pendente/suspensa ou bloqueada. A central de
+Configuracoes agora avisa quando uma ou mais consultas falham, permite tentar
+novamente e usa um trilho colorido por area sem bloquear os atalhos restantes.
+
+Arquivos funcionais:
+`apps/admin-web/src/app/(app)/{pedidos,clientes,entregadores,configuracoes}/page.tsx`
+e `apps/admin-web/src/components/ui/query-state.tsx`. Nao houve mudanca de API,
+contrato, autorizacao, banco, schema Prisma ou regra de negocio.
+
+Validacoes executadas: Prettier nos cinco arquivos; typecheck e lint do Admin
+Web; build de producao do Admin Web com 37 paginas geradas. Tudo passou. As
+primeiras tentativas de typecheck/lint no sandbox foram bloqueadas pelo Windows
+ao ler `node_modules`; a repeticao autorizada fora do sandbox passou. O smoke
+visual autenticado continua pendente porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: conferir `/pedidos` em desktop
+e celular, inclusive um link vindo da fila da home, e depois seguir para o lote
+de navegacao mobile e padronizacao dos cabecalhos.
+
+## Atualizacao - 2026-08-25: segundo lote da auditoria de UX do Admin
+
+A navegacao principal do Admin Web deixou de ser uma faixa horizontal rolavel
+em telas pequenas. No desktop, os oito destinos continuam visiveis na barra
+superior. Abaixo de `xl`, um menu compacto mostra a area atual e organiza os
+destinos em quatro grupos: Operacao, Comercial, Analise e Sistema. Cada grupo
+usa uma cor semantica e a pagina ativa permanece identificada visualmente e por
+`aria-current`. Os rotulos do componente Base UI foram mantidos dentro de
+`DropdownMenuGroup`, evitando a regressao conhecida de contexto ausente.
+
+Tambem foi criado um cabecalho administrativo comum com icone, contexto,
+titulo, descricao, acao opcional e cinco tons por dominio. Ele foi aplicado a
+Operacao global, Empresas, Entregadores, Financeiro, Central de relatorios e
+Configuracoes. As cores agora ajudam a reconhecer a area sem mudar logica:
+ambar para operacao, verde para clientes, azul para financeiro, teal para
+analise e azul-petroleo/teal para configuracoes. Botoes e indicadores que ja
+existiam foram preservados como acoes do cabecalho.
+
+Arquivos funcionais: `apps/admin-web/src/components/layout/top-nav.tsx`,
+`apps/admin-web/src/components/layout/admin-page-header.tsx` e as paginas
+principais em `apps/admin-web/src/app/(app)/{page.tsx,clientes,entregadores,
+financeiro,relatorios,configuracoes}`. Nao houve mudanca de API, contrato,
+autorizacao, banco, schema Prisma ou regra de negocio.
+
+Validacoes executadas: Prettier nos arquivos alterados; typecheck, lint e build
+de producao do Admin Web com 37 paginas geradas. A primeira execucao do
+typecheck encontrou somente uma inferencia heterogenea no `flatMap` do menu; os
+tipos `NavItem` e `NavGroup` foram explicitados e a repeticao passou. O smoke
+visual autenticado continua pendente porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: validar o menu em larguras de
+celular e tablet e seguir para o terceiro lote, padronizando feedback de acoes,
+confirmacoes e formularios nas telas administrativas mais densas.
+
+## Atualizacao - 2026-08-25: terceiro lote da auditoria de UX do Admin
+
+O Admin Web agora possui dois componentes comuns para a resposta visual de
+acoes. `ActionFeedback` apresenta sucesso, erro, aviso e informacao com icone,
+cor semantica, titulo opcional, regiao `aria-live` adequada e fechamento
+opcional. `PendingButtonLabel` mantem um indicador animado e texto consistente
+enquanto uma mutacao esta em andamento. Erros continuam exibindo a mensagem
+real de `ApiError` quando o fluxo ja a fornecia; nenhuma falha foi ocultada ou
+transformada em sucesso local.
+
+O padrao foi aplicado primeiro aos fluxos administrativos mais sensiveis:
+cadastro e aprovacao de empresas, cadastro e gestao de entregadores, criacao de
+pedido em nome da empresa, edicao de empresa/endereco, troca de senha e dialogo
+generico de confirmacao. No financeiro, passou a cobrir fechamento e
+cancelamento de fatura, baixa de pagamento, alteracao de vencimento e ajuste
+manual de carteira. Consequencias antes exibidas em caixas isoladas agora usam
+aviso/informacao; falhas possuem titulo contextual; sucessos usam regiao de
+status; botoes assincronos mostram spinner alem do texto. A ancora de foco do
+erro no cadastro de entregador foi preservada por `id` e `tabIndex`.
+
+Arquivos comuns:
+`apps/admin-web/src/components/ui/{action-feedback,pending-button-label}.tsx`.
+Consumidores principais em `components/{admin,companies,drivers,deliveries,
+users,finance}` e nas paginas `clientes` e `entregadores`. Nao houve mudanca de
+API, contrato, autorizacao, banco, schema Prisma, invalidacao de query ou regra
+de negocio.
+
+Validacoes executadas: Prettier nos arquivos alterados; typecheck, lint e build
+de producao do Admin Web com 37 paginas geradas. Tudo passou. O navegador
+controlavel foi consultado para smoke visual, mas nenhuma instancia estava
+disponivel nesta sessao; portanto a verificacao autenticada de abertura,
+submissao com erro e sucesso dos dialogos continua manual. Proximo passo
+concreto: testar em `/clientes`, `/entregadores`, detalhe de fatura e carteiras
+um erro real e uma acao bem-sucedida, conferindo foco, spinner e fechamento; o
+quarto lote pode compactar formularios longos e padronizar estados de consulta
+restantes no financeiro.
+
+## Atualizacao - 2026-08-25: quarto lote da auditoria de UX do Admin
+
+As consultas principais do Financeiro agora diferenciam explicitamente
+carregamento, falha e ausencia real de dados. O componente comum `QueryState`
+foi aplicado ao painel financeiro, movimento por periodo, faturas, avisos de
+pagamento, carteiras, historico de saques, demonstrativo, recebimentos e aos
+quadros de idade de contas a receber e repasses. Cada falha oferece `Tentar
+novamente` usando o `refetch` da consulta existente.
+
+Foi corrigida uma ambiguidade operacional importante: falhas em avisos de
+pagamento e no historico de saques podiam cair tambem no estado vazio, fazendo
+uma consulta indisponivel parecer uma fila sem trabalho. Indicadores financeiros
+continuam aparecendo somente quando os dados foram retornados; em caso de erro,
+uma mensagem informa que os numeros foram ocultados para nao parecerem `R$ 0,00`
+por engano. Nenhuma query key, endpoint, permissao, mutacao ou regra financeira
+foi alterada.
+
+Arquivos funcionais: `apps/admin-web/src/components/finance/{painel-tab,
+carteiras-tab,faturas-tab,avisos-tab,demonstrativo-tab,recebimentos-tab,
+payouts-aging,receivables-aging}.tsx`. Validacoes executadas: Prettier nos oito
+componentes; typecheck, lint e build de producao do Admin Web, com 37 paginas
+geradas; `git diff --check` sem erro de whitespace. O smoke visual autenticado
+continua manual porque nao ha navegador controlavel nesta sessao. Proximo passo
+concreto: simular uma falha de rede em cada aba de `/financeiro`, acionar
+`Tentar novamente` e conferir que nenhum total ou fila aparece como zero/vazio
+durante a falha; o proximo lote pode compactar os formularios financeiros mais
+longos e levar o mesmo estado de consulta aos dialogos auxiliares.
+
+## Atualizacao - 2026-08-25: quinto lote da auditoria de UX do Admin
+
+O fluxo `Criar fatura personalizada` foi compactado para aproveitar melhor a
+largura do desktop sem perder a disposicao vertical no celular. O dialogo agora
+usa largura ampliada, agrupa empresa, emissao e vencimento na mesma grade
+responsiva e mantem a lista de pedidos com rolagem propria. Textos operacionais
+foram revisados e os botoes de previa/emissao exibem progresso com spinner.
+
+As duas consultas internas do dialogo agora diferenciam carregamento, falha e
+resultado vazio. Falha ao buscar empresas bloqueia somente o seletor e oferece
+nova tentativa; falha ao buscar pedidos faturaveis nao aparece mais como empresa
+sem entregas. A selecao de pedidos usa feedback informativo e erros de previa ou
+emissao preservam a mensagem real de `ApiError` em um alerta dispensavel.
+
+Os detalhes administrativos de fatura e saque tambem receberam `QueryState`
+para carregamento e falha, com `refetch` e caminho de volta para a lista. No
+saque, falhas de aprovar, pagar ou rejeitar passaram a usar `ActionFeedback`,
+sem alterar confirmacoes, motivos obrigatorios, invalidacao de queries ou
+mutacoes. O fallback de `Suspense` da area Financeiro segue o mesmo padrao
+visual. Nao houve mudanca de API, contrato, autorizacao, banco, schema ou regra
+financeira.
+
+Arquivos funcionais: `apps/admin-web/src/components/finance/
+manual-invoice-dialog.tsx`, `apps/admin-web/src/app/(app)/faturas/[id]/
+page.tsx`, `apps/admin-web/src/app/(app)/financeiro/saques/[id]/page.tsx` e
+`apps/admin-web/src/app/(app)/financeiro/page.tsx`. Validacoes executadas:
+Prettier nos quatro arquivos; typecheck, lint e build de producao do Admin Web,
+com 37 paginas geradas; `git diff --check` sem erro de whitespace. O smoke
+visual autenticado continua manual porque nao ha navegador controlavel nesta
+sessao. Proximo passo concreto: abrir uma fatura personalizada em desktop e
+celular, testar empresa sem pedidos e falha de rede; depois seguir para os
+detalhes de empresa/entregador, onde ainda existem listas financeiras com
+estados de texto simples.

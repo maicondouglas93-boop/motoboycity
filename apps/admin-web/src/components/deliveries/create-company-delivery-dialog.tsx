@@ -28,6 +28,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminCompaniesApi, adminDeliveriesApi, adminServiceTypesApi } from '@/lib/api-client';
 
 interface Props {
@@ -433,11 +435,15 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
             )}
 
             {error && (
-              <p role="alert" className="text-sm text-destructive">
+              <ActionFeedback tone="error" title="Não foi possível lançar o pedido">
                 {error}
-              </p>
+              </ActionFeedback>
             )}
-            {success && <p className="text-sm font-medium text-status-entregue">{success}</p>}
+            {success && (
+              <ActionFeedback tone="success" title="Pedido lançado">
+                {success}
+              </ActionFeedback>
+            )}
           </DialogBody>
 
           <DialogFooter className="flex items-center justify-end gap-2">
@@ -455,7 +461,9 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
                 !companyId || !pickupAddress || serviceTypesQuery.isLoading || mutation.isPending
               }
             >
-              {mutation.isPending ? 'Lançando...' : 'Lançar pedido'}
+              <PendingButtonLabel pending={mutation.isPending} pendingLabel="Lançando...">
+                Lançar pedido
+              </PendingButtonLabel>
             </Button>
           </DialogFooter>
         </form>

@@ -14,6 +14,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { ActionFeedback } from '@/components/ui/action-feedback';
+import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminInvoicesApi } from '@/lib/api-client';
 import { useMoney } from '@/lib/money';
 
@@ -126,7 +128,11 @@ export function CancelInvoiceDialog({
             </p>
           </div>
 
-          {erro && <p className="text-sm text-destructive">{erro}</p>}
+          {erro && (
+            <ActionFeedback tone="error" title="Não foi possível cancelar a fatura">
+              {erro}
+            </ActionFeedback>
+          )}
         </div>
 
         <DialogFooter>
@@ -138,7 +144,9 @@ export function CancelInvoiceDialog({
             onClick={() => cancelar.mutate()}
             disabled={!motivoValido || cancelar.isPending}
           >
-            {cancelar.isPending ? 'Cancelando...' : 'Cancelar fatura'}
+            <PendingButtonLabel pending={cancelar.isPending} pendingLabel="Cancelando...">
+              Cancelar fatura
+            </PendingButtonLabel>
           </Button>
         </DialogFooter>
       </DialogContent>

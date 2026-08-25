@@ -4,14 +4,16 @@ import Link from 'next/link';
 import { use, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { WithdrawalRequestStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { QueryState } from '@/components/ui/query-state';
 import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
@@ -115,12 +117,29 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
     );
   }
   if (withdrawalQuery.isLoading) {
-    return <p className="text-sm text-muted-foreground">Carregando solicitação de saque...</p>;
+    return (
+      <QueryState
+        kind="loading"
+        title="Carregando a solicitação de saque"
+        description="Consultando valores, destino PIX e histórico auditável."
+      />
+    );
   }
   if (withdrawalQuery.isError || !withdrawalQuery.data) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        <AlertCircle className="size-4" /> Não foi possível carregar esta solicitação.
+      <div className="space-y-4">
+        <QueryState
+          kind="error"
+          title="Não foi possível carregar esta solicitação"
+          description="Tente novamente antes de aprovar, pagar ou rejeitar o saque."
+          onAction={() => void withdrawalQuery.refetch()}
+        />
+        <Link
+          href="/financeiro/saques"
+          className="flex w-fit items-center gap-1 text-sm font-medium text-primary hover:underline"
+        >
+          <ChevronLeft className="size-4" /> Voltar para fila de saques
+        </Link>
       </div>
     );
   }
@@ -253,7 +272,15 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
                 />
               </div>
             )}
-            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+            {actionError && (
+              <ActionFeedback
+                tone="error"
+                title="Não foi possível concluir a ação"
+                onDismiss={() => setActionError(null)}
+              >
+                {actionError}
+              </ActionFeedback>
+            )}
             <div className="flex flex-wrap gap-2">
               {withdrawal.status === 'PENDING' && (
                 <ConfirmActionDialog
