@@ -8,6 +8,7 @@ import type { DeliveryStatus, Prisma, User } from '@prisma/client';
 import type {
   CreateDeliveryPayload,
   ForceCompletePayload,
+  ManualDeliveryStagePayload,
   ReassignDriverPayload,
 } from '@motoboycity/validation';
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
@@ -32,6 +33,14 @@ const REASSIGNABLE_STATUSES: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIV
 
 /** Estados que estão esperando o motoboy confirmar algo que ele não confirmou. */
 const FORCE_COMPLETABLE_STATUSES: DeliveryStatus[] = ['DELIVERED', 'FAILED'];
+
+/** Estados que provam que a coleta ja foi registrada. */
+const POST_COLLECTION_STATUSES: DeliveryStatus[] = [
+  'COLLECTED',
+  'DELIVERED',
+  'FAILED',
+  'COMPLETED',
+];
 
 @Injectable()
 export class AdminDeliveriesService {
@@ -125,6 +134,178 @@ export class AdminDeliveriesService {
         },
       });
     });
+
+    const detail = await this.deliveriesService.detail(admin, deliveryId);
+    this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
+  }
+
+  /**
+   * Confirma a coleta pelo painel. Em lote, preserva a regra operacional de
+   * coleta unica: todos os itens aceitos avancam na mesma transacao.
+   */
+  async markCollected(
+    admin: User,
+    deliveryId: string,
+    payload: ManualDeliveryStagePayload,
+  ): Promise<DeliveryDetail> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+
+    const siblings = delivery.batchId
+      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+      : [delivery];
+
+    if (siblings.every((item) => POST_COLLECTION_STATUSES.includes(item.status))) {
+      return this.deliveriesService.detail(admin, deliveryId);
+    }
+    if (siblings.some((item) => item.status !== 'ACCEPTED')) {
+      throw new ConflictException(
+        'Todos os itens do pedido precisam estar aceitos para marcar a coleta.',
+      );
+    }
+    if (
+      !delivery.driverId ||
+      siblings.some((item) => !item.driverId || item.driverId !== delivery.driverId)
+    ) {
+      throw new ConflictException('O pedido precisa estar atribuído ao mesmo entregador.');
+    }
+
+    const changedAt = new Date();
+    try {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        for (const item of siblings) {
+          const updated = await tx.delivery.updateMany({
+            where: { id: item.id, status: 'ACCEPTED', driverId: delivery.driverId },
+            data: { status: 'COLLECTED', statusChangedAt: changedAt },
+          });
+          if (updated.count !== 1) {
+            throw new ConflictException('A coleta já foi registrada por outra solicitação.');
+          }
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId: item.id,
+              fromStatus: 'ACCEPTED',
+              toStatus: 'COLLECTED',
+              changedByUserId: admin.id,
+              note: `Coleta marcada manualmente pelo administrador. Motivo: ${payload.reason}`,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const current = delivery.batchId
+          ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+          : [await this.prisma.delivery.findUnique({ where: { id: deliveryId } })].filter(
+              (item) => item !== null,
+            );
+        if (
+          current.length > 0 &&
+          current.every((item) => POST_COLLECTION_STATUSES.includes(item.status))
+        ) {
+          return this.deliveriesService.detail(admin, deliveryId);
+        }
+      }
+      throw error;
+    }
+
+    const details = await Promise.all(
+      siblings.map((item) => this.deliveriesService.detail(admin, item.id)),
+    );
+    details.forEach((detail) =>
+      this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED'),
+    );
+    return details.find((detail) => detail.id === deliveryId) ?? details[0]!;
+  }
+
+  /**
+   * Confirma a entrega pelo painel. Destino calculado por GPS fica de fora:
+   * sem uma coordenada real nao existe distancia nem preco seguros para gravar.
+   */
+  async markDelivered(
+    admin: User,
+    deliveryId: string,
+    payload: ManualDeliveryStagePayload,
+  ): Promise<DeliveryDetail> {
+    const delivery = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (
+      (delivery.status === 'DELIVERED' || delivery.status === 'COMPLETED') &&
+      delivery.failedAt === null
+    ) {
+      return this.deliveriesService.detail(admin, deliveryId);
+    }
+    if (delivery.status !== 'COLLECTED') {
+      throw new ConflictException('O pedido precisa estar coletado antes da entrega.');
+    }
+    if (!delivery.destinationKnownAtCreation) {
+      throw new ConflictException(
+        'Este pedido calcula o valor pela localização da entrega. Confirme pelo aplicativo do motoboy.',
+      );
+    }
+    if (!delivery.driverId || delivery.driverValue === null) {
+      throw new InternalServerErrorException(
+        'Não foi possível concluir: a entrega não tem entregador ou valor definido.',
+      );
+    }
+
+    const nextStatus: DeliveryStatus = delivery.requiresReturn ? 'DELIVERED' : 'COMPLETED';
+    const changedAt = new Date();
+    try {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const updated = await tx.delivery.updateMany({
+          where: { id: deliveryId, status: 'COLLECTED', driverId: delivery.driverId },
+          data: { status: nextStatus, statusChangedAt: changedAt },
+        });
+        if (updated.count !== 1) {
+          throw new ConflictException('A entrega já foi registrada por outra solicitação.');
+        }
+
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId,
+            fromStatus: 'COLLECTED',
+            toStatus: 'DELIVERED',
+            changedByUserId: admin.id,
+            note: `Entrega marcada manualmente pelo administrador. Motivo: ${payload.reason}`,
+          },
+        });
+
+        if (nextStatus === 'COMPLETED') {
+          await tx.deliveryStatusHistory.create({
+            data: {
+              deliveryId,
+              fromStatus: 'DELIVERED',
+              toStatus: 'COMPLETED',
+              changedByUserId: admin.id,
+              note: 'Conclusão automática após entrega sem retorno.',
+            },
+          });
+          await this.financeLedgerService.creditDriverRepasse(tx, {
+            id: deliveryId,
+            driverId: delivery.driverId,
+            driverValue: delivery.driverValue,
+          });
+        }
+      });
+    } catch (error) {
+      if (error instanceof ConflictException || this.isRepasseConflict(error)) {
+        const current = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+        if (
+          current?.driverId === delivery.driverId &&
+          (current.status === 'DELIVERED' || current.status === 'COMPLETED') &&
+          current.failedAt === null
+        ) {
+          return this.deliveriesService.detail(admin, deliveryId);
+        }
+      }
+      throw error;
+    }
 
     const detail = await this.deliveriesService.detail(admin, deliveryId);
     this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');

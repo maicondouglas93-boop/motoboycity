@@ -15,7 +15,6 @@ import {
   Layers3,
   ListFilter,
   MapPin,
-  Radio,
   Route,
   Search,
   WalletCards,
@@ -53,7 +52,9 @@ import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 import { operationTime } from '@/lib/operation-clock';
 import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-dialog';
 import { CompanyQueues } from '@/components/operations/company-queues';
+import { DeliveryActionsMenu } from '@/components/operations/delivery-actions-menu';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
+import { DispatchQueue } from '@/components/operations/dispatch-queue';
 import { slaAlertMinutesFor } from '@/lib/sla';
 
 /**
@@ -116,76 +117,86 @@ function OperationRow({
   const totalLabel = order.totalValue === null ? 'A calcular' : money(order.totalValue);
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
+    <div
       className={`group/order relative w-full overflow-hidden text-left text-xs transition-all focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${
         grouped
           ? 'rounded-none border-0 border-b border-border/65 bg-transparent px-3.5 py-3 last:border-b-0 hover:bg-admin-soft/45'
           : 'rounded-xl border border-border/80 bg-card/75 px-3.5 py-3 shadow-sm hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card hover:shadow-md'
       } ${selected ? 'bg-admin-soft/75 ring-1 ring-inset ring-primary/25' : ''}`}
     >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={`Selecionar pedido #${order.displayNumber}`}
+        className="absolute inset-0 z-0 rounded-[inherit] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary focus-visible:outline-none"
+      />
       <span
         aria-hidden="true"
         className={`absolute inset-y-2 left-0 w-0.5 rounded-r-full ${statusRailClass(order.status)}`}
       />
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <strong className="font-mono text-[13px] text-admin-deep">#{order.displayNumber}</strong>
-        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-medium whitespace-nowrap text-muted-foreground">
-          <Clock3 className="size-3" aria-hidden="true" />
-          {operationTime(order.createdAt)}
-        </span>
-        <ElapsedTime
-          since={order.statusChangedAt}
-          alertAfterMinutes={slaAlertMinutes}
-          className="rounded-full bg-muted/80 px-2 py-0.5 text-[10px] whitespace-nowrap ring-1 ring-inset ring-foreground/5"
-        />
-        <StatusChip status={order.status} className="ml-auto px-2 py-0.5 text-[10px]" />
-      </div>
+      <div className="pointer-events-none relative z-[1]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <strong className="font-mono text-[13px] text-admin-deep">#{order.displayNumber}</strong>
+          <span className="inline-flex items-center gap-1 font-mono text-[10px] font-medium whitespace-nowrap text-muted-foreground">
+            <Clock3 className="size-3" aria-hidden="true" />
+            {operationTime(order.createdAt)}
+          </span>
+          <ElapsedTime
+            since={order.statusChangedAt}
+            alertAfterMinutes={slaAlertMinutes}
+            className="rounded-full bg-muted/80 px-2 py-0.5 text-[10px] whitespace-nowrap ring-1 ring-inset ring-foreground/5"
+          />
+          <StatusChip status={order.status} className="ml-auto mr-7 px-2 py-0.5 text-[10px]" />
+        </div>
 
-      <div className="mt-2 flex min-w-0 items-center gap-2">
-        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-admin-soft text-primary ring-1 ring-inset ring-primary/10">
-          {hideCompany ? (
-            <Bike className="size-3.5" aria-hidden="true" />
-          ) : (
-            <Building2 className="size-3.5" aria-hidden="true" />
+        <div className="mt-2 flex min-w-0 items-center gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-admin-soft text-primary ring-1 ring-inset ring-primary/10">
+            {hideCompany ? (
+              <Bike className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Building2 className="size-3.5" aria-hidden="true" />
+            )}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold text-foreground">
+              {hideCompany ? (order.driver?.name ?? 'Sem motoboy') : order.companyName}
+            </span>
+            <span className="block truncate text-[10px] text-muted-foreground">
+              {hideCompany
+                ? order.serviceTypeName
+                : (order.driver?.name ?? `${order.serviceTypeName} · sem motoboy`)}
+            </span>
+          </span>
+        </div>
+
+        <p className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+          <MapPin className="size-3 shrink-0 text-primary" aria-hidden="true" />
+          <span className="truncate">{addressLabel}</span>
+        </p>
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 whitespace-nowrap">
+            <Route className="size-3" aria-hidden="true" />
+            {order.distanceKm === null ? 'Distância pendente' : `${order.distanceKm} km`}
+          </span>
+          <span className="inline-flex items-center gap-1 font-semibold whitespace-nowrap text-foreground">
+            <WalletCards className="size-3 text-status-entregue" aria-hidden="true" />
+            {totalLabel}
+          </span>
+          {order.requiresReturn && (
+            <span className="rounded-full bg-admin-soft px-1.5 py-0.5 font-medium text-primary">
+              Com retorno
+            </span>
           )}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-xs font-semibold text-foreground">
-            {hideCompany ? (order.driver?.name ?? 'Sem motoboy') : order.companyName}
-          </span>
-          <span className="block truncate text-[10px] text-muted-foreground">
-            {hideCompany
-              ? order.serviceTypeName
-              : (order.driver?.name ?? `${order.serviceTypeName} · sem motoboy`)}
-          </span>
-        </span>
+        </div>
       </div>
 
-      <p className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-        <MapPin className="size-3 shrink-0 text-primary" aria-hidden="true" />
-        <span className="truncate">{addressLabel}</span>
-      </p>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1 whitespace-nowrap">
-          <Route className="size-3" aria-hidden="true" />
-          {order.distanceKm === null ? 'Distância pendente' : `${order.distanceKm} km`}
-        </span>
-        <span className="inline-flex items-center gap-1 font-semibold whitespace-nowrap text-foreground">
-          <WalletCards className="size-3 text-status-entregue" aria-hidden="true" />
-          {totalLabel}
-        </span>
-        {order.requiresReturn && (
-          <span className="rounded-full bg-admin-soft px-1.5 py-0.5 font-medium text-primary">
-            Com retorno
-          </span>
-        )}
+      <div className="pointer-events-auto absolute top-2 right-2 z-10">
+        <DeliveryActionsMenu order={order} />
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -253,6 +264,7 @@ export default function AdminDashboardPage() {
     socket.on('delivery:updated', refresh);
     socket.on('driver:location', refresh);
     socket.on('driver:presence', refresh);
+    socket.on('dispatch:queue-updated', refresh);
     return () => {
       socket.disconnect();
     };
@@ -618,44 +630,13 @@ export default function AdminDashboardPage() {
             </Card>
           )}
 
-          <Card className="premium-panel">
-            <CardHeader className="py-3">
-              <CardTitle className="flex items-center justify-between text-sm">
-                Motoboys online <Badge variant="secondary">{data?.onlineDrivers.length ?? 0}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="max-h-56 space-y-2 overflow-y-auto pt-0">
-              {data?.onlineDrivers.map((driver) => {
-                const age =
-                  new Date(data.generatedAt).getTime() -
-                  new Date(driver.location.capturedAt).getTime();
-                const stale = age > 90_000;
-                return (
-                  <button
-                    type="button"
-                    key={driver.id}
-                    className="flex w-full items-center justify-between rounded-lg border p-2 text-left text-xs hover:bg-muted"
-                    onClick={() => setSelection({ kind: 'driver', id: driver.id })}
-                  >
-                    <span>
-                      <strong>{driver.name}</strong>
-                      <span className="block text-muted-foreground">
-                        {driver.activeDeliveryIds.length} pedido(s)
-                      </span>
-                    </span>
-                    {stale ? (
-                      <AlertTriangle className="size-4 text-alerta" />
-                    ) : (
-                      <Radio className="size-4 text-status-entregue" />
-                    )}
-                  </button>
-                );
-              })}
-              {data?.onlineDrivers.length === 0 && (
-                <p className="text-sm text-muted-foreground">Nenhum heartbeat válido.</p>
-              )}
-            </CardContent>
-          </Card>
+          <DispatchQueue
+            key={data?.onlineDrivers.map((driver) => driver.id).join('|') ?? 'empty'}
+            token={token}
+            drivers={data?.onlineDrivers ?? []}
+            generatedAt={data?.generatedAt ?? new Date().toISOString()}
+            onSelect={(id) => setSelection({ kind: 'driver', id })}
+          />
 
           <Card className="premium-panel min-h-0 flex-1 overflow-hidden">
             <CardHeader className="py-3">

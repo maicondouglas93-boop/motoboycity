@@ -5387,14 +5387,14 @@ Arquivos principais deste recorte:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| build de `@motoboycity/validation` | aprovado |
-| typecheck completo do monorepo | 8 projetos aprovados |
-| lint completo do monorepo | 8 projetos aprovados |
-| Jest unitário completo da API | 58 suítes e 687 testes aprovados |
-| build da API e build de produção do Company Web | aprovado |
-| `git diff --check` | aprovado antes da atualização deste handoff |
+| Comando / fluxo                                 | Resultado                                   |
+| ----------------------------------------------- | ------------------------------------------- |
+| build de `@motoboycity/validation`              | aprovado                                    |
+| typecheck completo do monorepo                  | 8 projetos aprovados                        |
+| lint completo do monorepo                       | 8 projetos aprovados                        |
+| Jest unitário completo da API                   | 58 suítes e 687 testes aprovados            |
+| build da API e build de produção do Company Web | aprovado                                    |
+| `git diff --check`                              | aprovado antes da atualização deste handoff |
 
 Os testes cobrem vínculo inativo no login e em token existente, retry após
 resposta perdida, reativação de pedido agendado e colisão concorrente `P2002`
@@ -5454,14 +5454,14 @@ Arquivos principais deste recorte:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| build de `@motoboycity/validation` | aprovado |
-| typecheck completo do monorepo | 8 projetos aprovados |
-| lint completo do monorepo | 8 projetos aprovados, sem avisos |
-| Jest unitário completo da API | 58 suítes e 699 testes aprovados |
-| build da API | aprovado |
-| build de produção do Company Web | aprovado, 18 rotas |
+| Comando / fluxo                    | Resultado                        |
+| ---------------------------------- | -------------------------------- |
+| build de `@motoboycity/validation` | aprovado                         |
+| typecheck completo do monorepo     | 8 projetos aprovados             |
+| lint completo do monorepo          | 8 projetos aprovados, sem avisos |
+| Jest unitário completo da API      | 58 suítes e 699 testes aprovados |
+| build da API                       | aprovado                         |
+| build de produção do Company Web   | aprovado, 18 rotas               |
 
 E2E não foi executado porque PostgreSQL e Redis isolados não foram
 provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
@@ -5513,12 +5513,12 @@ exercitam os lifecycles e falhas acima, apesar de estarem verdes.
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| typecheck de `@motoboycity/driver-app` | aprovado |
-| lint de `@motoboycity/driver-app` | aprovado |
-| Jest do Driver App | 8 suítes e 58 testes aprovados |
-| build Android | não executado, conforme o escopo |
+| Comando / fluxo                        | Resultado                        |
+| -------------------------------------- | -------------------------------- |
+| typecheck de `@motoboycity/driver-app` | aprovado                         |
+| lint de `@motoboycity/driver-app`      | aprovado                         |
+| Jest do Driver App                     | 8 suítes e 58 testes aprovados   |
+| build Android                          | não executado, conforme o escopo |
 
 As primeiras execuções dentro do sandbox não conseguiram atravessar os junctions
 do PNPM (`EPERM`/módulos ausentes); os mesmos três comandos foram repetidos fora
@@ -5592,16 +5592,16 @@ Arquivos principais deste recorte:
 
 ### Verificação
 
-| Comando / fluxo | Resultado |
-| --- | --- |
-| build de `@motoboycity/validation` | aprovado |
-| typecheck completo do monorepo | 8 projetos aprovados |
-| lint completo do monorepo | 8 projetos aprovados, sem avisos |
-| Jest completo do Driver App | 12 suítes e 67 testes aprovados |
-| Jest unitário completo da API | 59 suítes e 718 testes aprovados |
-| build da API | aprovado |
-| `:app:compileDebugKotlin` | aprovado; um aviso preexistente de `Notification.Builder` depreciado |
-| `git diff --check` | aprovado antes da atualização final deste handoff |
+| Comando / fluxo                    | Resultado                                                            |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| build de `@motoboycity/validation` | aprovado                                                             |
+| typecheck completo do monorepo     | 8 projetos aprovados                                                 |
+| lint completo do monorepo          | 8 projetos aprovados, sem avisos                                     |
+| Jest completo do Driver App        | 12 suítes e 67 testes aprovados                                      |
+| Jest unitário completo da API      | 59 suítes e 718 testes aprovados                                     |
+| build da API                       | aprovado                                                             |
+| `:app:compileDebugKotlin`          | aprovado; um aviso preexistente de `Notification.Builder` depreciado |
+| `git diff --check`                 | aprovado antes da atualização final deste handoff                    |
 
 E2E não foi executado porque PostgreSQL e Redis isolados não foram
 provisionados. Nenhum seed, Docker, `.env`, secret ou arquivo de sessão Kotlin
@@ -6134,3 +6134,268 @@ empilhando de forma responsiva. Arquivo alterado:
 producao do Admin Web passaram. Proximo passo concreto: abrir pedidos com e sem
 destino, entregador, fatura, lote e historico longo para uma verificacao visual
 final nas larguras desktop e mobile.
+
+## Atualizacao — 2026-08-25: autonomia operacional do motoboy
+
+O fluxo da entrega no aplicativo foi simplificado para que confirmacoes de
+operacao nao dependam de horario retroativo, justificativa digitada ou GPS de
+proximidade. O seletor "Ha quanto tempo aconteceu?" e os links de marcacao
+retroativa foram removidos. "Devolver a fila" agora pede apenas confirmacao e
+grava uma nota padrao no historico.
+
+O botao amarelo do rodape passou a abrir "Opcoes da entrega". O motoboy pode
+cancelar o proprio pedido em qualquer etapa operacional exibida pelo app
+(`ACCEPTED`, `COLLECTED`, `DELIVERED` ou `FAILED`). Antes da coleta, "Problema
+na entrega" devolve o pedido para a fila; depois da coleta, registra `FAILED` e
+mantem o fluxo de devolucao da mercadoria. As acoes continuam auditadas e as
+transicoes condicionais/idempotentes existentes foram preservadas.
+
+No contrato, coordenadas de `fail` e `complete-return` passaram a ser
+opcionais. A API nao confere mais raio ou precisao para entrega com destino ja
+conhecido nem para concluir retorno. GPS permanece obrigatorio somente na
+entrega com `destinationKnownAtCreation=false`, porque nesse caso a coordenada
+e o proprio destino usado para calcular distancia e preco. Nao houve alteracao
+de schema Prisma nem migration.
+
+Arquivos principais alterados:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/lib/activeDeliveries.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/deliveries/deliveries.service.spec.ts`,
+`packages/validation/src/deliveries/mark-failed.schema.ts`,
+`packages/validation/src/deliveries/complete-return.schema.ts`,
+`packages/validation/src/deliveries/cancel-delivery.schema.ts`,
+`packages/api-client/src/deliveries.ts`, `packages/types/src/delivery.ts` e
+`docs/business-rules.md`.
+
+Validacoes executadas: build e typecheck de `@motoboycity/validation`;
+typecheck de API, driver-app, types e api-client; lint de API e driver-app;
+`deliveries.service.spec.ts` com 88 testes; suite do driver-app com 67 testes.
+Tudo passou. Proximo passo concreto: instalar um novo APK e validar em aparelho
+os quatro cenarios: devolver a fila antes da coleta, cancelar antes e depois da
+coleta, informar problema depois da coleta e concluir retorno com GPS ruim ou
+desligado.
+
+## Atualizacao — 2026-08-25: voltar protegido durante entrega no Android
+
+O botao fisico de voltar agora respeita a pilha operacional do aplicativo. Na
+tela de uma entrega, cada toque fecha primeiro a confirmacao ou o menu que
+estiver aberto e somente depois retorna a tela anterior. Se a tela da entrega
+tiver sido aberta como raiz, por notificacao ou substituicao de rota, a pilha e
+recriada na Home em vez de permitir que o Android encerre o aplicativo.
+
+Na Home, enquanto `activeDeliveries` contiver ao menos uma entrega em andamento,
+o botao fisico e consumido e o aplicativo permanece aberto. Se o menu lateral
+estiver visivel, o primeiro toque apenas o fecha. Sem entrega ativa e sem menu
+aberto, o comportamento normal do Android foi preservado.
+
+Arquivos alterados: `apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/driver-app/src/screens/HomeScreen.tsx`. Nao houve mudanca de status,
+contrato de API, persistencia ou configuracao nativa. Validacoes executadas:
+typecheck e lint de `@motoboycity/driver-app`, alem da suite Jest do app com 12
+suites e 67 testes; tudo passou. Proximo passo concreto: instalar o APK e testar
+o botao fisico com o menu amarelo, cada confirmacao, a tela da entrega e a Home,
+confirmando que a entrega continua ativa e o aplicativo nao fecha.
+
+## Atualizacao — 2026-08-25: acoes administrativas nas filas operacionais
+
+Cada card das filas da Home do Admin ganhou um botao de tres pontos. O balao
+exibe as cinco intervencoes solicitadas e habilita cada uma conforme o status:
+alterar entregador, marcar como coletado, marcar como entregue, finalizar e
+cancelar. A acao abre um dialogo compacto com consequencia, motivo obrigatorio
+e, na troca, selecao entre entregadores aprovados e ativos. O clique no menu nao
+interfere com o clique existente que seleciona o pedido no mapa.
+
+As rotas `PATCH /admin/deliveries/:id/collect` e
+`PATCH /admin/deliveries/:id/deliver` foram acrescentadas com guarda de Admin e
+payload Zod compartilhado. A coleta manual preserva a atomicidade do lote e usa
+updates condicionais dentro de transacao. A entrega manual aceita somente
+`COLLECTED` com destino e preco ja conhecidos; sem retorno ela cria as duas
+etapas de historico, conclui e credita o repasse, enquanto com retorno permanece
+em `DELIVERED`. Repeticoes concorrentes sao tratadas de forma idempotente. Nao
+houve mudanca Prisma nem migration.
+
+Pedidos com `destinationKnownAtCreation=false` nao podem ser marcados como
+entregues pelo Admin: a opcao fica desabilitada com explicacao, pois a
+coordenada do app e o dado que gera distancia, preco e repasse. Inventar ou usar
+uma posicao aproximada alteraria dinheiro. Cancelamento reutiliza a rota
+existente; troca de entregador e finalizacao reutilizam as intervencoes ja
+auditadas do Admin.
+
+Arquivos principais: `apps/admin-web/src/app/(app)/page.tsx`,
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`,
+`apps/api/src/admin/deliveries/admin-deliveries.controller.ts`,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts`, seu spec,
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`packages/api-client/src/admin-deliveries.ts` e `docs/business-rules.md`.
+
+Validacoes executadas: build de `@motoboycity/validation`; spec focado do
+AdminDeliveriesService com 30 testes; typecheck e lint dos oito workspaces;
+builds de producao da API e do Admin Web. Tudo passou. Proximo passo concreto:
+publicar API e Admin juntos e fazer smoke test com pedidos em `ACCEPTED`,
+`COLLECTED`, `DELIVERED` e `FAILED`, incluindo lote e entrega com destino por
+GPS.
+
+## Atualizacao — 2026-08-25: atividade auditavel com empresa e motoboy
+
+As mensagens da atividade auditavel do Admin passaram a identificar o pedido,
+a empresa e, nos eventos operacionais pertinentes, o motoboy. Coleta e entrega,
+por exemplo, agora aparecem como `Pedido #12 da empresa Drogaria Nova Farma foi
+coletado por Maicon Douglas.` e `... foi entregue por Maicon Douglas.`. Aceites,
+conclusoes, insucessos e respostas de oferta seguem a mesma redacao clara.
+
+A formatacao ficou centralizada na API e e usada tanto pelos eventos Socket.IO
+quanto pela reconstrução do feed a partir de `DeliveryStatusHistory` e
+`DeliveryOffer`; assim a frase nao volta a ficar generica depois de atualizar a
+pagina. No historico, o motoboy que gravou a transicao tem prioridade sobre o
+entregador atualmente atribuido, evitando trocar o autor de uma coleta ou
+entrega antiga depois de uma reatribuicao. Quando a transicao foi registrada por
+outro perfil, o entregador atribuido e usado como contexto operacional.
+
+Cancelamentos exibem empresa e pedido, mas deliberadamente nao dizem que foram
+feitos "por" um motoboy: empresa, administrador e motoboy podem executar essa
+acao. O nome continua no payload/link quando havia entregador atribuido. Nao
+houve mudanca de schema Prisma, rota ou contrato compartilhado.
+
+Arquivos principais alterados:
+`apps/api/src/common/status-labels.ts` e seu novo spec,
+`apps/api/src/admin/operations/admin-operations.service.ts` e seu spec,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/dispatch/dispatch.service.ts` e o spec de dispatch.
+
+Validacoes executadas: 163 testes focados em quatro suites; typecheck e lint dos
+oito workspaces; build de producao da API; `git diff --check`. Tudo passou.
+Proximo passo concreto: publicar a API e observar no Admin um pedido passando
+por aceite, coleta e entrega, confirmando que eventos novos e o feed recarregado
+mostram a mesma frase com empresa e motoboy.
+
+## Atualizacao — 2026-08-25: rua do destino capturado por GPS
+
+O detalhe de pedido do Admin agora tenta converter a coordenada final de uma
+entrega com destino definido por GPS em endereco legivel. Quando o `DROPOFF`
+possui latitude/longitude e ainda nao tem rua, a API usa geocodificacao reversa
+do Google em portugues do Brasil, separa rua, numero, cidade, UF e CEP e grava
+esses campos no `DeliveryAddress`. Assim, registros antigos tambem sao
+enriquecidos na primeira abertura do detalhe e a interface existente passa a
+mostrar o endereco sem precisar alterar seu contrato.
+
+A consulta e deliberadamente de melhor esforco e acontece somente no detalhe
+acessado por Admin. Falta de chave, timeout, negativa do Google, coordenada sem
+resultado ou falha ao salvar nao impedem a abertura do pedido: a tela continua
+mostrando as coordenadas originais. O endereco resolvido e somente descritivo;
+nao participa de distancia, preco, repasse ou transicao de status. Nao houve
+mudanca de schema Prisma, migration, rota ou contrato compartilhado.
+
+Arquivos alterados neste recorte:
+`apps/api/src/maps/google-maps.service.ts`, seu spec,
+`apps/api/src/deliveries/deliveries.service.ts` e seu spec. Validacoes
+executadas: 107 testes focados em Maps e Deliveries, typecheck e lint da API e
+build de producao da API; tudo passou. Proximo passo concreto: publicar a API,
+abrir no Admin um pedido concluido com destino por GPS e confirmar rua e
+coordenadas no card de entrega. A chave de producao precisa permitir a
+Geocoding API do Google Maps Platform.
+
+## Atualizacao — 2026-08-25: grids nos pedidos de cliente e entregador
+
+As secoes `Pedidos do cliente` em `/clientes/[id]` e `Pedidos do entregador`
+em `/entregadores/[id]` deixaram de usar linhas horizontais largas e passaram
+a usar o mesmo padrao compacto de cards da listagem geral de pedidos. Os cards
+possuem faixa lateral com a cor do status, cabecalho com numero e status,
+informacoes operacionais agrupadas, valor ou repasse destacado e botao de
+detalhe em largura total.
+
+O grid e responsivo: uma coluna no celular e crescimento progressivo ate sete
+colunas a partir de 1800 px. Na empresa foram preservados modalidade, data,
+distancia, valor, filtros e paginacao no servidor. No entregador foram
+preservados empresa, modalidade, distancia, retorno, repasse e filtro de
+status. Consultas TanStack Query, endpoints, contratos e regras financeiras
+nao foram alterados.
+
+Arquivos alterados neste recorte:
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx` e
+`apps/admin-web/src/app/(app)/entregadores/[id]/page.tsx`. Validacoes
+executadas: typecheck, lint e build de producao do Admin Web; tudo passou.
+Proximo passo concreto: abrir um cliente e um entregador com pedidos em varios
+status nas larguras mobile, desktop e 1920 px para conferir truncamento de
+nomes longos e a densidade de sete cards.
+
+## Atualizacao — 2026-08-25: fila de despacho editavel na Home do Admin
+
+A Home do Admin passou a expor a fila real usada pelo despacho. O card `Fila de
+despacho` identifica o primeiro como `Na vez`, o segundo como `Proximo` e mostra
+as demais posicoes, foto/iniciais, quantidade de pedidos ativos, tempo online e
+saude do GPS. Setas permitem subir ou descer cada motoboy; `Salvar ordem` grava
+a nova sequencia e `Desfazer` restaura o estado recebido da API. Outros paineis
+Admin abertos invalidam a consulta pelo evento Socket.IO
+`dispatch:queue-updated`.
+
+A prioridade foi implementada como sorted set operacional no Redis. Na ausencia
+de ordem persistida, o fallback continua sendo `wentOnlineAt ASC`; motoboys que
+entram depois sao anexados ao fim e sair do online remove a posicao. O
+`DispatchService` aplica essa prioridade somente depois de filtrar regiao,
+modalidade, conta, heartbeat, oferta pendente e capacidade, preservando os
+locks, a transacao serializable e a idempotencia ja existentes. Reordenar nao
+toca em oferta ja enviada nem em pedido aceito: vale para os proximos despachos.
+Depois que uma oferta nasce com timeout valido, a vez e consumida e o motoboy e
+movido para o fim da fila circular; falha isolada nessa atualizacao de prioridade
+nao cancela a oferta ja protegida pelo timeout.
+
+Foi adicionada a rota Admin protegida
+`PATCH /admin/operations/dispatch-queue`, o schema Zod
+`reorderDispatchQueueSchema`, o campo `queuePosition` em
+`AdminOnlineDriverItem` e o metodo correspondente no api-client. Se um motoboy
+da tela ficar offline antes do salvamento, a API devolve conflito para impedir
+uma decisao sobre fila antiga; quem ficar online durante a edicao e preservado
+no fim. A alteracao tambem gera atividade em tempo real com o nome do Admin.
+Nao houve schema Prisma nem migration.
+
+Arquivos principais deste recorte:
+`apps/api/src/live-presence/live-driver-presence.service.ts`,
+`apps/api/src/dispatch/dispatch.service.ts`,
+`apps/api/src/admin/operations/`,
+`apps/api/src/realtime/realtime.gateway.ts`,
+`packages/validation/src/admin/reorder-dispatch-queue.schema.ts`,
+`packages/types/src/operations.ts`,
+`packages/api-client/src/admin-operations.ts`,
+`apps/admin-web/src/components/operations/dispatch-queue.tsx` e
+`apps/admin-web/src/app/(app)/page.tsx`.
+
+Validacoes executadas: build de `@motoboycity/validation`; 80 testes focados de
+dispatch, operacoes Admin e presenca Redis; typecheck dos oito workspaces;
+lint de API e Admin; builds de producao da API e do Admin Web. Tudo passou.
+Proximo passo concreto: homologar com tres motoboys online, alterar a ordem e
+criar um pedido compativel, confirmando que a oferta vai ao primeiro elegivel e
+que uma oferta que ja estava pendente nao muda de destinatario.
+
+## Atualizacao — 2026-08-25: release Android pilot.3 e publicacao do controle operacional
+
+O conjunto de alteracoes de autonomia do motoboy, acoes administrativas sobre
+pedidos, fila operacional editavel, mensagens de atividade mais completas,
+geocodificacao reversa do destino final e grids de pedidos nos detalhes de
+clientes e entregadores foi consolidado para publicacao. O driver-app foi
+promovido para `0.1.0-pilot.3`; o APK usa `versionCode` `3` para atualizar os
+pilotos anteriores.
+
+Antes do build passaram `pnpm typecheck`, `pnpm lint`, os 62 suites/757 testes
+unitarios da API, os 12 suites/67 testes do driver-app e os builds de producao
+da API e do Admin Web. O release Android foi compilado em uma worktree fisica
+curta fora do repositorio para evitar o limite de caminhos do CMake no Windows,
+com a chave de assinatura copiada temporariamente para um caminho curto; chave,
+senhas, `local.properties` e `google-services.json` continuaram fora do Git.
+
+O `assembleRelease` concluiu com lint vital e Firebase Messaging incluído. O
+artefato verificado tem pacote `com.motoboycity.driverapp`, label `motoboycity`,
+`versionName` `0.1.0-pilot.3`, `versionCode` `3`, 74.968.521 bytes e SHA-256
+`C8F20CF6C97335E1793DAC2071CBA8CBC8DBAA3E0F0D0A1A22AE5343BFB5152F`.
+`apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial do
+piloto anterior. A inspecao do bundle confirmou
+`https://motoboycity-api.onrender.com`, ausencia de `localhost` e metadado do
+Google Maps. O APK foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.3-vc3.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.3-vc3.apk`.
+
+O artefato ainda nao foi instalado nem submetido a smoke test em aparelho nesta
+sessao. Proximo passo concreto: instalar com atualizacao sobre o piloto 2 e
+validar login, mapa/GPS, presenca parada por mais de 3 minutos, push/oferta em
+foreground/background/tela bloqueada e o fluxo completo de aceitar, devolver,
+cancelar, registrar problema, coletar e concluir.

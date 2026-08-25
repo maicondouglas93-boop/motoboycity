@@ -18,9 +18,13 @@ const motoboyApto = {
 function entrega(over: Record<string, unknown> = {}) {
   return {
     id: 'delivery-1',
+    batchId: null,
     status: 'COLLECTED',
     driverId: 'driver-1',
     driverValue: 10,
+    destinationKnownAtCreation: true,
+    requiresReturn: false,
+    failedAt: null,
     ...over,
   };
 }
@@ -28,12 +32,12 @@ function entrega(over: Record<string, unknown> = {}) {
 describe('AdminDeliveriesService', () => {
   let service: AdminDeliveriesService;
   let prisma: {
-    delivery: { findUnique: jest.Mock };
+    delivery: { findUnique: jest.Mock; findMany: jest.Mock };
     driver: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let tx: {
-    delivery: { update: jest.Mock };
+    delivery: { update: jest.Mock; updateMany: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock };
   };
   let deliveriesService: {
@@ -45,17 +49,17 @@ describe('AdminDeliveriesService', () => {
 
   beforeEach(async () => {
     tx = {
-      delivery: { update: jest.fn() },
+      delivery: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       deliveryStatusHistory: { create: jest.fn() },
     };
     prisma = {
-      delivery: { findUnique: jest.fn() },
+      delivery: { findUnique: jest.fn(), findMany: jest.fn() },
       driver: { findUnique: jest.fn() },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     deliveriesService = {
       createForCompany: jest.fn().mockResolvedValue({ id: 'delivery-created' }),
-      detail: jest.fn().mockResolvedValue({}),
+      detail: jest.fn((_admin: User, id: string) => Promise.resolve({ id })),
       publishDeliveryUpdate: jest.fn(),
     };
     financeLedgerService = { creditDriverRepasse: jest.fn() };
@@ -256,6 +260,110 @@ describe('AdminDeliveriesService', () => {
       await expect(
         service.forceComplete(admin, 'delivery-1', { reason: 'confirmado' }),
       ).rejects.toThrow('já foi finalizado');
+    });
+  });
+
+  describe('marcar coleta manualmente', () => {
+    it('avanca ACCEPTED e registra autor e motivo', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ status: 'ACCEPTED' }));
+
+      await service.markCollected(admin, 'delivery-1', { reason: 'confirmado com a loja' });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'ACCEPTED', driverId: 'driver-1' },
+        data: { status: 'COLLECTED', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          deliveryId: 'delivery-1',
+          fromStatus: 'ACCEPTED',
+          toStatus: 'COLLECTED',
+          changedByUserId: 'admin-1',
+          note: expect.stringContaining('confirmado com a loja'),
+        }),
+      });
+    });
+
+    it('preserva a coleta atomica do lote', async () => {
+      const first = entrega({ id: 'delivery-1', batchId: 'batch-1', status: 'ACCEPTED' });
+      const second = entrega({ id: 'delivery-2', batchId: 'batch-1', status: 'ACCEPTED' });
+      prisma.delivery.findUnique.mockResolvedValue(first);
+      prisma.delivery.findMany.mockResolvedValue([first, second]);
+
+      await service.markCollected(admin, 'delivery-1', { reason: 'lote retirado na loja' });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledTimes(2);
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(2);
+      expect(deliveriesService.publishDeliveryUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('recusa pedido que ainda nao foi aceito', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ status: 'AWAITING_DRIVER' }));
+
+      await expect(
+        service.markCollected(admin, 'delivery-1', { reason: 'pedido sem aceite' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('trata repeticao concorrente como idempotente', async () => {
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce(entrega({ status: 'ACCEPTED' }))
+        .mockResolvedValueOnce(entrega({ status: 'COLLECTED' }));
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.markCollected(admin, 'delivery-1', { reason: 'confirmado duas vezes' }),
+      ).resolves.toEqual({ id: 'delivery-1' });
+    });
+  });
+
+  describe('marcar entrega manualmente', () => {
+    it('mantem DELIVERED quando ha retorno e nao credita antes da volta', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ requiresReturn: true }));
+
+      await service.markDelivered(admin, 'delivery-1', { reason: 'cliente confirmou entrega' });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
+        data: { status: 'DELIVERED', statusChangedAt: expect.any(Date) },
+      });
+      expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
+    });
+
+    it('fecha e credita quando a entrega nao exige retorno', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ requiresReturn: false }));
+
+      await service.markDelivered(admin, 'delivery-1', { reason: 'confirmado por telefone' });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }),
+      );
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(2);
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledWith(tx, {
+        id: 'delivery-1',
+        driverId: 'driver-1',
+        driverValue: 10,
+      });
+    });
+
+    it('recusa entrega com destino que ainda depende do GPS', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        entrega({ destinationKnownAtCreation: false, driverValue: null }),
+      );
+
+      await expect(
+        service.markDelivered(admin, 'delivery-1', { reason: 'sem coordenada da entrega' }),
+      ).rejects.toThrow('localização da entrega');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa marcar entregue antes da coleta', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ status: 'ACCEPTED' }));
+
+      await expect(
+        service.markDelivered(admin, 'delivery-1', { reason: 'etapa incorreta' }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

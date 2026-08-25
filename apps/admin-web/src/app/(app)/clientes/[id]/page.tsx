@@ -4,8 +4,18 @@ import Link from 'next/link';
 import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react';
-import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
+import {
+  AlertCircle,
+  ArrowUpRight,
+  Bike,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  KeyRound,
+  MapPin,
+  WalletCards,
+} from 'lucide-react';
+import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -283,33 +293,77 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               </Card>
             ) : (
               <div className="space-y-3">
-                <div className="space-y-2" aria-busy={ordersQuery.isFetching}>
+                <div
+                  className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 min-[1800px]:grid-cols-7"
+                  aria-busy={ordersQuery.isFetching}
+                >
                   {orders.map((delivery) => (
-                    <Card key={delivery.id}>
-                      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
-                        <div>
-                          <p className="font-medium">
-                            #{delivery.displayNumber} · {delivery.serviceTypeName}
+                    <Card
+                      key={delivery.id}
+                      size="sm"
+                      className="h-full min-w-0 border-primary/15 bg-gradient-to-br from-card via-card to-admin-soft/35"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`absolute inset-y-0 left-0 w-1 ${statusRailClass(delivery.status)}`}
+                      />
+                      <CardContent className="flex h-full min-w-0 flex-col gap-3 pl-4">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <span className="rounded-md bg-admin-soft px-2 py-1 text-[11px] font-bold tracking-wide text-admin-deep">
+                            #{delivery.displayNumber}
+                          </span>
+                          <StatusChip
+                            status={delivery.status}
+                            className="max-w-full px-2 py-1 text-[10px]"
+                          />
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <p className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                            <Bike className="size-3 text-primary" aria-hidden="true" /> Modalidade
                           </p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(delivery.createdAt)} ·{' '}
+                          <p
+                            className="truncate text-sm font-semibold text-admin-deep"
+                            title={delivery.serviceTypeName}
+                          >
+                            {delivery.serviceTypeName}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2 border-y border-primary/10 py-3 text-xs text-muted-foreground">
+                          <p className="flex items-center gap-2">
+                            <CalendarDays
+                              className="size-3.5 shrink-0 text-primary"
+                              aria-hidden="true"
+                            />
+                            <span className="truncate" title={formatDate(delivery.createdAt)}>
+                              {formatDate(delivery.createdAt)}
+                            </span>
+                          </p>
+                          <p className="flex items-center gap-2">
+                            <MapPin className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
                             {delivery.distanceKm === null
-                              ? 'distância não calculada'
+                              ? 'Distância pendente'
                               : `${delivery.distanceKm} km`}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <StatusChip status={delivery.status} />
-                            <p className="mt-1 text-sm font-medium">{money(delivery.totalValue)}</p>
-                          </div>
-                          <Link
-                            className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-accent"
-                            href={`/pedidos/${delivery.id}`}
-                          >
-                            Ver detalhes
-                          </Link>
+
+                        <div className="mt-auto rounded-xl bg-admin-soft/70 p-2.5 ring-1 ring-inset ring-primary/10">
+                          <p className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                            <WalletCards className="size-3 text-primary" aria-hidden="true" /> Valor
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-admin-deep">
+                            {money(delivery.totalValue)}
+                          </p>
                         </div>
+
+                        <Link
+                          className="inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded-lg border border-primary/15 bg-card px-2 text-xs font-semibold text-primary shadow-sm transition-colors hover:bg-admin-soft"
+                          href={`/pedidos/${delivery.id}`}
+                        >
+                          Ver detalhes
+                          <ArrowUpRight className="size-3" aria-hidden="true" />
+                        </Link>
                       </CardContent>
                     </Card>
                   ))}

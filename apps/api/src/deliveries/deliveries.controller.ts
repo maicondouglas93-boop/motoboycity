@@ -116,7 +116,7 @@ export class DeliveriesController {
 
   /**
    * Corpo opcional: as telas que cancelam sem motivo continuam funcionando.
-   * O painel do admin manda o motivo, e ele vira nota no historico do pedido.
+   * Admin e motoboy podem mandar um motivo, que vira nota no historico.
    */
   @Patch(':id/cancel')
   cancel(

@@ -3,7 +3,7 @@ import { deliveriesApi } from './apiClient';
 
 /**
  * `FAILED` ainda e operacional: a mercadoria continua com o motoboy ate ele
- * confirmar, por GPS, que voltou a loja. Omiti-lo faz a devolucao desaparecer
+ * confirmar que voltou a loja. Omiti-lo faz a devolucao desaparecer
  * da Home e interrompe o rastreamento depois de reabrir o aplicativo.
  */
 export const operationalStatuses: DeliveryStatus[] = [

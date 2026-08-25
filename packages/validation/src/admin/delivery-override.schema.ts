@@ -22,5 +22,11 @@ export const forceCompleteSchema = z.object({
   reason: reasonSchema,
 });
 
+/** Coleta/entrega confirmada manualmente pelo administrador. */
+export const manualDeliveryStageSchema = z.object({
+  reason: reasonSchema,
+});
+
 export type ReassignDriverPayload = z.infer<typeof reassignDriverSchema>;
 export type ForceCompletePayload = z.infer<typeof forceCompleteSchema>;
+export type ManualDeliveryStagePayload = z.infer<typeof manualDeliveryStageSchema>;

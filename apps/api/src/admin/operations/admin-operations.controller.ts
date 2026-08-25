@@ -1,12 +1,15 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import {
   adminActivityQuerySchema,
   deliveryOperationsQuerySchema,
+  reorderDispatchQueueSchema,
   type AdminActivityQuery,
   type DeliveryOperationsQuery,
+  type ReorderDispatchQueuePayload,
 } from '@motoboycity/validation';
 import type {
   AdminDeliveryDispatchAudit,
+  AdminDispatchQueueResult,
   AdminOperationsResult,
   OperationalActivityEvent,
   SilentDriverItem,
@@ -48,6 +51,14 @@ export class AdminOperationsController {
   @Get('silent-drivers')
   silentDrivers(): Promise<SilentDriverItem[]> {
     return this.service.silentDrivers();
+  }
+
+  @Patch('dispatch-queue')
+  reorderDispatchQueue(
+    @Body(new ZodValidationPipe(reorderDispatchQueueSchema)) payload: ReorderDispatchQueuePayload,
+    @CurrentUser() user: User,
+  ): Promise<AdminDispatchQueueResult> {
+    return this.service.reorderDispatchQueue(user, payload);
   }
 
   @Get('deliveries/:id/dispatch-audit')

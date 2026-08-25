@@ -1,5 +1,6 @@
 import type {
   AdminDeliveryDispatchAudit,
+  AdminDispatchQueueResult,
   AdminOperationsResult,
   DeliveryStatus,
   OperationalActivityEvent,
@@ -63,6 +64,18 @@ export function createAdminOperationsApi({ baseUrl }: { baseUrl: string }) {
         { headers: withAuth(accessToken) },
       );
       return parseJsonOrThrow<AdminDeliveryDispatchAudit>(response);
+    },
+
+    async reorderDispatchQueue(
+      accessToken: string,
+      payload: { driverIds: string[] },
+    ): Promise<AdminDispatchQueueResult> {
+      const response = await fetch(`${baseUrl}/admin/operations/dispatch-queue`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminDispatchQueueResult>(response);
     },
   };
 }

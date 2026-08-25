@@ -132,7 +132,7 @@ describe('DeliveriesService', () => {
     company: { findUnique: jest.Mock };
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
-    deliveryAddress: { findFirst: jest.Mock };
+    deliveryAddress: { findFirst: jest.Mock; updateMany: jest.Mock };
     businessHour: { findMany: jest.Mock };
     delivery: {
       findMany: jest.Mock;
@@ -144,7 +144,7 @@ describe('DeliveriesService', () => {
     $transaction: jest.Mock;
   };
   let pricingService: { quote: jest.Mock };
-  let googleMapsService: { getDistance: jest.Mock };
+  let googleMapsService: { getDistance: jest.Mock; reverseGeocode: jest.Mock };
   let dispatchService: {
     assertConfigured: jest.Mock;
     dispatchDelivery: jest.Mock;
@@ -179,12 +179,11 @@ describe('DeliveriesService', () => {
       company: { findUnique: jest.fn() },
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
-      /**
-       * Sem coordenada por padrao: a conferencia de proximidade fica desligada,
-       * que e o estado dos enderecos antigos. Os testes da regra devolvem uma
-       * coordenada explicitamente.
-       */
-      deliveryAddress: { findFirst: jest.fn().mockResolvedValue(null) },
+      /** Enderecos antigos podem nao ter coordenada; a operacao deve tolerar. */
+      deliveryAddress: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       // Sem horario configurado: a operacao esta sempre aberta, que e o estado
       // padrao de quem nunca mexeu nisso.
       businessHour: { findMany: jest.fn().mockResolvedValue([]) },
@@ -198,7 +197,10 @@ describe('DeliveriesService', () => {
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     pricingService = { quote: jest.fn() };
-    googleMapsService = { getDistance: jest.fn() };
+    googleMapsService = {
+      getDistance: jest.fn(),
+      reverseGeocode: jest.fn().mockResolvedValue(null),
+    };
     dispatchService = {
       assertConfigured: jest.fn().mockResolvedValue(undefined),
       dispatchDelivery: jest.fn().mockResolvedValue(undefined),
@@ -1119,6 +1121,97 @@ describe('DeliveriesService', () => {
 
       expect(result.id).toBe('delivery-1');
     });
+
+    it('admin identifica e salva a rua de um destino capturado por GPS', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          destinationKnownAtCreation: false,
+          status: 'COMPLETED',
+          addresses: [
+            {
+              id: 'dropoff-gps-1',
+              type: 'DROPOFF',
+              street: null,
+              number: null,
+              complement: null,
+              city: null,
+              state: null,
+              zip: null,
+              lat: -20.1509698,
+              lng: -41.6146408,
+              referenceNote: null,
+            },
+          ],
+        }),
+      );
+      googleMapsService.reverseGeocode.mockResolvedValue({
+        street: 'Avenida Antonio Florencio Alvim',
+        number: '205',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+
+      const result = await service.detail(adminUser, 'delivery-1');
+
+      expect(googleMapsService.reverseGeocode).toHaveBeenCalledWith({
+        lat: -20.1509698,
+        lng: -41.6146408,
+      });
+      expect(prisma.deliveryAddress.updateMany).toHaveBeenCalledWith({
+        where: { id: 'dropoff-gps-1', street: null },
+        data: {
+          street: 'Avenida Antonio Florencio Alvim',
+          number: '205',
+          city: 'Lajinha',
+          state: 'MG',
+          zip: '36980-000',
+        },
+      });
+      expect(result.addresses[0]).toMatchObject({
+        street: 'Avenida Antonio Florencio Alvim',
+        number: '205',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+        lat: -20.1509698,
+        lng: -41.6146408,
+      });
+    });
+
+    it('mantem as coordenadas quando o Google nao consegue identificar a rua', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          destinationKnownAtCreation: false,
+          status: 'COMPLETED',
+          addresses: [
+            {
+              id: 'dropoff-gps-1',
+              type: 'DROPOFF',
+              street: null,
+              number: null,
+              complement: null,
+              city: null,
+              state: null,
+              zip: null,
+              lat: -20.1509698,
+              lng: -41.6146408,
+              referenceNote: null,
+            },
+          ],
+        }),
+      );
+      googleMapsService.reverseGeocode.mockRejectedValue(new Error('Google indisponivel'));
+
+      const result = await service.detail(adminUser, 'delivery-1');
+
+      expect(result.addresses[0]).toMatchObject({
+        street: null,
+        lat: -20.1509698,
+        lng: -41.6146408,
+      });
+      expect(prisma.deliveryAddress.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('redispatch', () => {
@@ -1252,6 +1345,42 @@ describe('DeliveriesService', () => {
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:cancelled', {
         deliveryIds: ['delivery-1'],
       });
+    });
+
+    it.each(['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'] as const)(
+      'motoboy pode cancelar o próprio pedido em %s',
+      async (status) => {
+        prisma.driver.findUnique.mockResolvedValue(driverRow);
+        prisma.delivery.findUnique
+          .mockResolvedValueOnce(fullDeliveryRow({ status, driverId: 'driver-1' }))
+          .mockResolvedValueOnce(fullDeliveryRow({ status: 'CANCELLED', driverId: 'driver-1' }));
+
+        await expect(
+          service.cancel(driverUser, 'delivery-1', 'Cancelado pelo motoboy.'),
+        ).resolves.toMatchObject({ status: 'CANCELLED' });
+
+        expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            deliveryId: 'delivery-1',
+            fromStatus: status,
+            toStatus: 'CANCELLED',
+            changedByUserId: driverUser.id,
+            note: 'Cancelado pelo motoboy.',
+          }),
+        });
+      },
+    );
+
+    it('motoboy não pode cancelar pedido atribuído a outro entregador', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ status: 'COLLECTED', driverId: 'driver-2' }),
+      );
+
+      await expect(service.cancel(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(tx.delivery.update).not.toHaveBeenCalled();
     });
 
     it('empresa não pode cancelar pedido de outra empresa', async () => {
@@ -1505,7 +1634,7 @@ describe('DeliveriesService', () => {
       );
     });
 
-    describe('proximidade do endereço informado', () => {
+    describe('autonomia com endereço informado', () => {
       // Lajinha, centro. O segundo ponto fica ~1,5 km ao norte.
       const DESTINO = { lat: -20.1389, lng: -41.6069 };
       const LONGE = { lat: -20.1255, lng: -41.6069 };
@@ -1528,14 +1657,12 @@ describe('DeliveriesService', () => {
         });
       }
 
-      it('recusa quando o motoboy está longe, dizendo a distância', async () => {
+      it('aceita a confirmação do motoboy mesmo quando o GPS está longe', async () => {
         pedidoComDestinoConhecido();
 
         await expect(
           service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
-        ).rejects.toMatchObject({
-          message: expect.stringContaining('200m do endereço de entrega'),
-        });
+        ).resolves.toBeDefined();
       });
 
       it('aceita quando está dentro do raio', async () => {
@@ -1546,16 +1673,12 @@ describe('DeliveriesService', () => {
         ).resolves.toBeDefined();
       });
 
-      it('recusa quando a precisão do GPS é pior que o próprio raio', async () => {
-        // Com raio de 200 m e fix de 900 m, "estou no cliente" seria verdadeiro
-        // em qualquer lugar do bairro: aprovar por ruido e pior que recusar.
+      it('aceita a confirmação mesmo com GPS impreciso', async () => {
         pedidoComDestinoConhecido();
 
         await expect(
           service.markDelivered(driverUser, 'delivery-1', { ...DESTINO, accuracy: 900 }),
-        ).rejects.toMatchObject({
-          message: expect.stringContaining('precisão do GPS'),
-        });
+        ).resolves.toBeDefined();
       });
 
       it('não confere na marcação retroativa', async () => {
@@ -1596,7 +1719,7 @@ describe('DeliveriesService', () => {
         await expect(service.markDelivered(driverUser, 'delivery-1', {})).resolves.toBeDefined();
       });
 
-      it('respeita o raio configurado pelo admin', async () => {
+      it('não consulta o raio configurado pelo admin', async () => {
         pedidoComDestinoConhecido();
         platformSettingsService.get.mockResolvedValue({
           businessHoursEnabled: false,
@@ -1606,6 +1729,7 @@ describe('DeliveriesService', () => {
         await expect(
           service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
         ).resolves.toBeDefined();
+        expect(platformSettingsService.get).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -1757,22 +1881,35 @@ describe('DeliveriesService', () => {
       expect(tx.delivery.updateMany).not.toHaveBeenCalled();
     });
 
-    it('rejeita quando o raio de retorno ainda não foi configurado', async () => {
+    it('conclui sem exigir raio de retorno configurado', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
-      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'DELIVERED',
+          requiresReturn: true,
+        }),
+      );
       platformSettingsService.get.mockResolvedValue({
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
       });
 
       await expect(
-        service.completeReturn(driverUser, 'delivery-1', nearPickup),
-      ).rejects.toBeInstanceOf(ConflictException);
+        service.completeReturn(driverUser, 'delivery-1', {}),
+      ).resolves.toBeDefined();
+      expect(platformSettingsService.get).not.toHaveBeenCalled();
     });
 
-    it('rejeita quando a empresa não tem coordenadas cadastradas', async () => {
+    it('conclui mesmo quando a empresa não tem coordenadas cadastradas', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
-      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'DELIVERED',
+          requiresReturn: true,
+        }),
+      );
       platformSettingsService.get.mockResolvedValue({
         returnProximityRadiusMeters: 200,
         businessHoursEnabled: false,
@@ -1780,13 +1917,19 @@ describe('DeliveriesService', () => {
       prisma.companyAddress.findFirst.mockResolvedValue({ ...pickupAddress, lat: null, lng: null });
 
       await expect(
-        service.completeReturn(driverUser, 'delivery-1', nearPickup),
-      ).rejects.toBeInstanceOf(ConflictException);
+        service.completeReturn(driverUser, 'delivery-1', {}),
+      ).resolves.toBeDefined();
     });
 
-    it('rejeita quando o motoboy está fora do raio configurado', async () => {
+    it('conclui mesmo quando a posição informada está longe', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
-      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ driverId: 'driver-1' }));
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'DELIVERED',
+          requiresReturn: true,
+        }),
+      );
       platformSettingsService.get.mockResolvedValue({
         returnProximityRadiusMeters: 200,
         businessHoursEnabled: false,
@@ -1799,7 +1942,7 @@ describe('DeliveriesService', () => {
 
       await expect(
         service.completeReturn(driverUser, 'delivery-1', { lat: -21, lng: -42 }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).resolves.toBeDefined();
     });
 
     it('rejeita quando não há entregas aguardando retorno', async () => {
@@ -1836,7 +1979,7 @@ describe('DeliveriesService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('fecha só os itens DELIVERED+requiresReturn, dentro do raio, sem mexer nos demais', async () => {
+    it('fecha só os itens DELIVERED+requiresReturn, sem mexer nos demais', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
         fullDeliveryRow({ id: 'delivery-1', driverId: 'driver-1', batchId: 'batch-1' }),

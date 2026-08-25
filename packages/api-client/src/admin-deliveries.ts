@@ -2,6 +2,7 @@ import type { DeliveryDetail } from '@motoboycity/types';
 import type {
   CreateDeliveryPayload,
   ForceCompletePayload,
+  ManualDeliveryStagePayload,
   ReassignDriverPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
@@ -45,6 +46,10 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
     },
     reassignDriver: (accessToken: string, id: string, payload: ReassignDriverPayload) =>
       patch(accessToken, id, 'driver', payload),
+    markCollected: (accessToken: string, id: string, payload: ManualDeliveryStagePayload) =>
+      patch(accessToken, id, 'collect', payload),
+    markDelivered: (accessToken: string, id: string, payload: ManualDeliveryStagePayload) =>
+      patch(accessToken, id, 'deliver', payload),
     forceComplete: (accessToken: string, id: string, payload: ForceCompletePayload) =>
       patch(accessToken, id, 'force-complete', payload),
   };

@@ -178,6 +178,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to('admin').emit('driver:presence', payload);
   }
 
+  emitDispatchQueueUpdated(payload: unknown): void {
+    this.server.to('admin').emit('dispatch:queue-updated', payload);
+  }
+
   emitDeliveryLocation(companyId: string, payload: unknown): void {
     this.server.to('admin').emit('delivery:location', payload);
     this.server.to(this.companyRoom(companyId)).emit('delivery:location', payload);

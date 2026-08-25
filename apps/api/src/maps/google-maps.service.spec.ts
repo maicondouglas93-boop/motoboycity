@@ -106,6 +106,80 @@ describe('GoogleMapsService', () => {
     });
   });
 
+  describe('reverseGeocode', () => {
+    it('separa rua, numero, cidade, UF e CEP da coordenada final', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(
+        jsonResponse({
+          status: 'OK',
+          results: [
+            {
+              formatted_address: 'Avenida Antonio Florencio Alvim, 205 - Lajinha - MG',
+              address_components: [
+                {
+                  long_name: 'Avenida Antonio Florencio Alvim',
+                  short_name: 'Av. Antonio Florencio Alvim',
+                  types: ['route'],
+                },
+                { long_name: '205', short_name: '205', types: ['street_number'] },
+                { long_name: 'Lajinha', short_name: 'Lajinha', types: ['locality'] },
+                {
+                  long_name: 'Minas Gerais',
+                  short_name: 'MG',
+                  types: ['administrative_area_level_1'],
+                },
+                { long_name: '36980-000', short_name: '36980-000', types: ['postal_code'] },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await expect(
+        service.reverseGeocode({ lat: -20.1509698, lng: -41.6146408 }),
+      ).resolves.toEqual({
+        street: 'Avenida Antonio Florencio Alvim',
+        number: '205',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+
+      const [requestUrl] = fetchSpy.mock.calls[0] as [URL, RequestInit];
+      expect(requestUrl.searchParams.get('latlng')).toBe('-20.1509698,-41.6146408');
+      expect(requestUrl.searchParams.get('language')).toBe('pt-BR');
+    });
+
+    it('usa o endereco formatado quando o Google nao separa a rua', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(
+        jsonResponse({
+          status: 'OK',
+          results: [{ formatted_address: 'Estrada sem nome, Lajinha - MG, Brasil' }],
+        }),
+      );
+
+      await expect(
+        service.reverseGeocode({ lat: -20.15, lng: -41.61 }),
+      ).resolves.toEqual({
+        street: 'Estrada sem nome, Lajinha - MG, Brasil',
+        number: null,
+        city: null,
+        state: null,
+        zip: null,
+      });
+    });
+
+    it('devolve null quando a coordenada nao possui endereco conhecido', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse({ status: 'ZERO_RESULTS' }));
+
+      await expect(
+        service.reverseGeocode({ lat: -20.15, lng: -41.61 }),
+      ).resolves.toBeNull();
+    });
+  });
+
   it('lança GoogleMapsNotConfiguredError quando não há chave configurada, sem chamar a API', async () => {
     config.get.mockReturnValue(undefined);
 

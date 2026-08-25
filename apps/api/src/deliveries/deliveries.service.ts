@@ -30,11 +30,13 @@ import type {
 import { Prisma } from '@prisma/client';
 import type { Delivery, DeliveryStatus, User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
-import { haversineDistanceMeters } from '../common/haversine';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { PricingService } from '../pricing/pricing.service';
-import { GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
+import {
+  GoogleMapsNotConfiguredError,
+  type ReverseGeocodedAddress,
+} from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { StageTimesAccumulator } from './delivery-stage-times';
 import {
@@ -45,7 +47,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
-import { deliveryStatusEventLabel } from '../common/status-labels';
+import { deliveryActivityMessage } from '../common/status-labels';
 import { checkBusinessHours } from './business-hours';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
@@ -101,17 +103,9 @@ type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
  * uma rota inventada, sem ninguem perceber.
  *
  * 100 m e a mesma ordem de grandeza usada em produtos parecidos para separar "GPS travado"
- * de "triangulacao de antena". O retorno tem regra propria: a precisao e comparada com o
- * raio configurado, porque ali o que importa e a checagem nao virar ruido.
+ * de "triangulacao de antena". Ele vale somente quando a coordenada define o destino e o preco.
  */
 const MAX_LOCATION_ACCURACY_METERS = 100;
-/**
- * Raio padrao para concluir entrega com destino informado.
- *
- * 200 m: abaixo disso o GPS urbano recusa entrega que realmente aconteceu, por
- * erro do proprio aparelho. O admin pode apertar ou afrouxar nas configuracoes.
- */
-const DEFAULT_DELIVERY_PROXIMITY_METERS = 200;
 
 export interface DeliveryAddressItem {
   type: string;
@@ -852,20 +846,72 @@ export class DeliveriesService {
 
     await this.assertCanAccess(user, delivery);
 
+    let resolvedGpsAddress: {
+      addressId: string;
+      value: ReverseGeocodedAddress;
+    } | null = null;
+
+    // Pedidos com destino definido somente na entrega guardam a coordenada
+    // capturada pelo app. Ao abrir o detalhe no Admin, enriquecemos registros
+    // novos e antigos com rua/cidade sem colocar o Google no caminho critico
+    // do motoboy. Qualquer falha mantem a coordenada visivel e nao altera o
+    // status, os valores ou a conclusao do pedido.
+    if (user.type === 'ADMIN') {
+      const gpsDropoff = delivery.addresses.find(
+        (address) =>
+          address.type === 'DROPOFF' &&
+          !address.street?.trim() &&
+          address.lat !== null &&
+          address.lng !== null,
+      );
+
+      if (gpsDropoff) {
+        try {
+          const value = await this.googleMapsService.reverseGeocode({
+            lat: Number(gpsDropoff.lat),
+            lng: Number(gpsDropoff.lng),
+          });
+          if (value) {
+            await this.prisma.deliveryAddress.updateMany({
+              where: { id: gpsDropoff.id, street: null },
+              data: {
+                street: value.street,
+                number: value.number,
+                city: value.city,
+                state: value.state,
+                zip: value.zip,
+              },
+            });
+            resolvedGpsAddress = { addressId: gpsDropoff.id, value };
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Falha ao identificar o endereco final da entrega ${id}: ${String(error)}`,
+          );
+        }
+      }
+    }
+
     return {
       ...this.toListItem(delivery),
-      addresses: delivery.addresses.map((address) => ({
-        type: address.type,
-        street: address.street,
-        number: address.number,
-        complement: address.complement,
-        city: address.city,
-        state: address.state,
-        zip: address.zip,
-        lat: address.lat === null ? null : Number(address.lat),
-        lng: address.lng === null ? null : Number(address.lng),
-        referenceNote: address.referenceNote,
-      })),
+      addresses: delivery.addresses.map((address) => {
+        const resolved =
+          resolvedGpsAddress && resolvedGpsAddress.addressId === address.id
+            ? resolvedGpsAddress.value
+            : null;
+        return {
+          type: address.type,
+          street: resolved?.street ?? address.street,
+          number: resolved?.number ?? address.number,
+          complement: address.complement,
+          city: resolved?.city ?? address.city,
+          state: resolved?.state ?? address.state,
+          zip: resolved?.zip ?? address.zip,
+          lat: address.lat === null ? null : Number(address.lat),
+          lng: address.lng === null ? null : Number(address.lng),
+          referenceNote: address.referenceNote,
+        };
+      }),
       driver: delivery.driver
         ? {
             id: delivery.driver.id,
@@ -930,7 +976,13 @@ export class DeliveriesService {
    * entrega dos outros precisa deixar dito por que.
    */
   async cancel(user: User, id: string, reason?: string): Promise<DeliveryDetail> {
-    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      include: {
+        company: { select: { tradeName: true } },
+        driver: { include: { user: { select: { name: true } } } },
+      },
+    });
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
     }
@@ -938,7 +990,13 @@ export class DeliveriesService {
     await this.assertCanAccess(user, delivery);
 
     const siblings = delivery.batchId
-      ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: delivery.batchId },
+          include: {
+            company: { select: { tradeName: true } },
+            driver: { include: { user: { select: { name: true } } } },
+          },
+        })
       : [delivery];
 
     // Itens já CANCELLED/COMPLETED ficam de fora — sem isto, um item que já
@@ -955,6 +1013,9 @@ export class DeliveriesService {
         throw new ConflictException(
           'A empresa só pode cancelar o lote enquanto nenhum entregador tiver aceitado.',
         );
+      }
+      if (user.type === 'DRIVER' && item.driverId !== delivery.driverId) {
+        throw new ForbiddenException('O lote possui uma entrega atribuída a outro motoboy.');
       }
     }
 
@@ -1008,10 +1069,19 @@ export class DeliveriesService {
       });
       this.realtimeGateway.emitAdminActivity({
         type: 'DELIVERY_CANCELLED',
-        message: `Pedido #${item.displayNumber}: CANCELLED.`,
+        message: deliveryActivityMessage({
+          displayNumber: item.displayNumber,
+          companyName: item.company?.tradeName,
+          status: 'CANCELLED',
+          driverName: item.driver?.user.name,
+        }),
         deliveryId: item.id,
         displayNumber: item.displayNumber,
         companyId: item.companyId,
+        ...(item.company?.tradeName ? { companyName: item.company.tradeName } : {}),
+        ...(item.driver
+          ? { driverId: item.driver.id, driverName: item.driver.user.name }
+          : {}),
         status: 'CANCELLED',
       });
     }
@@ -1143,9 +1213,9 @@ export class DeliveriesService {
    *
    * Nao e cancelamento. A regra de negocio confirmada e que a mercadoria volta
    * para a loja e a empresa paga a corrida normal — entao o pedido NAO fecha
-   * aqui: ele vai para FAILED e so fecha quando o motoboy confirmar o retorno
-   * perto da loja, pelo mesmo `completeReturn` de uma entrega bem-sucedida com
-   * retorno. Isso faz o repasse sair pelo caminho ja existente, com o
+   * aqui: ele vai para FAILED e so fecha quando o motoboy confirmar o retorno,
+   * pelo mesmo `completeReturn` de uma entrega bem-sucedida com retorno. Isso
+   * faz o repasse sair pelo caminho ja existente, com o
    * `driverValue` congelado na criacao — ou seja, a corrida normal.
    *
    * Nao ha desconto nem cobranca extra: o valor ja congelado e o que vale.
@@ -1212,13 +1282,9 @@ export class DeliveriesService {
       throw error;
     }
 
-    this.realtimeGateway.emitAdminActivity({
-      type: 'DELIVERY_STATUS_CHANGED',
-      message: `Pedido #${delivery.displayNumber} sem sucesso na entrega — retornando à loja.`,
-      deliveryId: id,
-    });
-
-    return this.detail(user, id);
+    const detail = await this.detail(user, id);
+    this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
   }
 
   private describeFailure(payload: MarkFailedPayload): string {
@@ -1228,7 +1294,10 @@ export class DeliveriesService {
       RECIPIENT_REFUSED: 'Destinatário recusou',
       OTHER: 'Outro motivo',
     };
-    const where = `registrado a ${payload.lat.toFixed(5)}, ${payload.lng.toFixed(5)}`;
+    const where =
+      payload.lat !== undefined && payload.lng !== undefined
+        ? `registrado a ${payload.lat.toFixed(5)}, ${payload.lng.toFixed(5)}`
+        : 'registrado pelo motoboy';
     const note = payload.note ? ` — ${payload.note}` : '';
     return `${labels[payload.reason]} (${where})${note}`;
   }
@@ -1358,8 +1427,6 @@ export class DeliveriesService {
       surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
       capturedLat = payload.lat;
       capturedLng = payload.lng;
-    } else {
-      await this.assertNearDropoff(delivery.id, payload);
     }
 
     const autoComplete = !delivery.requiresReturn;
@@ -1452,13 +1519,12 @@ export class DeliveriesService {
     return detail;
   }
 
-  /** Fecha os itens do lote que exigem retorno e já foram entregues —
-   * só quando o motoboy está fisicamente perto do endereço de coleta da
-   * empresa (checagem por distância em linha reta, não rota real). */
+  /** Fecha os itens do lote que exigem retorno e já foram entregues.
+   * A confirmação do motoboy é suficiente; GPS não bloqueia a operação. */
   async completeReturn(
     user: User,
     id: string,
-    payload: CompleteReturnPayload,
+    _payload: CompleteReturnPayload,
   ): Promise<DeliveryGroupResult> {
     const driver = await this.findDriverForUser(user);
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
@@ -1491,43 +1557,6 @@ export class DeliveriesService {
       throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
     }
 
-    const settings = await this.platformSettingsService.get();
-    if (settings.returnProximityRadiusMeters === null) {
-      throw new ConflictException(
-        'O raio de tolerância para fechar o retorno ainda não foi configurado pelo admin.',
-      );
-    }
-
-    const pickupAddress = await this.prisma.companyAddress.findFirst({
-      where: { companyId: delivery.companyId, isPrimary: true },
-    });
-    if (!pickupAddress || pickupAddress.lat === null || pickupAddress.lng === null) {
-      throw new ConflictException(
-        'O endereço de coleta da empresa não tem coordenadas cadastradas.',
-      );
-    }
-
-    // Precisao maior que o proprio raio torna a checagem vazia: com raio de 200 m e um
-    // fix de 800 m, "voltei na loja" fica verdadeiro em qualquer lugar do bairro. Recusar
-    // e melhor que aprovar por ruido — o motoboy tenta de novo com o GPS estabilizado.
-    if (payload.accuracy !== undefined && payload.accuracy > settings.returnProximityRadiusMeters) {
-      throw new ConflictException(
-        `A precisao do GPS agora (${Math.round(payload.accuracy)}m) e maior que o raio aceito ` +
-          `(${settings.returnProximityRadiusMeters}m). Aguarde o sinal melhorar e tente de novo.`,
-      );
-    }
-
-    const distanceMeters = haversineDistanceMeters(
-      { lat: payload.lat, lng: payload.lng },
-      { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) },
-    );
-    if (distanceMeters > settings.returnProximityRadiusMeters) {
-      throw new ConflictException(
-        `Você precisa estar a até ${settings.returnProximityRadiusMeters}m da empresa para fechar o ` +
-          `retorno (está a ${Math.round(distanceMeters)}m).`,
-      );
-    }
-
     if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
       throw new InternalServerErrorException(
         'Não foi possível gerar o repasse: há uma entrega de retorno sem entregador ou valor definido.',
@@ -1550,9 +1579,7 @@ export class DeliveriesService {
               fromStatus: item.status,
               toStatus: 'COMPLETED',
               changedByUserId: user.id,
-              note:
-                `Retorno validado a ${Math.round(distanceMeters)}m do ponto de coleta ` +
-                `(raio configurado: ${settings.returnProximityRadiusMeters}m).`,
+              note: 'Retorno confirmado pelo motoboy.',
             },
           });
           await this.financeLedgerService.creditDriverRepasse(tx, {
@@ -1633,7 +1660,12 @@ export class DeliveriesService {
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, delivery);
     this.realtimeGateway.emitAdminActivity({
       type,
-      message: `Pedido #${delivery.displayNumber} ${deliveryStatusEventLabel[delivery.status]}.`,
+      message: deliveryActivityMessage({
+        displayNumber: delivery.displayNumber,
+        companyName: delivery.companyName,
+        status: delivery.status,
+        driverName: delivery.driver?.name,
+      }),
       deliveryId: delivery.id,
       displayNumber: delivery.displayNumber,
       companyId: delivery.companyId,
@@ -2113,12 +2145,12 @@ export class DeliveriesService {
    * Descobre a coordenada do endereco de entrega.
    *
    * Existe porque o endereco chega so como texto: nem o painel da empresa nem
-   * as integracoes mandam coordenada, e sem ela nao ha como conferir se o
-   * motoboy estava mesmo no cliente ao concluir.
+   * as integracoes mandam coordenada. O ponto enriquece mapa e navegacao, mas
+   * nao e usado para bloquear a confirmacao do motoboy.
    *
    * Devolve `null` quando o Google nao encontra o endereco ou quando a
    * consulta falha. Nenhum dos dois pode impedir a loja de lancar o pedido —
-   * um endereco mal digitado atrasa a conferencia, nao a operacao.
+   * um endereco mal digitado reduz o contexto do mapa, nao trava a operacao.
    */
   private async resolverCoordenadaDoDestino(endereco: {
     street: string;
@@ -2139,7 +2171,7 @@ export class DeliveriesService {
       if (!ponto) {
         this.logger.warn(
           `Endereco de entrega sem coordenada: "${this.formatAddress(endereco)}" nao foi ` +
-            'encontrado. A conferencia de proximidade ficara desligada neste pedido.',
+            'encontrado. O pedido seguira com o endereco em texto.',
         );
         return { lat: null, lng: null };
       }
@@ -2147,62 +2179,9 @@ export class DeliveriesService {
     } catch (erro) {
       this.logger.warn(
         `Falha ao geocodificar "${this.formatAddress(endereco)}": ${String(erro)}. ` +
-          'O pedido segue sem conferencia de proximidade.',
+          'O pedido segue com o endereco em texto.',
       );
       return { lat: null, lng: null };
-    }
-  }
-
-  private async assertNearDropoff(
-    deliveryId: string,
-    payload: MarkDeliveredPayload,
-  ): Promise<void> {
-    if (payload.occurredAt !== undefined) return;
-
-    const dropoff = await this.prisma.deliveryAddress.findFirst({
-      where: { deliveryId, type: 'DROPOFF' },
-      select: { lat: true, lng: true, street: true, number: true },
-    });
-
-    if (!dropoff || dropoff.lat === null || dropoff.lng === null) {
-      this.logger.warn(
-        `Entrega ${deliveryId} concluida sem conferir proximidade: o endereco ` +
-          `"${dropoff?.street ?? '?'}, ${dropoff?.number ?? '?'}" nao tem coordenada.`,
-      );
-      return;
-    }
-
-    if (payload.lat === undefined || payload.lng === undefined) {
-      this.logger.warn(
-        `Entrega ${deliveryId} concluida sem conferir proximidade: o aplicativo ` +
-          'nao enviou a posicao. Provavelmente uma versao anterior.',
-      );
-      return;
-    }
-
-    const { deliveryProximityRadiusMeters } = await this.platformSettingsService.get();
-    const raio = deliveryProximityRadiusMeters ?? DEFAULT_DELIVERY_PROXIMITY_METERS;
-
-    // Precisao pior que o proprio raio torna a checagem vazia: com raio de 200 m
-    // e um fix de 800 m, "estou no cliente" fica verdadeiro em qualquer lugar do
-    // bairro. Recusar e melhor que aprovar por ruido.
-    if (payload.accuracy !== undefined && payload.accuracy > raio) {
-      throw new ConflictException(
-        `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é maior que o raio aceito ` +
-          `(${raio}m). Aguarde o sinal melhorar e tente de novo.`,
-      );
-    }
-
-    const distancia = haversineDistanceMeters(
-      { lat: payload.lat, lng: payload.lng },
-      { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
-    );
-
-    if (distancia > raio) {
-      throw new ConflictException(
-        `Você precisa estar a até ${raio}m do endereço de entrega para concluir ` +
-          `(está a ${Math.round(distancia)}m).`,
-      );
     }
   }
 

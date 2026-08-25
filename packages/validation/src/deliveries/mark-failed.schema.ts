@@ -14,10 +14,8 @@ export const deliveryFailureReasonValues = [
  * corrida normal, entao o pedido fecha pela mesma confirmacao de retorno que
  * uma entrega bem-sucedida com `requiresReturn`.
  *
- * lat/lng registram ONDE a tentativa aconteceu. Nao definem preco (diferente
- * de `markDelivered` em modo GPS), mas sao a unica prova de que o motoboy
- * chegou ao destino antes de declarar insucesso — sem isso, "nao consegui
- * entregar" seria indistinguivel de "nao fui".
+ * lat/lng podem registrar onde a tentativa aconteceu, mas são opcionais: uma
+ * falha de GPS não pode impedir o motoboy de informar o problema.
  */
 export const markFailedSchema = z
   .object({
@@ -25,9 +23,13 @@ export const markFailedSchema = z
       message: 'Informe um motivo válido para o insucesso.',
     }),
     note: z.string().trim().max(500, 'A observação deve ter no máximo 500 caracteres.').optional(),
-    lat: z.number().min(-90).max(90),
-    lng: z.number().min(-180).max(180),
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
     accuracy: z.number().min(0).optional(),
+  })
+  .refine((data) => (data.lat === undefined) === (data.lng === undefined), {
+    message: 'Informe lat e lng juntos, ou nenhum dos dois.',
+    path: ['lat'],
   })
   /**
    * "Outro" sem explicacao nao serve para nada: quem for analisar o relatorio

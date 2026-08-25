@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
+  BackHandler,
   Linking,
   Platform,
   Pressable,
@@ -12,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
 import type { AvailableDeliveryItem } from '@motoboycity/types';
@@ -200,6 +201,23 @@ export function HomeScreen({ navigation }: Props) {
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
   const isAvailable = availability === 'AVAILABLE';
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (drawerVisible) {
+          setDrawerVisible(false);
+          return true;
+        }
+
+        // Com uma corrida em andamento, a Home e o limite seguro da pilha:
+        // o botao fisico nao pode encerrar o aplicativo e interromper o fluxo.
+        return activeDeliveries.length > 0;
+      });
+
+      return () => subscription.remove();
+    }, [activeDeliveries.length, drawerVisible]),
+  );
 
   async function syncPresence(token: string) {
     try {

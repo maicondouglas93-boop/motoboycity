@@ -6,8 +6,8 @@ import { z } from 'zod';
  * **Opcional, ao contrario do cancelamento de fatura.** A loja cancela pedido
  * pelo aplicativo em segundos, muitas vezes porque o cliente desistiu na hora;
  * exigir texto ali transformaria uma acao corriqueira em formulario. Do lado do
- * admin a tela pede o motivo, porque quem cancela entrega dos outros precisa
- * deixar dito por que.
+ * admin a tela pede o motivo, e o app do motoboy envia uma nota padrao para
+ * manter a trilha de auditoria sem criar outro formulario.
  *
  * O corpo inteiro tambem e opcional: as telas antigas cancelam sem enviar nada
  * e continuam funcionando.

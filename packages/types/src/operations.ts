@@ -36,6 +36,8 @@ export interface OperationalActivityEvent {
 
 export interface AdminOnlineDriverItem {
   id: string;
+  /** Posicao global usada como prioridade nos proximos despachos elegiveis. */
+  queuePosition: number;
   name: string;
   phone: string;
   /**
@@ -55,6 +57,11 @@ export interface AdminOnlineDriverItem {
 export interface AdminOperationsResult extends DeliveryOperationsResult {
   onlineDrivers: AdminOnlineDriverItem[];
   generatedAt: string;
+}
+
+export interface AdminDispatchQueueResult {
+  driverIds: string[];
+  updatedAt: string;
 }
 
 export interface AdminDeliveryDispatchAudit {

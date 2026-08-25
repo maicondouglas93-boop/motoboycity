@@ -14,15 +14,14 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { PushService, type PushMessage } from '../push/push.service';
+import { deliveryActivityMessage } from '../common/status-labels';
 import { buildOfferPayload, remainingSeconds } from './offer-payload';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
 
-type PendingOfferCreationResult =
-  | { offers: DeliveryOffer[] }
-  | { retryNextDriver: boolean };
+type PendingOfferCreationResult = { offers: DeliveryOffer[] } | { retryNextDriver: boolean };
 
 /**
  * Status em que o motoboy ainda tem trabalho em maos e nao pode receber outra
@@ -213,6 +212,17 @@ export class DispatchService {
       // pois handleOfferExpired e idempotente para ofertas ja EXPIRED.
       await Promise.allSettled(offerIds.map((offerId) => this.cancelOfferTimeout(offerId)));
       throw schedulingFailure.reason;
+    }
+
+    // A oferta valida consome a vez deste motoboy. A mudanca de prioridade e
+    // operacional e nao pode invalidar uma oferta que ja nasceu com timeout;
+    // por isso uma falha isolada aqui e registrada, mas nao interrompe o envio.
+    try {
+      await this.livePresence.moveToDispatchTail(nextDriverId);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Nao foi possivel mover o motoboy ${nextDriverId} para o fim da fila: ${String(error)}`,
+      );
     }
 
     this.realtimeGateway.emitToDriver(
@@ -505,9 +515,7 @@ export class DispatchService {
 
     await this.cancelOfferTimeout(offerId);
     await this.notifyOfferResolved(driverId, [offerId], 'accepted');
-    this.realtimeGateway.emitAdminActivity(
-      `Pedido #${delivery.displayNumber} foi aceito por um motoboy.`,
-    );
+    await this.emitAcceptedActivities([delivery], driverId);
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId: delivery.id,
       displayNumber: delivery.displayNumber,
@@ -632,9 +640,7 @@ export class DispatchService {
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
     const accepted = deliveries.find((delivery) => delivery.id === deliveryId)!;
-    this.realtimeGateway.emitAdminActivity(
-      `Lote de ${deliveries.length} pedidos foi aceito por um motoboy.`,
-    );
+    await this.emitAcceptedActivities(deliveries, driverId);
     for (const item of deliveries) {
       this.realtimeGateway.emitDeliveryUpdated(item.companyId, {
         deliveryId: item.id,
@@ -1069,9 +1075,7 @@ export class DispatchService {
       throw error;
     }
 
-    this.realtimeGateway.emitAdminActivity(
-      `Pedido #${delivery.displayNumber} foi assumido por um motoboy a partir dos pedidos disponíveis.`,
-    );
+    await this.emitAcceptedActivities(irmaos, driverId);
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId: delivery.id,
       status: delivery.status,
@@ -1294,11 +1298,14 @@ export class DispatchService {
       select: { driverId: true },
     });
 
+    const orderedDriverIds = await this.livePresence.orderForDispatch(
+      presences.map((presence) => presence.driverId),
+    );
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
-    for (const presence of presences) {
-      if (!(await this.livePresence.isLive(presence.driverId))) continue;
-      if (!(await this.cabeMaisUmaEntrega(presence.driverId, limiteSimultaneo))) continue;
-      return presence.driverId;
+    for (const driverId of orderedDriverIds) {
+      if (!(await this.livePresence.isLive(driverId))) continue;
+      if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) continue;
+      return driverId;
     }
     return null;
   }
@@ -1338,6 +1345,58 @@ export class DispatchService {
       where: { driverId, status: { in: ASSIGNMENT_BLOCKING_STATUSES } },
     });
     return emAndamento < limiteSimultaneo;
+  }
+
+  /**
+   * O aceite nasce neste servico, antes de DeliveriesService montar o detalhe
+   * completo. Esta consulta curta evita que o feed em tempo real diga apenas
+   * "um motoboy" enquanto o historico recarregado ja conhece os nomes.
+   */
+  private async emitAcceptedActivities(
+    items: Array<{ id: string; displayNumber: number; companyId: string }>,
+    driverId: string,
+  ): Promise<void> {
+    let enriched: Array<{ id: string; company: { tradeName: string } }> = [];
+    let driver: { user: { name: string } } | null = null;
+    try {
+      const [foundDeliveries, foundDriver] = await Promise.all([
+        this.prisma.delivery.findMany({
+          where: { id: { in: items.map((item) => item.id) } },
+          include: { company: { select: { tradeName: true } } },
+        }),
+        this.prisma.driver.findUnique({
+          where: { id: driverId },
+          include: { user: { select: { name: true } } },
+        }),
+      ]);
+      enriched = foundDeliveries ?? [];
+      driver = foundDriver ?? null;
+    } catch (error) {
+      // A entrega ja foi aceita. Falha ao enriquecer uma mensagem auxiliar nao
+      // pode transformar sucesso operacional em erro e induzir uma repeticao.
+      this.logger.warn(`Falha ao enriquecer atividade de aceite: ${String(error)}`);
+    }
+    const enrichedById = new Map(enriched.map((item) => [item.id, item]));
+
+    for (const item of items) {
+      const complete = enrichedById.get(item.id);
+      this.realtimeGateway.emitAdminActivity({
+        type: 'DELIVERY_STATUS_CHANGED',
+        message: deliveryActivityMessage({
+          displayNumber: item.displayNumber,
+          companyName: complete?.company?.tradeName,
+          status: 'ACCEPTED',
+          driverName: driver?.user.name,
+        }),
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        companyId: item.companyId,
+        ...(complete?.company?.tradeName ? { companyName: complete.company.tradeName } : {}),
+        driverId,
+        ...(driver?.user.name ? { driverName: driver.user.name } : {}),
+        status: 'ACCEPTED',
+      });
+    }
   }
 
   private eligibleDriverWhere(regionId: string, serviceTypeIds: string[]): Prisma.DriverWhereInput {

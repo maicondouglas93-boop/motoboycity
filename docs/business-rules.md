@@ -20,8 +20,8 @@ congelado (`returnValue`) em `Delivery`, vindo de `PricingTable.returnFee`
 pedido. A empresa paga o extra (aumenta o valor total do pedido). Repassado
 100% ao motoboy, sem comissão da plataforma na perna de retorno. Acontece
 entre `DELIVERED` e `COMPLETED` — sem status novo. O fechamento
-(`complete-return`) exige o motoboy fisicamente perto do endereço de coleta
-da empresa — ver "Destino conhecido vs. capturado por GPS" abaixo.
+(`complete-return`) usa a confirmação do motoboy e não pode ser bloqueado por
+GPS, distância ou precisão do aparelho.
 
 ## Comissão (motoboy/plataforma)
 
@@ -44,24 +44,54 @@ exigiria uma decisão de produto separada.
 ## Cálculo de distância
 
 Rota real via Google Maps Routes API — explicitamente não é distância em
-linha reta. **Exceção deliberada**: a checagem de proximidade de retorno
-(`complete-return`) usa distância em linha reta (Haversine) de propósito —
-é uma checagem de "está perto o suficiente pra fechar", não um cálculo de
-preço.
+linha reta. O GPS continua obrigatório quando a posição capturada é o próprio
+destino usado para calcular distância e preço; não é usado para bloquear a
+confirmação de entrega com endereço já conhecido nem a confirmação de retorno.
 
 ## Cancelamento
 
 Empresa só pode cancelar enquanto nenhum motoboy aceitou. Admin pode
 cancelar a qualquer momento, em qualquer status (exceto já
-CANCELLED/COMPLETED). Motoboy **não pode** cancelar depois de aceitar — só
-admin pode remover um pedido de um motoboy pós-aceite. Sem penalidade
-monetária definida pra nenhum cenário de cancelamento.
+CANCELLED/COMPLETED). O motoboy pode cancelar um pedido atribuído a ele em
+qualquer etapa operacional ativa. Antes da coleta, também pode apenas devolver
+o pedido à fila; depois da coleta, pode informar problema e retornar a
+mercadoria à loja. Sem penalidade monetária definida pra nenhum cenário de
+cancelamento.
+
+As ações do motoboy usam o horário atual do servidor. O aplicativo não exige
+mais declaração retroativa, texto de justificativa para devolver à fila ou
+prova de proximidade. Confirmações simples continuam existindo para evitar
+toques acidentais e todas as transições permanecem no histórico auditável.
+
+## Intervenções operacionais pelo administrador
+
+Nos cards das filas, o administrador pode trocar o entregador, confirmar
+coleta, confirmar entrega, cancelar ou finalizar um pedido. Toda intervenção
+exige motivo, grava o usuário administrador no histórico e respeita a ordem das
+etapas. A coleta continua atômica para o lote inteiro. Marcar uma entrega sem
+retorno também conclui o pedido e libera o repasse; com retorno, mantém o pedido
+em `DELIVERED` até a finalização.
+
+O painel não marca como entregue um pedido cujo destino e preço ainda dependem
+do GPS do motoboy. Sem a coordenada real, não existe distância segura para
+calcular cobrança e repasse; esse caso precisa ser confirmado pelo aplicativo.
 
 ## Timeout de despacho
 
 Fila via Redis. Oferta vai pro primeiro motoboy da fila; duração da janela
 de aceite é configurável pelo admin (não hardcoded); se expirar sem
 resposta, a oferta passa automaticamente pro próximo da fila.
+
+Uma oferta criada com timeout válido consome a vez do motoboy e o move para o
+fim da sequência. Assim a fila é circular mesmo quando o motoboy pode carregar
+mais de um pedido; recusa e expiração continuam procurando o próximo elegível.
+
+A Home do administrador mostra a sequência global dos motoboys online e permite
+reordená-la. Sem ajuste manual, a prioridade inicial segue a entrada online mais
+antiga. A mudança manual vale somente para ofertas futuras: não cancela oferta pendente
+nem altera pedido aceito. Região, modalidades habilitadas, heartbeat, bloqueio e
+capacidade continuam filtrando os candidatos; quando um motoboy incompatível é
+ignorado, a ordem relativa dos demais é preservada.
 
 ## Suspensão/bloqueio de motoboy
 
@@ -208,8 +238,8 @@ entre dois modos:
 
 Fechamento: item sem `requiresReturn` fecha sozinho (`COMPLETED`) assim que
 marcado entregue. Item com `requiresReturn=true` fica em `DELIVERED` até o
-motoboy voltar fisicamente perto da empresa e confirmar via
-`complete-return`.
+motoboy confirmar o retorno via `complete-return`. A confirmação permanece
+auditada, mas GPS e proximidade da empresa não bloqueiam essa ação.
 
 **Contexto histórico, pra não reabrir a discussão sem necessidade**: uma
 versão anterior deste mesmo conceito (2026-08-10) tinha sido explicitamente

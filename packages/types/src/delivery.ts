@@ -165,9 +165,9 @@ export interface MarkDeliveredPayload {
 }
 
 export interface CompleteReturnPayload {
-  lat: number;
-  lng: number;
-  /** Raio de erro do fix em metros — ver complete-return.schema.ts. */
+  lat?: number;
+  lng?: number;
+  /** Raio de erro do fix em metros, quando o aparelho disponibilizar. */
   accuracy?: number;
 }
 

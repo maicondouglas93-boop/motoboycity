@@ -3,9 +3,11 @@ import type { User } from '@prisma/client';
 import {
   forceCompleteSchema,
   createDeliverySchema,
+  manualDeliveryStageSchema,
   reassignDriverSchema,
   type CreateDeliveryPayload,
   type ForceCompletePayload,
+  type ManualDeliveryStagePayload,
   type ReassignDriverPayload,
 } from '@motoboycity/validation';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -41,6 +43,24 @@ export class AdminDeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.adminDeliveriesService.reassignDriver(user, id, body);
+  }
+
+  @Patch(':id/collect')
+  markCollected(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(manualDeliveryStageSchema)) body: ManualDeliveryStagePayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.markCollected(user, id, body);
+  }
+
+  @Patch(':id/deliver')
+  markDelivered(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(manualDeliveryStageSchema)) body: ManualDeliveryStagePayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.markDelivered(user, id, body);
   }
 
   @Patch(':id/force-complete')

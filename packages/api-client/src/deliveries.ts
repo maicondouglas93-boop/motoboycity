@@ -166,9 +166,8 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     /**
      * `reason` e opcional e vira a nota do historico do pedido.
      *
-     * A loja cancela pelo aplicativo sem preencher nada; o painel do admin
-     * pede o motivo, porque quem cancela entrega dos outros precisa deixar
-     * dito por que.
+     * A loja pode cancelar sem preencher nada. Admin e motoboy podem enviar
+     * uma nota curta para deixar o contexto no historico.
      */
     async cancel(accessToken: string, id: string, reason?: string): Promise<DeliveryDetail> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/cancel`, {
@@ -234,8 +233,8 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       payload: {
         reason: 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
         note?: string;
-        lat: number;
-        lng: number;
+        lat?: number;
+        lng?: number;
         accuracy?: number;
       },
     ): Promise<DeliveryDetail> {
@@ -263,12 +262,14 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     async completeReturn(
       accessToken: string,
       id: string,
-      payload: CompleteReturnPayload,
+      payload?: CompleteReturnPayload,
     ): Promise<DeliveryGroupResult> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/complete-return`, {
         method: 'PATCH',
-        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: payload
+          ? { ...withAuth(accessToken), 'Content-Type': 'application/json' }
+          : withAuth(accessToken),
+        ...(payload && { body: JSON.stringify(payload) }),
       });
       return parseJsonOrThrow<DeliveryGroupResult>(response);
     },

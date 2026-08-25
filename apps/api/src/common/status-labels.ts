@@ -25,6 +25,52 @@ export const deliveryStatusEventLabel: Record<DeliveryStatus, string> = {
   AWAITING_PAYMENT: 'aguardando pagamento',
 };
 
+interface DeliveryActivityMessageInput {
+  displayNumber: number;
+  companyName?: string | null;
+  status: DeliveryStatus;
+  driverName?: string | null;
+}
+
+/**
+ * Frase completa usada no feed auditavel do Admin.
+ *
+ * Empresa e motoboy fazem parte da frase, em vez de aparecerem apenas como
+ * links soltos abaixo dela. O nome do motoboy entra somente nos estados em que
+ * ele efetivamente participa da operacao; em cancelamentos, por exemplo, o
+ * autor pode ser empresa, admin ou motoboy, entao nao atribuimos a acao a ele.
+ */
+export function deliveryActivityMessage({
+  displayNumber,
+  companyName,
+  status,
+  driverName,
+}: DeliveryActivityMessageInput): string {
+  const order = `Pedido #${displayNumber}${companyName ? ` da empresa ${companyName}` : ''}`;
+  const byDriver = driverName ? ` por ${driverName}` : '';
+
+  switch (status) {
+    case 'SCHEDULED':
+      return `${order} foi agendado.`;
+    case 'AWAITING_DRIVER':
+      return `${order} está buscando motoboy.`;
+    case 'ACCEPTED':
+      return `${order} foi aceito${byDriver || ' por um motoboy'}.`;
+    case 'COLLECTED':
+      return `${order} foi coletado${byDriver}.`;
+    case 'DELIVERED':
+      return `${order} foi entregue${byDriver}.`;
+    case 'FAILED':
+      return `${order} não foi entregue${byDriver} e está retornando à loja.`;
+    case 'COMPLETED':
+      return `${order} foi concluído${byDriver}.`;
+    case 'CANCELLED':
+      return `${order} foi cancelado.`;
+    case 'AWAITING_PAYMENT':
+      return `${order} está aguardando pagamento.`;
+  }
+}
+
 export type DeliveryOfferResponse = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED';
 
 export const offerResponseLabel: Record<DeliveryOfferResponse, string> = {
@@ -33,3 +79,33 @@ export const offerResponseLabel: Record<DeliveryOfferResponse, string> = {
   DECLINED: 'recusada',
   EXPIRED: 'expirada',
 };
+
+interface OfferActivityMessageInput {
+  displayNumber: number;
+  companyName?: string | null;
+  response: DeliveryOfferResponse;
+  driverName?: string | null;
+}
+
+export function offerActivityMessage({
+  displayNumber,
+  companyName,
+  response,
+  driverName,
+}: OfferActivityMessageInput): string {
+  const offer = `Oferta do pedido #${displayNumber}${
+    companyName ? ` da empresa ${companyName}` : ''
+  }`;
+  const driver = driverName ?? 'um motoboy';
+
+  switch (response) {
+    case 'PENDING':
+      return `${offer} foi enviada para ${driver}.`;
+    case 'ACCEPTED':
+      return `${offer} foi aceita por ${driver}.`;
+    case 'DECLINED':
+      return `${offer} foi recusada por ${driver}.`;
+    case 'EXPIRED':
+      return `${offer} expirou para ${driver}.`;
+  }
+}

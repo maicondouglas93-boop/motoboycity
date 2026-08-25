@@ -23,6 +23,14 @@ export interface Coordinate {
   lng: number;
 }
 
+export interface ReverseGeocodedAddress {
+  street: string;
+  number: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
 export class GoogleMapsNotConfiguredError extends Error {
   constructor() {
     super('GOOGLE_MAPS_API_KEY não configurada. Contate o suporte.');
@@ -53,11 +61,31 @@ interface GeocodeApiResponse {
   status: string;
   error_message?: string;
   results?: Array<{
+    formatted_address?: string;
+    address_components?: Array<{
+      long_name: string;
+      short_name: string;
+      types: string[];
+    }>;
     geometry?: {
       location?: { lat: number; lng: number };
       location_type?: string;
     };
   }>;
+}
+
+type GeocodeResult = NonNullable<GeocodeApiResponse['results']>[number];
+
+function addressComponent(
+  result: GeocodeResult,
+  types: string[],
+  name: 'long_name' | 'short_name' = 'long_name',
+): string | null {
+  for (const type of types) {
+    const component = result.address_components?.find((item) => item.types.includes(type));
+    if (component?.[name]) return component[name];
+  }
+  return null;
 }
 
 /**
@@ -162,6 +190,85 @@ export class GoogleMapsService {
     if (!PRECISOES_ACEITAS.has(precisao)) return null;
 
     return { lat: local.lat, lng: local.lng };
+  }
+
+  /**
+   * Converte a coordenada capturada pelo app em endereco legivel.
+   *
+   * Diferente do `geocode`, o resultado serve apenas para explicar no painel
+   * onde a entrega terminou. Ele nunca participa do calculo de distancia ou
+   * preco, portanto uma rua aproximada e melhor que esconder a localizacao —
+   * as coordenadas originais continuam sendo a fonte auditavel.
+   */
+  async reverseGeocode(coordinate: Coordinate): Promise<ReverseGeocodedAddress | null> {
+    const apiKey = this.config.get<string>('GOOGLE_MAPS_API_KEY');
+    if (!apiKey) {
+      throw new GoogleMapsNotConfiguredError();
+    }
+
+    const url = new URL(GEOCODE_ENDPOINT);
+    url.searchParams.set('latlng', `${coordinate.lat},${coordinate.lng}`);
+    url.searchParams.set('key', apiKey);
+    url.searchParams.set('region', 'br');
+    url.searchParams.set('language', 'pt-BR');
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new GoogleMapsTimeoutError();
+      }
+      throw new GoogleMapsApiError('Falha de rede ao identificar o endereço da coordenada.');
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+
+    if (!response.ok) {
+      throw new GoogleMapsApiError(`Geocodificação reversa retornou HTTP ${response.status}.`);
+    }
+
+    const body = (await response.json()) as GeocodeApiResponse;
+    if (body.status === 'ZERO_RESULTS') return null;
+    if (body.status !== 'OK') {
+      throw new GoogleMapsApiError(
+        `Geocodificação reversa retornou erro: ${body.error_message ?? body.status}`,
+      );
+    }
+
+    const result = body.results?.[0];
+    if (!result) return null;
+
+    const route = addressComponent(result, ['route']);
+    const formatted = result.formatted_address?.trim() || null;
+    if (!route && !formatted) return null;
+
+    // Se o Google nao separou a rua, o endereco formatado ainda e mais util
+    // que "Endereco nao informado". Nesse fallback nao repetimos cidade/UF.
+    if (!route) {
+      return {
+        street: formatted!,
+        number: null,
+        city: null,
+        state: null,
+        zip: null,
+      };
+    }
+
+    return {
+      street: route,
+      number: addressComponent(result, ['street_number']),
+      city: addressComponent(result, [
+        'locality',
+        'administrative_area_level_2',
+        'sublocality_level_1',
+      ]),
+      state: addressComponent(result, ['administrative_area_level_1'], 'short_name'),
+      zip: addressComponent(result, ['postal_code']),
+    };
   }
 
   async getDistance(request: DistanceRequest): Promise<DistanceResult> {

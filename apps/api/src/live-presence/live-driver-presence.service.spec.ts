@@ -2,6 +2,9 @@ const mockRedis = {
   connect: jest.fn(),
   quit: jest.fn(),
   get: jest.fn(),
+  zrange: jest.fn(),
+  zrevrange: jest.fn(),
+  zadd: jest.fn(),
   zrem: jest.fn(),
   multi: jest.fn(),
 };
@@ -22,22 +25,35 @@ describe('LiveDriverPresenceService', () => {
     emitDriverPresence: jest.Mock;
     emitToDriver: jest.Mock;
     emitAdminActivity: jest.Mock;
+    emitDispatchQueueUpdated: jest.Mock;
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.get.mockResolvedValue(null);
+    mockRedis.zrange.mockResolvedValue([]);
+    mockRedis.zrevrange.mockResolvedValue([]);
+    mockRedis.zadd.mockResolvedValue(1);
     mockRedis.zrem.mockResolvedValue(1);
-    mockRedis.multi.mockReturnValue({
-      del: jest.fn().mockReturnThis(),
-      zrem: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue([]),
+    mockRedis.multi.mockImplementation(() => {
+      const transaction = {
+        del: jest.fn(),
+        set: jest.fn(),
+        zadd: jest.fn(),
+        zrem: jest.fn(),
+        exec: jest.fn().mockResolvedValue([]),
+      };
+      transaction.del.mockReturnValue(transaction);
+      transaction.set.mockReturnValue(transaction);
+      transaction.zadd.mockReturnValue(transaction);
+      transaction.zrem.mockReturnValue(transaction);
+      return transaction;
     });
     prisma = {
       driver: {
-        findMany: jest.fn().mockResolvedValue([
-          { id: 'driver-1', user: { name: 'Motoboy Teste' } },
-        ]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'driver-1', user: { name: 'Motoboy Teste' } }]),
         updateMany: jest.fn(),
       },
       driverPresenceLog: { updateMany: jest.fn() },
@@ -46,6 +62,7 @@ describe('LiveDriverPresenceService', () => {
       emitDriverPresence: jest.fn(),
       emitToDriver: jest.fn(),
       emitAdminActivity: jest.fn(),
+      emitDispatchQueueUpdated: jest.fn(),
     };
   });
 
@@ -77,6 +94,47 @@ describe('LiveDriverPresenceService', () => {
       'driver-1',
       'driver:presence-expired',
       expect.objectContaining({ reason: 'HEARTBEAT_EXPIRED' }),
+    );
+  });
+
+  it('preserva a ordem manual e anexa novos motoboys no fim', async () => {
+    mockRedis.zrange.mockResolvedValue(['driver-2', 'driver-offline']);
+    mockRedis.zrevrange.mockResolvedValue(['driver-2', '4']);
+    const service = new LiveDriverPresenceService(prisma as never, realtime as never);
+
+    await expect(service.orderForDispatch(['driver-1', 'driver-2', 'driver-3'])).resolves.toEqual([
+      'driver-2',
+      'driver-1',
+      'driver-3',
+    ]);
+
+    const transaction = mockRedis.multi.mock.results.at(-1)?.value;
+    expect(transaction.zadd).toHaveBeenNthCalledWith(
+      1,
+      'motoboycity:driver-dispatch-order',
+      5,
+      'driver-1',
+    );
+    expect(transaction.zadd).toHaveBeenNthCalledWith(
+      2,
+      'motoboycity:driver-dispatch-order',
+      6,
+      'driver-3',
+    );
+  });
+
+  it('move para o fim e avisa os paineis admin quando a vez e consumida', async () => {
+    const service = new LiveDriverPresenceService(prisma as never, realtime as never);
+
+    await service.moveToDispatchTail('driver-1');
+
+    expect(mockRedis.zadd).toHaveBeenCalledWith(
+      'motoboycity:driver-dispatch-order',
+      expect.any(Number),
+      'driver-1',
+    );
+    expect(realtime.emitDispatchQueueUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({ driverId: 'driver-1' }),
     );
   });
 });

@@ -58,7 +58,11 @@ describe('DispatchService', () => {
     emitAdminActivity: jest.Mock;
     emitDeliveryUpdated: jest.Mock;
   };
-  let livePresence: { isLive: jest.Mock };
+  let livePresence: {
+    isLive: jest.Mock;
+    orderForDispatch: jest.Mock;
+    moveToDispatchTail: jest.Mock;
+  };
   let push: { sendToDriver: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
   let tx: {
@@ -117,7 +121,11 @@ describe('DispatchService', () => {
       emitAdminActivity: jest.fn(),
       emitDeliveryUpdated: jest.fn(),
     };
-    livePresence = { isLive: jest.fn().mockResolvedValue(true) };
+    livePresence = {
+      isLive: jest.fn().mockResolvedValue(true),
+      orderForDispatch: jest.fn().mockImplementation(async (driverIds: string[]) => driverIds),
+      moveToDispatchTail: jest.fn().mockResolvedValue(undefined),
+    };
     push = { sendToDriver: jest.fn().mockResolvedValue(1) };
     queue = { add: jest.fn(), remove: jest.fn() };
 
@@ -215,6 +223,32 @@ describe('DispatchService', () => {
   });
 
   describe('dispatchDelivery', () => {
+    it('respeita a sequencia editada pelo admin entre os motoboys elegiveis', async () => {
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([
+        { driverId: 'driver-1' },
+        { driverId: 'driver-2' },
+      ]);
+      livePresence.orderForDispatch.mockResolvedValue(['driver-2', 'driver-1']);
+
+      const driverId = await (
+        service as unknown as {
+          findNextEligibleDriverId(input: {
+            excludeDriverIds: string[];
+            regionId: string;
+            serviceTypeIds: string[];
+          }): Promise<string | null>;
+        }
+      ).findNextEligibleDriverId({
+        excludeDriverIds: [],
+        regionId: 'region-1',
+        serviceTypeIds: ['service-1'],
+      });
+
+      expect(driverId).toBe('driver-2');
+      expect(livePresence.orderForDispatch).toHaveBeenCalledWith(['driver-1', 'driver-2']);
+    });
+
     it('não faz nada se o pedido não existe', async () => {
       prisma.delivery.findUnique.mockResolvedValue(null);
 
@@ -313,6 +347,7 @@ describe('DispatchService', () => {
       expect(tx.deliveryOffer.create).toHaveBeenCalledWith({
         data: { deliveryId: 'delivery-1', driverId: 'driver-1', response: 'PENDING' },
       });
+      expect(livePresence.moveToDispatchTail).toHaveBeenCalledWith('driver-1');
       expect(queue.add).toHaveBeenCalledWith(
         'offer-expire',
         { offerId: 'offer-1' },
@@ -945,7 +980,23 @@ describe('DispatchService', () => {
       });
       tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
       tx.delivery.updateMany.mockResolvedValue({ count: 1 });
-      tx.delivery.findUniqueOrThrow.mockResolvedValue({ id: 'delivery-1', displayNumber: 9 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        companyId: 'company-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        {
+          id: 'delivery-1',
+          displayNumber: 9,
+          companyId: 'company-1',
+          company: { tradeName: 'Drogaria Nova Farma' },
+        },
+      ]);
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        user: { name: 'Maicon Douglas' },
+      });
 
       const result = await service.acceptOffer('offer-1', 'driver-1', 'user-1');
 
@@ -973,7 +1024,13 @@ describe('DispatchService', () => {
           data: expect.objectContaining({ offerId: 'offer-1', reason: 'accepted' }),
         }),
       );
-      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(expect.stringContaining('#9'));
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Pedido #9 da empresa Drogaria Nova Farma foi aceito por Maicon Douglas.',
+          companyName: 'Drogaria Nova Farma',
+          driverName: 'Maicon Douglas',
+        }),
+      );
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
     });
 
