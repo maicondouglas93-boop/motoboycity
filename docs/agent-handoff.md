@@ -6798,3 +6798,29 @@ conectado ao ADB, portanto a instalacao e o smoke test Xiaomi/HyperOS continuam
 pendentes. Proximo passo concreto: instalar o pilot.4 sobre o pilot.3 e testar
 permissao, ativacao, arraste, reabertura, oferta nativa e remocao da bolha ao
 ficar offline.
+
+## Atualizacao - 2026-08-25: detalhe do pedido da empresa em grid compacto
+
+A pagina `Company Web > Pedidos > Detalhes` foi reorganizada para aproveitar
+melhor telas largas sem alterar os dados ou as acoes do pedido. Destinatario,
+operacao e faturamento agora formam um grid de tres cards compactos, com os
+campos internos em duas colunas quando houver espaco. Coleta e entrega foram
+posicionadas ao lado do mapa, mantendo endereco, referencia e link das
+coordenadas. No celular, todos esses blocos continuam empilhados.
+
+O historico do pedido tambem passou de uma lista de cards em largura total para
+um grid responsivo de ate cinco colunas. Cada etapa mostra sequencia, transicao
+de status, horario, duracao, observacao e autor, preservando a mesma ordem e os
+mesmos valores recebidos da API. Rastreamento GPS, cancelamento, atualizacao em
+tempo real e consultas existentes nao foram modificados.
+
+Nao houve mudanca de contrato, API, autorizacao, banco ou logica operacional.
+Arquivo funcional alterado:
+`apps/company-web/src/app/(app)/pedidos/[id]/page.tsx`.
+
+Validacoes executadas: formatacao do arquivo alterado, typecheck e lint do
+Company Web e build de producao do Company Web. Tudo passou. A conferencia
+visual autenticada nao foi executada porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: abrir um pedido com historico,
+coordenadas, fatura e instrucao ao entregador em desktop e celular para conferir
+quebras de texto e o empilhamento responsivo.
