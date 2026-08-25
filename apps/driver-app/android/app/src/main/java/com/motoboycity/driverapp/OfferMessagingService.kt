@@ -1,11 +1,15 @@
 package com.motoboycity.driverapp
 
 import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.RemoteMessage
 import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService
@@ -62,12 +66,23 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
         putExtra(OfferActivity.EXTRA_OFFER_ID, offerId)
         expiresAtMs?.let { putExtra(OfferActivity.EXTRA_EXPIRES_AT_EPOCH_MS, it) }
       }
+    val pendingIntentOptions =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        ActivityOptions.makeBasic()
+          .setPendingIntentCreatorBackgroundActivityStartMode(
+            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+          )
+          .toBundle()
+      } else {
+        null
+      }
     val pendente =
       PendingIntent.getActivity(
         this,
         offerId.hashCode(),
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        pendingIntentOptions,
       )
 
     val builder =
@@ -147,6 +162,37 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
       if (ehOferta) OfferActionReceiver.OFFER_NOTIFICATION_ID else corpo.hashCode(),
       builder.build(),
     )
+
+    if (ehOferta && !appEmPrimeiroPlano) {
+      abrirOfertaSobreOutrosApps(intent, offerId)
+    }
+  }
+
+  /**
+   * Android 13+ sempre prefere heads-up enquanto o aparelho esta desbloqueado,
+   * mesmo com full-screen intent autorizado. Quando o motoboy liberou
+   * explicitamente "Exibir sobre outros apps", SYSTEM_ALERT_WINDOW tambem e
+   * uma excecao oficial para iniciar a Activity a partir do segundo plano.
+   *
+   * A notificacao ja foi publicada antes desta tentativa. Assim, uma restricao
+   * adicional do fabricante nunca faz a oferta desaparecer: ela continua com
+   * os botoes Aceitar/Recusar como fallback.
+   */
+  private fun abrirOfertaSobreOutrosApps(intent: Intent, offerId: String) {
+    val autorizado =
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+    if (!autorizado) return
+
+    try {
+      startActivity(
+        Intent(intent).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        },
+      )
+      Log.i(TAG, "Oferta nativa aberta sobre outros apps: ${offerId.take(8)}")
+    } catch (error: Exception) {
+      Log.w(TAG, "Fabricante bloqueou a abertura sobre outros apps; mantendo notificacao", error)
+    }
   }
 
   private fun acaoPendente(acao: String, offerId: String): PendingIntent {
@@ -201,6 +247,10 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
    */
   override fun onNewToken(token: String) {
     super.onNewToken(token)
+  }
+
+  companion object {
+    private const val TAG = "OfferMessagingService"
   }
 
 }

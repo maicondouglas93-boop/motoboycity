@@ -5982,3 +5982,71 @@ API, API Client e Admin Web passou; lint de API e Admin Web passou; os builds de
 producao da API e do Admin Web tambem passaram. Proximo passo concreto: revisar
 visualmente o modal com uma empresa ativa que tenha endereco e fazer um smoke
 test real de criacao contra um ambiente controlado antes de publicar.
+
+## Atualizacao — 2026-08-24: oferta nativa sobre outros apps e presenca estacionaria
+
+O teste no Xiaomi `24095PCADG`, Android 16/API 36, confirmou que a faixa com
+`Recusar`/`Aceitar` era a notificacao nativa criada pelo app, nao um push
+generico. `USE_FULL_SCREEN_INTENT` estava concedida, mas o Android 13+ prefere
+heads-up quando o aparelho esta desbloqueado. Para reproduzir de forma opt-in o
+cartao completo da referencia nesse estado, o app passou a declarar
+`SYSTEM_ALERT_WINDOW`, consultar `Settings.canDrawOverlays`, abrir a tela
+oficial de autorizacao e tentar trazer a `OfferActivity` quando uma oferta FCM
+chega com o app minimizado. A notificacao acionavel e publicada primeiro e
+permanece como fallback se a autorizacao estiver negada ou o fabricante
+bloquear a abertura. No Android 14+, o `PendingIntent` tambem declara o opt-in
+do criador para background activity launch exigido por apps target 35+.
+
+A Home impede ficar disponivel somente quando detecta que a permissao basica de
+notificacao do Android esta desativada. Falha temporaria ao registrar o token
+FCM, sobreposicao negada e tela cheia negada nao retiram mais o motoboy da fila:
+o socket e a notificacao comum continuam como degradacao segura. A tela Ajustes
+mostra separadamente o estado de sobreposicao e o de tela cheia/bloqueada. O uso
+de `SYSTEM_ALERT_WINDOW` e sensivel para revisao da Play Store e precisa ser
+homologado por fabricante; ele foi adotado aqui para o APK piloto solicitado.
+
+A segunda captura revelou um defeito independente de presenca: a API expira o
+motoboy depois de 150 segundos sem heartbeat, enquanto o servico Android so
+enviava heartbeat dentro de `onLocationChanged` e exigia deslocamento minimo de
+100 m sem corrida ou 50 m em corrida. Um motoboy parado podia, portanto, ser
+marcado offline com GPS, internet e servico ativos. O servico nativo agora
+mantem a ultima coordenada valida e envia somente o heartbeat de presenca a
+cada 60 segundos. Pontos de rota continuam ligados a uma nova localizacao, sem
+duplicar historico quando o aparelho esta parado. Falta homologar esse fluxo
+por mais de 3 minutos com o aparelho estacionario.
+
+Arquivos principais alterados:
+
+- `apps/driver-app/android/app/src/main/AndroidManifest.xml`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferMessagingService.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferSessionModule.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/DeliveryLocationTrackingService.kt`;
+- `apps/driver-app/src/lib/offerSession.ts`;
+- `apps/driver-app/src/screens/HomeScreen.tsx` e `SettingsScreen.tsx`;
+- mocks/testes de push do driver-app e `apps/driver-app/package.json`.
+
+O release foi promovido para `0.1.0-pilot.2`, `versionCode` 2, targetSdk 36.
+Como o caminho original excede 260 caracteres no CMake do Windows, o build de
+producao foi concluido numa copia fisica temporaria curta `C:\m2`, com
+`@motoboycity/validation` compilado antes do Metro. `assembleRelease`, lint
+vital, assinatura e empacotamento passaram. `apksigner` confirmou APK Signature
+Scheme v2 e o mesmo certificado SHA-256 do piloto anterior. O APK tem
+74.967.361 bytes e SHA-256
+`2F1ADE3EE1097465141FD2CE9CC0526AA91B2301ED94BB1F1BDAFC57DA4542E4`.
+Ele foi instalado com `adb install -r` sem apagar dados e copiado para
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.2-vc2.apk`.
+
+No reteste, o FCM retornou `FCM Registration failed` e a regra anterior impediu
+o toggle apesar de todas as permissoes Android estarem concedidas. O registro
+de push passou a ser best-effort e deixou de bloquear presenca. Um novo release
+assinado foi compilado e reinstalado; a Home confirmou `Ativo` e o Android
+confirmou `DeliveryLocationTrackingService` em foreground com
+`startRequested=true`. O hotfix foi preservado em
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.2-vc2-online-hotfix.apk`,
+SHA-256
+`74790177140CA48D859F8F4BAABCA8E4ADD75FA14062A49EDCED2726B3AC33A0`.
+
+Proximo passo concreto: conceder manualmente `Exibir sobre outros apps`, ficar
+online parado por mais de 3 minutos e gerar uma oferta controlada com o app
+minimizado; confirmar o cartao completo, aceitar/recusar, repetir com a tela
+bloqueada e guardar logcat se o HyperOS aplicar uma restricao adicional.

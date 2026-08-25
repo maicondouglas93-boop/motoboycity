@@ -19,6 +19,7 @@ import { colors } from '../theme/colors';
 import { API_BASE_URL, APP_ENV, APP_ENV_LABEL } from '../lib/config';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import {
+  abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
   consultarApresentacaoNativa,
   type NativeOfferPresentationStatus,
@@ -81,6 +82,30 @@ export function SettingsScreen({ navigation }: Props) {
           {Platform.OS === 'android' && (
             <>
               <View style={styles.divider} />
+              <SettingRow
+                icon="info"
+                title="Oferta sobre outros aplicativos"
+                description="Mostra o cartão completo da oferta mesmo com o aplicativo minimizado e o celular desbloqueado."
+                status={
+                  offerPresentation?.overlayGranted
+                    ? 'Sobreposição autorizada'
+                    : 'Autorização necessária'
+                }
+                tone={offerPresentation?.overlayGranted ? 'success' : 'warning'}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Configurar ofertas sobre outros aplicativos"
+                onPress={() => abrirAjusteDeSobreposicao().catch(() => undefined)}
+                style={({ pressed }) => [
+                  styles.permissionButton,
+                  pressed && styles.systemButtonPressed,
+                ]}
+              >
+                <Text style={styles.permissionButtonText}>Permitir sobre outros aplicativos</Text>
+                <Icon name="chevron" size={20} color={colors.action} />
+              </Pressable>
+              <View style={styles.dividerWithTopMargin} />
               <SettingRow
                 icon="info"
                 title="Oferta sobre a tela bloqueada"
@@ -267,6 +292,7 @@ const styles = StyleSheet.create({
   statusTextSuccess: { color: colors.success },
   statusTextWarning: { color: '#a76a00' },
   divider: { height: 1, backgroundColor: colors.divider },
+  dividerWithTopMargin: { height: 1, marginTop: 14, backgroundColor: colors.divider },
   systemButton: {
     minHeight: 50,
     flexDirection: 'row',

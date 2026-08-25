@@ -45,9 +45,12 @@ NativeModules.OfferSession = {
       notificationsEnabled: true,
       fullScreenGranted: true,
       fullScreenNeedsManualGrant: true,
+      overlayGranted: true,
+      overlayNeedsManualGrant: true,
     }),
   ),
   openFullScreenSettings: jest.fn(() => Promise.resolve()),
+  openOverlaySettings: jest.fn(() => Promise.resolve()),
 };
 
 /**

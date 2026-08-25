@@ -72,6 +72,12 @@ class OfferSessionModule(
       } else {
         true
       }
+    val overlayGranted =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Settings.canDrawOverlays(reactContext)
+      } else {
+        true
+      }
     val result = Arguments.createMap()
     result.putBoolean(
       "notificationsEnabled",
@@ -82,7 +88,41 @@ class OfferSessionModule(
       "fullScreenNeedsManualGrant",
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
     )
+    result.putBoolean("overlayGranted", overlayGranted)
+    result.putBoolean(
+      "overlayNeedsManualGrant",
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.M,
+    )
     promise.resolve(result)
+  }
+
+  /**
+   * Abre o acesso especial usado para mostrar a oferta completa com o aparelho
+   * desbloqueado. Android 13+ transforma full-screen intent em heads-up durante
+   * o uso normal do aparelho; SYSTEM_ALERT_WINDOW e uma escolha explicita do
+   * motoboy e mantem a notificacao comum como fallback quando estiver negada.
+   */
+  @ReactMethod
+  fun openOverlaySettings(promise: Promise) {
+    val packageUri = Uri.parse("package:${reactContext.packageName}")
+    val primary =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, packageUri)
+      } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+      }
+    primary.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+      reactContext.startActivity(primary)
+      promise.resolve(null)
+    } catch (_: Exception) {
+      val fallback =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri).addFlags(
+          Intent.FLAG_ACTIVITY_NEW_TASK,
+        )
+      reactContext.startActivity(fallback)
+      promise.resolve(null)
+    }
   }
 
   /**

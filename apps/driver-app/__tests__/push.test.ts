@@ -7,6 +7,7 @@ import {
 } from '@react-native-firebase/messaging';
 import { ativarPush, desativarPush } from '../src/lib/push';
 import {
+  abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
   consultarApresentacaoNativa,
   dispensarOfertaNativa,
@@ -171,10 +172,14 @@ describe('push do app do motoboy', () => {
       notificationsEnabled: true,
       fullScreenGranted: true,
       fullScreenNeedsManualGrant: true,
+      overlayGranted: true,
+      overlayNeedsManualGrant: true,
     });
     await abrirAjusteDeTelaCheia();
+    await abrirAjusteDeSobreposicao();
 
     expect(NativeModules.OfferSession.presentationStatus).toHaveBeenCalled();
     expect(NativeModules.OfferSession.openFullScreenSettings).toHaveBeenCalled();
+    expect(NativeModules.OfferSession.openOverlaySettings).toHaveBeenCalled();
   });
 });

@@ -6,12 +6,15 @@ interface OfferSessionNativo {
   dismiss(offerId: string): Promise<void>;
   presentationStatus(): Promise<NativeOfferPresentationStatus>;
   openFullScreenSettings(): Promise<void>;
+  openOverlaySettings(): Promise<void>;
 }
 
 export interface NativeOfferPresentationStatus {
   notificationsEnabled: boolean;
   fullScreenGranted: boolean;
   fullScreenNeedsManualGrant: boolean;
+  overlayGranted: boolean;
+  overlayNeedsManualGrant: boolean;
 }
 
 /**
@@ -57,4 +60,9 @@ export async function consultarApresentacaoNativa(): Promise<NativeOfferPresenta
 export async function abrirAjusteDeTelaCheia(): Promise<void> {
   if (Platform.OS !== 'android' || !modulo) return;
   await modulo.openFullScreenSettings().catch(() => undefined);
+}
+
+export async function abrirAjusteDeSobreposicao(): Promise<void> {
+  if (Platform.OS !== 'android' || !modulo) return;
+  await modulo.openOverlaySettings().catch(() => undefined);
 }

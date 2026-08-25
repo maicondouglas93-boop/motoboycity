@@ -20,8 +20,10 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -31,10 +33,12 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class DeliveryLocationTrackingService : Service(), LocationListener {
   private lateinit var locationManager: LocationManager
-  private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+  private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
   private val deliveryIds = ConcurrentHashMap.newKeySet<String>()
   private val pendingLocation = AtomicReference<Location?>(null)
+  private val latestLocation = AtomicReference<Location?>(null)
   private val sendingLocation = AtomicBoolean(false)
+  private var heartbeatTask: ScheduledFuture<*>? = null
 
   @Volatile private var baseUrl: String? = null
   @Volatile private var accessToken: String? = null
@@ -61,6 +65,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
 
     startForeground(NOTIFICATION_ID, buildNotification())
     requestLocationUpdates(force = true)
+    startHeartbeatLoop()
     return START_REDELIVER_INTENT
   }
 
@@ -106,6 +111,10 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
           Looper.getMainLooper(),
         )
       }
+      enabledProviders
+        .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
+        .maxByOrNull { location -> location.time }
+        ?.let { latestLocation.compareAndSet(null, Location(it)) }
       receivingUpdates = true
     } catch (error: Exception) {
       Log.w(TAG, "Provedor de localização indisponível para rastreamento", error)
@@ -114,9 +123,67 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   }
 
   override fun onLocationChanged(location: Location) {
+    latestLocation.set(Location(location))
     pendingLocation.set(Location(location))
     drainLatestLocation()
   }
+
+  /**
+   * Presenca e deslocamento sao sinais diferentes.
+   *
+   * O servidor expira um motoboy depois de 150 segundos sem heartbeat. Antes,
+   * o heartbeat vivia somente em `onLocationChanged`, mas a requisicao de GPS
+   * aceita atualizacao apenas depois de 50/100 metros. Um motoboy parado em uma
+   * loja ficava offline mesmo com GPS, internet e servico ativos.
+   *
+   * Este relogio renova a presenca com a ultima posicao valida. Os pontos das
+   * entregas continuam sendo enviados somente quando chega uma localizacao
+   * nova, portanto ficar parado nao polui o historico da rota.
+   */
+  private fun startHeartbeatLoop() {
+    if (heartbeatTask?.isCancelled == false && heartbeatTask?.isDone == false) return
+    heartbeatTask =
+      executor.scheduleWithFixedDelay(
+        { sendHeartbeatFromLatestLocation() },
+        HEARTBEAT_INTERVAL_MS,
+        HEARTBEAT_INTERVAL_MS,
+        TimeUnit.MILLISECONDS,
+      )
+  }
+
+  private fun sendHeartbeatFromLatestLocation() {
+    if (!hasLocationPermission() || !hasEnabledLocationProvider()) {
+      stopTracking()
+      return
+    }
+    val location = latestLocation.get() ?: return
+    val currentBaseUrl = baseUrl ?: return
+    val currentAccessToken = accessToken ?: return
+    val currentAppVersion = appVersion ?: return
+    val status =
+      sendPresenceHeartbeat(
+        currentBaseUrl,
+        currentAccessToken,
+        currentAppVersion,
+        location,
+      ) ?: return
+    if (
+      status == HttpURLConnection.HTTP_UNAUTHORIZED ||
+        status == HttpURLConnection.HTTP_FORBIDDEN ||
+        status == HttpURLConnection.HTTP_CONFLICT
+    ) {
+      Log.w(TAG, "Heartbeat recusado pela API: HTTP $status")
+      stopTracking()
+    }
+  }
+
+  private fun hasLocationPermission(): Boolean =
+    checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+  private fun hasEnabledLocationProvider(): Boolean =
+    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).any { provider ->
+      runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false)
+    }
 
   private fun drainLatestLocation() {
     if (executor.isShutdown || !sendingLocation.compareAndSet(false, true)) return
@@ -213,6 +280,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
   private fun stopTracking() {
+    heartbeatTask?.cancel(false)
+    heartbeatTask = null
     if (receivingUpdates) {
       locationManager.removeUpdates(this)
       receivingUpdates = false
@@ -257,6 +326,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onDestroy() {
+    heartbeatTask?.cancel(true)
+    heartbeatTask = null
     if (receivingUpdates) locationManager.removeUpdates(this)
     executor.shutdownNow()
     super.onDestroy()
@@ -277,6 +348,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     private const val ACTIVE_UPDATE_DISTANCE_METERS = 50f
     private const val IDLE_UPDATE_INTERVAL_MS = 60_000L
     private const val IDLE_UPDATE_DISTANCE_METERS = 100f
+    private const val HEARTBEAT_INTERVAL_MS = 60_000L
     private const val NETWORK_TIMEOUT_MS = 8_000
 
     fun startOrUpdate(

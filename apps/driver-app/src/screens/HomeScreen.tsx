@@ -42,6 +42,7 @@ import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { session } from '../lib/session';
 import { API_BASE_URL } from '../lib/config';
 import {
+  abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
   consultarApresentacaoNativa,
   dispensarOfertaNativa,
@@ -61,7 +62,19 @@ const ABAS = [
   { value: 'pendentes' as const, label: 'Pendentes' },
 ];
 
-type NotificationReadiness = 'ready' | 'unavailable' | 'disabled' | 'full-screen-disabled';
+type NotificationReadiness =
+  | 'ready'
+  | 'unavailable'
+  | 'disabled'
+  | 'overlay-disabled'
+  | 'full-screen-disabled';
+
+function notificacaoBloqueiaPresenca(status: NotificationReadiness): boolean {
+  // A permissao do Android e indispensavel para exibir ofertas. Falhas
+  // temporarias de registro no FCM e recursos extras de apresentacao nao
+  // podem impedir o motoboy de ficar online; o socket continua como fallback.
+  return status === 'disabled';
+}
 
 async function verificarNotificacaoObrigatoria(): Promise<NotificationReadiness> {
   const pushAtivo = await ativarPush().catch(() => false);
@@ -70,6 +83,9 @@ async function verificarNotificacaoObrigatoria(): Promise<NotificationReadiness>
 
   const apresentacao = await consultarApresentacaoNativa();
   if (!apresentacao?.notificationsEnabled) return 'disabled';
+  if (apresentacao.overlayNeedsManualGrant && !apresentacao.overlayGranted) {
+    return 'overlay-disabled';
+  }
   if (apresentacao.fullScreenNeedsManualGrant && !apresentacao.fullScreenGranted) {
     return 'full-screen-disabled';
   }
@@ -77,6 +93,9 @@ async function verificarNotificacaoObrigatoria(): Promise<NotificationReadiness>
 }
 
 function mensagemNotificacaoObrigatoria(status: NotificationReadiness): string {
+  if (status === 'overlay-disabled') {
+    return 'Autorize Exibir sobre outros apps para o cartão completo aparecer com o aplicativo minimizado.';
+  }
   if (status === 'full-screen-disabled') {
     return 'Autorize a tela cheia para as ofertas aparecerem mesmo com o celular bloqueado.';
   }
@@ -88,6 +107,10 @@ function mensagemNotificacaoObrigatoria(status: NotificationReadiness): string {
 
 function alertarNotificacaoObrigatoria(status: NotificationReadiness) {
   const abrirAjustes = () => {
+    if (status === 'overlay-disabled') {
+      abrirAjusteDeSobreposicao().catch(() => undefined);
+      return;
+    }
     if (status === 'full-screen-disabled') {
       abrirAjusteDeTelaCheia().catch(() => undefined);
       return;
@@ -197,7 +220,10 @@ export function HomeScreen({ navigation }: Props) {
     readiness: NotificationReadiness,
     mostrarAlerta: boolean,
   ) {
-    if (readiness === 'ready' || useDispatchStore.getState().availability !== 'AVAILABLE') {
+    if (
+      !notificacaoBloqueiaPresenca(readiness) ||
+      useDispatchStore.getState().availability !== 'AVAILABLE'
+    ) {
       return;
     }
 
@@ -328,7 +354,10 @@ export function HomeScreen({ navigation }: Props) {
       let presence = await syncPresence(token);
       if (cancelled) return;
 
-      if (presence?.availability === 'AVAILABLE' && notificationReadiness !== 'ready') {
+      if (
+        presence?.availability === 'AVAILABLE' &&
+        notificacaoBloqueiaPresenca(notificationReadiness)
+      ) {
         presence = await driverPresenceApi
           .set(token, { availability: 'UNAVAILABLE' })
           .catch(() => null);
@@ -346,7 +375,8 @@ export function HomeScreen({ navigation }: Props) {
             await syncDeliveryTracking(
               token,
               deliveries.map((delivery) => delivery.id),
-              presence?.availability === 'AVAILABLE' && notificationReadiness === 'ready',
+              presence?.availability === 'AVAILABLE' &&
+                !notificacaoBloqueiaPresenca(notificationReadiness),
             );
             if (!cancelled) setTrackingError(null);
           } catch (error) {
@@ -572,7 +602,7 @@ export function HomeScreen({ navigation }: Props) {
       }
 
       const notificationReadiness = await verificarNotificacaoObrigatoria();
-      if (notificationReadiness !== 'ready') {
+      if (notificacaoBloqueiaPresenca(notificationReadiness)) {
         setPresenceError(mensagemNotificacaoObrigatoria(notificationReadiness));
         alertarNotificacaoObrigatoria(notificationReadiness);
         return;
