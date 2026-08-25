@@ -9,8 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--
-      Permite exibir a Activity da oferta sobre a tela inicial ou outro app
-      quando o motoboy autorizou explicitamente "Exibir sobre outros apps".
+      Permite exibir a Activity da oferta e, quando o motoboy ativar a opcao,
+      o atalho flutuante sobre a tela inicial ou outro aplicativo.
       No Android 13+ o full-screen intent vira heads-up enquanto o aparelho
       esta desbloqueado, portanto esta permissao e o caminho opt-in para o
       cartao completo nesse estado. Sem ela, a notificacao acionavel continua

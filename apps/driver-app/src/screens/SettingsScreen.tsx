@@ -1,11 +1,13 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  AppState,
   Linking,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -18,6 +20,11 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { colors } from '../theme/colors';
 import { API_BASE_URL, APP_ENV, APP_ENV_LABEL } from '../lib/config';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
+import {
+  consultarAtalhoFlutuante,
+  definirAtalhoFlutuante,
+  type FloatingShortcutStatus,
+} from '../lib/floatingShortcut';
 import {
   abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
@@ -32,26 +39,68 @@ export function SettingsScreen({ navigation }: Props) {
   const [offerPresentation, setOfferPresentation] = useState<NativeOfferPresentationStatus | null>(
     null,
   );
+  const [floatingShortcut, setFloatingShortcut] = useState<FloatingShortcutStatus | null>(null);
+  const [savingFloatingShortcut, setSavingFloatingShortcut] = useState(false);
+
+  const refreshNativeStatuses = useCallback(async () => {
+    const [presentationStatus, shortcutStatus] = await Promise.all([
+      consultarApresentacaoNativa(),
+      consultarAtalhoFlutuante(),
+    ]);
+    setOfferPresentation(presentationStatus);
+    setFloatingShortcut(shortcutStatus);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      consultarApresentacaoNativa()
-        .then((status) => {
-          if (active) setOfferPresentation(status);
-        })
-        .catch(() => undefined);
-      return () => {
-        active = false;
-      };
-    }, []),
+      refreshNativeStatuses().catch(() => undefined);
+    }, [refreshNativeStatuses]),
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshNativeStatuses().catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, [refreshNativeStatuses]);
 
   async function openSystemSettings() {
     try {
       await Linking.openSettings();
     } catch {
       Alert.alert('Ajustes indisponíveis', 'Não foi possível abrir os ajustes deste aparelho.');
+    }
+  }
+
+  async function toggleFloatingShortcut(enabled: boolean) {
+    const overlayGranted =
+      floatingShortcut?.permissionGranted ?? offerPresentation?.overlayGranted ?? false;
+    if (enabled && !overlayGranted) {
+      Alert.alert(
+        'Autorização necessária',
+        'Autorize "Exibir sobre outros apps". Depois volte a esta tela e ative o botão flutuante.',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          {
+            text: 'Abrir ajustes',
+            onPress: () => abrirAjusteDeSobreposicao().catch(() => undefined),
+          },
+        ],
+      );
+      return;
+    }
+
+    setSavingFloatingShortcut(true);
+    try {
+      await definirAtalhoFlutuante(enabled);
+      await refreshNativeStatuses();
+    } catch {
+      Alert.alert(
+        'Não foi possível alterar',
+        'Confira a autorização de sobreposição e tente novamente.',
+      );
+    } finally {
+      setSavingFloatingShortcut(false);
     }
   }
 
@@ -155,6 +204,31 @@ export function SettingsScreen({ navigation }: Props) {
             status="Conectada à API"
             tone="success"
           />
+          {Platform.OS === 'android' && (
+            <>
+              <View style={styles.divider} />
+              <ToggleSettingRow
+                icon="menu"
+                title="Botão flutuante"
+                description="Quando você estiver online, mostra um atalho arrastável ao minimizar o app. Toque nele para voltar ao MOTOboyCity."
+                status={
+                  !floatingShortcut?.permissionGranted
+                    ? 'Autorize a sobreposição'
+                    : floatingShortcut?.enabled
+                      ? 'Ativado'
+                      : 'Desativado'
+                }
+                tone={
+                  floatingShortcut?.enabled && floatingShortcut.permissionGranted
+                    ? 'success'
+                    : 'warning'
+                }
+                value={floatingShortcut?.enabled ?? false}
+                disabled={savingFloatingShortcut}
+                onChange={(enabled) => toggleFloatingShortcut(enabled).catch(() => undefined)}
+              />
+            </>
+          )}
           <View style={styles.divider} />
           <SettingRow
             icon="pin"
@@ -183,6 +257,67 @@ export function SettingsScreen({ navigation }: Props) {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function ToggleSettingRow({
+  icon,
+  title,
+  description,
+  status,
+  tone,
+  value,
+  disabled,
+  onChange,
+}: {
+  icon: IconName;
+  title: string;
+  description: string;
+  status: string;
+  tone: 'success' | 'warning';
+  value: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={styles.settingToggleRow}>
+      <View style={styles.settingIcon}>
+        <Icon name={icon} size={21} color={colors.actionSoft} />
+      </View>
+      <View style={styles.settingText}>
+        <Text style={styles.settingTitle}>{title}</Text>
+        <Text style={styles.settingDescription}>{description}</Text>
+        <View
+          style={[
+            styles.statusPill,
+            tone === 'success' ? styles.statusSuccess : styles.statusWarning,
+          ]}
+        >
+          <View
+            style={[
+              styles.statusDot,
+              tone === 'success' ? styles.statusDotSuccess : styles.statusDotWarning,
+            ]}
+          />
+          <Text
+            style={[
+              styles.statusText,
+              tone === 'success' ? styles.statusTextSuccess : styles.statusTextWarning,
+            ]}
+          >
+            {status}
+          </Text>
+        </View>
+      </View>
+      <Switch
+        accessibilityLabel="Botão flutuante"
+        value={value}
+        disabled={disabled}
+        onValueChange={onChange}
+        trackColor={{ false: colors.divider, true: colors.successSoft }}
+        thumbColor={value ? colors.success : colors.inkMuted}
+      />
+    </View>
   );
 }
 
@@ -261,6 +396,12 @@ const styles = StyleSheet.create({
   sectionTitle: { marginTop: 8, color: colors.ink, fontSize: 18, fontWeight: '800' },
   card: { padding: 0, overflow: 'hidden' },
   settingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16 },
+  settingToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+  },
   settingIcon: {
     width: 42,
     height: 42,

@@ -6,15 +6,19 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
@@ -39,6 +43,15 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private val latestLocation = AtomicReference<Location?>(null)
   private val sendingLocation = AtomicBoolean(false)
   private var heartbeatTask: ScheduledFuture<*>? = null
+  private lateinit var floatingShortcut: FloatingLauncherOverlay
+  private var floatingShortcutReceiverRegistered = false
+
+  private val floatingShortcutReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        refreshFloatingShortcut()
+      }
+    }
 
   @Volatile private var baseUrl: String? = null
   @Volatile private var accessToken: String? = null
@@ -48,6 +61,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   override fun onCreate() {
     super.onCreate()
     locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    floatingShortcut = FloatingLauncherOverlay(this)
+    registerFloatingShortcutReceiver()
     createNotificationChannel()
   }
 
@@ -64,6 +79,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     }
 
     startForeground(NOTIFICATION_ID, buildNotification())
+    refreshFloatingShortcut()
     requestLocationUpdates(force = true)
     startHeartbeatLoop()
     return START_REDELIVER_INTENT
@@ -123,6 +139,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   }
 
   override fun onLocationChanged(location: Location) {
+    refreshFloatingShortcut()
     latestLocation.set(Location(location))
     pendingLocation.set(Location(location))
     drainLatestLocation()
@@ -280,6 +297,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
   private fun stopTracking() {
+    floatingShortcut.hide()
     heartbeatTask?.cancel(false)
     heartbeatTask = null
     if (receivingUpdates) {
@@ -325,7 +343,17 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
 
   override fun onBind(intent: Intent?): IBinder? = null
 
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    floatingShortcut.refreshBounds()
+  }
+
   override fun onDestroy() {
+    floatingShortcut.hide()
+    if (floatingShortcutReceiverRegistered) {
+      runCatching { unregisterReceiver(floatingShortcutReceiver) }
+      floatingShortcutReceiverRegistered = false
+    }
     heartbeatTask?.cancel(true)
     heartbeatTask = null
     if (receivingUpdates) locationManager.removeUpdates(this)
@@ -333,9 +361,38 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     super.onDestroy()
   }
 
+  private fun registerFloatingShortcutReceiver() {
+    val filter =
+      IntentFilter().apply {
+        addAction(DriverAppVisibility.ACTION_VISIBILITY_CHANGED)
+        addAction(ACTION_REFRESH_FLOATING_SHORTCUT)
+      }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      registerReceiver(floatingShortcutReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    } else {
+      @Suppress("UnspecifiedRegisterReceiverFlag")
+      registerReceiver(floatingShortcutReceiver, filter)
+    }
+    floatingShortcutReceiverRegistered = true
+  }
+
+  private fun refreshFloatingShortcut() {
+    val permissionGranted =
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+    val shouldShow =
+      FloatingShortcutStore.isEnabled(this) && permissionGranted && !DriverAppVisibility.isVisible()
+    if (shouldShow) {
+      floatingShortcut.show()
+    } else {
+      floatingShortcut.hide()
+    }
+  }
+
   companion object {
     const val ACTION_START_OR_UPDATE = "com.motoboycity.driverapp.tracking.START_OR_UPDATE"
     const val ACTION_STOP = "com.motoboycity.driverapp.tracking.STOP"
+    const val ACTION_REFRESH_FLOATING_SHORTCUT =
+      "com.motoboycity.driverapp.tracking.REFRESH_FLOATING_SHORTCUT"
     const val EXTRA_DELIVERY_IDS = "deliveryIds"
     const val EXTRA_BASE_URL = "baseUrl"
     const val EXTRA_ACCESS_TOKEN = "accessToken"

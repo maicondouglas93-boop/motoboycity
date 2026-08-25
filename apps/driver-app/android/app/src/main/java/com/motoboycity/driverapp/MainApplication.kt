@@ -21,6 +21,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(LocationTrackingPackage())
           add(OfferSessionPackage())
+          add(FloatingShortcutPackage())
         },
     )
   }
@@ -28,6 +29,7 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     loadReactNative(this)
+    DriverAppVisibility.register(this)
     criarCanaisDeNotificacao()
   }
 

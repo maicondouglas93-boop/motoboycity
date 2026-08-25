@@ -6726,3 +6726,75 @@ de producao do Company Web. Tudo passou. O smoke visual autenticado nao foi
 executado nesta sessao. Proximo passo concreto: abrir `/pedidos` com uma conta
 de empresa em desktop e celular, conferir cards com e sem retorno, pedidos
 agendados e o cancelamento dos estados permitidos.
+
+## Atualizacao - 2026-08-25: atalho flutuante do app do motoboy
+
+O aplicativo Android ganhou um atalho flutuante opcional para o motoboy voltar
+ao MOTOboyCity com um toque enquanto trabalha em outro aplicativo. A opcao fica
+em `Ajustes > Operacao > Botao flutuante` e depende da autorizacao explicita
+`Exibir sobre outros apps`, que ja era usada pela apresentacao nativa de
+ofertas. Ao retornar dos ajustes do Android, a tela atualiza o estado da
+permissao automaticamente.
+
+A bolha usa o icone redondo existente, pode ser arrastada e encaixa na lateral;
+a posicao e a preferencia de ativacao ficam somente no aparelho. Ela aparece
+apenas quando o motoboy esta online e o aplicativo esta minimizado. Ao abrir a
+Activity principal ou o cartao nativo de oferta, ficar offline, sair da conta,
+perder o rastreamento ou encerrar o servico, a bolha e removida. O toque traz a
+`MainActivity` `singleTask` existente para frente e preserva a navegacao atual.
+
+A implementacao reaproveita o `DeliveryLocationTrackingService`, que ja e um
+foreground service de localizacao enquanto o motoboy esta online. Assim nao
+foi criado um segundo servico persistente, uma segunda notificacao nem o tipo
+`specialUse`. A permissao continua opcional: nega-la nao altera localizacao,
+push, ofertas ou o ciclo de entregas. Nao houve mudanca de API, contrato,
+banco, schema Prisma, migration ou dependencia.
+
+Arquivos principais:
+`apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/{FloatingLauncherOverlay,FloatingShortcutStore,FloatingShortcutModule,FloatingShortcutPackage,DriverAppVisibility}.kt`,
+`DeliveryLocationTrackingService.kt`, `MainApplication.kt`,
+`apps/driver-app/src/lib/floatingShortcut.ts` e
+`apps/driver-app/src/screens/SettingsScreen.tsx`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; `:app:compileDebugKotlin` com target SDK 36. Tudo passou. Ainda falta o
+smoke test em aparelho real, principalmente no Xiaomi/HyperOS: autorizar a
+sobreposicao, ativar o atalho, ficar online, minimizar, arrastar para ambos os
+lados, tocar para reabrir, exibir uma oferta e ficar offline. Proximo passo
+concreto: executar esse roteiro antes de gerar o proximo APK de piloto e
+documentar o uso ampliado de `SYSTEM_ALERT_WINDOW` na publicacao da Play Store.
+
+## Atualizacao - 2026-08-25: release Android pilot.4 com atalho flutuante
+
+O Driver App foi promovido para `0.1.0-pilot.4`, com `versionCode` `4`, e o
+APK release foi gerado para atualizar os pilotos anteriores. O artefato inclui
+o atalho flutuante opcional documentado acima, usa `applicationId`
+`com.motoboycity.driverapp`, `minSdk` 24, `targetSdk` 36 e label
+`motoboycity`.
+
+O build foi executado em uma copia fisica temporaria curta em
+`C:\Users\Pichau\m4`, porque o caminho normal ultrapassa o limite de 260
+caracteres do CMake/Ninja no Windows. A chave oficial foi copiada somente para
+`C:\Users\Pichau\m4\k.jks` durante a compilacao; a copia temporaria e suas
+credenciais foram removidas ao final. O pacote `@motoboycity/validation` foi
+compilado antes da segunda passagem do Metro, conforme a regra do monorepo.
+
+O APK final tem 75.017.145 bytes e SHA-256
+`8D542F4EAC7AB487BA3A3D06515A7F5E4F5B37E848CB518E9502D88454B0C00E`.
+O `apksigner` confirmou o mesmo certificado oficial dos releases anteriores,
+com SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O bundle contem `https://motoboycity-api.onrender.com`, nao contem
+`localhost:3333` e inclui o metadado do Google Maps. O artefato foi preservado
+em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.4-vc4.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.4-vc4.apk`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; build de `@motoboycity/validation`; `:app:compileDebugKotlin` e
+`assembleRelease`; verificacao de assinatura, certificado, versao, SDKs, URL
+de producao e ausencia de localhost. Tudo passou. Nenhum aparelho estava
+conectado ao ADB, portanto a instalacao e o smoke test Xiaomi/HyperOS continuam
+pendentes. Proximo passo concreto: instalar o pilot.4 sobre o pilot.3 e testar
+permissao, ativacao, arraste, reabertura, oferta nativa e remocao da bolha ao
+ficar offline.
