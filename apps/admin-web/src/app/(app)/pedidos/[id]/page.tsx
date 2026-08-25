@@ -1,13 +1,30 @@
 'use client';
 
 import Link from 'next/link';
-import { use } from 'react';
+import { use, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryAddressItem, DeliveryStatus } from '@motoboycity/types';
-import { AlertCircle, ChevronLeft } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowRight,
+  Bike,
+  Building2,
+  CalendarClock,
+  ChevronLeft,
+  Clock3,
+  CreditCard,
+  FileText,
+  MapPin,
+  PackageCheck,
+  Phone,
+  ReceiptText,
+  Route,
+  UserRound,
+  WalletCards,
+} from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
 import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-dialog';
-import { StatusChip, statusLabel } from '@/components/orders/status-chip';
+import { StatusChip, statusLabel, statusRailClass } from '@/components/orders/status-chip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
@@ -73,6 +90,30 @@ const offerResponseLabel: Record<string, string> = {
   EXPIRED: 'Expirou',
 };
 
+function DetailField({
+  label,
+  icon,
+  children,
+  className = '',
+}: {
+  label: string;
+  icon: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`min-w-0 rounded-xl border border-primary/10 bg-admin-soft/45 p-3 ${className}`}
+    >
+      <p className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+        <span className="text-primary">{icon}</span>
+        {label}
+      </p>
+      <div className="mt-1.5 min-w-0 text-sm font-medium text-admin-deep">{children}</div>
+    </div>
+  );
+}
+
 export default function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const money = useMoney();
   const { id } = use(params);
@@ -136,7 +177,7 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
   const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Link href="/pedidos" className="flex w-fit items-center gap-1 text-sm text-muted-foreground">
         <ChevronLeft className="size-4" /> Voltar para pedidos
       </Link>
@@ -192,76 +233,81 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       */}
       <DeliveryOverrides delivery={delivery} />
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Destinatário e instruções</CardTitle>
+      <section className="grid items-stretch gap-4 xl:grid-cols-3">
+        <Card size="sm" className="premium-panel h-full">
+          <CardHeader className="border-b border-primary/10 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <UserRound className="size-4 text-primary" aria-hidden="true" />
+              Destinatário e instruções
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>
-              <span className="text-muted-foreground">Destinatário:</span>{' '}
+          <CardContent className="grid gap-2 sm:grid-cols-2">
+            <DetailField label="Destinatário" icon={<UserRound className="size-3" />}>
               {delivery.recipientName ?? 'Não informado'}
-            </p>
-            <p>
-              <span className="text-muted-foreground">Telefone:</span>{' '}
+            </DetailField>
+            <DetailField label="Telefone" icon={<Phone className="size-3" />}>
               {delivery.recipientPhone ?? 'Não informado'}
-            </p>
-            <p>
-              <span className="text-muted-foreground">Número externo:</span>{' '}
+            </DetailField>
+            <DetailField label="Número externo" icon={<FileText className="size-3" />}>
               {delivery.externalOrderNumber ?? 'Não informado'}
-            </p>
-            <p>
-              <span className="text-muted-foreground">Pagamento do cliente:</span>{' '}
+            </DetailField>
+            <DetailField label="Pagamento do cliente" icon={<WalletCards className="size-3" />}>
               {customerPaymentLabel(delivery.customerPaymentMethod)}
-            </p>
+            </DetailField>
             {delivery.driverNote && (
-              <p className="rounded-md bg-muted p-2">{delivery.driverNote}</p>
+              <div className="rounded-xl border border-status-rota/20 bg-status-rota/10 p-3 text-sm sm:col-span-2">
+                <p className="text-[10px] font-semibold tracking-[0.1em] text-[#8a5200] uppercase">
+                  Instrução ao entregador
+                </p>
+                <p className="mt-1.5">{delivery.driverNote}</p>
+              </div>
             )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Operação</CardTitle>
+
+        <Card size="sm" className="premium-panel h-full">
+          <CardHeader className="border-b border-primary/10 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Route className="size-4 text-primary" aria-hidden="true" /> Operação
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <p className="text-muted-foreground">Modalidade</p>
-              <p>{delivery.serviceTypeName}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Status atualizado em</p>
-              <p>{formatDate(delivery.statusChangedAt)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Agendamento</p>
-              <p>{formatDate(delivery.scheduledAt)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Entregador</p>
+          <CardContent className="grid gap-2 sm:grid-cols-2">
+            <DetailField label="Modalidade" icon={<Bike className="size-3" />}>
+              {delivery.serviceTypeName}
+            </DetailField>
+            <DetailField label="Status atualizado" icon={<Clock3 className="size-3" />}>
+              {formatDate(delivery.statusChangedAt)}
+            </DetailField>
+            <DetailField label="Agendamento" icon={<CalendarClock className="size-3" />}>
+              {formatDate(delivery.scheduledAt)}
+            </DetailField>
+            <DetailField label="Entregador" icon={<UserRound className="size-3" />}>
               {delivery.driver ? (
                 <Link
-                  className="text-primary underline-offset-4 hover:underline"
+                  className="block truncate text-primary underline-offset-4 hover:underline"
                   href={`/entregadores/${delivery.driver.id}`}
+                  title={`${delivery.driver.name} · ${delivery.driver.phone}`}
                 >
                   {delivery.driver.name} · {delivery.driver.phone}
                 </Link>
               ) : (
-                <p>Sem entregador vinculado</p>
+                'Sem entregador vinculado'
               )}
-            </div>
+            </DetailField>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Faturamento</CardTitle>
+
+        <Card size="sm" className="premium-panel h-full">
+          <CardHeader className="border-b border-primary/10 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <ReceiptText className="size-4 text-primary" aria-hidden="true" /> Faturamento
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <p className="text-muted-foreground">Método de pagamento</p>
-              <p>{delivery.paymentMethod === 'BILLED' ? 'Faturado' : 'Online'}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Fatura</p>
+          <CardContent className="grid gap-2 sm:grid-cols-2">
+            <DetailField label="Método" icon={<CreditCard className="size-3" />}>
+              {delivery.paymentMethod === 'BILLED' ? 'Faturado' : 'Online'}
+            </DetailField>
+            <DetailField label="Fatura" icon={<ReceiptText className="size-3" />}>
               {delivery.invoice ? (
                 <Link
                   className="text-primary underline-offset-4 hover:underline"
@@ -270,19 +316,15 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                   {delivery.invoice.number} · {delivery.invoice.status}
                 </Link>
               ) : (
-                <p>Sem fatura vinculada</p>
+                'Sem fatura vinculada'
               )}
-            </div>
-            <div>
-              <p className="text-muted-foreground">Tipo de destino</p>
-              <p>
-                {delivery.destinationKnownAtCreation
-                  ? 'Informado na criação'
-                  : 'Definido por GPS na entrega'}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Lote</p>
+            </DetailField>
+            <DetailField label="Tipo de destino" icon={<MapPin className="size-3" />}>
+              {delivery.destinationKnownAtCreation
+                ? 'Informado na criação'
+                : 'Definido por GPS na entrega'}
+            </DetailField>
+            <DetailField label="Lote" icon={<PackageCheck className="size-3" />}>
               {groupQuery.data && groupQuery.data.deliveries.length > 1 ? (
                 <div className="flex flex-wrap gap-2">
                   {groupQuery.data.deliveries.map((item) => (
@@ -296,56 +338,83 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                   ))}
                 </div>
               ) : (
-                <p>Pedido avulso</p>
+                'Pedido avulso'
               )}
-            </div>
+            </DetailField>
           </CardContent>
         </Card>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Coleta</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>{pickup ? formatAddress(pickup) : 'Endereço de coleta não registrado'}</p>
-            {pickup?.referenceNote && (
-              <p className="text-muted-foreground">Referência: {pickup.referenceNote}</p>
-            )}
-            {pickup?.lat !== null && pickup?.lat !== undefined && (
-              <p className="text-xs text-muted-foreground">
-                GPS: {pickup.lat}, {pickup.lng}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Entrega</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>{dropoff ? formatAddress(dropoff) : 'Endereço de entrega ainda não registrado'}</p>
-            {dropoff?.referenceNote && (
-              <p className="text-muted-foreground">Referência: {dropoff.referenceNote}</p>
-            )}
-            {dropoff?.lat !== null && dropoff?.lat !== undefined && (
-              <p className="text-xs text-muted-foreground">
-                GPS: {dropoff.lat}, {dropoff.lng}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section>
+      <section className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(380px,0.55fr)]">
         <OrderDetailMap addresses={delivery.addresses} points={trackingQuery.data?.points ?? []} />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+          <Card size="sm" className="premium-panel h-full">
+            <CardHeader className="border-b border-primary/10 pb-3">
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="size-4 text-primary" aria-hidden="true" /> Coleta
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p className="font-medium text-admin-deep">
+                {pickup ? formatAddress(pickup) : 'Endereço de coleta não registrado'}
+              </p>
+              {pickup?.referenceNote && (
+                <p className="text-muted-foreground">Referência: {pickup.referenceNote}</p>
+              )}
+              {pickup?.lat !== null &&
+                pickup?.lat !== undefined &&
+                pickup.lng !== null &&
+                pickup.lng !== undefined && (
+                <a
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  href={mapsUrl(pickup.lat, pickup.lng)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPin className="size-3" aria-hidden="true" />
+                  {pickup.lat}, {pickup.lng}
+                </a>
+              )}
+            </CardContent>
+          </Card>
+          <Card size="sm" className="premium-panel h-full">
+            <CardHeader className="border-b border-primary/10 pb-3">
+              <CardTitle className="flex items-center gap-2">
+                <MapPin className="size-4 text-primary" aria-hidden="true" /> Entrega
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p className="font-medium text-admin-deep">
+                {dropoff ? formatAddress(dropoff) : 'Endereço de entrega ainda não registrado'}
+              </p>
+              {dropoff?.referenceNote && (
+                <p className="text-muted-foreground">Referência: {dropoff.referenceNote}</p>
+              )}
+              {dropoff?.lat !== null &&
+                dropoff?.lat !== undefined &&
+                dropoff.lng !== null &&
+                dropoff.lng !== undefined && (
+                <a
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  href={mapsUrl(dropoff.lat, dropoff.lng)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPin className="size-3" aria-hidden="true" />
+                  {dropoff.lat}, {dropoff.lng}
+                </a>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </section>
 
-      <section>
-        <Card>
-          <CardHeader>
-            <CardTitle>Rastreamento GPS</CardTitle>
+      <section className="grid items-start gap-4 xl:grid-cols-2">
+        <Card size="sm" className="premium-panel">
+          <CardHeader className="border-b border-primary/10 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="size-4 text-primary" aria-hidden="true" /> Rastreamento GPS
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             {trackingQuery.isLoading ? (
@@ -396,12 +465,12 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             )}
           </CardContent>
         </Card>
-      </section>
 
-      <section>
-        <Card>
-          <CardHeader>
-            <CardTitle>Auditoria do despacho</CardTitle>
+        <Card size="sm" className="premium-panel">
+          <CardHeader className="border-b border-primary/10 pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Bike className="size-4 text-primary" aria-hidden="true" /> Auditoria do despacho
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {dispatchAuditQuery.data?.offers.map((offer) => (
@@ -430,7 +499,15 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       </section>
 
       <section>
-        <h2 className="mb-3 font-semibold">Histórico do pedido</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <Clock3 className="size-4 text-primary" aria-hidden="true" /> Histórico do pedido
+          </h2>
+          <span className="rounded-full bg-admin-soft px-2.5 py-1 text-xs font-medium text-primary">
+            {delivery.statusHistory.length} etapa
+            {delivery.statusHistory.length === 1 ? '' : 's'}
+          </span>
+        </div>
         {delivery.statusHistory.length === 0 ? (
           <Card>
             <CardContent className="py-6 text-sm text-muted-foreground">
@@ -438,21 +515,53 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-2">
+          <div className="grid items-stretch gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1700px]:grid-cols-5">
             {delivery.statusHistory.map((entry, index) => (
-              <Card key={`${entry.changedAt}-${index}`}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
-                  <div>
-                    <p className="font-medium">
-                      {entry.fromStatus ? `${statusLabel(entry.fromStatus)} → ` : ''}
-                      {statusLabel(entry.toStatus)}
-                    </p>
-                    {entry.note && <p className="text-muted-foreground">{entry.note}</p>}
+              <Card
+                key={`${entry.changedAt}-${index}`}
+                size="sm"
+                className="order-list-card h-full min-w-0 border-primary/15"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`absolute inset-y-0 left-0 w-1 ${statusRailClass(entry.toStatus)}`}
+                />
+                <CardContent className="flex h-full min-w-0 flex-col gap-3 pl-4 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-admin-soft text-xs font-bold text-primary">
+                      {index + 1}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatDate(entry.changedAt)}
+                    </span>
                   </div>
-                  <div className="text-right text-muted-foreground">
-                    <p>{formatDate(entry.changedAt)}</p>
+
+                  <div className="min-w-0">
+                    {entry.fromStatus && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {statusLabel(entry.fromStatus)}
+                      </p>
+                    )}
+                    <p className="mt-0.5 flex items-center gap-1.5 font-semibold text-admin-deep">
+                      {entry.fromStatus && (
+                        <ArrowRight className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                      )}
+                      <span className="truncate" title={statusLabel(entry.toStatus)}>
+                        {statusLabel(entry.toStatus)}
+                      </span>
+                    </p>
+                  </div>
+
+                  {entry.note && (
+                    <p className="rounded-lg bg-muted/70 p-2 text-xs text-muted-foreground">
+                      {entry.note}
+                    </p>
+                  )}
+
+                  <div className="mt-auto space-y-1 border-t border-primary/10 pt-2 text-[11px] text-muted-foreground">
                     {index > 0 && (
-                      <p>
+                      <p className="flex items-center gap-1.5">
+                        <Clock3 className="size-3 text-primary" aria-hidden="true" />
                         {durationLabel(
                           delivery.statusHistory[index - 1]!.changedAt,
                           entry.changedAt,
@@ -460,7 +569,12 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                         desde a etapa anterior
                       </p>
                     )}
-                    <p>{entry.changedBy?.name ?? 'Evento do sistema'}</p>
+                    <p className="flex items-center gap-1.5">
+                      <UserRound className="size-3 text-primary" aria-hidden="true" />
+                      <span className="truncate">
+                        {entry.changedBy?.name ?? 'Evento do sistema'}
+                      </span>
+                    </p>
                   </div>
                 </CardContent>
               </Card>

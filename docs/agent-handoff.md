@@ -6116,3 +6116,21 @@ build de producao do Admin Web passaram junto da correcao da camera do mapa.
 Proximo passo concreto: conferir `/pedidos` em 1920 px e em largura mobile com
 pedidos cancelaveis e concluidos, garantindo que status e botoes nao estourem o
 card.
+
+## Atualizacao — 2026-08-24: detalhe do pedido mais compacto no Admin
+
+A rota `/pedidos/[id]` foi reorganizada para eliminar os grandes vazios sem
+alterar consultas, contratos ou acoes. Destinatario, operacao e faturamento
+agora ocupam tres paineis na mesma linha em desktop, com campos internos em
+grade e hierarquia visual consistente. O mapa divide a linha com os cards de
+coleta e entrega, incluindo atalhos das coordenadas para o Google Maps.
+
+Rastreamento GPS e auditoria de despacho passaram a usar duas colunas. O
+historico deixou de renderizar um card de largura total por evento e virou uma
+grade cronologica compacta de ate cinco etapas por linha, preservando transicao,
+horario, duracao, autor e observacao. Em telas menores todas as secoes continuam
+empilhando de forma responsiva. Arquivo alterado:
+`apps/admin-web/src/app/(app)/pedidos/[id]/page.tsx`. Typecheck, lint e build de
+producao do Admin Web passaram. Proximo passo concreto: abrir pedidos com e sem
+destino, entregador, fatura, lote e historico longo para uma verificacao visual
+final nas larguras desktop e mobile.
