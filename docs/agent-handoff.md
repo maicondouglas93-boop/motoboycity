@@ -5857,6 +5857,54 @@ Próximo passo concreto: acompanhar o deploy de limpeza, confirmar novamente
 `GET /health` e então validar login e navegação essenciais nos dois painéis da
 Vercel contra a API de produção.
 
+## Atualização — 2026-08-24: primeiro APK Android de produção assinado
+
+Foi gerado o APK `release` do `apps/driver-app` para o piloto de produção com
+`applicationId` `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.1`, `versionCode` `1`, `minSdk` 24 e `targetSdk` 36. O bundle
+embarcado aponta para `https://motoboycity-api.onrender.com`, não contém a URL
+local `localhost:3333`, desabilita cleartext e inclui a configuração do
+Firebase Messaging.
+
+O PNPM não expunha o compilador transitivo do Hermes no caminho esperado pelo
+React Native Gradle Plugin. `hermes-compiler@250829098.0.16`, exatamente a
+versão usada por `react-native@0.86.2`, foi adicionado como dependência direta
+de desenvolvimento do app. Em Windows, o build também excedia o limite de
+caminhos no diretório original; a compilação foi executada em uma cópia física
+temporária curta (`C:\mbc`) sem alterar o código-fonte usado pelo artefato.
+
+A chave de release foi criada fora do repositório no pendrive removível em
+`I:\MOTOboyCity\signing\motoboycity-release.jks`, alias `motoboycity`. As
+senhas permanecem somente no arquivo local ignorado e não foram registradas
+neste documento. Certificado SHA-256:
+`BD:42:D6:1D:35:81:9B:86:CB:9D:1F:F7:84:D3:E6:43:40:C0:CE:15:3E:21:B0:33:2A:E9:7B:4C:F5:1D:50:B9`.
+
+O APK final foi copiado para
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.1-vc1.apk`, tem 71,49 MiB e
+SHA-256
+`2BDED57889B02FBE758E218F3E8D6C9FA595A5F2EA4A25AAC4BBDAB3C1D8369F`.
+`apksigner` confirmou um assinante RSA 4096 e APK Signature Scheme v2; `aapt`
+confirmou pacote, versão, label `motoboycity` e SDKs. Antes do build nativo,
+typecheck, lint e 67 testes Jest em 12 suítes do driver-app passaram, e a API
+de produção respondeu saudável.
+
+Como redundância local, a mesma chave protegida por senha também foi copiada
+para três discos físicos distintos em
+`C:\MOTOboyCity-Backup\signing\motoboycity-release.jks`,
+`D:\MOTOboyCity-Backup\signing\motoboycity-release.jks` e
+`F:\MOTOboyCity-Backup\signing\motoboycity-release.jks`. Todas as cópias foram
+conferidas com o SHA-256 do arquivo original:
+`51083392535AB3B59CAF2872112E25DD90FAAEB316A27773C75455614ABA3D61`.
+Nenhuma senha foi copiada junto com os arquivos.
+
+Um aparelho Android conectado já possuía o mesmo pacote assinado por um
+certificado antigo/diferente. O release novo não foi instalado para evitar uma
+desinstalação que apagaria dados locais. Próximo passo concreto: guardar as
+senhas em um cofre independente e manter ao menos uma cópia da chave fora deste
+computador, autorizar uma instalação limpa no aparelho de teste e executar o
+smoke test real de login, permissões, mapa/GPS, presença, ofertas,
+aceite/recusa e push em foreground, background e tela bloqueada.
+
 ## Atualização — 2026-08-24: copiar acesso do painel da empresa no Admin
 
 A página `/clientes` do Admin Web ganhou a ação `Copiar link do painel` ao
@@ -5869,3 +5917,68 @@ modifica dados das empresas.
 Validação deste recorte: typecheck e lint de `@motoboycity/admin-web`
 concluíram com sucesso. Próximo passo concreto: revisar visualmente em desktop
 e mobile e publicar o Admin Web quando o commit for autorizado.
+
+## Atualização — 2026-08-24: mapa Android bloqueado pela autorização do Google
+
+No aparelho real, o APK `0.1.0-pilot.1`/versionCode 1 abre o `MapView` e mostra
+a marca Google, mas não recebe os blocos do mapa. O `logcat` confirmou
+`Authorization failure` e `Error requesting API token. StatusCode=INVALID_ARGUMENT`.
+A chave está presente no APK e a configuração local/Firebase existe; portanto
+o defeito não está no layout nem na injeção da chave pelo Gradle.
+Uma comparação sem expor valores confirmou que a chave Android local não é a
+mesma chave configurada localmente para API, Admin Web, Company Web ou raiz do
+monorepo, então ela pode receber restrições específicas de aplicativo Android
+sem afetar esses consumidores locais.
+
+O próprio SDK informou a identidade Android que precisa ser autorizada no
+Google Cloud: pacote `com.motoboycity.driverapp` e SHA-1 de release
+`F5:92:B4:10:39:95:42:CC:AA:36:AD:A8:91:62:74:35:49:17:FF:DC`. O certificado
+instalado foi conferido diretamente com `apksigner` e corresponde à chave de
+release criada para o piloto.
+
+Nenhuma configuração externa foi alterada nesta sessão porque não havia uma
+sessão autenticada do Google Cloud disponível. Próximo passo concreto: no
+projeto que possui a chave usada pelo app, confirmar faturamento, habilitar
+`Maps SDK for Android` e restringir a chave para aplicativo Android usando o
+pacote e SHA-1 acima; em `Restrições de API`, permitir `Maps SDK for Android`.
+Depois de salvar e aguardar a propagação, forçar o encerramento e reabrir o app
+para repetir o teste no aparelho.
+
+A configuração foi salva pelo responsável no Google Cloud e retestada no mesmo
+aparelho. Após reiniciar apenas o processo do app, o `logcat` não apresentou
+mais `Authorization failure`/`INVALID_ARGUMENT`, e a captura de tela confirmou
+o carregamento dos blocos, nomes de ruas, pontos de interesse e posição atual.
+O mapa Android do APK piloto está operacional; não foi necessário recompilar o
+APK porque a chave embutida permaneceu a mesma.
+
+## Atualizacao — 2026-08-24: Admin lanca pedido para empresa selecionada
+
+O Admin Web ganhou a acao `Lancar pedido` em `/clientes`. O modal lista todas
+as empresas cadastradas, deixa pendentes e suspensas visiveis mas indisponiveis
+e, depois da escolha de uma empresa ativa, carrega seu endereco principal de
+coleta e as modalidades ativas. O formulario cria um pedido avulso imediato ou
+agendado, com destino informado ou capturado pelo GPS, dados opcionais do
+destinatario/pagamento e as exigencias de retorno, confirmacao de coleta e
+comprovante.
+
+A API expoe `POST /admin/deliveries/company/:companyId`, protegida por
+`JwtAuthGuard` e `AdminOnlyGuard` e validada pelo mesmo `createDeliverySchema`
+da empresa. `DeliveriesService.createForCompany` resolve a empresa diretamente,
+recusa alvos inexistentes ou nao ativos e reutiliza o nucleo de criacao. Assim,
+o pedido usa o endereco, a regiao e a tabela personalizada da empresa escolhida,
+mas `DeliveryStatusHistory.changedByUserId` registra o administrador. A chave
+idempotente continua isolada por empresa e o mesmo despacho/agendamento e
+realtime sao executados.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/admin/deliveries/*`,
+`packages/api-client/src/admin-deliveries.ts`,
+`apps/admin-web/src/components/deliveries/create-company-delivery-dialog.tsx`
+e `apps/admin-web/src/app/(app)/clientes/page.tsx`. Nao houve alteracao Prisma
+nem migration.
+
+Validacao executada: 105 testes unitarios focados da API passaram; typecheck de
+API, API Client e Admin Web passou; lint de API e Admin Web passou; os builds de
+producao da API e do Admin Web tambem passaram. Proximo passo concreto: revisar
+visualmente o modal com uma empresa ativa que tenha endereco e fazer um smoke
+test real de criacao contra um ambiente controlado antes de publicar.

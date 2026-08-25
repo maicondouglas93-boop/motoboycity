@@ -1,5 +1,9 @@
 import type { DeliveryDetail } from '@motoboycity/types';
-import type { ForceCompletePayload, ReassignDriverPayload } from '@motoboycity/validation';
+import type {
+  CreateDeliveryPayload,
+  ForceCompletePayload,
+  ReassignDriverPayload,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminDeliveriesApiConfig {
@@ -27,6 +31,18 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
   }
 
   return {
+    async createForCompany(
+      accessToken: string,
+      companyId: string,
+      payload: CreateDeliveryPayload,
+    ): Promise<DeliveryDetail> {
+      const response = await fetch(`${baseUrl}/admin/deliveries/company/${companyId}`, {
+        method: 'POST',
+        headers: jsonHeaders(accessToken),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
+    },
     reassignDriver: (accessToken: string, id: string, payload: ReassignDriverPayload) =>
       patch(accessToken, id, 'driver', payload),
     forceComplete: (accessToken: string, id: string, payload: ForceCompletePayload) =>

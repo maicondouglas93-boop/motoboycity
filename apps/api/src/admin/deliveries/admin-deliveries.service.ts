@@ -5,7 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { DeliveryStatus, Prisma, User } from '@prisma/client';
-import type { ForceCompletePayload, ReassignDriverPayload } from '@motoboycity/validation';
+import type {
+  CreateDeliveryPayload,
+  ForceCompletePayload,
+  ReassignDriverPayload,
+} from '@motoboycity/validation';
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -36,6 +40,14 @@ export class AdminDeliveriesService {
     private readonly deliveriesService: DeliveriesService,
     private readonly financeLedgerService: FinanceLedgerService,
   ) {}
+
+  createForCompany(
+    admin: User,
+    companyId: string,
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    return this.deliveriesService.createForCompany(admin, companyId, payload);
+  }
 
   /**
    * Troca o entregador de um pedido em andamento.

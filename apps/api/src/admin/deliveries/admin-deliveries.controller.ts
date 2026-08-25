@@ -1,8 +1,10 @@
-import { Body, Controller, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import {
   forceCompleteSchema,
+  createDeliverySchema,
   reassignDriverSchema,
+  type CreateDeliveryPayload,
   type ForceCompletePayload,
   type ReassignDriverPayload,
 } from '@motoboycity/validation';
@@ -22,6 +24,15 @@ import { AdminDeliveriesService } from './admin-deliveries.service';
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
 export class AdminDeliveriesController {
   constructor(private readonly adminDeliveriesService: AdminDeliveriesService) {}
+
+  @Post('company/:companyId')
+  createForCompany(
+    @Param('companyId') companyId: string,
+    @Body(new ZodValidationPipe(createDeliverySchema)) body: CreateDeliveryPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.createForCompany(user, companyId, body);
+  }
 
   @Patch(':id/driver')
   reassignDriver(

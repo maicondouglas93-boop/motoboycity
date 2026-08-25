@@ -129,6 +129,7 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
 describe('DeliveriesService', () => {
   let service: DeliveriesService;
   let prisma: {
+    company: { findUnique: jest.Mock };
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
     deliveryAddress: { findFirst: jest.Mock };
@@ -175,6 +176,7 @@ describe('DeliveriesService', () => {
       deliveryStatusHistory: { create: jest.fn() },
     };
     prisma = {
+      company: { findUnique: jest.fn() },
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
       /**
@@ -545,6 +547,94 @@ describe('DeliveriesService', () => {
     expect(result.id).toBe(winnerId);
     expect(dispatchService.dispatchDelivery).toHaveBeenCalledTimes(1);
     expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
+  });
+
+  describe('createForCompany', () => {
+    const payload = {
+      serviceTypeId: 'st-1',
+      destinationKnownAtCreation: true,
+      dropoffAddress: dropoffPayload,
+      requiresReturn: false,
+      requiresDeliveryProof: false,
+      requiresCollectionRecipient: false,
+      pickupSurchargeChargedToDriver: false,
+    };
+
+    beforeEach(() => {
+      prisma.company.findUnique.mockResolvedValue({
+        id: 'company-2',
+        status: 'ACTIVE',
+        regionId: 'region-2',
+      });
+      prisma.companyAddress.findFirst.mockResolvedValue({
+        ...pickupAddress,
+        id: 'addr-2',
+        companyId: 'company-2',
+      });
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 7.5,
+        subtotal: 12.5,
+        returnValue: 0,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+      });
+      tx.delivery.create.mockResolvedValue({ id: 'delivery-1' });
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          companyId: 'company-2',
+          company: { tradeName: 'Empresa Escolhida', regionId: 'region-2' },
+        }),
+      );
+    });
+
+    it('usa a empresa selecionada no preco, no pedido e no historico do admin', async () => {
+      await service.createForCompany(adminUser, 'company-2', payload);
+
+      expect(prisma.company.findUnique).toHaveBeenCalledWith({
+        where: { id: 'company-2' },
+        select: { id: true, status: true, regionId: true },
+      });
+      expect(pricingService.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: 'company-2', regionId: 'region-2' }),
+      );
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ companyId: 'company-2' }) }),
+      );
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: null,
+          toStatus: 'AWAITING_DRIVER',
+          changedByUserId: adminUser.id,
+        },
+      });
+      expect(prisma.companyTeamMember.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('recusa empresa inexistente ou nao ativa', async () => {
+      prisma.company.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        id: 'company-2',
+        status: 'SUSPENDED',
+        regionId: 'region-2',
+      });
+
+      await expect(
+        service.createForCompany(adminUser, 'company-2', payload),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.createForCompany(adminUser, 'company-2', payload),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa usuario que nao seja administrador', async () => {
+      await expect(
+        service.createForCompany(companyUser, 'company-2', payload),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   describe('createBatch', () => {
@@ -1658,7 +1748,9 @@ describe('DeliveriesService', () => {
         }),
       );
 
-      await expect(service.completeReturn(driverUser, 'delivery-1', nearPickup)).resolves.toMatchObject({
+      await expect(
+        service.completeReturn(driverUser, 'delivery-1', nearPickup),
+      ).resolves.toMatchObject({
         deliveries: [expect.objectContaining({ id: 'delivery-1', status: 'COMPLETED' })],
       });
       expect(platformSettingsService.get).not.toHaveBeenCalled();

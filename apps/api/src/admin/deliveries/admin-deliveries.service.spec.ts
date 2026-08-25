@@ -36,7 +36,11 @@ describe('AdminDeliveriesService', () => {
     delivery: { update: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock };
   };
-  let deliveriesService: { detail: jest.Mock; publishDeliveryUpdate: jest.Mock };
+  let deliveriesService: {
+    createForCompany: jest.Mock;
+    detail: jest.Mock;
+    publishDeliveryUpdate: jest.Mock;
+  };
   let financeLedgerService: { creditDriverRepasse: jest.Mock };
 
   beforeEach(async () => {
@@ -50,6 +54,7 @@ describe('AdminDeliveriesService', () => {
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     deliveriesService = {
+      createForCompany: jest.fn().mockResolvedValue({ id: 'delivery-created' }),
       detail: jest.fn().mockResolvedValue({}),
       publishDeliveryUpdate: jest.fn(),
     };
@@ -65,6 +70,21 @@ describe('AdminDeliveriesService', () => {
     }).compile();
 
     service = module.get(AdminDeliveriesService);
+  });
+
+  it('delega a criacao para a empresa escolhida preservando o admin como autor', async () => {
+    const payload = {
+      serviceTypeId: 'service-1',
+      destinationKnownAtCreation: false,
+      requiresReturn: false,
+      requiresDeliveryProof: false,
+      requiresCollectionRecipient: false,
+      pickupSurchargeChargedToDriver: false,
+    };
+
+    await service.createForCompany(admin, 'company-1', payload);
+
+    expect(deliveriesService.createForCompany).toHaveBeenCalledWith(admin, 'company-1', payload);
   });
 
   describe('trocar entregador', () => {

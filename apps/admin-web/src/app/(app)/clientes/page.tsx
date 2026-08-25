@@ -5,8 +5,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyListItem, RegisterCompanyResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Building2, Check, CircleCheckBig, Copy } from 'lucide-react';
+import { Building2, Check, CircleCheckBig, Copy, PackagePlus } from 'lucide-react';
 import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
+import { CreateCompanyDeliveryDialog } from '@/components/deliveries/create-company-delivery-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -99,6 +100,11 @@ export default function ClientsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <CreateCompanyDeliveryDialog accessToken={token} companies={companies}>
+            <Button type="button" variant="outline" className="gap-2">
+              <PackagePlus className="size-4" /> Lançar pedido
+            </Button>
+          </CreateCompanyDeliveryDialog>
           <Button
             type="button"
             variant="outline"
@@ -106,11 +112,7 @@ export default function ClientsPage() {
             onClick={() => void handleCopyCompanyLogin()}
             title={COMPANY_LOGIN_URL}
           >
-            {copyStatus === 'copied' ? (
-              <Check className="size-4" />
-            ) : (
-              <Copy className="size-4" />
-            )}
+            {copyStatus === 'copied' ? <Check className="size-4" /> : <Copy className="size-4" />}
             {copyStatus === 'copied' ? 'Link copiado' : 'Copiar link do painel'}
           </Button>
           <CreateCompanyDialog accessToken={token} onCreated={handleCompanyCreated}>

@@ -221,6 +221,42 @@ export class DeliveriesService {
       throw new ForbiddenException('Sua empresa precisa estar aprovada para lançar pedidos.');
     }
 
+    return this.createForResolvedCompany(user, company, payload);
+  }
+
+  /**
+   * Cria um pedido em nome de uma empresa escolhida pelo administrador.
+   * A empresa selecionada continua sendo a dona operacional e financeira; o
+   * administrador fica registrado como autor no historico.
+   */
+  async createForCompany(
+    admin: User,
+    companyId: string,
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    if (admin.type !== 'ADMIN') {
+      throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, status: true, regionId: true },
+    });
+    if (!company) {
+      throw new NotFoundException('Empresa não encontrada.');
+    }
+    if (company.status !== 'ACTIVE') {
+      throw new ForbiddenException('A empresa precisa estar ativa para lançar pedidos.');
+    }
+
+    return this.createForResolvedCompany(admin, company, payload);
+  }
+
+  private async createForResolvedCompany(
+    user: User,
+    company: { id: string; status: string; regionId: string },
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
     const idempotentDeliveryId = payload.idempotencyKey
       ? this.deterministicUuid(`delivery:${company.id}:${payload.idempotencyKey}`)
       : null;
@@ -1002,7 +1038,11 @@ export class DeliveriesService {
       ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
       : [delivery];
     if (siblings.every((item) => POST_COLLECTION_STATUSES.includes(item.status))) {
-      return this.deliveryGroupResult(user, delivery.batchId, siblings.map((item) => item.id));
+      return this.deliveryGroupResult(
+        user,
+        delivery.batchId,
+        siblings.map((item) => item.id),
+      );
     }
     if (siblings.some((item) => item.status !== 'ACCEPTED')) {
       throw new ConflictException('Todos os itens do pedido precisam estar aceitos para coletar.');
@@ -1023,12 +1063,12 @@ export class DeliveriesService {
         for (const item of siblings) {
           const updated = await tx.delivery.updateMany({
             where: { id: item.id, status: 'ACCEPTED', driverId: driver.id },
-          /**
-           * Na marcacao retroativa o carimbo do estado passa a ser o horario
-           * DECLARADO, e nao o do toque. Ele e o relogio operacional — e o que
-           * a fila ao vivo mostra, e o piso da proxima declaracao — enquanto a
-           * prova do registro fica no `changedAt` do historico.
-           */
+            /**
+             * Na marcacao retroativa o carimbo do estado passa a ser o horario
+             * DECLARADO, e nao o do toque. Ele e o relogio operacional — e o que
+             * a fila ao vivo mostra, e o piso da proxima declaracao — enquanto a
+             * prova do registro fica no `changedAt` do historico.
+             */
             data: { status: 'COLLECTED', statusChangedAt: occurredAt ?? agora },
           });
           if (updated.count !== 1) {
@@ -1075,7 +1115,11 @@ export class DeliveriesService {
       ? await this.prisma.delivery.findMany({ where: { batchId: delivery.batchId } })
       : [delivery];
     if (!siblings.every((item) => POST_COLLECTION_STATUSES.includes(item.status))) return null;
-    return this.deliveryGroupResult(user, delivery.batchId, siblings.map((item) => item.id));
+    return this.deliveryGroupResult(
+      user,
+      delivery.batchId,
+      siblings.map((item) => item.id),
+    );
   }
 
   private async deliveryGroupResult(
@@ -1435,11 +1479,14 @@ export class DeliveriesService {
     );
     if (candidates.length === 0) {
       const completed = siblings.filter(
-        (item) =>
-          item.status === 'COMPLETED' && (item.requiresReturn || item.failedAt !== null),
+        (item) => item.status === 'COMPLETED' && (item.requiresReturn || item.failedAt !== null),
       );
       if (completed.length > 0) {
-        return this.deliveryGroupResult(user, delivery.batchId, completed.map((item) => item.id));
+        return this.deliveryGroupResult(
+          user,
+          delivery.batchId,
+          completed.map((item) => item.id),
+        );
       }
       throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
     }
@@ -1549,7 +1596,11 @@ export class DeliveriesService {
       (item) => item.status === 'COMPLETED' && (item.requiresReturn || item.failedAt !== null),
     );
     if (completed.length === 0) return null;
-    return this.deliveryGroupResult(user, delivery.batchId, completed.map((item) => item.id));
+    return this.deliveryGroupResult(
+      user,
+      delivery.batchId,
+      completed.map((item) => item.id),
+    );
   }
 
   private async assertCanAccess(user: User, delivery: Delivery): Promise<void> {
@@ -2102,7 +2153,10 @@ export class DeliveriesService {
     }
   }
 
-  private async assertNearDropoff(deliveryId: string, payload: MarkDeliveredPayload): Promise<void> {
+  private async assertNearDropoff(
+    deliveryId: string,
+    payload: MarkDeliveredPayload,
+  ): Promise<void> {
     if (payload.occurredAt !== undefined) return;
 
     const dropoff = await this.prisma.deliveryAddress.findFirst({

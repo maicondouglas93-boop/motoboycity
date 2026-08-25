@@ -238,6 +238,19 @@ O texto das conversas não é persistido. A auditoria guarda somente metadados d
 requisição e parâmetros/resultados reduzidos das ferramentas, sem CPF,
 telefone, e-mail, endereço, coordenadas, destinatário ou credenciais.
 
+## Pedido criado pelo administrador para uma empresa
+
+O administrador pode criar um pedido avulso em nome de uma empresa ativa,
+escolhida explicitamente no painel. A criacao nao simula uma sessao da loja:
+o pedido pertence a empresa selecionada, usa seu endereco principal de coleta,
+sua regiao e sua tabela de precos personalizada, enquanto o administrador fica
+registrado como autor no historico do pedido.
+
+Empresas pendentes, suspensas, inexistentes ou sem endereco principal nao podem
+receber pedidos por esse fluxo. Depois da criacao, agendamento, congelamento de
+preco, despacho, realtime e idempotencia seguem exatamente as mesmas regras da
+criacao manual feita pela propria empresa.
+
 ---
 
 Decisões confirmadas diretamente com o responsável do produto em sessões
