@@ -9,3 +9,5 @@ export * from './finance.js';
 export * from './report.js';
 export * from './operations.js';
 export * from './virtual-secretary.js';
+export * from './administrative-audit.js';
+export * from './region.js';

@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   TimerReset,
   Trophy,
+  History,
   WalletCards,
   type LucideIcon,
 } from 'lucide-react';
@@ -35,6 +36,20 @@ type ReportGroup = {
 };
 
 const reportGroups: ReportGroup[] = [
+  {
+    title: 'Administração',
+    description: 'Consulte quem alterou cadastros e operações no painel.',
+    reports: [
+      {
+        title: 'Histórico administrativo',
+        description:
+          'Empresas, entregadores, documentos, regiões, pedidos e faturas em uma trilha única.',
+        href: '/relatorios/historico-administrativo',
+        icon: History,
+        tone: 'bg-teal-500/10 text-teal-700 ring-teal-500/15',
+      },
+    ],
+  },
   {
     title: 'Visão geral',
     description: 'Comece pelos indicadores que resumem o comportamento da operação.',

@@ -1,13 +1,15 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyDetail } from '@motoboycity/types';
 import {
   updateCompanyProfileSchema,
   upsertCompanyAddressSchema,
   type UpdateCompanyProfilePayload,
   type UpsertCompanyAddressPayload,
+  adminUpdateCompanySchema,
+  type AdminUpdateCompanyPayload,
 } from '@motoboycity/validation';
 import { Building2, MapPinned, Pencil } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
@@ -67,6 +69,12 @@ export function EditCompanyDialog({
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState(() => profileFrom(company));
+  const [core, setCore] = useState<AdminUpdateCompanyPayload>(() => ({
+    tradeName: company.tradeName,
+    legalName: company.legalName,
+    document: company.document,
+    regionId: company.region.id,
+  }));
   const [address, setAddress] = useState(() => addressFrom(company));
   const [profileError, setProfileError] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
@@ -76,11 +84,22 @@ export function EditCompanyDialog({
     () => company.addresses.find((item) => item.isPrimary)?.id ?? company.addresses[0]?.id,
     [company.addresses],
   );
+  const optionsQuery = useQuery({
+    queryKey: ['admin', 'company-registration-options'],
+    queryFn: () => adminCompaniesApi.registrationOptions(token),
+    enabled: open,
+  });
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
     if (!nextOpen) return;
     setProfile(profileFrom(company));
+    setCore({
+      tradeName: company.tradeName,
+      legalName: company.legalName,
+      document: company.document,
+      regionId: company.region.id,
+    });
     setAddress(addressFrom(company));
     setProfileError(null);
     setAddressError(null);
@@ -94,8 +113,13 @@ export function EditCompanyDialog({
   }
 
   const profileMutation = useMutation({
-    mutationFn: (payload: UpdateCompanyProfilePayload) =>
-      adminCompaniesApi.updateProfile(token, company.id, payload),
+    mutationFn: async (payload: {
+      core: AdminUpdateCompanyPayload;
+      profile: UpdateCompanyProfilePayload;
+    }) => {
+      await adminCompaniesApi.update(token, company.id, payload.core);
+      return adminCompaniesApi.updateProfile(token, company.id, payload.profile);
+    },
     onSuccess: (updated) => {
       setProfileError(null);
       acceptUpdatedCompany(updated, 'Dados cadastrais atualizados.');
@@ -126,11 +150,21 @@ export function EditCompanyDialog({
     event.preventDefault();
     setSuccess(null);
     const parsed = updateCompanyProfileSchema.safeParse(profile);
-    if (!parsed.success) {
-      setProfileError(parsed.error.issues[0]?.message ?? 'Revise os dados informados.');
+    const parsedCore = adminUpdateCompanySchema.safeParse({
+      ...core,
+      tradeName: profile.tradeName,
+      legalName: profile.legalName,
+    });
+    if (!parsed.success || !parsedCore.success) {
+      const issue = !parsed.success
+        ? parsed.error.issues[0]?.message
+        : !parsedCore.success
+          ? parsedCore.error.issues[0]?.message
+          : undefined;
+      setProfileError(issue ?? 'Revise os dados informados.');
       return;
     }
-    profileMutation.mutate(parsed.data);
+    profileMutation.mutate({ core: parsedCore.data, profile: parsed.data });
   }
 
   function submitAddress(event: FormEvent<HTMLFormElement>) {
@@ -185,6 +219,30 @@ export function EditCompanyDialog({
                   value={profile.tradeName}
                   onChange={(event) => setProfile({ ...profile, tradeName: event.target.value })}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="admin-company-document">CNPJ</Label>
+                <Input
+                  id="admin-company-document"
+                  inputMode="numeric"
+                  value={core.document}
+                  onChange={(event) => setCore({ ...core, document: event.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="admin-company-region">Regiao</Label>
+                <select
+                  id="admin-company-region"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={core.regionId}
+                  onChange={(event) => setCore({ ...core, regionId: event.target.value })}
+                >
+                  {(optionsQuery.data?.regions ?? [company.region]).map((region) => (
+                    <option key={region.id} value={region.id}>
+                      {region.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="admin-company-legal-name">Razao social</Label>

@@ -33,6 +33,8 @@ import { PushModule } from './push/push.module';
 import { LivePresenceModule } from './live-presence/live-presence.module';
 import { VirtualSecretaryModule } from './admin/virtual-secretary/virtual-secretary.module';
 import { ProfileModule } from './profile/profile.module';
+import { AdminAuditModule } from './admin/audit/admin-audit.module';
+import { AdminRegionsModule } from './admin/regions/admin-regions.module';
 
 @Module({
   imports: [
@@ -60,6 +62,8 @@ import { ProfileModule } from './profile/profile.module';
     LivePresenceModule,
     HealthModule,
     AuthModule,
+    AdminAuditModule,
+    AdminRegionsModule,
     AdminCompaniesModule,
     AdminDriversModule,
     AdminServiceTypesModule,

@@ -265,6 +265,7 @@ model User {
   driversReviewed         Driver[]                         @relation("DriverReviewedBy")
   platformSettingsEdits   PlatformSettings[]               @relation("PlatformSettingsUpdatedBy")
   virtualSecretaryAudits  VirtualSecretaryAudit[]
+  administrativeAudits    AdministrativeAudit[]
   walletAdjustments       WalletTransaction[]              @relation("WalletTransactionCreatedBy")
   paymentNoticesSent      InvoicePaymentNotice[]           @relation("PaymentNoticeCreatedBy")
   paymentNoticesReviewed  InvoicePaymentNotice[]           @relation("PaymentNoticeReviewedBy")
@@ -316,6 +317,28 @@ model VirtualSecretaryAudit {
   @@index([requestId])
   @@index([adminId, createdAt])
   @@map("virtual_secretary_audits")
+}
+
+/// Trilha append-only das mutacoes executadas pelo administrador fora dos
+/// historicos de dominio (pedido, fatura e saque). O texto e humano, enquanto
+/// `metadata` guarda somente identificadores e valores administrativos seguros.
+model AdministrativeAudit {
+  id          String @id @default(uuid())
+  actorUserId String
+  action      String @db.VarChar(80)
+  entityType  String @db.VarChar(40)
+  entityId    String @db.VarChar(80)
+  summary     String @db.VarChar(500)
+  metadata    Json?
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@map("administrative_audits")
 }
 
 /// Vínculo entre um User e uma Company, com papel dentro da empresa.

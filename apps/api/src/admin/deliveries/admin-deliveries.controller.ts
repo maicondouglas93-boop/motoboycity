@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import type { User } from '@prisma/client';
 import {
   forceCompleteSchema,
@@ -34,6 +34,15 @@ export class AdminDeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.adminDeliveriesService.createForCompany(user, companyId, body);
+  }
+
+  @Put(':id')
+  updateBeforeAcceptance(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(createDeliverySchema)) body: CreateDeliveryPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.updateBeforeAcceptance(user, id, body);
   }
 
   @Patch(':id/driver')

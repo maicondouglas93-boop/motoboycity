@@ -12,6 +12,10 @@ import type {
   CreateAdminCompanyPayload,
   UpdateCompanyProfilePayload,
   UpsertCompanyAddressPayload,
+  AdminUpdateCompanyPayload,
+  AdminCompanyAddressPayload,
+  AdminCreateCompanyMemberPayload,
+  AdminUpdateCompanyMemberPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
@@ -90,6 +94,105 @@ export function createAdminCompaniesApi({ baseUrl }: AdminCompaniesApiConfig) {
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async update(
+      accessToken: string,
+      companyId: string,
+      payload: AdminUpdateCompanyPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async addAddress(
+      accessToken: string,
+      companyId: string,
+      payload: AdminCompanyAddressPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/addresses`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async updateAddress(
+      accessToken: string,
+      companyId: string,
+      addressId: string,
+      payload: AdminCompanyAddressPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(
+        `${baseUrl}/admin/companies/${companyId}/addresses/${addressId}`,
+        {
+          method: 'PUT',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async deleteAddress(
+      accessToken: string,
+      companyId: string,
+      addressId: string,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(
+        `${baseUrl}/admin/companies/${companyId}/addresses/${addressId}`,
+        { method: 'DELETE', headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async addMember(
+      accessToken: string,
+      companyId: string,
+      payload: AdminCreateCompanyMemberPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/team-members`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async updateMember(
+      accessToken: string,
+      companyId: string,
+      memberId: string,
+      payload: AdminUpdateCompanyMemberPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(
+        `${baseUrl}/admin/companies/${companyId}/team-members/${memberId}`,
+        {
+          method: 'PUT',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async setMemberActive(
+      accessToken: string,
+      companyId: string,
+      memberId: string,
+      active: boolean,
+    ): Promise<AdminCompanyDetail> {
+      const action = active ? 'reactivate' : 'deactivate';
+      const response = await fetch(
+        `${baseUrl}/admin/companies/${companyId}/team-members/${memberId}/${action}`,
+        { method: 'PATCH', headers: withAuth(accessToken) },
+      );
       return parseJsonOrThrow<AdminCompanyDetail>(response);
     },
 

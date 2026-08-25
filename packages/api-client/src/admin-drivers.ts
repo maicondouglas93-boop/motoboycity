@@ -1,5 +1,6 @@
 import type {
   AdminDriverListItem,
+  AdminDriverDetail,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
   DriverAccountStatus,
@@ -10,7 +11,12 @@ import type {
   RegisterDriverResult,
   ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/types';
-import type { ChangeAdminPasswordPayload, CreateAdminDriverPayload } from '@motoboycity/validation';
+import type {
+  AdminReviewDriverDocumentPayload,
+  AdminUpdateDriverPayload,
+  ChangeAdminPasswordPayload,
+  CreateAdminDriverPayload,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
 export interface AdminDriversApiConfig {
@@ -57,11 +63,66 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       return parseJsonOrThrow<AdminDriverListItem[]>(response);
     },
 
-    async detail(accessToken: string, driverId: string): Promise<AdminDriverListItem> {
+    async detail(accessToken: string, driverId: string): Promise<AdminDriverDetail> {
       const response = await fetch(`${baseUrl}/admin/drivers/${driverId}`, {
         headers: withAuth(accessToken),
       });
-      return parseJsonOrThrow<AdminDriverListItem>(response);
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    async update(
+      accessToken: string,
+      driverId: string,
+      payload: AdminUpdateDriverPayload,
+    ): Promise<AdminDriverDetail> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    async uploadDocument(
+      accessToken: string,
+      driverId: string,
+      formData: FormData,
+    ): Promise<AdminDriverDetail> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/documents`, {
+        method: 'POST',
+        headers: withAuth(accessToken),
+        body: formData,
+      });
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    async reviewDocument(
+      accessToken: string,
+      driverId: string,
+      documentId: string,
+      payload: AdminReviewDriverDocumentPayload,
+    ): Promise<AdminDriverDetail> {
+      const response = await fetch(
+        `${baseUrl}/admin/drivers/${driverId}/documents/${documentId}/review`,
+        {
+          method: 'PATCH',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    async deleteDocument(
+      accessToken: string,
+      driverId: string,
+      documentId: string,
+    ): Promise<AdminDriverDetail> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/documents/${documentId}`, {
+        method: 'DELETE',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverDetail>(response);
     },
 
     async approve(accessToken: string, driverId: string): Promise<DriverReviewResult> {

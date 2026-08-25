@@ -11,14 +11,16 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  KeyRound,
   MapPin,
   WalletCards,
 } from 'lucide-react';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { CompanyStatusDialog } from '@/components/companies/company-status-dialog';
 import { EditCompanyDialog } from '@/components/companies/edit-company-dialog';
-import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
+import {
+  CompanyAddressesManager,
+  CompanyMembersManager,
+} from '@/components/companies/company-related-records';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,7 +59,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [orderPage, setOrderPage] = useState(1);
   const [orderPageSize, setOrderPageSize] = useState<number>(ORDER_PAGE_SIZES[0]);
   const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus | 'ALL'>('ALL');
-  const [passwordChangedFor, setPasswordChangedFor] = useState<string | null>(null);
 
   const companyQuery = useQuery({
     queryKey: ['admin', 'company', companyId],
@@ -157,12 +158,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       {companyQuery.isError && (
         <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertCircle className="size-4" /> Não foi possível carregar este cliente.
-        </div>
-      )}
-
-      {passwordChangedFor && (
-        <div className="rounded-2xl border border-primary/20 bg-primary/6 px-4 py-3 text-sm">
-          Senha de {passwordChangedFor} alterada. As sessões anteriores foram encerradas.
         </div>
       )}
 
@@ -484,30 +479,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <CardTitle>Endereços cadastrados</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                {company.addresses.length === 0 ? (
-                  <p className="text-muted-foreground">Nenhum endereço cadastrado.</p>
-                ) : (
-                  company.addresses.map((address) => (
-                    <div key={address.id} className="rounded-md border p-3">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{address.label ?? 'Sem rótulo'}</p>
-                        {address.isPrimary && <Badge>Coleta principal</Badge>}
-                      </div>
-                      <p>
-                        {address.street}, {address.number}
-                        {address.complement ? ` · ${address.complement}` : ''}
-                      </p>
-                      <p className="text-muted-foreground">
-                        {address.city} - {address.state} · {address.zip}
-                      </p>
-                      {address.lat !== null && (
-                        <p className="text-xs text-muted-foreground">
-                          GPS: {address.lat}, {address.lng}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
+                <CompanyAddressesManager company={company} token={token} />
               </CardContent>
             </Card>
             <Card>
@@ -515,48 +487,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <CardTitle>Equipe vinculada</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                {company.teamMembers.length === 0 ? (
-                  <p className="text-muted-foreground">Nenhum membro cadastrado.</p>
-                ) : (
-                  company.teamMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-start justify-between gap-2 rounded-md border p-3"
-                    >
-                      <div>
-                        <p className="font-medium">{member.user.name}</p>
-                        <p className="text-muted-foreground">
-                          {member.user.email} · {member.user.phone}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Entrou em {formatDate(member.joinedAt)}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <Badge variant={member.active ? 'secondary' : 'destructive'}>
-                          {member.role === 'OWNER' ? 'Responsável' : 'Operador'} ·{' '}
-                          {member.active ? 'ativo' : 'inativo'}
-                        </Badge>
-                        {member.role === 'OWNER' && member.active && (
-                          <ChangePasswordDialog
-                            targetName={member.user.name}
-                            targetEmail={member.user.email}
-                            changePassword={(password) =>
-                              adminCompaniesApi.changeMemberPassword(token, company.id, member.id, {
-                                password,
-                              })
-                            }
-                            onChanged={() => setPasswordChangedFor(member.user.name)}
-                          >
-                            <Button variant="outline" size="sm">
-                              <KeyRound className="size-3.5" /> Alterar senha
-                            </Button>
-                          </ChangePasswordDialog>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
+                <CompanyMembersManager company={company} token={token} />
               </CardContent>
             </Card>
           </section>

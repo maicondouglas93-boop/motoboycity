@@ -5,6 +5,8 @@ import { DispatchService } from '../../dispatch/dispatch.service';
 import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { ImageKitService } from '../../media/imagekit.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminDriversService } from './admin-drivers.service';
 
 describe('AdminDriversService', () => {
@@ -77,6 +79,14 @@ describe('AdminDriversService', () => {
         { provide: DispatchService, useValue: dispatchService },
         { provide: LiveDriverPresenceService, useValue: livePresence },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        {
+          provide: ImageKitService,
+          useValue: {
+            uploadDriverDocument: jest.fn(),
+            deleteImage: jest.fn(),
+          },
+        },
+        { provide: AdminAuditService, useValue: { record: jest.fn() } },
       ],
     }).compile();
 
@@ -87,7 +97,7 @@ describe('AdminDriversService', () => {
     it('resolve o usuário do motoboy, troca a senha e encerra conexões antigas', async () => {
       prisma.driver.findFirst.mockResolvedValue({ userId: 'driver-user-1' });
 
-      await expect(service.changePassword('driver-1', 'senhaNova123')).resolves.toEqual({
+      await expect(service.changePassword('driver-1', 'senhaNova123', 'admin-1')).resolves.toEqual({
         userId: 'driver-user-1',
       });
       expect(prisma.driver.findFirst).toHaveBeenCalledWith({
@@ -123,7 +133,7 @@ describe('AdminDriversService', () => {
       dispatchService.releasePendingOffersForDriver.mockRejectedValue(new Error('queue offline'));
       (service as unknown as { logger: { warn: jest.Mock } }).logger = { warn: jest.fn() };
 
-      await expect(service.changePassword('driver-1', 'senhaNova123')).resolves.toEqual({
+      await expect(service.changePassword('driver-1', 'senhaNova123', 'admin-1')).resolves.toEqual({
         userId: 'driver-user-1',
       });
 
@@ -138,7 +148,7 @@ describe('AdminDriversService', () => {
       prisma.driver.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.changePassword('driver-inexistente', 'senhaNova123'),
+        service.changePassword('driver-inexistente', 'senhaNova123', 'admin-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(authService.replacePassword).not.toHaveBeenCalled();
     });
@@ -383,7 +393,7 @@ describe('AdminDriversService', () => {
       });
       prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'SUSPENDED' });
 
-      const result = await service.suspend('driver-1');
+      const result = await service.suspend('driver-1', 'admin-1');
 
       expect(result).toEqual({ driverId: 'driver-1', accountStatus: 'SUSPENDED' });
       expect(prisma.driver.update).toHaveBeenCalledWith({
@@ -405,7 +415,7 @@ describe('AdminDriversService', () => {
       prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'BLOCKED' });
       dispatchService.releasePendingOffersForDriver.mockResolvedValue(2);
 
-      await service.block('driver-1');
+      await service.block('driver-1', 'admin-1');
 
       expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledWith('driver-1');
       expect(livePresence.remove).toHaveBeenCalledWith('driver-1');
@@ -426,7 +436,7 @@ describe('AdminDriversService', () => {
       });
       prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'ACTIVE' });
 
-      await service.reactivate('driver-1');
+      await service.reactivate('driver-1', 'admin-1');
 
       expect(prisma.driver.update).toHaveBeenCalledWith({
         where: { id: 'driver-1' },
@@ -444,7 +454,7 @@ describe('AdminDriversService', () => {
       });
       prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'BLOCKED' });
 
-      const result = await service.block('driver-1');
+      const result = await service.block('driver-1', 'admin-1');
 
       expect(result).toEqual({ driverId: 'driver-1', accountStatus: 'BLOCKED' });
     });
@@ -456,7 +466,9 @@ describe('AdminDriversService', () => {
         accountStatus: 'ACTIVE',
       });
 
-      await expect(service.suspend('driver-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.suspend('driver-1', 'admin-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(prisma.driver.update).not.toHaveBeenCalled();
     });
 
@@ -467,7 +479,9 @@ describe('AdminDriversService', () => {
         accountStatus: 'SUSPENDED',
       });
 
-      await expect(service.suspend('driver-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.suspend('driver-1', 'admin-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
 
     it('reativa um motoboy BLOCKED de volta para ACTIVE', async () => {
@@ -478,7 +492,7 @@ describe('AdminDriversService', () => {
       });
       prisma.driver.update.mockResolvedValue({ id: 'driver-1', accountStatus: 'ACTIVE' });
 
-      const result = await service.reactivate('driver-1');
+      const result = await service.reactivate('driver-1', 'admin-1');
 
       expect(result).toEqual({ driverId: 'driver-1', accountStatus: 'ACTIVE' });
     });
@@ -492,9 +506,13 @@ describe('AdminDriversService', () => {
         { id: 'service-2', code: 'CARRO', name: 'Carro' },
       ]);
 
-      const result = await service.replaceServiceTypes('driver-1', {
-        serviceTypeIds: ['service-2', 'service-1'],
-      });
+      const result = await service.replaceServiceTypes(
+        'driver-1',
+        {
+          serviceTypeIds: ['service-2', 'service-1'],
+        },
+        'admin-1',
+      );
 
       expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
       expect(prisma.driverServiceType.deleteMany).toHaveBeenCalledWith({
@@ -522,9 +540,13 @@ describe('AdminDriversService', () => {
       ]);
 
       await expect(
-        service.replaceServiceTypes('driver-1', {
-          serviceTypeIds: ['service-1', 'service-inactive'],
-        }),
+        service.replaceServiceTypes(
+          'driver-1',
+          {
+            serviceTypeIds: ['service-1', 'service-inactive'],
+          },
+          'admin-1',
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(prisma.driverServiceType.deleteMany).not.toHaveBeenCalled();
@@ -535,7 +557,7 @@ describe('AdminDriversService', () => {
       prisma.driver.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.replaceServiceTypes('missing', { serviceTypeIds: ['service-1'] }),
+        service.replaceServiceTypes('missing', { serviceTypeIds: ['service-1'] }, 'admin-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
 
       expect(prisma.driverServiceType.deleteMany).not.toHaveBeenCalled();

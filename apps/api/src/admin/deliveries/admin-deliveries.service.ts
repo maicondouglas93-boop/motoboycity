@@ -58,6 +58,14 @@ export class AdminDeliveriesService {
     return this.deliveriesService.createForCompany(admin, companyId, payload);
   }
 
+  updateBeforeAcceptance(
+    admin: User,
+    deliveryId: string,
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    return this.deliveriesService.updateBeforeAcceptance(admin, deliveryId, payload);
+  }
+
   /**
    * Troca o entregador de um pedido em andamento.
    *

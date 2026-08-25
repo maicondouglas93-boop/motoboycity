@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Bike, CalendarClock, CloudRain, SlidersHorizontal, Tag } from 'lucide-react';
+import { Bike, CalendarClock, CloudRain, MapPinned, SlidersHorizontal, Tag } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -17,6 +17,7 @@ import {
   adminPricingTablesApi,
   adminServiceTypesApi,
   adminSurchargesApi,
+  adminRegionsApi,
 } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -74,12 +75,18 @@ export default function SettingsPage() {
     queryFn: () => adminPlatformSettingsApi.get(token as string),
     enabled: habilitado,
   });
+  const regioesQuery = useQuery({
+    queryKey: ['admin', 'regions'],
+    queryFn: () => adminRegionsApi.list(token as string),
+    enabled: habilitado,
+  });
 
   const modalidadesAtivas = modalidadesQuery.data?.filter((item) => item.active).length ?? null;
   const tabelasAtivas = tabelasQuery.data?.filter((item) => item.active).length ?? null;
   const horarios = horariosQuery.data;
   const taxas = taxasQuery.data;
   const operacao = operacaoQuery.data;
+  const regioesAtivas = regioesQuery.data?.filter((item) => item.active).length ?? null;
 
   /**
    * Quantos limites da tela de Operação estão sem valor.
@@ -97,6 +104,22 @@ export default function SettingsPage() {
         ].filter((valor) => valor === null).length;
 
   const areas: AreaDeConfiguracao[] = [
+    {
+      href: '/configuracoes/regioes',
+      title: 'Regioes operacionais',
+      description: 'Cadastre as pracas que organizam empresas, motoboys, precos e despacho.',
+      icon: MapPinned,
+      tom: 'despacho',
+      situacao:
+        regioesAtivas === null
+          ? null
+          : regioesAtivas === 0
+            ? { estado: 'faltando', texto: 'Nenhuma regiao ativa' }
+            : {
+                estado: 'definido',
+                texto: contar(regioesAtivas, 'regiao ativa', 'regioes ativas'),
+              },
+    },
     {
       href: '/configuracoes/tipos-de-servico',
       title: 'Tipos de serviços',
@@ -123,7 +146,10 @@ export default function SettingsPage() {
           : tabelasAtivas === 0
             ? // Sem tabela ativa, o pedido nao tem como ser cotado.
               { estado: 'faltando', texto: 'Nenhuma tabela ativa' }
-            : { estado: 'definido', texto: contar(tabelasAtivas, 'tabela ativa', 'tabelas ativas') },
+            : {
+                estado: 'definido',
+                texto: contar(tabelasAtivas, 'tabela ativa', 'tabelas ativas'),
+              },
     },
     {
       href: '/configuracoes/horario',

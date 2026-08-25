@@ -44,6 +44,18 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
     },
+    async updateBeforeAcceptance(
+      accessToken: string,
+      id: string,
+      payload: CreateDeliveryPayload,
+    ): Promise<DeliveryDetail> {
+      const response = await fetch(`${baseUrl}/admin/deliveries/${id}`, {
+        method: 'PUT',
+        headers: jsonHeaders(accessToken),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
+    },
     reassignDriver: (accessToken: string, id: string, payload: ReassignDriverPayload) =>
       patch(accessToken, id, 'driver', payload),
     markCollected: (accessToken: string, id: string, payload: ManualDeliveryStagePayload) =>

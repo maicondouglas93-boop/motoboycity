@@ -1,5 +1,10 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { ReplaceDriverServiceTypesPayload } from '@motoboycity/validation';
+import type {
+  AdminDriverDocumentPayload,
+  AdminReviewDriverDocumentPayload,
+  AdminUpdateDriverPayload,
+  ReplaceDriverServiceTypesPayload,
+} from '@motoboycity/validation';
 import type {
   Driver,
   DriverAccountStatus,
@@ -8,6 +13,7 @@ import type {
 } from '@prisma/client';
 import type {
   AdminDriverListItem,
+  AdminDriverDetail,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
   DriverServiceTypeItem,
@@ -17,6 +23,37 @@ import { DispatchService } from '../../dispatch/dispatch.service';
 import { LiveDriverPresenceService } from '../../live-presence/live-driver-presence.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { ImageKitService } from '../../media/imagekit.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
+
+export interface UploadedDriverDocumentFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+  size: number;
+}
+
+function hasExpectedDocumentSignature(buffer: Buffer, mimetype: string): boolean {
+  const startsWith = (signature: number[]) =>
+    buffer.length >= signature.length && signature.every((byte, index) => buffer[index] === byte);
+
+  switch (mimetype) {
+    case 'image/jpeg':
+      return startsWith([0xff, 0xd8, 0xff]);
+    case 'image/png':
+      return startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case 'image/webp':
+      return (
+        buffer.length >= 12 &&
+        buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+        buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+      );
+    case 'application/pdf':
+      return buffer.length >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+    default:
+      return false;
+  }
+}
 
 /**
  * As formas vem de `@motoboycity/types` e nao sao redeclaradas aqui.
@@ -60,6 +97,8 @@ export class AdminDriversService {
     private readonly dispatchService: DispatchService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly livePresence: LiveDriverPresenceService,
+    private readonly imageKit: ImageKitService,
+    private readonly audit: AdminAuditService,
   ) {}
 
   async registrationOptions(): Promise<AdminDriverRegistrationOptions> {
@@ -158,7 +197,7 @@ export class AdminDriversService {
     );
   }
 
-  async detail(driverId: string): Promise<AdminDriverListItem> {
+  async detail(driverId: string): Promise<AdminDriverDetail> {
     const driver = await this.prisma.driver.findUnique({
       where: { id: driverId },
       include: {
@@ -166,6 +205,7 @@ export class AdminDriversService {
         region: { select: { id: true, name: true } },
         reviewedBy: true,
         serviceTypes: { include: { serviceType: true }, orderBy: { serviceType: { name: 'asc' } } },
+        documents: { orderBy: { createdAt: 'desc' } },
       },
     });
     if (!driver) {
@@ -173,7 +213,212 @@ export class AdminDriversService {
     }
 
     const devolucoes = await this.countRecentReturns([driver.userId]);
-    return this.toDriverListItem(driver, devolucoes.get(driver.userId) ?? 0);
+    return {
+      ...this.toDriverListItem(driver, devolucoes.get(driver.userId) ?? 0),
+      birthDate: driver.birthDate.toISOString().slice(0, 10),
+      pixKey: driver.pixKey,
+      pixKeyType: driver.pixKeyType,
+      hasCnpj: driver.hasCnpj,
+      documents: driver.documents.map((document) => ({
+        id: document.id,
+        type: document.type,
+        url: document.url,
+        reviewStatus: document.reviewStatus,
+        rgIssuer: document.rgIssuer,
+        cnhNumber: document.cnhNumber,
+        cnhExpiresAt: document.cnhExpiresAt?.toISOString().slice(0, 10) ?? null,
+        cnhIsPaidActivity: document.cnhIsPaidActivity,
+        createdAt: document.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  async update(
+    driverId: string,
+    payload: AdminUpdateDriverPayload,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        select: { userId: true },
+      });
+      if (!driver) throw new NotFoundException('Motoboy nao encontrado.');
+      const [region, emailOwner, cpfOwner] = await Promise.all([
+        tx.region.findFirst({
+          where: { id: payload.regionId, active: true },
+          select: { id: true },
+        }),
+        tx.user.findFirst({
+          where: { email: payload.email, id: { not: driver.userId } },
+          select: { id: true },
+        }),
+        tx.driver.findFirst({
+          where: { cpf: payload.cpf, id: { not: driverId } },
+          select: { id: true },
+        }),
+      ]);
+      if (!region) throw new ConflictException('A regiao selecionada nao existe ou esta inativa.');
+      if (emailOwner) throw new ConflictException('Este e-mail ja esta em uso.');
+      if (cpfOwner) throw new ConflictException('Este CPF ja pertence a outro motoboy.');
+      await tx.user.update({
+        where: { id: driver.userId },
+        data: { name: payload.name, email: payload.email, phone: payload.phone },
+      });
+      await tx.driver.update({
+        where: { id: driverId },
+        data: {
+          cpf: payload.cpf,
+          birthDate: new Date(`${payload.birthDate}T00:00:00.000Z`),
+          pixKey: payload.pixKey,
+          pixKeyType: payload.pixKeyType,
+          hasCnpj: payload.hasCnpj,
+          regionId: payload.regionId,
+        },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_UPDATED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Cadastro do motoboy ${payload.name} atualizado.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(driverId);
+  }
+
+  async uploadDocument(
+    driverId: string,
+    payload: AdminDriverDocumentPayload,
+    file: UploadedDriverDocumentFile,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    const extensionByMime: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'application/pdf': 'pdf',
+    };
+    const extension = extensionByMime[file.mimetype];
+    if (!extension) throw new ConflictException('Envie JPG, PNG, WEBP ou PDF.');
+    if (!hasExpectedDocumentSignature(file.buffer, file.mimetype)) {
+      throw new ConflictException('O conteudo do arquivo nao corresponde ao formato informado.');
+    }
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException('Motoboy nao encontrado.');
+    const uploaded = await this.imageKit.uploadDriverDocument({
+      driverId,
+      buffer: file.buffer,
+      extension,
+      type: payload.type,
+    });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const document = await tx.driverDocument.create({
+          data: {
+            driverId,
+            type: payload.type,
+            externalFileId: uploaded.externalFileId,
+            url: uploaded.url,
+            rgIssuer: payload.rgIssuer || null,
+            cnhNumber: payload.cnhNumber || null,
+            cnhExpiresAt: payload.cnhExpiresAt
+              ? new Date(`${payload.cnhExpiresAt}T00:00:00.000Z`)
+              : null,
+            cnhIsPaidActivity: payload.cnhIsPaidActivity ?? null,
+          },
+        });
+        await this.audit.record(
+          {
+            actorUserId,
+            action: 'DRIVER_DOCUMENT_UPLOADED',
+            entityType: 'DRIVER_DOCUMENT',
+            entityId: document.id,
+            summary: `Documento ${payload.type} adicionado ao cadastro do motoboy.`,
+          },
+          tx,
+        );
+      });
+    } catch (error) {
+      await this.imageKit.delete(uploaded.externalFileId).catch(() => undefined);
+      throw error;
+    }
+    return this.detail(driverId);
+  }
+
+  async reviewDocument(
+    driverId: string,
+    documentId: string,
+    payload: AdminReviewDriverDocumentPayload,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const [document, admin] = await Promise.all([
+        tx.driverDocument.findFirst({ where: { id: documentId, driverId }, select: { id: true } }),
+        tx.adminUser.findUnique({ where: { userId: actorUserId }, select: { id: true } }),
+      ]);
+      if (!document) throw new NotFoundException('Documento nao encontrado para este motoboy.');
+      if (!admin) throw new ConflictException('Perfil administrativo nao encontrado.');
+      await tx.driverDocument.update({
+        where: { id: documentId },
+        data: { reviewStatus: payload.reviewStatus, reviewedByAdminUserId: admin.id },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action:
+            payload.reviewStatus === 'APPROVED'
+              ? 'DRIVER_DOCUMENT_APPROVED'
+              : 'DRIVER_DOCUMENT_REJECTED',
+          entityType: 'DRIVER_DOCUMENT',
+          entityId: documentId,
+          summary: `Documento do motoboy ${payload.reviewStatus === 'APPROVED' ? 'aprovado' : 'rejeitado'}.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(driverId);
+  }
+
+  async deleteDocument(
+    driverId: string,
+    documentId: string,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    let externalFileId = '';
+    await this.prisma.$transaction(async (tx) => {
+      const document = await tx.driverDocument.findFirst({
+        where: { id: documentId, driverId },
+        select: { id: true, externalFileId: true, type: true },
+      });
+      if (!document) throw new NotFoundException('Documento nao encontrado para este motoboy.');
+      externalFileId = document.externalFileId;
+      await tx.driverDocument.delete({ where: { id: documentId } });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_DOCUMENT_REMOVED',
+          entityType: 'DRIVER_DOCUMENT',
+          entityId: documentId,
+          summary: `Documento ${document.type} removido do cadastro do motoboy.`,
+        },
+        tx,
+      );
+    });
+    await this.imageKit
+      .delete(externalFileId)
+      .catch((error) =>
+        this.logger.warn(
+          `Documento removido do banco, mas o arquivo nao saiu do ImageKit: ${String(error)}`,
+        ),
+      );
+    return this.detail(driverId);
   }
 
   private toDriverListItem(
@@ -241,19 +486,23 @@ export class AdminDriversService {
     return this.review(driverId, 'REJECTED', reviewedByUserId);
   }
 
-  async suspend(driverId: string): Promise<DriverAccountStatusResult> {
-    return this.setAccountStatus(driverId, 'SUSPENDED');
+  async suspend(driverId: string, actorUserId: string): Promise<DriverAccountStatusResult> {
+    return this.setAccountStatus(driverId, 'SUSPENDED', actorUserId);
   }
 
-  async block(driverId: string): Promise<DriverAccountStatusResult> {
-    return this.setAccountStatus(driverId, 'BLOCKED');
+  async block(driverId: string, actorUserId: string): Promise<DriverAccountStatusResult> {
+    return this.setAccountStatus(driverId, 'BLOCKED', actorUserId);
   }
 
-  async reactivate(driverId: string): Promise<DriverAccountStatusResult> {
-    return this.setAccountStatus(driverId, 'ACTIVE');
+  async reactivate(driverId: string, actorUserId: string): Promise<DriverAccountStatusResult> {
+    return this.setAccountStatus(driverId, 'ACTIVE', actorUserId);
   }
 
-  async changePassword(driverId: string, password: string): Promise<AdminPasswordChangeResult> {
+  async changePassword(
+    driverId: string,
+    password: string,
+    actorUserId: string,
+  ): Promise<AdminPasswordChangeResult> {
     const driver = await this.prisma.driver.findFirst({
       where: { id: driverId, user: { type: 'DRIVER' } },
       select: { userId: true },
@@ -273,6 +522,16 @@ export class AdminDriversService {
           where: { driverId, wentOfflineAt: null },
           data: { wentOfflineAt },
         });
+        await this.audit.record(
+          {
+            actorUserId,
+            action: 'DRIVER_PASSWORD_RESET',
+            entityType: 'DRIVER',
+            entityId: driverId,
+            summary: 'Senha de acesso do entregador redefinida.',
+          },
+          tx,
+        );
       },
     });
     this.realtimeGateway.disconnectUser(driver.userId);
@@ -303,6 +562,7 @@ export class AdminDriversService {
   async replaceServiceTypes(
     driverId: string,
     payload: ReplaceDriverServiceTypesPayload,
+    actorUserId: string,
   ): Promise<DriverServiceTypesResult> {
     return this.prisma.$transaction(async (tx) => {
       const driver = await tx.driver.findUnique({ where: { id: driverId } });
@@ -330,6 +590,16 @@ export class AdminDriversService {
           isPrimary: index === 0,
         })),
       });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_SERVICE_TYPES_UPDATED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Modalidades do entregador atualizadas (${orderedServiceTypes.length}).`,
+        },
+        tx,
+      );
 
       return {
         driverId,
@@ -346,9 +616,22 @@ export class AdminDriversService {
     reviewedByUserId: string,
   ): Promise<DriverReviewResult> {
     const reviewedAt = new Date();
-    const updated = await this.prisma.driver.update({
-      where: { id: driverId },
-      data: { approvalStatus, reviewedByUserId, reviewedAt },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const driverUpdated = await tx.driver.update({
+        where: { id: driverId },
+        data: { approvalStatus, reviewedByUserId, reviewedAt },
+      });
+      await this.audit.record(
+        {
+          actorUserId: reviewedByUserId,
+          action: approvalStatus === 'APPROVED' ? 'DRIVER_APPROVED' : 'DRIVER_REJECTED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Cadastro do entregador ${approvalStatus === 'APPROVED' ? 'aprovado' : 'rejeitado'}.`,
+        },
+        tx,
+      );
+      return driverUpdated;
     });
 
     return {
@@ -362,6 +645,7 @@ export class AdminDriversService {
   private async setAccountStatus(
     driverId: string,
     accountStatus: DriverAccountStatus,
+    actorUserId: string,
   ): Promise<DriverAccountStatusResult> {
     const driver = await this.findOrThrow(driverId);
 
@@ -399,6 +683,17 @@ export class AdminDriversService {
           data: { wentOfflineAt: new Date() },
         });
       }
+
+      await this.audit.record(
+        {
+          actorUserId,
+          action: `DRIVER_${accountStatus}`,
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Status da conta do entregador alterado para ${accountStatus}.`,
+        },
+        tx,
+      );
 
       return driverAtualizado;
     });

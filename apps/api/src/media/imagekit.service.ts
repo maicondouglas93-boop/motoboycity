@@ -60,6 +60,32 @@ export class ImageKitService {
     return { externalFileId: uploaded.fileId, url: uploaded.url };
   }
 
+  async uploadDriverDocument(input: {
+    driverId: string;
+    buffer: Buffer;
+    extension: string;
+    type: string;
+  }): Promise<StoredImage> {
+    if (!this.client) {
+      throw new ServiceUnavailableException(
+        'Upload de documento indisponivel: ImageKit nao esta configurado na API.',
+      );
+    }
+    const fileName = `${input.type.toLowerCase()}-${input.driverId}.${input.extension}`;
+    const uploaded = await this.client.files.upload({
+      file: await toFile(input.buffer, fileName),
+      fileName,
+      folder: `/motoboycity/driver-documents/${input.driverId}`,
+      tags: ['motoboycity', 'driver-document', input.type],
+      useUniqueFileName: true,
+    });
+    if (!uploaded.fileId || !uploaded.url) {
+      await this.deleteUploadedFileSilently(uploaded.fileId);
+      throw new BadGatewayException('O ImageKit nao devolveu os dados completos do documento.');
+    }
+    return { externalFileId: uploaded.fileId, url: uploaded.url };
+  }
+
   async delete(externalFileId: string): Promise<void> {
     if (!this.client) return;
     await this.client.files.delete(externalFileId);

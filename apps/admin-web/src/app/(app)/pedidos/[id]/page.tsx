@@ -29,6 +29,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
 import { DeliveryOverrides } from '@/components/operations/delivery-overrides';
+import { EditDeliveryDialog } from '@/components/deliveries/edit-delivery-dialog';
 import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
@@ -191,6 +192,8 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
         </div>
         <div className="flex items-center gap-2">
           <StatusChip status={delivery.status} />
+          {(delivery.status === 'SCHEDULED' || delivery.status === 'AWAITING_DRIVER') &&
+            !delivery.batchId && <EditDeliveryDialog accessToken={token} delivery={delivery} />}
           {cancellableStatuses.includes(delivery.status) && (
             <CancelDeliveryDialog
               token={token}
@@ -365,16 +368,16 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                 pickup?.lat !== undefined &&
                 pickup.lng !== null &&
                 pickup.lng !== undefined && (
-                <a
-                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                  href={mapsUrl(pickup.lat, pickup.lng)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <MapPin className="size-3" aria-hidden="true" />
-                  {pickup.lat}, {pickup.lng}
-                </a>
-              )}
+                  <a
+                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    href={mapsUrl(pickup.lat, pickup.lng)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <MapPin className="size-3" aria-hidden="true" />
+                    {pickup.lat}, {pickup.lng}
+                  </a>
+                )}
             </CardContent>
           </Card>
           <Card size="sm" className="premium-panel h-full">
@@ -394,16 +397,16 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                 dropoff?.lat !== undefined &&
                 dropoff.lng !== null &&
                 dropoff.lng !== undefined && (
-                <a
-                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                  href={mapsUrl(dropoff.lat, dropoff.lng)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <MapPin className="size-3" aria-hidden="true" />
-                  {dropoff.lat}, {dropoff.lng}
-                </a>
-              )}
+                  <a
+                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    href={mapsUrl(dropoff.lat, dropoff.lng)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <MapPin className="size-3" aria-hidden="true" />
+                    {dropoff.lat}, {dropoff.lng}
+                  </a>
+                )}
             </CardContent>
           </Card>
         </div>

@@ -6566,3 +6566,63 @@ contrato, banco, migration ou logica de producao. Proximo passo concreto:
 publicar o ajuste e confirmar o E2E completo no PostgreSQL e Redis isolados da
 CI. Antes da publicacao passaram o typecheck e o lint dos oito workspaces; a
 descoberta das 22 suites E2E pelo Jest tambem passou sem abrir conexao com banco.
+
+## Atualizacao - 2026-08-25: primeiro lote de autonomia administrativa concluido
+
+Foi concluido o primeiro lote de autonomia do unico administrador do sistema.
+O detalhe da empresa agora permite editar nome fantasia, razao social, CNPJ e
+regiao; manter varios enderecos com escolha do principal; e criar, editar,
+desativar, reativar e redefinir a senha de responsaveis. A regra de pelo menos
+um proprietario ativo impede deixar a empresa sem acesso. A geracao manual e
+seletiva de faturas, com previa e datas personalizadas, ja estava concluida no
+lote anterior e foi preservada.
+
+O detalhe do entregador passou a editar dados pessoais, contato, CPF,
+nascimento, regiao, PIX e CNPJ, alem de enviar, revisar, rejeitar ou remover
+documentos. Os arquivos aceitos sao imagem ou PDF, com limite de 8 MB, enviados
+ao ImageKit e removidos do provedor quando o registro e excluido. Acoes antigas
+de aprovacao, conta, senha e modalidades continuam disponiveis.
+
+O Admin ganhou CRUD de regioes em `Configuracoes > Regioes`, incluindo limite
+maximo de distancia. Uma regiao so pode ser desativada depois que empresas e
+motoboys ativos forem movidos ou suspensos; nao existe hard delete.
+
+Pedidos avulsos `SCHEDULED` ou `AWAITING_DRIVER` podem ser editados no detalhe
+antes do aceite. Modalidade, agendamento, destino, destinatario, pagamento,
+instrucoes e exigencias operacionais podem mudar; distancia e valores sao
+recalculados e congelados novamente. A API bloqueia lote, pedido aceito e
+pedido com oferta pendente para que o motoboy nunca decida sobre dados que
+foram alterados enquanto a oferta estava na tela. A gravacao tambem e
+condicional ao status e a ausencia de oferta no instante da transacao, evitando
+que uma oferta concorrente passe entre a leitura e a edicao. O job de
+agendamento antigo e removido somente depois da gravacao bem-sucedida e o
+pedido e reagendado ou despachado conforme o novo horario.
+
+Foi criada a pagina `Relatorios > Historico administrativo`, com filtros,
+links para os registros e exportacao CSV. Ela combina a nova trilha generica
+com os historicos existentes de pedidos e faturas. Criacao, edicao, aprovacao,
+suspensao/bloqueio, reativacao, senha, modalidades, documentos e regioes
+registram autor e resumo; senhas e conteudo de arquivos nunca sao gravados na
+auditoria.
+
+Foi adicionada a tabela append-only `administrative_audits` e a migration
+aditiva `20260825103000_administrative_audits`. A migration foi validada pelo
+Prisma, mas **nao foi aplicada ao Neon nem a qualquer banco compartilhado**.
+Antes do deploy da API, ela precisa passar pelo fluxo normal de backup/staging
+e `prisma migrate deploy`; publicar o Admin antes da API/migration deixaria as
+novas telas sem suporte.
+
+Arquivos principais: `apps/api/src/admin/{audit,companies,drivers,regions}`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/prisma/schema.prisma`, os contratos em
+`packages/{validation,types,api-client}` e as telas relacionadas de clientes,
+entregadores, pedidos, configuracoes e relatorios em `apps/admin-web`.
+
+Validacoes executadas: `prisma generate`, `prisma validate`, typecheck e lint
+dos oito workspaces; 62 suites/778 testes unitarios completos da API; builds de
+producao da API, Admin Web e Company Web. O upload administrativo de documentos
+agora tambem confere a assinatura real de JPG, PNG, WEBP e PDF, alem do MIME e
+do limite de tamanho. O smoke test autenticado e a aplicacao da migration
+continuam pendentes. Proximo passo concreto: validar a migration em copia de
+staging, publicar API e depois Admin Web; em homologacao, percorrer cada CRUD,
+editar um pedido agendado e confirmar a trilha administrativa gerada.

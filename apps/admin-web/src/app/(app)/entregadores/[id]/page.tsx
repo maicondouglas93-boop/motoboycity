@@ -16,6 +16,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
+import { DriverDocumentsManager, EditDriverDialog } from '@/components/drivers/driver-maintenance';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -170,18 +171,21 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                   Conta {accountLabel[driver.accountStatus] ?? driver.accountStatus}
                 </Badge>
               </div>
-              <ChangePasswordDialog
-                targetName={driver.name}
-                targetEmail={driver.email}
-                changePassword={(password) =>
-                  adminDriversApi.changePassword(token, driver.id, { password })
-                }
-                onChanged={() => setPasswordChanged(true)}
-              >
-                <Button variant="outline" size="sm">
-                  <KeyRound className="size-3.5" /> Alterar senha
-                </Button>
-              </ChangePasswordDialog>
+              <div className="flex flex-wrap justify-end gap-2">
+                <EditDriverDialog driver={driver} token={token} />
+                <ChangePasswordDialog
+                  targetName={driver.name}
+                  targetEmail={driver.email}
+                  changePassword={(password) =>
+                    adminDriversApi.changePassword(token, driver.id, { password })
+                  }
+                  onChanged={() => setPasswordChanged(true)}
+                >
+                  <Button variant="outline" size="sm">
+                    <KeyRound className="size-3.5" /> Alterar senha
+                  </Button>
+                </ChangePasswordDialog>
+              </div>
             </div>
           </header>
 
@@ -201,6 +205,20 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                 <div>
                   <p className="text-muted-foreground">CPF</p>
                   <p>{driver.cpf}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Nascimento</p>
+                  <p>{driver.birthDate}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Regiao</p>
+                  <p>{driver.region.name}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Chave PIX</p>
+                  <p>
+                    {driver.pixKeyType} · {driver.pixKey}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Cadastrado em</p>
@@ -250,6 +268,15 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
               </CardContent>
             </Card>
           </section>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Documentos do entregador</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DriverDocumentsManager driver={driver} token={token} />
+            </CardContent>
+          </Card>
 
           <section className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">

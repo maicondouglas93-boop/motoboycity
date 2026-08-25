@@ -47,6 +47,9 @@ export interface DeliveryListItem {
   externalOrderNumber: string | null;
   driverNote: string | null;
   customerPaymentMethod: CustomerPaymentMethod | null;
+  requiresDeliveryProof: boolean;
+  requiresCollectionRecipient: boolean;
+  pickupSurchargeChargedToDriver: boolean;
   /** Nome e valor da taxa adicional vigente na criação, congelados. */
   surchargeLabel: string | null;
   surchargeValue: number | null;

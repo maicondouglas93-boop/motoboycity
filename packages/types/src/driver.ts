@@ -58,6 +58,29 @@ export interface AdminDriverListItem {
   returnsLast7Days: number;
 }
 
+export type DriverDocumentType = 'SELFIE' | 'RG' | 'CNH_FRONT' | 'CNH_BACK' | 'PROOF_OF_ADDRESS';
+export type DocumentReviewStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+
+export interface AdminDriverDocument {
+  id: string;
+  type: DriverDocumentType;
+  url: string;
+  reviewStatus: DocumentReviewStatus;
+  rgIssuer: string | null;
+  cnhNumber: string | null;
+  cnhExpiresAt: string | null;
+  cnhIsPaidActivity: boolean | null;
+  createdAt: string;
+}
+
+export interface AdminDriverDetail extends AdminDriverListItem {
+  birthDate: string;
+  pixKey: string;
+  pixKeyType: string;
+  hasCnpj: boolean;
+  documents: AdminDriverDocument[];
+}
+
 export interface AdminDriverRegistrationOptions {
   regions: Array<{ id: string; name: string }>;
 }

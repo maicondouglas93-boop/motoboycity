@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminCompaniesService } from './admin-companies.service';
 
 describe('AdminCompaniesService', () => {
@@ -59,6 +60,7 @@ describe('AdminCompaniesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AuthService, useValue: authService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        { provide: AdminAuditService, useValue: { record: jest.fn() } },
       ],
     }).compile();
 
@@ -209,12 +211,16 @@ describe('AdminCompaniesService', () => {
       prisma.companyTeamMember.findFirst.mockResolvedValue({ userId: 'owner-user-1' });
       jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
 
-      await service.updateProfile('company-1', {
-        tradeName: 'Nova Farma',
-        legalName: 'Nova Farma LTDA',
-        fullName: 'Maria Responsavel',
-        whatsapp: '33999990000',
-      });
+      await service.updateProfile(
+        'company-1',
+        {
+          tradeName: 'Nova Farma',
+          legalName: 'Nova Farma LTDA',
+          fullName: 'Maria Responsavel',
+          whatsapp: '33999990000',
+        },
+        'admin-1',
+      );
 
       expect(prisma.company.update).toHaveBeenCalledWith({
         where: { id: 'company-1' },
@@ -231,13 +237,17 @@ describe('AdminCompaniesService', () => {
       prisma.companyAddress.findFirst.mockResolvedValue({ id: 'address-1' });
       jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
 
-      await service.upsertPrimaryAddress('company-1', {
-        street: 'Rua Nova',
-        number: '25',
-        city: 'Lajinha',
-        state: 'MG',
-        zip: '36980000',
-      });
+      await service.upsertPrimaryAddress(
+        'company-1',
+        {
+          street: 'Rua Nova',
+          number: '25',
+          city: 'Lajinha',
+          state: 'MG',
+          zip: '36980000',
+        },
+        'admin-1',
+      );
 
       expect(prisma.companyAddress.update).toHaveBeenCalledWith({
         where: { id: 'address-1' },
@@ -268,7 +278,7 @@ describe('AdminCompaniesService', () => {
       prisma.company.updateMany.mockResolvedValue({ count: 1 });
       jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
 
-      await service.suspend('company-1');
+      await service.suspend('company-1', 'admin-1');
 
       expect(prisma.company.updateMany).toHaveBeenCalledWith({
         where: { id: 'company-1', status: 'ACTIVE' },
@@ -285,7 +295,9 @@ describe('AdminCompaniesService', () => {
         teamMembers: [],
       });
 
-      await expect(service.suspend('company-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.suspend('company-1', 'admin-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(prisma.company.updateMany).not.toHaveBeenCalled();
     });
   });
@@ -296,19 +308,20 @@ describe('AdminCompaniesService', () => {
       authService.replacePassword.mockResolvedValue({ userId: 'owner-user-1' });
 
       await expect(
-        service.changeMemberPassword('company-1', 'member-1', 'senhaNova123'),
+        service.changeMemberPassword('company-1', 'member-1', 'senhaNova123', 'admin-1'),
       ).resolves.toEqual({ userId: 'owner-user-1' });
       expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith({
         where: {
           id: 'member-1',
           companyId: 'company-1',
           active: true,
-          role: 'OWNER',
           user: { type: 'COMPANY_MEMBER' },
         },
         select: { userId: true },
       });
-      expect(authService.replacePassword).toHaveBeenCalledWith('owner-user-1', 'senhaNova123');
+      expect(authService.replacePassword).toHaveBeenCalledWith('owner-user-1', 'senhaNova123', {
+        mutateInSameTransaction: expect.any(Function),
+      });
       expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-user-1');
     });
 
@@ -317,7 +330,7 @@ describe('AdminCompaniesService', () => {
       prisma.company.findUnique.mockResolvedValue({ id: 'company-1' });
 
       await expect(
-        service.changeMemberPassword('company-1', 'member-invalido', 'senhaNova123'),
+        service.changeMemberPassword('company-1', 'member-invalido', 'senhaNova123', 'admin-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(authService.replacePassword).not.toHaveBeenCalled();
     });

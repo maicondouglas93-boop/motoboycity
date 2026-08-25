@@ -1,5 +1,7 @@
 import {
   Body,
+  BadRequestException,
+  Delete,
   Controller,
   Get,
   HttpCode,
@@ -11,7 +13,11 @@ import {
   Put,
   Query,
   UseGuards,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import {
   changeAdminPasswordSchema,
   createAdminDriverSchema,
@@ -21,6 +27,12 @@ import {
   type CreateAdminDriverPayload,
   type ListDriversQuery,
   type ReplaceDriverServiceTypesPayload,
+  adminUpdateDriverSchema,
+  adminDriverDocumentSchema,
+  adminReviewDriverDocumentSchema,
+  type AdminUpdateDriverPayload,
+  type AdminDriverDocumentPayload,
+  type AdminReviewDriverDocumentPayload,
 } from '@motoboycity/validation';
 import type { AdminPasswordChangeResult } from '@motoboycity/types';
 import type { User } from '@prisma/client';
@@ -29,9 +41,11 @@ import { AuthService, type RegisterDriverResult } from '../../auth/auth.service'
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import {
   AdminDriversService,
   type AdminDriverListItem,
+  type UploadedDriverDocumentFile,
   type AdminDriverRegistrationOptions,
   type DriverAccountStatusResult,
   type DriverReviewResult,
@@ -46,6 +60,7 @@ export class AdminDriversController {
   constructor(
     private readonly adminDriversService: AdminDriversService,
     private readonly authService: AuthService,
+    private readonly audit: AdminAuditService,
   ) {}
 
   @Get('registration-options')
@@ -55,10 +70,11 @@ export class AdminDriversController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(
+  async create(
     @Body(new ZodValidationPipe(createAdminDriverSchema)) body: CreateAdminDriverPayload,
+    @CurrentUser() admin: User,
   ): Promise<RegisterDriverResult> {
-    return this.authService.registerDriver(
+    const result = await this.authService.registerDriver(
       {
         name: body.name,
         email: body.email,
@@ -72,6 +88,14 @@ export class AdminDriversController {
       },
       { regionId: body.regionId, serviceTypeIds: body.serviceTypeIds },
     );
+    await this.audit.record({
+      actorUserId: admin.id,
+      action: 'DRIVER_CREATED',
+      entityType: 'DRIVER',
+      entityId: result.driverId,
+      summary: `Entregador ${body.name} cadastrado pelo administrador.`,
+    });
+    return result;
   }
 
   @Get()
@@ -82,8 +106,50 @@ export class AdminDriversController {
   }
 
   @Get(':id')
-  detail(@Param('id') id: string): Promise<AdminDriverListItem> {
+  detail(@Param('id') id: string) {
     return this.adminDriversService.detail(id);
+  }
+
+  @Put(':id')
+  update(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminUpdateDriverSchema)) body: AdminUpdateDriverPayload,
+    @CurrentUser() admin: User,
+  ) {
+    return this.adminDriversService.update(id, body, admin.id);
+  }
+
+  @Post(':id/documents')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', { limits: { files: 1, fileSize: 8 * 1024 * 1024 } }))
+  uploadDocument(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminDriverDocumentSchema)) body: AdminDriverDocumentPayload,
+    @UploadedFile() file: UploadedDriverDocumentFile | undefined,
+    @CurrentUser() admin: User,
+  ) {
+    if (!file) throw new BadRequestException('Selecione uma imagem ou PDF do documento.');
+    return this.adminDriversService.uploadDocument(id, body, file, admin.id);
+  }
+
+  @Patch(':id/documents/:documentId/review')
+  reviewDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body(new ZodValidationPipe(adminReviewDriverDocumentSchema))
+    body: AdminReviewDriverDocumentPayload,
+    @CurrentUser() admin: User,
+  ) {
+    return this.adminDriversService.reviewDocument(id, documentId, body, admin.id);
+  }
+
+  @Delete(':id/documents/:documentId')
+  deleteDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @CurrentUser() admin: User,
+  ) {
+    return this.adminDriversService.deleteDocument(id, documentId, admin.id);
   }
 
   @Patch(':id/approve')
@@ -97,18 +163,21 @@ export class AdminDriversController {
   }
 
   @Patch(':id/suspend')
-  suspend(@Param('id') id: string): Promise<DriverAccountStatusResult> {
-    return this.adminDriversService.suspend(id);
+  suspend(@Param('id') id: string, @CurrentUser() admin: User): Promise<DriverAccountStatusResult> {
+    return this.adminDriversService.suspend(id, admin.id);
   }
 
   @Patch(':id/block')
-  block(@Param('id') id: string): Promise<DriverAccountStatusResult> {
-    return this.adminDriversService.block(id);
+  block(@Param('id') id: string, @CurrentUser() admin: User): Promise<DriverAccountStatusResult> {
+    return this.adminDriversService.block(id, admin.id);
   }
 
   @Patch(':id/reactivate')
-  reactivate(@Param('id') id: string): Promise<DriverAccountStatusResult> {
-    return this.adminDriversService.reactivate(id);
+  reactivate(
+    @Param('id') id: string,
+    @CurrentUser() admin: User,
+  ): Promise<DriverAccountStatusResult> {
+    return this.adminDriversService.reactivate(id, admin.id);
   }
 
   @Patch(':id/password')
@@ -117,7 +186,7 @@ export class AdminDriversController {
     @Body(new ZodValidationPipe(changeAdminPasswordSchema)) body: ChangeAdminPasswordPayload,
     @CurrentUser() admin: User,
   ): Promise<AdminPasswordChangeResult> {
-    const result = await this.adminDriversService.changePassword(id, body.password);
+    const result = await this.adminDriversService.changePassword(id, body.password, admin.id);
     this.logger.warn(
       `Admin ${admin.id} redefiniu a credencial do usuário ${result.userId} (motoboy ${id}).`,
     );
@@ -129,7 +198,8 @@ export class AdminDriversController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(replaceDriverServiceTypesSchema))
     body: ReplaceDriverServiceTypesPayload,
+    @CurrentUser() admin: User,
   ): Promise<DriverServiceTypesResult> {
-    return this.adminDriversService.replaceServiceTypes(id, body);
+    return this.adminDriversService.replaceServiceTypes(id, body, admin.id);
   }
 }

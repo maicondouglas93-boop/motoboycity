@@ -142,6 +142,9 @@ export interface DeliveryListItem {
   externalOrderNumber: string | null;
   driverNote: string | null;
   customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
+  requiresDeliveryProof: boolean;
+  requiresCollectionRecipient: boolean;
+  pickupSurchargeChargedToDriver: boolean;
   surchargeLabel: string | null;
   surchargeValue: number | null;
   statusChangedAt: string;
@@ -244,6 +247,210 @@ export class DeliveriesService {
     }
 
     return this.createForResolvedCompany(admin, company, payload);
+  }
+
+  /**
+   * Edita um pedido avulso antes de ele ser aceito por um motoboy.
+   *
+   * O painel pode alterar inclusive modalidade e destino, portanto preço e
+   * distância são recalculados e congelados novamente. Uma oferta pendente
+   * bloqueia a edição: o motoboy precisa decidir sobre exatamente os dados
+   * que viu no celular.
+   */
+  async updateBeforeAcceptance(
+    admin: User,
+    deliveryId: string,
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    if (admin.type !== 'ADMIN') {
+      throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      include: {
+        company: { select: { id: true, status: true, regionId: true } },
+        addresses: true,
+        offers: { where: { response: 'PENDING' }, select: { id: true }, take: 1 },
+      },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (delivery.batchId) {
+      throw new ConflictException(
+        'Pedidos em lote não podem ser editados individualmente. Cancele e recrie o lote.',
+      );
+    }
+    if (delivery.status !== 'SCHEDULED' && delivery.status !== 'AWAITING_DRIVER') {
+      throw new ConflictException(
+        'O pedido só pode ser editado antes de ser aceito por um entregador.',
+      );
+    }
+    if (delivery.offers.length > 0) {
+      throw new ConflictException(
+        'Existe uma oferta aguardando resposta. Aguarde a resposta ou o vencimento para editar.',
+      );
+    }
+    if (delivery.company.status !== 'ACTIVE') {
+      throw new ConflictException('A empresa deste pedido não está ativa.');
+    }
+
+    await this.assertWithinBusinessHours(delivery.company.regionId, payload.scheduledAt);
+    const destinationKnownAtCreation = payload.destinationKnownAtCreation ?? true;
+    const pickupAddress = delivery.addresses.find((address) => address.type === 'PICKUP');
+    if (
+      !pickupAddress?.street ||
+      !pickupAddress.number ||
+      !pickupAddress.city ||
+      !pickupAddress.state ||
+      !pickupAddress.zip
+    ) {
+      throw new ConflictException('O pedido não possui um endereço de coleta válido.');
+    }
+
+    let distanceKm: number | null = null;
+    let totalValue: number | null = null;
+    let driverValue: number | null = null;
+    let platformValue: number | null = null;
+    let returnValue: number | null = null;
+    let surchargeLabel: string | null = null;
+    let surchargeValue: number | null = null;
+
+    if (destinationKnownAtCreation) {
+      try {
+        const distance = await this.googleMapsService.getDistance({
+          origin: {
+            address: this.formatAddress({
+              street: pickupAddress.street,
+              number: pickupAddress.number,
+              complement: pickupAddress.complement,
+              city: pickupAddress.city,
+              state: pickupAddress.state,
+              zip: pickupAddress.zip,
+            }),
+          },
+          destination: { address: this.formatAddress(payload.dropoffAddress!) },
+        });
+        distanceKm = distance.distanceKm;
+      } catch (error) {
+        if (error instanceof GoogleMapsNotConfiguredError) {
+          throw new InternalServerErrorException(
+            'Cálculo de distância não está configurado. Contate o suporte.',
+          );
+        }
+        throw new ServiceUnavailableException(
+          'Não foi possível recalcular a distância agora. Tente novamente em instantes.',
+        );
+      }
+
+      const quote = await this.pricingService.quote({
+        companyId: delivery.company.id,
+        regionId: delivery.company.regionId,
+        serviceTypeId: payload.serviceTypeId,
+        distanceKm,
+        requiresReturn: payload.requiresReturn ?? false,
+      });
+      totalValue = quote.totalValue;
+      driverValue = quote.driverValue;
+      platformValue = quote.platformValue;
+      returnValue = quote.returnValue > 0 ? quote.returnValue : null;
+      surchargeLabel = quote.surchargeLabel;
+      surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
+    }
+
+    const nextStatus: DeliveryStatus = payload.scheduledAt ? 'SCHEDULED' : 'AWAITING_DRIVER';
+    if (nextStatus === 'AWAITING_DRIVER') {
+      await this.dispatchService.assertConfigured();
+    }
+    const dropoffCoordinate = destinationKnownAtCreation
+      ? await this.resolverCoordenadaDoDestino(payload.dropoffAddress!)
+      : { lat: null, lng: null };
+
+    const changedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.delivery.updateMany({
+        where: {
+          id: delivery.id,
+          status: delivery.status,
+          offers: { none: { response: 'PENDING' } },
+        },
+        data: {
+          serviceTypeId: payload.serviceTypeId,
+          status: nextStatus,
+          ...(nextStatus !== delivery.status && { statusChangedAt: changedAt }),
+          scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
+          destinationKnownAtCreation,
+          distanceKm,
+          totalValue,
+          driverValue,
+          platformValue,
+          surchargeLabel,
+          surchargeValue,
+          recipientName: payload.recipientName ?? null,
+          recipientPhone: payload.recipientPhone ?? null,
+          externalOrderNumber: payload.externalOrderNumber ?? null,
+          driverNote: payload.driverNote ?? null,
+          customerPaymentMethod: payload.customerPaymentMethod ?? null,
+          requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
+          requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
+          pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
+          requiresReturn: payload.requiresReturn ?? false,
+          returnValue,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          'O pedido mudou ou recebeu uma oferta durante a edicao. Atualize a tela e tente novamente.',
+        );
+      }
+      await tx.deliveryAddress.deleteMany({
+        where: { deliveryId: delivery.id, type: 'DROPOFF' },
+      });
+      if (destinationKnownAtCreation) {
+        const dropoff = payload.dropoffAddress!;
+        await tx.deliveryAddress.create({
+          data: {
+            deliveryId: delivery.id,
+            type: 'DROPOFF',
+            street: dropoff.street,
+            number: dropoff.number,
+            complement: dropoff.complement,
+            city: dropoff.city,
+            state: dropoff.state,
+            zip: dropoff.zip,
+            referenceNote: dropoff.referenceNote,
+            lat: dropoffCoordinate.lat,
+            lng: dropoffCoordinate.lng,
+          },
+        });
+      }
+      await tx.deliveryStatusHistory.create({
+        data: {
+          deliveryId: delivery.id,
+          fromStatus: delivery.status,
+          toStatus: nextStatus,
+          changedByUserId: admin.id,
+          note: 'Dados, rota e preço revisados pelo administrador antes do aceite.',
+        },
+      });
+    });
+
+    if (delivery.status === 'SCHEDULED') {
+      await this.dispatchService.cancelScheduledActivation(delivery.id);
+    } else {
+      await this.dispatchService.cancelPendingOfferForDelivery(delivery.id);
+    }
+
+    if (nextStatus === 'SCHEDULED') {
+      await this.dispatchService.scheduleActivation(delivery.id, new Date(payload.scheduledAt!));
+    } else {
+      await this.dispatchService.dispatchDelivery(delivery.id);
+    }
+
+    const detail = await this.detail(admin, delivery.id);
+    this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
   }
 
   private async createForResolvedCompany(
@@ -1079,9 +1286,7 @@ export class DeliveriesService {
         displayNumber: item.displayNumber,
         companyId: item.companyId,
         ...(item.company?.tradeName ? { companyName: item.company.tradeName } : {}),
-        ...(item.driver
-          ? { driverId: item.driver.id, driverName: item.driver.user.name }
-          : {}),
+        ...(item.driver ? { driverId: item.driver.id, driverName: item.driver.user.name } : {}),
         status: 'CANCELLED',
       });
     }
@@ -2060,6 +2265,9 @@ export class DeliveriesService {
     externalOrderNumber: string | null;
     driverNote: string | null;
     customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
+    requiresDeliveryProof: boolean;
+    requiresCollectionRecipient: boolean;
+    pickupSurchargeChargedToDriver: boolean;
     statusChangedAt: Date;
     surchargeLabel: string | null;
     surchargeValue: { toString(): string } | null;
@@ -2092,6 +2300,9 @@ export class DeliveriesService {
       externalOrderNumber: delivery.externalOrderNumber,
       driverNote: delivery.driverNote,
       customerPaymentMethod: delivery.customerPaymentMethod,
+      requiresDeliveryProof: delivery.requiresDeliveryProof,
+      requiresCollectionRecipient: delivery.requiresCollectionRecipient,
+      pickupSurchargeChargedToDriver: delivery.pickupSurchargeChargedToDriver,
       statusChangedAt: delivery.statusChangedAt.toISOString(),
       scheduledAt: delivery.scheduledAt?.toISOString() ?? null,
       createdAt: delivery.createdAt.toISOString(),

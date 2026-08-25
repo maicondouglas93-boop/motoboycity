@@ -4,13 +4,21 @@ import type {
   AdminPasswordChangeResult,
 } from '@motoboycity/types';
 import type {
+  AdminCompanyAddressPayload,
+  AdminCreateCompanyMemberPayload,
+  AdminUpdateCompanyMemberPayload,
+  AdminUpdateCompanyPayload,
   UpdateCompanyProfilePayload,
   UpsertCompanyAddressPayload,
 } from '@motoboycity/validation';
-import type { CompanyStatus } from '@prisma/client';
+import { Prisma, type CompanyStatus } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { AdminAuditService } from '../audit/admin-audit.service';
+
+const PASSWORD_HASH_ROUNDS = 10;
 
 export interface ApproveCompanyResult {
   companyId: string;
@@ -62,6 +70,7 @@ export class AdminCompaniesService {
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly audit: AdminAuditService,
   ) {}
 
   async registrationOptions(): Promise<AdminCompanyRegistrationOptions> {
@@ -171,9 +180,22 @@ export class AdminCompaniesService {
     }
 
     const approvedAt = new Date();
-    const updated = await this.prisma.company.update({
-      where: { id: companyId },
-      data: { status: 'ACTIVE', approvedByUserId, approvedAt },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const companyUpdated = await tx.company.update({
+        where: { id: companyId },
+        data: { status: 'ACTIVE', approvedByUserId, approvedAt },
+      });
+      await this.audit.record(
+        {
+          actorUserId: approvedByUserId,
+          action: 'COMPANY_APPROVED',
+          entityType: 'COMPANY',
+          entityId: companyId,
+          summary: 'Empresa aprovada e liberada para operar.',
+        },
+        tx,
+      );
+      return companyUpdated;
     });
 
     return {
@@ -187,6 +209,7 @@ export class AdminCompaniesService {
   async updateProfile(
     companyId: string,
     payload: UpdateCompanyProfilePayload,
+    actorUserId: string,
   ): Promise<AdminCompanyDetail> {
     await this.prisma.$transaction(async (tx) => {
       const company = await tx.company.findUnique({
@@ -221,6 +244,16 @@ export class AdminCompaniesService {
         where: { id: owner.userId },
         data: { name: payload.fullName, phone: payload.whatsapp },
       });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_PROFILE_UPDATED',
+          entityType: 'COMPANY',
+          entityId: companyId,
+          summary: `Cadastro comercial e responsavel principal da empresa ${payload.tradeName} atualizados.`,
+        },
+        tx,
+      );
     });
 
     return this.detail(companyId);
@@ -229,6 +262,7 @@ export class AdminCompaniesService {
   async upsertPrimaryAddress(
     companyId: string,
     payload: UpsertCompanyAddressPayload,
+    actorUserId: string,
   ): Promise<AdminCompanyDetail> {
     await this.prisma.$transaction(async (tx) => {
       const company = await tx.company.findUnique({
@@ -262,23 +296,34 @@ export class AdminCompaniesService {
       } else {
         await tx.companyAddress.create({ data: { ...addressData, companyId } });
       }
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_PRIMARY_ADDRESS_UPDATED',
+          entityType: 'COMPANY_ADDRESS',
+          entityId: companyId,
+          summary: `Endereco principal da empresa atualizado para ${payload.street}, ${payload.number}.`,
+        },
+        tx,
+      );
     });
 
     return this.detail(companyId);
   }
 
-  suspend(companyId: string): Promise<AdminCompanyDetail> {
-    return this.setStatus(companyId, 'ACTIVE', 'SUSPENDED');
+  suspend(companyId: string, actorUserId: string): Promise<AdminCompanyDetail> {
+    return this.setStatus(companyId, 'ACTIVE', 'SUSPENDED', actorUserId);
   }
 
-  reactivate(companyId: string): Promise<AdminCompanyDetail> {
-    return this.setStatus(companyId, 'SUSPENDED', 'ACTIVE');
+  reactivate(companyId: string, actorUserId: string): Promise<AdminCompanyDetail> {
+    return this.setStatus(companyId, 'SUSPENDED', 'ACTIVE', actorUserId);
   }
 
   private async setStatus(
     companyId: string,
     expectedStatus: CompanyStatus,
     nextStatus: CompanyStatus,
+    actorUserId: string,
   ): Promise<AdminCompanyDetail> {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -296,13 +341,27 @@ export class AdminCompaniesService {
       );
     }
 
-    const updated = await this.prisma.company.updateMany({
-      where: { id: companyId, status: expectedStatus },
-      data: { status: nextStatus },
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.company.updateMany({
+        where: { id: companyId, status: expectedStatus },
+        data: { status: nextStatus },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          'O status da empresa mudou durante a operacao. Atualize a tela.',
+        );
+      }
+      await this.audit.record(
+        {
+          actorUserId,
+          action: nextStatus === 'ACTIVE' ? 'COMPANY_REACTIVATED' : 'COMPANY_SUSPENDED',
+          entityType: 'COMPANY',
+          entityId: companyId,
+          summary: `Empresa alterada de ${expectedStatus} para ${nextStatus}.`,
+        },
+        tx,
+      );
     });
-    if (updated.count !== 1) {
-      throw new ConflictException('O status da empresa mudou durante a operacao. Atualize a tela.');
-    }
 
     if (nextStatus === 'SUSPENDED') {
       for (const member of company.teamMembers) {
@@ -317,13 +376,13 @@ export class AdminCompaniesService {
     companyId: string,
     memberId: string,
     password: string,
+    actorUserId: string,
   ): Promise<AdminPasswordChangeResult> {
     const membership = await this.prisma.companyTeamMember.findFirst({
       where: {
         id: memberId,
         companyId,
         active: true,
-        role: 'OWNER',
         user: { type: 'COMPANY_MEMBER' },
       },
       select: { userId: true },
@@ -340,9 +399,319 @@ export class AdminCompaniesService {
       throw new NotFoundException('Responsável ativo não encontrado nesta empresa.');
     }
 
-    const result = await this.authService.replacePassword(membership.userId, password);
+    const result = await this.authService.replacePassword(membership.userId, password, {
+      mutateInSameTransaction: async (tx) => {
+        await this.audit.record(
+          {
+            actorUserId,
+            action: 'COMPANY_MEMBER_PASSWORD_RESET',
+            entityType: 'COMPANY_MEMBER',
+            entityId: memberId,
+            summary: 'Senha de acesso de um responsavel da empresa redefinida.',
+          },
+          tx,
+        );
+      },
+    });
     this.realtimeGateway.disconnectUser(membership.userId);
     return result;
+  }
+
+  async updateCompany(
+    companyId: string,
+    payload: AdminUpdateCompanyPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const [company, region, duplicate] = await Promise.all([
+        tx.company.findUnique({ where: { id: companyId }, select: { id: true } }),
+        tx.region.findFirst({
+          where: { id: payload.regionId, active: true },
+          select: { id: true },
+        }),
+        tx.company.findFirst({
+          where: { document: payload.document, id: { not: companyId } },
+          select: { id: true },
+        }),
+      ]);
+      if (!company) throw new NotFoundException('Empresa nao encontrada.');
+      if (!region) throw new ConflictException('A regiao selecionada nao existe ou esta inativa.');
+      if (duplicate) throw new ConflictException('Este CNPJ ja pertence a outra empresa.');
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: {
+          tradeName: payload.tradeName,
+          legalName: payload.legalName,
+          document: payload.document,
+          regionId: payload.regionId,
+        },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_UPDATED',
+          entityType: 'COMPANY',
+          entityId: companyId,
+          summary: `Empresa ${payload.tradeName} atualizada, incluindo CNPJ e regiao.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async addAddress(
+    companyId: string,
+    payload: AdminCompanyAddressPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true },
+      });
+      if (!company) throw new NotFoundException('Empresa nao encontrada.');
+      const count = await tx.companyAddress.count({ where: { companyId } });
+      const isPrimary = payload.isPrimary || count === 0;
+      if (isPrimary) {
+        await tx.companyAddress.updateMany({ where: { companyId }, data: { isPrimary: false } });
+      }
+      const address = await tx.companyAddress.create({
+        data: { companyId, ...this.addressData(payload), isPrimary },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_ADDRESS_CREATED',
+          entityType: 'COMPANY_ADDRESS',
+          entityId: address.id,
+          summary: `Endereco ${payload.street}, ${payload.number} adicionado a empresa.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async updateAddress(
+    companyId: string,
+    addressId: string,
+    payload: AdminCompanyAddressPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const address = await tx.companyAddress.findFirst({
+        where: { id: addressId, companyId },
+        select: { id: true, isPrimary: true },
+      });
+      if (!address) throw new NotFoundException('Endereco nao encontrado nesta empresa.');
+      const isPrimary = payload.isPrimary || address.isPrimary;
+      if (isPrimary) {
+        await tx.companyAddress.updateMany({
+          where: { companyId, id: { not: addressId } },
+          data: { isPrimary: false },
+        });
+      }
+      await tx.companyAddress.update({
+        where: { id: addressId },
+        data: { ...this.addressData(payload), isPrimary },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_ADDRESS_UPDATED',
+          entityType: 'COMPANY_ADDRESS',
+          entityId: addressId,
+          summary: `Endereco ${payload.street}, ${payload.number} atualizado.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async deleteAddress(
+    companyId: string,
+    addressId: string,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const addresses = await tx.companyAddress.findMany({
+        where: { companyId },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      });
+      const address = addresses.find((item) => item.id === addressId);
+      if (!address) throw new NotFoundException('Endereco nao encontrado nesta empresa.');
+      if (addresses.length === 1) {
+        throw new ConflictException(
+          'Cadastre outro endereco antes de remover o unico endereco da empresa.',
+        );
+      }
+      await tx.companyAddress.delete({ where: { id: addressId } });
+      if (address.isPrimary) {
+        const replacement = addresses.find((item) => item.id !== addressId)!;
+        await tx.companyAddress.update({
+          where: { id: replacement.id },
+          data: { isPrimary: true },
+        });
+      }
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_ADDRESS_REMOVED',
+          entityType: 'COMPANY_ADDRESS',
+          entityId: addressId,
+          summary: `Endereco ${address.street}, ${address.number} removido da empresa.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async addMember(
+    companyId: string,
+    payload: AdminCreateCompanyMemberPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const [company, duplicate] = await Promise.all([
+        tx.company.findUnique({ where: { id: companyId }, select: { id: true } }),
+        tx.user.findUnique({ where: { email: payload.email }, select: { id: true } }),
+      ]);
+      if (!company) throw new NotFoundException('Empresa nao encontrada.');
+      if (duplicate) throw new ConflictException('Este e-mail ja esta em uso.');
+      const user = await tx.user.create({
+        data: {
+          type: 'COMPANY_MEMBER',
+          name: payload.name,
+          email: payload.email,
+          phone: payload.phone,
+          passwordHash: await bcrypt.hash(payload.password, PASSWORD_HASH_ROUNDS),
+        },
+      });
+      const member = await tx.companyTeamMember.create({
+        data: { companyId, userId: user.id, role: payload.role },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_MEMBER_CREATED',
+          entityType: 'COMPANY_MEMBER',
+          entityId: member.id,
+          summary: `${payload.name} adicionado como ${payload.role} da empresa.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async updateMember(
+    companyId: string,
+    memberId: string,
+    payload: AdminUpdateCompanyMemberPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const member = await tx.companyTeamMember.findFirst({
+        where: { id: memberId, companyId },
+        select: { id: true, userId: true, role: true, active: true },
+      });
+      if (!member) throw new NotFoundException('Responsavel nao encontrado nesta empresa.');
+      const duplicate = await tx.user.findFirst({
+        where: { email: payload.email, id: { not: member.userId } },
+        select: { id: true },
+      });
+      if (duplicate) throw new ConflictException('Este e-mail ja esta em uso.');
+      if (member.active && member.role === 'OWNER' && payload.role !== 'OWNER') {
+        await this.assertAnotherActiveOwner(tx, companyId, memberId);
+      }
+      await tx.user.update({
+        where: { id: member.userId },
+        data: { name: payload.name, email: payload.email, phone: payload.phone },
+      });
+      await tx.companyTeamMember.update({ where: { id: memberId }, data: { role: payload.role } });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_MEMBER_UPDATED',
+          entityType: 'COMPANY_MEMBER',
+          entityId: memberId,
+          summary: `Dados e papel de ${payload.name} atualizados para ${payload.role}.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(companyId);
+  }
+
+  async setMemberActive(
+    companyId: string,
+    memberId: string,
+    active: boolean,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    let userId: string | null = null;
+    await this.prisma.$transaction(async (tx) => {
+      const member = await tx.companyTeamMember.findFirst({
+        where: { id: memberId, companyId },
+        select: {
+          id: true,
+          userId: true,
+          role: true,
+          active: true,
+          user: { select: { name: true } },
+        },
+      });
+      if (!member) throw new NotFoundException('Responsavel nao encontrado nesta empresa.');
+      if (member.active === active)
+        throw new ConflictException(`Este acesso ja esta ${active ? 'ativo' : 'inativo'}.`);
+      if (!active && member.role === 'OWNER')
+        await this.assertAnotherActiveOwner(tx, companyId, memberId);
+      await tx.companyTeamMember.update({ where: { id: memberId }, data: { active } });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: active ? 'COMPANY_MEMBER_REACTIVATED' : 'COMPANY_MEMBER_DEACTIVATED',
+          entityType: 'COMPANY_MEMBER',
+          entityId: memberId,
+          summary: `Acesso de ${member.user.name} ${active ? 'reativado' : 'desativado'}.`,
+        },
+        tx,
+      );
+      userId = member.userId;
+    });
+    if (!active && userId) this.realtimeGateway.disconnectUser(userId);
+    return this.detail(companyId);
+  }
+
+  private async assertAnotherActiveOwner(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    excludedMemberId: string,
+  ): Promise<void> {
+    const other = await tx.companyTeamMember.findFirst({
+      where: { companyId, id: { not: excludedMemberId }, active: true, role: 'OWNER' },
+      select: { id: true },
+    });
+    if (!other)
+      throw new ConflictException('A empresa precisa manter ao menos um responsavel ativo.');
+  }
+
+  private addressData(payload: AdminCompanyAddressPayload) {
+    return {
+      label: payload.label || null,
+      street: payload.street,
+      number: payload.number,
+      complement: payload.complement || null,
+      city: payload.city,
+      state: payload.state.toUpperCase(),
+      zip: payload.zip,
+      lat: payload.lat ?? null,
+      lng: payload.lng ?? null,
+    };
   }
 
   private toListItem(company: {

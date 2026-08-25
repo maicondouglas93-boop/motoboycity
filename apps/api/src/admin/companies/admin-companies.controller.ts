@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -23,11 +24,19 @@ import {
   listCompaniesQuerySchema,
   updateCompanyProfileSchema,
   upsertCompanyAddressSchema,
+  adminUpdateCompanySchema,
+  adminCompanyAddressSchema,
+  adminCreateCompanyMemberSchema,
+  adminUpdateCompanyMemberSchema,
   type ChangeAdminPasswordPayload,
   type CreateAdminCompanyPayload,
   type ListCompaniesQuery,
   type UpdateCompanyProfilePayload,
   type UpsertCompanyAddressPayload,
+  type AdminUpdateCompanyPayload,
+  type AdminCompanyAddressPayload,
+  type AdminCreateCompanyMemberPayload,
+  type AdminUpdateCompanyMemberPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -35,6 +44,7 @@ import { AuthService } from '../../auth/auth.service';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import {
   AdminCompaniesService,
   type AdminCompanyDetail,
@@ -50,6 +60,7 @@ export class AdminCompaniesController {
   constructor(
     private readonly adminCompaniesService: AdminCompaniesService,
     private readonly authService: AuthService,
+    private readonly audit: AdminAuditService,
   ) {}
 
   @Get('registration-options')
@@ -75,6 +86,13 @@ export class AdminCompaniesController {
       },
       { regionId: body.regionId },
     );
+    await this.audit.record({
+      actorUserId: admin.id,
+      action: 'COMPANY_CREATED',
+      entityType: 'COMPANY',
+      entityId: result.companyId,
+      summary: `Empresa ${body.tradeName} cadastrada pelo administrador.`,
+    });
     this.logger.log(`Admin ${admin.id} cadastrou a empresa ${result.companyId}.`);
     return result;
   }
@@ -97,9 +115,85 @@ export class AdminCompaniesController {
     @Body(new ZodValidationPipe(updateCompanyProfileSchema)) body: UpdateCompanyProfilePayload,
     @CurrentUser() admin: User,
   ): Promise<AdminCompanyDetail> {
-    const result = await this.adminCompaniesService.updateProfile(id, body);
+    const result = await this.adminCompaniesService.updateProfile(id, body, admin.id);
     this.logger.log(`Admin ${admin.id} atualizou o cadastro da empresa ${id}.`);
     return result;
+  }
+
+  @Put(':id')
+  updateCompany(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminUpdateCompanySchema)) body: AdminUpdateCompanyPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.updateCompany(id, body, admin.id);
+  }
+
+  @Post(':id/addresses')
+  addAddress(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminCompanyAddressSchema)) body: AdminCompanyAddressPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.addAddress(id, body, admin.id);
+  }
+
+  @Put(':id/addresses/:addressId')
+  updateAddress(
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+    @Body(new ZodValidationPipe(adminCompanyAddressSchema)) body: AdminCompanyAddressPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.updateAddress(id, addressId, body, admin.id);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  deleteAddress(
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.deleteAddress(id, addressId, admin.id);
+  }
+
+  @Post(':id/team-members')
+  addMember(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminCreateCompanyMemberSchema))
+    body: AdminCreateCompanyMemberPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.addMember(id, body, admin.id);
+  }
+
+  @Put(':id/team-members/:memberId')
+  updateMember(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Body(new ZodValidationPipe(adminUpdateCompanyMemberSchema))
+    body: AdminUpdateCompanyMemberPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.updateMember(id, memberId, body, admin.id);
+  }
+
+  @Patch(':id/team-members/:memberId/deactivate')
+  deactivateMember(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.setMemberActive(id, memberId, false, admin.id);
+  }
+
+  @Patch(':id/team-members/:memberId/reactivate')
+  reactivateMember(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.setMemberActive(id, memberId, true, admin.id);
   }
 
   @Put(':id/address')
@@ -108,7 +202,7 @@ export class AdminCompaniesController {
     @Body(new ZodValidationPipe(upsertCompanyAddressSchema)) body: UpsertCompanyAddressPayload,
     @CurrentUser() admin: User,
   ): Promise<AdminCompanyDetail> {
-    const result = await this.adminCompaniesService.upsertPrimaryAddress(id, body);
+    const result = await this.adminCompaniesService.upsertPrimaryAddress(id, body, admin.id);
     this.logger.log(`Admin ${admin.id} atualizou o endereco principal da empresa ${id}.`);
     return result;
   }
@@ -119,11 +213,8 @@ export class AdminCompaniesController {
   }
 
   @Patch(':id/suspend')
-  async suspend(
-    @Param('id') id: string,
-    @CurrentUser() admin: User,
-  ): Promise<AdminCompanyDetail> {
-    const result = await this.adminCompaniesService.suspend(id);
+  async suspend(@Param('id') id: string, @CurrentUser() admin: User): Promise<AdminCompanyDetail> {
+    const result = await this.adminCompaniesService.suspend(id, admin.id);
     this.logger.warn(`Admin ${admin.id} suspendeu a empresa ${id}.`);
     return result;
   }
@@ -133,7 +224,7 @@ export class AdminCompaniesController {
     @Param('id') id: string,
     @CurrentUser() admin: User,
   ): Promise<AdminCompanyDetail> {
-    const result = await this.adminCompaniesService.reactivate(id);
+    const result = await this.adminCompaniesService.reactivate(id, admin.id);
     this.logger.warn(`Admin ${admin.id} reativou a empresa ${id}.`);
     return result;
   }
@@ -149,6 +240,7 @@ export class AdminCompaniesController {
       id,
       memberId,
       body.password,
+      admin.id,
     );
     this.logger.warn(
       `Admin ${admin.id} redefiniu a credencial do usuário ${result.userId} na empresa ${id}.`,
