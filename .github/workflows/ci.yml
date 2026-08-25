@@ -91,6 +91,9 @@ jobs:
       - name: API unit tests
         run: pnpm --filter @motoboycity/api exec jest --runInBand
 
+      - name: Pre-production reset safety tests
+        run: pnpm --filter @motoboycity/api test:data-reset:preproduction
+
       - name: Driver app tests
         run: pnpm --filter @motoboycity/driver-app exec jest --runInBand
 

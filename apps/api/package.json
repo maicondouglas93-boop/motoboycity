@@ -16,6 +16,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
+    "data:reset:preproduction": "node scripts/reset-preproduction-data.cjs",
+    "test:data-reset:preproduction": "node --test scripts/reset-preproduction-data.test.cjs",
     "postinstall": "prisma generate",
     "test": "jest",
     "test:watch": "jest --watch",
