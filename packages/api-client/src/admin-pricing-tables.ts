@@ -37,6 +37,7 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
         perKmFee: number;
         minimumFee?: number;
         returnFee?: number;
+        driverCommissionPercentage?: number;
       },
     ): Promise<PricingTableItem> {
       const response = await fetch(`${baseUrl}/admin/pricing-tables`, {

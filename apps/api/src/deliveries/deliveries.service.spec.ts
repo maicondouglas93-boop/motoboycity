@@ -1722,6 +1722,107 @@ describe('DeliveriesService', () => {
         data: expect.objectContaining({ status: 'FAILED', failureReason: 'RECIPIENT_ABSENT' }),
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
+      expect(pricingService.quote).not.toHaveBeenCalled();
+      expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
+    });
+
+    it('calcula e congela o valor normal quando o destino é definido no insucesso', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      const collected = fullDeliveryRow({
+        driverId: 'driver-1',
+        serviceTypeId: 'st-1',
+        status: 'COLLECTED',
+        destinationKnownAtCreation: false,
+        distanceKm: null,
+        totalValue: null,
+        driverValue: null,
+        platformValue: null,
+        addresses: [fullDeliveryRow().addresses[0]],
+      });
+      const failed = fullDeliveryRow({
+        ...collected,
+        status: 'FAILED',
+        failedAt: new Date('2026-08-25T16:00:00.000Z'),
+        distanceKm: { toString: () => '8.00' },
+        totalValue: { toString: () => '17.00' },
+        driverValue: { toString: () => '14.00' },
+        platformValue: { toString: () => '3.00' },
+      });
+      prisma.delivery.findUnique.mockResolvedValueOnce(collected).mockResolvedValue(failed);
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 8, durationMinutes: 25 });
+      pricingService.quote.mockResolvedValue({
+        chargeableDistanceKm: 8,
+        distanceFee: 12,
+        subtotal: 17,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+        totalValue: 17,
+        driverValue: 14,
+        platformValue: 3,
+      });
+
+      await service.markFailed(driverUser, 'delivery-1', failurePayload);
+
+      expect(googleMapsService.getDistance).toHaveBeenCalledWith({
+        origin: { address: expect.stringContaining('Rua da Loja') },
+        destination: { lat: failurePayload.lat, lng: failurePayload.lng },
+      });
+      expect(pricingService.quote).toHaveBeenCalledWith({
+        companyId: 'company-1',
+        regionId: 'region-1',
+        serviceTypeId: 'st-1',
+        distanceKm: 8,
+        requiresReturn: false,
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'COLLECTED', driverId: 'driver-1' },
+        data: expect.objectContaining({
+          status: 'FAILED',
+          distanceKm: 8,
+          totalValue: 17,
+          driverValue: 14,
+          platformValue: 3,
+          returnValue: null,
+        }),
+      });
+      expect(tx.deliveryAddress.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          deliveryId: 'delivery-1',
+          type: 'DROPOFF',
+          lat: failurePayload.lat,
+          lng: failurePayload.lng,
+        }),
+      });
+      expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
+    });
+
+    it('não registra insucesso sem GPS quando ele é necessário para calcular o valor', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          serviceTypeId: 'st-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          distanceKm: null,
+          totalValue: null,
+          driverValue: null,
+          platformValue: null,
+        }),
+      );
+
+      await expect(
+        service.markFailed(driverUser, 'delivery-1', {
+          reason: 'OTHER',
+          note: 'Problema informado pelo motoboy.',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+      expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
     });
 
     it('devolve o insucesso existente sem criar outro histórico no retry', async () => {
@@ -2165,6 +2266,47 @@ describe('DeliveriesService', () => {
         expect.objectContaining({ id: 'delivery-1', driverId: 'driver-1' }),
       );
       expect(result.deliveries).toHaveLength(1);
+    });
+
+    it('fecha o insucesso com o mesmo motoboy e credita uma única vez o valor calculado', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      const failed = fullDeliveryRow({
+        driverId: 'driver-1',
+        status: 'FAILED',
+        failedAt: new Date('2026-08-25T16:00:00.000Z'),
+        requiresReturn: false,
+        driverValue: { toString: () => '14.00' },
+      });
+      const completed = fullDeliveryRow({
+        ...failed,
+        status: 'COMPLETED',
+      });
+      prisma.delivery.findUnique.mockResolvedValueOnce(failed).mockResolvedValue(completed);
+
+      const result = await service.completeReturn(driverUser, 'delivery-1', {});
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'FAILED', driverId: 'driver-1' },
+        data: { status: 'COMPLETED', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'FAILED',
+          toStatus: 'COMPLETED',
+          changedByUserId: driverUser.id,
+          note: 'Retorno confirmado pelo motoboy.',
+        },
+      });
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledTimes(1);
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledWith(tx, {
+        id: 'delivery-1',
+        driverId: 'driver-1',
+        driverValue: failed.driverValue,
+      });
+      expect(result.deliveries).toEqual([
+        expect.objectContaining({ id: 'delivery-1', status: 'COMPLETED' }),
+      ]);
     });
   });
 });

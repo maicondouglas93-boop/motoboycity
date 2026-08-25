@@ -6824,3 +6824,102 @@ visual autenticada nao foi executada porque nenhum navegador controlavel estava
 disponivel nesta sessao. Proximo passo concreto: abrir um pedido com historico,
 coordenadas, fatura e instrucao ao entregador em desktop e celular para conferir
 quebras de texto e o empilhamento responsivo.
+
+## Atualizacao - 2026-08-25: divisao personalizada por empresa e modalidade
+
+As tabelas de preco personalizadas agora versionam tambem a divisao do subtotal
+base + distancia entre motoboy e plataforma. Ao criar uma tabela para uma
+empresa, o admin informa o percentual do motoboy entre 0% e 100%; a plataforma
+recebe automaticamente o complemento. Preco e divisao entram na mesma nova
+versao e a anterior do mesmo escopo empresa + modalidade continua sendo
+desativada atomicamente.
+
+A tabela geral continua usando
+`PlatformSettings.driverCommissionPercentage`. Tabelas personalizadas antigas
+ficam com `PricingTable.driverCommissionPercentage = null` e tambem continuam
+herdando o global, sem backfill e sem mudar pedidos existentes. Quando a tabela
+personalizada tem override, a cotacao nao depende da configuracao global. O
+retorno permanece 100% do motoboy e cada taxa adicional preserva seu proprio
+`driverSharePercentage`. Os valores calculados continuam congelados em
+`Delivery`.
+
+O contrato de criacao exige o percentual quando `companyId` existe e o recusa
+em uma tabela geral, mantendo uma unica fonte de verdade para cada escopo. O
+valor aceita no maximo duas casas decimais, coerente com `DECIMAL(5,2)`, e o
+service repete a guarda de escopo/presenca mesmo quando chamado sem o
+controller. A listagem passou a expor o campo nullable. No Admin Web, a selecao
+de empresa abre os campos `Motoboy (%)` e `Plataforma (%)`; o segundo e
+calculado e somente leitura. Trocar de empresa limpa a divisao digitada para
+nao copiar um acordo por engano. A tabela historica mostra a divisao propria ou
+informa que a versao herda o global.
+
+Schema e migration aditiva:
+`apps/api/prisma/migrations/20260825162135_company_pricing_commission_override/migration.sql`.
+A migration adiciona somente `DECIMAL(5,2) NULL`, sem default nem backfill. O
+`prisma migrate dev` nao pode concluir porque o PostgreSQL local em
+`localhost:5434` estava indisponivel; o SQL foi entao gerado pelo Prisma com
+`migrate diff`, comparando o schema do `HEAD` com o schema novo, e revisado. Ela
+nao foi aplicada em Neon nem em outro banco compartilhado.
+
+Arquivos principais: `apps/api/prisma/schema.prisma`, a migration acima,
+`packages/validation/src/admin/create-pricing-table.schema.ts`,
+`packages/types/src/pricing.ts`,
+`packages/api-client/src/admin-pricing-tables.ts`,
+`apps/api/src/{admin/pricing-tables,pricing}` e
+`apps/admin-web/src/app/(app)/configuracoes/tabela-de-precos/page.tsx`.
+`docs/business-rules.md` foi atualizado para registrar a nova decisao de
+produto.
+
+Validacoes executadas: `prisma generate` e `prisma validate`; 65 suites/795
+testes unitarios completos da API; typecheck e lint dos oito workspaces; builds
+de producao da API e do Admin Web. Tudo passou. O E2E alterado nao foi
+executado, pois PostgreSQL e Redis isolados nao estavam disponiveis. Deploy seguro:
+validar backup/restauracao em staging, aplicar a migration, publicar a API e
+logo depois o Admin Web; testar uma cotacao geral, uma personalizada nova e
+uma personalizada antiga. Em rollback, manter a coluna. Depois que overrides
+forem usados, voltar para uma API antiga faria novas cotacoes ignorarem a
+divisao; prefira correcao para frente ou pause temporariamente as empresas
+afetadas.
+
+## Atualizacao - 2026-08-25: problema na entrega preserva o valor normal
+
+O fluxo de insucesso depois da coleta foi corrigido para manter o pedido com o
+mesmo motoboy, exigir a devolucao da mercadoria a empresa e contabilizar o
+valor normal da corrida. Antes da coleta, a acao continua sendo apenas
+`Devolver a fila`; o menu `Problema na entrega` deixou de aparecer nessa etapa
+para nao sugerir que uma mercadoria ainda nao coletada precisa ser devolvida.
+
+Em pedidos cujo destino ja era conhecido, o valor congelado na criacao
+continua intacto. Em pedidos cujo destino seria definido pelo GPS, o app agora
+captura a posicao no momento em que o motoboy informa o problema. A API calcula
+a rota desde a coleta, aplica a tabela e a divisao vigentes, grava o DROPOFF e
+congela `distanceKm`, `totalValue`, `driverValue`, `platformValue`, retorno e
+taxa adicional na mesma transicao condicional `COLLECTED -> FAILED`. Sem GPS
+valido, a transicao e recusada e o pedido permanece coletado; assim nao nasce
+outra devolucao sem valor.
+
+O repasse nao e criado no registro do problema. Ele continua saindo uma unica
+vez pelo fluxo idempotente `complete-return`, quando o mesmo motoboy confirma a
+devolucao na loja. O insucesso nao desconta nem acrescenta valor; a taxa de
+retorno so permanece quando o pedido ja tinha `requiresReturn=true`. O GPS da
+devolucao nao altera o preco nem bloqueia o fechamento.
+
+Arquivos funcionais principais:
+`apps/api/src/deliveries/deliveries.service.ts` e
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`. Cobertura adicionada
+em `apps/api/src/deliveries/deliveries.service.spec.ts` e
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`; a validacao compartilhada de
+`mark-failed` ja aceitava `lat`, `lng` e `accuracy`, portanto nao houve mudanca
+de rota, contrato, banco ou migration para este ajuste.
+
+Validacoes executadas: 96 testes unitarios focados de `DeliveriesService`;
+typecheck, lint e build de producao da API; typecheck, lint e 13 suites/71
+testes do Driver App. Tudo passou. O E2E alterado nao foi executado nesta
+sessao porque PostgreSQL e Redis isolados nao foram disponibilizados. Como o
+ambiente ainda e de testes, pedidos `FAILED` antigos que ja ficaram sem valor
+nao serao recuperados automaticamente: podem ser cancelados e recriados. Essa
+decisao evita precificar uma tentativa antiga usando a posicao posterior na
+loja ou um ponto de rastreamento inferido. Proximo passo concreto: publicar API
+e novo APK em conjunto e testar em aparelho real um pedido com destino
+conhecido e outro por GPS, do problema ate a confirmacao da devolucao e o
+credito na carteira.

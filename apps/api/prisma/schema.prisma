@@ -607,8 +607,8 @@ model Delivery {
 
   /// true (padrão): destino informado e preço calculado/congelado na
   /// criação, como sempre foi. false: pedido nasce sem DROPOFF — distanceKm/
-  /// totalValue/driverValue/platformValue ficam nulos até markDelivered()
-  /// capturar lat/lng do motoboy na entrega e calcular retroativamente.
+  /// totalValue/driverValue/platformValue ficam nulos até markDelivered() ou
+  /// markFailed() capturar lat/lng do motoboy na tentativa e calcular o valor.
   /// Mesmo valor obrigatório em todos os itens de um lote (validado em Zod).
   destinationKnownAtCreation Boolean @default(true)
 
@@ -1114,6 +1114,12 @@ model PricingTable {
   /// distância). Null = este serviço não tem retorno pago configurado nesta
   /// região; requiresReturn não pode ser usado em Delivery até isso existir.
   returnFee Decimal? @db.Decimal(10, 2)
+
+  /// Percentual do subtotal base+distância repassado ao entregador nesta
+  /// tabela personalizada. Só é preenchido quando companyId existe. Null =
+  /// herda PlatformSettings.driverCommissionPercentage, preservando tabelas
+  /// gerais e personalizadas criadas antes deste override.
+  driverCommissionPercentage Decimal? @db.Decimal(5, 2)
 
   /// Só uma PricingTable por (regionId, serviceTypeId, companyId) fica
   /// active=true por vez. Índices únicos parciais no banco tratam o escopo

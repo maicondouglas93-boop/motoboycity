@@ -179,6 +179,18 @@ export interface DeliveryGroupResult {
   deliveries: DeliveryDetail[];
 }
 
+interface DeferredDestinationPricing {
+  distanceKm: number;
+  totalValue: number;
+  driverValue: number;
+  platformValue: number;
+  returnValue: number | null;
+  surchargeLabel: string | null;
+  surchargeValue: number | null;
+  lat: number;
+  lng: number;
+}
+
 export interface AdminDeliverySearchSummary {
   total: number;
   items: Array<{
@@ -1420,14 +1432,82 @@ export class DeliveriesService {
    * para a loja e a empresa paga a corrida normal — entao o pedido NAO fecha
    * aqui: ele vai para FAILED e so fecha quando o motoboy confirmar o retorno,
    * pelo mesmo `completeReturn` de uma entrega bem-sucedida com retorno. Isso
-   * faz o repasse sair pelo caminho ja existente, com o
-   * `driverValue` congelado na criacao — ou seja, a corrida normal.
+   * faz o repasse sair pelo caminho ja existente, com o valor normal da
+   * corrida. Quando o destino era conhecido, esse valor ja veio congelado da
+   * criacao. Quando o destino seria definido pelo GPS, a posicao da tentativa
+   * de entrega congela agora distancia, cobranca e repasse.
    *
-   * Nao ha desconto nem cobranca extra: o valor ja congelado e o que vale.
+   * Nao ha desconto nem cobranca extra por causa do insucesso.
    */
+  private async calculateDeferredDestinationPricing(
+    delivery: Pick<Delivery, 'companyId' | 'serviceTypeId' | 'requiresReturn'> & {
+      company: { regionId: string };
+    },
+    payload: { lat?: number; lng?: number; accuracy?: number },
+  ): Promise<DeferredDestinationPricing> {
+    if (payload.lat === undefined || payload.lng === undefined) {
+      throw new ConflictException(
+        'É necessário informar a localização atual para registrar o destino e calcular o valor desta entrega.',
+      );
+    }
+    if (payload.accuracy !== undefined && payload.accuracy > MAX_LOCATION_ACCURACY_METERS) {
+      throw new ConflictException(
+        `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é baixa demais para definir ` +
+          `o destino desta entrega. Aguarde o sinal melhorar e tente de novo.`,
+      );
+    }
+
+    const pickupAddress = await this.prisma.companyAddress.findFirst({
+      where: { companyId: delivery.companyId, isPrimary: true },
+    });
+    if (!pickupAddress) {
+      throw new ConflictException('A empresa não tem mais um endereço de coleta cadastrado.');
+    }
+
+    let distance: { distanceKm: number };
+    try {
+      distance = await this.googleMapsService.getDistance({
+        origin: { address: this.formatAddress(pickupAddress) },
+        destination: { lat: payload.lat, lng: payload.lng },
+      });
+    } catch (error) {
+      if (error instanceof GoogleMapsNotConfiguredError) {
+        throw new InternalServerErrorException(
+          'Cálculo de distância não está configurado. Contate o suporte.',
+        );
+      }
+      throw new ServiceUnavailableException(
+        'Não foi possível calcular a distância desta entrega agora. Tente novamente em instantes.',
+      );
+    }
+
+    const quote = await this.pricingService.quote({
+      companyId: delivery.companyId,
+      regionId: delivery.company.regionId,
+      serviceTypeId: delivery.serviceTypeId,
+      distanceKm: distance.distanceKm,
+      requiresReturn: delivery.requiresReturn,
+    });
+
+    return {
+      distanceKm: distance.distanceKm,
+      totalValue: quote.totalValue,
+      driverValue: quote.driverValue,
+      platformValue: quote.platformValue,
+      returnValue: quote.returnValue > 0 ? quote.returnValue : null,
+      surchargeLabel: quote.surchargeLabel,
+      surchargeValue: quote.surchargeValue > 0 ? quote.surchargeValue : null,
+      lat: payload.lat,
+      lng: payload.lng,
+    };
+  }
+
   async markFailed(user: User, id: string, payload: MarkFailedPayload): Promise<DeliveryDetail> {
     const driver = await this.findDriverForUser(user);
-    const delivery = await this.prisma.delivery.findUnique({ where: { id } });
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      include: { company: { select: { regionId: true } } },
+    });
 
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
@@ -1448,6 +1528,10 @@ export class DeliveriesService {
       throw new ConflictException('Só é possível registrar insucesso depois de coletar o pedido.');
     }
 
+    const deferredPricing = delivery.destinationKnownAtCreation
+      ? null
+      : await this.calculateDeferredDestinationPricing(delivery, payload);
+
     try {
       await this.prisma.$transaction(async (tx) => {
         const updated = await tx.delivery.updateMany({
@@ -1458,10 +1542,35 @@ export class DeliveriesService {
             failedAt: new Date(),
             failureReason: payload.reason,
             failureNote: payload.note ?? null,
+            ...(deferredPricing && {
+              distanceKm: deferredPricing.distanceKm,
+              totalValue: deferredPricing.totalValue,
+              driverValue: deferredPricing.driverValue,
+              platformValue: deferredPricing.platformValue,
+              returnValue: deferredPricing.returnValue,
+              surchargeLabel: deferredPricing.surchargeLabel,
+              surchargeValue: deferredPricing.surchargeValue,
+            }),
           },
         });
         if (updated.count !== 1) {
           throw new ConflictException('O insucesso já foi registrado por outra solicitação.');
+        }
+        if (deferredPricing) {
+          await tx.deliveryAddress.create({
+            data: {
+              deliveryId: id,
+              type: 'DROPOFF',
+              street: null,
+              number: null,
+              complement: null,
+              city: null,
+              state: null,
+              zip: null,
+              lat: deferredPricing.lat,
+              lng: deferredPricing.lng,
+            },
+          });
         }
         await tx.deliveryStatusHistory.create({
           data: {

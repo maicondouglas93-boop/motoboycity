@@ -1162,6 +1162,87 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await releaseAllDeliveries([deliveryId]);
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
+
+    it('calcula o valor no local do insucesso quando o destino seria definido por GPS', async () => {
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, destinationKnownAtCreation: false, requiresReturn: false })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      expect(created.body.driverValue).toBeNull();
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      // Sem a coordenada da tentativa, a API não cria uma devolução sem valor.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/fail`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'RECIPIENT_ABSENT' })
+        .expect(409);
+
+      const falhou = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/fail`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ reason: 'RECIPIENT_ABSENT', lat: -20.16, lng: -41.75, accuracy: 12 })
+        .expect(200);
+      expect(falhou.body).toMatchObject({
+        status: 'FAILED',
+        driver: { id: driver1Id },
+        distanceKm: 5,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+        returnValue: null,
+      });
+
+      const dropoffAddress = await prisma.deliveryAddress.findFirstOrThrow({
+        where: { deliveryId, type: 'DROPOFF' },
+      });
+      expect(Number(dropoffAddress.lat)).toBeCloseTo(-20.16);
+      expect(Number(dropoffAddress.lng)).toBeCloseTo(-41.75);
+
+      const completed = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      expect(completed.body.deliveries[0]).toMatchObject({
+        id: deliveryId,
+        status: 'COMPLETED',
+        driverValue: 10,
+      });
+
+      // Repetir após uma resposta perdida devolve o resultado já aplicado.
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      const credits = await prisma.walletTransaction.findMany({
+        where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
+      });
+      expect(credits).toHaveLength(1);
+      expect(Number(credits[0]!.amount)).toBe(10);
+      expect(credits[0]!.idempotencyKey).toBe(`driver-repasse:${deliveryId}`);
+      expect(
+        await prisma.deliveryStatusHistory.count({
+          where: { deliveryId, fromStatus: 'FAILED', toStatus: 'COMPLETED' },
+        }),
+      ).toBe(1);
+
+      await releaseAllDeliveries([deliveryId]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
   });
 
   describe('tempo por etapa (stage-times)', () => {

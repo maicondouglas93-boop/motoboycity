@@ -17,6 +17,7 @@ describe('AdminPricingTablesController (e2e)', () => {
   let adminToken: string;
   let serviceTypeId: string;
   let firstPricingTableId: string;
+  let companyId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -37,10 +38,27 @@ describe('AdminPricingTablesController (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ code: testServiceTypeCode, name: 'Serviço Teste Preço E2E' });
     serviceTypeId = serviceTypeResponse.body.id;
+
+    const region = await prisma.region.findFirstOrThrow({ where: { active: true } });
+    const company = await prisma.company.create({
+      data: {
+        legalName: `Empresa Teste Preço E2E ${uniqueSuffix}`,
+        tradeName: `Loja Preço E2E ${uniqueSuffix}`,
+        document: `E2E-PRECO-${uniqueSuffix}`,
+        status: 'ACTIVE',
+        regionId: region.id,
+      },
+    });
+    companyId = company.id;
   });
 
   afterAll(async () => {
-    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+    if (serviceTypeId) {
+      await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+    }
+    if (companyId) {
+      await prisma.company.deleteMany({ where: { id: companyId } });
+    }
     await prisma.serviceType.deleteMany({ where: { code: testServiceTypeCode } });
     await app.close();
   });
@@ -82,6 +100,7 @@ describe('AdminPricingTablesController (e2e)', () => {
       perKmFee: 1.5,
       minimumFee: 8,
       returnFee: 3,
+      driverCommissionPercentage: null,
       active: true,
       createdAt: expect.any(String),
     });
@@ -120,6 +139,60 @@ describe('AdminPricingTablesController (e2e)', () => {
       .expect(400);
   });
 
+  it('exige uma divisão própria ao criar preço personalizado', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        serviceTypeId,
+        companyId,
+        baseFee: 8,
+        perKmFee: 1.5,
+      })
+      .expect(400);
+  });
+
+  it('recusa divisão personalizada fora de 0 a 100', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        serviceTypeId,
+        companyId,
+        baseFee: 8,
+        perKmFee: 1.5,
+        driverCommissionPercentage: 101,
+      })
+      .expect(400);
+  });
+
+  it('recusa divisão personalizada com mais de duas casas decimais', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        serviceTypeId,
+        companyId,
+        baseFee: 8,
+        perKmFee: 1.5,
+        driverCommissionPercentage: 72.555,
+      })
+      .expect(400);
+  });
+
+  it('recusa divisão personalizada em uma tabela geral', async () => {
+    await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        serviceTypeId,
+        baseFee: 8,
+        perKmFee: 1.5,
+        driverCommissionPercentage: 70,
+      })
+      .expect(400);
+  });
+
   it('admin lista tabelas de preço filtrando por serviceTypeId e active', async () => {
     const response = await request(app.getHttpServer())
       .get('/admin/pricing-tables')
@@ -129,6 +202,33 @@ describe('AdminPricingTablesController (e2e)', () => {
 
     expect(response.body).toHaveLength(1);
     expect(response.body[0].active).toBe(true);
+  });
+
+  it('cria, persiste e devolve a divisão personalizada da empresa', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/admin/pricing-tables')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        serviceTypeId,
+        companyId,
+        baseFee: 4,
+        perKmFee: 1.2,
+        driverCommissionPercentage: 72.5,
+      })
+      .expect(201);
+
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        companyId,
+        companyName: `Loja Preço E2E ${uniqueSuffix}`,
+        driverCommissionPercentage: 72.5,
+        active: true,
+      }),
+    );
+    const persisted = await prisma.pricingTable.findUniqueOrThrow({
+      where: { id: response.body.id },
+    });
+    expect(Number(persisted.driverCommissionPercentage)).toBe(72.5);
   });
 
   it('rejeita desativar uma tabela já inativa com 409', async () => {

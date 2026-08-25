@@ -1,10 +1,64 @@
-import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { createPricingTableSchema } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPricingTablesService } from './admin-pricing-tables.service';
 
 const actorUserId = 'admin-1';
+
+describe('createPricingTableSchema', () => {
+  const customPayload = {
+    serviceTypeId: '11111111-1111-4111-8111-111111111111',
+    companyId: '22222222-2222-4222-8222-222222222222',
+    baseFee: 5,
+    perKmFee: 1.5,
+  };
+
+  it.each([0, 72.55, 100])(
+    'aceita %s%% para o entregador em tabela personalizada',
+    (percentage) => {
+      expect(
+        createPricingTableSchema.safeParse({
+          ...customPayload,
+          driverCommissionPercentage: percentage,
+        }).success,
+      ).toBe(true);
+    },
+  );
+
+  it('exige divisão própria em uma tabela personalizada', () => {
+    expect(createPricingTableSchema.safeParse(customPayload).success).toBe(false);
+  });
+
+  it('recusa divisão própria em tabela geral e percentuais fora da faixa', () => {
+    expect(
+      createPricingTableSchema.safeParse({
+        serviceTypeId: customPayload.serviceTypeId,
+        baseFee: 5,
+        perKmFee: 1.5,
+        driverCommissionPercentage: 70,
+      }).success,
+    ).toBe(false);
+    expect(
+      createPricingTableSchema.safeParse({
+        ...customPayload,
+        driverCommissionPercentage: 100.01,
+      }).success,
+    ).toBe(false);
+    expect(
+      createPricingTableSchema.safeParse({
+        ...customPayload,
+        driverCommissionPercentage: 72.555,
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('AdminPricingTablesService', () => {
   let service: AdminPricingTablesService;
@@ -71,6 +125,7 @@ describe('AdminPricingTablesService', () => {
           perKmFee: { toString: () => '1.50' },
           minimumFee: { toString: () => '8.00' },
           returnFee: { toString: () => '3.00' },
+          driverCommissionPercentage: null,
           active: true,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
         },
@@ -91,6 +146,7 @@ describe('AdminPricingTablesService', () => {
           perKmFee: 1.5,
           minimumFee: 8,
           returnFee: 3,
+          driverCommissionPercentage: null,
           active: true,
           createdAt: '2026-01-01T00:00:00.000Z',
         },
@@ -111,6 +167,7 @@ describe('AdminPricingTablesService', () => {
           perKmFee: { toString: () => '1.50' },
           minimumFee: null,
           returnFee: null,
+          driverCommissionPercentage: null,
           active: true,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
         },
@@ -120,6 +177,7 @@ describe('AdminPricingTablesService', () => {
 
       expect(result[0]?.minimumFee).toBeNull();
       expect(result[0]?.returnFee).toBeNull();
+      expect(result[0]?.driverCommissionPercentage).toBeNull();
     });
 
     it('repassa filtros serviceTypeId e active para a query', async () => {
@@ -144,6 +202,16 @@ describe('AdminPricingTablesService', () => {
       returnFee: 3,
     };
 
+    it('protege a divisão mesmo quando o service é chamado sem o controller', async () => {
+      await expect(
+        service.create({ ...payload, companyId: 'company-1' }, actorUserId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.create({ ...payload, driverCommissionPercentage: 70 }, actorUserId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.serviceType.findUnique).not.toHaveBeenCalled();
+    });
+
     it('cria uma nova tabela de preços e desativa a anterior da mesma região+serviço', async () => {
       prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
       prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
@@ -159,6 +227,7 @@ describe('AdminPricingTablesService', () => {
         perKmFee: { toString: () => '1.50' },
         minimumFee: { toString: () => '8.00' },
         returnFee: { toString: () => '3.00' },
+        driverCommissionPercentage: null,
         active: true,
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
@@ -185,6 +254,7 @@ describe('AdminPricingTablesService', () => {
             perKmFee: 1.5,
             minimumFee: 8,
             returnFee: 3,
+            driverCommissionPercentage: null,
           }),
         }),
       );
@@ -219,6 +289,7 @@ describe('AdminPricingTablesService', () => {
         perKmFee: { toString: () => '1.20' },
         minimumFee: null,
         returnFee: null,
+        driverCommissionPercentage: { toString: () => '72.50' },
         active: true,
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
@@ -228,6 +299,7 @@ describe('AdminPricingTablesService', () => {
           ...payload,
           companyId: 'company-1',
           includedDistanceKm: 2,
+          driverCommissionPercentage: 72.5,
         },
         actorUserId,
       );
@@ -248,10 +320,18 @@ describe('AdminPricingTablesService', () => {
             regionId: 'region-2',
             companyId: 'company-1',
             includedDistanceKm: 2,
+            driverCommissionPercentage: 72.5,
           }),
         }),
       );
       expect(result.companyName).toBe('Loja Especial');
+      expect(result.driverCommissionPercentage).toBe(72.5);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          summary: expect.stringContaining('72.5% entregador e 27.5% plataforma'),
+        }),
+        tx,
+      );
     });
 
     it('repete a transação serializável quando outra atualização concorre no mesmo escopo', async () => {
@@ -270,6 +350,7 @@ describe('AdminPricingTablesService', () => {
         perKmFee: { toString: () => '1.50' },
         minimumFee: { toString: () => '8.00' },
         returnFee: { toString: () => '3.00' },
+        driverCommissionPercentage: null,
         active: true,
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
@@ -297,7 +378,10 @@ describe('AdminPricingTablesService', () => {
       prisma.company.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create({ ...payload, companyId: 'company-1' }, actorUserId),
+        service.create(
+          { ...payload, companyId: 'company-1', driverCommissionPercentage: 70 },
+          actorUserId,
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -310,7 +394,10 @@ describe('AdminPricingTablesService', () => {
       });
 
       await expect(
-        service.create({ ...payload, companyId: 'company-1' }, actorUserId),
+        service.create(
+          { ...payload, companyId: 'company-1', driverCommissionPercentage: 70 },
+          actorUserId,
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -347,6 +434,7 @@ describe('AdminPricingTablesService', () => {
         perKmFee: { toString: () => '1.50' },
         minimumFee: null,
         returnFee: null,
+        driverCommissionPercentage: null,
         active: false,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       });
@@ -400,6 +488,7 @@ describe('AdminPricingTablesService', () => {
         perKmFee: 1.5,
         minimumFee: 5,
         returnFee: 1,
+        driverCommissionPercentage: null,
         includedDistanceKm: 2,
         createdAt: new Date('2026-08-24T12:00:00Z'),
         serviceType: { id: 'servico-1', name: 'motoboy', code: 'MOTOBOY' },

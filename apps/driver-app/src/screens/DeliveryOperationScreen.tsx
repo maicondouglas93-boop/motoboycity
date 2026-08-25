@@ -40,14 +40,7 @@ import { useDispatchStore } from '../store/dispatchStore';
 import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
-type Operation =
-  | 'collect'
-  | 'deliver'
-  | 'return'
-  | 'fail'
-  | 'cancel'
-  | 'return-to-queue'
-  | null;
+type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -80,7 +73,10 @@ function destinationLabel(
   return 'Endereço de entrega não informado';
 }
 
-function operationWasApplied(operation: Exclude<Operation, null>, delivery: DeliveryDetail): boolean {
+function operationWasApplied(
+  operation: Exclude<Operation, null>,
+  delivery: DeliveryDetail,
+): boolean {
   const hasTransition = (fromStatus: DeliveryStatus, toStatuses: DeliveryStatus[]) =>
     delivery.statusHistory.some(
       (item) => item.fromStatus === fromStatus && toStatuses.includes(item.toStatus),
@@ -152,21 +148,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     }
     return true;
-  }, [
-    actionMenuOpen,
-    cancelOpen,
-    deliverConfirmationOpen,
-    navigation,
-    problemOpen,
-    returnOpen,
-  ]);
+  }, [actionMenuOpen, cancelOpen, deliverConfirmationOpen, navigation, problemOpen, returnOpen]);
 
   useFocusEffect(
     useCallback(() => {
-      const subscription = BackHandler.addEventListener(
-        'hardwareBackPress',
-        handleProtectedBack,
-      );
+      const subscription = BackHandler.addEventListener('hardwareBackPress', handleProtectedBack);
       return () => subscription.remove();
     }, [handleProtectedBack]),
   );
@@ -263,14 +249,24 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         navigation.popToTop();
         return;
       } else if (nextOperation === 'fail') {
+        const failureLocation = delivery.destinationKnownAtCreation
+          ? null
+          : await captureCurrentLocation();
         setDelivery(
           await deliveriesApi.fail(token, delivery.id, {
             reason: 'OTHER',
             note: operationNote ?? 'Problema informado pelo motoboy.',
+            ...(failureLocation && {
+              lat: failureLocation.lat,
+              lng: failureLocation.lng,
+              accuracy: failureLocation.accuracy,
+            }),
           }),
         );
         setProblemOpen(false);
-        setSuccessMessage('Ocorrência registrada. Leve a mercadoria de volta à loja.');
+        setSuccessMessage(
+          'Ocorrência registrada. O pedido continua com você; devolva à loja para concluir o repasse.',
+        );
       } else if (nextOperation === 'cancel') {
         await deliveriesApi.cancel(token, delivery.id, 'Cancelado pelo motoboy.');
         setCancelOpen(false);
@@ -468,10 +464,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safeArea}>
       <MapBackdrop />
       <BottomSheet style={styles.sheet}>
-        <SheetHeader
-          title={`Pedido #${delivery.displayNumber}`}
-          onBack={handleProtectedBack}
-        />
+        <SheetHeader title={`Pedido #${delivery.displayNumber}`} onBack={handleProtectedBack} />
 
         {successMessage ? (
           <View style={styles.successBanner} accessibilityLiveRegion="polite">
@@ -713,7 +706,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               </View>
             </Pressable>
 
-            {delivery.status === 'ACCEPTED' || delivery.status === 'COLLECTED' ? (
+            {delivery.status === 'COLLECTED' ? (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
@@ -726,9 +719,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
                 <View style={styles.actionOptionCopy}>
                   <Text style={styles.actionOptionTitle}>Problema na entrega</Text>
                   <Text style={styles.actionOptionDescription}>
-                    {delivery.status === 'ACCEPTED'
-                      ? 'Solta o pedido para outro motoboy.'
-                      : 'Registra o problema e orienta o retorno à loja.'}
+                    Mantém o pedido com você e orienta a devolução à loja.
                   </Text>
                 </View>
               </Pressable>
@@ -767,18 +758,17 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       <ConfirmationModal
         visible={problemOpen}
         title="Informar problema?"
-        description={
-          delivery.status === 'ACCEPTED'
-            ? 'O pedido voltará para a fila e poderá ser aceito por outro motoboy.'
-            : 'A ocorrência será registrada e você deverá levar a mercadoria de volta à loja.'
+        description="Você continuará responsável pelo pedido. A ocorrência será registrada, o valor normal da entrega será mantido e você deverá devolver a mercadoria à loja para concluir o repasse."
+        confirmLabel={
+          busy
+            ? delivery.destinationKnownAtCreation
+              ? 'Registrando...'
+              : 'Capturando localização...'
+            : 'Sim, informar'
         }
-        confirmLabel={busy ? 'Registrando...' : 'Sim, informar'}
         disabled={busy}
         onConfirm={() =>
-          runOperation(
-            delivery.status === 'ACCEPTED' ? 'return-to-queue' : 'fail',
-            'Problema informado pelo motoboy.',
-          ).catch(() => undefined)
+          runOperation('fail', 'Problema informado pelo motoboy.').catch(() => undefined)
         }
         onCancel={() => setProblemOpen(false)}
       />

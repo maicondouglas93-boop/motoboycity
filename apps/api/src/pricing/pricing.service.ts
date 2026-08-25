@@ -78,11 +78,22 @@ export class PricingService {
       );
     }
 
-    const settings = await this.platformSettingsService.get();
-    if (settings.driverCommissionPercentage === null) {
-      throw new ConflictException(
-        'A divisão entregador/plataforma ainda não foi configurada pelo admin.',
-      );
+    let driverCommissionPercentage: number;
+    if (
+      pricingTable.companyId !== null &&
+      pricingTable.companyId !== undefined &&
+      pricingTable.driverCommissionPercentage !== null &&
+      pricingTable.driverCommissionPercentage !== undefined
+    ) {
+      driverCommissionPercentage = Number(pricingTable.driverCommissionPercentage);
+    } else {
+      const settings = await this.platformSettingsService.get();
+      if (settings.driverCommissionPercentage === null) {
+        throw new ConflictException(
+          'A divisão entregador/plataforma ainda não foi configurada pelo admin.',
+        );
+      }
+      driverCommissionPercentage = settings.driverCommissionPercentage;
     }
 
     const surcharge = await this.resolveSurcharge(region.id, input.at ?? new Date());
@@ -95,7 +106,7 @@ export class PricingService {
       minimumFee: pricingTable.minimumFee === null ? null : Number(pricingTable.minimumFee),
       returnFee: pricingTable.returnFee === null ? null : Number(pricingTable.returnFee),
       requiresReturn: input.requiresReturn,
-      driverCommissionPercentage: settings.driverCommissionPercentage,
+      driverCommissionPercentage,
       surcharge,
     });
   }

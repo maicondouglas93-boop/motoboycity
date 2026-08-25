@@ -27,7 +27,8 @@ GPS, distância ou precisão do aparelho.
 
 Percentual, configurável pelo admin — não hardcoded, sem valor padrão fixo
 decidido (isso é configuração de implementação, não decisão de negócio
-bloqueante).
+bloqueante). A configuração global vale para tabelas gerais e como fallback
+das tabelas personalizadas antigas que ainda não possuem uma divisão própria.
 
 ## Preços personalizados por empresa
 
@@ -38,8 +39,17 @@ quando não existir, a empresa usa a tabela geral ativa da sua região.
 Uma nova tabela desativa somente a anterior do mesmo escopo (empresa + tipo de
 serviço, ou tabela geral + tipo de serviço). Valores já calculados continuam
 congelados em `Delivery` e nunca são reescritos por uma alteração posterior.
-Comissão da plataforma e taxas adicionais continuam globais; personalizá-las
-exigiria uma decisão de produto separada.
+
+Ao criar uma tabela personalizada nova, o admin também define o percentual do
+subtotal base + distância destinado ao motoboy; a plataforma recebe o
+complemento até 100%. Preço e divisão são versionados juntos por empresa e tipo
+de serviço. Tabelas gerais continuam usando a divisão global. Tabelas
+personalizadas antigas sem percentual próprio também continuam herdando a
+divisão global, sem backfill nem mudança retroativa.
+
+O retorno continua 100% com o motoboy. Cada taxa adicional continua usando seu
+próprio `driverSharePercentage`; esses dois valores não são afetados pela
+divisão personalizada da tabela.
 
 ## Cálculo de distância
 
@@ -57,6 +67,13 @@ qualquer etapa operacional ativa. Antes da coleta, também pode apenas devolver
 o pedido à fila; depois da coleta, pode informar problema e retornar a
 mercadoria à loja. Sem penalidade monetária definida pra nenhum cenário de
 cancelamento.
+
+“Problema na entrega” não devolve o pedido à fila e não troca o entregador. A
+ação só existe depois da coleta: mantém o mesmo motoboy responsável, muda o
+pedido para devolução pendente e preserva o valor normal da corrida. O repasse
+é liberado uma única vez quando ele confirma que devolveu a mercadoria à
+empresa. O insucesso não cria desconto nem cobrança adicional; uma taxa de
+retorno só existe quando o pedido já nasceu com `requiresReturn=true`.
 
 As ações do motoboy usam o horário atual do servidor. O aplicativo não exige
 mais declaração retroativa, texto de justificativa para devolver à fila ou
@@ -235,6 +252,13 @@ entre dois modos:
   vê valor nenhum ao aceitar a oferta. A localização GPS dele no momento de
   marcar "entregue" vira o destino daquele item especificamente, com preço
   calculado retroativamente a partir daí.
+
+Se uma entrega com destino desconhecido termina em problema depois da coleta,
+a localização da tentativa de entrega — não a localização posterior da
+devolução — vira o destino e congela distância, cobrança e repasse antes de o
+pedido entrar em `FAILED`. Sem essa coordenada o insucesso não é registrado,
+evitando uma devolução sem valor. A confirmação posterior na loja não recalcula
+o preço e continua sem bloqueio de proximidade.
 
 Fechamento: item sem `requiresReturn` fecha sozinho (`COMPLETED`) assim que
 marcado entregue. Item com `requiresReturn=true` fica em `DELIVERED` até o

@@ -49,6 +49,8 @@ describe('PricingService', () => {
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: null,
     });
     platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
 
@@ -66,6 +68,46 @@ describe('PricingService', () => {
     expect(result.totalValue).toBe(12.5);
   });
 
+  it('usa a divisão personalizada da empresa sem consultar a divisão global', async () => {
+    prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+    prisma.pricingTable.findFirst.mockResolvedValue({
+      baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
+      perKmFee: { toString: () => '1.5' } as unknown as number,
+      minimumFee: null,
+      returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: { toString: () => '70.00' } as unknown as number,
+    });
+
+    const result = await service.quote(input);
+
+    expect(platformSettingsService.get).not.toHaveBeenCalled();
+    expect(result.totalValue).toBe(12.5);
+    expect(result.driverValue).toBe(8.75);
+    expect(result.platformValue).toBe(3.75);
+  });
+
+  it('mantém o fallback global para uma tabela personalizada antiga sem divisão própria', async () => {
+    prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+    prisma.pricingTable.findFirst.mockResolvedValue({
+      baseFee: { toString: () => '5' } as unknown as number,
+      includedDistanceKm: { toString: () => '0' } as unknown as number,
+      perKmFee: { toString: () => '1.5' } as unknown as number,
+      minimumFee: null,
+      returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: null,
+    });
+    platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
+
+    const result = await service.quote(input);
+
+    expect(platformSettingsService.get).toHaveBeenCalledTimes(1);
+    expect(result.driverValue).toBe(10);
+    expect(result.platformValue).toBe(2.5);
+  });
+
   // A cotação passou a exigir a região da empresa (P1-06). Antes ela escolhia sozinha a
   // primeira região ativa: com duas praças, uma empresa seria cobrada pela tabela da
   // outra, sem erro nenhum aparecendo.
@@ -77,6 +119,8 @@ describe('PricingService', () => {
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: null,
     });
     platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
 
@@ -104,6 +148,8 @@ describe('PricingService', () => {
       perKmFee: { toString: () => '2' } as unknown as number,
       minimumFee: null,
       returnFee: null,
+      companyId: null,
+      driverCommissionPercentage: null,
     });
     platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
 
@@ -142,6 +188,8 @@ describe('PricingService', () => {
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: null,
     });
     platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: null });
 
@@ -156,6 +204,8 @@ describe('PricingService', () => {
       perKmFee: { toString: () => '1.5' } as unknown as number,
       minimumFee: null,
       returnFee: null,
+      companyId: 'company-1',
+      driverCommissionPercentage: null,
     });
     platformSettingsService.get.mockResolvedValue({ driverCommissionPercentage: 80 });
 

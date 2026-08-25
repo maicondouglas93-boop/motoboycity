@@ -49,6 +49,10 @@ function formatDistance(value: number): string {
   return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} km`;
 }
 
+function formatPercentage(value: number): string {
+  return value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+}
+
 export default function PricingTablesPage() {
   const money = useMoney();
   const token = session.getToken();
@@ -64,6 +68,7 @@ export default function PricingTablesPage() {
   const [perKmFee, setPerKmFee] = useState('');
   const [minimumFee, setMinimumFee] = useState('');
   const [returnFee, setReturnFee] = useState('');
+  const [customCommissionInput, setCustomCommissionInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -112,6 +117,7 @@ export default function PricingTablesPage() {
       perKmFee: number;
       minimumFee?: number;
       returnFee?: number;
+      driverCommissionPercentage?: number;
     }) => adminPricingTablesApi.create(token as string, payload),
     onSuccess: () => {
       setFormError(null);
@@ -179,8 +185,22 @@ export default function PricingTablesPage() {
   const scopedPricingTables = canConfigurePrices
     ? pricingTables.filter((pricingTable) => pricingTable.companyId === selectedCompanyId)
     : [];
+  const parsedCustomCommission = customCommissionInput.trim()
+    ? Number(customCommissionInput.replace(',', '.'))
+    : null;
+  const customPlatformPercentage =
+    parsedCustomCommission !== null &&
+    Number.isFinite(parsedCustomCommission) &&
+    parsedCustomCommission >= 0 &&
+    parsedCustomCommission <= 100
+      ? 100 - parsedCustomCommission
+      : null;
 
   function handlePricingScopeChange(scope: string) {
+    if (scope !== pricingScope) {
+      // Nao reaproveita sem querer a negociacao da empresa anterior.
+      setCustomCommissionInput('');
+    }
     setPricingScope(scope);
     setFormError(null);
     setActionError(null);
@@ -212,6 +232,16 @@ export default function PricingTablesPage() {
       setFormError('Valor base e valor por km são obrigatórios.');
       return;
     }
+    if (
+      selectedCompanyId &&
+      (parsedCustomCommission === null ||
+        !Number.isFinite(parsedCustomCommission) ||
+        parsedCustomCommission < 0 ||
+        parsedCustomCommission > 100)
+    ) {
+      setFormError('Informe o percentual do entregador entre 0 e 100 para esta empresa.');
+      return;
+    }
 
     createMutation.mutate({
       serviceTypeId,
@@ -223,6 +253,10 @@ export default function PricingTablesPage() {
       perKmFee: perKm,
       ...(minimumFee.trim() && { minimumFee: Number(minimumFee.replace(',', '.')) }),
       ...(returnFee.trim() && { returnFee: Number(returnFee.replace(',', '.')) }),
+      ...(selectedCompanyId &&
+        parsedCustomCommission !== null && {
+          driverCommissionPercentage: parsedCustomCommission,
+        }),
     });
   }
 
@@ -251,15 +285,17 @@ export default function PricingTablesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Divisão entregador/plataforma</CardTitle>
+          <CardTitle className="text-sm">Divisão global entregador/plataforma</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {settingsQuery.isSuccess && (
+          {settingsQuery.isSuccess && settings && (
             <p className="text-sm text-muted-foreground">
-              {settings?.driverCommissionPercentage === null
-                ? 'Ainda não configurado — nenhum pedido pode ser precificado até isso ser definido.'
-                : `Atual: ${settings?.driverCommissionPercentage}% para o entregador${
-                    settings?.updatedBy ? ` · última alteração por ${settings.updatedBy.name}` : ''
+              {settings.driverCommissionPercentage === null
+                ? 'Ainda não configurado — tabelas gerais e tabelas personalizadas antigas não podem ser precificadas até isso ser definido.'
+                : `Atual: ${formatPercentage(settings.driverCommissionPercentage)}% para o entregador e ${formatPercentage(
+                    100 - settings.driverCommissionPercentage,
+                  )}% para a plataforma${
+                    settings.updatedBy ? ` · última alteração por ${settings.updatedBy.name}` : ''
                   }`}
             </p>
           )}
@@ -349,7 +385,7 @@ export default function PricingTablesPage() {
                   Criar preços personalizados
                 </span>
                 <span className="mt-1 block text-sm leading-relaxed text-muted-foreground">
-                  Defina valores exclusivos para uma empresa, modalidade por modalidade.
+                  Defina valores e divisão exclusivos para uma empresa, modalidade por modalidade.
                 </span>
               </span>
               {isCustomPricing && (
@@ -416,7 +452,7 @@ export default function PricingTablesPage() {
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {selectedCompany
-                      ? 'A empresa usará estes valores nas modalidades configuradas e continuará usando a tabela geral nas demais.'
+                      ? 'A empresa usará estes valores e esta divisão nas modalidades configuradas; nas demais, continuará usando a tabela geral e a divisão global.'
                       : 'Escolha a empresa ao lado para preencher e salvar os valores personalizados.'}
                   </p>
                 </div>
@@ -440,7 +476,9 @@ export default function PricingTablesPage() {
                     : 'Configurar tabela geral'}
                 </CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Preencha os valores da modalidade e salve a nova tabela.
+                  {selectedCompany
+                    ? 'Preencha os valores e a divisão da modalidade e salve a nova tabela.'
+                    : 'Preencha os valores da modalidade e salve a nova tabela geral.'}
                 </p>
               </div>
             </div>
@@ -529,6 +567,68 @@ export default function PricingTablesPage() {
                   </div>
                 </div>
 
+                {selectedCompany && (
+                  <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Divisão desta tabela personalizada
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          Vale somente para novos pedidos de {selectedCompany.tradeName} nesta
+                          modalidade. A tabela geral continua com a divisão global.
+                        </p>
+                      </div>
+                      {settings?.driverCommissionPercentage !== null &&
+                        settings?.driverCommissionPercentage !== undefined && (
+                          <Badge variant="outline" className="mt-2 w-fit shrink-0 sm:mt-0">
+                            Global: {formatPercentage(settings.driverCommissionPercentage)}% /{' '}
+                            {formatPercentage(100 - settings.driverCommissionPercentage)}%
+                          </Badge>
+                        )}
+                    </div>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="customCommission">Motoboy (%)</Label>
+                        <Input
+                          id="customCommission"
+                          inputMode="decimal"
+                          step="0.01"
+                          placeholder="80"
+                          value={customCommissionInput}
+                          onChange={(event) => setCustomCommissionInput(event.target.value)}
+                          className="h-11 bg-background"
+                          aria-describedby="custom-commission-help"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="customPlatformCommission">Plataforma (%)</Label>
+                        <Input
+                          id="customPlatformCommission"
+                          value={
+                            customPlatformPercentage === null
+                              ? ''
+                              : formatPercentage(customPlatformPercentage)
+                          }
+                          placeholder="Calculado automaticamente"
+                          className="h-11 bg-muted/60"
+                          readOnly
+                          tabIndex={-1}
+                        />
+                      </div>
+                    </div>
+                    <p
+                      id="custom-commission-help"
+                      className="mt-3 text-xs leading-relaxed text-muted-foreground"
+                    >
+                      A plataforma recebe automaticamente o complemento até 100%. O retorno continua
+                      100% com o motoboy; taxas adicionais mantêm a divisão configurada nelas
+                      próprias.
+                    </p>
+                  </div>
+                )}
+
                 {formError && <p className="text-sm text-destructive">{formError}</p>}
 
                 <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -576,6 +676,7 @@ export default function PricingTablesPage() {
               <TableHead>Por km</TableHead>
               <TableHead>Mínimo</TableHead>
               <TableHead>Retorno</TableHead>
+              <TableHead>Divisão</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -590,6 +691,23 @@ export default function PricingTablesPage() {
                 <TableCell>{money(pricingTable.perKmFee)}</TableCell>
                 <TableCell>{money(pricingTable.minimumFee)}</TableCell>
                 <TableCell>{money(pricingTable.returnFee)}</TableCell>
+                <TableCell>
+                  {typeof pricingTable.driverCommissionPercentage !== 'number' ? (
+                    <span className="text-xs text-muted-foreground">
+                      {pricingTable.companyId ? 'Usa divisão global' : 'Divisão global'}
+                    </span>
+                  ) : (
+                    <div className="min-w-36 text-xs">
+                      <p className="font-medium text-foreground">
+                        Motoboy {formatPercentage(pricingTable.driverCommissionPercentage)}%
+                      </p>
+                      <p className="text-muted-foreground">
+                        Plataforma {formatPercentage(100 - pricingTable.driverCommissionPercentage)}
+                        %
+                      </p>
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>
                   <Badge variant={pricingTable.active ? 'default' : 'outline'}>
                     {pricingTable.active ? 'Ativa' : 'Inativa'}

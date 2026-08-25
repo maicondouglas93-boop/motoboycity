@@ -20,6 +20,8 @@ export interface PricingTableItem {
   perKmFee: number;
   minimumFee: number | null;
   returnFee: number | null;
+  /** Null = usa a divisão global; preenchido = override desta tabela de empresa. */
+  driverCommissionPercentage: number | null;
   active: boolean;
   createdAt: string;
 }

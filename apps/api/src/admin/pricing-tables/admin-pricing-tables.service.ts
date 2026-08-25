@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -38,6 +39,20 @@ export class AdminPricingTablesService {
   }
 
   async create(payload: CreatePricingTablePayload, actorUserId: string): Promise<PricingTableItem> {
+    // O controller aplica o schema Zod, mas este service tambem pode ser
+    // reutilizado internamente. Repetir esta invariante aqui impede que um
+    // chamador futuro grave uma tabela personalizada nova herdando o global.
+    if (payload.companyId && payload.driverCommissionPercentage === undefined) {
+      throw new BadRequestException(
+        'Informe a divisão entre entregador e plataforma para o preço personalizado.',
+      );
+    }
+    if (!payload.companyId && payload.driverCommissionPercentage !== undefined) {
+      throw new BadRequestException(
+        'A divisão personalizada só pode ser usada em uma tabela de empresa.',
+      );
+    }
+
     const serviceType = await this.prisma.serviceType.findUnique({
       where: { id: payload.serviceTypeId },
     });
@@ -217,6 +232,13 @@ export class AdminPricingTablesService {
                 perKmFee: payload.perKmFee,
                 minimumFee: payload.minimumFee,
                 returnFee: payload.returnFee,
+                // Tabela geral tem uma unica fonte de verdade: PlatformSettings.
+                // A validacao exige o percentual quando a tabela pertence a uma
+                // empresa, mas mantemos o null explicito para o contrato ficar
+                // correto mesmo se este metodo for chamado fora do controller.
+                driverCommissionPercentage: payload.companyId
+                  ? payload.driverCommissionPercentage
+                  : null,
               },
               include: { serviceType: true, company: { select: { tradeName: true } } },
             });
@@ -226,7 +248,12 @@ export class AdminPricingTablesService {
                 action: 'PRICING_TABLE_CREATED',
                 entityType: 'PRICING_TABLE',
                 entityId: created.id,
-                summary: `Nova tabela de preços de ${created.serviceType.name}${created.company ? ` para ${created.company.tradeName}` : ' geral'} ativada.`,
+                summary:
+                  `Nova tabela de preços de ${created.serviceType.name}` +
+                  `${created.company ? ` para ${created.company.tradeName}` : ' geral'} ativada.` +
+                  (created.driverCommissionPercentage === null
+                    ? ''
+                    : ` Divisão: ${Number(created.driverCommissionPercentage)}% entregador e ${100 - Number(created.driverCommissionPercentage)}% plataforma.`),
               },
               tx,
             );
@@ -265,6 +292,7 @@ export class AdminPricingTablesService {
     perKmFee: { toString(): string };
     minimumFee: { toString(): string } | null;
     returnFee: { toString(): string } | null;
+    driverCommissionPercentage: { toString(): string } | null;
     active: boolean;
     createdAt: Date;
   }): PricingTableItem {
@@ -280,6 +308,10 @@ export class AdminPricingTablesService {
       perKmFee: Number(pricingTable.perKmFee),
       minimumFee: pricingTable.minimumFee === null ? null : Number(pricingTable.minimumFee),
       returnFee: pricingTable.returnFee === null ? null : Number(pricingTable.returnFee),
+      driverCommissionPercentage:
+        pricingTable.driverCommissionPercentage === null
+          ? null
+          : Number(pricingTable.driverCommissionPercentage),
       active: pricingTable.active,
       createdAt: pricingTable.createdAt.toISOString(),
     };
