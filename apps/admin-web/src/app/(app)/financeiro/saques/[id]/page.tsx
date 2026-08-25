@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { WithdrawalRequestStatus } from '@motoboycity/types';
 import { AlertCircle, ChevronLeft } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,7 +16,13 @@ import { adminFinancialApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 
-const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
+const dateFormatter = new Intl.DateTimeFormat('pt-BR', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'America/Sao_Paulo',
+});
+
+const MIN_REASON_LENGTH = 10;
 
 const statusLabel: Record<WithdrawalRequestStatus, string> = {
   PENDING: 'Em análise',
@@ -48,21 +55,18 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
   });
 
   function invalidate() {
-    return Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial', 'withdrawal', id] }),
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial', 'withdrawals'] }),
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial', 'overview'] }),
-      queryClient.invalidateQueries({ queryKey: ['admin', 'financial', 'driver-wallets'] }),
-    ]);
+    return queryClient.invalidateQueries({ queryKey: ['admin', 'financial'] });
   }
 
   const approveMutation = useMutation({
     mutationFn: () =>
       adminFinancialApi.approveWithdrawal(token as string, id, {
-        ...(note.trim() && { note: note.trim() }),
+        note: note.trim(),
       }),
+    onMutate: () => setActionError(null),
     onSuccess: async () => {
       setNote('');
+      setActionError(null);
       await invalidate();
     },
     onError: (error) =>
@@ -73,12 +77,14 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
   const paidMutation = useMutation({
     mutationFn: () =>
       adminFinancialApi.markWithdrawalPaid(token as string, id, {
-        ...(note.trim() && { note: note.trim() }),
+        note: note.trim(),
         ...(paymentReference.trim() && { paymentReference: paymentReference.trim() }),
       }),
+    onMutate: () => setActionError(null),
     onSuccess: async () => {
       setNote('');
       setPaymentReference('');
+      setActionError(null);
       await invalidate();
     },
     onError: (error) =>
@@ -89,8 +95,10 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
   const rejectMutation = useMutation({
     mutationFn: () =>
       adminFinancialApi.rejectWithdrawal(token as string, id, { note: note.trim() }),
+    onMutate: () => setActionError(null),
     onSuccess: async () => {
       setNote('');
+      setActionError(null);
       await invalidate();
     },
     onError: (error) =>
@@ -120,15 +128,8 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
   const withdrawal = withdrawalQuery.data;
   const actionInFlight =
     approveMutation.isPending || paidMutation.isPending || rejectMutation.isPending;
-
-  function reject() {
-    if (note.trim().length < 3) {
-      setActionError('Informe um motivo de pelo menos três caracteres para rejeitar o saque.');
-      return;
-    }
-    setActionError(null);
-    rejectMutation.mutate();
-  }
+  const reasonLength = note.trim().length;
+  const reasonIsValid = reasonLength >= MIN_REASON_LENGTH;
 
   return (
     <div className="space-y-6">
@@ -220,19 +221,30 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
             <div className="space-y-1">
               <Label htmlFor="withdrawal-note">
                 {withdrawal.status === 'PENDING'
-                  ? 'Observação de aprovação ou motivo da rejeição'
-                  : 'Observação do pagamento ou motivo da rejeição'}
+                  ? 'Motivo da aprovação ou rejeição'
+                  : 'Motivo do pagamento ou da rejeição'}
               </Label>
-              <Input
+              <textarea
                 id="withdrawal-note"
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="Registre um contexto para a auditoria"
+                placeholder="Registre o motivo desta decisão para a auditoria"
+                rows={3}
+                maxLength={1_000}
+                className="flex w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
               />
+              <p
+                className={`text-xs ${reasonIsValid || reasonLength === 0 ? 'text-muted-foreground' : 'text-destructive'}`}
+              >
+                Mínimo de {MIN_REASON_LENGTH} caracteres para registrar a decisão. ({reasonLength}/
+                {MIN_REASON_LENGTH})
+              </p>
             </div>
             {withdrawal.status === 'APPROVED' && (
               <div className="space-y-1">
-                <Label htmlFor="withdrawal-reference">Referência ou comprovante do pagamento</Label>
+                <Label htmlFor="withdrawal-reference">
+                  Referência ou comprovante do pagamento (opcional)
+                </Label>
                 <Input
                   id="withdrawal-reference"
                   value={paymentReference}
@@ -244,30 +256,42 @@ export default function WithdrawalDetailPage({ params }: { params: Promise<{ id:
             {actionError && <p className="text-sm text-destructive">{actionError}</p>}
             <div className="flex flex-wrap gap-2">
               {withdrawal.status === 'PENDING' && (
-                <Button
-                  disabled={actionInFlight}
-                  onClick={() => {
-                    setActionError(null);
-                    approveMutation.mutate();
-                  }}
+                <ConfirmActionDialog
+                  title="Aprovar este saque?"
+                  description={`O saque de ${money(withdrawal.netAmount)} ficará liberado para a etapa de pagamento.`}
+                  consequence="Esta aprovação não registra uma transferência. Depois de pagar o PIX, ainda será necessário marcar o saque como pago."
+                  confirmLabel="Confirmar aprovação"
+                  pendingLabel="Aprovando..."
+                  onConfirm={() => approveMutation.mutateAsync()}
                 >
-                  {approveMutation.isPending ? 'Aprovando...' : 'Aprovar saque'}
-                </Button>
+                  <Button disabled={actionInFlight || !reasonIsValid}>Aprovar saque</Button>
+                </ConfirmActionDialog>
               )}
               {withdrawal.status === 'APPROVED' && (
-                <Button
-                  disabled={actionInFlight}
-                  onClick={() => {
-                    setActionError(null);
-                    paidMutation.mutate();
-                  }}
+                <ConfirmActionDialog
+                  title="Confirmar que o saque foi pago?"
+                  description={`Confirme somente depois de transferir ${money(withdrawal.netAmount)} para a chave PIX exibida nesta página.`}
+                  consequence="A confirmação finaliza o lançamento pendente no ledger e registra o saque como pago no histórico auditável."
+                  confirmLabel="Confirmar pagamento"
+                  pendingLabel="Registrando..."
+                  onConfirm={() => paidMutation.mutateAsync()}
                 >
-                  {paidMutation.isPending ? 'Registrando...' : 'Marcar como pago'}
-                </Button>
+                  <Button disabled={actionInFlight || !reasonIsValid}>Marcar como pago</Button>
+                </ConfirmActionDialog>
               )}
-              <Button variant="destructive" disabled={actionInFlight} onClick={reject}>
-                {rejectMutation.isPending ? 'Rejeitando...' : 'Rejeitar e devolver saldo'}
-              </Button>
+              <ConfirmActionDialog
+                title="Rejeitar este saque?"
+                description={`O saque de ${money(withdrawal.requestedAmount)} será rejeitado.`}
+                consequence="O lançamento pendente será cancelado e o valor solicitado voltará ao saldo disponível do motoboy. A justificativa ficará no histórico."
+                confirmLabel="Rejeitar e devolver saldo"
+                pendingLabel="Rejeitando..."
+                variant="destructive"
+                onConfirm={() => rejectMutation.mutateAsync()}
+              >
+                <Button variant="destructive" disabled={actionInFlight || !reasonIsValid}>
+                  Rejeitar e devolver saldo
+                </Button>
+              </ConfirmActionDialog>
             </div>
           </CardContent>
         </Card>

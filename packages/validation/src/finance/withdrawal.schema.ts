@@ -14,7 +14,11 @@ const moneySchema = z
     message: 'Informe o valor com no máximo duas casas decimais.',
   });
 
-const optionalNoteSchema = z.string().trim().min(3).max(1_000).optional();
+const administrativeReasonSchema = z
+  .string()
+  .trim()
+  .min(10, 'Informe um motivo com pelo menos 10 caracteres.')
+  .max(1_000);
 
 export const requestWithdrawalSchema = z.object({
   amount: moneySchema,
@@ -22,16 +26,16 @@ export const requestWithdrawalSchema = z.object({
 });
 
 export const approveWithdrawalSchema = z.object({
-  note: optionalNoteSchema,
+  note: administrativeReasonSchema,
 });
 
 export const markWithdrawalPaidSchema = z.object({
-  note: optionalNoteSchema,
+  note: administrativeReasonSchema,
   paymentReference: z.string().trim().min(1).max(180).optional(),
 });
 
 export const rejectWithdrawalSchema = z.object({
-  note: z.string().trim().min(3, 'Informe o motivo da rejeição.').max(1_000),
+  note: administrativeReasonSchema,
 });
 
 export const listWithdrawalRequestsQuerySchema = z

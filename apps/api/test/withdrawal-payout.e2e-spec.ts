@@ -137,6 +137,20 @@ describe('Saques do motoboy — reserva, aprovação e pagamento (e2e)', () => {
       expect.objectContaining({ id: withdrawalId, status: 'PENDING', feeAmount: 0, netAmount: 50 }),
     ]);
 
+    await request(server)
+      .post(`/admin/financial/withdrawals/${withdrawalId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ note: 'curto' })
+      .expect(400);
+    await request(server)
+      .get(`/admin/financial/withdrawals/${withdrawalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.status).toBe('PENDING');
+        expect(body.statusHistory).toHaveLength(1);
+      });
+
     const approvals = await Promise.all([
       request(server)
         .post(`/admin/financial/withdrawals/${withdrawalId}/approve`)
@@ -148,6 +162,20 @@ describe('Saques do motoboy — reserva, aprovação e pagamento (e2e)', () => {
         .send({ note: 'Dados PIX conferidos.' }),
     ]);
     expect(approvals.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    await request(server)
+      .post(`/admin/financial/withdrawals/${withdrawalId}/mark-paid`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ paymentReference: 'E2E-SEM-MOTIVO' })
+      .expect(400);
+    await request(server)
+      .get(`/admin/financial/withdrawals/${withdrawalId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.status).toBe('APPROVED');
+        expect(body.statusHistory).toHaveLength(2);
+      });
 
     const payments = await Promise.all([
       request(server)
@@ -203,6 +231,19 @@ describe('Saques do motoboy — reserva, aprovação e pagamento (e2e)', () => {
       .set('Authorization', `Bearer ${driverToken}`)
       .send({ amount: 10 })
       .expect(201);
+
+    await request(server)
+      .post(`/admin/financial/withdrawals/${created.body.id}/reject`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ note: 'curto' })
+      .expect(400);
+    await request(server)
+      .get('/driver/wallet')
+      .set('Authorization', `Bearer ${driverToken}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ availableBalance: 10, pendingWithdrawalAmount: 10 });
+      });
 
     await request(server)
       .post(`/admin/financial/withdrawals/${created.body.id}/reject`)

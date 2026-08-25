@@ -227,9 +227,7 @@ export class FinancialPayoutService {
           where: { idempotencyKey },
           include: { withdrawalRequest: { include: withdrawalInclude } },
         });
-        if (
-          existing?.withdrawalRequest?.wallet.driver?.user.id === user.id
-        ) {
+        if (existing?.withdrawalRequest?.wallet.driver?.user.id === user.id) {
           return this.toWithdrawalRequestItem(existing.withdrawalRequest);
         }
       }
@@ -310,7 +308,7 @@ export class FinancialPayoutService {
       withdrawalId,
       fromStatuses: ['PENDING'],
       toStatus: 'APPROVED',
-      note: payload.note ?? 'Saque aprovado para pagamento.',
+      note: payload.note,
     });
   }
 
@@ -349,7 +347,7 @@ export class FinancialPayoutService {
           fromStatus: 'APPROVED',
           toStatus: 'PAID',
           changedByUserId: admin.id,
-          note: payload.note ?? 'Pagamento registrado pelo administrador.',
+          note: payload.note,
         },
       });
       const updated = await tx.withdrawalRequest.findUniqueOrThrow({

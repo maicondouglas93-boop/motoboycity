@@ -218,7 +218,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
     async approveWithdrawal(
       accessToken: string,
       withdrawalId: string,
-      payload: { note?: string },
+      payload: { note: string },
     ): Promise<WithdrawalRequestItem> {
       const response = await fetch(
         `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/approve`,
@@ -234,7 +234,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
     async markWithdrawalPaid(
       accessToken: string,
       withdrawalId: string,
-      payload: { note?: string; paymentReference?: string },
+      payload: { note: string; paymentReference?: string },
     ): Promise<WithdrawalRequestItem> {
       const response = await fetch(
         `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/mark-paid`,

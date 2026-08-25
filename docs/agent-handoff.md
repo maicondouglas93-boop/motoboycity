@@ -6668,3 +6668,40 @@ foi executado. Proximo passo concreto: em homologacao, confirmar cada acao
 critica e verificar o evento correspondente no historico; depois revisar a
 autonomia financeira restante, especialmente conferencia e processamento de
 saques, sem criar exclusao destrutiva de lancamentos.
+
+## Atualizacao - 2026-08-25: decisoes administrativas de saque protegidas
+
+A conferencia e o processamento de saques no Admin foram reforcados sem
+alterar o ledger, o schema Prisma ou criar migration. Aprovar, marcar como pago
+e rejeitar agora exigem motivo auditavel com no minimo 10 caracteres tanto no
+contrato compartilhado quanto na API. Os fallbacks que geravam justificativas
+genericas no servidor foram removidos; toda decisao financeira passa a guardar
+o contexto escrito pelo administrador e o autor autenticado ja registrado no
+historico de status.
+
+A tela de detalhe do saque passou a bloquear as acoes enquanto o motivo nao e
+valido e a pedir confirmacao explicita. A aprovacao explica que ainda nao houve
+transferencia; o pagamento orienta confirmar somente depois do PIX; a rejeicao
+avisa que o lancamento pendente sera cancelado e o valor retornara ao saldo
+disponivel. A referencia ou comprovante continua opcional. Depois de qualquer
+acao, todo o namespace financeiro do cache e invalidado para atualizar fila,
+carteiras, indicadores, aging e relatorios. Datas do detalhe e do historico
+agora sao exibidas explicitamente no fuso `America/Sao_Paulo`.
+
+Foram adicionados testes de contrato para motivo ausente, curto e valido, alem
+de cenarios E2E que comprovam que entradas invalidas retornam `400` sem mudar o
+status nem o saldo. Arquivos principais:
+`packages/validation/src/finance/withdrawal.schema.ts`,
+`packages/api-client/src/admin-financial.ts`,
+`apps/api/src/finance/financial-payout.service.ts`,
+`apps/api/src/finance/withdrawal-validation.spec.ts`,
+`apps/api/test/withdrawal-payout.e2e-spec.ts` e
+`apps/admin-web/src/app/(app)/financeiro/saques/[id]/page.tsx`.
+
+Validacoes executadas: build do pacote de validacao; 2 suites/9 testes
+direcionados da API; typecheck e lint dos oito workspaces; builds de producao
+da API e do Admin Web. Tudo passou. O E2E alterado nao foi executado localmente
+porque depende de PostgreSQL e Redis isolados; deve rodar na CI preparada para
+esse fim. Proximo passo concreto: em homologacao, aprovar, pagar e rejeitar
+saques de teste, conferindo carteira, aging e trilha auditavel; a antecipacao
+de saldo permanece fora do escopo ate existir demanda confirmada no piloto.
