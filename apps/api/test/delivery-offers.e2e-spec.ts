@@ -282,18 +282,25 @@ describe('DeliveryOffersController (e2e)', () => {
       .expect(200);
   });
 
-  it('rejeita aceitar de novo uma oferta já respondida (409)', async () => {
+  it('repetir o aceite da mesma oferta é idempotente', async () => {
     const { deliveryId, offerId } = await createAwaitingDeliveryAndGetOffer();
 
-    await request(app.getHttpServer())
+    const primeiroAceite = await request(app.getHttpServer())
       .patch(`/delivery-offers/${offerId}/accept`)
       .set('Authorization', `Bearer ${driverToken}`)
       .expect(200);
 
-    await request(app.getHttpServer())
+    const segundoAceite = await request(app.getHttpServer())
       .patch(`/delivery-offers/${offerId}/accept`)
       .set('Authorization', `Bearer ${driverToken}`)
-      .expect(409);
+      .expect(200);
+
+    expect(segundoAceite.body).toEqual(primeiroAceite.body);
+    expect(
+      await prisma.deliveryStatusHistory.count({
+        where: { deliveryId, fromStatus: 'AWAITING_DRIVER', toStatus: 'ACCEPTED' },
+      }),
+    ).toBe(1);
 
     await request(app.getHttpServer())
       .patch(`/deliveries/${deliveryId}/cancel`)

@@ -6542,3 +6542,27 @@ typecheck, lint e build de producao do Admin Web; tudo passou. O smoke test
 autenticado ainda nao foi executado. Proximo passo concreto: abrir uma fatura
 pendente no Admin, cancelar pelo detalhe e confirmar a troca imediata de status,
 o motivo na auditoria e o retorno dos pedidos ao fechamento seguinte.
+
+## Atualizacao - 2026-08-25: E2E alinhado a autonomia e idempotencia do motoboy
+
+O primeiro pipeline do deploy do cancelamento no detalhe da fatura revelou
+expectativas E2E antigas no ciclo de entrega. A logica de producao ja havia sido
+alterada para dar autonomia ao motoboy: repetir aceite, coleta, entrega ou
+confirmacao de retorno devolve o resultado ja aplicado sem duplicar transicao
+ou repasse; a confirmacao de retorno tambem nao e bloqueada por distancia ou
+precisao do GPS, que permanecem apenas como informacao de auditoria.
+
+Foram atualizados somente os testes ponta a ponta para afirmar essas regras e
+continuar provando que existe uma unica transicao e um unico credito financeiro.
+O teste de motoboy sem posicao nao foi afrouxado: ele falhava por contaminacao
+do proprio conjunto, pois o teste anterior parava antes da limpeza ao esperar
+um `409` obsoleto na segunda coleta. Com o aceite idempotente esperado como
+`200`, a entrega de teste volta a ser encerrada no `cleanup` e o detector segue
+validado com a regra original.
+
+Arquivos alterados: `apps/api/test/delivery-lifecycle.e2e-spec.ts` e
+`apps/api/test/delivery-offers.e2e-spec.ts`. Nao houve alteracao de API,
+contrato, banco, migration ou logica de producao. Proximo passo concreto:
+publicar o ajuste e confirmar o E2E completo no PostgreSQL e Redis isolados da
+CI. Antes da publicacao passaram o typecheck e o lint dos oito workspaces; a
+descoberta das 22 suites E2E pelo Jest tambem passou sem abrir conexao com banco.

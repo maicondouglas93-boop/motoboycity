@@ -701,7 +701,9 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
           .set('Authorization', `Bearer ${driver1Token}`)
           .send({}),
       ]);
-      expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+      // Repetir a finalização é idempotente: as duas chamadas enxergam o mesmo
+      // resultado concluído, sem duplicar o crédito financeiro.
+      expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
 
       const repasses = await prisma.walletTransaction.findMany({
         where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
@@ -714,7 +716,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   describe('requiresReturn com endereço conhecido', () => {
-    it('deliver fica em DELIVERED; completeReturn falha longe e fecha perto do endereço da empresa', async () => {
+    it('deliver fica em DELIVERED; a confirmação do retorno fecha mesmo sem proximidade GPS', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
 
       const created = await request(app.getHttpServer())
@@ -741,22 +743,25 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .expect(200);
       expect(delivered.body.status).toBe('DELIVERED');
 
-      await request(app.getHttpServer())
+      const completed = await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
         .send(farFromPickup)
-        .expect(409);
+        .expect(200);
+      expect(completed.body.deliveries).toHaveLength(1);
+      expect(completed.body.deliveries[0].status).toBe('COMPLETED');
 
-      const stillDelivered = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
-      expect(stillDelivered.status).toBe('DELIVERED');
-
-      const completed = await request(app.getHttpServer())
+      // Um segundo toque devolve o mesmo resultado e não duplica o repasse.
+      await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
         .send(nearPickup)
         .expect(200);
-      expect(completed.body.deliveries).toHaveLength(1);
-      expect(completed.body.deliveries[0].status).toBe('COMPLETED');
+      expect(
+        await prisma.walletTransaction.count({
+          where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
+        }),
+      ).toBe(1);
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
@@ -1035,7 +1040,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
 
-    it('recusa fechar retorno quando a precisao e maior que o raio aceito', async () => {
+    it('não bloqueia o retorno por precisão GPS baixa', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
 
       const criado = await request(app.getHttpServer())
@@ -1060,22 +1065,14 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({})
         .expect(200);
 
-      // Raio configurado no setup: 100 m. Precisao de 500 m tornaria a checagem vazia —
-      // "estou na loja" seria verdade em qualquer lugar do bairro.
-      await request(app.getHttpServer())
+      // No retorno, a confirmação do motoboy é soberana. O GPS permanece como
+      // dado de auditoria e não impede a operação.
+      const concluido = await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
         .send({ ...nearPickup, accuracy: 500 })
-        .expect(409);
-
-      const aindaEntregue = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
-      expect(aindaEntregue.status).toBe('DELIVERED');
-
-      await request(app.getHttpServer())
-        .patch(`/deliveries/${deliveryId}/complete-return`)
-        .set('Authorization', `Bearer ${driver1Token}`)
-        .send({ ...nearPickup, accuracy: 15 })
         .expect(200);
+      expect(concluido.body.deliveries[0].status).toBe('COMPLETED');
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
@@ -1138,18 +1135,11 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       });
       expect(semCredito).toBe(0);
 
-      // Longe da loja o retorno nao fecha.
-      await request(app.getHttpServer())
-        .patch(`/deliveries/${deliveryId}/complete-return`)
-        .set('Authorization', `Bearer ${driver1Token}`)
-        .send({ ...farFromPickup, accuracy: 8 })
-        .expect(409);
-
-      // Na porta da loja, fecha.
+      // A confirmação do motoboy fecha o retorno mesmo sem proximidade GPS.
       const fechado = await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
-        .send({ ...nearPickup, accuracy: 8 })
+        .send({ ...farFromPickup, accuracy: 8 })
         .expect(200);
       expect(fechado.body.deliveries[0].status).toBe('COMPLETED');
 
@@ -1321,7 +1311,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
 
-    it('rejeita /collect numa entrega que já está COLLECTED (409, não ACCEPTED)', async () => {
+    it('repetir /collect numa entrega COLLECTED é idempotente', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
       const created = await request(app.getHttpServer())
         .post('/deliveries')
@@ -1342,7 +1332,13 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/collect`)
         .set('Authorization', `Bearer ${driver1Token}`)
-        .expect(409);
+        .expect(200);
+
+      expect(
+        await prisma.deliveryStatusHistory.count({
+          where: { deliveryId, fromStatus: 'ACCEPTED', toStatus: 'COLLECTED' },
+        }),
+      ).toBe(1);
 
       await releaseAllDeliveries([deliveryId]);
       await setAvailability(driver1Token, 'UNAVAILABLE');
