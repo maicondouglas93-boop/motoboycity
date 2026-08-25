@@ -6073,3 +6073,46 @@ dois servicos continuam na mesma regiao, com a ligacao automatica de
 passo concreto: acompanhar o sync do Blueprint, confirmar API e Key Value como
 `Live`, habilitar a persistencia oferecida pelo plano pago no painel do Redis e
 fazer smoke test de login, presenca e criacao/despacho de pedido.
+
+## Atualizacao — 2026-08-24: camera estavel no mapa da Home do Admin
+
+O mapa da operacao global executava `fitBounds` toda vez que os dados de
+`admin/operations` mudavam. Como os eventos Socket.IO `driver:location`,
+`driver:presence` e `delivery:updated` invalidam essa consulta, cada nova
+posicao recriava os marcadores e reenquadrava a camera. A combinacao entre
+`fitBounds` e o teto de zoom no evento `idle` causava o ciclo visual de
+aproximar e voltar relatado em producao.
+
+`AdminOperationsMap` agora separa atualizacao dos marcadores de controle da
+camera: pedidos e motoboys continuam se movendo em tempo real, mas o
+enquadramento automatico ocorre somente na primeira carga ou quando o operador
+altera modo, busca, empresa, motoboy ou status. Se a primeira resposta estiver
+vazia, o primeiro marcador que aparecer ainda recebe enquadramento. O listener
+de `idle` anterior tambem e cancelado antes de um novo enquadramento para evitar
+ajustes atrasados concorrentes.
+
+Arquivos alterados: `apps/admin-web/src/components/operations/admin-operations-map.tsx`
+e `apps/admin-web/src/app/(app)/page.tsx`. Nao houve mudanca de endpoint,
+contrato ou regra operacional. Typecheck, lint e build de producao do Admin Web
+passaram. Proximo passo concreto: manter um motoboy online e parado/movendo por
+alguns minutos, ajustar o zoom manualmente e confirmar que os marcadores
+atualizam sem a camera mudar; depois alternar filtros e confirmar um unico
+reenquadramento intencional.
+
+## Atualizacao — 2026-08-24: pedidos do Admin em grid de cards
+
+A listagem paginada de `/pedidos` deixou de usar linhas horizontais largas e
+passou a usar cards compactos. Cada card preserva os dados e acoes existentes:
+numero, empresa, status, modalidade, distancia, retorno, valor, detalhe e
+cancelamento com confirmacao. Uma faixa lateral usa a mesma semantica de cor do
+status aplicada no restante do painel.
+
+O grid responde de uma coluna no celular ate sete colunas em telas com pelo
+menos 1800 px; os pontos intermediarios usam duas, tres, quatro e cinco colunas
+para manter leitura e toque confortaveis. Rastreamento ao vivo, filtro lateral,
+paginacao de 25 itens e consultas reais da API nao foram alterados. Arquivo
+alterado: `apps/admin-web/src/app/(app)/pedidos/page.tsx`. Typecheck, lint e
+build de producao do Admin Web passaram junto da correcao da camera do mapa.
+Proximo passo concreto: conferir `/pedidos` em 1920 px e em largura mobile com
+pedidos cancelaveis e concluidos, garantindo que status e botoes nao estourem o
+card.

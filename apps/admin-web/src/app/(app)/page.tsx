@@ -262,6 +262,10 @@ export default function AdminDashboardPage() {
     (item: NonNullable<AdminMapSelection>) => setSelection(item),
     [],
   );
+  const mapViewportKey = useMemo(
+    () => [mode, query.trim(), companyId, driverId, [...statuses].sort().join(',')].join('|'),
+    [companyId, driverId, mode, query, statuses],
+  );
   const data = operationsQuery.data;
   const allOrders = useMemo(() => [...(data?.active ?? []), ...(data?.recent ?? [])], [data]);
   const selectedOrder =
@@ -549,6 +553,7 @@ export default function AdminDashboardPage() {
           <AdminOperationsMap
             data={data}
             mode={mode}
+            viewportKey={mapViewportKey}
             selection={selection}
             onSelect={selectMapItem}
           />

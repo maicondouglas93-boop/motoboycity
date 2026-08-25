@@ -33,14 +33,17 @@ const MAX_AUTO_ZOOM = 16;
 interface Props {
   data: AdminOperationsResult | undefined;
   mode: MapMode;
+  viewportKey: string;
   selection: AdminMapSelection;
   onSelect: (selection: NonNullable<AdminMapSelection>) => void;
 }
 
-export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
+export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const viewportRef = useRef({ key: '', framed: false });
+  const viewportIdleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
   const [ready, setReady] = useState(false);
   // O painel do admin olha a operacao inteira, entao o centro e sempre a cidade.
   const initialCenterRef = useRef(LAJINHA_CENTER);
@@ -70,6 +73,10 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
       );
     return () => {
       cancelled = true;
+      if (viewportIdleListenerRef.current) {
+        google.maps.event.removeListener(viewportIdleListenerRef.current);
+        viewportIdleListenerRef.current = null;
+      }
     };
   }, []);
 
@@ -167,28 +174,38 @@ export function AdminOperationsMap({ data, mode, selection, onSelect }: Props) {
       }
     }
     /**
-     * Enquadrar so quando ha o que enquadrar.
-     *
-     * `fitBounds` com um unico marcador recebe bordas de tamanho zero e o
-     * Google responde com o zoom maximo — a tela saltava da cidade para a
-     * calcada de um endereco so. Com um ponto, o certo e centralizar e deixar o
-     * zoom como esta, o que tambem respeita quem ja tinha ajustado a vista.
+     * Atualizacoes de localizacao recriam os marcadores, mas nao podem tomar o
+     * controle da camera. O socket invalida `admin/operations` a cada
+     * `driver:location`; executar `fitBounds` em cada resposta fazia o mapa
+     * aproximar e voltar continuamente. A camera so e reenquadrada na primeira
+     * carga ou quando o operador muda modo/filtros (`viewportKey`).
      */
     const map = mapRef.current;
-    if (markersRef.current.length === 1) {
-      map.setCenter(markersRef.current[0]!.getPosition()!);
-    } else if (markersRef.current.length > 1) {
-      google.maps.event.addListenerOnce(map, 'idle', () => {
-        const zoom = map.getZoom();
-        if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
-      });
-      map.fitBounds(bounds, 64);
+    if (viewportRef.current.key !== viewportKey) {
+      viewportRef.current = { key: viewportKey, framed: false };
+    }
+    if (!viewportRef.current.framed && markersRef.current.length > 0) {
+      viewportRef.current.framed = true;
+      if (viewportIdleListenerRef.current) {
+        google.maps.event.removeListener(viewportIdleListenerRef.current);
+        viewportIdleListenerRef.current = null;
+      }
+      if (markersRef.current.length === 1) {
+        map.setCenter(markersRef.current[0]!.getPosition()!);
+      } else {
+        viewportIdleListenerRef.current = google.maps.event.addListenerOnce(map, 'idle', () => {
+          viewportIdleListenerRef.current = null;
+          const zoom = map.getZoom();
+          if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
+        });
+        map.fitBounds(bounds, 64);
+      }
     }
 
     return () => {
       descartado = true;
     };
-  }, [data, mode, onSelect, ready, selection]);
+  }, [data, mode, onSelect, ready, selection, viewportKey]);
 
   return (
     <div className="premium-panel relative h-full min-h-[600px] overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">
