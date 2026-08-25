@@ -6050,3 +6050,26 @@ Proximo passo concreto: conceder manualmente `Exibir sobre outros apps`, ficar
 online parado por mais de 3 minutos e gerar uma oferta controlada com o app
 minimizado; confirmar o cartao completo, aceitar/recusar, repetir com a tela
 bloqueada e guardar logcat se o HyperOS aplicar uma restricao adicional.
+
+## Atualizacao — 2026-08-24: Render no workspace Hobby com servicos Starter
+
+Depois de o proprietario cancelar o plano Pro do workspace, o Blueprint foi
+ajustado para manter o workspace no plano Hobby e cobrar somente os recursos da
+aplicacao. Em `render.yaml`, `motoboycity-api` e `motoboycity-redis` passaram de
+`free` para `starter`. A politica Redis `noeviction`, exigida pelo BullMQ para
+nao descartar jobs de despacho e financeiro, foi preservada.
+
+O custo-base esperado no Render passa a ser USD 17 por mes: USD 7 da API
+Starter e USD 10 do Key Value Starter, sem os USD 25 do workspace Pro. Trafego,
+overages ou outros recursos externos nao estao incluidos nessa soma. A promocao
+do Key Value gratuito pode recriar a instancia e perder os dados temporarios
+existentes, com uma breve indisponibilidade; neste momento esses dados sao filas
+e estados efemeros de teste. PostgreSQL continua no Neon e nao e alterado por
+essa promocao.
+
+Validacao executada: revisao do diff, `git diff --check` e confirmacao de que os
+dois servicos continuam na mesma regiao, com a ligacao automatica de
+`REDIS_URL`, health check `/health` e sem qualquer segredo versionado. Proximo
+passo concreto: acompanhar o sync do Blueprint, confirmar API e Key Value como
+`Live`, habilitar a persistencia oferecida pelo plano pago no painel do Redis e
+fazer smoke test de login, presenca e criacao/despacho de pedido.

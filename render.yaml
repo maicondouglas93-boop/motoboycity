@@ -18,7 +18,7 @@
 #     carregam e TODA chamada e bloqueada pelo navegador.
 #   - Preencher ADMIN_SEED_EMAIL e ADMIN_SEED_PASSWORD com credenciais fortes.
 #     O `initialDeployHook` cria a regiao inicial e o primeiro administrador
-#     uma unica vez, inclusive no plano gratuito que nao oferece Shell.
+#     uma unica vez pelo fluxo reproduzivel do Blueprint.
 # =============================================================================
 
 services:
@@ -32,7 +32,7 @@ services:
   # ---------------------------------------------------------------------------
   - type: keyvalue
     name: motoboycity-redis
-    plan: free
+    plan: starter
     region: virginia
     ipAllowList: []
     maxmemoryPolicy: noeviction
@@ -43,7 +43,7 @@ services:
   - type: web
     name: motoboycity-api
     runtime: node
-    plan: free
+    plan: starter
     region: virginia
     branch: main
     # Monorepo pnpm: o build roda da RAIZ, porque as dependencias sao do
@@ -58,9 +58,9 @@ services:
     # Delega ao script do proprio pacote (`node dist/main`), em vez de repetir
     # o caminho aqui: se o build mudar de lugar, o start acompanha sozinho.
     startCommand: corepack pnpm --filter @motoboycity/api start:prod
-    # O plano gratuito nao oferece Shell. Este hook oficial do Render executa
-    # somente depois do primeiro deploy bem-sucedido e torna o bootstrap
-    # reproduzivel sem colocar credenciais no repositorio.
+    # Este hook oficial do Render executa somente depois do primeiro deploy
+    # bem-sucedido e torna o bootstrap reproduzivel sem colocar credenciais no
+    # repositorio.
     initialDeployHook: corepack pnpm --filter @motoboycity/api exec prisma db seed
     healthCheckPath: /health
 
