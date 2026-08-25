@@ -7,6 +7,7 @@ import type { AdminDriverListItem, RegisterDriverResult } from '@motoboycity/typ
 import { ApiError } from '@motoboycity/api-client';
 import { ChevronRight, CircleCheckBig, MapPin, UserPlus } from 'lucide-react';
 import { CreateDriverDialog } from '@/components/drivers/create-driver-dialog';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -126,14 +127,6 @@ export default function DriversPage() {
       }.`,
     );
     setActionError(null);
-  }
-
-  function isPending(driverId: string, action: DriverAction) {
-    return (
-      actionMutation.isPending &&
-      actionMutation.variables?.driverId === driverId &&
-      actionMutation.variables?.action === action
-    );
   }
 
   function selectedServiceTypeIds(driver: AdminDriverListItem): string[] {
@@ -259,7 +252,9 @@ export default function DriversPage() {
                       {approvalStatusLabel[driver.approvalStatus]}
                     </Badge>
                     {driver.approvalStatus === 'APPROVED' && driver.accountStatus !== 'ACTIVE' && (
-                      <Badge variant="destructive">{accountStatusLabel[driver.accountStatus]}</Badge>
+                      <Badge variant="destructive">
+                        {accountStatusLabel[driver.accountStatus]}
+                      </Badge>
                     )}
                   </div>
                 </div>
@@ -354,81 +349,137 @@ export default function DriversPage() {
 
               {driver.approvalStatus === 'PENDING' && (
                 <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    onClick={() =>
-                      actionMutation.mutate({ action: 'approve', driverId: driver.id })
+                  <ConfirmActionDialog
+                    title={`Aprovar ${driver.name}?`}
+                    description="Confirme a liberação deste entregador."
+                    consequence="O entregador poderá ficar online, receber ofertas e assumir pedidos nas modalidades atribuídas."
+                    confirmLabel="Aprovar entregador"
+                    pendingLabel="Aprovando..."
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'approve', driverId: driver.id })
                     }
-                    disabled={actionMutation.isPending}
                   >
-                    {isPending(driver.id, 'approve') ? 'Aprovando...' : 'Aprovar'}
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    variant="outline"
-                    onClick={() => actionMutation.mutate({ action: 'reject', driverId: driver.id })}
-                    disabled={actionMutation.isPending}
+                    <Button className="flex-1" disabled={actionMutation.isPending}>
+                      Aprovar
+                    </Button>
+                  </ConfirmActionDialog>
+                  <ConfirmActionDialog
+                    title={`Rejeitar o cadastro de ${driver.name}?`}
+                    description="Confirme a rejeição deste cadastro."
+                    consequence="O entregador continuará sem acesso à operação. A decisão ficará registrada no histórico administrativo."
+                    confirmLabel="Rejeitar cadastro"
+                    pendingLabel="Rejeitando..."
+                    variant="destructive"
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'reject', driverId: driver.id })
+                    }
                   >
-                    {isPending(driver.id, 'reject') ? 'Rejeitando...' : 'Rejeitar'}
-                  </Button>
+                    <Button
+                      className="flex-1"
+                      variant="outline"
+                      disabled={actionMutation.isPending}
+                    >
+                      Rejeitar
+                    </Button>
+                  </ConfirmActionDialog>
                 </div>
               )}
 
               {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'ACTIVE' && (
                 <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    variant="outline"
-                    onClick={() =>
-                      actionMutation.mutate({ action: 'suspend', driverId: driver.id })
+                  <ConfirmActionDialog
+                    title={`Suspender ${driver.name}?`}
+                    description="Confirme a suspensão temporária deste entregador."
+                    consequence="Ele não poderá ficar online nem receber novos pedidos até ser reativado pelo administrador."
+                    confirmLabel="Suspender entregador"
+                    pendingLabel="Suspendendo..."
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'suspend', driverId: driver.id })
                     }
-                    disabled={actionMutation.isPending}
                   >
-                    {isPending(driver.id, 'suspend') ? 'Suspendendo...' : 'Suspender'}
-                  </Button>
-                  <Button
-                    className="flex-1"
+                    <Button
+                      className="flex-1"
+                      variant="outline"
+                      disabled={actionMutation.isPending}
+                    >
+                      Suspender
+                    </Button>
+                  </ConfirmActionDialog>
+                  <ConfirmActionDialog
+                    title={`Bloquear ${driver.name}?`}
+                    description="Confirme o bloqueio deste entregador."
+                    consequence="O acesso operacional será interrompido até uma reativação manual do administrador."
+                    confirmLabel="Bloquear entregador"
+                    pendingLabel="Bloqueando..."
                     variant="destructive"
-                    onClick={() => actionMutation.mutate({ action: 'block', driverId: driver.id })}
-                    disabled={actionMutation.isPending}
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'block', driverId: driver.id })
+                    }
                   >
-                    {isPending(driver.id, 'block') ? 'Bloqueando...' : 'Bloquear'}
-                  </Button>
+                    <Button
+                      className="flex-1"
+                      variant="destructive"
+                      disabled={actionMutation.isPending}
+                    >
+                      Bloquear
+                    </Button>
+                  </ConfirmActionDialog>
                 </div>
               )}
 
               {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'SUSPENDED' && (
                 <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    onClick={() =>
-                      actionMutation.mutate({ action: 'reactivate', driverId: driver.id })
+                  <ConfirmActionDialog
+                    title={`Reativar ${driver.name}?`}
+                    description="Confirme a volta deste entregador à operação."
+                    consequence="Ele poderá ficar online e voltar a receber novas ofertas imediatamente."
+                    confirmLabel="Reativar entregador"
+                    pendingLabel="Reativando..."
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'reactivate', driverId: driver.id })
                     }
-                    disabled={actionMutation.isPending}
                   >
-                    {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}
-                  </Button>
-                  <Button
-                    className="flex-1"
+                    <Button className="flex-1" disabled={actionMutation.isPending}>
+                      Reativar
+                    </Button>
+                  </ConfirmActionDialog>
+                  <ConfirmActionDialog
+                    title={`Bloquear ${driver.name}?`}
+                    description="Confirme o bloqueio deste entregador."
+                    consequence="A suspensão será convertida em bloqueio e o acesso seguirá interrompido até reativação manual."
+                    confirmLabel="Bloquear entregador"
+                    pendingLabel="Bloqueando..."
                     variant="destructive"
-                    onClick={() => actionMutation.mutate({ action: 'block', driverId: driver.id })}
-                    disabled={actionMutation.isPending}
+                    onConfirm={() =>
+                      actionMutation.mutateAsync({ action: 'block', driverId: driver.id })
+                    }
                   >
-                    {isPending(driver.id, 'block') ? 'Bloqueando...' : 'Bloquear'}
-                  </Button>
+                    <Button
+                      className="flex-1"
+                      variant="destructive"
+                      disabled={actionMutation.isPending}
+                    >
+                      Bloquear
+                    </Button>
+                  </ConfirmActionDialog>
                 </div>
               )}
 
               {driver.approvalStatus === 'APPROVED' && driver.accountStatus === 'BLOCKED' && (
-                <Button
-                  className="w-full"
-                  onClick={() =>
-                    actionMutation.mutate({ action: 'reactivate', driverId: driver.id })
+                <ConfirmActionDialog
+                  title={`Reativar ${driver.name}?`}
+                  description="Confirme a remoção do bloqueio deste entregador."
+                  consequence="Ele recuperará o acesso operacional e poderá voltar a receber ofertas."
+                  confirmLabel="Reativar entregador"
+                  pendingLabel="Reativando..."
+                  onConfirm={() =>
+                    actionMutation.mutateAsync({ action: 'reactivate', driverId: driver.id })
                   }
-                  disabled={actionMutation.isPending}
                 >
-                  {isPending(driver.id, 'reactivate') ? 'Reativando...' : 'Reativar'}
-                </Button>
+                  <Button className="w-full" disabled={actionMutation.isPending}>
+                    Reativar
+                  </Button>
+                </ConfirmActionDialog>
               )}
             </CardContent>
           </Card>

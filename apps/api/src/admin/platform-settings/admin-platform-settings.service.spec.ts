@@ -1,20 +1,30 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPlatformSettingsService } from './admin-platform-settings.service';
 
 describe('AdminPlatformSettingsService', () => {
   let service: AdminPlatformSettingsService;
   let prisma: {
     platformSettings: { findUnique: jest.Mock; upsert: jest.Mock };
+    $transaction: jest.Mock;
   };
+  let audit: { record: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       platformSettings: { findUnique: jest.fn(), upsert: jest.fn() },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
+    audit = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AdminPlatformSettingsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AdminPlatformSettingsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: AdminAuditService, useValue: audit },
+      ],
     }).compile();
 
     service = module.get(AdminPlatformSettingsService);
@@ -147,9 +157,7 @@ describe('AdminPlatformSettingsService', () => {
         update: { dispatchOfferTimeoutSeconds: 45, updatedByUserId: 'admin-1' },
         create: {
           id: 'global',
-          driverCommissionPercentage: undefined,
           dispatchOfferTimeoutSeconds: 45,
-          returnProximityRadiusMeters: undefined,
           updatedByUserId: 'admin-1',
         },
         include: { updatedBy: true },
@@ -172,14 +180,62 @@ describe('AdminPlatformSettingsService', () => {
         update: { returnProximityRadiusMeters: 150, updatedByUserId: 'admin-1' },
         create: {
           id: 'global',
-          driverCommissionPercentage: undefined,
-          dispatchOfferTimeoutSeconds: undefined,
           returnProximityRadiusMeters: 150,
           updatedByUserId: 'admin-1',
         },
         include: { updatedBy: true },
       });
       expect(result.returnProximityRadiusMeters).toBe(150);
+    });
+
+    it('preserva os limites de capacidade na criação inicial e audita os campos alterados', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: null,
+        returnProximityRadiusMeters: null,
+        businessHoursEnabled: false,
+        minMinutesBeforeCollect: null,
+        minMinutesBeforeDeliver: null,
+        locationSilenceAlertMinutes: null,
+        slaAlertMinutesToAccept: null,
+        slaAlertMinutesToCollect: null,
+        slaAlertMinutesToDeliver: null,
+        maxConcurrentDeliveriesPerDriver: 3,
+        maxDeliveriesPerBatch: 8,
+        deliveryProximityRadiusMeters: 120,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const payload = {
+        maxConcurrentDeliveriesPerDriver: 3,
+        maxDeliveriesPerBatch: 8,
+        deliveryProximityRadiusMeters: 120,
+      };
+      const result = await service.update(payload, 'admin-1');
+
+      expect(prisma.platformSettings.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: {
+            id: 'global',
+            ...payload,
+            updatedByUserId: 'admin-1',
+          },
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'admin-1',
+          action: 'PLATFORM_SETTINGS_UPDATED',
+          entityType: 'PLATFORM_SETTINGS',
+          entityId: 'global',
+          metadata: { changedFields: Object.keys(payload) },
+        }),
+        prisma,
+      );
+      expect(result.maxConcurrentDeliveriesPerDriver).toBe(3);
+      expect(result.maxDeliveriesPerBatch).toBe(8);
+      expect(result.deliveryProximityRadiusMeters).toBe(120);
     });
   });
 });

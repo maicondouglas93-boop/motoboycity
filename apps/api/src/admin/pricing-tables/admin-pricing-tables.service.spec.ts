@@ -1,7 +1,10 @@
 import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPricingTablesService } from './admin-pricing-tables.service';
+
+const actorUserId = 'admin-1';
 
 describe('AdminPricingTablesService', () => {
   let service: AdminPricingTablesService;
@@ -10,9 +13,11 @@ describe('AdminPricingTablesService', () => {
       updateMany: jest.Mock;
       create: jest.Mock;
       findFirst: jest.Mock;
+      findUnique: jest.Mock;
       update: jest.Mock;
     };
   };
+  let audit: { record: jest.Mock };
   let prisma: {
     serviceType: { findUnique: jest.Mock };
     company: { findUnique: jest.Mock };
@@ -27,6 +32,7 @@ describe('AdminPricingTablesService', () => {
         updateMany: jest.fn(),
         create: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn(),
         update: jest.fn(),
       },
     };
@@ -37,9 +43,14 @@ describe('AdminPricingTablesService', () => {
       pricingTable: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
+    audit = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AdminPricingTablesService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AdminPricingTablesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: AdminAuditService, useValue: audit },
+      ],
     }).compile();
 
     service = module.get(AdminPricingTablesService);
@@ -152,7 +163,7 @@ describe('AdminPricingTablesService', () => {
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
 
-      const result = await service.create(payload);
+      const result = await service.create(payload, actorUserId);
 
       expect(tx.pricingTable.updateMany).toHaveBeenCalledWith({
         where: {
@@ -179,6 +190,15 @@ describe('AdminPricingTablesService', () => {
       );
       expect(result.id).toBe('pt-2');
       expect(result.active).toBe(true);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId,
+          action: 'PRICING_TABLE_CREATED',
+          entityType: 'PRICING_TABLE',
+          entityId: 'pt-2',
+        }),
+        tx,
+      );
     });
 
     it('cria preço personalizado na região da empresa sem desativar a tabela geral', async () => {
@@ -203,11 +223,14 @@ describe('AdminPricingTablesService', () => {
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
 
-      const result = await service.create({
-        ...payload,
-        companyId: 'company-1',
-        includedDistanceKm: 2,
-      });
+      const result = await service.create(
+        {
+          ...payload,
+          companyId: 'company-1',
+          includedDistanceKm: 2,
+        },
+        actorUserId,
+      );
 
       expect(prisma.region.findFirst).not.toHaveBeenCalled();
       expect(tx.pricingTable.updateMany).toHaveBeenCalledWith({
@@ -251,7 +274,7 @@ describe('AdminPricingTablesService', () => {
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
       });
 
-      const result = await service.create(payload);
+      const result = await service.create(payload, actorUserId);
 
       expect(result.id).toBe('pt-retried');
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
@@ -265,7 +288,7 @@ describe('AdminPricingTablesService', () => {
       prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
       prisma.$transaction.mockRejectedValue({ code: 'P2002' });
 
-      await expect(service.create(payload)).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.create(payload, actorUserId)).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.$transaction).toHaveBeenCalledTimes(3);
     });
 
@@ -273,9 +296,9 @@ describe('AdminPricingTablesService', () => {
       prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1', name: 'Moto' });
       prisma.company.findUnique.mockResolvedValue(null);
 
-      await expect(service.create({ ...payload, companyId: 'company-1' })).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.create({ ...payload, companyId: 'company-1' }, actorUserId),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
@@ -286,16 +309,16 @@ describe('AdminPricingTablesService', () => {
         region: { id: 'region-2', active: false },
       });
 
-      await expect(service.create({ ...payload, companyId: 'company-1' })).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        service.create({ ...payload, companyId: 'company-1' }, actorUserId),
+      ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('rejeita quando o tipo de serviço não existe', async () => {
       prisma.serviceType.findUnique.mockResolvedValue(null);
 
-      await expect(service.create(payload)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.create(payload, actorUserId)).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
@@ -303,14 +326,16 @@ describe('AdminPricingTablesService', () => {
       prisma.serviceType.findUnique.mockResolvedValue({ id: 'st-1' });
       prisma.region.findFirst.mockResolvedValue(null);
 
-      await expect(service.create(payload)).rejects.toBeInstanceOf(InternalServerErrorException);
+      await expect(service.create(payload, actorUserId)).rejects.toBeInstanceOf(
+        InternalServerErrorException,
+      );
     });
   });
 
   describe('deactivate', () => {
     it('desativa uma tabela de preços ativa', async () => {
-      prisma.pricingTable.findUnique.mockResolvedValue({ id: 'pt-1', active: true });
-      prisma.pricingTable.update.mockResolvedValue({
+      tx.pricingTable.findUnique.mockResolvedValue({ id: 'pt-1', active: true });
+      tx.pricingTable.update.mockResolvedValue({
         id: 'pt-1',
         regionId: 'region-1',
         serviceTypeId: 'st-1',
@@ -326,22 +351,35 @@ describe('AdminPricingTablesService', () => {
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       });
 
-      const result = await service.deactivate('pt-1');
+      const result = await service.deactivate('pt-1', actorUserId);
 
       expect(result.active).toBe(false);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId,
+          action: 'PRICING_TABLE_DEACTIVATED',
+          entityType: 'PRICING_TABLE',
+          entityId: 'pt-1',
+        }),
+        tx,
+      );
     });
 
     it('rejeita desativar uma tabela já inativa', async () => {
-      prisma.pricingTable.findUnique.mockResolvedValue({ id: 'pt-1', active: false });
+      tx.pricingTable.findUnique.mockResolvedValue({ id: 'pt-1', active: false });
 
-      await expect(service.deactivate('pt-1')).rejects.toBeInstanceOf(ConflictException);
-      expect(prisma.pricingTable.update).not.toHaveBeenCalled();
+      await expect(service.deactivate('pt-1', actorUserId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(tx.pricingTable.update).not.toHaveBeenCalled();
     });
 
     it('retorna 404 quando a tabela não existe', async () => {
-      prisma.pricingTable.findUnique.mockResolvedValue(null);
+      tx.pricingTable.findUnique.mockResolvedValue(null);
 
-      await expect(service.deactivate('inexistente')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.deactivate('inexistente', actorUserId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 
@@ -374,11 +412,20 @@ describe('AdminPricingTablesService', () => {
       prisma.pricingTable.findUnique.mockResolvedValue(inativa);
       tx.pricingTable.update.mockResolvedValue(tabelaPronta());
 
-      const resultado = await service.reactivate('tabela-1');
+      const resultado = await service.reactivate('tabela-1', actorUserId);
 
       expect(resultado.active).toBe(true);
       expect(tx.pricingTable.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'tabela-1' }, data: { active: true } }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId,
+          action: 'PRICING_TABLE_REACTIVATED',
+          entityType: 'PRICING_TABLE',
+          entityId: 'tabela-1',
+        }),
+        tx,
       );
     });
 
@@ -395,7 +442,9 @@ describe('AdminPricingTablesService', () => {
         serviceType: { name: 'motoboy' },
       });
 
-      await expect(service.reactivate('tabela-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.reactivate('tabela-1', actorUserId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(tx.pricingTable.update).not.toHaveBeenCalled();
       expect(tx.pricingTable.updateMany).not.toHaveBeenCalled();
     });
@@ -405,7 +454,7 @@ describe('AdminPricingTablesService', () => {
       prisma.pricingTable.findUnique.mockResolvedValue({ ...inativa, companyId: 'empresa-1' });
       tx.pricingTable.update.mockResolvedValue(tabelaPronta({ companyId: 'empresa-1' }));
 
-      await service.reactivate('tabela-1');
+      await service.reactivate('tabela-1', actorUserId);
 
       expect(tx.pricingTable.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -422,13 +471,17 @@ describe('AdminPricingTablesService', () => {
     it('recusa reativar o que ja esta ativo', async () => {
       prisma.pricingTable.findUnique.mockResolvedValue({ ...inativa, active: true });
 
-      await expect(service.reactivate('tabela-1')).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.reactivate('tabela-1', actorUserId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
 
     it('erra claro quando a tabela nao existe', async () => {
       prisma.pricingTable.findUnique.mockResolvedValue(null);
 
-      await expect(service.reactivate('sumiu')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.reactivate('sumiu', actorUserId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 });

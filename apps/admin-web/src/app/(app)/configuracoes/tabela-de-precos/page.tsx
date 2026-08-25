@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import { Building2, Check, Globe2 } from 'lucide-react';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
 import { Tag } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -138,9 +139,7 @@ export default function PricingTablesPage() {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'pricing-tables'] });
     },
     onError: (error) =>
-      setFormError(
-        error instanceof ApiError ? error.message : 'Não foi possível ativar a tabela.',
-      ),
+      setFormError(error instanceof ApiError ? error.message : 'Não foi possível ativar a tabela.'),
   });
 
   const deactivateMutation = useMutation({
@@ -603,25 +602,32 @@ export default function PricingTablesPage() {
                     regiao SEM tabela — e pedido sem tabela nao e cotado.
                   */}
                   {pricingTable.active ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={deactivateMutation.isPending}
-                      onClick={() => deactivateMutation.mutate(pricingTable.id)}
+                    <ConfirmActionDialog
+                      title={`Desativar tabela de ${pricingTable.serviceTypeName}?`}
+                      description={`Aplicação: ${pricingTable.companyName ?? 'todas as empresas'}.`}
+                      consequence="Se não houver outra tabela ativa no mesmo escopo, novas solicitações dessa modalidade ficarão sem cotação."
+                      confirmLabel="Desativar tabela"
+                      pendingLabel="Desativando..."
+                      variant="destructive"
+                      onConfirm={() => deactivateMutation.mutateAsync(pricingTable.id)}
                     >
-                      Desativar
-                    </Button>
+                      <Button variant="outline" size="sm" disabled={deactivateMutation.isPending}>
+                        Desativar
+                      </Button>
+                    </ConfirmActionDialog>
                   ) : (
-                    <Button
-                      size="sm"
-                      disabled={reactivateMutation.isPending}
-                      onClick={() => reactivateMutation.mutate(pricingTable.id)}
+                    <ConfirmActionDialog
+                      title={`Ativar tabela de ${pricingTable.serviceTypeName}?`}
+                      description={`Aplicação: ${pricingTable.companyName ?? 'todas as empresas'}.`}
+                      consequence="Esta tabela passará a definir os valores das novas cotações. A ativação será recusada se já existir outra tabela ativa no mesmo escopo."
+                      confirmLabel="Ativar tabela"
+                      pendingLabel="Ativando..."
+                      onConfirm={() => reactivateMutation.mutateAsync(pricingTable.id)}
                     >
-                      {reactivateMutation.isPending &&
-                      reactivateMutation.variables === pricingTable.id
-                        ? 'Ativando...'
-                        : 'Ativar'}
-                    </Button>
+                      <Button size="sm" disabled={reactivateMutation.isPending}>
+                        Ativar
+                      </Button>
+                    </ConfirmActionDialog>
                   )}
                 </TableCell>
               </TableRow>

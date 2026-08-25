@@ -21,6 +21,11 @@ const entityLabels: Record<string, string> = {
   DELIVERY: 'Pedido',
   INVOICE: 'Fatura',
   REGION: 'Região',
+  SERVICE_TYPE: 'Modalidade',
+  PRICING_TABLE: 'Tabela de preços',
+  SURCHARGE: 'Taxa adicional',
+  BUSINESS_HOURS: 'Horário de funcionamento',
+  PLATFORM_SETTINGS: 'Parâmetros operacionais',
 };
 
 function entityHref(event: AdministrativeAuditEvent): string | null {
@@ -29,6 +34,11 @@ function entityHref(event: AdministrativeAuditEvent): string | null {
   if (event.entityType === 'DELIVERY') return `/pedidos/${event.entityId}`;
   if (event.entityType === 'INVOICE') return `/faturas/${event.entityId}`;
   if (event.entityType === 'REGION') return '/configuracoes/regioes';
+  if (event.entityType === 'SERVICE_TYPE') return '/configuracoes/tipos-de-servico';
+  if (event.entityType === 'PRICING_TABLE') return '/configuracoes/tabela-de-precos';
+  if (event.entityType === 'SURCHARGE') return '/configuracoes/taxas';
+  if (event.entityType === 'BUSINESS_HOURS') return '/configuracoes/horario';
+  if (event.entityType === 'PLATFORM_SETTINGS') return '/configuracoes/operacao';
   return null;
 }
 
@@ -57,6 +67,11 @@ export default function AdministrativeHistoryPage() {
           | 'DELIVERY'
           | 'INVOICE'
           | 'REGION'
+          | 'SERVICE_TYPE'
+          | 'PRICING_TABLE'
+          | 'SURCHARGE'
+          | 'BUSINESS_HOURS'
+          | 'PLATFORM_SETTINGS'
           | undefined,
         from: from || undefined,
         to: to || undefined,
@@ -96,7 +111,8 @@ export default function AdministrativeHistoryPage() {
             <History className="size-6 text-primary" /> Histórico administrativo
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Alterações em cadastros, documentos, regiões, pedidos e faturas, com autor e data.
+            Alterações em cadastros, documentos, operação, preços, pedidos e faturas, com autor e
+            data.
           </p>
         </div>
         <Button variant="outline" onClick={downloadCsv} disabled={events.length === 0}>

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { PlatformSettingsItem } from '@motoboycity/types';
 import type { UpdatePlatformSettingsPayload } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 
 const SETTINGS_ID = 'global';
 
@@ -12,7 +13,10 @@ export type { PlatformSettingsItem };
 
 @Injectable()
 export class AdminPlatformSettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AdminAuditService,
+  ) {}
 
   async get(): Promise<PlatformSettingsItem> {
     const settings = await this.prisma.platformSettings.findUnique({
@@ -47,69 +51,69 @@ export class AdminPlatformSettingsService {
     payload: UpdatePlatformSettingsPayload,
     updatedByUserId: string,
   ): Promise<PlatformSettingsItem> {
-    const settings = await this.prisma.platformSettings.upsert({
-      where: { id: SETTINGS_ID },
-      update: {
-        ...(payload.driverCommissionPercentage !== undefined && {
-          driverCommissionPercentage: payload.driverCommissionPercentage,
-        }),
-        ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
-          dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
-        }),
-        ...(payload.returnProximityRadiusMeters !== undefined && {
-          returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
-        }),
-        ...(payload.businessHoursEnabled !== undefined && {
-          businessHoursEnabled: payload.businessHoursEnabled,
-        }),
-        ...(payload.minMinutesBeforeCollect !== undefined && {
-          minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
-        }),
-        ...(payload.minMinutesBeforeDeliver !== undefined && {
-          minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
-        }),
-        ...(payload.locationSilenceAlertMinutes !== undefined && {
-          locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
-        }),
-        ...(payload.slaAlertMinutesToAccept !== undefined && {
-          slaAlertMinutesToAccept: payload.slaAlertMinutesToAccept,
-        }),
-        ...(payload.slaAlertMinutesToCollect !== undefined && {
-          slaAlertMinutesToCollect: payload.slaAlertMinutesToCollect,
-        }),
-        ...(payload.maxConcurrentDeliveriesPerDriver !== undefined && {
-          maxConcurrentDeliveriesPerDriver: payload.maxConcurrentDeliveriesPerDriver,
-        maxDeliveriesPerBatch: payload.maxDeliveriesPerBatch,
-        deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
-        }),
-        ...(payload.maxDeliveriesPerBatch !== undefined && {
-          maxDeliveriesPerBatch: payload.maxDeliveriesPerBatch,
-        }),
-        ...(payload.deliveryProximityRadiusMeters !== undefined && {
-          deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
-        }),
-        ...(payload.slaAlertMinutesToDeliver !== undefined && {
-          slaAlertMinutesToDeliver: payload.slaAlertMinutesToDeliver,
-        maxConcurrentDeliveriesPerDriver: payload.maxConcurrentDeliveriesPerDriver,
-        }),
-        updatedByUserId,
-      },
-      create: {
-        id: SETTINGS_ID,
+    const data = {
+      ...(payload.driverCommissionPercentage !== undefined && {
         driverCommissionPercentage: payload.driverCommissionPercentage,
+      }),
+      ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
         dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
+      }),
+      ...(payload.returnProximityRadiusMeters !== undefined && {
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
-        // Ausente cai no default do banco, como os outros campos deste ramo.
+      }),
+      ...(payload.businessHoursEnabled !== undefined && {
         businessHoursEnabled: payload.businessHoursEnabled,
+      }),
+      ...(payload.minMinutesBeforeCollect !== undefined && {
         minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
+      }),
+      ...(payload.minMinutesBeforeDeliver !== undefined && {
         minMinutesBeforeDeliver: payload.minMinutesBeforeDeliver,
+      }),
+      ...(payload.locationSilenceAlertMinutes !== undefined && {
         locationSilenceAlertMinutes: payload.locationSilenceAlertMinutes,
+      }),
+      ...(payload.slaAlertMinutesToAccept !== undefined && {
         slaAlertMinutesToAccept: payload.slaAlertMinutesToAccept,
+      }),
+      ...(payload.slaAlertMinutesToCollect !== undefined && {
         slaAlertMinutesToCollect: payload.slaAlertMinutesToCollect,
+      }),
+      ...(payload.slaAlertMinutesToDeliver !== undefined && {
         slaAlertMinutesToDeliver: payload.slaAlertMinutesToDeliver,
-        updatedByUserId,
-      },
-      include: { updatedBy: true },
+      }),
+      ...(payload.maxConcurrentDeliveriesPerDriver !== undefined && {
+        maxConcurrentDeliveriesPerDriver: payload.maxConcurrentDeliveriesPerDriver,
+      }),
+      ...(payload.maxDeliveriesPerBatch !== undefined && {
+        maxDeliveriesPerBatch: payload.maxDeliveriesPerBatch,
+      }),
+      ...(payload.deliveryProximityRadiusMeters !== undefined && {
+        deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
+      }),
+      updatedByUserId,
+    };
+
+    const settings = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.platformSettings.upsert({
+        where: { id: SETTINGS_ID },
+        update: data,
+        create: { id: SETTINGS_ID, ...data },
+        include: { updatedBy: true },
+      });
+      const changedFields = Object.keys(payload);
+      await this.audit.record(
+        {
+          actorUserId: updatedByUserId,
+          action: 'PLATFORM_SETTINGS_UPDATED',
+          entityType: 'PLATFORM_SETTINGS',
+          entityId: SETTINGS_ID,
+          summary: `${changedFields.length} parâmetro(s) operacional(is) atualizado(s).`,
+          metadata: { changedFields },
+        },
+        tx,
+      );
+      return updated;
     });
 
     return this.toItem(settings);

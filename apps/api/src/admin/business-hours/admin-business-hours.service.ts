@@ -3,6 +3,7 @@ import type { BusinessHoursResult } from '@motoboycity/types';
 import type { ReplaceBusinessHoursPayload } from '@motoboycity/validation';
 import { checkBusinessHours } from '../../deliveries/business-hours';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPlatformSettingsService } from '../platform-settings/admin-platform-settings.service';
 
 export type { BusinessHoursResult };
@@ -12,6 +13,7 @@ export class AdminBusinessHoursService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
+    private readonly audit: AdminAuditService,
   ) {}
 
   async get(): Promise<BusinessHoursResult> {
@@ -52,7 +54,10 @@ export class AdminBusinessHoursService {
    * numa hora que ninguém configurou. Trocar o conjunto inteiro não tem esse
    * estado intermediário.
    */
-  async replace(payload: ReplaceBusinessHoursPayload): Promise<BusinessHoursResult> {
+  async replace(
+    payload: ReplaceBusinessHoursPayload,
+    actorUserId: string,
+  ): Promise<BusinessHoursResult> {
     const region = await this.resolveRegion();
 
     await this.prisma.$transaction(async (tx) => {
@@ -62,6 +67,16 @@ export class AdminBusinessHoursService {
           data: payload.hours.map((hour) => ({ ...hour, regionId: region.id })),
         });
       }
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'BUSINESS_HOURS_REPLACED',
+          entityType: 'BUSINESS_HOURS',
+          entityId: region.id,
+          summary: `Horário de funcionamento substituído com ${payload.hours.length} faixa(s).`,
+        },
+        tx,
+      );
     });
 
     return this.get();

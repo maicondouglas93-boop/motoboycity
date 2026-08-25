@@ -4,7 +4,9 @@ import {
   type ReplaceBusinessHoursPayload,
 } from '@motoboycity/validation';
 import type { BusinessHoursResult } from '@motoboycity/types';
+import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
+import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AdminBusinessHoursService } from './admin-business-hours.service';
@@ -23,7 +25,8 @@ export class AdminBusinessHoursController {
   @Put()
   replace(
     @Body(new ZodValidationPipe(replaceBusinessHoursSchema)) body: ReplaceBusinessHoursPayload,
+    @CurrentUser() admin: User,
   ): Promise<BusinessHoursResult> {
-    return this.adminBusinessHoursService.replace(body);
+    return this.adminBusinessHoursService.replace(body, admin.id);
   }
 }

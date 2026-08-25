@@ -4,6 +4,7 @@ import { useState, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
 import { Bike } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { adminServiceTypesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -158,19 +166,28 @@ export default function ServiceTypesPage() {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={toggleActiveMutation.isPending}
-                    onClick={() =>
-                      toggleActiveMutation.mutate({
+                  <ConfirmActionDialog
+                    title={`${serviceType.active ? 'Desativar' : 'Ativar'} ${serviceType.name}?`}
+                    description="Confirme a mudança desta modalidade."
+                    consequence={
+                      serviceType.active
+                        ? 'A modalidade deixará de aparecer em novos cadastros e novas solicitações, sem alterar pedidos já criados.'
+                        : 'A modalidade voltará a ficar disponível para novas configurações e solicitações.'
+                    }
+                    confirmLabel={serviceType.active ? 'Desativar modalidade' : 'Ativar modalidade'}
+                    pendingLabel={serviceType.active ? 'Desativando...' : 'Ativando...'}
+                    variant={serviceType.active ? 'destructive' : 'default'}
+                    onConfirm={() =>
+                      toggleActiveMutation.mutateAsync({
                         id: serviceType.id,
                         active: !serviceType.active,
                       })
                     }
                   >
-                    {serviceType.active ? 'Desativar' : 'Ativar'}
-                  </Button>
+                    <Button variant="outline" size="sm" disabled={toggleActiveMutation.isPending}>
+                      {serviceType.active ? 'Desativar' : 'Ativar'}
+                    </Button>
+                  </ConfirmActionDialog>
                 </TableCell>
               </TableRow>
             ))}

@@ -8,6 +8,7 @@ import type { PricingTableItem } from '@motoboycity/types';
 import type { CreatePricingTablePayload } from '@motoboycity/validation';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminAuditService } from '../audit/admin-audit.service';
 
 export interface ListPricingTablesFilters {
   serviceTypeId?: string;
@@ -17,7 +18,10 @@ export interface ListPricingTablesFilters {
 
 @Injectable()
 export class AdminPricingTablesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AdminAuditService,
+  ) {}
 
   async list(filters: ListPricingTablesFilters): Promise<PricingTableItem[]> {
     const pricingTables = await this.prisma.pricingTable.findMany({
@@ -33,7 +37,7 @@ export class AdminPricingTablesService {
     return pricingTables.map((pricingTable) => this.toItem(pricingTable));
   }
 
-  async create(payload: CreatePricingTablePayload): Promise<PricingTableItem> {
+  async create(payload: CreatePricingTablePayload, actorUserId: string): Promise<PricingTableItem> {
     const serviceType = await this.prisma.serviceType.findUnique({
       where: { id: payload.serviceTypeId },
     });
@@ -66,29 +70,41 @@ export class AdminPricingTablesService {
       regionId = region.id;
     }
 
-    const created = await this.createActiveVersion(regionId, payload);
+    const created = await this.createActiveVersion(regionId, payload, actorUserId);
 
     return this.toItem(created);
   }
 
-  async deactivate(id: string): Promise<PricingTableItem> {
-    const existing = await this.prisma.pricingTable.findUnique({ where: { id } });
-    if (!existing) {
-      throw new NotFoundException('Tabela de preços não encontrada.');
-    }
-    if (!existing.active) {
-      throw new ConflictException('Esta tabela de preços já está inativa.');
-    }
+  async deactivate(id: string, actorUserId: string): Promise<PricingTableItem> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.pricingTable.findUnique({ where: { id } });
+      if (!existing) {
+        throw new NotFoundException('Tabela de preços não encontrada.');
+      }
+      if (!existing.active) {
+        throw new ConflictException('Esta tabela de preços já está inativa.');
+      }
 
-    const updated = await this.prisma.pricingTable.update({
-      where: { id },
-      data: { active: false },
-      include: { serviceType: true, company: { select: { tradeName: true } } },
+      const deactivated = await tx.pricingTable.update({
+        where: { id },
+        data: { active: false },
+        include: { serviceType: true, company: { select: { tradeName: true } } },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'PRICING_TABLE_DEACTIVATED',
+          entityType: 'PRICING_TABLE',
+          entityId: deactivated.id,
+          summary: `Tabela de preços de ${deactivated.serviceType.name}${deactivated.company ? ` para ${deactivated.company.tradeName}` : ' geral'} desativada.`,
+        },
+        tx,
+      );
+      return deactivated;
     });
 
     return this.toItem(updated);
   }
-
 
   /**
    * Volta uma tabela desativada para o ar.
@@ -103,7 +119,7 @@ export class AdminPricingTablesService {
    * dinheiro; fazer isso como efeito colateral de um clique em "Ativar"
    * mudaria o preco de todo pedido novo sem ninguem perceber.
    */
-  async reactivate(id: string): Promise<PricingTableItem> {
+  async reactivate(id: string, actorUserId: string): Promise<PricingTableItem> {
     const existing = await this.prisma.pricingTable.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Tabela de preços não encontrada.');
@@ -134,11 +150,22 @@ export class AdminPricingTablesService {
               );
             }
 
-            return tx.pricingTable.update({
+            const reactivated = await tx.pricingTable.update({
               where: { id },
               data: { active: true },
               include: { serviceType: true, company: { select: { tradeName: true } } },
             });
+            await this.audit.record(
+              {
+                actorUserId,
+                action: 'PRICING_TABLE_REACTIVATED',
+                entityType: 'PRICING_TABLE',
+                entityId: reactivated.id,
+                summary: `Tabela de preços de ${reactivated.serviceType.name}${reactivated.company ? ` para ${reactivated.company.tradeName}` : ' geral'} reativada.`,
+              },
+              tx,
+            );
+            return reactivated;
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
@@ -157,7 +184,11 @@ export class AdminPricingTablesService {
     throw new ConflictException('Não foi possível reativar a tabela de preços.');
   }
 
-  private async createActiveVersion(regionId: string, payload: CreatePricingTablePayload) {
+  private async createActiveVersion(
+    regionId: string,
+    payload: CreatePricingTablePayload,
+    actorUserId: string,
+  ) {
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -174,7 +205,7 @@ export class AdminPricingTablesService {
               data: { active: false },
             });
 
-            return tx.pricingTable.create({
+            const created = await tx.pricingTable.create({
               data: {
                 regionId,
                 serviceTypeId: payload.serviceTypeId,
@@ -189,6 +220,17 @@ export class AdminPricingTablesService {
               },
               include: { serviceType: true, company: { select: { tradeName: true } } },
             });
+            await this.audit.record(
+              {
+                actorUserId,
+                action: 'PRICING_TABLE_CREATED',
+                entityType: 'PRICING_TABLE',
+                entityId: created.id,
+                summary: `Nova tabela de preços de ${created.serviceType.name}${created.company ? ` para ${created.company.tradeName}` : ' geral'} ativada.`,
+              },
+              tx,
+            );
+            return created;
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );

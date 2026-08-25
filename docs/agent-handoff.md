@@ -6626,3 +6626,45 @@ do limite de tamanho. O smoke test autenticado e a aplicacao da migration
 continuam pendentes. Proximo passo concreto: validar a migration em copia de
 staging, publicar API e depois Admin Web; em homologacao, percorrer cada CRUD,
 editar um pedido agendado e confirmar a trilha administrativa gerada.
+
+## Atualizacao - 2026-08-25: configuracoes administrativas auditaveis e confirmacoes
+
+O segundo lote de autonomia administrativa fechou a lacuna de auditoria das
+configuracoes operacionais. Criacao e alteracao de modalidades, criacao,
+desativacao e reativacao de tabelas de preco, todas as mutacoes de taxas
+adicionais, substituicao dos horarios de funcionamento e alteracao dos
+parametros globais agora gravam autor, entidade e resumo em
+`administrative_audits`. A mutacao e a auditoria ficam na mesma transacao para
+que uma falha nunca deixe configuracao sem historico ou historico de uma
+configuracao que nao foi salva.
+
+O `AdminPlatformSettingsService` tambem foi corrigido no primeiro cadastro dos
+parametros: `maxConcurrentDeliveriesPerDriver`, `maxDeliveriesPerBatch` e
+`deliveryProximityRadiusMeters` eram aceitos pelo contrato, mas eram omitidos
+no ramo `create` do upsert. O update agora monta uma unica carga parcial usada
+nos dois ramos, preservando todos os campos nao enviados e registrando no
+historico somente os nomes dos campos alterados.
+
+No Admin Web, aprovar empresa; aprovar, rejeitar, suspender, bloquear e reativar
+entregador; ativar ou desativar modalidade e tabela de preco; e ativar,
+desativar ou excluir taxa adicional exigem confirmacao explicando o efeito
+operacional. O interruptor manual `Ligar agora/Desligar agora` da taxa permanece
+deliberadamente em um clique, pois e um comando operacional reversivel e de
+resposta imediata. O historico administrativo ganhou filtros e links para
+modalidades, tabelas, taxas, horarios e parametros operacionais.
+
+Nao houve alteracao de schema Prisma nem nova migration neste lote. O enum do
+filtro de auditoria foi ampliado em `packages/validation`; rotas e formatos de
+resposta existentes foram preservados. Arquivos principais:
+`apps/api/src/admin/{service-types,pricing-tables,surcharges,business-hours,platform-settings}`,
+`packages/validation/src/admin/administrative-audit.schema.ts`,
+`apps/admin-web/src/components/admin/confirm-action-dialog.tsx` e as paginas de
+clientes, entregadores, configuracoes e historico administrativo.
+
+Validacoes executadas: 64 suites/783 testes unitarios completos da API;
+typecheck e lint dos oito workspaces; builds de producao da API, Admin Web e
+Company Web. Tudo passou. O smoke test autenticado dos novos dialogos ainda nao
+foi executado. Proximo passo concreto: em homologacao, confirmar cada acao
+critica e verificar o evento correspondente no historico; depois revisar a
+autonomia financeira restante, especialmente conferencia e processamento de
+saques, sem criar exclusao destrutiva de lancamentos.

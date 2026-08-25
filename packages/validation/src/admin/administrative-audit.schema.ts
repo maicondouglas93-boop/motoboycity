@@ -13,6 +13,11 @@ export const administrativeAuditQuerySchema = z.object({
       'DELIVERY',
       'INVOICE',
       'REGION',
+      'SERVICE_TYPE',
+      'PRICING_TABLE',
+      'SURCHARGE',
+      'BUSINESS_HOURS',
+      'PLATFORM_SETTINGS',
     ])
     .optional(),
   search: z.string().trim().max(120).optional(),

@@ -8,6 +8,7 @@ import { ApiError } from '@motoboycity/api-client';
 import { Building2, Check, CircleCheckBig, Copy, PackagePlus } from 'lucide-react';
 import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
 import { CreateCompanyDeliveryDialog } from '@/components/deliveries/create-company-delivery-dialog';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -181,15 +182,18 @@ export default function ClientsPage() {
                 )}
               </div>
               {company.status === 'PENDING_APPROVAL' && (
-                <Button
-                  className="w-full"
-                  onClick={() => approveMutation.mutate(company.id)}
-                  disabled={approveMutation.isPending}
+                <ConfirmActionDialog
+                  title={`Aprovar ${company.tradeName}?`}
+                  description="Confirme a liberação desta empresa no painel."
+                  consequence="A empresa poderá entrar no próprio painel e começar a solicitar entregas imediatamente."
+                  confirmLabel="Aprovar empresa"
+                  pendingLabel="Aprovando..."
+                  onConfirm={() => approveMutation.mutateAsync(company.id)}
                 >
-                  {approveMutation.isPending && approveMutation.variables === company.id
-                    ? 'Aprovando...'
-                    : 'Aprovar'}
-                </Button>
+                  <Button className="w-full" disabled={approveMutation.isPending}>
+                    Aprovar
+                  </Button>
+                </ConfirmActionDialog>
               )}
               <Link
                 className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-input bg-card px-3 text-sm font-semibold text-admin-deep shadow-sm transition-all hover:border-primary/25 hover:bg-admin-soft"

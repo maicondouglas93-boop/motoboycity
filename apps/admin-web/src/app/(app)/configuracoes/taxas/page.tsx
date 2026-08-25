@@ -7,6 +7,7 @@ import { ApiError } from '@motoboycity/api-client';
 import type { SurchargeItem } from '@motoboycity/types';
 import type { UpsertSurchargePayload } from '@motoboycity/validation';
 import { Plus, Trash2 } from 'lucide-react';
+import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
 import { CloudRain } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -196,8 +197,8 @@ export default function SurchargesPage() {
   if (listQuery.isError) {
     return (
       <p className="text-sm text-destructive">
-        Não foi possível carregar as taxas adicionais. Não conclua que não há taxa
-        ativa: recarregue a página.
+        Não foi possível carregar as taxas adicionais. Não conclua que não há taxa ativa: recarregue
+        a página.
       </p>
     );
   }
@@ -455,21 +456,43 @@ export default function SurchargesPage() {
                     <Button size="sm" variant="outline" onClick={() => startEditing(surcharge)}>
                       Editar
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => activeMutation.mutate({ surcharge, on: !surcharge.active })}
+                    <ConfirmActionDialog
+                      title={`${surcharge.active ? 'Desativar' : 'Reativar'} ${surcharge.name}?`}
+                      description="Confirme a mudança desta taxa adicional."
+                      consequence={
+                        surcharge.active
+                          ? 'A taxa deixará de ser aplicada em novas cotações, inclusive quando uma janela programada estiver em vigor.'
+                          : 'A taxa voltará a participar das novas cotações conforme o interruptor manual e as janelas configuradas.'
+                      }
+                      confirmLabel={surcharge.active ? 'Desativar taxa' : 'Reativar taxa'}
+                      pendingLabel={surcharge.active ? 'Desativando...' : 'Reativando...'}
+                      variant={surcharge.active ? 'destructive' : 'default'}
+                      onConfirm={() =>
+                        activeMutation.mutateAsync({ surcharge, on: !surcharge.active })
+                      }
                     >
-                      {surcharge.active ? 'Desativar' : 'Reativar'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => removeMutation.mutate(surcharge.id)}
+                      <Button size="sm" variant="outline" disabled={activeMutation.isPending}>
+                        {surcharge.active ? 'Desativar' : 'Reativar'}
+                      </Button>
+                    </ConfirmActionDialog>
+                    <ConfirmActionDialog
+                      title={`Excluir ${surcharge.name}?`}
+                      description="Confirme a exclusão definitiva desta taxa adicional."
+                      consequence="A configuração e todas as suas janelas serão removidas. O histórico administrativo preservará quem fez a exclusão."
+                      confirmLabel="Excluir taxa"
+                      pendingLabel="Excluindo..."
+                      variant="destructive"
+                      onConfirm={() => removeMutation.mutateAsync(surcharge.id)}
                     >
-                      Excluir
-                    </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        disabled={removeMutation.isPending}
+                      >
+                        Excluir
+                      </Button>
+                    </ConfirmActionDialog>
                   </div>
                 </div>
 
