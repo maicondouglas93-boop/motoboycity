@@ -7555,19 +7555,28 @@ arrastar e redimensionar a bolha nos dois lados, receber uma oferta com a bolha
 ativa, alternar online/offline, reiniciar o app e conferir o consumo de bateria
 com `Manter tela ligada`, incluindo ao menos um Xiaomi/HyperOS.
 
-## Atualizacao - 2026-08-26: APK de validacao pilot.7
+## Atualizacao - 2026-08-26: release Android oficial pilot.7
 
-O Driver App foi promovido no codigo para `0.1.0-pilot.7`. Foi gerado e
-verificado um APK `debug` com `versionCode` 7 em
-`apps/driver-app/android/app/build/outputs/apk/debug/motoboycity-0.1.0-pilot.7-vc7-debug.apk`.
-O arquivo tem 166.511.963 bytes e SHA-256
-`E43DEA1435B5F7C4BAB7838B5395466C778761F0D7ACD807B881DC085D5640DF`;
-`aapt` confirmou pacote `com.motoboycity.driverapp`, `minSdk` 24 e `targetSdk`
-36, e `apksigner` confirmou APK Signature Scheme v2.
+O Driver App foi promovido para `0.1.0-pilot.7`, com `versionCode` 7. O release
+foi compilado em uma copia fisica curta temporaria em `C:\m7`, contornando o
+limite de caminho do CMake/Ninja no Windows. A chave oficial foi copiada apenas
+para esse ambiente durante o build; a copia temporaria completa foi removida
+depois da verificacao e preservacao do artefato.
 
-O release com a chave oficial existente nao foi recriado: as quatro variaveis
-de assinatura nao estavam carregadas na sessao. Nenhuma chave foi substituida
-ou regenerada. Por usar a chave de debug, este APK serve para validacao com
-Metro e nao atualiza a instalacao oficial `pilot.6`. Proximo passo concreto:
-carregar as credenciais locais da chave oficial e executar `assembleRelease`
-com `versionCode` 7 antes de distribuir a versao aos pilotos.
+O APK oficial tem 75.075.309 bytes e SHA-256
+`AECDB701BF08B373D72766F1025AAE7721CA5DB27B5F06E5EF4F0BE48BA81513`.
+`apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial do
+`pilot.6`, com SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+`aapt` confirmou pacote `com.motoboycity.driverapp`, `minSdk` 24, `targetSdk`
+36, `versionName` `0.1.0-pilot.7` e `versionCode` 7. O bundle contem
+`https://motoboycity-api.onrender.com` e nao contem `localhost:3333`,
+`127.0.0.1` ou `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.7-vc7.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.7-vc7.apk`; as duas
+copias possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo
+passo concreto: instalar sobre o `pilot.6` em um aparelho real e validar login,
+online/offline, ofertas e as novas opcoes de botao flutuante e tela antes da
+distribuicao ampla.
