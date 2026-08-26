@@ -7418,3 +7418,36 @@ entrega e retorno podem ser registrados em sequencia offline. Proximo passo
 concreto: validar em aparelho real destino conhecido, destino por GPS, retorno
 em lote misto, kill/reabertura, troca de conta e cancelamento administrativo
 concorrente antes de gerar o APK de producao.
+
+## Atualizacao - 2026-08-26: release Android pilot.6 com encerramento offline
+
+O encerramento offline foi publicado na `main` no commit `036f80c` e o Driver
+App foi promovido para `0.1.0-pilot.6`, com `versionCode` `6`. Antes do release
+passaram typecheck, lint e a suite completa do aplicativo, com 15 suites e 90
+testes aprovados.
+
+Para evitar o limite de caminho do CMake/Ninja no Windows, o build foi feito em
+uma copia fisica curta em `C:\m6`, com a chave oficial copiada temporariamente
+para `C:\m6\k.jks`. O pacote `@motoboycity/validation` foi compilado antes de
+`clean assembleRelease`. A compilacao terminou com lint vital e assinatura de
+release; a copia temporaria, incluindo a chave, foi removida depois da
+preservacao e verificacao do artefato.
+
+O APK final tem 75.062.045 bytes e SHA-256
+`30513E45D1D186AA6C0EF80627D02CC6087B5B83DFD98BF3BB1497EC24612349`.
+O `apksigner` confirmou APK Signature Scheme v2 e o certificado oficial com
+SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, label `motoboycity`,
+`minSdk` 24, `targetSdk` 36, `versionName` `0.1.0-pilot.6` e `versionCode` 6.
+O bundle contem `https://motoboycity-api.onrender.com`, nao contem
+`localhost:3333`, `127.0.0.1` ou `10.0.2.2`, e o manifesto inclui o metadado
+do Google Maps.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.6-vc6.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.6-vc6.apk`; os dois
+arquivos foram conferidos pelo mesmo hash. O APK ainda nao foi instalado nesta
+sessao. Proximo passo concreto: instalar sobre o pilot.5 e testar, em aparelho
+real, encerramento offline com destino conhecido, destino por GPS, retorno,
+kill/reabertura e sincronizacao depois de recuperar a internet.
