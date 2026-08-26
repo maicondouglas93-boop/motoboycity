@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   AppState,
+  type GestureResponderEvent,
   Linking,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -22,7 +24,14 @@ import { API_BASE_URL, APP_ENV, APP_ENV_LABEL } from '../lib/config';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import {
   consultarAtalhoFlutuante,
-  definirAtalhoFlutuante,
+  definirAtalhoFlutuanteComAppAberto,
+  definirAtalhoFlutuanteMinimizado,
+  definirTamanhoAtalhoFlutuante,
+  definirTelaLigada,
+  FLOATING_SHORTCUT_DEFAULT_SIZE_DP,
+  FLOATING_SHORTCUT_MAX_SIZE_DP,
+  FLOATING_SHORTCUT_MIN_SIZE_DP,
+  FLOATING_SHORTCUT_SIZE_STEP_DP,
   type FloatingShortcutStatus,
 } from '../lib/floatingShortcut';
 import {
@@ -40,6 +49,9 @@ export function SettingsScreen({ navigation }: Props) {
     null,
   );
   const [floatingShortcut, setFloatingShortcut] = useState<FloatingShortcutStatus | null>(null);
+  const [floatingShortcutSize, setFloatingShortcutSize] = useState(
+    FLOATING_SHORTCUT_DEFAULT_SIZE_DP,
+  );
   const [savingFloatingShortcut, setSavingFloatingShortcut] = useState(false);
 
   const refreshNativeStatuses = useCallback(async () => {
@@ -49,6 +61,7 @@ export function SettingsScreen({ navigation }: Props) {
     ]);
     setOfferPresentation(presentationStatus);
     setFloatingShortcut(shortcutStatus);
+    if (shortcutStatus) setFloatingShortcutSize(shortcutStatus.sizeDp);
   }, []);
 
   useFocusEffect(
@@ -72,7 +85,10 @@ export function SettingsScreen({ navigation }: Props) {
     }
   }
 
-  async function toggleFloatingShortcut(enabled: boolean) {
+  async function updateFloatingShortcut(
+    enabled: boolean,
+    persist: (value: boolean) => Promise<void>,
+  ) {
     const overlayGranted =
       floatingShortcut?.permissionGranted ?? offerPresentation?.overlayGranted ?? false;
     if (enabled && !overlayGranted) {
@@ -92,13 +108,37 @@ export function SettingsScreen({ navigation }: Props) {
 
     setSavingFloatingShortcut(true);
     try {
-      await definirAtalhoFlutuante(enabled);
+      await persist(enabled);
       await refreshNativeStatuses();
     } catch {
       Alert.alert(
         'Não foi possível alterar',
         'Confira a autorização de sobreposição e tente novamente.',
       );
+    } finally {
+      setSavingFloatingShortcut(false);
+    }
+  }
+
+  async function updateFloatingShortcutSize(sizeDp: number) {
+    setSavingFloatingShortcut(true);
+    try {
+      await definirTamanhoAtalhoFlutuante(sizeDp);
+      await refreshNativeStatuses();
+    } catch {
+      Alert.alert('Não foi possível alterar', 'Atualize o aplicativo e tente novamente.');
+    } finally {
+      setSavingFloatingShortcut(false);
+    }
+  }
+
+  async function updateKeepScreenOn(enabled: boolean) {
+    setSavingFloatingShortcut(true);
+    try {
+      await definirTelaLigada(enabled);
+      await refreshNativeStatuses();
+    } catch {
+      Alert.alert('Não foi possível alterar', 'Atualize o aplicativo e tente novamente.');
     } finally {
       setSavingFloatingShortcut(false);
     }
@@ -204,31 +244,6 @@ export function SettingsScreen({ navigation }: Props) {
             status="Conectada à API"
             tone="success"
           />
-          {Platform.OS === 'android' && (
-            <>
-              <View style={styles.divider} />
-              <ToggleSettingRow
-                icon="menu"
-                title="Botão flutuante"
-                description="Quando você estiver online, mostra um atalho arrastável ao minimizar o app. Toque nele para voltar ao MOTOboyCity."
-                status={
-                  !floatingShortcut?.permissionGranted
-                    ? 'Autorize a sobreposição'
-                    : floatingShortcut?.enabled
-                      ? 'Ativado'
-                      : 'Desativado'
-                }
-                tone={
-                  floatingShortcut?.enabled && floatingShortcut.permissionGranted
-                    ? 'success'
-                    : 'warning'
-                }
-                value={floatingShortcut?.enabled ?? false}
-                disabled={savingFloatingShortcut}
-                onChange={(enabled) => toggleFloatingShortcut(enabled).catch(() => undefined)}
-              />
-            </>
-          )}
           <View style={styles.divider} />
           <SettingRow
             icon="pin"
@@ -238,6 +253,77 @@ export function SettingsScreen({ navigation }: Props) {
             tone="warning"
           />
         </Card>
+
+        {Platform.OS === 'android' && (
+          <>
+            <Text style={styles.sectionTitle}>Botão flutuante</Text>
+            <Card style={styles.card}>
+              <SettingRow
+                icon="menu"
+                title="Sobreposição"
+                description="Atalho arrastável para voltar ao MOTOboyCity. Ele fica disponível somente enquanto você estiver online."
+                status={
+                  !floatingShortcut?.permissionGranted
+                    ? 'Autorize a sobreposição'
+                    : floatingShortcut?.enabledWhenMinimized || floatingShortcut?.enabledWhenOpen
+                      ? 'Ativado'
+                      : 'Desativado'
+                }
+                tone={
+                  floatingShortcut?.permissionGranted &&
+                  (floatingShortcut.enabledWhenMinimized || floatingShortcut.enabledWhenOpen)
+                    ? 'success'
+                    : 'warning'
+                }
+              />
+              <View style={styles.divider} />
+              <OptionSwitchRow
+                title="Habilitar com app minimizado"
+                description="Mostra o botão sobre a tela inicial e outros aplicativos."
+                value={floatingShortcut?.enabledWhenMinimized ?? false}
+                disabled={savingFloatingShortcut}
+                onChange={(enabled) =>
+                  updateFloatingShortcut(enabled, definirAtalhoFlutuanteMinimizado).catch(
+                    () => undefined,
+                  )
+                }
+              />
+              <View style={styles.divider} />
+              <OptionSwitchRow
+                title="Habilitar com app aberto"
+                description="Mantém o botão visível sobre as telas do MOTOboyCity, exceto durante uma oferta."
+                value={floatingShortcut?.enabledWhenOpen ?? false}
+                disabled={savingFloatingShortcut}
+                onChange={(enabled) =>
+                  updateFloatingShortcut(enabled, definirAtalhoFlutuanteComAppAberto).catch(
+                    () => undefined,
+                  )
+                }
+              />
+              <View style={styles.divider} />
+              <ShortcutSizeSetting
+                value={floatingShortcutSize}
+                disabled={savingFloatingShortcut}
+                onChange={setFloatingShortcutSize}
+                onCommit={(sizeDp) => updateFloatingShortcutSize(sizeDp).catch(() => undefined)}
+              />
+            </Card>
+
+            <Text style={styles.sectionTitle}>Tela</Text>
+            <Card style={styles.card}>
+              <ToggleSettingRow
+                icon="clock"
+                title="Manter tela ligada"
+                description="A tela não apaga sozinha enquanto o aplicativo estiver aberto. Consome mais bateria."
+                status={floatingShortcut?.keepScreenOn ? 'Ativado' : 'Desativado'}
+                tone={floatingShortcut?.keepScreenOn ? 'success' : 'warning'}
+                value={floatingShortcut?.keepScreenOn ?? false}
+                disabled={savingFloatingShortcut}
+                onChange={(enabled) => updateKeepScreenOn(enabled).catch(() => undefined)}
+              />
+            </Card>
+          </>
+        )}
 
         <Text style={styles.sectionTitle}>Sobre o aplicativo</Text>
         <Card style={styles.card}>
@@ -257,6 +343,134 @@ export function SettingsScreen({ navigation }: Props) {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function OptionSwitchRow({
+  title,
+  description,
+  value,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  value: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={styles.optionSwitchRow}>
+      <View style={styles.optionSwitchText}>
+        <Text style={styles.settingTitle}>{title}</Text>
+        <Text style={styles.settingDescription}>{description}</Text>
+      </View>
+      <Switch
+        accessibilityLabel={title}
+        value={value}
+        disabled={disabled}
+        onValueChange={onChange}
+        trackColor={{ false: colors.divider, true: colors.successSoft }}
+        thumbColor={value ? colors.success : colors.inkMuted}
+      />
+    </View>
+  );
+}
+
+function ShortcutSizeSetting({
+  value,
+  disabled,
+  onChange,
+  onCommit,
+}: {
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+  onCommit: (value: number) => void;
+}) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const percentage =
+    ((value - FLOATING_SHORTCUT_MIN_SIZE_DP) /
+      (FLOATING_SHORTCUT_MAX_SIZE_DP - FLOATING_SHORTCUT_MIN_SIZE_DP)) *
+    100;
+
+  function valueFromEvent(event: GestureResponderEvent): number {
+    if (trackWidth <= 0) return value;
+    const ratio = Math.min(1, Math.max(0, event.nativeEvent.locationX / trackWidth));
+    const raw =
+      FLOATING_SHORTCUT_MIN_SIZE_DP +
+      ratio * (FLOATING_SHORTCUT_MAX_SIZE_DP - FLOATING_SHORTCUT_MIN_SIZE_DP);
+    return Math.round(raw / FLOATING_SHORTCUT_SIZE_STEP_DP) * FLOATING_SHORTCUT_SIZE_STEP_DP;
+  }
+
+  function previewFromEvent(event: GestureResponderEvent) {
+    if (!disabled) onChange(valueFromEvent(event));
+  }
+
+  function commitFromEvent(event: GestureResponderEvent) {
+    if (disabled) return;
+    const nextValue = valueFromEvent(event);
+    onChange(nextValue);
+    onCommit(nextValue);
+  }
+
+  function handleLayout(event: LayoutChangeEvent) {
+    setTrackWidth(event.nativeEvent.layout.width);
+  }
+
+  function adjust(accessibilityAction: 'increment' | 'decrement') {
+    if (disabled) return;
+    const direction = accessibilityAction === 'increment' ? 1 : -1;
+    const nextValue = Math.min(
+      FLOATING_SHORTCUT_MAX_SIZE_DP,
+      Math.max(FLOATING_SHORTCUT_MIN_SIZE_DP, value + direction * FLOATING_SHORTCUT_SIZE_STEP_DP),
+    );
+    onChange(nextValue);
+    onCommit(nextValue);
+  }
+
+  return (
+    <View style={styles.sizeSetting}>
+      <View style={styles.sizeSettingHeader}>
+        <View style={styles.optionSwitchText}>
+          <Text style={styles.settingTitle}>Tamanho do botão</Text>
+          <Text style={styles.settingDescription}>Ajuste o diâmetro da sobreposição.</Text>
+        </View>
+        <Text style={styles.sizeValue}>{value} dp</Text>
+      </View>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Tamanho do botão flutuante"
+        accessibilityValue={{
+          min: FLOATING_SHORTCUT_MIN_SIZE_DP,
+          max: FLOATING_SHORTCUT_MAX_SIZE_DP,
+          now: value,
+          text: `${value} dp`,
+        }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === 'increment') adjust('increment');
+          if (event.nativeEvent.actionName === 'decrement') adjust('decrement');
+        }}
+        onLayout={handleLayout}
+        onStartShouldSetResponder={() => !disabled}
+        onMoveShouldSetResponder={() => !disabled}
+        onResponderGrant={previewFromEvent}
+        onResponderMove={previewFromEvent}
+        onResponderRelease={commitFromEvent}
+        onResponderTerminationRequest={() => false}
+        style={[styles.slider, disabled && styles.sliderDisabled]}
+      >
+        <View style={styles.sliderTrack} />
+        <View style={[styles.sliderFill, { width: `${percentage}%` }]} />
+        <View style={[styles.sliderThumb, { left: `${percentage}%` }]} />
+      </View>
+      <View style={styles.sliderLabels}>
+        <Text style={styles.sliderLabel}>{FLOATING_SHORTCUT_MIN_SIZE_DP} dp</Text>
+        <Text style={styles.sliderLabel}>{FLOATING_SHORTCUT_MAX_SIZE_DP} dp</Text>
+      </View>
+    </View>
   );
 }
 
@@ -310,7 +524,7 @@ function ToggleSettingRow({
         </View>
       </View>
       <Switch
-        accessibilityLabel="Botão flutuante"
+        accessibilityLabel={title}
         value={value}
         disabled={disabled}
         onValueChange={onChange}
@@ -402,6 +616,52 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 16,
   },
+  optionSwitchRow: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  optionSwitchText: { flex: 1, gap: 4 },
+  sizeSetting: { gap: 10, paddingHorizontal: 16, paddingVertical: 16 },
+  sizeSettingHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sizeValue: { color: colors.ink, fontSize: 16, fontWeight: '900' },
+  slider: { height: 30, justifyContent: 'center' },
+  sliderDisabled: { opacity: 0.5 },
+  sliderTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.divider,
+  },
+  sliderFill: {
+    position: 'absolute',
+    left: 0,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.actionSoft,
+  },
+  sliderThumb: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    marginLeft: -11,
+    borderRadius: 11,
+    borderWidth: 3,
+    borderColor: colors.surface,
+    backgroundColor: colors.actionSoft,
+    elevation: 2,
+    shadowColor: colors.ink,
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  sliderLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  sliderLabel: { color: colors.inkMuted, fontSize: 10, fontWeight: '700' },
   settingIcon: {
     width: 42,
     height: 42,

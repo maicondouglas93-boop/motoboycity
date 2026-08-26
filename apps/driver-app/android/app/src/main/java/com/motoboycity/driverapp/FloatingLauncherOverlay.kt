@@ -20,7 +20,6 @@ import kotlin.math.roundToInt
 /** Bolha nativa, arrastavel, que apenas traz a MainActivity existente para frente. */
 class FloatingLauncherOverlay(private val context: Context) {
   private val windowManager = context.getSystemService(WindowManager::class.java)
-  private val size = context.dp(BUBBLE_SIZE_DP)
   private val edgeMargin = context.dp(EDGE_MARGIN_DP)
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
   private var view: ImageView? = null
@@ -29,11 +28,15 @@ class FloatingLauncherOverlay(private val context: Context) {
   fun isShown(): Boolean = view != null
 
   fun show(): Boolean {
-    if (view != null) return true
+    if (view != null) {
+      refreshBounds()
+      return true
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
       return false
     }
 
+    val size = bubbleSize()
     val availableArea = availableArea()
     val defaultY =
       availableArea.top +
@@ -55,8 +58,8 @@ class FloatingLauncherOverlay(private val context: Context) {
         PixelFormat.TRANSLUCENT,
       ).apply {
         gravity = Gravity.TOP or Gravity.START
-        x = if (rightSide) rightEdge(availableArea) else availableArea.left
-        y = clampY(FloatingShortcutStore.positionY(context, defaultY), availableArea)
+        x = if (rightSide) rightEdge(availableArea, size) else availableArea.left
+        y = clampY(FloatingShortcutStore.positionY(context, defaultY), availableArea, size)
       }
 
     val bubble =
@@ -97,14 +100,19 @@ class FloatingLauncherOverlay(private val context: Context) {
   fun refreshBounds() {
     val currentView = view ?: return
     val currentParams = params ?: return
+    val previousSize = currentParams.width.coerceAtLeast(1)
+    val size = bubbleSize()
     val availableArea = availableArea()
+    val rightSide = currentParams.x + previousSize / 2 >= availableArea.centerX()
+    currentParams.width = size
+    currentParams.height = size
     currentParams.x =
-      if (currentParams.x + size / 2 >= availableArea.centerX()) {
-        rightEdge(availableArea)
+      if (rightSide) {
+        rightEdge(availableArea, size)
       } else {
         availableArea.left
       }
-    currentParams.y = clampY(currentParams.y, availableArea)
+    currentParams.y = clampY(currentParams.y, availableArea, size)
     runCatching { windowManager.updateViewLayout(currentView, currentParams) }
   }
 
@@ -119,15 +127,18 @@ class FloatingLauncherOverlay(private val context: Context) {
       }
     // No Android 15+, a janela ainda precisa estar visivel no instante em que
     // o app e trazido para frente. Por isso ela so some depois do startActivity.
-    // DriverAppVisibility remove a bolha somente quando uma Activity realmente
-    // ficar visivel. Se o fabricante bloquear a abertura sem erro, o atalho
-    // continua disponivel para uma nova tentativa.
+    // DriverAppVisibility reavalia a bolha quando uma Activity realmente fica
+    // visivel. Ela permanece se o modo "app aberto" estiver habilitado; se o
+    // fabricante bloquear a abertura sem erro, continua disponivel.
     runCatching { context.startActivity(intent) }
   }
 
-  private fun rightEdge(area: Rect): Int = (area.right - size).coerceAtLeast(area.left)
+  private fun bubbleSize(): Int = context.dp(FloatingShortcutStore.sizeDp(context).toFloat())
 
-  private fun clampY(y: Int, area: Rect): Int =
+  private fun rightEdge(area: Rect, size: Int): Int =
+    (area.right - size).coerceAtLeast(area.left)
+
+  private fun clampY(y: Int, area: Rect, size: Int): Int =
     y.coerceIn(area.top, (area.bottom - size).coerceAtLeast(area.top))
 
   private fun availableArea(): Rect {
@@ -181,13 +192,14 @@ class FloatingLauncherOverlay(private val context: Context) {
           val deltaY = event.rawY - initialTouchY
           if (!dragging && (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop)) dragging = true
           if (dragging) {
+            val size = bubbleSize()
             val availableArea = availableArea()
             layoutParams.x =
               (initialX + deltaX.roundToInt()).coerceIn(
                 availableArea.left,
                 (availableArea.right - size).coerceAtLeast(availableArea.left),
               )
-            layoutParams.y = clampY(initialY + deltaY.roundToInt(), availableArea)
+            layoutParams.y = clampY(initialY + deltaY.roundToInt(), availableArea, size)
             runCatching { windowManager.updateViewLayout(touchedView, layoutParams) }
           }
           return true
@@ -211,10 +223,11 @@ class FloatingLauncherOverlay(private val context: Context) {
     }
 
     private fun settleOnEdge(touchedView: View) {
+      val size = bubbleSize()
       val availableArea = availableArea()
       val rightSide = layoutParams.x + size / 2 >= availableArea.centerX()
-      layoutParams.x = if (rightSide) rightEdge(availableArea) else availableArea.left
-      layoutParams.y = clampY(layoutParams.y, availableArea)
+      layoutParams.x = if (rightSide) rightEdge(availableArea, size) else availableArea.left
+      layoutParams.y = clampY(layoutParams.y, availableArea, size)
       FloatingShortcutStore.savePosition(context, rightSide, layoutParams.y)
       runCatching { windowManager.updateViewLayout(touchedView, layoutParams) }
     }
@@ -224,7 +237,6 @@ class FloatingLauncherOverlay(private val context: Context) {
     (value * resources.displayMetrics.density).roundToInt()
 
   companion object {
-    private const val BUBBLE_SIZE_DP = 64f
     private const val EDGE_MARGIN_DP = 12f
     private const val DEFAULT_VERTICAL_POSITION = 0.22f
   }

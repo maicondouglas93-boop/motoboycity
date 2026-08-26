@@ -53,6 +53,24 @@ NativeModules.OfferSession = {
   openOverlaySettings: jest.fn(() => Promise.resolve()),
 };
 
+NativeModules.FloatingShortcut = {
+  status: jest.fn(() =>
+    Promise.resolve({
+      enabled: false,
+      enabledWhenMinimized: false,
+      enabledWhenOpen: false,
+      sizeDp: 64,
+      keepScreenOn: false,
+      permissionGranted: true,
+    }),
+  ),
+  setEnabled: jest.fn(() => Promise.resolve()),
+  setEnabledWhenMinimized: jest.fn(() => Promise.resolve()),
+  setEnabledWhenOpen: jest.fn(() => Promise.resolve()),
+  setSizeDp: jest.fn(() => Promise.resolve()),
+  setKeepScreenOn: jest.fn(() => Promise.resolve()),
+};
+
 /**
  * Mapa.
  *

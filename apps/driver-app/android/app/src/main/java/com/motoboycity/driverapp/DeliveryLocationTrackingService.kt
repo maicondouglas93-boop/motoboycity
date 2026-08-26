@@ -379,8 +379,15 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private fun refreshFloatingShortcut() {
     val permissionGranted =
       Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+    val appVisible = DriverAppVisibility.isVisible()
+    val visibilityEnabled =
+      if (appVisible) {
+        FloatingShortcutStore.showWhenOpen(this) && !DriverAppVisibility.isOfferVisible()
+      } else {
+        FloatingShortcutStore.showWhenMinimized(this)
+      }
     val shouldShow =
-      FloatingShortcutStore.isEnabled(this) && permissionGranted && !DriverAppVisibility.isVisible()
+      permissionGranted && visibilityEnabled
     if (shouldShow) {
       floatingShortcut.show()
     } else {

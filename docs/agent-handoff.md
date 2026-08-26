@@ -7513,3 +7513,61 @@ concreto: validar backup/restore e a migration em copia restaurada de staging,
 testar rollback operacional e executar um smoke autenticado configurando duas
 empresas com politicas diferentes, emitindo manualmente apenas uma delas e
 confirmando bloqueio, sessao recusada e reativacao administrativa.
+
+## Atualizacao - 2026-08-26: controles do botao flutuante e da tela no Android
+
+A tela `Ajustes` do Driver App passou a oferecer quatro preferencias Android:
+mostrar o botao flutuante com o app minimizado, mostra-lo com o app aberto,
+ajustar seu tamanho entre 48 e 96 dp em passos de 4 dp e manter a tela ligada
+enquanto a `MainActivity` estiver aberta. O tamanho padrao continua 64 dp. A
+chave local antiga `enabled` agora representa o modo minimizado, preservando a
+escolha dos pilotos que ja tinham ativado o atalho; as opcoes novas nascem
+desligadas.
+
+O atalho continua existindo somente enquanto o motoboy esta online e o
+`DeliveryLocationTrackingService` esta ativo. Os dois modos de visibilidade
+sao independentes. Mesmo com `app aberto` habilitado, a bolha e removida sobre
+a `OfferActivity`, evitando cobrir o cartao nativo e seus botoes. A alteracao de
+tamanho e aplicada ao vivo, mantem o encaixe lateral e limita novamente a
+posicao aos limites uteis da tela. `Manter tela ligada` usa somente
+`FLAG_KEEP_SCREEN_ON`, e reaplica a preferencia local em cada `onResume`; ela
+nao acende a tela em segundo plano nem modifica a tela de bloqueio.
+
+Preferencias e posicao continuam somente em `SharedPreferences`, sem token ou
+dado operacional. Nao foi criada permissao, dependencia, API, schema,
+migration, servico ou notificacao: a implementacao reutiliza
+`SYSTEM_ALERT_WINDOW`, a ponte `FloatingShortcut` e o foreground service ja
+existentes. No iOS as secoes permanecem ocultas, pois o sistema nao oferece uma
+sobreposicao equivalente sobre outros aplicativos.
+
+Arquivos principais:
+`apps/driver-app/src/screens/SettingsScreen.tsx`,
+`apps/driver-app/src/lib/floatingShortcut.ts`,
+`apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/{FloatingShortcutStore,FloatingShortcutModule,FloatingLauncherOverlay,DriverAppVisibility,DeliveryLocationTrackingService,MainActivity}.kt`,
+o mock Jest e `__tests__/floatingShortcut.test.ts`.
+
+Validacoes aprovadas: teste focado da ponte com 6 casos; suite completa do
+Driver App com 15 suites e 92 testes; typecheck e lint na raiz cobrindo os oito
+workspaces; `:app:compileDebugKotlin` com target SDK 36; `git diff --check`.
+Nao houve instalacao nem smoke visual em aparelho real. Proximo passo concreto:
+em um Android fisico, testar as quatro combinacoes de app aberto/minimizado,
+arrastar e redimensionar a bolha nos dois lados, receber uma oferta com a bolha
+ativa, alternar online/offline, reiniciar o app e conferir o consumo de bateria
+com `Manter tela ligada`, incluindo ao menos um Xiaomi/HyperOS.
+
+## Atualizacao - 2026-08-26: APK de validacao pilot.7
+
+O Driver App foi promovido no codigo para `0.1.0-pilot.7`. Foi gerado e
+verificado um APK `debug` com `versionCode` 7 em
+`apps/driver-app/android/app/build/outputs/apk/debug/motoboycity-0.1.0-pilot.7-vc7-debug.apk`.
+O arquivo tem 166.511.963 bytes e SHA-256
+`E43DEA1435B5F7C4BAB7838B5395466C778761F0D7ACD807B881DC085D5640DF`;
+`aapt` confirmou pacote `com.motoboycity.driverapp`, `minSdk` 24 e `targetSdk`
+36, e `apksigner` confirmou APK Signature Scheme v2.
+
+O release com a chave oficial existente nao foi recriado: as quatro variaveis
+de assinatura nao estavam carregadas na sessao. Nenhuma chave foi substituida
+ou regenerada. Por usar a chave de debug, este APK serve para validacao com
+Metro e nao atualiza a instalacao oficial `pilot.6`. Proximo passo concreto:
+carregar as credenciais locais da chave oficial e executar `assembleRelease`
+com `versionCode` 7 antes de distribuir a versao aos pilotos.
