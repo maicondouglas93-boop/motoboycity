@@ -3,12 +3,17 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
+import type {
+  AdminOperationsResult,
+  DeliveryStatus,
+  OperationalDeliveryItem,
+} from '@motoboycity/types';
 import { io } from 'socket.io-client';
 import {
   AlertTriangle,
   Bike,
   Building2,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -16,11 +21,14 @@ import {
   ListFilter,
   MapPin,
   RadioTower,
+  RotateCcw,
   Route,
   Search,
   WalletCards,
   Wifi,
   WifiOff,
+  XCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { AdminPageHeader } from '@/components/layout/admin-page-header';
 import {
@@ -45,12 +53,13 @@ import {
   adminDriversApi,
   adminOperationsApi,
   adminPlatformSettingsApi,
+  adminReportsApi,
   baseUrl,
 } from '@/lib/api-client';
 import { formatRelativeTime } from '@/lib/format';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
-import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
+import { isDriverPresenceActivity, useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 import { operationTime } from '@/lib/operation-clock';
 import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-dialog';
 import { CompanyQueues } from '@/components/operations/company-queues';
@@ -70,7 +79,9 @@ const LIMITE_POR_FILA = 8;
 const filterStatuses = STATUS_OPTIONS.map((option) => option.value).filter(
   (status) => status !== 'COMPLETED',
 );
-const sectionStatuses: DeliveryStatus[] = [
+type SectionStatus = Exclude<DeliveryStatus, 'COMPLETED'>;
+
+const sectionStatuses: SectionStatus[] = [
   'SCHEDULED',
   'AWAITING_DRIVER',
   'ACCEPTED',
@@ -80,6 +91,63 @@ const sectionStatuses: DeliveryStatus[] = [
   'AWAITING_PAYMENT',
   'CANCELLED',
 ];
+
+/**
+ * Cada fila usa uma cor propria apenas para reconhecimento rapido. O status
+ * continua vindo da mesma fonte de verdade usada nos cards e nos filtros.
+ */
+const STATUS_QUEUE_VISUALS: Record<
+  SectionStatus,
+  { icon: LucideIcon; iconClass: string; iconSurfaceClass: string }
+> = {
+  SCHEDULED: {
+    icon: CalendarDays,
+    iconClass: 'text-blue-600',
+    iconSurfaceClass: 'bg-blue-50 ring-blue-100',
+  },
+  AWAITING_DRIVER: {
+    icon: Search,
+    iconClass: 'text-orange-600',
+    iconSurfaceClass: 'bg-orange-50 ring-orange-100',
+  },
+  ACCEPTED: {
+    icon: Bike,
+    iconClass: 'text-emerald-600',
+    iconSurfaceClass: 'bg-emerald-50 ring-emerald-100',
+  },
+  COLLECTED: {
+    icon: Route,
+    iconClass: 'text-violet-600',
+    iconSurfaceClass: 'bg-violet-50 ring-violet-100',
+  },
+  DELIVERED: {
+    icon: RotateCcw,
+    iconClass: 'text-indigo-600',
+    iconSurfaceClass: 'bg-indigo-50 ring-indigo-100',
+  },
+  FAILED: {
+    icon: AlertTriangle,
+    iconClass: 'text-rose-600',
+    iconSurfaceClass: 'bg-rose-50 ring-rose-100',
+  },
+  AWAITING_PAYMENT: {
+    icon: WalletCards,
+    iconClass: 'text-amber-600',
+    iconSurfaceClass: 'bg-amber-50 ring-amber-100',
+  },
+  CANCELLED: {
+    icon: XCircle,
+    iconClass: 'text-slate-500',
+    iconSurfaceClass: 'bg-slate-100 ring-slate-200',
+  },
+};
+
+function formatAverageDuration(minutes: number): string {
+  const totalMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(remainingMinutes).padStart(2, '0')}`;
+}
 
 function OperationRow({
   order,
@@ -203,10 +271,20 @@ function OperationRow({
 }
 
 type QueueMode = 'status' | 'company';
+type ActivityMode = 'operations' | 'presence' | 'all';
+
+interface DriverLocationRealtimeEvent {
+  driverId: string;
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  capturedAt: string;
+}
 
 export default function AdminDashboardPage() {
   const token = session.getToken();
   const [queueMode, setQueueMode] = useState<QueueMode>('status');
+  const [activityMode, setActivityMode] = useState<ActivityMode>('operations');
   const queryClient = useQueryClient();
   const { events, connected: activityConnected } = useAdminActivityFeed();
   const [query, setQuery] = useState('');
@@ -246,6 +324,22 @@ export default function AdminDashboardPage() {
   });
   const slaSettings = settingsQuery.data ?? null;
 
+  const operationDate = operationsQuery.data?.generatedAt
+    ? new Date(operationsQuery.data.generatedAt).toLocaleDateString('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+      })
+    : null;
+  const todayReportQuery = useQuery({
+    queryKey: ['admin', 'reports', 'operations', 'today', operationDate],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        from: operationDate as string,
+        to: operationDate as string,
+      }),
+    enabled: Boolean(token && operationDate),
+    refetchInterval: 60_000,
+  });
+
   const companiesQuery = useQuery({
     queryKey: ['admin', 'companies', 'operations-filter'],
     queryFn: () => adminCompaniesApi.list(token as string),
@@ -262,11 +356,54 @@ export default function AdminDashboardPage() {
     const socket = io(baseUrl, { auth: { token } });
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    const refresh = () => void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
-    socket.on('delivery:updated', refresh);
-    socket.on('driver:location', refresh);
-    socket.on('driver:presence', refresh);
-    socket.on('dispatch:queue-updated', refresh);
+    const refreshOperation = () =>
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
+    const refreshDelivery = () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['admin', 'reports', 'operations', 'today'],
+      });
+    };
+    const updateDriverLocation = (payload: DriverLocationRealtimeEvent) => {
+      if (
+        !payload?.driverId ||
+        !Number.isFinite(payload.lat) ||
+        !Number.isFinite(payload.lng) ||
+        !payload.capturedAt
+      ) {
+        return;
+      }
+
+      queryClient.setQueriesData<AdminOperationsResult>(
+        { queryKey: ['admin', 'operations'] },
+        (current) => {
+          if (!current?.onlineDrivers.some((driver) => driver.id === payload.driverId)) {
+            return current;
+          }
+          return {
+            ...current,
+            onlineDrivers: current.onlineDrivers.map((driver) =>
+              driver.id === payload.driverId
+                ? {
+                    ...driver,
+                    location: {
+                      ...driver.location,
+                      lat: payload.lat,
+                      lng: payload.lng,
+                      accuracy: payload.accuracy,
+                      capturedAt: payload.capturedAt,
+                    },
+                  }
+                : driver,
+            ),
+          };
+        },
+      );
+    };
+    socket.on('delivery:updated', refreshDelivery);
+    socket.on('driver:location', updateDriverLocation);
+    socket.on('driver:presence', refreshOperation);
+    socket.on('dispatch:queue-updated', refreshOperation);
     return () => {
       socket.disconnect();
     };
@@ -282,6 +419,16 @@ export default function AdminDashboardPage() {
   );
   const data = operationsQuery.data;
   const allOrders = useMemo(() => [...(data?.active ?? []), ...(data?.recent ?? [])], [data]);
+  const visibleActivityEvents = useMemo(
+    () =>
+      events.filter((event) => {
+        const isPresence = isDriverPresenceActivity(event);
+        if (activityMode === 'presence') return isPresence;
+        if (activityMode === 'operations') return !isPresence;
+        return true;
+      }),
+    [activityMode, events],
+  );
   const selectedOrder =
     selection?.kind === 'delivery'
       ? (allOrders.find((item) => item.id === selection.id) ?? null)
@@ -290,6 +437,84 @@ export default function AdminDashboardPage() {
     selection?.kind === 'driver'
       ? (data?.onlineDrivers.find((item) => item.id === selection.id) ?? null)
       : null;
+  const todayReport = todayReportQuery.data;
+  const completedToday = todayReport?.deliveriesCompleted.count ?? 0;
+  const finalizedToday =
+    todayReport?.drivers.reduce(
+      (total, driver) =>
+        total + driver.completedCount + driver.failedCount + driver.cancelledAfterAcceptCount,
+      0,
+    ) ?? 0;
+  const completionRate =
+    finalizedToday > 0 ? Math.round((completedToday / finalizedToday) * 100) : 0;
+  const timedSamples =
+    todayReport?.drivers.reduce((total, driver) => total + driver.timedSamples, 0) ?? 0;
+  const averageMinutes =
+    timedSamples > 0
+      ? (todayReport?.drivers.reduce(
+          (total, driver) => total + (driver.averageMinutesToComplete ?? 0) * driver.timedSamples,
+          0,
+        ) ?? 0) / timedSamples
+      : 0;
+  const operationUnavailable = operationsQuery.isError || operationsQuery.isPending;
+  const reportUnavailable = todayReportQuery.isError || todayReportQuery.isPending;
+  const operationMetrics: Array<{
+    label: string;
+    value: string;
+    hint: string;
+    icon: LucideIcon;
+    iconClass: string;
+    iconSurfaceClass: string;
+  }> = [
+    {
+      label: 'Pedidos ativos',
+      value: operationUnavailable ? '—' : String(data?.active.length ?? 0),
+      hint: operationUnavailable ? 'Dados indisponíveis' : 'Em operação agora',
+      icon: Bike,
+      iconClass: 'text-emerald-600',
+      iconSurfaceClass: 'bg-emerald-50 ring-emerald-100',
+    },
+    {
+      label: 'Motoboys online',
+      value: operationUnavailable ? '—' : String(data?.onlineDrivers.length ?? 0),
+      hint: operationUnavailable ? 'Dados indisponíveis' : 'Heartbeat válido',
+      icon: RadioTower,
+      iconClass: 'text-orange-600',
+      iconSurfaceClass: 'bg-orange-50 ring-orange-100',
+    },
+    {
+      label: 'Pedidos hoje',
+      value: reportUnavailable ? '—' : String(todayReport?.ordersCreated.count ?? 0),
+      hint: reportUnavailable ? 'Dados indisponíveis' : 'Total criado no dia',
+      icon: CalendarDays,
+      iconClass: 'text-violet-600',
+      iconSurfaceClass: 'bg-violet-50 ring-violet-100',
+    },
+    {
+      label: 'Taxa de conclusão',
+      value: reportUnavailable ? '—' : `${completionRate}%`,
+      hint: reportUnavailable
+        ? 'Dados indisponíveis'
+        : finalizedToday > 0
+          ? `${completedToday} de ${finalizedToday} encerrados`
+          : 'Sem corridas encerradas',
+      icon: Route,
+      iconClass: 'text-blue-600',
+      iconSurfaceClass: 'bg-blue-50 ring-blue-100',
+    },
+    {
+      label: 'Tempo médio de entrega',
+      value: reportUnavailable ? '—' : formatAverageDuration(averageMinutes),
+      hint: reportUnavailable
+        ? 'Dados indisponíveis'
+        : timedSamples > 0
+          ? `${timedSamples} entrega${timedSamples === 1 ? '' : 's'} na média`
+          : 'Sem entregas concluídas',
+      icon: Clock3,
+      iconClass: 'text-teal-600',
+      iconSurfaceClass: 'bg-teal-50 ring-teal-100',
+    },
+  ];
 
   if (!token)
     return <p className="text-sm text-muted-foreground">Faça login como administrador.</p>;
@@ -480,6 +705,8 @@ export default function AdminDashboardPage() {
                   const daFila = allOrders.filter((order) => order.status === status);
                   const orders = daFila.slice(0, LIMITE_POR_FILA);
                   const total = data?.counts[status] ?? daFila.length;
+                  const queueVisual = STATUS_QUEUE_VISUALS[status];
+                  const QueueIcon = queueVisual.icon;
                   // Quantos existem alem dos que couberam na lista. O distintivo
                   // sempre mostrou o total; sem esta conta, uma fila de 20
                   // exibia "20" e listava 8, sem dizer que escondeu 12.
@@ -491,7 +718,7 @@ export default function AdminDashboardPage() {
                   return (
                     <div
                       key={status}
-                      className="overflow-hidden rounded-xl border border-primary/10 bg-card/70"
+                      className="overflow-hidden rounded-xl border border-border/65 bg-card/75 shadow-[0_5px_16px_-15px_rgba(15,23,42,0.45)]"
                     >
                       <button
                         type="button"
@@ -504,19 +731,34 @@ export default function AdminDashboardPage() {
                             [status]: !collapsed,
                           }))
                         }
-                        className="flex w-full items-center justify-between gap-3 bg-admin-soft/55 px-3 py-2 text-left text-xs font-semibold text-admin-deep transition-colors hover:bg-admin-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary focus-visible:outline-none"
+                        className="flex w-full items-center gap-2.5 bg-slate-50/85 px-2.5 py-2 text-left text-xs font-semibold text-admin-deep transition-colors hover:bg-admin-soft/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary focus-visible:outline-none"
                       >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="grid size-5 shrink-0 place-items-center rounded-md bg-card/80 text-primary ring-1 ring-inset ring-primary/10">
-                            {collapsed ? (
-                              <ChevronRight className="size-3.5" aria-hidden="true" />
-                            ) : (
-                              <ChevronDown className="size-3.5" aria-hidden="true" />
-                            )}
-                          </span>
-                          <span className="truncate">{statusLabel(status)}</span>
+                        <span
+                          className={`grid size-6 shrink-0 place-items-center rounded-lg ring-1 ring-inset ${queueVisual.iconSurfaceClass}`}
+                        >
+                          <QueueIcon
+                            className={`size-3.5 ${queueVisual.iconClass}`}
+                            aria-hidden="true"
+                          />
                         </span>
-                        <Badge variant="secondary">{total}</Badge>
+                        <span className="min-w-0 flex-1 truncate">{statusLabel(status)}</span>
+                        <Badge
+                          variant="secondary"
+                          className="h-5 min-w-6 justify-center rounded-full bg-slate-200/80 px-1.5 text-[10px] tabular-nums text-slate-600"
+                        >
+                          {total}
+                        </Badge>
+                        {collapsed ? (
+                          <ChevronRight
+                            className="size-3.5 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <ChevronDown
+                            className="size-3.5 shrink-0 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        )}
                       </button>
                       <div id={contentId} hidden={collapsed}>
                         {orders.map((order) => (
@@ -551,27 +793,63 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
 
-        <div className="relative">
-          <div className="absolute top-3 right-3 z-10 flex rounded-xl border border-primary/15 bg-card/90 p-1 shadow-lg ring-1 ring-white/70 backdrop-blur-xl">
-            {(['orders', 'drivers', 'all'] as MapMode[]).map((item) => (
-              <Button
-                key={item}
-                type="button"
-                size="sm"
-                variant={mode === item ? 'default' : 'ghost'}
-                onClick={() => setMode(item)}
-              >
-                {item === 'orders' ? 'Pedidos' : item === 'drivers' ? 'Motoboys' : 'Todos'}
-              </Button>
-            ))}
+        <div className="space-y-3">
+          <div className="relative">
+            <div className="absolute top-3 right-3 z-10 flex rounded-xl border border-primary/15 bg-card/90 p-1 shadow-lg ring-1 ring-white/70 backdrop-blur-xl">
+              {(['orders', 'drivers', 'all'] as MapMode[]).map((item) => (
+                <Button
+                  key={item}
+                  type="button"
+                  size="sm"
+                  variant={mode === item ? 'default' : 'ghost'}
+                  onClick={() => setMode(item)}
+                >
+                  {item === 'orders' ? 'Pedidos' : item === 'drivers' ? 'Motoboys' : 'Todos'}
+                </Button>
+              ))}
+            </div>
+            <AdminOperationsMap
+              data={data}
+              mode={mode}
+              viewportKey={mapViewportKey}
+              selection={selection}
+              onSelect={selectMapItem}
+            />
           </div>
-          <AdminOperationsMap
-            data={data}
-            mode={mode}
-            viewportKey={mapViewportKey}
-            selection={selection}
-            onSelect={selectMapItem}
-          />
+
+          <Card className="premium-panel overflow-hidden py-0">
+            <CardContent className="grid grid-cols-2 gap-px bg-border/70 p-0 sm:grid-cols-3 xl:grid-cols-5">
+              {operationMetrics.map((metric) => {
+                const MetricIcon = metric.icon;
+                return (
+                  <div
+                    key={metric.label}
+                    className="flex min-w-0 items-center gap-2.5 bg-card px-3 py-3"
+                  >
+                    <span
+                      className={`grid size-9 shrink-0 place-items-center rounded-full ring-1 ring-inset ${metric.iconSurfaceClass}`}
+                    >
+                      <MetricIcon
+                        className={`size-[18px] ${metric.iconClass}`}
+                        aria-hidden="true"
+                      />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[10px] font-semibold text-muted-foreground">
+                        {metric.label}
+                      </span>
+                      <strong className="block text-lg leading-tight font-bold tracking-tight text-admin-deep tabular-nums">
+                        {metric.value}
+                      </strong>
+                      <span className="block truncate text-[9px] text-muted-foreground">
+                        {metric.hint}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
         </div>
 
         <div className="flex min-h-0 flex-col gap-4">
@@ -642,27 +920,63 @@ export default function AdminDashboardPage() {
           />
 
           <Card className="premium-panel min-h-0 flex-1 overflow-hidden">
-            <CardHeader className="py-3">
+            <CardHeader className="gap-2 py-3">
               <CardTitle className="text-sm">Atividade auditável</CardTitle>
+              <div
+                className="grid grid-cols-3 rounded-lg border border-border/70 bg-muted/55 p-1 text-[10px]"
+                aria-label="Filtrar atividade auditável"
+              >
+                {(
+                  [
+                    ['operations', 'Operação'],
+                    ['presence', 'Presença'],
+                    ['all', 'Tudo'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={activityMode === value}
+                    onClick={() => setActivityMode(value)}
+                    className={`rounded-md px-2 py-1.5 font-medium transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none ${
+                      activityMode === value
+                        ? 'bg-card text-admin-deep shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </CardHeader>
             <CardContent className="max-h-[420px] space-y-2 overflow-y-auto pt-0">
-              {events.map((event) => (
-                <div key={event.id} className="border-t pt-2 text-xs first:border-0 first:pt-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <span>{event.message}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatRelativeTime(event.at)}
-                    </span>
+              {visibleActivityEvents.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  Nenhum evento nesta categoria.
+                </p>
+              ) : (
+                visibleActivityEvents.map((event) => (
+                  <div key={event.id} className="border-t pt-2 text-xs first:border-0 first:pt-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <span>{event.message}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatRelativeTime(event.at)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex gap-2 text-primary">
+                      {event.deliveryId && (
+                        <Link href={`/pedidos/${event.deliveryId}`}>Pedido</Link>
+                      )}
+                      {event.companyId && (
+                        <Link href={`/clientes/${event.companyId}`}>Empresa</Link>
+                      )}
+                      {event.driverId && (
+                        <Link href={`/entregadores/${event.driverId}`}>Motoboy</Link>
+                      )}
+                    </div>
                   </div>
-                  <div className="mt-1 flex gap-2 text-primary">
-                    {event.deliveryId && <Link href={`/pedidos/${event.deliveryId}`}>Pedido</Link>}
-                    {event.companyId && <Link href={`/clientes/${event.companyId}`}>Empresa</Link>}
-                    {event.driverId && (
-                      <Link href={`/entregadores/${event.driverId}`}>Motoboy</Link>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </CardContent>
           </Card>
         </div>

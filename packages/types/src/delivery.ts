@@ -142,6 +142,16 @@ export interface DeliverySearchResult {
   total: number;
 }
 
+/** Agregados calculados no banco, sem transferir todo o historico ao cliente. */
+export interface DeliverySummaryResult {
+  totalCount: number;
+  counts: Partial<Record<DeliveryStatus, number>>;
+  totalValue: number;
+  completedTotalValue: number;
+  completedDriverValue: number;
+  completedPlatformValue: number;
+}
+
 export interface DeliveryDispatchAuditItem {
   id: string;
   offerId: string;

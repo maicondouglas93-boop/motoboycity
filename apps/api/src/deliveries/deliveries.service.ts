@@ -14,6 +14,7 @@ import type {
   CreateDeliveryPayload,
   DeliveryOperationsQuery,
   DeliveryStageTimesQuery,
+  DeliverySummaryQuery,
   MarkDeliveredPayload,
   MarkCollectedPayload,
   MarkFailedPayload,
@@ -24,6 +25,7 @@ import type {
   DeliveryOperationsResult,
   DeliveryStageTimesResult,
   DeliverySearchResult,
+  DeliverySummaryResult,
   OperationalDeliveryItem,
   OperationalActivityType,
 } from '@motoboycity/types';
@@ -972,6 +974,52 @@ export class DeliveriesService {
       page: filters.page,
       pageSize: filters.pageSize,
       total,
+    };
+  }
+
+  async summary(user: User, filters: DeliverySummaryQuery): Promise<DeliverySummaryResult> {
+    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Os filtros por entregador ou empresa sao restritos a administradores.',
+      );
+    }
+
+    const scope = await this.resolveListScope(user);
+    const where = this.buildDeliveryWhere(scope, filters);
+    const [statusGroups, totals, completedTotals] = await this.prisma.$transaction([
+      this.prisma.delivery.groupBy({
+        by: ['status'],
+        where,
+        orderBy: { status: 'asc' },
+        _count: { _all: true },
+      }),
+      this.prisma.delivery.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { totalValue: true },
+      }),
+      this.prisma.delivery.aggregate({
+        where: { ...where, status: 'COMPLETED' },
+        _sum: {
+          totalValue: true,
+          driverValue: true,
+          platformValue: true,
+        },
+      }),
+    ]);
+    const counts: Partial<Record<DeliveryStatus, number>> = {};
+    statusGroups.forEach((group) => {
+      counts[group.status] =
+        typeof group._count === 'object' && group._count !== null ? (group._count._all ?? 0) : 0;
+    });
+
+    return {
+      totalCount: totals._count._all,
+      counts,
+      totalValue: Number(totals._sum.totalValue ?? 0),
+      completedTotalValue: Number(completedTotals._sum.totalValue ?? 0),
+      completedDriverValue: Number(completedTotals._sum.driverValue ?? 0),
+      completedPlatformValue: Number(completedTotals._sum.platformValue ?? 0),
     };
   }
 

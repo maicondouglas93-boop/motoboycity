@@ -9,6 +9,7 @@ import type {
   DeliveryOperationsResult,
   DeliveryStageTimesResult,
   DeliverySearchResult,
+  DeliverySummaryResult,
   DeliveryStatus,
   MarkDeliveredPayload,
 } from '@motoboycity/types';
@@ -102,6 +103,27 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliverySearchResult>(response);
+    },
+
+    async summary(
+      accessToken: string,
+      filters?: {
+        driverId?: string;
+        companyId?: string;
+        from?: string;
+        to?: string;
+      },
+    ): Promise<DeliverySummaryResult> {
+      const params = new URLSearchParams();
+      if (filters?.driverId) params.set('driverId', filters.driverId);
+      if (filters?.companyId) params.set('companyId', filters.companyId);
+      if (filters?.from) params.set('from', filters.from);
+      if (filters?.to) params.set('to', filters.to);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await fetch(`${baseUrl}/deliveries/summary${query}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliverySummaryResult>(response);
     },
 
     async list(

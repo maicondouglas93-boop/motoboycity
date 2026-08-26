@@ -16,6 +16,7 @@ import {
   listDeliveriesQuerySchema,
   deliveryOperationsQuerySchema,
   searchDeliveriesQuerySchema,
+  deliverySummaryQuerySchema,
   deliveryStageTimesQuerySchema,
   type DeliveryStageTimesQuery,
   type CreateDeliveryPayload,
@@ -23,11 +24,13 @@ import {
   type ListDeliveriesQuery,
   type DeliveryOperationsQuery,
   type SearchDeliveriesQuery,
+  type DeliverySummaryQuery,
   type MarkDeliveredPayload,
 } from '@motoboycity/validation';
 import type {
   DeliveryOperationsResult,
   DeliverySearchResult,
+  DeliverySummaryResult,
   DeliveryStageTimesResult,
 } from '@motoboycity/types';
 import type { User } from '@prisma/client';
@@ -102,6 +105,14 @@ export class DeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliverySearchResult> {
     return this.deliveriesService.search(user, query);
+  }
+
+  @Get('summary')
+  summary(
+    @Query(new ZodValidationPipe(deliverySummaryQuerySchema)) query: DeliverySummaryQuery,
+    @CurrentUser() user: User,
+  ): Promise<DeliverySummaryResult> {
+    return this.deliveriesService.summary(user, query);
   }
 
   @Get(':id/group')

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Activity, ChevronDown } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/format';
-import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
+import { isDriverPresenceActivity, useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 
 /**
  * Painel flutuante de atividade.
@@ -25,6 +25,11 @@ import { useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
 export function LiveActivityWidget() {
   const { events, connected } = useAdminActivityFeed();
   const [open, setOpen] = useState(false);
+  const [showPresence, setShowPresence] = useState(false);
+  const visibleEvents = useMemo(
+    () => (showPresence ? events : events.filter((event) => !isDriverPresenceActivity(event))),
+    [events, showPresence],
+  );
 
   // Força um re-render periódico só pra manter "há Xs"/"há X min" atualizado
   // sem precisar de nenhum novo evento chegando.
@@ -86,10 +91,38 @@ export function LiveActivityWidget() {
 
         {open && (
           <CardContent className="max-h-56 space-y-2 overflow-y-auto p-3 text-xs">
-            {events.length === 0 ? (
-              <p className="text-muted-foreground">Nenhuma atividade ainda.</p>
+            <div className="grid grid-cols-2 rounded-lg bg-muted/65 p-1 text-[10px]">
+              <button
+                type="button"
+                aria-pressed={!showPresence}
+                onClick={() => setShowPresence(false)}
+                className={cn(
+                  'rounded-md px-2 py-1.5 font-medium transition-colors',
+                  !showPresence
+                    ? 'bg-card text-admin-deep shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Operação
+              </button>
+              <button
+                type="button"
+                aria-pressed={showPresence}
+                onClick={() => setShowPresence(true)}
+                className={cn(
+                  'rounded-md px-2 py-1.5 font-medium transition-colors',
+                  showPresence
+                    ? 'bg-card text-admin-deep shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Tudo
+              </button>
+            </div>
+            {visibleEvents.length === 0 ? (
+              <p className="text-muted-foreground">Nenhuma atividade nesta categoria.</p>
             ) : (
-              events.map((event) => (
+              visibleEvents.map((event) => (
                 <div
                   key={event.id}
                   className="flex items-start justify-between gap-2 border-t pt-2 first:border-t-0 first:pt-0"

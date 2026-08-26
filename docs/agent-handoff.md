@@ -7196,3 +7196,98 @@ sessao. Proximo passo concreto: abrir uma fatura personalizada em desktop e
 celular, testar empresa sem pedidos e falha de rede; depois seguir para os
 detalhes de empresa/entregador, onde ainda existem listas financeiras com
 estados de texto simples.
+
+## Atualizacao - 2026-08-25: filas e indicadores mais legiveis na Home do Admin
+
+A visao `Por status` das Filas operacionais recebeu uma apresentacao mais
+compacta para facilitar a leitura em uma coluna estreita. Cada etapa agora tem
+icone e cor de reconhecimento proprios, contador em formato de pilula e a seta
+de expansao alinhada a direita. As oito filas, as abas `Por status` e `Por
+empresa`, a abertura automatica de filas com pedidos, a selecao do pedido e os
+links para itens excedentes foram preservados.
+
+Abaixo do mapa foi adicionada uma faixa responsiva com cinco indicadores reais:
+pedidos ativos, motoboys online, pedidos criados hoje, taxa de conclusao e tempo
+medio de entrega. Os dois primeiros usam o panorama operacional ja carregado;
+os tres seguintes reutilizam `GET /admin/reports/operations` com o dia civil de
+Sao Paulo. A taxa considera somente corridas encerradas com entregador
+(concluidas, insucessos e cancelamentos depois do aceite), e o tempo medio e
+ponderado pela quantidade real de amostras de cada motoboy. Sem amostra o texto
+explica a ausencia; falha ou carregamento mostram traco, nunca zero falso.
+
+O relatorio do dia atualiza a cada minuto e tambem quando chega
+`delivery:updated`. Eventos frequentes de localizacao continuam invalidando
+somente o panorama operacional, evitando consultar o relatorio a cada ponto de
+GPS. A mudanca esta concentrada em
+`apps/admin-web/src/app/(app)/page.tsx`; nao houve novo endpoint, contrato,
+permissao, banco ou regra operacional. Validacoes executadas: Prettier,
+typecheck e lint do Admin Web, todos aprovados. O lint detectou inicialmente o
+uso impuro de `Date.now()` no render; a data passou a ser derivada de
+`generatedAt` devolvido pela API e a repeticao passou. As primeiras validacoes
+da etapa visual no sandbox tambem haviam sido bloqueadas pelo Windows ao ler
+`node_modules`; a repeticao autorizada fora do sandbox passou. O smoke visual
+autenticado permanece manual. Proximo passo concreto: conferir na Home a
+expansao de filas e a faixa abaixo do mapa em desktop e celular, validando
+contraste, quebra responsiva e numeros contra o relatorio do dia.
+
+## Atualizacao - 2026-08-25: realtime e atividade da Home sem consultas duplicadas
+
+O evento frequente `driver:location` da Home deixou de invalidar e buscar todo o
+panorama operacional. A posicao, precisao e horario do motoboy agora sao
+aplicados diretamente ao cache das consultas `admin/operations`; o refetch de
+30 segundos continua como reconciliacao de seguranca. Entrada/saida de
+motoboys, mudanca de pedido e reordenacao da fila continuam invalidando a
+consulta, pois alteram mais dados que uma coordenada.
+
+O feed de atividade passou a ser provido uma unica vez pelo layout autenticado.
+A Home e o botao flutuante antes abriam dois sockets e repetiam a consulta
+inicial; agora compartilham os mesmos 100 eventos e uma unica conexao. Na Home,
+o admin pode alternar entre `Operacao`, `Presenca` e `Tudo`; o padrao evita que
+eventos de online/offline escondam alteracoes de pedidos. O widget flutuante
+tambem abre em `Operacao` e permite incluir tudo quando necessario. Eventos de
+perda de localizacao continuam na operacao por serem alertas relevantes, nao
+simples mudancas de presenca.
+
+Arquivos funcionais: `apps/admin-web/src/app/(app)/page.tsx`,
+`apps/admin-web/src/app/(app)/layout.tsx`,
+`apps/admin-web/src/components/layout/live-activity-widget.tsx` e
+`apps/admin-web/src/lib/use-admin-activity-feed.tsx` (substitui o arquivo
+`.ts`). Nao houve alteracao de endpoint, contrato, permissao, banco ou regra de
+negocio. Validacoes executadas: Prettier, typecheck e lint do Admin Web, todos
+aprovados. O typecheck dentro do sandbox nao conseguiu seguir as junctions de
+`node_modules` no Windows; a repeticao autorizada fora do sandbox passou. O
+smoke autenticado continua manual. Proximo passo concreto: validar na Home um
+motoboy se deslocando sem requisicoes repetidas de `GET /admin/operations` e,
+depois, seguir para paginacao/resumos nos detalhes de empresa e entregador.
+
+## Atualizacao - 2026-08-25: detalhes de empresa e entregador sem historico ilimitado
+
+Os detalhes administrativos de empresa e entregador deixaram de baixar todo o
+historico de pedidos para calcular contagens e valores. Foi criado
+`GET /deliveries/summary`, com filtros opcionais de empresa, entregador e
+periodo, que agrega no PostgreSQL as contagens por status, o valor total e os
+valores concluidos da entrega, do motoboy e da plataforma. O endpoint reutiliza
+o mesmo escopo de `list/search`: filtros explicitos por empresa ou entregador
+continuam restritos ao administrador; empresa e motoboy sem filtro permanecem
+limitados ao proprio cadastro. Nao houve alteracao de schema, migration,
+persistencia ou regra financeira.
+
+O contrato foi adicionado em `packages/validation/src/deliveries/
+delivery-summary-query.schema.ts`, `packages/types/src/delivery.ts` e
+`packages/api-client/src/deliveries.ts`. Controller, service e testes foram
+atualizados em `apps/api/src/deliveries`. O detalhe da empresa usa o resumo para
+os indicadores e mantem a grade paginada existente. O detalhe do entregador
+passou de duas chamadas ilimitadas para um resumo e uma busca paginada, com 10,
+25 ou 50 pedidos por pagina. Indicadores de pedido e carteira mostram traco
+enquanto nao existe resposta e exibem erro recuperavel no resumo, evitando que
+falha de rede pareca zero real. O mesmo cuidado foi aplicado aos indicadores de
+fatura da empresa.
+
+Validacoes executadas: build de `@motoboycity/validation`; teste unitario focado
+de `DeliveriesService` com 99 testes aprovados; `pnpm typecheck` e `pnpm lint`
+na raiz, cobrindo os oito workspaces; `git diff --check` sem erro. As primeiras
+tentativas dentro do sandbox falharam somente porque o Windows bloqueou as
+junctions de `node_modules`; as repeticoes autorizadas fora do sandbox passaram.
+O smoke autenticado continua manual. Proximo passo concreto: paginar tambem a
+lista de faturas da empresa e o extrato de carteira do entregador, que ainda
+podem crescer sem limite, e validar visualmente os detalhes em desktop e celular.

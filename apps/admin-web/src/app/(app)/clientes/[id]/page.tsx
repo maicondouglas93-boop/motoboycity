@@ -24,6 +24,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { QueryState } from '@/components/ui/query-state';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi, adminInvoicesApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -65,9 +66,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     queryFn: () => adminCompaniesApi.detail(token as string, companyId),
     enabled: Boolean(token),
   });
-  const allOrdersQuery = useQuery({
-    queryKey: ['admin', 'company-deliveries', companyId],
-    queryFn: () => deliveriesApi.list(token as string, { companyId }),
+  const deliverySummaryQuery = useQuery({
+    queryKey: ['admin', 'company-deliveries', 'summary', companyId],
+    queryFn: () => deliveriesApi.summary(token as string, { companyId }),
     enabled: Boolean(token),
   });
   const ordersQuery = useQuery({
@@ -102,23 +103,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const totalOrders = ordersQuery.data?.total ?? 0;
   const totalOrderPages = Math.max(1, Math.ceil(totalOrders / orderPageSize));
 
-  const deliveryStats = useMemo(() => {
-    const deliveries = allOrdersQuery.data ?? [];
-    const completed = deliveries.filter((delivery) => delivery.status === 'COMPLETED');
-    return {
-      total: deliveries.length,
-      completed: completed.length,
-      cancelled: deliveries.filter((delivery) => delivery.status === 'CANCELLED').length,
-      // Em centavos inteiros. Somar dinheiro em float acumula sobra ao longo
-      // de centenas de entregas, e este e o numero que se olha antes de
-      // negociar preco com a loja.
-      totalValue: somarDinheiro(deliveries.map((delivery) => delivery.totalValue)),
-      platformValue: somarDinheiro(completed.map((delivery) => delivery.platformValue)),
-    };
-  }, [allOrdersQuery.data]);
-
   const invoiceStats = useMemo(() => {
-    const invoices = invoicesQuery.data ?? [];
+    const invoices = invoicesQuery.data;
+    if (!invoices) return null;
     return {
       total: somarDinheiro(invoices.map((invoice) => invoice.totalValue)),
       receivable: somarDinheiro(
@@ -138,6 +125,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   const company = companyQuery.data;
+  const deliverySummary = deliverySummaryQuery.data;
   const orders = ordersQuery.data?.items ?? [];
   const invoices = invoicesQuery.data ?? [];
   const firstVisibleOrder = totalOrders === 0 ? 0 : (orderPage - 1) * orderPageSize + 1;
@@ -188,12 +176,37 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </header>
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-            <StatCard label="Pedidos" value={String(deliveryStats.total)} />
-            <StatCard label="Concluídos" value={String(deliveryStats.completed)} />
-            <StatCard label="Cancelados" value={String(deliveryStats.cancelled)} />
-            <StatCard label="Valor dos pedidos" value={money(deliveryStats.totalValue)} />
-            <StatCard label="Faturas em aberto" value={money(invoiceStats.receivable)} />
+            <StatCard
+              label="Pedidos"
+              value={deliverySummary ? String(deliverySummary.totalCount) : '—'}
+            />
+            <StatCard
+              label="Concluídos"
+              value={deliverySummary ? String(deliverySummary.counts.COMPLETED ?? 0) : '—'}
+            />
+            <StatCard
+              label="Cancelados"
+              value={deliverySummary ? String(deliverySummary.counts.CANCELLED ?? 0) : '—'}
+            />
+            <StatCard
+              label="Valor dos pedidos"
+              value={deliverySummary ? money(deliverySummary.totalValue) : '—'}
+            />
+            <StatCard
+              label="Faturas em aberto"
+              value={invoiceStats ? money(invoiceStats.receivable) : '—'}
+            />
           </section>
+
+          {deliverySummaryQuery.isError && (
+            <QueryState
+              compact
+              kind="error"
+              title="Resumo dos pedidos indisponível"
+              description="Os indicadores foram ocultados para não parecerem zerados por engano."
+              onAction={() => void deliverySummaryQuery.refetch()}
+            />
+          )}
 
           <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <Card>
@@ -232,12 +245,18 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <CardTitle>Conferência financeira</CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <StatCard label="Total faturado no filtro" value={money(invoiceStats.total)} />
+                <StatCard
+                  label="Total faturado no filtro"
+                  value={invoiceStats ? money(invoiceStats.total) : '—'}
+                />
                 <StatCard
                   label="Receita da plataforma"
-                  value={money(deliveryStats.platformValue)}
+                  value={deliverySummary ? money(deliverySummary.completedPlatformValue) : '—'}
                 />
-                <StatCard label="Faturas encontradas" value={String(invoices.length)} />
+                <StatCard
+                  label="Faturas encontradas"
+                  value={invoiceStats ? String(invoices.length) : '—'}
+                />
               </CardContent>
             </Card>
           </section>

@@ -135,6 +135,8 @@ describe('DeliveriesService', () => {
     deliveryAddress: { findFirst: jest.Mock; updateMany: jest.Mock };
     businessHour: { findMany: jest.Mock };
     delivery: {
+      aggregate: jest.Mock;
+      count: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
       update: jest.Mock;
@@ -188,6 +190,8 @@ describe('DeliveriesService', () => {
       // padrao de quem nunca mexeu nisso.
       businessHour: { findMany: jest.fn().mockResolvedValue([]) },
       delivery: {
+        aggregate: jest.fn(),
+        count: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
@@ -1043,6 +1047,81 @@ describe('DeliveriesService', () => {
       expect(prisma.delivery.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { companyId: 'company-1', status: 'CANCELLED' } }),
       );
+    });
+  });
+
+  describe('summary', () => {
+    beforeEach(() => {
+      prisma.$transaction.mockImplementation(async (input: unknown) =>
+        Array.isArray(input)
+          ? Promise.all(input)
+          : (input as (transaction: typeof tx) => unknown)(tx),
+      );
+    });
+
+    it('agrega contagens e valores no escopo administrativo informado', async () => {
+      prisma.delivery.groupBy.mockResolvedValue([
+        { status: 'COMPLETED', _count: { _all: 4 } },
+        { status: 'CANCELLED', _count: { _all: 2 } },
+      ]);
+      prisma.delivery.aggregate
+        .mockResolvedValueOnce({
+          _count: { _all: 8 },
+          _sum: { totalValue: { toString: () => '123.45' } },
+        })
+        .mockResolvedValueOnce({
+          _sum: {
+            totalValue: { toString: () => '80.00' },
+            driverValue: { toString: () => '60.00' },
+            platformValue: { toString: () => '20.00' },
+          },
+        });
+
+      const result = await service.summary(adminUser, { companyId: 'company-1' });
+
+      expect(prisma.delivery.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { companyId: 'company-1' } }),
+      );
+      expect(prisma.delivery.aggregate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { companyId: 'company-1', status: 'COMPLETED' } }),
+      );
+      expect(result).toEqual({
+        totalCount: 8,
+        counts: { COMPLETED: 4, CANCELLED: 2 },
+        totalValue: 123.45,
+        completedTotalValue: 80,
+        completedDriverValue: 60,
+        completedPlatformValue: 20,
+      });
+    });
+
+    it('mantem empresa no proprio escopo quando nao ha filtro administrativo', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.groupBy.mockResolvedValue([]);
+      prisma.delivery.aggregate
+        .mockResolvedValueOnce({ _count: { _all: 0 }, _sum: { totalValue: null } })
+        .mockResolvedValueOnce({
+          _sum: { totalValue: null, driverValue: null, platformValue: null },
+        });
+
+      await expect(service.summary(companyUser, {})).resolves.toEqual({
+        totalCount: 0,
+        counts: {},
+        totalValue: 0,
+        completedTotalValue: 0,
+        completedDriverValue: 0,
+        completedPlatformValue: 0,
+      });
+      expect(prisma.delivery.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { companyId: 'company-1' } }),
+      );
+    });
+
+    it('recusa filtro explicito de empresa fora do perfil administrativo', async () => {
+      await expect(service.summary(companyUser, { companyId: 'company-1' })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.delivery.groupBy).not.toHaveBeenCalled();
     });
   });
 
