@@ -208,7 +208,7 @@ export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelec
   }, [data, mode, onSelect, ready, selection, viewportKey]);
 
   return (
-    <div className="premium-panel relative h-full min-h-[600px] overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">
+    <div className="premium-panel relative h-full min-h-[600px] w-full min-w-0 max-w-full overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">
       <div ref={containerRef} className="absolute inset-0" />
       {error && (
         <div className="absolute inset-0 grid place-items-center bg-muted p-8 text-center text-sm text-muted-foreground">

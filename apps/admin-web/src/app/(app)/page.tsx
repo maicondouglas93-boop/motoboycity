@@ -520,7 +520,7 @@ export default function AdminDashboardPage() {
     return <p className="text-sm text-muted-foreground">Faça login como administrador.</p>;
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <AdminPageHeader
         icon={RadioTower}
         eyebrow="Central operacional"
@@ -565,9 +565,9 @@ export default function AdminDashboardPage() {
           ninguem em silencio. Dentro de uma coluna ele passaria batido. */}
       <SilentDrivers />
 
-      <section className="grid min-h-[760px] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card className="premium-panel">
+      <section className="grid min-h-[760px] w-full min-w-0 grid-cols-[minmax(0,1fr)] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
+          <Card className="premium-panel min-w-0">
             <CardHeader className="py-3">
               <CardTitle className="text-sm">Filtros</CardTitle>
             </CardHeader>
@@ -582,7 +582,7 @@ export default function AdminDashboardPage() {
                 />
               </div>
               <select
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
                 value={companyId}
                 onChange={(event) => setCompanyId(event.target.value)}
               >
@@ -594,7 +594,7 @@ export default function AdminDashboardPage() {
                 ))}
               </select>
               <select
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
                 value={driverId}
                 onChange={(event) => setDriverId(event.target.value)}
               >
@@ -605,9 +605,9 @@ export default function AdminDashboardPage() {
                   </option>
                 ))}
               </select>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
                 {filterStatuses.map((status) => (
-                  <label key={status} className="flex items-start gap-2 text-xs">
+                  <label key={status} className="flex min-w-0 items-start gap-2 text-xs">
                     <Checkbox
                       checked={statuses.includes(status)}
                       onCheckedChange={(checked) =>
@@ -618,7 +618,7 @@ export default function AdminDashboardPage() {
                         )
                       }
                     />
-                    {statusLabel(status)}
+                    <span className="min-w-0 break-words leading-4">{statusLabel(status)}</span>
                   </label>
                 ))}
               </div>
@@ -793,7 +793,7 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <div className="relative">
             <div className="absolute top-3 right-3 z-10 flex rounded-xl border border-primary/15 bg-card/90 p-1 shadow-lg ring-1 ring-white/70 backdrop-blur-xl">
               {(['orders', 'drivers', 'all'] as MapMode[]).map((item) => (
@@ -852,7 +852,7 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-4">
+        <div className="flex min-h-0 min-w-0 flex-col gap-4">
           {(selectedOrder || selectedDriver) && (
             <Card className="border-primary/40">
               <CardContent className="space-y-2 pt-4 text-sm">

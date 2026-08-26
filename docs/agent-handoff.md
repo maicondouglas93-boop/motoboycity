@@ -7630,3 +7630,29 @@ Prisma e dependencias opcionais do Google Cloud (2 moderados e 3 altos). Nao
 houve smoke autenticado no navegador. Proximo passo concreto:
 expandir a cobertura para os formularios de login/cadastro, criacao de pedido
 em lote, faturamento e estados de erro/carregamento das paginas operacionais.
+
+## Atualizacao - 2026-08-26: contencao de largura da Home administrativa no mobile
+
+A Home do Admin Web podia nascer com a largura correta e ultrapassar a lateral
+da tela depois que empresas, motoboys e a operacao eram carregados. A grade
+principal usava uma coluna implicita `auto` abaixo de `2xl`, enquanto selects e
+os tres blocos operacionais ainda conservavam largura minima intrinseca. Uma
+opcao ou conteudo assincrono mais longo podia aumentar a faixa da grade e, por
+consequencia, alargar todos os cards da coluna de filtros.
+
+`apps/admin-web/src/app/(app)/page.tsx` agora usa uma faixa mobile explicita
+`minmax(0,1fr)`, aplica `min-w-0` ao contêiner e aos tres blocos da operacao e
+limita os selects a largura disponivel. As duas colunas de status tambem usam
+faixas que podem encolher e seus rotulos quebram linha dentro da propria
+celula. `AdminOperationsMap` recebeu a mesma contencao de largura para o Google
+Maps nao voltar a impor tamanho intrinseco depois de inicializar.
+
+Nao houve alteracao de API, contrato, autenticacao, consulta, realtime, regra
+operacional, dependencia ou desktop `2xl`. Typecheck e lint do Admin Web
+passaram. O build de producao passou com 37 rotas; a primeira tentativa isolada
+falhou somente porque o sandbox nao podia baixar as fontes Google ja usadas e
+passou ao repetir com rede. O navegador de teste integrado nao estava
+disponivel nesta sessao, portanto o smoke visual autenticado permanece manual.
+Proximo passo concreto: depois do deploy, abrir a Home em 360-430 px, aguardar
+empresas, motoboys, mapa e filas carregarem e confirmar que `scrollWidth`
+permanece igual a largura visivel e que o botao de atividade continua no canto.
