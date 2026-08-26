@@ -1157,7 +1157,9 @@ Regra atual em `America/Sao_Paulo`:
 
 - entrega concluída gera crédito pendente;
 - segunda-feira às 00:00 libera repasses vencidos;
-- segunda-feira às 00:05 fecha as faturas das empresas;
+- às 00:05 de cada dia, o job fecha somente os ciclos automáticos devidos para
+  cada empresa, conforme frequência e dia configurados;
+- empresas em modo manual são fechadas pelo admin quando ele decidir;
 - motoboy solicita saque somente na segunda-feira;
 - admin aprova e marca o PIX como pago manualmente;
 - admin marca a fatura como paga manualmente.
@@ -1172,22 +1174,23 @@ Confirme:
 4. pedido aparece como faturável, mas sem fatura antecipada;
 5. repetição de atualização não duplica dinheiro.
 
-### Na segunda-feira seguinte
+### No próximo fechamento configurado
 
-1. às 00:00, confirme liberação do crédito;
-2. no app, solicite um saque permitido;
-3. no admin `/financeiro/saques`, aprove;
+1. se for segunda-feira, às 00:00 confirme a liberação do crédito;
+2. se for segunda-feira, no app solicite um saque permitido;
+3. no admin `/financeiro/saques`, aprove o saque solicitado;
 4. realize o PIX fora da plataforma somente se for um teste financeiro
    autorizado; caso contrário, mantenha o valor fictício e não marque pago;
 5. registre referência e marque pago;
-6. às 00:05, confira a fatura em `/faturas`;
+6. para uma empresa automática, às 00:05 do dia configurado confira a fatura
+   em `/faturas`; para uma empresa manual, feche-a no detalhe administrativo;
 7. confira empresa, pedidos, total, parte do motoboy e plataforma;
 8. marque o pagamento manual conforme a evidência do piloto;
 9. confira todas as linhas do histórico.
 
 O ciclo completo com relógio controlado deve continuar sendo provado nos E2E
 isolados. Nunca mude o relógio do servidor de piloto nem edite datas/transações
-no banco para antecipar segunda-feira.
+no banco para antecipar o fechamento.
 
 ## 22. O que monitorar durante o piloto
 
@@ -1297,7 +1300,8 @@ Mesmo com o piloto aprovado, ainda faltam no mínimo:
 - testes mobile além do smoke único atual;
 - resolução ou aceitação formal dos advisories altos transitivos conhecidos;
 - backup automático, restore periódico e política de retenção;
-- homologação financeira na segunda-feira real;
+- homologação financeira na segunda-feira real para saque e na data de corte
+  configurada para cada empresa;
 - contratos e processo operacional com empresas e motoboys;
 - integração Aiqfome homologada, se for habilitada.
 
@@ -1355,7 +1359,9 @@ Mesmo com o piloto aprovado, ainda faltam no mínimo:
 - [ ] cache da carteira confere com ledger
 - [ ] segunda 00:00 validada
 - [ ] saque/aprovação/pagamento auditados
-- [ ] segunda 00:05 e fatura validados
+- [ ] fechamento automático configurado e fatura validados
+- [ ] fechamento manual por empresa validado
+- [ ] bloqueio por atraso e reativação administrativa validados
 - [ ] pagamento manual da empresa auditado
 
 ## 28. Ordem exata recomendada
@@ -1384,7 +1390,7 @@ Se você começar do estado atual, siga esta sequência sem pular etapas:
 20. executar lote;
 21. executar cancelamentos e falhas controladas;
 22. validar o financeiro imediato;
-23. validar o ciclo financeiro na segunda-feira;
+23. validar o saque na segunda-feira e cada política de fechamento configurada;
 24. revisar evidências e decidir ampliar, corrigir ou encerrar o piloto.
 
 Até o item 7, não existe artefato confiável para colocar na rua. Até o item

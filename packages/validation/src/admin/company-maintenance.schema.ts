@@ -16,6 +16,72 @@ export const adminUpdateCompanySchema = z.object({
   regionId: z.string().uuid('Selecione uma regiao valida.'),
 });
 
+const invoiceOverdueBlockAfterDaysSchema = z
+  .number()
+  .int('O prazo de bloqueio deve ser um numero inteiro de dias.')
+  .min(1, 'O bloqueio deve ocorrer depois de pelo menos 1 dia de atraso.')
+  .max(365, 'O prazo de bloqueio deve ser de no maximo 365 dias.')
+  .nullable();
+
+/**
+ * Politica financeira de uma unica empresa.
+ *
+ * Os campos impossiveis ficam literalmente nulos no contrato. Isso impede
+ * uma configuracao manual de carregar silenciosamente uma agenda antiga, ou
+ * uma agenda mensal manter ao mesmo tempo um dia da semana.
+ */
+export const adminUpdateCompanyBillingSettingsSchema = z.discriminatedUnion('invoiceClosingMode', [
+  z.object({
+    invoiceClosingMode: z.literal('MANUAL'),
+    invoiceClosingFrequency: z.null(),
+    invoiceClosingWeekday: z.null(),
+    invoiceClosingMonthDay: z.null(),
+    invoiceOverdueBlockAfterDays: invoiceOverdueBlockAfterDaysSchema,
+  }),
+  z
+    .object({
+      invoiceClosingMode: z.literal('AUTOMATIC'),
+      invoiceClosingFrequency: z.enum(['WEEKLY', 'MONTHLY']),
+      invoiceClosingWeekday: z.number().int().min(0).max(6).nullable(),
+      invoiceClosingMonthDay: z.number().int().min(1).max(31).nullable(),
+      invoiceOverdueBlockAfterDays: invoiceOverdueBlockAfterDaysSchema,
+    })
+    .superRefine((data, context) => {
+      if (data.invoiceClosingFrequency === 'WEEKLY') {
+        if (data.invoiceClosingWeekday === null) {
+          context.addIssue({
+            code: 'custom',
+            path: ['invoiceClosingWeekday'],
+            message: 'Escolha o dia da semana do fechamento.',
+          });
+        }
+        if (data.invoiceClosingMonthDay !== null) {
+          context.addIssue({
+            code: 'custom',
+            path: ['invoiceClosingMonthDay'],
+            message: 'Fechamento semanal nao usa dia do mes.',
+          });
+        }
+        return;
+      }
+
+      if (data.invoiceClosingMonthDay === null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['invoiceClosingMonthDay'],
+          message: 'Escolha o dia do mes do fechamento.',
+        });
+      }
+      if (data.invoiceClosingWeekday !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['invoiceClosingWeekday'],
+          message: 'Fechamento mensal nao usa dia da semana.',
+        });
+      }
+    }),
+]);
+
 export const adminCompanyAddressSchema = z
   .object({
     label: z.string().trim().max(80).optional(),
@@ -50,6 +116,9 @@ export const adminUpdateCompanyMemberSchema = z.object({
 });
 
 export type AdminUpdateCompanyPayload = z.infer<typeof adminUpdateCompanySchema>;
+export type AdminUpdateCompanyBillingSettingsPayload = z.infer<
+  typeof adminUpdateCompanyBillingSettingsSchema
+>;
 export type AdminCompanyAddressPayload = z.infer<typeof adminCompanyAddressSchema>;
 export type AdminCreateCompanyMemberPayload = z.infer<typeof adminCreateCompanyMemberSchema>;
 export type AdminUpdateCompanyMemberPayload = z.infer<typeof adminUpdateCompanyMemberSchema>;

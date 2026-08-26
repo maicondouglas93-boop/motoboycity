@@ -635,8 +635,8 @@ export interface CompanyFinancialPosition {
    */
   unbilled: { count: number; value: number };
   totalOpen: number;
-  /** Próxima segunda-feira, quando o fechamento semanal roda. */
-  nextClosingDate: string;
+  /** Proximo corte automatico; nulo quando o fechamento e manual. */
+  nextClosingDate: string | null;
 }
 
 /**
@@ -730,8 +730,8 @@ export interface CompanyUnbilledDeliveries {
   items: CompanyUnbilledDelivery[];
   count: number;
   total: number;
-  /** Proxima segunda: a data em que estes pedidos viram fatura. */
-  closingDate: string;
+  /** Proximo corte automatico; nulo quando o admin fecha manualmente. */
+  closingDate: string | null;
 }
 
 export interface InvoiceDetail extends InvoiceListItem {

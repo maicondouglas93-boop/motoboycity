@@ -14,7 +14,6 @@ import { MetricCard } from '@/components/finance/metric-card';
 import { ManualInvoiceDialog } from '@/components/finance/manual-invoice-dialog';
 import { ReceivablesAging } from '@/components/finance/receivables-aging';
 import { adminFinancialApi, adminInvoicesApi } from '@/lib/api-client';
-import { CloseInvoicesDialog } from '@/components/finance/close-invoices-dialog';
 import { formatarData, formatarNumero } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
 
@@ -25,25 +24,9 @@ const ROTULO_DO_STATUS: Record<InvoiceStatus, string> = {
   CANCELLED: 'Cancelada',
 };
 
-/** Segunda-feira no fuso da operação, que é quando o fechamento pode rodar. */
-function ehSegundaFeira(data: Date): boolean {
-  const diaEmSaoPaulo = data.toLocaleDateString('en-US', {
-    timeZone: 'America/Sao_Paulo',
-    weekday: 'short',
-  });
-  return diaEmSaoPaulo === 'Mon';
-}
-
-/** `AAAA-MM-DD` de hoje no fuso da operação. */
-function hojeNaOperacao(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-}
-
 export function FaturasTab({ token }: { token: string }) {
   const money = useMoney();
   const [statusFiltrado, setStatusFiltrado] = useState<InvoiceStatus | 'ALL'>('ALL');
-  /** Quantas faturas o ultimo fechamento gerou. `null` = ainda nao fechou. */
-  const [faturasGeradas, setFaturasGeradas] = useState<number | null>(null);
   const [faturaPersonalizada, setFaturaPersonalizada] = useState<{
     id: string;
     number: string;
@@ -65,8 +48,6 @@ export function FaturasTab({ token }: { token: string }) {
   const caixa = caixaQuery.data;
   const faturas = faturasQuery.data ?? [];
 
-  const hojeEhDiaDeFechar = ehSegundaFeira(new Date());
-
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden border-primary/20 bg-gradient-to-r from-primary/8 via-card to-card">
@@ -78,8 +59,8 @@ export function FaturasTab({ token }: { token: string }) {
             <div>
               <p className="font-heading font-semibold">Fatura personalizada</p>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Selecione uma empresa, escolha os pedidos concluidos e defina emissao e vencimento.
-                Os demais pedidos continuam aguardando o fechamento semanal.
+                Selecione uma empresa, escolha os pedidos concluídos e defina emissão e vencimento.
+                Os demais pedidos continuam aguardando a política configurada para a empresa.
               </p>
             </div>
           </div>
@@ -103,25 +84,15 @@ export function FaturasTab({ token }: { token: string }) {
         )}
       </Card>
 
-      {/*
-        Este bloco existe porque o fechamento aqui NÃO é por seleção de pedidos.
-        A regra do sistema é semanal e automática: roda toda segunda-feira a
-        partir das 00:05, cobrindo tudo que ficou aberto até o corte. O botão
-        manual é uma segunda chance para quando a rotina falha, e a própria API
-        recusa em qualquer outro dia.
-
-        Uma tela com caixinhas de seleção pareceria mais poderosa e prometeria
-        algo que o servidor não faz.
-      */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarClock aria-hidden className="size-4 text-dinheiro-nao-cobrado" />
-            Fechamento semanal
+            Fechamentos por empresa
           </CardTitle>
           <p className="text-sm font-normal text-muted-foreground">
-            As faturas fecham sozinhas toda segunda-feira, a partir das 00:05, juntando tudo que
-            ficou aberto na semana. O botão abaixo só serve se a rotina automática falhar.
+            Cada empresa pode fechar automaticamente por semana ou por mês, em seu próprio dia, ou
+            ficar em modo manual. A configuração e o fechamento manual ficam no detalhe do cliente.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -164,33 +135,10 @@ export function FaturasTab({ token }: { token: string }) {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <CloseInvoicesDialog
-              token={token}
-              dataDoFechamento={hojeNaOperacao()}
-              valorAFaturar={caixa?.unbilledValue ?? null}
-              entregasAFaturar={caixa?.unbilledCount ?? null}
-              desabilitado={!hojeEhDiaDeFechar}
-              onFechado={setFaturasGeradas}
-            />
-            {/*
-              O motivo do botão desligado fica escrito. Botão cinza sem
-              explicação faz o admin achar que o sistema travou.
-            */}
-            {!hojeEhDiaDeFechar && (
-              <p className="text-sm text-muted-foreground">
-                Disponível somente às segundas-feiras — é a regra de fechamento da operação.
-              </p>
-            )}
-          </div>
-
-          {faturasGeradas !== null && (
-            <p className="text-sm text-dinheiro-recebido">
-              {faturasGeradas === 0
-                ? 'Nada a fechar: nenhuma entrega em aberto até o corte.'
-                : `${formatarNumero(faturasGeradas)} fatura(s) gerada(s).`}
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            Abra Clientes, selecione a empresa e use Faturamento para ajustar a política. Empresas
+            em modo manual exibem a ação Fechar fatura agora.
+          </p>
         </CardContent>
       </Card>
 

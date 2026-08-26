@@ -27,7 +27,7 @@ export class FinancialPayoutProcessor extends WorkerHost {
       return;
     }
     if (job.name === CLOSE_COMPANY_INVOICES_JOB) {
-      await this.invoiceService.closeScheduledInvoices();
+      await this.invoiceService.processScheduledBilling();
       return;
     }
     this.logger.warn(`Job financeiro desconhecido: ${job.name}`);

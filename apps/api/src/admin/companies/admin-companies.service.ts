@@ -8,6 +8,7 @@ import type {
   AdminCreateCompanyMemberPayload,
   AdminUpdateCompanyMemberPayload,
   AdminUpdateCompanyPayload,
+  AdminUpdateCompanyBillingSettingsPayload,
   UpdateCompanyProfilePayload,
   UpsertCompanyAddressPayload,
 } from '@motoboycity/validation';
@@ -41,6 +42,15 @@ export interface AdminCompanyListItem {
 
 export interface AdminCompanyDetail extends AdminCompanyListItem {
   region: { id: string; name: string };
+  billingSettings: {
+    invoiceClosingMode: 'AUTOMATIC' | 'MANUAL';
+    invoiceClosingFrequency: 'WEEKLY' | 'MONTHLY' | null;
+    invoiceClosingWeekday: number | null;
+    invoiceClosingMonthDay: number | null;
+    invoiceOverdueBlockAfterDays: number | null;
+    lastAutomaticInvoiceClosingDate: string | null;
+    invoiceOverdueBlockedAt: string | null;
+  };
   addresses: Array<{
     id: string;
     label: string | null;
@@ -143,6 +153,16 @@ export class AdminCompaniesService {
     return {
       ...this.toListItem(company),
       region: company.region,
+      billingSettings: {
+        invoiceClosingMode: company.invoiceClosingMode,
+        invoiceClosingFrequency: company.invoiceClosingFrequency,
+        invoiceClosingWeekday: company.invoiceClosingWeekday,
+        invoiceClosingMonthDay: company.invoiceClosingMonthDay,
+        invoiceOverdueBlockAfterDays: company.invoiceOverdueBlockAfterDays,
+        lastAutomaticInvoiceClosingDate:
+          company.lastAutomaticInvoiceClosingDate?.toISOString().slice(0, 10) ?? null,
+        invoiceOverdueBlockedAt: company.invoiceOverdueBlockedAt?.toISOString() ?? null,
+      },
       addresses: company.addresses.map((address) => ({
         id: address.id,
         label: address.label,
@@ -195,6 +215,15 @@ export class AdminCompaniesService {
         },
         tx,
       );
+      await tx.companyStatusHistory.create({
+        data: {
+          companyId,
+          fromStatus: 'PENDING_APPROVAL',
+          toStatus: 'ACTIVE',
+          changedByUserId: approvedByUserId,
+          note: 'Empresa aprovada e liberada para operar.',
+        },
+      });
       return companyUpdated;
     });
 
@@ -344,7 +373,7 @@ export class AdminCompaniesService {
     await this.prisma.$transaction(async (tx) => {
       const updated = await tx.company.updateMany({
         where: { id: companyId, status: expectedStatus },
-        data: { status: nextStatus },
+        data: { status: nextStatus, invoiceOverdueBlockedAt: null },
       });
       if (updated.count !== 1) {
         throw new ConflictException(
@@ -361,6 +390,18 @@ export class AdminCompaniesService {
         },
         tx,
       );
+      await tx.companyStatusHistory.create({
+        data: {
+          companyId,
+          fromStatus: expectedStatus,
+          toStatus: nextStatus,
+          changedByUserId: actorUserId,
+          note:
+            nextStatus === 'ACTIVE'
+              ? 'Empresa reativada manualmente pelo administrador.'
+              : 'Empresa suspensa manualmente pelo administrador.',
+        },
+      });
     });
 
     if (nextStatus === 'SUSPENDED') {
@@ -458,6 +499,62 @@ export class AdminCompaniesService {
         tx,
       );
     });
+    return this.detail(companyId);
+  }
+
+  async updateBillingSettings(
+    companyId: string,
+    payload: AdminUpdateCompanyBillingSettingsPayload,
+    actorUserId: string,
+  ): Promise<AdminCompanyDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.findUnique({
+        where: { id: companyId },
+        select: {
+          invoiceClosingMode: true,
+          invoiceClosingFrequency: true,
+          invoiceClosingWeekday: true,
+          invoiceClosingMonthDay: true,
+        },
+      });
+      if (!company) throw new NotFoundException('Empresa nao encontrada.');
+
+      const scheduleChanged =
+        company.invoiceClosingMode !== payload.invoiceClosingMode ||
+        company.invoiceClosingFrequency !== payload.invoiceClosingFrequency ||
+        company.invoiceClosingWeekday !== payload.invoiceClosingWeekday ||
+        company.invoiceClosingMonthDay !== payload.invoiceClosingMonthDay;
+
+      await tx.company.update({
+        where: { id: companyId },
+        data: {
+          invoiceClosingMode: payload.invoiceClosingMode,
+          invoiceClosingFrequency: payload.invoiceClosingFrequency,
+          invoiceClosingWeekday: payload.invoiceClosingWeekday,
+          invoiceClosingMonthDay: payload.invoiceClosingMonthDay,
+          invoiceOverdueBlockAfterDays: payload.invoiceOverdueBlockAfterDays,
+          ...(scheduleChanged && { lastAutomaticInvoiceClosingDate: null }),
+        },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'COMPANY_BILLING_SETTINGS_UPDATED',
+          entityType: 'COMPANY',
+          entityId: companyId,
+          summary: 'Politica de fechamento e bloqueio financeiro da empresa atualizada.',
+          metadata: {
+            invoiceClosingMode: payload.invoiceClosingMode,
+            invoiceClosingFrequency: payload.invoiceClosingFrequency,
+            invoiceClosingWeekday: payload.invoiceClosingWeekday,
+            invoiceClosingMonthDay: payload.invoiceClosingMonthDay,
+            invoiceOverdueBlockAfterDays: payload.invoiceOverdueBlockAfterDays,
+          },
+        },
+        tx,
+      );
+    });
+
     return this.detail(companyId);
   }
 

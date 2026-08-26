@@ -54,9 +54,8 @@ export function ResumoTab({ token }: { token: string }) {
                 neutralizarZero
               />
               {/*
-                O cartao mais valioso desta tela: e o numero que a loja nao
-                conseguia saber. Antes ela so descobria o valor na segunda,
-                quando a fatura fechava.
+                O cartao mais valioso desta tela e o numero que a loja precisa
+                acompanhar antes de cada fechamento configurado.
               */}
               <MetricCard
                 label="Ainda não faturado"
@@ -88,13 +87,18 @@ export function ResumoTab({ token }: { token: string }) {
           </CardHeader>
           <CardContent>
             {/*
-              A regra semanal existe no sistema e era folclore para a loja: ela
-              via a fatura aparecer sem saber quando nem com o quê.
+              A política configurada precisa ficar explícita para a loja saber
+              quando os pedidos serão faturados.
             */}
             <p className="text-sm">
-              A próxima fatura fecha em{' '}
-              <strong>{formatarData(posicao.nextClosingDate)}</strong>, juntando os pedidos feitos
-              até lá.
+              {posicao.nextClosingDate ? (
+                <>
+                  A próxima fatura fecha em <strong>{formatarData(posicao.nextClosingDate)}</strong>
+                  , juntando os pedidos feitos até lá.
+                </>
+              ) : (
+                'O fechamento desta empresa é manual e será realizado pelo administrador.'
+              )}
             </p>
             {posicao.unbilled.count > 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">

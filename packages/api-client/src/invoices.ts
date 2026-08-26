@@ -71,13 +71,13 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       return parseJsonOrThrow<InvoiceDetail>(response);
     },
 
-    async close(accessToken: string, issueDate: string): Promise<InvoiceListItem[]> {
+    async close(accessToken: string, companyId: string): Promise<InvoiceListItem> {
       const response = await fetch(`${baseUrl}/admin/financial/invoices/close`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issueDate }),
+        body: JSON.stringify({ companyId }),
       });
-      return parseJsonOrThrow<InvoiceListItem[]>(response);
+      return parseJsonOrThrow<InvoiceListItem>(response);
     },
 
     async manualCandidates(

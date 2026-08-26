@@ -5,7 +5,7 @@ import { InvoiceService } from './invoice.service';
 
 describe('InvoiceService', () => {
   const tx = {
-    company: { findUnique: jest.fn() },
+    company: { findUnique: jest.fn(), findFirst: jest.fn(), updateMany: jest.fn() },
     delivery: { findMany: jest.fn(), updateMany: jest.fn() },
     invoice: {
       create: jest.fn(),
@@ -14,17 +14,23 @@ describe('InvoiceService', () => {
       updateMany: jest.fn(),
     },
     invoiceStatusHistory: { create: jest.fn() },
+    companyStatusHistory: { create: jest.fn() },
   };
   // `getListItem` roda FORA da transacao, relendo a fatura recem-criada.
   const prisma = {
     $transaction: jest.fn(),
-    company: { findUnique: jest.fn() },
+    company: { findUnique: jest.fn(), findMany: jest.fn() },
     delivery: { findMany: jest.fn() },
     invoice: { findUnique: jest.fn(), findMany: jest.fn() },
     companyTeamMember: { findFirst: jest.fn() },
   };
   const clock = { now: jest.fn() };
-  const service = new InvoiceService(prisma as never, clock as FinancialClock);
+  const realtimeGateway = { disconnectUser: jest.fn() };
+  const service = new InvoiceService(
+    prisma as never,
+    clock as FinancialClock,
+    realtimeGateway as never,
+  );
   const admin = { id: 'admin-1' } as User;
 
   beforeEach(() => {
@@ -34,6 +40,8 @@ describe('InvoiceService', () => {
     );
     tx.delivery.findMany.mockResolvedValue([]);
     tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+    tx.company.findFirst.mockResolvedValue({ id: 'empresa-1' });
+    tx.company.updateMany.mockResolvedValue({ count: 1 });
     tx.invoice.create.mockResolvedValue({ id: 'fatura-1' });
     tx.invoice.findMany.mockResolvedValue([]);
     tx.invoice.findUnique.mockResolvedValue({
@@ -49,6 +57,16 @@ describe('InvoiceService', () => {
       tradeName: 'Loja Teste',
       document: '12345678000199',
     });
+    prisma.company.findMany.mockResolvedValue([
+      {
+        id: 'empresa-1',
+        invoiceClosingMode: 'AUTOMATIC',
+        invoiceClosingFrequency: 'WEEKLY',
+        invoiceClosingWeekday: 1,
+        invoiceClosingMonthDay: null,
+        lastAutomaticInvoiceClosingDate: null,
+      },
+    ]);
     prisma.delivery.findMany.mockResolvedValue([]);
     tx.company.findUnique.mockResolvedValue({
       id: 'empresa-1',
@@ -73,13 +91,45 @@ describe('InvoiceService', () => {
     });
   });
 
-  it('recusa antecipar o fechamento manual antes do corte confirmado', async () => {
-    clock.now.mockReturnValue(new Date('2026-08-24T03:04:59.000Z'));
+  it('recusa o fechamento avulso de uma empresa configurada como automatica', async () => {
+    clock.now.mockReturnValue(new Date('2026-08-26T15:00:00.000Z'));
+    tx.company.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.closeOpenInvoices(admin, { issueDate: '2026-08-24' }),
+      service.closeOpenInvoices(admin, { companyId: 'empresa-1' }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('fecha uma empresa manual em qualquer dia e sem alcancar outras empresas', async () => {
+    const now = new Date('2026-08-26T15:00:00.000Z');
+    clock.now.mockReturnValue(now);
+    tx.delivery.findMany.mockResolvedValue([
+      {
+        id: 'entrega-1',
+        totalValue: 12.5,
+        driverValue: 9.2,
+        platformValue: 3.3,
+      },
+    ]);
+
+    await service.closeOpenInvoices(admin, { companyId: 'empresa-1' });
+
+    expect(tx.delivery.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'empresa-1',
+          statusChangedAt: { lte: now },
+        }),
+      }),
+    );
+    expect(tx.invoice.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        companyId: 'empresa-1',
+        issueDate: new Date('2026-08-26T00:00:00.000Z'),
+        dueDate: new Date('2026-08-26T00:00:00.000Z'),
+      }),
+    });
   });
 
   it('recupera no boot o último corte vencido e usa 00:05 de São Paulo como limite', async () => {
@@ -163,6 +213,68 @@ describe('InvoiceService', () => {
     expect(tx.invoice.create.mock.calls[0]?.[0].data).toEqual(
       expect.objectContaining({ totalValue: 0.3, driverValueSum: 0.09, platformValueSum: 0.21 }),
     );
+  });
+
+  it('nao processa novamente o mesmo ciclo automatico', async () => {
+    prisma.company.findMany.mockResolvedValue([
+      {
+        id: 'empresa-1',
+        invoiceClosingMode: 'AUTOMATIC',
+        invoiceClosingFrequency: 'WEEKLY',
+        invoiceClosingWeekday: 1,
+        invoiceClosingMonthDay: null,
+        lastAutomaticInvoiceClosingDate: new Date('2026-08-24T00:00:00.000Z'),
+      },
+    ]);
+
+    await expect(
+      service.closeScheduledInvoices(new Date('2026-08-26T12:00:00.000Z')),
+    ).resolves.toEqual([]);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia e desconecta a empresa exatamente no prazo configurado', async () => {
+    prisma.company.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'empresa-1',
+        invoiceOverdueBlockAfterDays: 3,
+        teamMembers: [{ userId: 'owner-1' }, { userId: 'operator-1' }],
+      },
+    ]);
+    prisma.invoice.findMany.mockResolvedValue([]);
+    tx.company.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.processScheduledBilling(new Date('2026-08-26T12:00:00.000Z'));
+
+    expect(tx.company.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'empresa-1',
+        status: 'ACTIVE',
+        invoiceOverdueBlockAfterDays: 3,
+        invoices: {
+          some: {
+            status: 'OVERDUE',
+            dueDate: { lte: new Date('2026-08-23T00:00:00.000Z') },
+          },
+        },
+      },
+      data: {
+        status: 'SUSPENDED',
+        invoiceOverdueBlockedAt: new Date('2026-08-26T12:00:00.000Z'),
+      },
+    });
+    expect(tx.companyStatusHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        companyId: 'empresa-1',
+        fromStatus: 'ACTIVE',
+        toStatus: 'SUSPENDED',
+        changedByUserId: null,
+      }),
+    });
+    expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-1');
+    expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('operator-1');
+    expect(result.blockedCompanyIds).toEqual(['empresa-1']);
   });
 
   describe('fatura personalizada', () => {

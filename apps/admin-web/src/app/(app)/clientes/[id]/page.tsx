@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
+import type { AdminCompanyDetail, DeliveryStatus, InvoiceStatus } from '@motoboycity/types';
 import {
   AlertCircle,
   ArrowUpRight,
@@ -17,6 +17,8 @@ import {
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { CompanyStatusDialog } from '@/components/companies/company-status-dialog';
 import { EditCompanyDialog } from '@/components/companies/edit-company-dialog';
+import { BillingSettingsDialog } from '@/components/companies/billing-settings-dialog';
+import { ManualCompanyInvoiceDialog } from '@/components/companies/manual-company-invoice-dialog';
 import {
   CompanyAddressesManager,
   CompanyMembersManager,
@@ -47,6 +49,24 @@ const invoiceStatusLabel: Record<InvoiceStatus, string> = {
 };
 
 const ORDER_PAGE_SIZES = [10, 25, 50] as const;
+const WEEKDAY_LABELS = [
+  'domingo',
+  'segunda-feira',
+  'terça-feira',
+  'quarta-feira',
+  'quinta-feira',
+  'sexta-feira',
+  'sábado',
+];
+
+function billingScheduleLabel(company: AdminCompanyDetail): string {
+  const settings = company.billingSettings;
+  if (settings.invoiceClosingMode === 'MANUAL') return 'Manual pelo administrador';
+  if (settings.invoiceClosingFrequency === 'MONTHLY') {
+    return `Automático mensal, dia ${settings.invoiceClosingMonthDay ?? 1}`;
+  }
+  return `Automático semanal, ${WEEKDAY_LABELS[settings.invoiceClosingWeekday ?? 1]}`;
+}
 
 function formatDate(value: string | null): string {
   return value ? dateFormatter.format(new Date(value)) : '—';
@@ -170,6 +190,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               >
                 {companyStatusLabel[company.status] ?? company.status}
               </Badge>
+              {company.billingSettings.invoiceClosingMode === 'MANUAL' && (
+                <ManualCompanyInvoiceDialog company={company} token={token} />
+              )}
+              <BillingSettingsDialog company={company} token={token} />
               <EditCompanyDialog company={company} token={token} />
               <CompanyStatusDialog company={company} token={token} />
             </div>
@@ -236,6 +260,18 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     {company.owner
                       ? `${company.owner.name} · ${company.owner.email}`
                       : 'Não identificado'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Fechamento de fatura</p>
+                  <p>{billingScheduleLabel(company)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Bloqueio por atraso</p>
+                  <p>
+                    {company.billingSettings.invoiceOverdueBlockAfterDays === null
+                      ? 'Desabilitado'
+                      : `Após ${company.billingSettings.invoiceOverdueBlockAfterDays} dia(s)`}
                   </p>
                 </div>
               </CardContent>

@@ -16,6 +16,7 @@ import type {
   AdminCompanyAddressPayload,
   AdminCreateCompanyMemberPayload,
   AdminUpdateCompanyMemberPayload,
+  AdminUpdateCompanyBillingSettingsPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
@@ -103,6 +104,19 @@ export function createAdminCompaniesApi({ baseUrl }: AdminCompaniesApiConfig) {
       payload: AdminUpdateCompanyPayload,
     ): Promise<AdminCompanyDetail> {
       const response = await fetch(`${baseUrl}/admin/companies/${companyId}`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminCompanyDetail>(response);
+    },
+
+    async updateBillingSettings(
+      accessToken: string,
+      companyId: string,
+      payload: AdminUpdateCompanyBillingSettingsPayload,
+    ): Promise<AdminCompanyDetail> {
+      const response = await fetch(`${baseUrl}/admin/companies/${companyId}/billing-settings`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

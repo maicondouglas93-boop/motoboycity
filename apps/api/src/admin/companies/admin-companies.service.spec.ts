@@ -24,6 +24,7 @@ describe('AdminCompaniesService', () => {
     };
     user: { update: jest.Mock };
     region: { findMany: jest.Mock };
+    companyStatusHistory: { create: jest.Mock };
     $transaction: jest.Mock;
   };
   let authService: { replacePassword: jest.Mock };
@@ -46,6 +47,7 @@ describe('AdminCompaniesService', () => {
       },
       user: { update: jest.fn() },
       region: { findMany: jest.fn() },
+      companyStatusHistory: { create: jest.fn() },
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (operation: (tx: typeof prisma) => unknown) =>
@@ -282,7 +284,7 @@ describe('AdminCompaniesService', () => {
 
       expect(prisma.company.updateMany).toHaveBeenCalledWith({
         where: { id: 'company-1', status: 'ACTIVE' },
-        data: { status: 'SUSPENDED' },
+        data: { status: 'SUSPENDED', invoiceOverdueBlockedAt: null },
       });
       expect(realtimeGateway.disconnectUser).toHaveBeenCalledTimes(2);
       expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-user-1');
@@ -299,6 +301,40 @@ describe('AdminCompaniesService', () => {
         ConflictException,
       );
       expect(prisma.company.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('atualiza a politica financeira e reinicia o marcador quando a agenda muda', async () => {
+      prisma.company.findUnique.mockResolvedValue({
+        invoiceClosingMode: 'AUTOMATIC',
+        invoiceClosingFrequency: 'WEEKLY',
+        invoiceClosingWeekday: 1,
+        invoiceClosingMonthDay: null,
+      });
+      jest.spyOn(service, 'detail').mockResolvedValue({ id: 'company-1' } as never);
+
+      await service.updateBillingSettings(
+        'company-1',
+        {
+          invoiceClosingMode: 'AUTOMATIC',
+          invoiceClosingFrequency: 'MONTHLY',
+          invoiceClosingWeekday: null,
+          invoiceClosingMonthDay: 31,
+          invoiceOverdueBlockAfterDays: 10,
+        },
+        'admin-1',
+      );
+
+      expect(prisma.company.update).toHaveBeenCalledWith({
+        where: { id: 'company-1' },
+        data: {
+          invoiceClosingMode: 'AUTOMATIC',
+          invoiceClosingFrequency: 'MONTHLY',
+          invoiceClosingWeekday: null,
+          invoiceClosingMonthDay: 31,
+          invoiceOverdueBlockAfterDays: 10,
+          lastAutomaticInvoiceClosingDate: null,
+        },
+      });
     });
   });
 

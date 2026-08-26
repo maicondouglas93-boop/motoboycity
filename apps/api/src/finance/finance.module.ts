@@ -19,9 +19,10 @@ import { FinancialPayoutProcessor, FINANCE_QUEUE } from './financial-payout.proc
 import { FinancialPayoutService } from './financial-payout.service';
 import { FinancialReleaseScheduler } from './financial-release.scheduler';
 import { AdminWithdrawalController, DriverWithdrawalController } from './withdrawal.controller';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: FINANCE_QUEUE })],
+  imports: [BullModule.registerQueue({ name: FINANCE_QUEUE }), RealtimeModule],
   controllers: [
     DriverWalletController,
     AdminFinancialController,

@@ -1,4 +1,19 @@
 export type CompanyStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED';
+export type InvoiceClosingMode = 'AUTOMATIC' | 'MANUAL';
+export type InvoiceClosingFrequency = 'WEEKLY' | 'MONTHLY';
+
+export interface AdminCompanyBillingSettings {
+  invoiceClosingMode: InvoiceClosingMode;
+  invoiceClosingFrequency: InvoiceClosingFrequency | null;
+  /** 0 = domingo .. 6 = sabado. */
+  invoiceClosingWeekday: number | null;
+  /** 1..31; meses curtos usam o ultimo dia civil disponivel. */
+  invoiceClosingMonthDay: number | null;
+  /** Nulo significa que o bloqueio automatico por atraso esta desabilitado. */
+  invoiceOverdueBlockAfterDays: number | null;
+  lastAutomaticInvoiceClosingDate: string | null;
+  invoiceOverdueBlockedAt: string | null;
+}
 
 export interface CompanyProfile {
   companyId: string;
@@ -33,6 +48,7 @@ export interface AdminCompanyListItem {
 
 export interface AdminCompanyDetail extends AdminCompanyListItem {
   region: { id: string; name: string };
+  billingSettings: AdminCompanyBillingSettings;
   addresses: Array<{
     id: string;
     label: string | null;

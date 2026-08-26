@@ -14,6 +14,7 @@ function agregado(count: number, total: number | null) {
 describe('CompanyFinancialService.position', () => {
   let service: CompanyFinancialService;
   let prisma: {
+    company: { findUniqueOrThrow: jest.Mock };
     companyTeamMember: { findFirst: jest.Mock };
     invoice: { aggregate: jest.Mock; findFirst: jest.Mock };
     delivery: { aggregate: jest.Mock; findMany: jest.Mock };
@@ -24,6 +25,14 @@ describe('CompanyFinancialService.position', () => {
 
   beforeEach(async () => {
     prisma = {
+      company: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          invoiceClosingMode: 'AUTOMATIC',
+          invoiceClosingFrequency: 'WEEKLY',
+          invoiceClosingWeekday: 1,
+          invoiceClosingMonthDay: null,
+        }),
+      },
       companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'empresa-1' }) },
       invoice: {
         aggregate: jest.fn().mockResolvedValue(agregado(0, null)),
@@ -129,6 +138,19 @@ describe('CompanyFinancialService.position', () => {
     expect(posicao.nextClosingDate).toBe('2026-08-31');
   });
 
+  it('nao promete data quando a empresa usa fechamento manual', async () => {
+    prisma.company.findUniqueOrThrow.mockResolvedValue({
+      invoiceClosingMode: 'MANUAL',
+      invoiceClosingFrequency: null,
+      invoiceClosingWeekday: null,
+      invoiceClosingMonthDay: null,
+    });
+
+    await expect(service.position(lojista)).resolves.toEqual(
+      expect.objectContaining({ nextClosingDate: null }),
+    );
+  });
+
   it('só conta como "sem fatura" pedido concluído e faturado', async () => {
     // Pedido pago online nunca vira fatura: incluí-lo faria a loja ver dívida
     // por algo que ela já pagou.
@@ -149,6 +171,7 @@ describe('CompanyFinancialService.position', () => {
 describe('CompanyFinancialService.unbilledDeliveries', () => {
   let service: CompanyFinancialService;
   let prisma: {
+    company: { findUniqueOrThrow: jest.Mock };
     companyTeamMember: { findFirst: jest.Mock };
     delivery: { findMany: jest.Mock };
   };
@@ -169,6 +192,14 @@ describe('CompanyFinancialService.unbilledDeliveries', () => {
 
   beforeEach(async () => {
     prisma = {
+      company: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          invoiceClosingMode: 'AUTOMATIC',
+          invoiceClosingFrequency: 'WEEKLY',
+          invoiceClosingWeekday: 1,
+          invoiceClosingMonthDay: null,
+        }),
+      },
       companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'empresa-1' }) },
       delivery: { findMany: jest.fn().mockResolvedValue([]) },
     };
@@ -372,9 +403,7 @@ describe('CompanyFinancialService.summary', () => {
   });
 
   it('nomeia a modalidade mais usada', async () => {
-    prisma.delivery.groupBy.mockResolvedValue([
-      { serviceTypeId: 'srv-1', _count: { _all: 7 } },
-    ]);
+    prisma.delivery.groupBy.mockResolvedValue([{ serviceTypeId: 'srv-1', _count: { _all: 7 } }]);
 
     const resumo = await service.summary(lojista, periodo);
 

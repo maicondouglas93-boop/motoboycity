@@ -7451,3 +7451,65 @@ arquivos foram conferidos pelo mesmo hash. O APK ainda nao foi instalado nesta
 sessao. Proximo passo concreto: instalar sobre o pilot.5 e testar, em aparelho
 real, encerramento offline com destino conhecido, destino por GPS, retorno,
 kill/reabertura e sincronizacao depois de recuperar a internet.
+
+## Atualizacao - 2026-08-26: politicas de faturamento por empresa
+
+O faturamento deixou de usar um unico fechamento global. Cada empresa agora
+possui `invoiceClosingMode` manual ou automatico. No automatico, a frequencia
+pode ser semanal, com dia da semana de 0 a 6, ou mensal, com dia de 1 a 31; nos
+meses curtos, os dias 29, 30 e 31 sao ajustados para o ultimo dia civil. O job
+`daily-company-billing` roda diariamente as 00:05 de `America/Sao_Paulo`,
+calcula o ultimo ciclo devido por empresa e reserva
+`lastAutomaticInvoiceClosingDate` dentro de transacao serializavel. A reserva e
+feita mesmo quando nao existem pedidos, impedindo repeticao do mesmo ciclo em
+boot, retry ou depois do cancelamento de uma fatura.
+
+Empresas existentes recebem os defaults `AUTOMATIC`, `WEEKLY` e segunda-feira,
+preservando o comportamento anterior. O modo manual limpa frequencia e dias; o
+admin pode fechar a empresa em qualquer dia pelo detalhe de Clientes, e a API
+confirma novamente que ela continua em modo manual. O endpoint existente de
+fechamento passou a receber `companyId` e retorna uma unica fatura. A emissao e
+o vencimento continuam na mesma data civil. A criacao de fatura personalizada,
+com selecao de pedidos e datas, foi preservada como fluxo separado.
+
+O admin ganhou `PUT /admin/companies/:id/billing-settings`, validacao Zod,
+contratos compartilhados e um formulario para modo, frequencia, dia e prazo de
+bloqueio. O detalhe da empresa mostra a politica e oferece `Fechar fatura
+agora` somente em modo manual. O Company Web passou a exibir a proxima data da
+politica automatica ou informar que o fechamento e manual. O dialogo global de
+fechamento semanal foi removido para nao atingir empresas com politicas
+diferentes.
+
+`invoiceOverdueBlockAfterDays` aceita de 1 a 365 dias; nulo mantem o bloqueio
+desativado, inclusive para todas as empresas existentes. A rotina diaria marca
+faturas vencidas por data civil de Sao Paulo e suspende uma empresa `ACTIVE`
+quando alguma fatura atinge o limite. A transicao grava
+`CompanyStatusHistory` com autor de sistema nulo, preenche
+`invoiceOverdueBlockedAt` e desconecta os membros ativos. Pagamento nao reativa
+automaticamente: o admin precisa reativar, e transicoes manuais tambem ficam no
+historico. Enquanto a divida permanecer no limite, uma empresa reativada sera
+suspensa novamente no proximo processamento diario.
+
+O schema e a migration aditiva estao em `apps/api/prisma/schema.prisma` e
+`apps/api/prisma/migrations/20260826100000_company_billing_policies/`. A
+migration foi gerada com `prisma migrate diff`, sem conexao nem aplicacao em
+banco. Foram atualizados os modulos financeiros e administrativos da API, os
+contratos em `packages/{validation,types,api-client}`, o detalhe de Clientes e
+Faturas do Admin Web, as telas financeiras do Company Web, as regras de negocio
+e o runbook do piloto.
+
+Validacoes aprovadas: `prisma validate`; build de
+`@motoboycity/validation`; `pnpm typecheck` e `pnpm lint` nos oito workspaces;
+suite unitaria completa da API com 67 suites e 817 testes; builds de producao
+da API, Admin Web e Company Web; `git diff --check`. Os testes novos cobrem
+payloads condicionais, fechamento manual por empresa em qualquer dia,
+idempotencia do ciclo, dias semanais arbitrarios, meses curtos e ano bissexto,
+empresa manual sem proxima data e bloqueio exatamente no limite com historico
+e desconexao.
+
+E2E e aplicacao da migration nao foram executados porque exigem PostgreSQL e
+Redis isolados. Tambem nao houve smoke autenticado no navegador. Proximo passo
+concreto: validar backup/restore e a migration em copia restaurada de staging,
+testar rollback operacional e executar um smoke autenticado configurando duas
+empresas com politicas diferentes, emitindo manualmente apenas uma delas e
+confirmando bloqueio, sessao recusada e reativacao administrativa.

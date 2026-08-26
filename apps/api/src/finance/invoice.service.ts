@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type {
@@ -16,11 +17,12 @@ import type {
 import { Prisma, type User } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { FinancialClock } from './financial-clock.service';
 import {
   dateInSaoPaulo,
   invoiceClosingCutoff,
-  latestInvoiceClosingDateInSaoPaulo,
+  latestInvoiceClosingDateForPolicyInSaoPaulo,
 } from './finance-release.utils';
 import { civilDateFromDbDate } from '../common/sao-paulo-time';
 
@@ -73,6 +75,20 @@ interface ManualInvoiceDeliveryRow {
   serviceType: { name: string };
 }
 
+interface CompanyInvoicePolicy {
+  id: string;
+  invoiceClosingMode: 'AUTOMATIC' | 'MANUAL';
+  invoiceClosingFrequency: 'WEEKLY' | 'MONTHLY' | null;
+  invoiceClosingWeekday: number | null;
+  invoiceClosingMonthDay: number | null;
+  lastAutomaticInvoiceClosingDate: Date | null;
+}
+
+export interface BillingAutomationResult {
+  invoices: InvoiceListItem[];
+  blockedCompanyIds: string[];
+}
+
 export interface InvoiceDetail extends InvoiceListItem {
   deliveries: Array<{
     id: string;
@@ -118,41 +134,71 @@ function sumMoney(values: ReadonlyArray<{ toString(): string } | null>): number 
 
 @Injectable()
 export class InvoiceService {
+  private readonly logger = new Logger(InvoiceService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: FinancialClock,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
-  async closeOpenInvoices(admin: User, payload: CloseInvoicesPayload): Promise<InvoiceListItem[]> {
-    const issueDate = this.dateOnly(payload.issueDate);
-    if (issueDate.getUTCDay() !== 1) {
-      throw new ConflictException(
-        'O fechamento de faturas só pode ser realizado em uma segunda-feira.',
-      );
-    }
-    const cutoff = invoiceClosingCutoff(payload.issueDate);
-    if (cutoff.getTime() > this.clock.now().getTime()) {
-      throw new ConflictException(
-        'O fechamento não pode ser antecipado; aguarde segunda-feira às 00:05.',
-      );
-    }
-
-    return this.closeInvoices({
-      issueDate: payload.issueDate,
-      cutoff,
+  async closeOpenInvoices(admin: User, payload: CloseInvoicesPayload): Promise<InvoiceListItem> {
+    const now = this.clock.now();
+    const invoice = await this.closeCompanyInvoice({
+      companyId: payload.companyId,
+      issueDate: dateInSaoPaulo(now),
+      cutoff: now,
       changedByUserId: admin.id,
       automatic: false,
     });
+    if (!invoice) {
+      throw new ConflictException(
+        'A empresa nao possui pedidos concluidos e faturaveis para fechar agora.',
+      );
+    }
+    return invoice;
   }
 
   async closeScheduledInvoices(now = this.clock.now()): Promise<InvoiceListItem[]> {
-    const issueDate = latestInvoiceClosingDateInSaoPaulo(now);
-    return this.closeInvoices({
-      issueDate,
-      cutoff: invoiceClosingCutoff(issueDate),
-      changedByUserId: null,
-      automatic: true,
+    const companies = await this.prisma.company.findMany({
+      where: { invoiceClosingMode: 'AUTOMATIC' },
+      select: {
+        id: true,
+        invoiceClosingMode: true,
+        invoiceClosingFrequency: true,
+        invoiceClosingWeekday: true,
+        invoiceClosingMonthDay: true,
+        lastAutomaticInvoiceClosingDate: true,
+      },
     });
+
+    const invoices: InvoiceListItem[] = [];
+    for (const company of companies) {
+      const issueDate = latestInvoiceClosingDateForPolicyInSaoPaulo(now, company);
+      if (!issueDate) continue;
+      const lastClosingDate = company.lastAutomaticInvoiceClosingDate
+        ? civilDateFromDbDate(company.lastAutomaticInvoiceClosingDate)
+        : null;
+      if (lastClosingDate && lastClosingDate >= issueDate) continue;
+
+      const invoice = await this.closeCompanyInvoice({
+        companyId: company.id,
+        issueDate,
+        cutoff: invoiceClosingCutoff(issueDate),
+        changedByUserId: null,
+        automatic: true,
+        policy: company,
+      });
+      if (invoice) invoices.push(invoice);
+    }
+    return invoices;
+  }
+
+  async processScheduledBilling(now = this.clock.now()): Promise<BillingAutomationResult> {
+    const invoices = await this.closeScheduledInvoices(now);
+    await this.refreshOverdueInvoices(now);
+    const blockedCompanyIds = await this.blockOverdueCompanies(now);
+    return { invoices, blockedCompanyIds };
   }
 
   async listManualCandidates(query: ManualInvoiceEligibleQuery): Promise<ManualInvoiceCandidate[]> {
@@ -226,29 +272,62 @@ export class InvoiceService {
     return this.getDetail(invoiceId);
   }
 
-  private async closeInvoices(input: {
+  private async closeCompanyInvoice(input: {
+    companyId: string;
     issueDate: string;
     cutoff: Date;
     changedByUserId: string | null;
     automatic: boolean;
-  }): Promise<InvoiceListItem[]> {
+    policy?: CompanyInvoicePolicy;
+  }): Promise<InvoiceListItem | null> {
     const issueDate = this.dateOnly(input.issueDate);
 
     /**
      * A fatura vence NO DIA em que e emitida. E regra do negocio, nao descuido.
      *
-     * O ciclo inteiro cabe na segunda-feira: o corte roda 00:05, a fatura nasce
-     * com vencimento no mesmo dia, e a loja paga ao longo do expediente. Como o
+     * O ciclo cabe no dia configurado: o corte roda 00:05, a fatura nasce com
+     * vencimento no mesmo dia, e a loja paga ao longo do expediente. Como o
      * `refreshOverdueInvoices` compara com `dueDate < hoje`, ela so vira
-     * OVERDUE na terca de madrugada — ou seja, um dia util cheio para pagar.
+     * OVERDUE no dia seguinte — ou seja, um dia civil cheio para pagar.
      *
      * Se algum dia existir prazo, ele vira configuracao e passa por aqui. Ate
      * la, isto NAO e um `dueDate` esquecido esperando conserto.
      */
     const dueDate = issueDate;
-    const invoiceIds = await this.prisma.$transaction(async (tx) => {
+    const invoiceId = await this.serializableTransaction(async (tx) => {
+      if (input.automatic) {
+        const policy = input.policy;
+        if (!policy) throw new Error('Politica automatica ausente no fechamento.');
+        const reserved = await tx.company.updateMany({
+          where: {
+            id: input.companyId,
+            invoiceClosingMode: 'AUTOMATIC',
+            invoiceClosingFrequency: policy.invoiceClosingFrequency,
+            invoiceClosingWeekday: policy.invoiceClosingWeekday,
+            invoiceClosingMonthDay: policy.invoiceClosingMonthDay,
+            OR: [
+              { lastAutomaticInvoiceClosingDate: null },
+              { lastAutomaticInvoiceClosingDate: { lt: issueDate } },
+            ],
+          },
+          data: { lastAutomaticInvoiceClosingDate: issueDate },
+        });
+        if (reserved.count !== 1) return null;
+      } else {
+        const manualCompany = await tx.company.findFirst({
+          where: { id: input.companyId, invoiceClosingMode: 'MANUAL' },
+          select: { id: true },
+        });
+        if (!manualCompany) {
+          throw new ConflictException(
+            'O fechamento avulso so pode ser usado em uma empresa configurada como manual.',
+          );
+        }
+      }
+
       const deliveries = await tx.delivery.findMany({
         where: {
+          companyId: input.companyId,
           status: 'COMPLETED',
           paymentMethod: 'BILLED',
           invoiceId: null,
@@ -259,66 +338,59 @@ export class InvoiceService {
         },
         select: {
           id: true,
-          companyId: true,
           totalValue: true,
           driverValue: true,
           platformValue: true,
         },
       });
 
-      const byCompany = new Map<string, typeof deliveries>();
-      for (const delivery of deliveries) {
-        const group = byCompany.get(delivery.companyId) ?? [];
-        group.push(delivery);
-        byCompany.set(delivery.companyId, group);
+      if (deliveries.length === 0) return null;
+
+      const invoice = await tx.invoice.create({
+        data: {
+          companyId: input.companyId,
+          number: this.invoiceNumber(input.issueDate),
+          issueDate,
+          dueDate,
+          totalValue: sumMoney(deliveries.map((delivery) => delivery.totalValue)),
+          driverValueSum: sumMoney(deliveries.map((delivery) => delivery.driverValue)),
+          platformValueSum: sumMoney(deliveries.map((delivery) => delivery.platformValue)),
+        },
+      });
+
+      const linked = await tx.delivery.updateMany({
+        where: {
+          id: { in: deliveries.map((delivery) => delivery.id) },
+          companyId: input.companyId,
+          status: 'COMPLETED',
+          paymentMethod: 'BILLED',
+          invoiceId: null,
+        },
+        data: { invoiceId: invoice.id },
+      });
+      if (linked.count !== deliveries.length) {
+        throw new ConflictException(
+          'Um ou mais pedidos ja foram faturados em outra solicitacao. Atualize a lista e tente novamente.',
+        );
       }
 
-      const ids: string[] = [];
-      for (const [companyId, companyDeliveries] of byCompany) {
-        const invoice = await tx.invoice.create({
-          data: {
-            companyId,
-            number: this.invoiceNumber(input.issueDate),
-            issueDate,
-            dueDate,
-            totalValue: sumMoney(companyDeliveries.map((delivery) => delivery.totalValue)),
-            driverValueSum: sumMoney(companyDeliveries.map((delivery) => delivery.driverValue)),
-            platformValueSum: sumMoney(companyDeliveries.map((delivery) => delivery.platformValue)),
-          },
-        });
-
-        const linked = await tx.delivery.updateMany({
-          where: {
-            id: { in: companyDeliveries.map((delivery) => delivery.id) },
-            status: 'COMPLETED',
-            paymentMethod: 'BILLED',
-            invoiceId: null,
-          },
-          data: { invoiceId: invoice.id },
-        });
-        if (linked.count !== companyDeliveries.length) {
-          throw new ConflictException(
-            'Um ou mais pedidos já foram faturados em outra solicitação. Atualize a lista e tente novamente.',
-          );
-        }
-
-        await tx.invoiceStatusHistory.create({
-          data: {
-            invoiceId: invoice.id,
-            fromStatus: null,
-            toStatus: 'PENDING',
-            changedByUserId: input.changedByUserId,
-            note: input.automatic
-              ? `Fechamento automático semanal de ${companyDeliveries.length} pedido(s).`
-              : `Fechamento financeiro manual de ${companyDeliveries.length} pedido(s).`,
-          },
-        });
-        ids.push(invoice.id);
-      }
-      return ids;
+      const periodicity =
+        input.policy?.invoiceClosingFrequency === 'MONTHLY' ? 'mensal' : 'semanal';
+      await tx.invoiceStatusHistory.create({
+        data: {
+          invoiceId: invoice.id,
+          fromStatus: null,
+          toStatus: 'PENDING',
+          changedByUserId: input.changedByUserId,
+          note: input.automatic
+            ? `Fechamento automatico ${periodicity} de ${deliveries.length} pedido(s).`
+            : `Fechamento financeiro manual de ${deliveries.length} pedido(s).`,
+        },
+      });
+      return invoice.id;
     });
 
-    return Promise.all(invoiceIds.map((invoiceId) => this.getListItem(invoiceId)));
+    return invoiceId ? this.getListItem(invoiceId) : null;
   }
 
   async markPaid(
@@ -686,8 +758,8 @@ export class InvoiceService {
    * chamar isto antes pode ver uma fatura ja vencida ainda como pendente, e o
    * caixa mostraria zero atrasado com dinheiro atrasado de verdade.
    */
-  async refreshOverdueInvoices(): Promise<void> {
-    const now = this.dateOnly(dateInSaoPaulo(this.clock.now()));
+  async refreshOverdueInvoices(referenceTime = this.clock.now()): Promise<void> {
+    const now = this.dateOnly(dateInSaoPaulo(referenceTime));
     const overdue = await this.prisma.invoice.findMany({
       where: { status: 'PENDING', dueDate: { lt: now } },
       select: { id: true },
@@ -706,12 +778,93 @@ export class InvoiceService {
               invoiceId: invoice.id,
               fromStatus: 'PENDING',
               toStatus: 'OVERDUE',
-              note: 'Vencimento ultrapassado; atualização automática na consulta financeira.',
+              note: 'Vencimento ultrapassado; atualização automática da rotina financeira.',
             },
           });
         }
       }
     });
+  }
+
+  private async blockOverdueCompanies(now: Date): Promise<string[]> {
+    const candidates = await this.prisma.company.findMany({
+      where: { status: 'ACTIVE', invoiceOverdueBlockAfterDays: { not: null } },
+      select: {
+        id: true,
+        invoiceOverdueBlockAfterDays: true,
+        teamMembers: { where: { active: true }, select: { userId: true } },
+      },
+    });
+
+    const blockedCompanyIds: string[] = [];
+    const today = dateInSaoPaulo(now);
+    for (const company of candidates) {
+      const blockAfterDays = company.invoiceOverdueBlockAfterDays;
+      if (blockAfterDays === null) continue;
+      const overdueCutoff = this.shiftCivilDate(today, -blockAfterDays);
+
+      const blocked = await this.serializableTransaction(async (tx) => {
+        const updated = await tx.company.updateMany({
+          where: {
+            id: company.id,
+            status: 'ACTIVE',
+            invoiceOverdueBlockAfterDays: blockAfterDays,
+            invoices: {
+              some: {
+                status: 'OVERDUE',
+                dueDate: { lte: overdueCutoff },
+              },
+            },
+          },
+          data: { status: 'SUSPENDED', invoiceOverdueBlockedAt: now },
+        });
+        if (updated.count !== 1) return false;
+
+        await tx.companyStatusHistory.create({
+          data: {
+            companyId: company.id,
+            fromStatus: 'ACTIVE',
+            toStatus: 'SUSPENDED',
+            changedByUserId: null,
+            note: `Bloqueio automatico por fatura vencida ha pelo menos ${blockAfterDays} dia(s).`,
+          },
+        });
+        return true;
+      });
+
+      if (!blocked) continue;
+      blockedCompanyIds.push(company.id);
+      for (const member of company.teamMembers) {
+        this.realtimeGateway.disconnectUser(member.userId);
+      }
+      this.logger.warn(`Empresa ${company.id} suspensa automaticamente por inadimplencia.`);
+    }
+
+    return blockedCompanyIds;
+  }
+
+  private async serializableTransaction<T>(
+    operation: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code: unknown }).code)
+            : null;
+        if (code !== 'P2034' || attempt === 3) throw error;
+      }
+    }
+    throw new Error('Transacao serializavel esgotou as tentativas.');
+  }
+
+  private shiftCivilDate(value: string, days: number): Date {
+    const [year = 0, month = 1, day = 1] = value.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + days));
   }
 
   private async resolveCompanyId(user: User): Promise<string> {

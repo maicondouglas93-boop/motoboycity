@@ -28,6 +28,7 @@ import {
   adminCompanyAddressSchema,
   adminCreateCompanyMemberSchema,
   adminUpdateCompanyMemberSchema,
+  adminUpdateCompanyBillingSettingsSchema,
   type ChangeAdminPasswordPayload,
   type CreateAdminCompanyPayload,
   type ListCompaniesQuery,
@@ -37,6 +38,7 @@ import {
   type AdminCompanyAddressPayload,
   type AdminCreateCompanyMemberPayload,
   type AdminUpdateCompanyMemberPayload,
+  type AdminUpdateCompanyBillingSettingsPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -127,6 +129,16 @@ export class AdminCompaniesController {
     @CurrentUser() admin: User,
   ): Promise<AdminCompanyDetail> {
     return this.adminCompaniesService.updateCompany(id, body, admin.id);
+  }
+
+  @Put(':id/billing-settings')
+  updateBillingSettings(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminUpdateCompanyBillingSettingsSchema))
+    body: AdminUpdateCompanyBillingSettingsPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminCompanyDetail> {
+    return this.adminCompaniesService.updateBillingSettings(id, body, admin.id);
   }
 
   @Post(':id/addresses')

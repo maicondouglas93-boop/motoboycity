@@ -8,15 +8,17 @@ import {
 
 describe('contratos de data das faturas', () => {
   it('aceita datas civis existentes', () => {
-    expect(closeInvoicesSchema.safeParse({ issueDate: '2028-02-29' }).success).toBe(true);
+    expect(
+      closeInvoicesSchema.safeParse({ companyId: '6dfcd2be-3c0b-4d6c-9eb5-f7ef8bdd875a' }).success,
+    ).toBe(true);
     expect(
       markInvoicePaidSchema.safeParse({ paymentDate: '2026-08-24', paymentMethod: 'BILLED' })
         .success,
     ).toBe(true);
   });
 
-  it('rejeita datas inexistentes em fechamento, pagamento e filtros', () => {
-    expect(closeInvoicesSchema.safeParse({ issueDate: '2026-02-30' }).success).toBe(false);
+  it('rejeita empresa invalida, datas inexistentes em pagamento e filtros', () => {
+    expect(closeInvoicesSchema.safeParse({ companyId: 'empresa-invalida' }).success).toBe(false);
     expect(
       markInvoicePaidSchema.safeParse({ paymentDate: '2026-13-01', paymentMethod: 'BILLED' })
         .success,

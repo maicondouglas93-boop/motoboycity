@@ -47,7 +47,7 @@ export class AdminInvoicesController {
   close(
     @Body(new ZodValidationPipe(closeInvoicesSchema)) body: CloseInvoicesPayload,
     @CurrentUser() admin: User,
-  ): Promise<InvoiceListItem[]> {
+  ): Promise<InvoiceListItem> {
     return this.invoiceService.closeOpenInvoices(admin, body);
   }
 

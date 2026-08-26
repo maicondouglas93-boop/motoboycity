@@ -20,7 +20,7 @@ const dateOnlySchema = z
 export const invoiceStatusValues = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED'] as const;
 
 export const closeInvoicesSchema = z.object({
-  issueDate: dateOnlySchema,
+  companyId: z.string().uuid('Selecione uma empresa valida.'),
 });
 
 export const manualInvoiceEligibleQuerySchema = z.object({

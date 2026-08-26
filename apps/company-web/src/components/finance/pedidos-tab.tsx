@@ -30,7 +30,9 @@ export function PedidosTab({ token }: { token: string }) {
         <h2 className="text-base font-semibold">Pedidos sem fatura</h2>
         <p className="text-sm text-muted-foreground">
           {dados
-            ? `Estes ${formatarNumero(dados.count)} pedido(s) entram na fatura que fecha em ${formatarData(dados.closingDate)}.`
+            ? dados.closingDate
+              ? `Estes ${formatarNumero(dados.count)} pedido(s) entram na fatura que fecha em ${formatarData(dados.closingDate)}.`
+              : `Estes ${formatarNumero(dados.count)} pedido(s) aguardam o fechamento manual do administrador.`
             : 'Pedidos já concluídos que ainda não entraram em nenhuma fatura.'}
         </p>
       </div>

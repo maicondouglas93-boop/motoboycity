@@ -4,9 +4,9 @@ import { FinancialReleaseScheduler } from './financial-release.scheduler';
 import { InvoiceService } from './invoice.service';
 
 describe('FinancialReleaseScheduler', () => {
-  const queue = { upsertJobScheduler: jest.fn() };
+  const queue = { upsertJobScheduler: jest.fn(), removeJobScheduler: jest.fn() };
   const payoutService = { releaseDueRepasses: jest.fn() };
-  const invoiceService = { closeScheduledInvoices: jest.fn() };
+  const invoiceService = { processScheduledBilling: jest.fn() };
   const scheduler = new FinancialReleaseScheduler(
     queue as unknown as Queue,
     payoutService as unknown as FinancialPayoutService,
@@ -16,11 +16,15 @@ describe('FinancialReleaseScheduler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     queue.upsertJobScheduler.mockResolvedValue(undefined);
+    queue.removeJobScheduler.mockResolvedValue(false);
     payoutService.releaseDueRepasses.mockResolvedValue(0);
-    invoiceService.closeScheduledInvoices.mockResolvedValue([]);
+    invoiceService.processScheduledBilling.mockResolvedValue({
+      invoices: [],
+      blockedCompanyIds: [],
+    });
   });
 
-  it('agenda repasses às 00:00 e faturas às 00:05 no fuso operacional', async () => {
+  it('agenda repasses semanais e faturamento diario no fuso operacional', async () => {
     await scheduler.onModuleInit();
 
     expect(queue.upsertJobScheduler).toHaveBeenNthCalledWith(
@@ -31,11 +35,12 @@ describe('FinancialReleaseScheduler', () => {
     );
     expect(queue.upsertJobScheduler).toHaveBeenNthCalledWith(
       2,
-      'weekly-company-invoice-close',
-      { pattern: '5 0 * * 1', tz: 'America/Sao_Paulo' },
+      'daily-company-billing',
+      { pattern: '5 0 * * *', tz: 'America/Sao_Paulo' },
       { name: 'close-company-invoices', data: {} },
     );
     expect(payoutService.releaseDueRepasses).toHaveBeenCalledTimes(1);
-    expect(invoiceService.closeScheduledInvoices).toHaveBeenCalledTimes(1);
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('weekly-company-invoice-close');
+    expect(invoiceService.processScheduledBilling).toHaveBeenCalledTimes(1);
   });
 });

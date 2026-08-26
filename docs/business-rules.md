@@ -143,10 +143,25 @@ valores fixos decididos.
 
 ## Faturamento da empresa
 
-Fecha toda segunda-feira, agrupando todos os pedidos entregues desde o
-último corte. Vencimento no mesmo dia do fechamento. Cobrança
+Cada empresa tem uma política própria de fechamento. O administrador pode
+escolher fechamento **manual**, executado quando quiser no detalhe da empresa,
+ou **automático**. No automático, a frequência pode ser semanal, com um dia da
+semana configurado, ou mensal, com dia de 1 a 31; quando o mês não possui o dia
+escolhido, o corte ocorre no último dia civil daquele mês. O job avalia os
+cortes devidos diariamente às 00:05 de `America/Sao_Paulo` e cada ciclo é
+processado uma única vez, mesmo quando não há pedidos faturáveis.
+
+Empresas já existentes mantêm, por padrão, o fechamento automático semanal de
+segunda-feira. O vencimento permanece no mesmo dia do fechamento. A cobrança é
 manual/offline pro lançamento — sem gateway de pagamento (boleto/PIX
 automático) planejado ainda.
+
+O administrador também pode configurar, por empresa, a suspensão automática
+após 1 a 365 dias de atraso. Sem prazo configurado, o bloqueio fica desativado.
+A suspensão acontece quando uma fatura em aberto atinge o limite, desconecta os
+usuários da empresa e fica registrada no histórico de status. Pagamento não
+reativa a empresa automaticamente: a reativação continua sendo decisão manual
+do administrador.
 
 No detalhe administrativo da fatura, o painel pode abrir o WhatsApp do
 responsável `OWNER` ativo com uma mensagem pré-preenchida contendo somente

@@ -10,8 +10,9 @@ import type { CompanyFinancialSummaryQuery } from '@motoboycity/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { FinancialClock } from './financial-clock.service';
 import { InvoiceService } from './invoice.service';
-import { nextInvoiceClosingDateInSaoPaulo } from './finance-release.utils';
+import { nextInvoiceClosingDateForPolicyInSaoPaulo } from './finance-release.utils';
 import {
+  civilDateFromDbDate,
   dateInSaoPaulo,
   endOfDayInSaoPaulo,
   startOfDayInSaoPaulo,
@@ -34,6 +35,7 @@ export class CompanyFinancialService {
 
   async position(user: User): Promise<CompanyFinancialPosition> {
     const companyId = await this.resolverEmpresa(user);
+    const billingPolicy = await this.billingPolicy(companyId);
 
     /**
      * Atualiza o vencimento antes de somar.
@@ -87,7 +89,7 @@ export class CompanyFinancialService {
           Math.round(valorVencido * 100) +
           Math.round(valorSemFatura * 100)) /
         100,
-      nextClosingDate: nextInvoiceClosingDateInSaoPaulo(this.clock.now()),
+      nextClosingDate: nextInvoiceClosingDateForPolicyInSaoPaulo(this.clock.now(), billingPolicy),
     };
   }
 
@@ -99,6 +101,7 @@ export class CompanyFinancialService {
    */
   async unbilledDeliveries(user: User): Promise<CompanyUnbilledDeliveries> {
     const companyId = await this.resolverEmpresa(user);
+    const billingPolicy = await this.billingPolicy(companyId);
 
     const pedidos = await this.prisma.delivery.findMany({
       where: { companyId, status: 'COMPLETED', paymentMethod: 'BILLED', invoiceId: null },
@@ -139,7 +142,7 @@ export class CompanyFinancialService {
       items: itens,
       count: itens.length,
       total: totalEmCentavos / 100,
-      closingDate: nextInvoiceClosingDateInSaoPaulo(this.clock.now()),
+      closingDate: nextInvoiceClosingDateForPolicyInSaoPaulo(this.clock.now(), billingPolicy),
     };
   }
 
@@ -166,10 +169,7 @@ export class CompanyFinancialService {
    * um mes de operacao real vira milhares de linhas atravessando a rede para
    * calcular uma media.
    */
-  async summary(
-    user: User,
-    query: CompanyFinancialSummaryQuery,
-  ): Promise<CompanyFinancialSummary> {
+  async summary(user: User, query: CompanyFinancialSummaryQuery): Promise<CompanyFinancialSummary> {
     const companyId = await this.resolverEmpresa(user);
 
     const inicio = startOfDayInSaoPaulo(query.from);
@@ -180,8 +180,7 @@ export class CompanyFinancialService {
     // que nao quer dizer nada.
     const inicioAnterior = new Date(inicio.getTime() - duracao);
 
-    const [atual, anterior, porModalidade, serieDiaria, porStatus, comRetorno] =
-      await Promise.all([
+    const [atual, anterior, porModalidade, serieDiaria, porStatus, comRetorno] = await Promise.all([
       this.totaisDoPeriodo(companyId, inicio, fimExclusivo),
       this.totaisDoPeriodo(companyId, inicioAnterior, inicio),
       this.prisma.delivery.groupBy({
@@ -221,9 +220,7 @@ export class CompanyFinancialService {
       previous: anterior.count === 0 ? null : anterior,
       topServiceType: modalidade,
       daily: serieDiaria,
-      byStatus: Object.fromEntries(
-        porStatus.map((linha) => [linha.status, linha._count._all]),
-      ),
+      byStatus: Object.fromEntries(porStatus.map((linha) => [linha.status, linha._count._all])),
       requiresReturnCount: comRetorno,
     };
   }
@@ -361,7 +358,9 @@ export class CompanyFinancialService {
       pedido.paymentMethod,
       // Sem fatura ainda: o campo vazio seria ambiguo com "fatura sem numero".
       pedido.invoice?.number ?? 'Sem fatura',
-      Number(pedido.totalValue ?? 0).toFixed(2).replace('.', ','),
+      Number(pedido.totalValue ?? 0)
+        .toFixed(2)
+        .replace('.', ','),
     ]);
 
     return montarCsv(cabecalho, linhas);
@@ -388,13 +387,32 @@ export class CompanyFinancialService {
     return vinculo.companyId;
   }
 
+  private async billingPolicy(companyId: string) {
+    const company = await this.prisma.company.findUniqueOrThrow({
+      where: { id: companyId },
+      select: {
+        invoiceClosingMode: true,
+        invoiceClosingFrequency: true,
+        invoiceClosingWeekday: true,
+        invoiceClosingMonthDay: true,
+      },
+    });
+    return company;
+  }
+
   /** Dias inteiros desde o vencimento, nunca negativo. */
   private diasDeAtraso(vencimento: Date): number {
     const umDia = 24 * 60 * 60 * 1000;
-    const diferenca = this.clock.now().getTime() - vencimento.getTime();
+    const [todayYear = 0, todayMonth = 1, todayDay = 1] = dateInSaoPaulo(this.clock.now())
+      .split('-')
+      .map(Number);
+    const [dueYear = 0, dueMonth = 1, dueDay = 1] = civilDateFromDbDate(vencimento)
+      .split('-')
+      .map(Number);
+    const diferenca =
+      Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(dueYear, dueMonth - 1, dueDay);
     return Math.max(0, Math.floor(diferenca / umDia));
   }
-
 }
 
 const SEPARADOR = ';';
@@ -420,8 +438,6 @@ function escaparCelula(valor: string): string {
 }
 
 function montarCsv(cabecalho: string[], linhas: string[][]): string {
-  const linhasCsv = [cabecalho, ...linhas].map((linha) =>
-    linha.map(escaparCelula).join(SEPARADOR),
-  );
+  const linhasCsv = [cabecalho, ...linhas].map((linha) => linha.map(escaparCelula).join(SEPARADOR));
   return BOM + linhasCsv.join(QUEBRA_DE_LINHA);
 }
