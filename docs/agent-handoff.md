@@ -7291,3 +7291,80 @@ junctions de `node_modules`; as repeticoes autorizadas fora do sandbox passaram.
 O smoke autenticado continua manual. Proximo passo concreto: paginar tambem a
 lista de faturas da empresa e o extrato de carteira do entregador, que ainda
 podem crescer sem limite, e validar visualmente os detalhes em desktop e celular.
+
+## Atualizacao - 2026-08-26: primeiro lote de reducao de carga sem perder realtime
+
+Foi adotado cache seletivo somente no navegador para cadastros pouco volateis.
+No Admin Web, regioes ficam frescas por 5 minutos e modalidades, tabelas de
+preco e configuracoes da plataforma por 1 minuto. No Company Web, modalidades
+ficam frescas por 1 minuto e o perfil por 5 minutos. Pedidos, filas, GPS,
+operacao, financeiro, relatorios, endereco de coleta, dispatch e ofertas nao
+receberam `staleTime` novo. Os tempos de descarte sao limitados a 15 ou 30
+minutos, e o Admin agora limpa integralmente o cache ao trocar de sessao,
+deslogar ou detectar uma sessao invalida, evitando dados entre administradores.
+
+Na Home da empresa, cada evento `delivery:location` passou a atualizar apenas
+o ponto do pedido correspondente no cache local. Ele nao dispara mais duas
+consultas completas a cada coordenada. `delivery:updated` continua invalidando
+operacao e busca de pedidos, e a reconciliacao por polling de 30 segundos foi
+preservada. Assim, o ponto recebido pelo socket aparece imediatamente e uma
+eventual perda de evento ainda e corrigida automaticamente.
+
+A API recebeu observabilidade global de baixa cardinalidade. O interceptor
+registra somente respostas 5xx e operacoes acima de
+`SLOW_REQUEST_THRESHOLD_MS` (750 ms por padrao), identificadas por metodo e
+`Controller.handler`. URL, parametros, query string, corpo, token e mensagem de
+erro nao entram no log, e uma falha do proprio logger nunca altera a resposta.
+A variavel foi documentada nos exemplos e no Blueprint do Render. Nao foi
+adicionado cache de resposta na API nem uso adicional do Redis: a instancia
+atual de 256 MB com politica `noeviction` continua reservada para BullMQ,
+presenca e dispatch, evitando que cache concorra com operacoes criticas.
+
+Arquivos principais: providers do TanStack Query e fluxo de sessao dos dois
+paineis, Home da empresa, `apps/api/src/common/request-performance.interceptor.*`,
+`apps/api/src/app.module.ts`, exemplos de ambiente e `render.yaml`. Nao houve
+schema, migration, endpoint, payload, calculo financeiro ou transicao de status
+alterados. Validacoes aprovadas: teste unitario focado do interceptor (4/4),
+typecheck, lint e build de producao de API, Admin Web e Company Web. E2E nao foi
+executado porque esta mudanca nao toca banco/Redis e a suite exige servicos
+isolados. Proximo passo concreto: observar por pelo menos 7 dias os logs lentos,
+metricas do Render e uso/latencia do Neon antes de decidir por indices ou cache
+de relatorios historicos; nenhum cache adicional deve usar o Redis operacional.
+
+## Atualizacao - 2026-08-26: cache de catalogos administrativos e perfil mobile
+
+O segundo lote reduziu apenas consultas de baixa volatilidade. No Admin Web,
+as opcoes de regiao usadas nos cadastros de empresa e entregador agora ficam
+frescas por 5 minutos e sao descartadas em 30 minutos. Criar, editar, ativar ou
+desativar uma regiao invalida imediatamente a lista de regioes e os dois
+catalogos combinados. A lista de modalidades ativas da pagina de entregadores
+passou a usar a mesma chave estruturada dos demais consumidores, eliminando um
+cache paralelo. Login administrativo bem-sucedido com uma conta nao-admin
+tambem limpa token e cache anteriores antes de mostrar a recusa.
+
+No app do entregador, `GET /auth/me` recebeu cache somente em memoria, por token
+e com TTL de 5 minutos. Chamadas concorrentes sao deduplicadas; login, cold
+start validado e upload de avatar semeiam ou atualizam o perfil, enquanto troca
+de token, logout e sessao invalida limpam o dado. Nada e persistido no aparelho.
+O cold start continua usando `force: true`, portanto sempre valida a credencial
+na API antes de abrir a Home. O retry manual da tela de perfil tambem ignora o
+cache. Carteira, ofertas, presenca, GPS, pedidos, historico e realtime nao usam
+esse cache e mantiveram o comportamento anterior.
+
+Foi avaliada instrumentacao por evento de consulta do Prisma, mas ela ficou
+deliberadamente fora deste lote: o Prisma precisaria materializar SQL e
+parametros em JavaScript para toda consulta antes do filtro, adicionando
+overhead justamente no caminho que se deseja baratear. Primeiro devem ser
+observados os logs de endpoint lento ja adicionados, junto das metricas do Neon;
+instrumentacao de query ou indices so entram com um gargalo comprovado.
+
+Arquivos principais: provider e paginas cadastrais do Admin Web,
+`apps/driver-app/src/lib/driverProfileCache.ts`, sessao/bootstrap mobile, menu,
+login e perfil do entregador, mais o teste unitario do cache. Nao houve endpoint,
+contrato, schema, migration, Redis, dispatch ou regra financeira alterados.
+Validacoes aprovadas ate este ponto: testes focados de cache/bootstrap (9/9),
+suite completa do Driver App (76/76), typecheck e lint do Driver App e Admin
+Web, build de producao do Admin Web, alem de typecheck e lint na raiz cobrindo
+os oito workspaces. Proximo passo concreto: observar no painel de rede que abrir
+repetidamente os formularios cadastrais e o menu mobile nao repete as consultas
+dentro do TTL; depois coletar sete dias de metricas reais.

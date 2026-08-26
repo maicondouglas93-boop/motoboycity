@@ -2,7 +2,7 @@
 
 import { useState, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { loginSchema } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { session } from '@/lib/session';
 
 export default function AdminLoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -23,9 +24,12 @@ export default function AdminLoginPage() {
     mutationFn: authApi.login,
     onSuccess: (result) => {
       if (result.user.type !== 'ADMIN') {
+        session.clearToken();
+        queryClient.clear();
         setFormError('Este painel é restrito a administradores.');
         return;
       }
+      queryClient.clear();
       session.setToken(result.accessToken);
       router.push('/');
     },

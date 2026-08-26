@@ -36,6 +36,15 @@ export default function RegionsPage() {
     queryFn: () => adminRegionsApi.list(token as string),
     enabled: Boolean(token),
   });
+  function invalidateRegionCatalogs() {
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
+    void queryClient.invalidateQueries({
+      queryKey: ['admin', 'company-registration-options'],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ['admin', 'driver-registration-options'],
+    });
+  }
   function start(region?: AdminRegion) {
     setEditing(region ?? null);
     setName(region?.name ?? '');
@@ -54,7 +63,7 @@ export default function RegionsPage() {
         : adminRegionsApi.create(token as string, payload);
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
+      invalidateRegionCatalogs();
       setOpen(false);
     },
     onError: (cause) =>
@@ -69,7 +78,7 @@ export default function RegionsPage() {
   const active = useMutation({
     mutationFn: (region: AdminRegion) =>
       adminRegionsApi.setActive(token as string, region.id, !region.active),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] }),
+    onSuccess: invalidateRegionCatalogs,
     onError: (cause) =>
       setError(cause instanceof ApiError ? cause.message : 'Falha ao alterar regiao.'),
   });

@@ -8,6 +8,7 @@ import { FormField } from '../components/FormField';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { colors } from '../theme/colors';
 import { authApi } from '../lib/apiClient';
+import { setDriverProfile } from '../lib/driverProfileCache';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -47,6 +48,7 @@ export function LoginScreen({ navigation }: Props) {
         return;
       }
       await session.setToken(loginResult.accessToken);
+      setDriverProfile(loginResult.accessToken, loginResult.user);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {
       setStatus('idle');

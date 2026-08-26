@@ -111,6 +111,10 @@ services:
         value: '120'
       - key: THROTTLE_TTL_MS
         value: '60000'
+      # Observabilidade de baixa cardinalidade; nao altera respostas nem cacheia
+      # dados. Registra apenas operacoes lentas e falhas 5xx.
+      - key: SLOW_REQUEST_THRESHOLD_MS
+        value: '750'
 
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b

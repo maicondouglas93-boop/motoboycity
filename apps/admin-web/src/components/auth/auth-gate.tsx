@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -15,11 +16,13 @@ type GateStatus = 'checking' | 'authenticated';
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<GateStatus>('checking');
 
   useEffect(() => {
     const token = session.getToken();
     if (!token) {
+      queryClient.clear();
       router.replace('/login');
       return;
     }
@@ -29,6 +32,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       .then((user) => {
         if (user.type !== 'ADMIN') {
           session.clearToken();
+          queryClient.clear();
           router.replace('/login');
           return;
         }
@@ -36,9 +40,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         session.clearToken();
+        queryClient.clear();
         router.replace('/login');
       });
-  }, [router]);
+  }, [queryClient, router]);
 
   if (status === 'checking') {
     return (

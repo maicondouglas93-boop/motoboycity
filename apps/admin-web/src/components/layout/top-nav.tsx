@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DollarSign,
   Eye,
@@ -93,11 +94,13 @@ function isNavItemActive(pathname: string, href: string): boolean {
 export function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { hidden: moneyHidden, toggle: toggleMoney } = useMoneyVisibility();
   const currentItem = NAV_ITEMS.find((item) => isNavItemActive(pathname, item.href));
 
   function handleLogout() {
     session.clearToken();
+    queryClient.clear();
     router.replace('/login');
   }
 

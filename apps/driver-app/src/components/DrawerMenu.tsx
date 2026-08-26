@@ -3,10 +3,11 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'rea
 import type { AuthUser } from '@motoboycity/types';
 import { Icon, type IconName } from './Icon';
 import { colors } from '../theme/colors';
-import { authApi, driverPresenceApi, driverWalletApi } from '../lib/apiClient';
+import { driverPresenceApi, driverWalletApi } from '../lib/apiClient';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
 import { formatarDinheiro } from '../lib/format';
+import { getDriverProfile } from '../lib/driverProfileCache';
 import { limparSessaoNativa } from '../lib/offerSession';
 import { desativarPush } from '../lib/push';
 import { session } from '../lib/session';
@@ -45,7 +46,7 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
       if (!token) return;
 
       const [currentProfile, wallet] = await Promise.all([
-        authApi.me(token).catch(() => null),
+        getDriverProfile(token).catch(() => null),
         driverWalletApi.get(token, { limit: 1 }).catch(() => null),
       ]);
 

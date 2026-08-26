@@ -65,7 +65,7 @@ export default function DriversPage() {
   });
 
   const serviceTypesQuery = useQuery({
-    queryKey: ['admin', 'service-types', 'active'],
+    queryKey: ['admin', 'service-types', { active: true }],
     queryFn: () => adminServiceTypesApi.list(token as string, { active: true }),
     enabled: Boolean(token),
   });

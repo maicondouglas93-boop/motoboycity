@@ -17,6 +17,7 @@ import { FormField } from '../components/FormField';
 import { Icon } from '../components/Icon';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { authApi } from '../lib/apiClient';
+import { getDriverProfile, setDriverProfile } from '../lib/driverProfileCache';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
@@ -30,7 +31,7 @@ export function ProfileScreen({ navigation }: Props) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  const loadProfile = useCallback(async () => {
+  const loadProfile = useCallback(async (force = false) => {
     const token = await session.getToken();
     if (!token) {
       setProfileError('Sua sessão expirou. Entre novamente.');
@@ -38,7 +39,7 @@ export function ProfileScreen({ navigation }: Props) {
     }
 
     try {
-      setProfile(await authApi.me(token));
+      setProfile(await getDriverProfile(token, { force }));
       setProfileError(null);
     } catch (loadError) {
       setProfileError(
@@ -104,6 +105,7 @@ export function ProfileScreen({ navigation }: Props) {
     setUploadingAvatar(true);
     try {
       const updatedProfile = await authApi.uploadAvatar(token, formData);
+      setDriverProfile(token, updatedProfile);
       setProfile(updatedProfile);
       setFailedAvatarUrl(null);
     } catch (uploadError) {
@@ -185,7 +187,7 @@ export function ProfileScreen({ navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Tentar carregar perfil novamente"
             style={styles.errorBox}
-            onPress={() => loadProfile().catch(() => undefined)}
+            onPress={() => loadProfile(true).catch(() => undefined)}
           >
             <Text style={styles.errorText}>{profileError}</Text>
             <Text style={styles.retryText}>Tocar para tentar novamente</Text>

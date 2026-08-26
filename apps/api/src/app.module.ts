@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminCompaniesModule } from './admin/companies/admin-companies.module';
 import { AdminDriversModule } from './admin/drivers/admin-drivers.module';
@@ -35,6 +35,7 @@ import { VirtualSecretaryModule } from './admin/virtual-secretary/virtual-secret
 import { ProfileModule } from './profile/profile.module';
 import { AdminAuditModule } from './admin/audit/admin-audit.module';
 import { AdminRegionsModule } from './admin/regions/admin-regions.module';
+import { RequestPerformanceInterceptor } from './common/request-performance.interceptor';
 
 @Module({
   imports: [
@@ -90,6 +91,9 @@ import { AdminRegionsModule } from './admin/regions/admin-regions.module';
     PushModule,
     ProfileModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: RequestPerformanceInterceptor },
+  ],
 })
 export class AppModule {}

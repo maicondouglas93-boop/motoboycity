@@ -1,6 +1,6 @@
 import { ApiError } from '@motoboycity/api-client';
-import { authApi } from './apiClient';
 import { stopDeliveryTracking } from './deliveryTracking';
+import { getDriverProfile } from './driverProfileCache';
 import { limparSessaoNativa } from './offerSession';
 import { desativarPush } from './push';
 import { session } from './session';
@@ -18,7 +18,7 @@ type SessionBootstrapDependencies = {
 
 const defaultDependencies: SessionBootstrapDependencies = {
   getToken: () => session.getToken(),
-  validate: (token) => authApi.me(token),
+  validate: (token) => getDriverProfile(token, { force: true }),
   clearToken: () => session.clearToken(),
   stopTracking: () => stopDeliveryTracking(),
   deactivatePush: () => desativarPush({ clearLocalToken: true }),
