@@ -47,7 +47,7 @@ export function LoginScreen({ navigation }: Props) {
         setFormError('Esta conta não é de um entregador.');
         return;
       }
-      await session.setToken(loginResult.accessToken);
+      await session.setToken(loginResult.accessToken, loginResult.user.id);
       setDriverProfile(loginResult.accessToken, loginResult.user);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {

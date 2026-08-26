@@ -15,7 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type { DeliveryAddressItem, DeliveryDetail, DeliveryStatus } from '@motoboycity/types';
+import type {
+  DeliveryAddressItem,
+  DeliveryDetail,
+  DeliveryStatus,
+  MarkDeliveredPayload,
+} from '@motoboycity/types';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
@@ -24,6 +29,16 @@ import { RouteTimeline } from '../components/RouteTimeline';
 import { SheetHeader } from '../components/SheetHeader';
 import { deliveriesApi } from '../lib/apiClient';
 import { getActiveDeliveries } from '../lib/activeDeliveries';
+import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
+import {
+  completionClosesDeliveryLocally,
+  enqueueDeliveryCompletion,
+  getPendingDeliveryCompletions,
+  pendingCompletionForDelivery,
+  subscribeDeliveryCompletionOutbox,
+  synchronizePendingDeliveryCompletions,
+  type PendingDeliveryCompletion,
+} from '../lib/deliveryCompletionOutbox';
 import {
   deliveryOperationCopy,
   deliveryPaymentLabel,
@@ -33,6 +48,7 @@ import {
   navigationDestination,
 } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
+import { getDriverProfile } from '../lib/driverProfileCache';
 import { captureCurrentLocation, LocationError } from '../lib/location';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
@@ -41,6 +57,8 @@ import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
 type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
+
+const IMMEDIATE_COMPLETION_SYNC_WAIT_MS = 2_500;
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -112,6 +130,10 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [operation, setOperation] = useState<Operation>(null);
+  const [pendingCompletion, setPendingCompletion] = useState<PendingDeliveryCompletion | null>(
+    null,
+  );
+  const previousPendingCompletionId = useRef<string | null>(null);
   const operationInFlight = useRef(false);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
@@ -181,9 +203,63 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     }
   }, [navigation, route.params.deliveryId]);
 
+  const refreshPendingCompletion = useCallback(async () => {
+    const ownerUserId = await session.getUserId();
+    if (!ownerUserId || !delivery) {
+      setPendingCompletion(null);
+      return;
+    }
+    const queue = await getPendingDeliveryCompletions(ownerUserId);
+    setPendingCompletion(pendingCompletionForDelivery(queue, delivery) ?? null);
+  }, [delivery]);
+
   useEffect(() => {
     loadDelivery().catch(() => undefined);
   }, [loadDelivery]);
+
+  useEffect(() => {
+    refreshPendingCompletion().catch(() => undefined);
+    return subscribeDeliveryCompletionOutbox(() => {
+      refreshPendingCompletion().catch(() => undefined);
+    });
+  }, [refreshPendingCompletion]);
+
+  useEffect(() => {
+    const previousId = previousPendingCompletionId.current;
+    previousPendingCompletionId.current = pendingCompletion?.id ?? null;
+    if (previousId && !pendingCompletion) {
+      loadDelivery().catch(() => undefined);
+    }
+  }, [loadDelivery, pendingCompletion]);
+
+  useEffect(() => {
+    if (
+      pendingCompletion?.action === 'DELIVER' &&
+      pendingCompletion.state === 'PENDING' &&
+      delivery?.status === 'COLLECTED' &&
+      delivery.requiresReturn
+    ) {
+      // Projecao apenas visual/operacional: permite registrar o retorno mesmo
+      // durante uma queda longa. O servidor continua sendo a fonte oficial e
+      // recebe DELIVER antes de COMPLETE_RETURN pela ordem da outbox.
+      setDelivery({
+        ...delivery,
+        status: 'DELIVERED',
+        statusChangedAt: pendingCompletion.queuedAt,
+      });
+      setActiveDeliveries(
+        useDispatchStore.getState().activeDeliveries.map((activeDelivery) =>
+          activeDelivery.id === delivery.id
+            ? {
+                ...activeDelivery,
+                status: 'DELIVERED',
+                statusChangedAt: pendingCompletion.queuedAt,
+              }
+            : activeDelivery,
+        ),
+      );
+    }
+  }, [delivery, pendingCompletion, setActiveDeliveries]);
 
   useEffect(() => {
     if (delivery?.status !== 'ACCEPTED') return undefined;
@@ -205,6 +281,212 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     return deliveries;
   }
 
+  async function showConfirmedCompletion(
+    token: string,
+    projectedStatus: 'DELIVERED' | 'COMPLETED',
+    message: string,
+  ): Promise<void> {
+    if (!delivery) return;
+    const confirmed = await deliveriesApi.detail(token, delivery.id).catch(() => null);
+    setDelivery(
+      confirmed ?? {
+        ...delivery,
+        status: projectedStatus,
+        statusChangedAt: new Date().toISOString(),
+      },
+    );
+    setDeliverConfirmationOpen(false);
+    setSuccessMessage(message);
+
+    // A mutacao ja foi confirmada. Falhar neste GET auxiliar nao pode transformar
+    // sucesso em erro nem recolocar a acao na fila.
+    const active = await getActiveDeliveries(token).catch(() => null);
+    if (!active) return;
+    setActiveDeliveries(active);
+    await syncDeliveryTracking(
+      token,
+      active.map((activeDelivery) => activeDelivery.id),
+      useDispatchStore.getState().availability === 'AVAILABLE',
+    ).catch(() => undefined);
+
+    if (!active.some((activeDelivery) => activeDelivery.id === delivery.id)) {
+      const nextDelivery = active[0];
+      if (nextDelivery) {
+        navigation.replace('DeliveryOperation', { deliveryId: nextDelivery.id });
+      }
+    }
+  }
+
+  async function resolveOwnerUserId(token: string): Promise<string | null> {
+    const persisted = await session.getUserId();
+    if (persisted) return persisted;
+
+    const profile = await getDriverProfile(token).catch(() => null);
+    if (!profile) return null;
+    await session.setUserId(profile.id);
+    return profile.id;
+  }
+
+  async function redirectExpiredSession(expectedToken: string): Promise<void> {
+    if ((await session.getToken()) !== expectedToken) return;
+    await clearExpiredDriverSession();
+    Alert.alert(
+      'Sessao expirada',
+      'A finalizacao continua salva neste aparelho. Entre novamente para sincronizar.',
+    );
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  }
+
+  async function queueAndSynchronizeCompletion(
+    token: string,
+    action: 'DELIVER' | 'COMPLETE_RETURN',
+    payload: MarkDeliveredPayload = {},
+  ): Promise<PendingDeliveryCompletion | null | undefined> {
+    if (!delivery) return undefined;
+    const ownerUserId = await resolveOwnerUserId(token);
+    if (!ownerUserId) {
+      Alert.alert(
+        'Identidade indisponivel',
+        'Abra o aplicativo uma vez com internet para proteger a sincronizacao desta conta.',
+      );
+      return undefined;
+    }
+
+    const queued = await enqueueDeliveryCompletion(
+      action === 'DELIVER'
+        ? {
+            ownerUserId,
+            action,
+            deliveryId: delivery.id,
+            batchId: delivery.batchId,
+            displayNumber: delivery.displayNumber,
+            companyName: delivery.companyName,
+            payload,
+          }
+        : {
+            ownerUserId,
+            action,
+            deliveryId: delivery.id,
+            batchId: delivery.batchId,
+            displayNumber: delivery.displayNumber,
+            companyName: delivery.companyName,
+          },
+    );
+
+    const syncPromise = synchronizePendingDeliveryCompletions(token, ownerUserId);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const syncAttempt = await Promise.race([
+      syncPromise.then(
+        (result) => ({ finished: true as const, result }),
+        () => ({ finished: true as const, result: null }),
+      ),
+      new Promise<{ finished: false; result: null }>((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve({ finished: false, result: null }),
+          IMMEDIATE_COMPLETION_SYNC_WAIT_MS,
+        );
+      }),
+    ]);
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (!syncAttempt.finished) {
+      // A acao ja esta duravel no aparelho. Nao deixamos uma conexao degradada
+      // prender o motoboy numa tela de carregamento; a mesma Promise continua
+      // em segundo plano e os demais gatilhos tentam novamente depois.
+      setPendingCompletion(queued);
+      syncPromise
+        .then(async (result) => {
+          if (result.authRequired) {
+            await redirectExpiredSession(token);
+            return;
+          }
+          const queue = await getPendingDeliveryCompletions(ownerUserId);
+          if (pendingCompletionForDelivery(queue, delivery)) return;
+          const active = await getActiveDeliveries(token).catch(() => null);
+          if (!active) return;
+          setActiveDeliveries(active);
+          await syncDeliveryTracking(
+            token,
+            active.map((activeDelivery) => activeDelivery.id),
+            useDispatchStore.getState().availability === 'AVAILABLE',
+          ).catch(() => undefined);
+        })
+        .catch(() => undefined);
+      return queued;
+    }
+
+    if (syncAttempt.result?.authRequired) {
+      setPendingCompletion(queued);
+      await redirectExpiredSession(token);
+      return undefined;
+    }
+
+    const remaining = (await getPendingDeliveryCompletions(ownerUserId)).find(
+      (item) => item.id === queued.id,
+    );
+    setPendingCompletion(remaining ?? null);
+    return remaining ?? null;
+  }
+
+  async function keepCompletionPendingLocally(
+    token: string,
+    item: PendingDeliveryCompletion,
+  ): Promise<void> {
+    if (!delivery) return;
+    setDeliverConfirmationOpen(false);
+    const finalLocally =
+      item.action === 'COMPLETE_RETURN' || (item.action === 'DELIVER' && !delivery.requiresReturn);
+
+    if (item.state === 'NEEDS_REVIEW') {
+      Alert.alert(
+        'Finalizacao precisa de atencao',
+        item.lastError ??
+          'O servidor recusou a operacao. Atualize o pedido antes de tentar novamente.',
+      );
+      return;
+    }
+
+    setSuccessMessage(
+      finalLocally
+        ? 'Finalizacao salva no aparelho. Aguardando internet para confirmar no servidor.'
+        : 'Entrega salva no aparelho. Aguardando internet antes da etapa de retorno.',
+    );
+
+    if (!finalLocally) {
+      if (item.action === 'DELIVER' && delivery.requiresReturn) {
+        setDelivery({ ...delivery, status: 'DELIVERED', statusChangedAt: item.queuedAt });
+        setActiveDeliveries(
+          useDispatchStore
+            .getState()
+            .activeDeliveries.map((activeDelivery) =>
+              activeDelivery.id === delivery.id
+                ? { ...activeDelivery, status: 'DELIVERED', statusChangedAt: item.queuedAt }
+                : activeDelivery,
+            ),
+        );
+      }
+      return;
+    }
+
+    const remainingDeliveries = useDispatchStore
+      .getState()
+      .activeDeliveries.filter(
+        (activeDelivery) => !completionClosesDeliveryLocally(item, activeDelivery),
+      );
+    setActiveDeliveries(remainingDeliveries);
+    await syncDeliveryTracking(
+      token,
+      remainingDeliveries.map((activeDelivery) => activeDelivery.id),
+      useDispatchStore.getState().availability === 'AVAILABLE',
+    ).catch(() => undefined);
+
+    Alert.alert(
+      'Finalizacao salva no celular',
+      'A corrida sera confirmada, auditada e liberada financeiramente assim que a internet voltar.',
+    );
+    navigation.popToTop();
+  }
+
   async function runOperation(nextOperation: Exclude<Operation, null>, operationNote?: string) {
     if (!delivery || operationInFlight.current) return;
     operationInFlight.current = true;
@@ -219,22 +501,27 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
         setSuccessMessage('O pedido foi marcado como coletado!');
       } else if (nextOperation === 'deliver') {
-        if (delivery.destinationKnownAtCreation) {
-          setDelivery(await deliveriesApi.deliver(token, delivery.id, {}));
-        } else {
-          // Aqui o GPS nao e uma trava de confianca: ele e o proprio destino
-          // usado para calcular a distancia e o valor da corrida.
-          const fix = await captureCurrentLocation();
-          setDelivery(
-            await deliveriesApi.deliver(token, delivery.id, {
+        // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
+        // tentativa posterior nunca pode recapturar outra rua por engano.
+        const payload = delivery.destinationKnownAtCreation
+          ? {}
+          : await captureCurrentLocation().then((fix) => ({
               lat: fix.lat,
               lng: fix.lng,
               accuracy: fix.accuracy,
-            }),
-          );
+            }));
+        const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
+        if (queued === undefined) return;
+        if (queued) {
+          await keepCompletionPendingLocally(token, queued);
+          return;
         }
-        setDeliverConfirmationOpen(false);
-        setSuccessMessage('O pedido foi marcado como entregue!');
+        await showConfirmedCompletion(
+          token,
+          delivery.requiresReturn ? 'DELIVERED' : 'COMPLETED',
+          'O pedido foi marcado como entregue!',
+        );
+        return;
       } else if (nextOperation === 'return-to-queue') {
         await deliveriesApi.returnToQueue(token, delivery.id, {
           reason: operationNote ?? 'Devolvido à fila pelo motoboy.',
@@ -278,9 +565,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         navigation.popToTop();
         return;
       } else {
-        const result = await deliveriesApi.completeReturn(token, delivery.id);
-        setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
-        setSuccessMessage('Retorno concluído!');
+        const queued = await queueAndSynchronizeCompletion(token, 'COMPLETE_RETURN');
+        if (queued === undefined) return;
+        if (queued) {
+          await keepCompletionPendingLocally(token, queued);
+          return;
+        }
+        await showConfirmedCompletion(token, 'COMPLETED', 'Retorno concluído!');
+        return;
       }
 
       const activeDeliveries = await refreshActiveDeliveries(token);
@@ -373,7 +665,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const currentDelivery = delivery;
   const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
   const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
-  const busy = operation !== null;
+  const operationBusy = operation !== null;
+  const canQueueDependentReturn =
+    pendingCompletion?.action === 'DELIVER' &&
+    pendingCompletion.state === 'PENDING' &&
+    delivery.status === 'DELIVERED' &&
+    delivery.requiresReturn;
+  const controlsBusy = operationBusy || pendingCompletion !== null;
+  const primaryBusy = operationBusy || (pendingCompletion !== null && !canQueueDependentReturn);
   const copy = deliveryOperationCopy(delivery.status);
   const action =
     delivery.status === 'ACCEPTED'
@@ -427,7 +726,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   }
 
   function handlePrimaryAction() {
-    if (!action || busy) return;
+    if (!action || primaryBusy) return;
     if (action === 'deliver' && !currentDelivery.destinationKnownAtCreation) {
       setDeliverConfirmationOpen(true);
       return;
@@ -472,6 +771,33 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               <Icon name="check" size={16} color={colors.success} />
             </View>
             <Text style={styles.successText}>{successMessage}</Text>
+          </View>
+        ) : null}
+
+        {pendingCompletion ? (
+          <View
+            style={[
+              styles.pendingBanner,
+              pendingCompletion.state === 'NEEDS_REVIEW' && styles.pendingBannerReview,
+            ]}
+            accessibilityLiveRegion="polite"
+          >
+            <Icon
+              name={pendingCompletion.state === 'NEEDS_REVIEW' ? 'info' : 'clock'}
+              size={20}
+              color={pendingCompletion.state === 'NEEDS_REVIEW' ? colors.danger : colors.warning}
+            />
+            <View style={styles.pendingBannerCopy}>
+              <Text style={styles.pendingBannerTitle}>
+                {pendingCompletion.state === 'NEEDS_REVIEW'
+                  ? 'Finalizacao precisa de atencao'
+                  : 'Aguardando sincronizacao'}
+              </Text>
+              <Text style={styles.pendingBannerText}>
+                {pendingCompletion.lastError ??
+                  'A acao esta salva neste aparelho e sera confirmada quando a internet voltar.'}
+              </Text>
+            </View>
           </View>
         ) : null}
 
@@ -619,12 +945,12 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Devolver para a fila"
-                disabled={busy}
+                disabled={controlsBusy}
                 onPress={() => setReturnOpen(true)}
                 style={({ pressed }) => [
                   styles.returnQueueButton,
-                  pressed && !busy && styles.pressed,
-                  busy && styles.disabled,
+                  pressed && !controlsBusy && styles.pressed,
+                  controlsBusy && styles.disabled,
                 ]}
               >
                 <Text style={styles.returnQueueText}>Devolver à fila</Text>
@@ -634,15 +960,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={copy.primaryActionLabel}
-              disabled={busy}
+              disabled={primaryBusy}
               onPress={handlePrimaryAction}
               style={({ pressed }) => [
                 styles.footerPrimary,
-                pressed && !busy && styles.pressed,
-                busy && styles.disabled,
+                pressed && !primaryBusy && styles.pressed,
+                primaryBusy && styles.disabled,
               ]}
             >
-              {busy ? (
+              {operationBusy ? (
                 <ActivityIndicator color={colors.actionText} />
               ) : (
                 <Text style={styles.footerPrimaryText}>{copy.primaryActionLabel}</Text>
@@ -653,12 +979,12 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Abrir opções da entrega"
-                disabled={busy}
+                disabled={controlsBusy}
                 onPress={() => setActionMenuOpen(true)}
                 style={({ pressed }) => [
                   styles.warningButton,
-                  pressed && !busy && styles.pressed,
-                  busy && styles.disabled,
+                  pressed && !controlsBusy && styles.pressed,
+                  controlsBusy && styles.disabled,
                 ]}
               >
                 <Text style={styles.warningGlyph}>{'⚠'}</Text>
@@ -672,8 +998,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         visible={deliverConfirmationOpen}
         title="Confirme a entrega"
         description="Este pedido foi criado sem endereço de destino. Ao confirmar, sua localização atual será registrada como destino e usada para calcular o valor da entrega."
-        confirmLabel={busy ? 'Capturando GPS...' : 'Confirmar com GPS'}
-        disabled={busy}
+        confirmLabel={operationBusy ? 'Capturando GPS...' : 'Confirmar com GPS'}
+        disabled={controlsBusy}
         onConfirm={() => runOperation('deliver').catch(() => undefined)}
         onCancel={() => setDeliverConfirmationOpen(false)}
       />
@@ -728,7 +1054,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             <PrimaryButton
               label="Voltar"
               variant="outline"
-              disabled={busy}
+              disabled={controlsBusy}
               onPress={() => setActionMenuOpen(false)}
             />
           </View>
@@ -739,8 +1065,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         visible={returnOpen}
         title="Devolver para a fila?"
         description="O pedido ficará disponível para outro motoboy. Tem certeza?"
-        confirmLabel={busy ? 'Devolvendo...' : 'Sim, devolver'}
-        disabled={busy}
+        confirmLabel={operationBusy ? 'Devolvendo...' : 'Sim, devolver'}
+        disabled={controlsBusy}
         onConfirm={() => runOperation('return-to-queue').catch(() => undefined)}
         onCancel={() => setReturnOpen(false)}
       />
@@ -749,8 +1075,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         visible={cancelOpen}
         title="Cancelar esta entrega?"
         description="A entrega será cancelada e a loja e a administração serão avisadas. Essa ação não pode ser desfeita."
-        confirmLabel={busy ? 'Cancelando...' : 'Sim, cancelar'}
-        disabled={busy}
+        confirmLabel={operationBusy ? 'Cancelando...' : 'Sim, cancelar'}
+        disabled={controlsBusy}
         onConfirm={() => runOperation('cancel').catch(() => undefined)}
         onCancel={() => setCancelOpen(false)}
       />
@@ -760,13 +1086,13 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         title="Informar problema?"
         description="Você continuará responsável pelo pedido. A ocorrência será registrada, o valor normal da entrega será mantido e você deverá devolver a mercadoria à loja para concluir o repasse."
         confirmLabel={
-          busy
+          operationBusy
             ? delivery.destinationKnownAtCreation
               ? 'Registrando...'
               : 'Capturando localização...'
             : 'Sim, informar'
         }
-        disabled={busy}
+        disabled={controlsBusy}
         onConfirm={() =>
           runOperation('fail', 'Problema informado pelo motoboy.').catch(() => undefined)
         }
@@ -878,6 +1204,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   successText: { flex: 1, color: colors.actionText, fontSize: 14, fontWeight: '700' },
+  pendingBanner: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: colors.warningSoft,
+  },
+  pendingBannerReview: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
+  pendingBannerCopy: { flex: 1, gap: 2 },
+  pendingBannerTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  pendingBannerText: { color: colors.inkSoft, fontSize: 12, lineHeight: 17 },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dateText: { color: colors.ink, fontSize: 16, fontWeight: '700' },
   statusRow: {

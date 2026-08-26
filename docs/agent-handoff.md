@@ -7368,3 +7368,53 @@ Web, build de producao do Admin Web, alem de typecheck e lint na raiz cobrindo
 os oito workspaces. Proximo passo concreto: observar no painel de rede que abrir
 repetidamente os formularios cadastrais e o menu mobile nao repete as consultas
 dentro do TTL; depois coletar sete dias de metricas reais.
+
+## Atualizacao - 2026-08-26: encerramento offline no aplicativo do motoboy
+
+O Driver App passou a persistir uma outbox operacional em `AsyncStorage` para
+as duas acoes que encerram uma corrida: marcar a entrega (`DELIVER`) e concluir
+o retorno (`COMPLETE_RETURN`). A acao e gravada antes da primeira tentativa de
+rede e fica vinculada ao ID do usuario, nunca ao token. Logout ou 401 removem a
+sessao, mas preservam a outbox; ela so reaparece e sincroniza quando o mesmo
+motoboy autentica novamente. O login e o bootstrap validado agora espelham esse
+ID na sessao local.
+
+Para entregas cujo destino nasce no local da entrega, latitude, longitude e
+precisao sao capturadas e congeladas antes de enfileirar. A sincronizacao e
+FIFO, deduplicada por entrega (ou lote no retorno), serial por conta e
+idempotente com os endpoints existentes. Uma segunda acao criada enquanto a
+primeira esta em voo provoca nova leitura da fila ao final; isso permite salvar
+`DELIVER` e depois `COMPLETE_RETURN` durante a mesma queda de conexao. Em lote,
+somente itens `DELIVERED` com retorno ou `FAILED` saem da lista local; irmaos
+`ACCEPTED`/`COLLECTED` continuam ativos e rastreados.
+
+A tela espera no maximo 2,5 segundos pela confirmacao imediata e depois libera
+o motoboy com aviso explicito de sincronizacao pendente. Cada request da outbox
+tem limite de 15 segundos para uma conexao degradada nao prender o mutex; uma
+resposta tardia continua segura pela idempotencia do backend. Rede/5xx mantem a
+acao pendente, 401 conduz ao login sem apagar a outbox e recusas de negocio que
+nao puderem ser reconciliadas ficam em `NEEDS_REVIEW`, identificadas por pedido
+e empresa. Tentativas acontecem no bootstrap, reconexao do socket, retorno ao
+primeiro plano, pull-to-refresh e toque manual.
+
+Nenhum endpoint, schema Prisma, migration, payload compartilhado ou dependencia
+nativa foi alterado. Status, historico, horario oficial, calculo financeiro e
+repasse continuam existindo somente depois da confirmacao da API; o horario
+oficial e o da sincronizacao no servidor. Arquivos principais:
+`apps/driver-app/src/lib/{session,bootstrapSession,clearExpiredDriverSession,
+deliveryCompletionOutbox}.ts`, `apps/driver-app/src/screens/{LoginScreen,
+HomeScreen,DeliveryOperationScreen}.tsx` e os testes de bootstrap/outbox.
+
+Validacoes executadas: Prettier nos arquivos alterados; suite completa do
+Driver App com 15 suites e 90 testes aprovados; typecheck e lint do Driver App
+aprovados; `git diff --check` sem erro de whitespace. Build Android nativo nao
+foi executado porque esta mudanca nao adiciona dependencia nativa e a geracao
+de APK nao foi solicitada neste recorte.
+
+Limitacao conhecida: uma acao ja enfileirada sobrevive ao encerramento do app,
+mas um cold start inteiramente offline ainda nao consegue reconstruir e abrir
+uma corrida ativa que nunca foi salva como snapshot. Dentro da tela ja aberta,
+entrega e retorno podem ser registrados em sequencia offline. Proximo passo
+concreto: validar em aparelho real destino conhecido, destino por GPS, retorno
+em lote misto, kill/reabertura, troca de conta e cancelamento administrativo
+concorrente antes de gerar o APK de producao.

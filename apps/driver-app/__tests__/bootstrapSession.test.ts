@@ -1,10 +1,11 @@
 import { ApiError } from '@motoboycity/api-client';
 import { resolveInitialSessionRoute } from '../src/lib/bootstrapSession';
 
-function dependencies(validate: () => Promise<unknown>) {
+function dependencies(validate: () => Promise<{ id?: unknown }>) {
   return {
     getToken: jest.fn().mockResolvedValue('token'),
     validate: jest.fn(validate),
+    rememberUserId: jest.fn().mockResolvedValue(undefined),
     clearToken: jest.fn().mockResolvedValue(undefined),
     stopTracking: jest.fn().mockResolvedValue(undefined),
     deactivatePush: jest.fn().mockResolvedValue(undefined),
@@ -13,6 +14,13 @@ function dependencies(validate: () => Promise<unknown>) {
 }
 
 describe('resolveInitialSessionRoute', () => {
+  it('persiste a identidade validada para escopar operacoes offline', async () => {
+    const deps = dependencies(async () => ({ id: 'driver-user-1' }));
+
+    await expect(resolveInitialSessionRoute(deps)).resolves.toBe('Home');
+    expect(deps.rememberUserId).toHaveBeenCalledWith('driver-user-1');
+  });
+
   it('preserva a sessão quando a API está temporariamente indisponível', async () => {
     const deps = dependencies(async () => {
       throw new ApiError(502, { message: 'API indisponível' });
@@ -37,7 +45,7 @@ describe('resolveInitialSessionRoute', () => {
   });
 
   it('abre o login quando não existe token persistido', async () => {
-    const deps = dependencies(async () => undefined);
+    const deps = dependencies(async () => ({}));
     deps.getToken.mockResolvedValue(null);
 
     await expect(resolveInitialSessionRoute(deps)).resolves.toBe('Login');

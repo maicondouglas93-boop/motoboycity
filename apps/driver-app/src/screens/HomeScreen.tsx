@@ -31,9 +31,18 @@ import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
 import { findNewlyAcceptedDelivery, getActiveDeliveries } from '../lib/activeDeliveries';
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
+import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
+import {
+  getPendingDeliveryCompletions,
+  retryDeliveryCompletionQueue,
+  subscribeDeliveryCompletionOutbox,
+  synchronizePendingDeliveryCompletions,
+  type PendingDeliveryCompletion,
+} from '../lib/deliveryCompletionOutbox';
 import { deliveryPaymentLabel, formatDeliveryAddress } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { getDriverProfile } from '../lib/driverProfileCache';
 import {
   capturePresenceLocation,
   ensureBackgroundTrackingPermission,
@@ -64,11 +73,7 @@ const ABAS = [
 ];
 
 type NotificationReadiness =
-  | 'ready'
-  | 'unavailable'
-  | 'disabled'
-  | 'overlay-disabled'
-  | 'full-screen-disabled';
+  'ready' | 'unavailable' | 'disabled' | 'overlay-disabled' | 'full-screen-disabled';
 
 function notificacaoBloqueiaPresenca(status: NotificationReadiness): boolean {
   // A permissao do Android e indispensavel para exibir ofertas. Falhas
@@ -192,6 +197,8 @@ export function HomeScreen({ navigation }: Props) {
   const [pendentesError, setPendentesError] = useState<string | null>(null);
   const [aceitandoPendenteId, setAceitandoPendenteId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [completionQueue, setCompletionQueue] = useState<PendingDeliveryCompletion[]>([]);
+  const [completionSyncing, setCompletionSyncing] = useState(false);
 
   const availability = useDispatchStore((state) => state.availability);
   const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
@@ -201,6 +208,55 @@ export function HomeScreen({ navigation }: Props) {
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
   const isAvailable = availability === 'AVAILABLE';
+  const queuedCompletionForBanner =
+    completionQueue.find((item) => item.state === 'NEEDS_REVIEW') ?? completionQueue[0] ?? null;
+
+  const resolveOwnerUserId = useCallback(async (token: string): Promise<string | null> => {
+    const persisted = await session.getUserId();
+    if (persisted) return persisted;
+    const profile = await getDriverProfile(token).catch(() => null);
+    if (!profile) return null;
+    await session.setUserId(profile.id);
+    return profile.id;
+  }, []);
+
+  const refreshCompletionQueue = useCallback(async () => {
+    const ownerUserId = await session.getUserId();
+    setCompletionQueue(ownerUserId ? await getPendingDeliveryCompletions(ownerUserId) : []);
+  }, []);
+
+  const syncCompletionQueue = useCallback(
+    async (token: string, retryReviewId?: string) => {
+      const ownerUserId = await resolveOwnerUserId(token);
+      if (!ownerUserId) return null;
+      setCompletionSyncing(true);
+      try {
+        if (retryReviewId) await retryDeliveryCompletionQueue(ownerUserId, retryReviewId);
+        const result = await synchronizePendingDeliveryCompletions(token, ownerUserId);
+        setCompletionQueue(await getPendingDeliveryCompletions(ownerUserId));
+        if (result.authRequired && (await session.getToken()) === token) {
+          await clearExpiredDriverSession();
+          setCompletionQueue([]);
+          Alert.alert(
+            'Sessao expirada',
+            'A finalizacao continua salva neste aparelho. Entre novamente para sincronizar.',
+          );
+          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+        }
+        return result;
+      } finally {
+        setCompletionSyncing(false);
+      }
+    },
+    [navigation, resolveOwnerUserId],
+  );
+
+  useEffect(() => {
+    refreshCompletionQueue().catch(() => undefined);
+    return subscribeDeliveryCompletionOutbox(() => {
+      refreshCompletionQueue().catch(() => undefined);
+    });
+  }, [refreshCompletionQueue]);
 
   useFocusEffect(
     useCallback(() => {
@@ -368,6 +424,10 @@ export function HomeScreen({ navigation }: Props) {
        */
       await salvarSessaoNativa(API_BASE_URL, token);
       const notificationReadiness = await verificarNotificacaoObrigatoria();
+      // Uma finalizacao salva antes de o app fechar precisa ser enviada antes
+      // de reconstruir a lista operacional vinda do servidor.
+      const completionSync = await syncCompletionQueue(token).catch(() => null);
+      if (completionSync?.authRequired) return;
 
       let presence = await syncPresence(token);
       if (cancelled) return;
@@ -417,8 +477,19 @@ export function HomeScreen({ navigation }: Props) {
         onConnected: () => {
           verificarNotificacaoObrigatoria()
             .then(async (readiness) => {
+              const reconnectCompletionSync = await syncCompletionQueue(token).catch(() => null);
+              if (reconnectCompletionSync?.authRequired) return;
               await syncPresence(token);
               await retirarDaFilaSemNotificacao(token, readiness, false);
+              const deliveries = await getActiveDeliveries(token).catch(() => null);
+              if (deliveries && !cancelled) {
+                setActiveDeliveries(deliveries);
+                await syncDeliveryTracking(
+                  token,
+                  deliveries.map((delivery) => delivery.id),
+                  useDispatchStore.getState().availability === 'AVAILABLE',
+                ).catch(() => undefined);
+              }
             })
             .catch(() => undefined);
         },
@@ -520,6 +591,8 @@ export function HomeScreen({ navigation }: Props) {
         .getToken()
         .then(async (atual) => {
           if (!atual) return;
+          const completionSync = await syncCompletionQueue(atual).catch(() => null);
+          if (completionSync?.authRequired) return;
           /**
            * O aceite feito pela tela nativa acontece fora do React Native. Ao
            * fechar aquela Activity, a Home ja montada precisa descobrir o novo
@@ -680,6 +753,23 @@ export function HomeScreen({ navigation }: Props) {
     });
   }
 
+  async function retryQueuedCompletions() {
+    const token = await session.getToken();
+    if (!token || completionSyncing) return;
+    const retryReview = completionQueue.find((item) => item.state === 'NEEDS_REVIEW');
+    const result = await syncCompletionQueue(token, retryReview?.id);
+    if (result?.authRequired) return;
+    const deliveries = await getActiveDeliveries(token).catch(() => null);
+    if (deliveries) {
+      setActiveDeliveries(deliveries);
+      await syncDeliveryTracking(
+        token,
+        deliveries.map((delivery) => delivery.id),
+        useDispatchStore.getState().availability === 'AVAILABLE',
+      ).catch(() => undefined);
+    }
+  }
+
   async function refreshCurrentTab() {
     const token = await session.getToken();
     if (!token) return;
@@ -690,7 +780,15 @@ export function HomeScreen({ navigation }: Props) {
         await carregarPendentes();
         return;
       }
-      setActiveDeliveries(await getActiveDeliveries(token));
+      const result = await syncCompletionQueue(token);
+      if (result?.authRequired) return;
+      const deliveries = await getActiveDeliveries(token);
+      setActiveDeliveries(deliveries);
+      await syncDeliveryTracking(
+        token,
+        deliveries.map((delivery) => delivery.id),
+        useDispatchStore.getState().availability === 'AVAILABLE',
+      ).catch(() => undefined);
     } catch {
       // Os avisos persistentes acima continuam sendo a fonte de erro da tela.
     } finally {
@@ -735,6 +833,33 @@ export function HomeScreen({ navigation }: Props) {
               />
             </View>
           )}
+
+          {completionQueue.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Sincronizar finalizacoes salvas no aparelho"
+              disabled={completionSyncing}
+              style={[
+                styles.avisoSincronizacao,
+                completionQueue.some((item) => item.state === 'NEEDS_REVIEW') &&
+                  styles.avisoSincronizacaoReview,
+              ]}
+              onPress={() => retryQueuedCompletions().catch(() => undefined)}
+            >
+              <Text style={styles.avisoSincronizacaoTitulo}>
+                {queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
+                  ? `Pedido #${queuedCompletionForBanner.displayNumber} precisa de atencao`
+                  : `${completionQueue.length} finalizacao(oes) aguardando internet`}
+              </Text>
+              <Text style={styles.avisoSincronizacaoTexto}>
+                {completionSyncing
+                  ? 'Sincronizando com o servidor...'
+                  : queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
+                    ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError ?? 'toque para revisar a sincronizacao.'}`
+                    : 'A acao esta salva neste celular. Toque para tentar sincronizar agora.'}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {presenceError && (
             <Pressable style={styles.avisoErro} onPress={refreshPresence}>
@@ -903,6 +1028,22 @@ const styles = StyleSheet.create({
 
   conteudo: { flex: 1, paddingHorizontal: 18 },
   areaToggle: { paddingVertical: 14 },
+
+  avisoSincronizacao: {
+    borderWidth: 1,
+    borderColor: colors.warning,
+    borderRadius: 12,
+    padding: 12,
+    gap: 3,
+    marginBottom: 10,
+    backgroundColor: colors.warningSoft,
+  },
+  avisoSincronizacaoReview: {
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
+  avisoSincronizacaoTitulo: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  avisoSincronizacaoTexto: { color: colors.inkSoft, fontSize: 12, lineHeight: 17 },
 
   avisoErro: {
     borderWidth: 1,

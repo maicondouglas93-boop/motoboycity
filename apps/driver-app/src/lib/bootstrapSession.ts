@@ -9,7 +9,8 @@ export type InitialSessionRoute = 'Login' | 'Home';
 
 type SessionBootstrapDependencies = {
   getToken(): Promise<string | null>;
-  validate(token: string): Promise<unknown>;
+  validate(token: string): Promise<{ id?: unknown }>;
+  rememberUserId(userId: string): Promise<void>;
   clearToken(): Promise<void>;
   stopTracking(): Promise<void>;
   deactivatePush(): Promise<void>;
@@ -19,6 +20,7 @@ type SessionBootstrapDependencies = {
 const defaultDependencies: SessionBootstrapDependencies = {
   getToken: () => session.getToken(),
   validate: (token) => getDriverProfile(token, { force: true }),
+  rememberUserId: (userId) => session.setUserId(userId),
   clearToken: () => session.clearToken(),
   stopTracking: () => stopDeliveryTracking(),
   deactivatePush: () => desativarPush({ clearLocalToken: true }),
@@ -36,7 +38,10 @@ export async function resolveInitialSessionRoute(
   if (!token) return 'Login';
 
   try {
-    await dependencies.validate(token);
+    const profile = await dependencies.validate(token);
+    if (typeof profile.id === 'string') {
+      await dependencies.rememberUserId(profile.id);
+    }
     return 'Home';
   } catch (error) {
     if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 403)) {

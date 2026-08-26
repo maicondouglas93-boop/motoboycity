@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearDriverProfile } from './driverProfileCache';
 
 const ACCESS_TOKEN_KEY = 'motoboycity.driver.accessToken';
+const USER_ID_KEY = 'motoboycity.driver.userId';
 
 /**
  * Sessão persistida via AsyncStorage (equivalente ao localStorage dos apps
@@ -12,12 +13,22 @@ export const session = {
   async getToken(): Promise<string | null> {
     return AsyncStorage.getItem(ACCESS_TOKEN_KEY);
   },
-  async setToken(token: string): Promise<void> {
+  async getUserId(): Promise<string | null> {
+    return AsyncStorage.getItem(USER_ID_KEY);
+  },
+  async setToken(token: string, userId?: string): Promise<void> {
     clearDriverProfile();
     await AsyncStorage.setItem(ACCESS_TOKEN_KEY, token);
+    if (userId) await AsyncStorage.setItem(USER_ID_KEY, userId);
+  },
+  async setUserId(userId: string): Promise<void> {
+    await AsyncStorage.setItem(USER_ID_KEY, userId);
   },
   async clearToken(): Promise<void> {
     clearDriverProfile();
-    await AsyncStorage.removeItem(ACCESS_TOKEN_KEY);
+    await Promise.all([
+      AsyncStorage.removeItem(ACCESS_TOKEN_KEY),
+      AsyncStorage.removeItem(USER_ID_KEY),
+    ]);
   },
 };

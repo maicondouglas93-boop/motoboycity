@@ -80,6 +80,22 @@ mais declaração retroativa, texto de justificativa para devolver à fila ou
 prova de proximidade. Confirmações simples continuam existindo para evitar
 toques acidentais e todas as transições permanecem no histórico auditável.
 
+## Encerramento offline pelo motoboy
+
+O motoboy pode marcar a entrega e concluir o retorno mesmo durante uma queda de
+internet. A ação é salva primeiro no aparelho e fica claramente identificada
+como pendente de sincronização; o aplicativo tenta enviá-la novamente ao abrir,
+voltar ao primeiro plano, reconectar ou por comando manual. Quando o destino é
+definido no momento da entrega, a coordenada e a precisão capturadas naquele
+momento ficam congeladas junto da ação e não podem ser recapturadas depois.
+
+O encerramento local não antecipa efeitos oficiais. Status auditável, horário
+da transição, cálculo definitivo, faturamento e repasse só passam a valer após
+a API confirmar a ação. O horário oficial continua sendo o horário do servidor
+na sincronização. Entrega e retorno pendentes são enviados na ordem, sem
+duplicar histórico ou crédito, e a fila é vinculada à identidade do motoboy
+para nunca ser transmitida pela conta de outra pessoa no mesmo aparelho.
+
 ## Intervenções operacionais pelo administrador
 
 Nos cards das filas, o administrador pode trocar o entregador, confirmar
