@@ -71,6 +71,7 @@ raiz do monorepo**, não só no workspace que você editou (ver Armadilha #4).
    ```sh
    pnpm --filter @motoboycity/api test -- --runInBand
    pnpm --filter @motoboycity/api test:e2e
+   pnpm --filter @motoboycity/company-web test
    pnpm typecheck   # na raiz — roda os 8 workspaces via Turborepo
    pnpm lint        # idem
    ```

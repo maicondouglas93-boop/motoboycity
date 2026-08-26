@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DeliveryOperationsResult, DeliveryTrackingPoint } from '@motoboycity/types';
+import type { DeliveryOperationsResult } from '@motoboycity/types';
 
 import { io } from 'socket.io-client';
 import { CircleDot, Copy, MapPin, Search, Wifi, WifiOff } from 'lucide-react';
@@ -18,14 +18,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
+import {
+  updateDeliveryLocationInOperations,
+  type DeliveryLocationRealtimeEvent,
+} from '@/lib/delivery-location-cache';
 import { session } from '@/lib/session';
 
 const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
-
-type DeliveryLocationRealtimeEvent = DeliveryTrackingPoint & {
-  deliveryId: string;
-  driverId: string;
-};
 
 export default function CompanyHomePage() {
   const token = session.getToken();
@@ -77,32 +76,10 @@ export default function CompanyHomePage() {
       void queryClient.invalidateQueries({ queryKey: ['deliveries', 'search'] });
     };
     const updateDeliveryLocation = (point: DeliveryLocationRealtimeEvent) => {
-      if (
-        !point?.deliveryId ||
-        !Number.isFinite(point.lat) ||
-        !Number.isFinite(point.lng) ||
-        !point.capturedAt
-      ) {
-        return;
-      }
-
-      queryClient.setQueryData<DeliveryOperationsResult>(['company', 'operations'], (current) => {
-        if (!current) return current;
-        const updateItems = (items: DeliveryOperationsResult['active']) =>
-          items.map((delivery) =>
-            delivery.id === point.deliveryId
-              ? {
-                  ...delivery,
-                  lastLocation: point,
-                }
-              : delivery,
-          );
-        return {
-          ...current,
-          active: updateItems(current.active),
-          recent: updateItems(current.recent),
-        };
-      });
+      queryClient.setQueryData<DeliveryOperationsResult>(
+        ['company', 'operations'],
+        (current) => updateDeliveryLocationInOperations(current, point),
+      );
     };
     socket.on('delivery:updated', refresh);
     socket.on('delivery:location', updateDeliveryLocation);

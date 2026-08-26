@@ -2,6 +2,7 @@
 
 > Este projeto e trabalhado por mais de um agente de IA, em sessoes
 > diferentes. Antes de qualquer alteracao, leia tambem
+> `AI_INSTRUCTIONS.md` (protocolo operacional e uso de skills),
 > `docs/ai-agent-guide.md` (fluxo de trabalho, armadilhas conhecidas) e
 > `docs/business-rules.md` (decisoes de negocio confirmadas), alem deste
 > arquivo e de `docs/agent-handoff.md`.
@@ -25,6 +26,7 @@ pnpm lint
 pnpm --filter @motoboycity/api exec jest --runInBand
 pnpm --filter @motoboycity/api test:e2e
 pnpm --filter @motoboycity/api run build
+pnpm --filter @motoboycity/company-web test
 pnpm --filter @motoboycity/company-web run build
 pnpm --filter @motoboycity/admin-web run build
 pnpm --filter @motoboycity/driver-app exec jest --runInBand

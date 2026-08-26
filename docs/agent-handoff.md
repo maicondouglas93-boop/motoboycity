@@ -7580,3 +7580,53 @@ copias possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo
 passo concreto: instalar sobre o `pilot.6` em um aparelho real e validar login,
 online/offline, ofertas e as novas opcoes de botao flutuante e tela antes da
 distribuicao ampla.
+
+## Atualizacao - 2026-08-26: protocolo operacional para agentes de IA
+
+Foi adicionado `AI_INSTRUCTIONS.md` como complemento operacional, sem substituir
+`AGENTS.md`, as regras de negocio ou o handoff. O protocolo define precedencia
+das fontes, investigacao baseada em evidencias, profundidade proporcional ao
+risco, roteamento das cinco skills do projeto, limites para subagentes somente
+leitura, validacao proporcional e criterio objetivo de conclusao. Referencias a
+ferramentas exclusivas de um agente especifico foram removidas para o documento
+funcionar com diferentes assistentes.
+
+`AGENTS.md` passou a exigir a leitura desse protocolo antes de alteracoes. Nao
+houve mudanca de aplicacao, contrato, schema, migration, dependencia ou
+configuracao de runtime. Validacao prevista: revisao do diff e
+`git diff --check`. Proximo passo concreto: observar o protocolo na proxima
+tarefa real e ajustar somente regras que produzirem ambiguidade comprovada.
+
+## Atualizacao - 2026-08-26: testes iniciais automatizados do Company Web
+
+O Company Web passou a ter uma base de testes com Vitest, jsdom e React
+Testing Library. Os comandos locais sao `pnpm --filter
+@motoboycity/company-web test` para uma execucao unica e `test:watch` durante
+o desenvolvimento. A configuracao usa o alias `@` existente, limpeza de DOM e
+`localStorage` entre casos e matchers acessiveis do Testing Library.
+
+A primeira suite cobre o `AuthGate`: ausencia de token, validacao bem-sucedida
+com preenchimento do cache do TanStack Query, respostas 401/403 com limpeza da
+sessao e redirecionamento, e falha temporaria com nova tentativa sem desconectar
+o usuario. Tambem cobre persistencia/limpeza do token em `session` e a aplicacao
+de eventos `delivery:location` ao cache operacional, incluindo entregas ativas,
+recentes, coordenada invalida e entrega ausente.
+
+A regra de atualizacao de localizacao foi extraida de
+`apps/company-web/src/app/(app)/page.tsx` para
+`apps/company-web/src/lib/delivery-location-cache.ts`. O socket continua
+atualizando diretamente `['company', 'operations']`, sem requisicao HTTP; a
+funcao agora preserva a referencia do cache quando o evento e invalido ou nao
+encontra uma entrega carregada. Nao houve mudanca de API, contrato persistido,
+schema, migration, autenticacao ou ambiente de runtime.
+
+Validacoes aprovadas: 3 arquivos e 11 testes; typecheck e lint do Company Web;
+build de producao do Company Web com 18 paginas geradas; `git diff --check`. O
+primeiro build isolado falhou somente porque o sandbox nao podia baixar as
+fontes Google ja usadas pela aplicacao; com acesso de rede, o mesmo build
+passou. `pnpm audit` nao apontou alerta alto ou moderado pelos pacotes novos;
+ele continua falhando por 5 avisos transitivos preexistentes no React Native,
+Prisma e dependencias opcionais do Google Cloud (2 moderados e 3 altos). Nao
+houve smoke autenticado no navegador. Proximo passo concreto:
+expandir a cobertura para os formularios de login/cadastro, criacao de pedido
+em lote, faturamento e estados de erro/carregamento das paginas operacionais.
