@@ -8336,3 +8336,36 @@ teste e este handoff. Validacoes aprovadas: teste focado com 7 casos, typecheck
 e lint do Driver App e `git diff --check`. Proximo passo concreto: validar
 visualmente no aparelho um card aceito e outro entregue. APK, commit e push nao
 foram executados.
+
+## Atualizacao - 2026-08-27: release Android oficial pilot.9
+
+O conjunto funcional foi publicado no `main` no commit `7c94a58`, incluindo
+fila real do motoboy, ordenacao estavel dos pedidos aceitos, prazo de coleta e
+redispatch, card compacto, correcoes do historico e as marcas verdes da rota.
+O Driver App foi promovido para `0.1.0-pilot.9`, com `versionCode` 9. O build
+do Render continua executando `prisma migrate deploy` antes de iniciar a API,
+de modo que a migration aditiva acompanha o rollout do codigo.
+
+O release foi compilado em uma worktree temporaria curta em `C:\m9`, usando
+`production`, a URL `https://motoboycity-api.onrender.com` e a chave oficial.
+A primeira tentativa parou antes de gerar o APK porque a worktree limpa ainda
+nao tinha o `dist` de `@motoboycity/validation`; depois de compilar esse pacote,
+o `assembleRelease` concluiu com sucesso. A worktree temporaria, inclusive a
+copia da configuracao local ignorada, foi removida ao final.
+
+O APK oficial tem 75.104.781 bytes e SHA-256
+`5E8FBE9712A11239852D1308C28EBD81768C8AE8C6D566B17DEB65A455211B75`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o mesmo certificado
+dos pilotos anteriores, SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.9`, `versionCode` 9, minSdk 24 e targetSdk 36. O bundle contem a
+URL oficial e nao contem `localhost:3333`, `127.0.0.1` nem `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.9-vc9.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.9-vc9.apk`; tamanho e
+hash coincidem nas duas copias. As 19 suites e os 110 testes do Driver App
+passaram depois do build. O APK nao foi instalado nesta sessao. Proximo passo
+concreto: instalar sobre o `pilot.8` em um aparelho e validar fila, ordenacao de
+tres ou quatro pedidos, contador de coleta, redispatch e checks da rota.
