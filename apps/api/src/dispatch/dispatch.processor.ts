@@ -1,7 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
-import { ACTIVATE_SCHEDULED_JOB, DISPATCH_QUEUE, DispatchService, OFFER_EXPIRE_JOB } from './dispatch.service';
+import {
+  ACTIVATE_SCHEDULED_JOB,
+  DISPATCH_QUEUE,
+  DispatchService,
+  OFFER_EXPIRE_JOB,
+  PICKUP_EXPIRE_JOB,
+} from './dispatch.service';
 
 @Processor(DISPATCH_QUEUE)
 export class DispatchProcessor extends WorkerHost {
@@ -18,6 +24,13 @@ export class DispatchProcessor extends WorkerHost {
         return;
       case ACTIVATE_SCHEDULED_JOB:
         await this.dispatchService.handleScheduledActivation(job.data.deliveryId as string);
+        return;
+      case PICKUP_EXPIRE_JOB:
+        await this.dispatchService.handlePickupExpired(
+          job.data.deliveryId as string,
+          job.data.expectedDriverId as string,
+          job.data.expectedDeadlineAt as string,
+        );
         return;
       default:
         this.logger.warn(`Job desconhecido na fila de despacho: ${job.name}`);

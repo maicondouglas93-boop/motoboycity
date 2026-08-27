@@ -220,6 +220,7 @@ export default function OperationSettingsPage() {
   const queryClient = useQueryClient();
 
   const [timeoutInput, setTimeoutInput] = useState('');
+  const [pickupTimeoutInput, setPickupTimeoutInput] = useState('');
   const [radiusInput, setRadiusInput] = useState('');
   const [minCollectInput, setMinCollectInput] = useState('');
   const [minDeliverInput, setMinDeliverInput] = useState('');
@@ -241,6 +242,7 @@ export default function OperationSettingsPage() {
 
   function resetInputs() {
     setTimeoutInput('');
+    setPickupTimeoutInput('');
     setRadiusInput('');
     setMinCollectInput('');
     setMinDeliverInput('');
@@ -271,6 +273,7 @@ export default function OperationSettingsPage() {
   const settings = settingsQuery.data;
   const hasChanges = [
     timeoutInput,
+    pickupTimeoutInput,
     radiusInput,
     minCollectInput,
     minDeliverInput,
@@ -313,6 +316,12 @@ export default function OperationSettingsPage() {
       'O tempo de resposta',
       TIMEOUT_MIN_SECONDS,
       TIMEOUT_MAX_SECONDS,
+    );
+    const pickupTimeout = parseField(
+      pickupTimeoutInput,
+      'O prazo para coletar',
+      SLA_MIN_MINUTES,
+      SLA_MAX_MINUTES,
     );
     const radius = parseField(
       radiusInput,
@@ -377,6 +386,7 @@ export default function OperationSettingsPage() {
 
     const error =
       timeout.error ??
+      pickupTimeout.error ??
       radius.error ??
       minCollect.error ??
       minDeliver.error ??
@@ -394,6 +404,7 @@ export default function OperationSettingsPage() {
 
     if (
       timeout.value === undefined &&
+      pickupTimeout.value === undefined &&
       radius.value === undefined &&
       minCollect.value === undefined &&
       minDeliver.value === undefined &&
@@ -411,6 +422,9 @@ export default function OperationSettingsPage() {
 
     updateMutation.mutate({
       ...(timeout.value !== undefined && { dispatchOfferTimeoutSeconds: timeout.value }),
+      ...(pickupTimeout.value !== undefined && {
+        pickupAssignmentTimeoutMinutes: pickupTimeout.value,
+      }),
       ...(radius.value !== undefined && { returnProximityRadiusMeters: radius.value }),
       ...(minCollect.value !== undefined && { minMinutesBeforeCollect: minCollect.value }),
       ...(minDeliver.value !== undefined && { minMinutesBeforeDeliver: minDeliver.value }),
@@ -522,6 +536,23 @@ export default function OperationSettingsPage() {
                   }
                   estado={settings.dispatchOfferTimeoutSeconds === null ? 'faltando' : 'definido'}
                   description="Depois desse prazo, a oferta pode seguir para o próximo motoboy da fila."
+                />
+                <SettingField
+                  id="pickup-timeout"
+                  label="Tempo para coletar depois do aceite"
+                  placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
+                  unit="minutos"
+                  value={pickupTimeoutInput}
+                  onValueChange={setPickupTimeoutInput}
+                  currentValue={
+                    settings.pickupAssignmentTimeoutMinutes === null
+                      ? 'não configurado'
+                      : `${settings.pickupAssignmentTimeoutMinutes} min`
+                  }
+                  estado={
+                    settings.pickupAssignmentTimeoutMinutes === null ? 'faltando' : 'definido'
+                  }
+                  description="Ao zerar antes da coleta, o pedido volta para a fila e toca para outro motoboy."
                 />
                 <SettingField
                   id="return-radius"
@@ -726,6 +757,22 @@ export default function OperationSettingsPage() {
                         settings.dispatchOfferTimeoutSeconds === null ? 'faltando' : 'definido'
                       }
                       pendente={timeoutInput.trim() ? `${timeoutInput.trim()} segundos` : undefined}
+                    />
+                    <CurrentValueRow
+                      label="Prazo para coletar"
+                      value={
+                        settings.pickupAssignmentTimeoutMinutes === null
+                          ? 'Não configurado'
+                          : `${settings.pickupAssignmentTimeoutMinutes} min`
+                      }
+                      estado={
+                        settings.pickupAssignmentTimeoutMinutes === null ? 'faltando' : 'definido'
+                      }
+                      pendente={
+                        pickupTimeoutInput.trim()
+                          ? `${pickupTimeoutInput.trim()} min`
+                          : undefined
+                      }
                     />
                     <CurrentValueRow
                       label="Raio de retorno"

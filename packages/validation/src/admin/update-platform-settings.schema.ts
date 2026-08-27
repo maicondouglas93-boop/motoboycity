@@ -19,6 +19,12 @@ export const updatePlatformSettingsSchema = z
       .min(10, 'O tempo de resposta deve ser de pelo menos 10 segundos.')
       .max(600, 'O tempo de resposta deve ser de no máximo 600 segundos.')
       .optional(),
+    pickupAssignmentTimeoutMinutes: z
+      .number()
+      .int('O prazo de coleta deve ser um numero inteiro de minutos.')
+      .min(1, 'O prazo de coleta deve ser de pelo menos 1 minuto.')
+      .max(480, 'O prazo de coleta deve ser de no maximo 480 minutos.')
+      .optional(),
     returnProximityRadiusMeters: z
       .number()
       .int('O raio de retorno deve ser um número inteiro de metros.')
@@ -109,6 +115,7 @@ export const updatePlatformSettingsSchema = z
     (data) =>
       data.driverCommissionPercentage !== undefined ||
       data.dispatchOfferTimeoutSeconds !== undefined ||
+      data.pickupAssignmentTimeoutMinutes !== undefined ||
       data.returnProximityRadiusMeters !== undefined ||
       data.businessHoursEnabled !== undefined ||
       data.minMinutesBeforeCollect !== undefined ||

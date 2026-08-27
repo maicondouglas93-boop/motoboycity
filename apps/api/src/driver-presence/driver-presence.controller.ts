@@ -6,6 +6,7 @@ import {
   type SetDriverPresencePayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
+import type { DriverDispatchQueueResult } from '@motoboycity/types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { DriverOnlyGuard } from '../auth/driver-only.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -20,6 +21,11 @@ export class DriverPresenceController {
   @Get()
   get(@CurrentUser() user: User): Promise<DriverPresenceItem> {
     return this.driverPresenceService.get(user);
+  }
+
+  @Get('queue')
+  queue(@CurrentUser() user: User): Promise<DriverDispatchQueueResult> {
+    return this.driverPresenceService.queue(user);
   }
 
   @Put()

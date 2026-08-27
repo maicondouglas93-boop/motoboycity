@@ -28,6 +28,7 @@ export class AdminPlatformSettingsService {
       return {
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        pickupAssignmentTimeoutMinutes: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
@@ -57,6 +58,9 @@ export class AdminPlatformSettingsService {
       }),
       ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
         dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
+      }),
+      ...(payload.pickupAssignmentTimeoutMinutes !== undefined && {
+        pickupAssignmentTimeoutMinutes: payload.pickupAssignmentTimeoutMinutes,
       }),
       ...(payload.returnProximityRadiusMeters !== undefined && {
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
@@ -122,6 +126,7 @@ export class AdminPlatformSettingsService {
   private toItem(settings: {
     driverCommissionPercentage: { toString(): string } | null;
     dispatchOfferTimeoutSeconds: number | null;
+    pickupAssignmentTimeoutMinutes: number | null;
     returnProximityRadiusMeters: number | null;
     businessHoursEnabled: boolean;
     minMinutesBeforeCollect: number | null;
@@ -142,6 +147,7 @@ export class AdminPlatformSettingsService {
           ? null
           : Number(settings.driverCommissionPercentage),
       dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
+      pickupAssignmentTimeoutMinutes: settings.pickupAssignmentTimeoutMinutes,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
       businessHoursEnabled: settings.businessHoursEnabled,
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,

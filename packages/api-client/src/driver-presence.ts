@@ -1,4 +1,5 @@
 import type {
+  DriverDispatchQueueResult,
   DriverPresenceHeartbeatPayload,
   DriverPresenceItem,
   SetDriverPresencePayload,
@@ -20,6 +21,13 @@ export function createDriverPresenceApi({ baseUrl }: DriverPresenceApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DriverPresenceItem>(response);
+    },
+
+    async queue(accessToken: string): Promise<DriverDispatchQueueResult> {
+      const response = await fetch(`${baseUrl}/driver/presence/queue`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DriverDispatchQueueResult>(response);
     },
 
     async set(

@@ -3,6 +3,7 @@ import type {
   DriverPresenceHeartbeatPayload,
   SetDriverPresencePayload,
 } from '@motoboycity/validation';
+import type { DriverDispatchQueueResult } from '@motoboycity/types';
 import type { DriverAvailability, User } from '@prisma/client';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
@@ -30,6 +31,95 @@ export class DriverPresenceService {
       driver = await this.findDriverForUser(user);
     }
     return this.buildItem(driver.id, driver.availability);
+  }
+
+  /**
+   * Entrega ao motoboy online a mesma sequencia global usada pela Home Admin
+   * e pelo despacho antes dos filtros de regiao/modalidade.
+   *
+   * A resposta e deliberadamente sanitizada: nomes e posicoes bastam para a
+   * operacao; telefone, GPS, appVersion e IDs dos colegas nao saem da API.
+   */
+  async queue(user: User): Promise<DriverDispatchQueueResult> {
+    const currentDriver = await this.findDriverForUser(user);
+    const generatedAt = new Date().toISOString();
+    const snapshots = await this.livePresence.listActive();
+    const activeDriverIds = snapshots.map((snapshot) => snapshot.driverId);
+
+    if (
+      currentDriver.availability !== 'AVAILABLE' ||
+      !activeDriverIds.includes(currentDriver.id)
+    ) {
+      return {
+        queueName: 'Geral',
+        currentPosition: null,
+        totalDrivers: 0,
+        drivers: [],
+        generatedAt,
+      };
+    }
+
+    const drivers = await this.prisma.driver.findMany({
+      where: {
+        id: { in: activeDriverIds },
+        availability: 'AVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        user: { select: { name: true } },
+        presenceLogs: {
+          where: { wentOfflineAt: null },
+          orderBy: { wentOnlineAt: 'desc' },
+          take: 1,
+          select: { wentOnlineAt: true },
+        },
+      },
+    });
+
+    const fallbackOrder = [...drivers].sort((left, right) => {
+      const leftTime = left.presenceLogs[0]?.wentOnlineAt.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightTime = right.presenceLogs[0]?.wentOnlineAt.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime || left.id.localeCompare(right.id);
+    });
+    const orderedDriverIds = await this.livePresence.orderForDispatch(
+      fallbackOrder.map((driver) => driver.id),
+    );
+    const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
+    const entries = orderedDriverIds.flatMap((driverId, index) => {
+      const driver = driverById.get(driverId);
+      return driver
+        ? [
+            {
+              position: index + 1,
+              name: driver.user.name,
+              isCurrentDriver: driver.id === currentDriver.id,
+            },
+          ]
+        : [];
+    });
+    const currentEntry = entries.find((entry) => entry.isCurrentDriver);
+
+    // Se a conta mudou entre as duas leituras, nao exponha a fila a quem ja
+    // nao aparece nela. A proxima sincronizacao de presenca corrige a Home.
+    if (!currentEntry) {
+      return {
+        queueName: 'Geral',
+        currentPosition: null,
+        totalDrivers: 0,
+        drivers: [],
+        generatedAt,
+      };
+    }
+
+    return {
+      queueName: 'Geral',
+      currentPosition: currentEntry.position,
+      totalDrivers: entries.length,
+      drivers: entries,
+      generatedAt,
+    };
   }
 
   async setAvailability(

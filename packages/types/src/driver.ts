@@ -7,6 +7,25 @@ export interface DriverPresenceItem {
   since: string | null;
 }
 
+export interface DriverDispatchQueueEntry {
+  position: number;
+  name: string;
+  isCurrentDriver: boolean;
+}
+
+/**
+ * Visao sanitizada da fila global de despacho para o motoboy online.
+ *
+ * Nao inclui telefone, coordenadas nem identificadores dos demais motoboys.
+ */
+export interface DriverDispatchQueueResult {
+  queueName: string;
+  currentPosition: number | null;
+  totalDrivers: number;
+  drivers: DriverDispatchQueueEntry[];
+  generatedAt: string;
+}
+
 export interface DriverLiveLocationInput {
   lat: number;
   lng: number;

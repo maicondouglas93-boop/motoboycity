@@ -99,7 +99,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         return;
       }
       this.socketDriverId.set(client.id, driver.id);
-      void client.join(this.driverRoom(driver.id));
+      await Promise.all([client.join(this.driverRoom(driver.id)), client.join('drivers')]);
       this.logger.debug(`Motoboy conectado: ${client.id} (driver ${driver.id})`);
       return;
     }
@@ -197,10 +197,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitDriverPresence(payload: unknown): void {
     this.server.to('admin').emit('driver:presence', payload);
+    this.emitDriverQueueChanged();
   }
 
   emitDispatchQueueUpdated(payload: unknown): void {
     this.server.to('admin').emit('dispatch:queue-updated', payload);
+    this.emitDriverQueueChanged();
   }
 
   emitDeliveryLocation(companyId: string, payload: unknown): void {
@@ -228,6 +230,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   private driverRoom(driverId: string): string {
     return `driver:${driverId}`;
+  }
+
+  private emitDriverQueueChanged(): void {
+    this.server.to('drivers').emit('driver-queue:updated', {
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private companyRoom(companyId: string): string {

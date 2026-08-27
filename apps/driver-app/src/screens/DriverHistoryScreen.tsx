@@ -18,14 +18,17 @@ import { Icon } from '../components/Icon';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { deliveriesApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia } from '../lib/format';
+import {
+  formatHistoryDate,
+  normalizeHistoryPeriod,
+  type HistoryPeriod,
+} from '../lib/historyPeriod';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'History'>;
-type PeriodFilter = { from?: string; to?: string };
 
-const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const dayFormatter = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
   day: '2-digit',
@@ -43,14 +46,6 @@ const keyFormatter = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 });
-
-function isValidPeriod(from: string, to: string): boolean {
-  return (
-    (!from || datePattern.test(from)) &&
-    (!to || datePattern.test(to)) &&
-    (!from || !to || from <= to)
-  );
-}
 
 function groupByCompletionDay(deliveries: DeliveryListItem[]) {
   const grouped = new Map<string, DeliveryListItem[]>();
@@ -71,12 +66,12 @@ export function DriverHistoryScreen({ navigation }: Props) {
   const [deliveries, setDeliveries] = useState<DeliveryListItem[]>([]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [appliedPeriod, setAppliedPeriod] = useState<PeriodFilter>({});
+  const [appliedPeriod, setAppliedPeriod] = useState<HistoryPeriod>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadHistory = useCallback(async (period: PeriodFilter) => {
+  const loadHistory = useCallback(async (period: HistoryPeriod) => {
     const token = await session.getToken();
     if (!token) {
       setError('Sua sessão expirou. Entre novamente para consultar o histórico.');
@@ -106,13 +101,14 @@ export function DriverHistoryScreen({ navigation }: Props) {
   }, [appliedPeriod, loadHistory]);
 
   function applyPeriod() {
-    if (!isValidPeriod(from, to)) {
+    const normalizedPeriod = normalizeHistoryPeriod(from, to);
+    if (!normalizedPeriod) {
       setError(
-        'Informe datas no formato AAAA-MM-DD; a data inicial não pode ser posterior à final.',
+        'Informe datas válidas no formato DD/MM/AAAA; a data inicial não pode ser posterior à final.',
       );
       return;
     }
-    setAppliedPeriod({ ...(from && { from }), ...(to && { to }) });
+    setAppliedPeriod(normalizedPeriod);
   }
 
   function clearPeriod() {
@@ -128,7 +124,9 @@ export function DriverHistoryScreen({ navigation }: Props) {
   const groups = useMemo(() => groupByCompletionDay(deliveries), [deliveries]);
   const periodLabel =
     appliedPeriod.from || appliedPeriod.to
-      ? `${appliedPeriod.from ?? 'início'} até ${appliedPeriod.to ?? 'hoje'}`
+      ? `${appliedPeriod.from ? formatHistoryDate(appliedPeriod.from) : 'início'} até ${
+          appliedPeriod.to ? formatHistoryDate(appliedPeriod.to) : 'hoje'
+        }`
       : 'Todo o histórico';
 
   return (
@@ -174,7 +172,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
                 <Text style={styles.dateLabel}>A partir de</Text>
                 <TextInput
                   accessibilityLabel="Data inicial do histórico"
-                  placeholder="AAAA-MM-DD"
+                  placeholder="DD/MM/AAAA"
                   placeholderTextColor={colors.inkMuted}
                   value={from}
                   onChangeText={setFrom}
@@ -187,7 +185,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
                 <Text style={styles.dateLabel}>Até</Text>
                 <TextInput
                   accessibilityLabel="Data final do histórico"
-                  placeholder="AAAA-MM-DD"
+                  placeholder="DD/MM/AAAA"
                   placeholderTextColor={colors.inkMuted}
                   value={to}
                   onChangeText={setTo}

@@ -20,8 +20,11 @@ import { buildOfferPayload, remainingSeconds } from './offer-payload';
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
+export const PICKUP_EXPIRE_JOB = 'pickup-expire';
 
 type PendingOfferCreationResult = { offers: DeliveryOffer[] } | { retryNextDriver: boolean };
+
+class PickupExpiryRaceError extends Error {}
 
 /**
  * Status em que o motoboy ainda tem trabalho em maos e nao pode receber outra
@@ -41,6 +44,10 @@ function expireJobId(offerId: string): string {
 
 function activateJobId(deliveryId: string): string {
   return `activate-${deliveryId}`;
+}
+
+function pickupExpireJobId(deliveryId: string, deadlineAt: Date): string {
+  return `pickup-expire-${deliveryId}-${deadlineAt.getTime()}`;
 }
 
 @Injectable()
@@ -74,6 +81,159 @@ export class DispatchService {
       { deliveryId },
       { delay: delayMs, jobId: activateJobId(deliveryId) },
     );
+  }
+
+  private async pickupDeadlineFrom(acceptedAt: Date): Promise<Date | null> {
+    const settings = await this.platformSettingsService.get();
+    const timeoutMinutes = settings.pickupAssignmentTimeoutMinutes;
+    if (timeoutMinutes === null || timeoutMinutes === undefined) return null;
+    return new Date(acceptedAt.getTime() + timeoutMinutes * 60_000);
+  }
+
+  private async schedulePickupExpiry(
+    deliveryId: string,
+    driverId: string,
+    deadlineAt: Date | null,
+  ): Promise<void> {
+    if (!deadlineAt) return;
+
+    await this.dispatchQueue.add(
+      PICKUP_EXPIRE_JOB,
+      {
+        deliveryId,
+        expectedDriverId: driverId,
+        expectedDeadlineAt: deadlineAt.toISOString(),
+      },
+      {
+        delay: Math.max(0, deadlineAt.getTime() - Date.now()),
+        jobId: pickupExpireJobId(deliveryId, deadlineAt),
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5_000 },
+      },
+    );
+  }
+
+  private async ensurePickupExpiry(deliveryId: string, driverId: string): Promise<void> {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      select: { status: true, driverId: true, pickupDeadlineAt: true },
+    });
+    if (
+      !delivery ||
+      delivery.status !== 'ACCEPTED' ||
+      delivery.driverId !== driverId ||
+      !delivery.pickupDeadlineAt
+    ) {
+      return;
+    }
+    await this.schedulePickupExpiry(deliveryId, driverId, delivery.pickupDeadlineAt);
+  }
+
+  async handlePickupExpired(
+    deliveryId: string,
+    expectedDriverId: string,
+    expectedDeadlineAt: string,
+  ): Promise<void> {
+    const deadlineAt = new Date(expectedDeadlineAt);
+    if (Number.isNaN(deadlineAt.getTime())) {
+      this.logger.warn(`Prazo de coleta invalido no job do pedido ${deliveryId}.`);
+      return;
+    }
+
+    const target = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    if (!target) return;
+
+    // Se a transicao ja foi gravada mas o redespacho falhou, uma tentativa do
+    // BullMQ chega aqui e conclui somente a parte externa que ficou pendente.
+    if (
+      target.status === 'AWAITING_DRIVER' &&
+      target.driverId === null &&
+      target.pickupDeadlineAt === null
+    ) {
+      await this.dispatchDelivery(deliveryId, { excludeDriverIds: [expectedDriverId] });
+      return;
+    }
+
+    if (
+      target.status !== 'ACCEPTED' ||
+      target.driverId !== expectedDriverId ||
+      target.pickupDeadlineAt?.getTime() !== deadlineAt.getTime()
+    ) {
+      return;
+    }
+
+    const deliveries = target.batchId
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: target.batchId },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [target];
+    const deliveryIds = deliveries.map((item) => item.id);
+    const expiredAt = new Date();
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.delivery.updateMany({
+          where: {
+            id: { in: deliveryIds },
+            status: 'ACCEPTED',
+            driverId: expectedDriverId,
+            pickupDeadlineAt: deadlineAt,
+          },
+          data: {
+            status: 'AWAITING_DRIVER',
+            driverId: null,
+            pickupDeadlineAt: null,
+            statusChangedAt: expiredAt,
+          },
+        });
+        if (updated.count !== deliveryIds.length) {
+          // Coleta e expiracao podem tocar o mesmo registro no mesmo instante.
+          // Lancar reverte inclusive uma atualizacao parcial do lote.
+          throw new PickupExpiryRaceError();
+        }
+
+        await tx.deliveryStatusHistory.createMany({
+          data: deliveryIds.map((id) => ({
+            deliveryId: id,
+            fromStatus: 'ACCEPTED' as const,
+            toStatus: 'AWAITING_DRIVER' as const,
+            note: 'Prazo de coleta expirado; pedido devolvido automaticamente ao despacho.',
+          })),
+        });
+      });
+    } catch (error) {
+      if (error instanceof PickupExpiryRaceError) return;
+      throw error;
+    }
+
+    this.realtimeGateway.emitToDriver(expectedDriverId, 'delivery:pickup-expired', {
+      deliveryIds,
+    });
+    this.realtimeGateway.emitAdminActivity(
+      `Prazo de coleta do pedido #${target.displayNumber} expirou; buscando outro motoboy.`,
+    );
+    for (const item of deliveries) {
+      this.realtimeGateway.emitDeliveryUpdated(item.companyId, {
+        deliveryId: item.id,
+        displayNumber: item.displayNumber,
+        companyId: item.companyId,
+        driverId: null,
+        status: 'AWAITING_DRIVER',
+      });
+    }
+    await this.pushService
+      .sendToDriver(expectedDriverId, {
+        title: 'Prazo de coleta encerrado',
+        body: `O pedido #${target.displayNumber} voltou para a fila e sera enviado a outro motoboy.`,
+        kind: 'general',
+        data: { type: 'pickup-expired', deliveryIds: deliveryIds.join(',') },
+      })
+      .catch((error) =>
+        this.logger.warn(`Falha ao avisar expiracao da coleta por push: ${String(error)}`),
+      );
+
+    await this.dispatchDelivery(deliveryId, { excludeDriverIds: [expectedDriverId] });
   }
 
   /** Tenta ofertar um pedido AWAITING_DRIVER específico ao próximo motoboy
@@ -472,6 +632,13 @@ export class DispatchService {
       );
     }
 
+    const acceptedAt = new Date();
+    const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
+    // O job nasce antes da transacao: se o Redis estiver indisponivel, o
+    // pedido nao pode ser aceito sem a garantia de que o prazo sera cumprido.
+    // Se a transacao perder uma corrida, o job orfao apenas faz no-op.
+    await this.schedulePickupExpiry(offer.deliveryId, driverId, pickupDeadlineAt);
+
     let delivery: { id: string; displayNumber: number; companyId: string };
     try {
       delivery = await this.prisma.$transaction(async (tx) => {
@@ -485,7 +652,12 @@ export class DispatchService {
 
         const deliveryUpdate = await tx.delivery.updateMany({
           where: { id: offer.deliveryId, status: 'AWAITING_DRIVER' },
-          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+          data: {
+            status: 'ACCEPTED',
+            driverId,
+            statusChangedAt: acceptedAt,
+            pickupDeadlineAt,
+          },
         });
         if (deliveryUpdate.count === 0) {
           throw new ConflictException('Este pedido já não está mais disponível.');
@@ -590,6 +762,9 @@ export class DispatchService {
       throw new ConflictException('O lote não está mais disponível para aceite.');
     }
     const offerIds = offers.map((offer) => offer.id);
+    const acceptedAt = new Date();
+    const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
+    await this.schedulePickupExpiry(deliveryId, driverId, pickupDeadlineAt);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -602,7 +777,12 @@ export class DispatchService {
         }
         const deliveryUpdate = await tx.delivery.updateMany({
           where: { id: { in: deliveryIds }, status: 'AWAITING_DRIVER' },
-          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+          data: {
+            status: 'ACCEPTED',
+            driverId,
+            statusChangedAt: acceptedAt,
+            pickupDeadlineAt,
+          },
         });
         if (deliveryUpdate.count !== deliveryIds.length) {
           throw new ConflictException('O lote já não está mais disponível.');
@@ -701,6 +881,7 @@ export class DispatchService {
     driverId: string,
     result: AcceptOfferResult,
   ): Promise<void> {
+    await this.ensurePickupExpiry(result.deliveryId, driverId);
     const deliveryIds = result.deliveryIds ?? [result.deliveryId];
     const offers = await this.prisma.deliveryOffer.findMany({
       where: { driverId, deliveryId: { in: deliveryIds }, response: 'ACCEPTED' },
@@ -1013,6 +1194,7 @@ export class DispatchService {
     }
     const claimedBeforeRetry = await this.assignedDeliveryResult(alvo, driverId);
     if (claimedBeforeRetry) {
+      await this.ensurePickupExpiry(claimedBeforeRetry.deliveryId, driverId);
       return claimedBeforeRetry;
     }
     if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
@@ -1035,6 +1217,9 @@ export class DispatchService {
       throw new ConflictException('Este lote já não está mais disponível por inteiro.');
     }
     const ids = irmaos.map((item) => item.id);
+    const acceptedAt = new Date();
+    const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
+    await this.schedulePickupExpiry(deliveryId, driverId, pickupDeadlineAt);
 
     let delivery: {
       id: string;
@@ -1047,7 +1232,12 @@ export class DispatchService {
       delivery = await this.prisma.$transaction(async (tx) => {
         const atualizadas = await tx.delivery.updateMany({
           where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
-          data: { status: 'ACCEPTED', driverId, statusChangedAt: new Date() },
+          data: {
+            status: 'ACCEPTED',
+            driverId,
+            statusChangedAt: acceptedAt,
+            pickupDeadlineAt,
+          },
         });
         if (atualizadas.count !== ids.length) {
           throw new ConflictException('Este pedido já não está mais disponível.');
@@ -1070,7 +1260,10 @@ export class DispatchService {
     } catch (error) {
       if (error instanceof ConflictException) {
         const claimedDuringRace = await this.assignedDeliveryResultById(deliveryId, driverId);
-        if (claimedDuringRace) return claimedDuringRace;
+        if (claimedDuringRace) {
+          await this.ensurePickupExpiry(claimedDuringRace.deliveryId, driverId);
+          return claimedDuringRace;
+        }
       }
       throw error;
     }
@@ -1180,7 +1373,12 @@ export class DispatchService {
     const delivery = await this.prisma.$transaction(async (tx) => {
       const atualizadas = await tx.delivery.updateMany({
         where: { id: { in: ids }, driverId, status: 'ACCEPTED' },
-        data: { status: 'AWAITING_DRIVER', driverId: null, statusChangedAt: new Date() },
+        data: {
+          status: 'AWAITING_DRIVER',
+          driverId: null,
+          pickupDeadlineAt: null,
+          statusChangedAt: new Date(),
+        },
       });
       if (atualizadas.count !== ids.length) {
         throw new ConflictException('Este pedido já não está mais com este motoboy.');

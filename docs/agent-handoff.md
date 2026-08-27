@@ -8101,3 +8101,238 @@ e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.8-vc8.apk`; as duas copias
 possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo passo
 concreto: instalar sobre o `pilot.7` e conferir na Home tres a quatro pedidos
 simultaneos, incluindo um `ACCEPTED` e outro `COLLECTED`.
+
+## Atualizacao - 2026-08-27: backup local automatico do PostgreSQL
+
+Foi ativada uma rotina Windows de backup logico do PostgreSQL do Neon para
+`F:\MOTOboyCity\database-backups`. A tarefa
+`MOTOboyCity PostgreSQL Backup` roda diariamente as 02:30, usa
+`StartWhenAvailable`, impede execucoes simultaneas e mantem 30 dias. Ela roda
+como o usuario Windows `Pichau`, inclusive com a tela bloqueada; se a sessao
+estiver encerrada, aguarda o proximo logon. O disco F foi confirmado como
+unidade local fixa, NTFS,
+saudavel, com 242,79 GB totais e 195,25 GB livres antes da primeira execucao.
+
+O script usa exclusivamente a `DIRECT_URL` do arquivo dedicado e local
+`F:\MOTOboyCity\config\backup.env`, transfere a credencial ao `libpq` por
+variaveis do processo e nao a registra na tarefa, nos logs ou no manifesto. Os
+`.env` do repositorio apontam para `localhost:5434` e, por seguranca, nao sao
+fallback para o backup de producao. O
+dump customizado nasce com sufixo `.partial`; somente depois de `pg_dump`
+concluir, `pg_restore --list` reconhecer o archive e o arquivo ter tamanho
+valido ele recebe o nome final. Cada backup ganha SHA-256 e manifesto sem
+secrets. A limpeza usa caminhos literais e padroes restritos ao diretorio de
+backup.
+
+Arquivos: `apps/api/scripts/backup-postgres.ps1`,
+`apps/api/scripts/configure-postgres-backup-secret.ps1`,
+`apps/api/scripts/register-postgres-backup-task.ps1` e
+`docs/runbooks/postgres-backup-local-windows.md`. O checklist do piloto agora
+registra o backup local, mas preserva como pendencias o ensaio de restore e uma
+segunda copia criptografada fora da maquina.
+
+O secret dedicado foi criado pelo helper de prompt oculto e ficou restrito a
+`SYSTEM`, administradores e ao usuario atual. A validacao sanitizada confirmou
+o host Neon de Sao Paulo, banco `neondb`, TLS `require`, URL direta sem
+`-pooler` e sem `localhost`; usuario e senha nao foram exibidos.
+
+O cliente portatil oficial 17.11 detectou corretamente incompatibilidade com o
+servidor PostgreSQL 18 e abortou sem deixar dump parcial. O cliente oficial
+PostgreSQL 18.6 foi entao instalado em
+`F:\MOTOboyCity\tools\postgresql-18.6`, a tarefa foi atualizada e a repeticao
+concluiu com codigo 0. O primeiro archive,
+`motoboycity-postgres-20260827-153942.dump`, tem 307.301 bytes; o SHA-256
+recalculado confere com o sidecar, e `pg_restore --list` retornou 0 com 300
+entradas. A proxima execucao ficou agendada para 2026-08-28 02:30.
+
+Comandos/validacoes: parser de sintaxe dos tres scripts, dry-run sanitizado,
+`pg_dump --version`, registro/execucao pelo Agendador, `Get-FileHash` e
+`pg_restore --list`. Proximo passo concreto: restaurar esse archive em um
+banco/branch Neon isolado e comparar contagens; depois adicionar uma segunda
+copia criptografada fora da maquina. O backup local nao inclui Redis e nao
+substitui uma estrategia 3-2-1.
+
+## Atualizacao - 2026-08-27: filtro do historico e privacidade financeira mobile
+
+O filtro do Historico do Driver App agora aceita a data brasileira mostrada na
+tela (`DD/MM/AAAA`) e a converte para `AAAA-MM-DD` antes de chamar
+`GET /deliveries`. O erro fotografado acontecia porque `27/08/2026` era enviado
+sem conversao para a API, cujo schema exige ISO. A normalizacao tambem aceita o
+formato ISO anterior, rejeita datas civis inexistentes, impede periodo invertido
+e mantem uma das pontas vazia. O periodo aplicado continua aparecendo no formato
+brasileiro.
+
+No detalhe do pedido do motoboy, a comissao/participacao da plataforma deixou de
+ser renderizada. O `platformValue` persistido, o contrato compartilhado e os
+calculos de preco nao foram alterados; valor do entregador, total, distancia e
+retorno continuam disponiveis. Nao houve mudanca de API, banco, migration ou
+codigo nativo.
+
+Arquivos: `apps/driver-app/src/screens/DriverHistoryScreen.tsx`,
+`apps/driver-app/src/screens/DriverOrderDetailScreen.tsx`, o novo helper
+`apps/driver-app/src/lib/historyPeriod.ts` e seu teste
+`apps/driver-app/__tests__/historyPeriod.test.ts`.
+
+Validacoes aprovadas: teste focado com 4 casos; suite completa do Driver App com
+17 suites e 98 testes; typecheck e lint do workspace; busca confirmou que
+`platformValue`, `Comissao`, `porcentagem` e `percentual` nao sao renderizados em
+`apps/driver-app/src`. Proximo passo concreto: conferir no aparelho o filtro com
+`27/08/2026` nas duas pontas e abrir os detalhes de uma entrega concluida. APK,
+commit e push nao foram executados neste recorte.
+
+## Atualizacao - 2026-08-27: rota compacta na Home do motorista
+
+Os pedidos em andamento da Home agora seguem a leitura visual da referencia:
+numero e tag da etapa no topo; horario, empresa, distancia e ganho em uma linha;
+e abaixo uma rota vertical compacta com coleta, destino e `Todos os detalhes`.
+`ACCEPTED` mostra `Aceito`, `COLLECTED` mostra `Coletado`, `DELIVERED` mostra
+`Retorno` e `FAILED` mostra `Devolucao`. Fontes e espacamentos permanecem
+reduzidos para o uso simultaneo de tres a quatro pedidos.
+
+A ultima etapa usa o icone circular de retorno e so entra quando
+`requiresReturn=true`. Uma entrega `FAILED` tambem mostra essa etapa porque a
+regra operacional exige devolver a mercadoria mesmo sem retorno comercial no
+pedido original. Destino nao conhecido na criacao aparece como `Endereco de
+entrega definido no momento da entrega`.
+
+`GET /deliveries` continua sendo uma listagem resumida sem enderecos. Para nao
+mudar o contrato nem depender de deploy da API, o Driver App enriquece somente
+os poucos pedidos ativos com `GET /deliveries/:id`. Se um detalhe falhar por
+rede, o resumo permanece na store e o card nao desaparece. Banco, precificacao,
+status, Socket.IO e codigo nativo nao mudaram.
+
+Arquivos principais: `components/DeliveryCard.tsx`, `screens/HomeScreen.tsx`,
+`lib/activeDeliveries.ts`, o novo `lib/activeDeliveryPresentation.ts`,
+`store/dispatchStore.ts`, `lib/acceptanceReconciliation.ts` e testes de card,
+enriquecimento e rota condicional.
+
+Validacoes aprovadas: 3 suites focadas com 9 testes; suite completa do Driver
+App com 18 suites e 103 testes; typecheck e lint do workspace. Nao houve teste
+visual em aparelho, APK, commit ou push. Proximo passo concreto: abrir a Home no
+aparelho com um pedido comum e outro com retorno, confirmar a terceira etapa
+circular e revisar a densidade com tres a quatro cards.
+
+## Atualizacao - 2026-08-27: fila real de entregadores no Driver App
+
+A Home do motorista online agora mostra um botao circular compacto abaixo do
+menu com sua posicao (`#1`, `#2`, etc.). O toque abre o painel `Fila de
+Entregadores`, inicialmente recolhido, com total, fila `Geral` e o texto `Voce
+esta em X de Y`; ao expandir, aparecem os nomes na ordem e o proprio motoboy e
+destacado. A lista possui rolagem para nao aumentar a Home nem disputar espaco
+com os tres a quatro cards de pedidos em andamento.
+
+Foi adicionada a rota autenticada de motoboy `GET /driver/presence/queue`. Ela
+usa a mesma sequencia global do Redis consultada pela Home Admin e pelo
+despacho, com fallback por entrada online mais antiga. A rota so entrega a fila
+quando o solicitante continua `AVAILABLE` e com heartbeat vivo. O payload e
+sanitizado: contem somente posicao, nome e indicador do proprio motorista; nao
+exponhe telefone, GPS, appVersion ou IDs dos colegas. Nao houve schema Prisma,
+migration nem mudanca na elegibilidade e na rotacao do dispatch.
+
+Os sockets de motorista tambem entram na sala comum `drivers`. Entrada/saida da
+presenca e mudanca da prioridade emitem apenas `driver-queue:updated` com
+timestamp; o app entao recarrega o endpoint autenticado. A fila tambem e
+atualizada no bootstrap, reconexao, retorno ao primeiro plano, pull-to-refresh e
+mudanca do toggle. Ao ficar offline, expirar presenca ou perder acesso da conta,
+o numero e o painel sao limpos imediatamente.
+
+Arquivos principais: `apps/api/src/driver-presence/`,
+`apps/api/src/realtime/realtime.gateway.ts`, `packages/types/src/driver.ts`,
+`packages/api-client/src/driver-presence.ts`,
+`apps/driver-app/src/components/DriverQueueSheet.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` e
+`apps/driver-app/src/lib/socket.ts`. A decisao de visibilidade sanitizada foi
+registrada em `docs/business-rules.md`.
+
+Validacoes aprovadas: 2 suites focadas da API com 36 testes; suite completa do
+Driver App com 19 suites e 104 testes; typecheck e lint dos oito workspaces;
+build de producao da API; `git diff --check`. Nao houve E2E com Redis real,
+teste visual em aparelho, APK, commit, push ou deploy. Proximo passo concreto:
+homologar com tres motoboys online, observar a mesma ordem no Admin e nos tres
+aparelhos, criar uma oferta e confirmar que o contemplado vai ao fim e todos os
+numeros se atualizam.
+
+## Atualizacao - 2026-08-27: ordem fixa dos pedidos aceitos na Home mobile
+
+Os pedidos em andamento agora aparecem de cima para baixo pelo horario em que a
+atribuicao atual foi aceita: o primeiro aceite fica no topo, o segundo abaixo e
+assim por diante. Mudar de `ACCEPTED` para `COLLECTED`, `DELIVERED` ou `FAILED`
+nao reordena os cards. Se um pedido voltar para a fila e for aceito novamente,
+vale o ultimo `ACCEPTED`, pois ele representa a nova atribuicao.
+
+O Driver App deriva `acceptedAt` do `statusHistory` que ja vem em
+`GET /deliveries/:id`; nao houve rota, contrato compartilhado, banco, migration
+ou mudanca no despacho. O helper mantem em memoria o horario conhecido enquanto
+o pedido esta ativo, preservando a ordem se uma atualizacao individual do
+detalhe falhar. Sem historico disponivel na primeira carga, o fallback continua
+sendo `createdAt`, sem remover o pedido da Home.
+
+Arquivos: `apps/driver-app/src/lib/activeDeliveries.ts`, seu teste
+`apps/driver-app/__tests__/activeDeliveries.test.ts`, `docs/business-rules.md`
+e este handoff. Validacoes aprovadas: teste focado com 6 casos; suite completa
+do Driver App com 19 suites e 106 testes; typecheck, lint e `git diff --check`.
+Proximo passo concreto: validar no aparelho dois pedidos aceitos em sequencia,
+coletar o primeiro e confirmar que ele continua acima do segundo. Nao houve
+APK, commit, push ou deploy neste recorte.
+
+## Atualizacao - 2026-08-27: prazo de coleta com redespacho automatico
+
+Foi adicionada uma configuracao operacional global
+`pickupAssignmentTimeoutMinutes` no Admin Web. Ela define de 1 a 480 minutos
+entre o aceite e a coleta e e independente de `slaAlertMinutesToCollect`, que
+continua sendo apenas um alerta visual da operacao. Campo vazio preserva o valor
+atual; configuracao nula mantem a regra desligada para compatibilidade.
+
+No aceite por oferta, lote ou vitrine de pedidos disponiveis, a API congela
+`Delivery.pickupDeadlineAt` e agenda `pickup-expire` no BullMQ antes de confirmar
+a atribuicao. O job carrega pedido, motoboy e prazo esperados. Ao vencer, uma
+atualizacao condicional muda `ACCEPTED -> AWAITING_DRIVER`, solta o motoboy,
+limpa o prazo, grava historico e redespacha excluindo o motorista anterior da
+tentativa imediata. Lotes voltam inteiros. Se coleta e job concorrerem, contagem
+divergente lanca e reverte a transacao, preservando quem coletou. O job tem
+retentativas e consegue retomar apenas o redespacho se a transicao ja tiver sido
+gravada.
+
+O Driver App recebe `pickupDeadlineAt` no contrato resumido, atualiza um unico
+relogio por segundo e mostra `MM:SS` (ou `H:MM:SS`) na pilula vermelha do card
+somente em `ACCEPTED`. O socket `delivery:pickup-expired` remove o pedido ativo,
+reconfigura o rastreamento e leva a navegacao de volta a Home; push geral cobre
+o aplicativo em segundo plano.
+
+Schema/migration: `apps/api/prisma/schema.prisma` e a migration aditiva
+`20260827170000_add_pickup_assignment_deadline`. Ela adiciona duas colunas
+nulas e um indice, sem backfill: atribuicoes aceitas antes do deploy permanecem
+sem prazo. O schema foi formatado e validado pelo Prisma; a migration foi
+criada, mas NAO foi executada nem aplicada a banco compartilhado. Ordem de rollout: backup/restore validado,
+migration, API, Admin Web e novo APK. Rollback de codigo pode ignorar as colunas
+nulas; nao remover as colunas durante o rollback.
+
+Arquivos principais: contratos em `packages/types`, validacao Admin em
+`packages/validation`, `admin-platform-settings.service.ts`,
+`dispatch.service.ts`/`dispatch.processor.ts`, mapeamento de entregas,
+configuracao operacional do Admin Web, socket/Home/helper de apresentacao do
+Driver App e testes focados correspondentes.
+
+Validacoes aprovadas: Prisma format/validate/generate; suite completa da API
+com 70 suites e 867 testes; suite completa do Driver App com 19 suites e 108
+testes; typecheck e lint dos oito workspaces; builds de producao da API e do
+Admin Web; `git diff --check`. Proximo passo concreto: depois de aplicar a
+migration em ambiente isolado, homologar com dois motoboys:
+aceitar, observar o contador, deixar zerar e confirmar que o segundo recebe a
+nova oferta. Nao houve aplicacao de migration, APK, commit, push ou deploy.
+
+## Atualizacao - 2026-08-27: marcas verdes nas etapas da rota mobile
+
+Na rota compacta da Home, o primeiro icone agora vira um check verde assim que
+o pedido entra em `ACCEPTED` e permanece concluido nos estados seguintes. O
+icone do destino vira check verde somente em `DELIVERED`; uma entrega `FAILED`
+nao recebe essa confirmacao. A etapa de retorno continua com o icone circular
+ate ser concluida e o pedido sair da lista ativa.
+
+A mudanca reutiliza `RouteStop.done` e o check verde que ja existiam em
+`RouteTimeline`, sem alterar API, contrato, status, espacamento ou codigo
+nativo. Arquivos: `apps/driver-app/src/lib/activeDeliveryPresentation.ts`, seu
+teste e este handoff. Validacoes aprovadas: teste focado com 7 casos, typecheck
+e lint do Driver App e `git diff --check`. Proximo passo concreto: validar
+visualmente no aparelho um card aceito e outro entregue. APK, commit e push nao
+foram executados.

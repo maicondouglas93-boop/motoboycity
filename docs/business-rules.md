@@ -126,6 +126,15 @@ nem altera pedido aceito. Região, modalidades habilitadas, heartbeat, bloqueio 
 capacidade continuam filtrando os candidatos; quando um motoboy incompatível é
 ignorado, a ordem relativa dos demais é preservada.
 
+O motoboy online também pode consultar essa sequência global no aplicativo,
+incluindo sua posição e os nomes dos demais entregadores na fila. A consulta não
+expõe telefone, localização, versão do aplicativo nem identificadores internos.
+
+Na Home do motoboy, pedidos já aceitos são ordenados pelo aceite da atribuição
+atual, do mais antigo no topo para o mais novo abaixo. Coleta, entrega ou retorno
+não mudam essa posição; se o pedido voltar à fila e for aceito novamente, vale o
+novo aceite.
+
 ## Suspensão/bloqueio de motoboy
 
 Decisão exclusiva do admin, sem prazo definido, sem processo formal de
@@ -390,6 +399,24 @@ link expira e nenhuma nova localizacao e disponibilizada. Uma pagina que ja
 estiver aberta pode receber somente o estado final sanitizado antes de encerrar a
 conexao. A empresa tambem pode revogar o link antes disso; gerar novamente depois
 da revogacao cria outro token.
+
+## Prazo para coleta depois do aceite
+
+O administrador pode configurar globalmente quantos minutos o motoboy tem para
+coletar um pedido depois de aceita-lo. O prazo vigente e congelado no pedido no
+instante do aceite: mudar a configuracao nao encurta nem amplia atribuicoes que
+ja estao em andamento. Sem configuracao, pedidos antigos e novos continuam sem
+expiracao automatica.
+
+Se o prazo chegar ao fim enquanto o pedido ainda estiver em `ACCEPTED`, a
+atribuicao inteira volta para `AWAITING_DRIVER` e o despacho procura outro
+motoboy, excluindo o anterior da tentativa imediata. Um lote expira por inteiro.
+Se a coleta vencer a corrida concorrente com o job, a transicao condicional
+preserva o pedido com o motorista e a expiracao nao produz efeito.
+
+O Driver App mostra a contagem regressiva vermelha somente em `ACCEPTED`. Ao
+coletar, o contador desaparece; ao expirar, o pedido sai da lista ativa e o
+motoboy recebe o aviso de que ele voltou para a fila.
 
 ---
 

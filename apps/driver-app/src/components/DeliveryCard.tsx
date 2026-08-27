@@ -1,35 +1,19 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DeliveryStatus } from '@motoboycity/types';
-import { Icon, type IconName } from './Icon';
+import { Icon } from './Icon';
 import { RouteTimeline, type RouteStop } from './RouteTimeline';
 import { colors } from '../theme/colors';
 
 type StagePresentation = {
-  icon: IconName;
-  progressLabel: string;
-  badgeLabel?: string;
-  attention?: boolean;
+  badgeLabel: string;
+  tone: 'default' | 'success' | 'warning';
 };
 
 const ACTIVE_STAGES: Partial<Record<DeliveryStatus, StagePresentation>> = {
-  ACCEPTED: { icon: 'arrow', progressLabel: 'A caminho da coleta' },
-  COLLECTED: {
-    icon: 'check',
-    progressLabel: 'A caminho da entrega',
-    badgeLabel: 'Coletado',
-  },
-  DELIVERED: {
-    icon: 'return',
-    progressLabel: 'Retorno à coleta',
-    badgeLabel: 'Entregue',
-    attention: true,
-  },
-  FAILED: {
-    icon: 'return',
-    progressLabel: 'Devolução à loja',
-    badgeLabel: 'Atenção',
-    attention: true,
-  },
+  ACCEPTED: { badgeLabel: 'Aceito', tone: 'default' },
+  COLLECTED: { badgeLabel: 'Coletado', tone: 'success' },
+  DELIVERED: { badgeLabel: 'Retorno', tone: 'warning' },
+  FAILED: { badgeLabel: 'Devolução', tone: 'warning' },
 };
 
 export type DeliveryCardProps = {
@@ -78,7 +62,7 @@ export function DeliveryCard({
   const stage = deliveryStatus ? ACTIVE_STAGES[deliveryStatus] : undefined;
   const accessibilityLabel =
     onPress && displayNumber && stage
-      ? `Abrir pedido ${displayNumber}, ${stage.progressLabel}`
+      ? `Abrir pedido ${displayNumber}, ${stage.badgeLabel}`
       : undefined;
 
   return (
@@ -88,13 +72,43 @@ export function DeliveryCard({
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={accessibilityLabel}
     >
+      <View style={styles.linhaPedido}>
+        <Text style={styles.numeroPedido}>
+          {displayNumber ? `#${displayNumber}` : 'Pedido'}
+        </Text>
+        {stage ? (
+          <View
+            style={[
+              styles.tag,
+              stage.tone === 'success' && styles.tagSucesso,
+              stage.tone === 'warning' && styles.tagAtencao,
+            ]}
+          >
+            <Text
+              style={[
+                styles.tagTexto,
+                stage.tone === 'success' && styles.tagTextoSucesso,
+                stage.tone === 'warning' && styles.tagTextoAtencao,
+              ]}
+            >
+              {stage.badgeLabel}
+            </Text>
+          </View>
+        ) : statusLabel ? (
+          <Text style={styles.status}>{statusLabel}</Text>
+        ) : null}
+      </View>
+
       <View style={styles.topo}>
+        {time ? <Text style={styles.hora}>{time}</Text> : <View style={styles.horaVazia} />}
         <View style={styles.identificacao}>
-          {time && <Text style={styles.hora}>{time}</Text>}
-          <Icon name="person" size={16} color={colors.inkSoft} />
-          <Text style={styles.empresa} numberOfLines={1}>
-            {displayNumber ? `#${displayNumber} · ${companyName}` : companyName}
-          </Text>
+          <View style={styles.empresaLinha}>
+            <Icon name="person" size={15} color={colors.inkSoft} />
+            <Text style={styles.empresa} numberOfLines={1}>
+              {companyName}
+            </Text>
+          </View>
+          {supportingLabel ? <Text style={styles.apoio}>{supportingLabel}</Text> : null}
         </View>
 
         <View style={styles.valores}>
@@ -108,107 +122,77 @@ export function DeliveryCard({
         </View>
       </View>
 
-      {stage ? (
-        <View style={styles.etapa}>
-          <View style={styles.progresso}>
-            <View style={[styles.iconeEtapa, stage.attention && styles.iconeEtapaAtencao]}>
-              <Icon
-                name={stage.icon}
-                size={14}
-                color={stage.attention ? colors.warning : colors.success}
-              />
-            </View>
-            <View style={styles.progressoTexto}>
-              <Text style={styles.etapaTitulo}>{stage.progressLabel}</Text>
-              {supportingLabel ? <Text style={styles.apoio}>{supportingLabel}</Text> : null}
-            </View>
-          </View>
-
-          {stage.badgeLabel ? (
-            <View style={[styles.tag, stage.attention && styles.tagAtencao]}>
-              <Text style={[styles.tagTexto, stage.attention && styles.tagTextoAtencao]}>
-                {stage.badgeLabel}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      ) : statusLabel ? (
-        <Text style={styles.status}>{statusLabel}</Text>
-      ) : null}
-
-      {stops && stops.length > 0 && (
+      {stops && stops.length > 0 ? (
         <View style={styles.rota}>
-          <RouteTimeline stops={stops} />
+          <RouteTimeline stops={stops} compact />
         </View>
-      )}
+      ) : null}
 
       {children}
 
-      {onPressDetails && (
+      {onPressDetails ? (
         <Pressable onPress={onPressDetails} hitSlop={8} style={styles.detalhes}>
           <Text style={styles.detalhesTexto}>Todos os detalhes</Text>
         </Pressable>
-      )}
+      ) : onPress ? (
+        <Text style={[styles.detalhes, styles.detalhesTexto]}>Todos os detalhes</Text>
+      ) : null}
     </Container>
   );
 }
 
 const styles = StyleSheet.create({
   cartao: {
-    paddingVertical: 10,
+    paddingVertical: 9,
     gap: 5,
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
   },
-  topo: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  identificacao: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  hora: { fontSize: 14, fontWeight: '700', color: colors.ink },
-  empresa: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.inkSoft },
-  valores: { alignItems: 'flex-end' },
-  cronometro: {
-    backgroundColor: colors.countdown,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 4,
-    marginBottom: 4,
-  },
-  cronometroTexto: { color: colors.surface, fontSize: 14, fontWeight: '600' },
-  distancia: { fontSize: 13, color: colors.inkSoft },
-  valor: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  status: { fontSize: 14, fontWeight: '700', color: colors.ink },
-  etapa: {
+  linhaPedido: {
+    minHeight: 22,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    paddingLeft: 44,
   },
-  progresso: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  iconeEtapa: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.successSoft,
+  numeroPedido: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
+  topo: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  hora: { width: 38, paddingTop: 1, fontSize: 13, fontWeight: '800', color: colors.ink },
+  horaVazia: { width: 38 },
+  identificacao: { flex: 1, gap: 2 },
+  empresaLinha: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  empresa: { flex: 1, fontSize: 12, fontWeight: '600', color: colors.inkSoft },
+  apoio: { paddingLeft: 21, fontSize: 10, fontWeight: '600', color: colors.inkMuted },
+  valores: { minWidth: 58, alignItems: 'flex-end', gap: 1 },
+  cronometro: {
+    backgroundColor: colors.countdown,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+    marginBottom: 2,
   },
-  iconeEtapaAtencao: { backgroundColor: colors.warningSoft },
-  progressoTexto: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  etapaTitulo: { flexShrink: 1, fontSize: 13, fontWeight: '800', color: colors.ink },
-  apoio: { fontSize: 10, fontWeight: '600', color: colors.inkMuted },
+  cronometroTexto: { color: colors.surface, fontSize: 11, fontWeight: '800' },
+  distancia: { fontSize: 11, fontWeight: '700', color: colors.inkSoft },
+  valor: { fontSize: 12, fontWeight: '800', color: colors.ink },
+  status: { fontSize: 11, fontWeight: '800', color: colors.actionSoft },
   tag: {
     paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 7,
-    backgroundColor: colors.successSoft,
+    borderWidth: 1,
+    borderColor: colors.actionSoft,
+    borderRadius: 6,
+    backgroundColor: colors.actionSoftTint,
   },
-  tagAtencao: { backgroundColor: colors.warningSoft },
-  tagTexto: { fontSize: 10, fontWeight: '800', color: colors.success },
+  tagSucesso: { borderColor: colors.success, backgroundColor: colors.successSoft },
+  tagAtencao: { borderColor: colors.warning, backgroundColor: colors.warningSoft },
+  tagTexto: { fontSize: 10, fontWeight: '800', color: colors.actionSoft },
+  tagTextoSucesso: { color: colors.success },
   tagTextoAtencao: { color: colors.warning },
-  rota: { marginTop: 6 },
+  rota: { marginTop: 3, paddingLeft: 8 },
   detalhes: { alignSelf: 'flex-end' },
   detalhesTexto: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.ink,
     textDecorationLine: 'underline',
   },

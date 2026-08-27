@@ -1,19 +1,19 @@
 import { create } from 'zustand';
 import type {
-  DeliveryListItem,
   DeliveryOfferPayload,
   DriverAvailability,
 } from '@motoboycity/types';
+import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
 
 interface DispatchState {
   availability: DriverAvailability;
   since: string | null;
   incomingOffer: DeliveryOfferPayload | null;
-  activeDeliveries: DeliveryListItem[];
+  activeDeliveries: ActiveDeliveryItem[];
   socketConnected: boolean;
   setPresence: (availability: DriverAvailability, since: string | null) => void;
   setIncomingOffer: (offer: DeliveryOfferPayload | null) => void;
-  setActiveDeliveries: (deliveries: DeliveryListItem[]) => void;
+  setActiveDeliveries: (deliveries: ActiveDeliveryItem[]) => void;
   setSocketConnected: (connected: boolean) => void;
 }
 

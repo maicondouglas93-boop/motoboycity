@@ -39,6 +39,7 @@ describe('AdminPlatformSettingsService', () => {
       expect(result).toEqual({
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        pickupAssignmentTimeoutMinutes: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
@@ -186,6 +187,36 @@ describe('AdminPlatformSettingsService', () => {
         include: { updatedBy: true },
       });
       expect(result.returnProximityRadiusMeters).toBe(150);
+    });
+
+    it('atualiza o prazo de coleta sem alterar o alerta visual de coleta', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: 60,
+        pickupAssignmentTimeoutMinutes: 20,
+        returnProximityRadiusMeters: null,
+        businessHoursEnabled: false,
+        minMinutesBeforeCollect: null,
+        minMinutesBeforeDeliver: null,
+        locationSilenceAlertMinutes: null,
+        slaAlertMinutesToAccept: null,
+        slaAlertMinutesToCollect: 30,
+        slaAlertMinutesToDeliver: null,
+        maxConcurrentDeliveriesPerDriver: null,
+        maxDeliveriesPerBatch: null,
+        deliveryProximityRadiusMeters: null,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-08-27T12:00:00.000Z'),
+      });
+
+      await service.update({ pickupAssignmentTimeoutMinutes: 20 }, 'admin-1');
+
+      const update = prisma.platformSettings.upsert.mock.calls[0]?.[0]?.update;
+      expect(update).toEqual({
+        pickupAssignmentTimeoutMinutes: 20,
+        updatedByUserId: 'admin-1',
+      });
+      expect(update).not.toHaveProperty('slaAlertMinutesToCollect');
     });
 
     it('preserva os limites de capacidade na criação inicial e audita os campos alterados', async () => {

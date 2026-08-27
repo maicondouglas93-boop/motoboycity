@@ -141,7 +141,7 @@ describe('RealtimeGateway', () => {
       expect(socket.disconnect).toHaveBeenCalledWith(true);
     });
 
-    it('motoboy entra na sala driver:{id}', async () => {
+    it('motoboy entra na sala privada e na sala de atualizacao da fila', async () => {
       jwtService.verifyAsync.mockResolvedValue(validPayload('user-driver'));
       prisma.user.findUnique.mockResolvedValue(mockUser('user-driver', 'DRIVER'));
       prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', userId: 'user-driver' });
@@ -150,6 +150,7 @@ describe('RealtimeGateway', () => {
       await gateway.handleConnection(socket);
 
       expect(socket.join).toHaveBeenCalledWith('driver:driver-1');
+      expect(socket.join).toHaveBeenCalledWith('drivers');
       expect(socket.disconnect).not.toHaveBeenCalled();
     });
 
@@ -301,6 +302,15 @@ describe('RealtimeGateway', () => {
         'admin:activity',
         expect.objectContaining({ message: 'Pedido #1 criado', at: expect.any(String) }),
       );
+    });
+
+    it('avisa os motoboys para recarregar a fila sem transmitir dados dela', () => {
+      gateway.emitDriverPresence({ driverId: 'driver-1', availability: 'AVAILABLE' });
+
+      expect(serverTo).toHaveBeenCalledWith('drivers');
+      expect(serverEmit).toHaveBeenCalledWith('driver-queue:updated', {
+        updatedAt: expect.any(String),
+      });
     });
 
     it('emite localizacao publica sanitizada somente enquanto a entrega esta ativa', async () => {

@@ -16,10 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type { AvailableDeliveryItem } from '@motoboycity/types';
+import type { AvailableDeliveryItem, DriverDispatchQueueResult } from '@motoboycity/types';
 import { ActiveToggle } from '../components/ActiveToggle';
 import { BottomSheet } from '../components/BottomSheet';
 import { DeliveryCard } from '../components/DeliveryCard';
+import { DriverQueueSheet } from '../components/DriverQueueSheet';
 import { DrawerMenu } from '../components/DrawerMenu';
 import { EmptyIconCircle, Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
@@ -30,6 +31,7 @@ import { colors } from '../theme/colors';
 import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
 import { findNewlyAcceptedDelivery, getActiveDeliveries } from '../lib/activeDeliveries';
+import { activeDeliveryStops, pickupCountdownLabel } from '../lib/activeDeliveryPresentation';
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
@@ -167,7 +169,12 @@ export function HomeScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
   const acceptingPendingRef = useRef(false);
   const pendingListVersionRef = useRef(0);
+  const queueRequestVersionRef = useRef(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [queueVisible, setQueueVisible] = useState(false);
+  const [driverQueue, setDriverQueue] = useState<DriverDispatchQueueResult | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [presenceLoading, setPresenceLoading] = useState(true);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
@@ -184,6 +191,7 @@ export function HomeScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [completionQueue, setCompletionQueue] = useState<PendingDeliveryCompletion[]>([]);
   const [completionSyncing, setCompletionSyncing] = useState(false);
+  const [pickupCountdownNow, setPickupCountdownNow] = useState(() => Date.now());
 
   const availability = useDispatchStore((state) => state.availability);
   const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
@@ -195,6 +203,17 @@ export function HomeScreen({ navigation }: Props) {
   const isAvailable = availability === 'AVAILABLE';
   const queuedCompletionForBanner =
     completionQueue.find((item) => item.state === 'NEEDS_REVIEW') ?? completionQueue[0] ?? null;
+
+  useEffect(() => {
+    const hasPickupCountdown = activeDeliveries.some(
+      (delivery) => delivery.status === 'ACCEPTED' && Boolean(delivery.pickupDeadlineAt),
+    );
+    if (!hasPickupCountdown) return undefined;
+
+    setPickupCountdownNow(Date.now());
+    const timer = setInterval(() => setPickupCountdownNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [activeDeliveries]);
 
   const resolveOwnerUserId = useCallback(async (token: string): Promise<string | null> => {
     const persisted = await session.getUserId();
@@ -208,6 +227,40 @@ export function HomeScreen({ navigation }: Props) {
   const refreshCompletionQueue = useCallback(async () => {
     const ownerUserId = await session.getUserId();
     setCompletionQueue(ownerUserId ? await getPendingDeliveryCompletions(ownerUserId) : []);
+  }, []);
+
+  const clearDriverQueue = useCallback(() => {
+    queueRequestVersionRef.current += 1;
+    setDriverQueue(null);
+    setQueueError(null);
+    setQueueLoading(false);
+    setQueueVisible(false);
+  }, []);
+
+  const loadDriverQueue = useCallback(async (knownToken?: string, silent = false) => {
+    const requestVersion = queueRequestVersionRef.current + 1;
+    queueRequestVersionRef.current = requestVersion;
+    const token = knownToken ?? (await session.getToken());
+    if (!token) return;
+
+    if (!silent) setQueueLoading(true);
+    try {
+      const result = await driverPresenceApi.queue(token);
+      if (requestVersion !== queueRequestVersionRef.current) return;
+      setDriverQueue(result);
+      setQueueError(null);
+    } catch (error) {
+      if (requestVersion !== queueRequestVersionRef.current) return;
+      setQueueError(
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível carregar a fila de entregadores.',
+      );
+    } finally {
+      if (!silent && requestVersion === queueRequestVersionRef.current) {
+        setQueueLoading(false);
+      }
+    }
   }, []);
 
   const syncCompletionQueue = useCallback(
@@ -246,6 +299,11 @@ export function HomeScreen({ navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (queueVisible) {
+          setQueueVisible(false);
+          return true;
+        }
+
         if (drawerVisible) {
           setDrawerVisible(false);
           return true;
@@ -257,7 +315,7 @@ export function HomeScreen({ navigation }: Props) {
       });
 
       return () => subscription.remove();
-    }, [activeDeliveries.length, drawerVisible]),
+    }, [activeDeliveries.length, drawerVisible, queueVisible]),
   );
 
   async function syncPresence(token: string) {
@@ -289,6 +347,7 @@ export function HomeScreen({ navigation }: Props) {
     await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
     await stopDeliveryTracking().catch(() => undefined);
     setPresence('UNAVAILABLE', null);
+    clearDriverQueue();
     setPresenceError(mensagemNotificacaoObrigatoria(readiness));
     if (mostrarAlerta) alertarNotificacaoObrigatoria(readiness);
   }
@@ -456,6 +515,12 @@ export function HomeScreen({ navigation }: Props) {
         // A disponibilidade continua utilizavel; a proxima abertura recarrega as entregas ativas.
       }
 
+      if (presence?.availability === 'AVAILABLE') {
+        await loadDriverQueue(token, true);
+      } else {
+        clearDriverQueue();
+      }
+
       if (cancelled) return;
 
       connectDriverSocket(token, {
@@ -464,8 +529,16 @@ export function HomeScreen({ navigation }: Props) {
             .then(async (readiness) => {
               const reconnectCompletionSync = await syncCompletionQueue(token).catch(() => null);
               if (reconnectCompletionSync?.authRequired) return;
-              await syncPresence(token);
+              const reconnectedPresence = await syncPresence(token);
               await retirarDaFilaSemNotificacao(token, readiness, false);
+              if (
+                reconnectedPresence?.availability === 'AVAILABLE' &&
+                useDispatchStore.getState().availability === 'AVAILABLE'
+              ) {
+                await loadDriverQueue(token, true);
+              } else {
+                clearDriverQueue();
+              }
               const deliveries = await getActiveDeliveries(token).catch(() => null);
               if (deliveries && !cancelled) {
                 setActiveDeliveries(deliveries);
@@ -513,12 +586,29 @@ export function HomeScreen({ navigation }: Props) {
           Alert.alert('Pedido cancelado', 'Este pedido foi cancelado pela administracao.');
           navigation.popToTop();
         },
+        onPickupExpired: (deliveryIds) => {
+          const remainingDeliveries = useDispatchStore
+            .getState()
+            .activeDeliveries.filter((delivery) => !deliveryIds.includes(delivery.id));
+          setActiveDeliveries(remainingDeliveries);
+          syncDeliveryTracking(
+            token,
+            remainingDeliveries.map((delivery) => delivery.id),
+            useDispatchStore.getState().availability === 'AVAILABLE',
+          ).catch(() => undefined);
+          Alert.alert(
+            'Prazo de coleta encerrado',
+            'O pedido voltou para a fila e sera enviado a outro motoboy.',
+          );
+          navigation.popToTop();
+        },
         onAccountStatusChanged: (accountStatus) => {
           if (accountStatus === 'ACTIVE') return;
           const offerId = useDispatchStore.getState().incomingOffer?.offerId;
           if (offerId) dispensarOfertaNativa(offerId).catch(() => undefined);
           setIncomingOffer(null);
           setPresence('UNAVAILABLE', null);
+          clearDriverQueue();
           stopDeliveryTracking().catch(() => undefined);
           Alert.alert(
             'Conta indisponivel',
@@ -528,6 +618,7 @@ export function HomeScreen({ navigation }: Props) {
         },
         onPresenceExpired: () => {
           setPresence('UNAVAILABLE', null);
+          clearDriverQueue();
           stopDeliveryTracking().catch(() => undefined);
           setPresenceError(
             'Você ficou offline porque o servidor parou de receber sua localização. Ligue a localização e fique online novamente.',
@@ -536,6 +627,10 @@ export function HomeScreen({ navigation }: Props) {
             'Você ficou offline',
             'O servidor parou de receber sua localização. Verifique a localização do aparelho antes de ficar online novamente.',
           );
+        },
+        onQueueUpdated: () => {
+          if (useDispatchStore.getState().availability !== 'AVAILABLE') return;
+          loadDriverQueue(token, true).catch(() => undefined);
         },
         /**
          * O servidor deixou de receber a posicao dele.
@@ -611,6 +706,11 @@ export function HomeScreen({ navigation }: Props) {
           await mostrarOfertaPendente(atual);
           const readiness = await verificarNotificacaoObrigatoria();
           await retirarDaFilaSemNotificacao(atual, readiness, true);
+          if (useDispatchStore.getState().availability === 'AVAILABLE') {
+            await loadDriverQueue(atual, true);
+          } else {
+            clearDriverQueue();
+          }
         })
         .catch(() => undefined);
     });
@@ -660,7 +760,12 @@ export function HomeScreen({ navigation }: Props) {
     const token = await session.getToken();
     if (!token) return;
     setPresenceLoading(true);
-    await syncPresence(token);
+    const presence = await syncPresence(token);
+    if (presence?.availability === 'AVAILABLE') {
+      await loadDriverQueue(token);
+    } else {
+      clearDriverQueue();
+    }
   }
 
   async function handleToggleAvailability(value: boolean) {
@@ -673,6 +778,7 @@ export function HomeScreen({ navigation }: Props) {
         const result = await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' });
         await stopDeliveryTracking();
         setPresence(result.availability, result.since);
+        clearDriverQueue();
         setPresenceError(null);
         return;
       }
@@ -705,6 +811,7 @@ export function HomeScreen({ navigation }: Props) {
         throw trackingStartError;
       }
       setPresence(result.availability, result.since);
+      await loadDriverQueue(token);
       setPresenceError(null);
     } catch (error) {
       await syncPresence(token);
@@ -769,6 +876,9 @@ export function HomeScreen({ navigation }: Props) {
       if (result?.authRequired) return;
       const deliveries = await getActiveDeliveries(token);
       setActiveDeliveries(deliveries);
+      if (useDispatchStore.getState().availability === 'AVAILABLE') {
+        await loadDriverQueue(token, true);
+      }
       await syncDeliveryTracking(
         token,
         deliveries.map((delivery) => delivery.id),
@@ -787,15 +897,38 @@ export function HomeScreen({ navigation }: Props) {
 
       <SafeAreaView style={styles.sobreposicao} edges={['top']} pointerEvents="box-none">
         <View style={styles.barraSuperior} pointerEvents="box-none">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Abrir menu"
-            style={styles.botaoMenu}
-            onPress={() => setDrawerVisible(true)}
-            hitSlop={10}
-          >
-            <Icon name="menu" size={24} color={colors.ink} />
-          </Pressable>
+          <View style={styles.menuActions} pointerEvents="box-none">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Abrir menu"
+              style={styles.botaoMenu}
+              onPress={() => setDrawerVisible(true)}
+              hitSlop={10}
+            >
+              <Icon name="menu" size={24} color={colors.ink} />
+            </Pressable>
+
+            {isAvailable ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  driverQueue?.currentPosition
+                    ? `Abrir fila de entregadores. Sua posição é ${driverQueue.currentPosition}`
+                    : 'Abrir fila de entregadores'
+                }
+                style={styles.queueButton}
+                onPress={() => {
+                  setQueueVisible(true);
+                  loadDriverQueue().catch(() => undefined);
+                }}
+                hitSlop={8}
+              >
+                <Text style={styles.queueButtonText}>
+                  {driverQueue?.currentPosition ? `#${driverQueue.currentPosition}` : '#--'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
 
           {!socketConnected && (
             <View style={styles.avisoConexao}>
@@ -908,6 +1041,8 @@ export function HomeScreen({ navigation }: Props) {
                         ? 'A calcular'
                         : formatarDinheiro(delivery.driverValue)
                     }
+                    countdownLabel={pickupCountdownLabel(delivery, pickupCountdownNow)}
+                    stops={activeDeliveryStops(delivery)}
                     onPress={() =>
                       navigation.navigate('DeliveryOperation', { deliveryId: delivery.id })
                     }
@@ -967,6 +1102,15 @@ export function HomeScreen({ navigation }: Props) {
         onClose={() => setDrawerVisible(false)}
         navigation={navigation}
       />
+
+      <DriverQueueSheet
+        visible={queueVisible}
+        queue={driverQueue}
+        loading={queueLoading}
+        error={queueError}
+        onClose={() => setQueueVisible(false)}
+        onRetry={() => loadDriverQueue().catch(() => undefined)}
+      />
     </View>
   );
 }
@@ -991,6 +1135,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     gap: 12,
   },
+  menuActions: { alignItems: 'center', gap: 8 },
   botaoMenu: {
     width: 58,
     height: 58,
@@ -1004,6 +1149,20 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
   },
+  queueButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.action,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  queueButtonText: { color: colors.actionText, fontSize: 18, fontWeight: '900' },
   avisoConexao: {
     backgroundColor: colors.warning,
     paddingHorizontal: 14,

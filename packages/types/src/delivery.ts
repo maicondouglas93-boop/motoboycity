@@ -54,6 +54,8 @@ export interface DeliveryListItem {
   surchargeLabel: string | null;
   surchargeValue: number | null;
   statusChangedAt: string;
+  /** Prazo congelado no aceite; null quando a expiracao automatica esta desligada. */
+  pickupDeadlineAt: string | null;
   scheduledAt: string | null;
   createdAt: string;
 }

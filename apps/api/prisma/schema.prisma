@@ -712,6 +712,12 @@ model Delivery {
   /// a trilha completa vive em DeliveryStatusHistory.
   statusChangedAt DateTime @default(now())
 
+  /// Prazo congelado quando o motoboy aceita o pedido. Se ainda estiver em
+  /// ACCEPTED quando chegar nesse instante, a atribuicao expira e o pedido
+  /// volta para o despacho. Null preserva pedidos antigos e operacoes que
+  /// ainda nao configuraram esse limite.
+  pickupDeadlineAt DateTime?
+
   /// Preenchidos apenas quando a entrega falha. `failureNote` e obrigatoria
   /// quando o motivo e OTHER — a validacao cuida disso.
   failureReason DeliveryFailureReason?
@@ -783,6 +789,7 @@ model Delivery {
   @@index([companyCustomerId, createdAt])
   @@index([invoiceId])
   @@index([batchId])
+  @@index([status, pickupDeadlineAt])
   @@map("deliveries")
 }
 
@@ -1271,6 +1278,11 @@ model PlatformSettings {
   /// ainda não configurado — criação de pedido AWAITING_DRIVER falha com
   /// erro claro em vez de usar um valor inventado.
   dispatchOfferTimeoutSeconds Int?
+
+  /// Tempo maximo (minutos) entre o aceite e a coleta. O valor vigente e
+  /// congelado em Delivery.pickupDeadlineAt no aceite; mudar a configuracao
+  /// nao altera pedidos que ja estao com um motoboy. Null = regra desligada.
+  pickupAssignmentTimeoutMinutes Int?
 
   /// Raio (metros) de tolerância pra fechar "retorno ao local de coleta" —
   /// distância em linha reta (Haversine) entre o motoboy e o endereço de

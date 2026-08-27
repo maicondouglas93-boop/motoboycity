@@ -1,9 +1,8 @@
-import type { DeliveryListItem } from '@motoboycity/types';
-import { getActiveDeliveries } from './activeDeliveries';
+import { getActiveDeliveries, type ActiveDeliveryItem } from './activeDeliveries';
 
 export type ReconciledAssignment = {
-  delivery: DeliveryListItem;
-  activeDeliveries: DeliveryListItem[];
+  delivery: ActiveDeliveryItem;
+  activeDeliveries: ActiveDeliveryItem[];
 };
 
 /**

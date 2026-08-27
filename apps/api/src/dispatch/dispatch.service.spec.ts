@@ -877,6 +877,131 @@ describe('DispatchService', () => {
     });
   });
 
+  describe('handlePickupExpired', () => {
+    it('devolve o pedido aceito a fila, avisa o motoboy e redespacha sem ele', async () => {
+      const deadlineAt = new Date('2026-08-27T18:20:00.000Z');
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 77,
+        companyId: 'company-1',
+        batchId: null,
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        pickupDeadlineAt: deadlineAt,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      const redespacho = jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
+
+      await service.handlePickupExpired(
+        'delivery-1',
+        'driver-1',
+        deadlineAt.toISOString(),
+      );
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['delivery-1'] },
+          status: 'ACCEPTED',
+          driverId: 'driver-1',
+          pickupDeadlineAt: deadlineAt,
+        },
+        data: {
+          status: 'AWAITING_DRIVER',
+          driverId: null,
+          pickupDeadlineAt: null,
+          statusChangedAt: expect.any(Date),
+        },
+      });
+      expect(tx.deliveryStatusHistory.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            fromStatus: 'ACCEPTED',
+            toStatus: 'AWAITING_DRIVER',
+          }),
+        ],
+      });
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:pickup-expired',
+        { deliveryIds: ['delivery-1'] },
+      );
+      expect(redespacho).toHaveBeenCalledWith('delivery-1', {
+        excludeDriverIds: ['driver-1'],
+      });
+    });
+
+    it('devolve todos os itens de um lote na mesma transacao', async () => {
+      const deadlineAt = new Date('2026-08-27T18:20:00.000Z');
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 77,
+        companyId: 'company-1',
+        batchId: 'batch-1',
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        pickupDeadlineAt: deadlineAt,
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        {
+          id: 'delivery-1',
+          displayNumber: 77,
+          companyId: 'company-1',
+          batchId: 'batch-1',
+        },
+        {
+          id: 'delivery-2',
+          displayNumber: 78,
+          companyId: 'company-1',
+          batchId: 'batch-1',
+        },
+      ]);
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+      jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
+
+      await service.handlePickupExpired(
+        'delivery-1',
+        'driver-1',
+        deadlineAt.toISOString(),
+      );
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['delivery-1', 'delivery-2'] } }),
+        }),
+      );
+      expect(tx.deliveryStatusHistory.createMany).toHaveBeenCalledWith({
+        data: expect.arrayContaining([
+          expect.objectContaining({ deliveryId: 'delivery-1' }),
+          expect.objectContaining({ deliveryId: 'delivery-2' }),
+        ]),
+      });
+    });
+
+    it('nao remove a atribuicao se a coleta venceu a corrida concorrente', async () => {
+      const deadlineAt = new Date('2026-08-27T18:20:00.000Z');
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 77,
+        companyId: 'company-1',
+        batchId: null,
+        status: 'ACCEPTED',
+        driverId: 'driver-1',
+        pickupDeadlineAt: deadlineAt,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.handlePickupExpired(
+        'delivery-1',
+        'driver-1',
+        deadlineAt.toISOString(),
+      );
+
+      expect(tx.deliveryStatusHistory.createMany).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+    });
+  });
+
   describe('handleScheduledActivation', () => {
     it('não faz nada se o pedido não existe mais', async () => {
       prisma.delivery.findUnique.mockResolvedValue(null);
@@ -1006,7 +1131,12 @@ describe('DispatchService', () => {
       });
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
         where: { id: 'delivery-1', status: 'AWAITING_DRIVER' },
-        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+        data: {
+          status: 'ACCEPTED',
+          driverId: 'driver-1',
+          statusChangedAt: expect.any(Date),
+          pickupDeadlineAt: null,
+        },
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
         data: {
@@ -1032,6 +1162,42 @@ describe('DispatchService', () => {
         }),
       );
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
+    });
+
+    it('congela o prazo configurado e agenda a expiracao antes de aceitar', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        pickupAssignmentTimeoutMinutes: 20,
+      });
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        companyId: 'company-1',
+      });
+
+      await service.acceptOffer('offer-1', 'driver-1', 'user-1');
+
+      expect(queue.add).toHaveBeenCalledWith(
+        'pickup-expire',
+        expect.objectContaining({
+          deliveryId: 'delivery-1',
+          expectedDriverId: 'driver-1',
+          expectedDeadlineAt: expect.any(String),
+        }),
+        expect.objectContaining({ delay: expect.any(Number), attempts: 5 }),
+      );
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ pickupDeadlineAt: expect.any(Date) }),
+        }),
+      );
     });
 
     it('devolve o mesmo aceite quando a primeira resposta se perdeu', async () => {
@@ -1114,7 +1280,12 @@ describe('DispatchService', () => {
       });
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
         where: { id: { in: ['delivery-1', 'delivery-2'] }, status: 'AWAITING_DRIVER' },
-        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+        data: {
+          status: 'ACCEPTED',
+          driverId: 'driver-1',
+          statusChangedAt: expect.any(Date),
+          pickupDeadlineAt: null,
+        },
       });
       expect(tx.deliveryStatusHistory.createMany).toHaveBeenCalledWith({
         data: expect.arrayContaining([
@@ -1381,7 +1552,12 @@ describe('DispatchService', () => {
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 1234 });
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
         where: { id: { in: ['delivery-1'] }, status: 'AWAITING_DRIVER', driverId: null },
-        data: { status: 'ACCEPTED', driverId: 'driver-1', statusChangedAt: expect.any(Date) },
+        data: {
+          status: 'ACCEPTED',
+          driverId: 'driver-1',
+          statusChangedAt: expect.any(Date),
+          pickupDeadlineAt: null,
+        },
       });
       const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
       expect(historico.note).toContain('pedidos disponíveis');
@@ -1493,6 +1669,7 @@ describe('DispatchService', () => {
         data: {
           status: 'AWAITING_DRIVER',
           driverId: null,
+          pickupDeadlineAt: null,
           statusChangedAt: expect.any(Date),
         },
       });

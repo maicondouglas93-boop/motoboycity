@@ -19,7 +19,12 @@ const availablePayload = {
 describe('DriverPresenceService', () => {
   let service: DriverPresenceService;
   let prisma: {
-    driver: { findUnique: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
+    driver: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
     driverPresenceLog: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -34,6 +39,8 @@ describe('DriverPresenceService', () => {
     upsert: jest.Mock;
     remove: jest.Mock;
     reconcileExpired: jest.Mock;
+    listActive: jest.Mock;
+    orderForDispatch: jest.Mock;
   };
   let tx: {
     driver: { updateMany: jest.Mock };
@@ -48,6 +55,7 @@ describe('DriverPresenceService', () => {
     prisma = {
       driver: {
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
@@ -71,6 +79,8 @@ describe('DriverPresenceService', () => {
       upsert: jest.fn().mockResolvedValue(undefined),
       remove: jest.fn().mockResolvedValue(undefined),
       reconcileExpired: jest.fn().mockResolvedValue(0),
+      listActive: jest.fn().mockResolvedValue([]),
+      orderForDispatch: jest.fn().mockImplementation(async (driverIds: string[]) => driverIds),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -114,6 +124,80 @@ describe('DriverPresenceService', () => {
       const result = await service.get(driverUser);
 
       expect(result).toEqual({ availability: 'AVAILABLE', since: '2026-01-01T10:00:00.000Z' });
+    });
+  });
+
+  describe('queue', () => {
+    it('retorna a mesma prioridade global do despacho sem expor dados privados', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-2',
+        availability: 'AVAILABLE',
+      });
+      livePresence.listActive.mockResolvedValue([
+        { driverId: 'driver-1' },
+        { driverId: 'driver-2' },
+        { driverId: 'driver-3' },
+      ]);
+      prisma.driver.findMany.mockResolvedValue([
+        {
+          id: 'driver-2',
+          user: { name: 'Motoboy atual' },
+          presenceLogs: [{ wentOnlineAt: new Date('2026-08-27T13:00:00.000Z') }],
+        },
+        {
+          id: 'driver-1',
+          user: { name: 'Primeiro da fila' },
+          presenceLogs: [{ wentOnlineAt: new Date('2026-08-27T12:00:00.000Z') }],
+        },
+        {
+          id: 'driver-3',
+          user: { name: 'Terceiro da fila' },
+          presenceLogs: [{ wentOnlineAt: new Date('2026-08-27T14:00:00.000Z') }],
+        },
+      ]);
+      livePresence.orderForDispatch.mockResolvedValue(['driver-3', 'driver-1', 'driver-2']);
+
+      const result = await service.queue(driverUser);
+
+      expect(livePresence.orderForDispatch).toHaveBeenCalledWith([
+        'driver-1',
+        'driver-2',
+        'driver-3',
+      ]);
+      expect(result).toEqual({
+        queueName: 'Geral',
+        currentPosition: 3,
+        totalDrivers: 3,
+        drivers: [
+          { position: 1, name: 'Terceiro da fila', isCurrentDriver: false },
+          { position: 2, name: 'Primeiro da fila', isCurrentDriver: false },
+          { position: 3, name: 'Motoboy atual', isCurrentDriver: true },
+        ],
+        generatedAt: expect.any(String),
+      });
+      expect(result.drivers[0]).not.toHaveProperty('driverId');
+      expect(result.drivers[0]).not.toHaveProperty('phone');
+      expect(result.drivers[0]).not.toHaveProperty('location');
+    });
+
+    it('nao expoe a fila quando o proprio motoboy nao esta online', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'UNAVAILABLE',
+      });
+      livePresence.listActive.mockResolvedValue([{ driverId: 'driver-2' }]);
+
+      const result = await service.queue(driverUser);
+
+      expect(result).toEqual({
+        queueName: 'Geral',
+        currentPosition: null,
+        totalDrivers: 0,
+        drivers: [],
+        generatedAt: expect.any(String),
+      });
+      expect(prisma.driver.findMany).not.toHaveBeenCalled();
+      expect(livePresence.orderForDispatch).not.toHaveBeenCalled();
     });
   });
 

@@ -207,12 +207,6 @@ export function DriverOrderDetailScreen({ navigation, route }: Props) {
                       : `${delivery.distanceKm.toFixed(1)} km`
                   }
                 />
-                {delivery.platformValue !== null ? (
-                  <ValueItem
-                    label="Comissão"
-                    value={currencyFormatter.format(delivery.platformValue)}
-                  />
-                ) : null}
                 {delivery.returnValue !== null ? (
                   <ValueItem
                     label="Inclui retorno"

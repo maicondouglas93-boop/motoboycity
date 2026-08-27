@@ -1299,7 +1299,8 @@ Mesmo com o piloto aprovado, ainda faltam no mínimo:
 - monitoramento, alertas, plantão e suporte;
 - testes mobile além do smoke único atual;
 - resolução ou aceitação formal dos advisories altos transitivos conhecidos;
-- backup automático, restore periódico e política de retenção;
+- backup automático local ativo; ainda faltam restore periódico comprovado e
+  uma segunda cópia criptografada fora da máquina;
 - homologação financeira na segunda-feira real para saque e na data de corte
   configurada para cada empresa;
 - contratos e processo operacional com empresas e motoboys;
@@ -1322,7 +1323,7 @@ Mesmo com o piloto aprovado, ainda faltam no mínimo:
 ### Infraestrutura
 
 - [ ] três domínios HTTPS
-- [ ] PostgreSQL privado com backup
+- [x] PostgreSQL com backup lógico diário local ativo (retenção de 30 dias)
 - [ ] Redis privado e autenticado
 - [ ] API em uma réplica
 - [ ] CORS exato para empresa/admin

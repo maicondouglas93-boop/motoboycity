@@ -34,6 +34,8 @@ export interface PricingTableItem {
 export interface PlatformSettingsItem {
   driverCommissionPercentage: number | null;
   dispatchOfferTimeoutSeconds: number | null;
+  /** Minutos entre aceite e coleta; null desliga a devolucao automatica a fila. */
+  pickupAssignmentTimeoutMinutes: number | null;
   returnProximityRadiusMeters: number | null;
   /** Liga o bloqueio de pedido fora do horário de funcionamento. */
   businessHoursEnabled: boolean;
@@ -77,6 +79,7 @@ export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
   businessHoursEnabled?: boolean;
   dispatchOfferTimeoutSeconds?: number;
+  pickupAssignmentTimeoutMinutes?: number;
   returnProximityRadiusMeters?: number;
   minMinutesBeforeCollect?: number;
   minMinutesBeforeDeliver?: number;

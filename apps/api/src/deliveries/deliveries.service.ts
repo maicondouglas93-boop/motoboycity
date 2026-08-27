@@ -151,6 +151,7 @@ export interface DeliveryListItem {
   surchargeLabel: string | null;
   surchargeValue: number | null;
   statusChangedAt: string;
+  pickupDeadlineAt: string | null;
   scheduledAt: string | null;
   createdAt: string;
 }
@@ -2445,6 +2446,7 @@ export class DeliveriesService {
     requiresCollectionRecipient: boolean;
     pickupSurchargeChargedToDriver: boolean;
     statusChangedAt: Date;
+    pickupDeadlineAt: Date | null;
     surchargeLabel: string | null;
     surchargeValue: { toString(): string } | null;
     scheduledAt: Date | null;
@@ -2480,6 +2482,7 @@ export class DeliveriesService {
       requiresCollectionRecipient: delivery.requiresCollectionRecipient,
       pickupSurchargeChargedToDriver: delivery.pickupSurchargeChargedToDriver,
       statusChangedAt: delivery.statusChangedAt.toISOString(),
+      pickupDeadlineAt: delivery.pickupDeadlineAt?.toISOString() ?? null,
       scheduledAt: delivery.scheduledAt?.toISOString() ?? null,
       createdAt: delivery.createdAt.toISOString(),
     };
