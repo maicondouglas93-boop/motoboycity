@@ -134,21 +134,6 @@ function alertarNotificacaoObrigatoria(status: NotificationReadiness) {
   );
 }
 
-function deliveryStatusLabel(status: string): string {
-  switch (status) {
-    case 'ACCEPTED':
-      return 'A caminho da coleta';
-    case 'COLLECTED':
-      return 'Em entrega';
-    case 'DELIVERED':
-      return 'Retorno pendente';
-    case 'FAILED':
-      return 'Devolução pendente';
-    default:
-      return status;
-  }
-}
-
 function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
   const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
   const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
@@ -909,8 +894,10 @@ export function HomeScreen({ navigation }: Props) {
                   <DeliveryCard
                     key={delivery.id}
                     time={formatarHora(delivery.statusChangedAt)}
+                    displayNumber={delivery.displayNumber}
                     companyName={delivery.companyName}
-                    statusLabel={`${deliveryStatusLabel(delivery.status)} · ${deliveryPaymentLabel(delivery.paymentMethod)}`}
+                    deliveryStatus={delivery.status}
+                    supportingLabel={deliveryPaymentLabel(delivery.paymentMethod)}
                     distanceLabel={
                       delivery.distanceKm === null
                         ? 'Distância a calcular'

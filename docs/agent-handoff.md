@@ -8042,3 +8042,31 @@ Proximo passo concreto: homologar com um pedido avulso sem destino, abrir o
 detalhe depois da entrega, confirmar o endereco resolvido, cadastrar o cliente e
 criar outro pedido selecionando `Destino da entrega`. Repetir com o mesmo
 telefone deve mostrar apenas o link para o cliente existente.
+
+## Atualizacao - 2026-08-27: leitura visual do pedido ativo no Driver App
+
+O card da aba `Em andamento` agora comunica a etapa sem aumentar a quantidade de
+informacao na tela: pedido aceito recebe seta verde e `A caminho da coleta`; apos
+a coleta, check verde, `A caminho da entrega` e a tag `Coletado`. Os estados que
+ainda exigem retorno usam icone e tag em ambar. Para comportar as 3 a 4 entregas
+que um motoboy costuma manter ao mesmo tempo, numero e empresa ficam na mesma
+linha; fontes, icones, tags e espacamento vertical foram compactados sem remover
+distancia, valor ou forma de pagamento. O card clicavel ganhou rotulo de
+acessibilidade.
+
+A apresentacao deriva exclusivamente do `DeliveryStatus` que a Home ja recebe do
+store e da API. Nao houve mudanca de rota, contrato, Socket.IO, GPS, permissao ou
+codigo nativo.
+
+Arquivos: `apps/driver-app/src/components/DeliveryCard.tsx`,
+`apps/driver-app/src/components/Icon.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` e o novo teste
+`apps/driver-app/__tests__/DeliveryCard.test.tsx`.
+
+Validacoes aprovadas: suite completa do Driver App com 16 suites e 94 testes,
+typecheck e lint do workspace. A primeira execucao do teste focado detectou que o
+numero era renderizado em dois nos de texto; o componente foi ajustado e a
+repeticao passou. Nao houve teste em aparelho nem build Android neste recorte.
+
+Proximo passo concreto: conferir visualmente no aparelho um pedido `ACCEPTED` e
+outro `COLLECTED`; gerar APK e publicar somente quando solicitado.

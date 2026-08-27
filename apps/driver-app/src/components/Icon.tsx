@@ -15,6 +15,7 @@ import { colors } from '../theme/colors';
  */
 export type IconName =
   | 'menu'
+  | 'arrow'
   | 'check'
   | 'close'
   | 'pin'
@@ -46,6 +47,7 @@ type Props = {
 
 /** Glifos que ja sao monocromaticos e alinham bem em qualquer Android. */
 const GLIFOS: Partial<Record<IconName, string>> = {
+  arrow: '\u2192',
   check: '\u2713',
   close: '\u00d7',
   flag: '\u2691',
