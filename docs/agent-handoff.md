@@ -7984,3 +7984,21 @@ commit, push ou deploy nesta alteracao.
 
 Proximo passo concreto: revisar visualmente a Home com um pedido em `ACCEPTED` e
 outro em `COLLECTED`; depois commitar e publicar quando autorizado.
+
+## Release - 2026-08-27: compartilhamento do rastreamento na Home
+
+O commit funcional `7c1fd8e` foi enviado para `main`. Os deployments oficiais
+`Production - motoboycity-company-web`, `Production - motoboycity-admin-web` e
+`main - motoboycity-api` concluiram com sucesso. A API nao teve alteracao neste
+recorte, mas o Render repetiu seu deploy automatico pelo push do monorepo.
+
+O smoke publico respondeu 200 tanto no alias oficial do Company Web quanto em
+`GET /health` da API. A validacao anterior ao commit aprovou 11 arquivos e 41
+testes do Company Web, typecheck, lint e build de producao com 19 rotas. O SHA
+local e `origin/main` estavam sincronizados depois do push, sem arquivos
+pendentes ou secrets incluidos.
+
+Nao houve smoke autenticado com pedido real nesta sessao. Proximo passo
+concreto: selecionar na Home uma entrega em `ACCEPTED` e outra em `COLLECTED`,
+abrir o WhatsApp pelo novo botao e confirmar que o cliente recebe e abre o link
+da entrega correta.
