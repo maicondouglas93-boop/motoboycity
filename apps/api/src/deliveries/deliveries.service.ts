@@ -1138,11 +1138,11 @@ export class DeliveriesService {
     } | null = null;
 
     // Pedidos com destino definido somente na entrega guardam a coordenada
-    // capturada pelo app. Ao abrir o detalhe no Admin, enriquecemos registros
-    // novos e antigos com rua/cidade sem colocar o Google no caminho critico
-    // do motoboy. Qualquer falha mantem a coordenada visivel e nao altera o
-    // status, os valores ou a conclusao do pedido.
-    if (user.type === 'ADMIN') {
+    // capturada pelo app. Ao abrir o detalhe no Admin ou na empresa dona,
+    // enriquecemos registros novos e antigos com rua/cidade sem colocar o
+    // Google no caminho critico do motoboy. Qualquer falha mantem a coordenada
+    // visivel e nao altera o status, os valores ou a conclusao do pedido.
+    if (user.type === 'ADMIN' || user.type === 'COMPANY_MEMBER') {
       const gpsDropoff = delivery.addresses.find(
         (address) =>
           address.type === 'DROPOFF' &&

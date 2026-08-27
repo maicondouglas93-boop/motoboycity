@@ -1359,7 +1359,13 @@ describe('DeliveriesService', () => {
       expect(result.id).toBe('delivery-1');
     });
 
-    it('admin identifica e salva a rua de um destino capturado por GPS', async () => {
+    it.each([
+      ['admin', adminUser],
+      ['empresa dona', companyUser],
+    ])('%s identifica e salva a rua de um destino capturado por GPS', async (_label, user) => {
+      if (user.type === 'COMPANY_MEMBER') {
+        mockCompanyMembership(user.id, 'company-1');
+      }
       prisma.delivery.findUnique.mockResolvedValue(
         fullDeliveryRow({
           destinationKnownAtCreation: false,
@@ -1389,7 +1395,7 @@ describe('DeliveriesService', () => {
         zip: '36980-000',
       });
 
-      const result = await service.detail(adminUser, 'delivery-1');
+      const result = await service.detail(user, 'delivery-1');
 
       expect(googleMapsService.reverseGeocode).toHaveBeenCalledWith({
         lat: -20.1509698,

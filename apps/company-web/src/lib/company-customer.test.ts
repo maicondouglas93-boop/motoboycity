@@ -1,7 +1,9 @@
 import type { CompanyCustomer } from '@motoboycity/types';
 import { describe, expect, it } from 'vitest';
 import {
+  buildCompletedDeliveryCustomerPrefill,
   buildCustomerRegistrationCandidates,
+  type CompletedDeliveryCustomerSource,
   customerToDeliveryFields,
   formatCustomerCpf,
 } from '@/lib/company-customer';
@@ -42,6 +44,28 @@ const customer: CompanyCustomer = {
   createdAt: '2026-08-26T12:00:00.000Z',
   updatedAt: '2026-08-26T12:00:00.000Z',
 };
+
+const completedDelivery = {
+  batchId: null,
+  destinationKnownAtCreation: false,
+  status: 'COMPLETED',
+  recipientName: '  Maria Oliveira  ',
+  recipientPhone: '(33) 99999-9991',
+  addresses: [
+    {
+      type: 'DROPOFF',
+      street: 'Rua Um',
+      number: null,
+      complement: null,
+      city: 'Lajinha',
+      state: 'MG',
+      zip: '36930-000',
+      lat: -20.15,
+      lng: -41.62,
+      referenceNote: null,
+    },
+  ],
+} satisfies CompletedDeliveryCustomerSource;
 
 describe('company customer delivery integration', () => {
   it('preenche destinatario, telefone e endereco ao selecionar cliente', () => {
@@ -137,5 +161,38 @@ describe('company customer delivery integration', () => {
         },
       ]),
     ).toEqual([]);
+  });
+
+  it('preenche o cadastro com o destino final capturado em pedido avulso', () => {
+    expect(buildCompletedDeliveryCustomerPrefill(completedDelivery)).toEqual({
+      name: 'Maria Oliveira',
+      phone: '33999999991',
+      addressLabel: 'Destino da entrega',
+      address: {
+        street: 'Rua Um',
+        number: '',
+        complement: null,
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930-000',
+        lat: -20.15,
+        lng: -41.62,
+        referenceNote: null,
+      },
+    });
+  });
+
+  it.each([
+    ['pedido em lote', { batchId: 'batch-1' }],
+    ['destino conhecido na criacao', { destinationKnownAtCreation: true }],
+    ['pedido ainda coletado', { status: 'COLLECTED' as const }],
+    ['entrega sem sucesso', { status: 'FAILED' as const }],
+    ['telefone invalido', { recipientPhone: '123' }],
+    [
+      'endereco ainda sem geocodificacao reversa',
+      { addresses: [{ ...completedDelivery.addresses[0]!, street: null }] },
+    ],
+  ])('nao oferece cadastro para %s', (_label, override) => {
+    expect(buildCompletedDeliveryCustomerPrefill({ ...completedDelivery, ...override })).toBeNull();
   });
 });

@@ -25,6 +25,7 @@ import {
 import { ApiError } from '@motoboycity/api-client';
 import { StatusChip, statusLabel, statusRailClass } from '@/components/orders/status-chip';
 import { ShareDeliveryTrackingButton } from '@/components/orders/share-delivery-tracking-button';
+import { CompletedDeliveryCustomerRegistration } from '@/components/customers/completed-delivery-customer-registration';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
@@ -407,6 +408,7 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
                     {dropoff.lat}, {dropoff.lng}
                   </a>
                 )}
+              <CompletedDeliveryCustomerRegistration token={token} delivery={delivery} />
             </CardContent>
           </Card>
         </div>

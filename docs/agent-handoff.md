@@ -8002,3 +8002,43 @@ Nao houve smoke autenticado com pedido real nesta sessao. Proximo passo
 concreto: selecionar na Home uma entrega em `ACCEPTED` e outra em `COLLECTED`,
 abrir o WhatsApp pelo novo botao e confirmar que o cliente recebe e abre o link
 da entrega correta.
+
+## Atualizacao - 2026-08-27: cadastrar cliente pelo destino final do pedido
+
+O detalhe do pedido no Company Web agora oferece `Cadastrar este cliente` junto
+ao destino quando o pedido for avulso (`batchId=null`), tiver sido criado sem
+destino conhecido e ja estiver em `DELIVERED` ou `COMPLETED`. A acao reutiliza o
+nome e o telefone do snapshot da entrega e o endereco final capturado pelo
+motoboy. O formulario abre preenchido com o rotulo `Destino da entrega`; quando
+o Google nao identifica o numero, a empresa precisa completa-lo antes de salvar.
+
+Antes de oferecer o cadastro, o painel consulta a agenda privada pelo telefone.
+Se o cliente ja existir, mostra um link para o cadastro existente em vez de
+permitir duplicidade. A acao nao aparece para lotes, destino informado na
+criacao, entrega ainda ativa, insucesso/cancelamento, telefone invalido ou
+endereco final ainda sem rua, cidade, UF e CEP resolvidos.
+
+Para tornar o endereco utilizavel pela empresa, `DeliveriesService.detail()`
+passou a executar a geocodificacao reversa tambem para o membro da empresa dona,
+depois da verificacao de acesso. O admin preserva o mesmo comportamento e o
+motoboy continua fora desse enriquecimento, portanto o Google nao entrou no
+caminho critico da conclusao. O resultado legivel e salvo no snapshot
+`DeliveryAddress`; falha do Maps apenas mantem as coordenadas e nao altera
+status, distancia, preco ou historico. Nao houve mudanca de schema, migration,
+rota ou contrato compartilhado.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service{.ts,.spec.ts}`;
+`apps/company-web/src/app/(app)/pedidos/[id]/page.tsx`; o novo componente e teste
+`components/customers/completed-delivery-customer-registration{.tsx,.test.tsx}`;
+e `apps/company-web/src/lib/company-customer{.ts,.test.ts}`.
+
+Validacoes aprovadas: teste focado da API com 101 testes; testes focados do
+Company Web com 15 testes; suite completa do Company Web com 12 arquivos e 50
+testes; typecheck e lint dos workspaces API e Company Web; builds de producao da
+API e do Company Web, este com 19 rotas. Nao houve smoke autenticado, commit,
+push ou deploy nesta alteracao.
+
+Proximo passo concreto: homologar com um pedido avulso sem destino, abrir o
+detalhe depois da entrega, confirmar o endereco resolvido, cadastrar o cliente e
+criar outro pedido selecionando `Destino da entrega`. Repetir com o mesmo
+telefone deve mostrar apenas o link para o cliente existente.

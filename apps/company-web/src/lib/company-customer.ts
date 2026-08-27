@@ -2,7 +2,10 @@ import type {
   CompanyCustomer,
   CompanyCustomerAddress,
   CompanyCustomerSavedAddress,
+  DeliveryAddressItem,
+  DeliveryStatus,
 } from '@motoboycity/types';
+import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type { SelectedGoogleAddress } from '@/components/operations/google-address-autocomplete';
 
 export interface DeliveryCustomerFields {
@@ -20,7 +23,17 @@ export interface CustomerRegistrationPrefill {
   name: string;
   cpf?: string;
   phone: string;
+  addressLabel?: string;
   address: CompanyCustomerAddress;
+}
+
+export interface CompletedDeliveryCustomerSource {
+  batchId: string | null;
+  destinationKnownAtCreation: boolean;
+  status: DeliveryStatus;
+  recipientName: string | null;
+  recipientPhone: string | null;
+  addresses: DeliveryAddressItem[];
 }
 
 export interface DeliveryCustomerCandidateSource {
@@ -119,4 +132,57 @@ export function buildCustomerRegistrationCandidates(
       },
     ];
   });
+}
+
+/**
+ * Reaproveita o snapshot imutavel de um pedido avulso cujo destino foi
+ * capturado pelo motoboy. Rua, cidade, UF e CEP precisam ter sido resolvidos
+ * pela API; o numero pode ser confirmado pela empresa no formulario.
+ */
+export function buildCompletedDeliveryCustomerPrefill(
+  delivery: CompletedDeliveryCustomerSource,
+): CustomerRegistrationPrefill | null {
+  if (
+    delivery.batchId !== null ||
+    delivery.destinationKnownAtCreation ||
+    (delivery.status !== 'DELIVERED' && delivery.status !== 'COMPLETED')
+  ) {
+    return null;
+  }
+
+  const name = delivery.recipientName?.trim() ?? '';
+  const phone = delivery.recipientPhone
+    ? companyCustomerPhoneSchema.safeParse(delivery.recipientPhone)
+    : null;
+  const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
+
+  if (
+    name.length < 2 ||
+    !phone?.success ||
+    !dropoff?.street?.trim() ||
+    !dropoff.city?.trim() ||
+    !dropoff.state?.trim() ||
+    !dropoff.zip?.trim() ||
+    dropoff.lat === null ||
+    dropoff.lng === null
+  ) {
+    return null;
+  }
+
+  return {
+    name,
+    phone: phone.data,
+    addressLabel: 'Destino da entrega',
+    address: {
+      street: dropoff.street.trim(),
+      number: dropoff.number?.trim() ?? '',
+      complement: dropoff.complement?.trim() || null,
+      city: dropoff.city.trim(),
+      state: dropoff.state.trim(),
+      zip: dropoff.zip.trim(),
+      lat: dropoff.lat,
+      lng: dropoff.lng,
+      referenceNote: dropoff.referenceNote?.trim() || null,
+    },
+  };
 }
