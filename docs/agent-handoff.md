@@ -7917,7 +7917,7 @@ depois homologar com uma entrega de teste nos quatro status permitidos, confirma
 o movimento do marcador no celular e verificar que concluir ou cancelar faz uma
 nova abertura do mesmo link responder como expirado.
 
-## Release parcial - 2026-08-27: rastreamento publico por WhatsApp
+## Release - 2026-08-27: rastreamento publico por WhatsApp
 
 O commit funcional `4a63b8a` foi enviado para `main`. O deployment oficial
 `main - motoboycity-api` concluiu com sucesso no Render, confirmando que o
@@ -7929,13 +7929,17 @@ publico malformado respondeu 400; a emissao protegida respondeu 401 sem sessao;
 e o preflight do endpoint publico respondeu 204 com a origem oficial do Company
 Web. Nenhum token real de entrega foi criado durante o smoke.
 
-A integracao GitHub -> Vercel nao criou deployment para esse commit. O ultimo
-deployment registrado dos projetos Vercel continuava com aproximadamente tres
-horas, e `/rastrear/token-curto` ainda respondia 404 no alias oficial. A CLI
-Vercel disponivel nesta maquina esta autenticada em outra conta, sem acesso ao
-projeto `movecity`; nenhum projeto ou configuracao oficial foi alterado por ela.
-O metadado local criado durante a verificacao foi removido imediatamente e o
-worktree permaneceu limpo.
+A integracao GitHub -> Vercel nao criou deployment no primeiro push. O commit de
+handoff `8890a84` serviu como uma segunda tentativa e disparou corretamente os
+deployments `Production - motoboycity-company-web` e
+`Production - motoboycity-admin-web`; ambos concluiram com sucesso. O Render
+tambem concluiu novamente para o mesmo estado de `main`. No smoke final,
+`/rastrear/token-curto` respondeu 200 no alias oficial do Company Web e o HTML
+incluiu `noindex` e `no-referrer`; a API permaneceu saudavel e respondeu 400 ao
+token deliberadamente malformado. A CLI Vercel disponivel nesta maquina esta
+autenticada em outra conta, sem acesso ao projeto `movecity`; nenhum projeto ou
+configuracao oficial foi alterado por ela. O metadado local criado durante a
+verificacao foi removido imediatamente e o worktree permaneceu limpo.
 
 O CI aprovou migration isolada, seed, typecheck, lint, 858 testes unitarios da
 API, testes de seguranca do reset e testes do Driver App. A etapa E2E ficou presa
@@ -7948,8 +7952,7 @@ cancelada depois da reproducao; os containers locais isolados foram removidos.
 Os builds de producao da API e do Company Web ja haviam passado localmente no
 mesmo commit.
 
-Proximo passo concreto: usar a conta/equipe correta da Vercel para reimplantar o
-Company Web a partir de `main` ou restaurar sua integracao com o GitHub. Depois,
-confirmar 200 em `/rastrear/token-curto` e fazer o smoke autenticado de emissao
-de um link real. Em recorte separado, corrigir o cleanup e os dois testes E2E
-antigos para o CI voltar a encerrar com sucesso.
+Proximo passo concreto: fazer o smoke autenticado de emissao e compartilhamento
+de um link real, acompanhar o marcador no celular e confirmar a expiracao ao
+entregar ou cancelar. Em recorte separado, corrigir o cleanup e os dois testes
+E2E antigos para o CI voltar a encerrar com sucesso.
