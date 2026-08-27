@@ -10,6 +10,7 @@ import type {
   ServiceTypeItem,
 } from '@motoboycity/types';
 import { Copy, Minus, Plus, X } from 'lucide-react';
+import { CustomerAutocomplete } from '@/components/customers/customer-autocomplete';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -21,7 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { deliveriesApi } from '@/lib/api-client';
+import { companyCustomersApi, deliveriesApi } from '@/lib/api-client';
+import {
+  buildCustomerRegistrationCandidates,
+  customerToDeliveryFields,
+  type CustomerRegistrationPrefill,
+} from '@/lib/company-customer';
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import type { CloneSeed } from './clone-delivery';
 import {
@@ -31,6 +37,7 @@ import {
 
 interface DeliveryDraft {
   key: string;
+  customerId: string | null;
   recipientName: string;
   recipientPhone: string;
   externalOrderNumber: string;
@@ -55,11 +62,13 @@ interface Props {
    * geraria render em cascata.
    */
   clone?: { seed: CloneSeed; displayNumber: number } | null;
+  onUnregisteredCustomers?: (customers: CustomerRegistrationPrefill[]) => void;
 }
 
 function draftFromSeed(seed: CloneSeed): DeliveryDraft {
   return {
     key: crypto.randomUUID(),
+    customerId: null,
     recipientName: seed.recipientName,
     recipientPhone: seed.recipientPhone,
     // Numero externo nao vem no clone: ele identifica UM pedido no sistema da
@@ -78,6 +87,7 @@ function draftFromSeed(seed: CloneSeed): DeliveryDraft {
 function emptyDraft(): DeliveryDraft {
   return {
     key: crypto.randomUUID(),
+    customerId: null,
     recipientName: '',
     recipientPhone: '',
     externalOrderNumber: '',
@@ -91,7 +101,13 @@ function emptyDraft(): DeliveryDraft {
   };
 }
 
-export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone }: Props) {
+export function OperationalOrderForm({
+  token,
+  pickupAddress,
+  serviceTypes,
+  clone,
+  onUnregisteredCustomers,
+}: Props) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'single' | 'batch'>('single');
   const [serviceTypeId, setServiceTypeId] = useState(clone?.seed.serviceTypeId ?? '');
@@ -166,6 +182,23 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
     };
   }
 
+  async function identifyUnregisteredCustomers(submittedDrafts: DeliveryDraft[]) {
+    const candidates = buildCustomerRegistrationCandidates(submittedDrafts);
+
+    const missing: CustomerRegistrationPrefill[] = [];
+    for (const candidate of candidates) {
+      try {
+        const match = await companyCustomersApi.match(token, { phone: candidate.phone });
+        if (!match.customer) missing.push(candidate);
+      } catch {
+        // A entrega ja foi criada. Se a verificacao falhar por rede, ainda e
+        // seguro oferecer o cadastro: a API impedira eventual duplicidade.
+        missing.push(candidate);
+      }
+    }
+    onUnregisteredCustomers?.(missing);
+  }
+
   const mutation = useMutation({
     mutationFn: async () => {
       const request =
@@ -175,17 +208,19 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
       const attempt = idempotencyAttemptFor(creationAttempt.current, request);
       creationAttempt.current = attempt;
 
-      return request.kind === 'batch'
-        ? deliveriesApi.createBatch(token, {
-            idempotencyKey: attempt.key,
-            deliveries: request.deliveries,
-          })
-        : deliveriesApi.create(token, {
-            ...request.delivery,
-            idempotencyKey: attempt.key,
-          });
+      const result =
+        request.kind === 'batch'
+          ? await deliveriesApi.createBatch(token, {
+              idempotencyKey: attempt.key,
+              deliveries: request.deliveries,
+            })
+          : await deliveriesApi.create(token, {
+              ...request.delivery,
+              idempotencyKey: attempt.key,
+            });
+      return { result, submittedDrafts: drafts };
     },
-    onSuccess: (result) => {
+    onSuccess: ({ result, submittedDrafts }) => {
       creationAttempt.current = null;
       const count = 'deliveries' in result ? result.deliveries.length : 1;
       setMessage(
@@ -197,6 +232,7 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
       setCloneWarnings([]);
       void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
       void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
+      void identifyUnregisteredCustomers(submittedDrafts);
     },
     onError: (mutationError) => {
       setMessage(null);
@@ -366,15 +402,27 @@ export function OperationalOrderForm({ token, pickupAddress, serviceTypes, clone
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">
+              <div className="col-span-2">
+                <CustomerAutocomplete
+                  token={token}
+                  selectedName={draft.customerId ? draft.recipientName : undefined}
+                  onClear={() => updateDraft(index, { customerId: null })}
+                  onSelect={(customer) => updateDraft(index, customerToDeliveryFields(customer))}
+                />
+              </div>
               <Input
                 placeholder="Destinatário"
                 value={draft.recipientName}
-                onChange={(event) => updateDraft(index, { recipientName: event.target.value })}
+                onChange={(event) =>
+                  updateDraft(index, { recipientName: event.target.value, customerId: null })
+                }
               />
               <Input
                 placeholder="Telefone"
                 value={draft.recipientPhone}
-                onChange={(event) => updateDraft(index, { recipientPhone: event.target.value })}
+                onChange={(event) =>
+                  updateDraft(index, { recipientPhone: event.target.value, customerId: null })
+                }
               />
               <Input
                 placeholder="Nº externo"

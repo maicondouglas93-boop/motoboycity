@@ -404,6 +404,7 @@ model Company {
 
   teamMembers   CompanyTeamMember[]
   addresses     CompanyAddress[]
+  customers     CompanyCustomer[]
   deliveries    Delivery[]
   wallet        Wallet?
   invoices      Invoice[]
@@ -459,6 +460,38 @@ model CompanyAddress {
 
   @@index([companyId])
   @@map("company_addresses")
+}
+
+/// Agenda de destinatarios mantida por cada empresa. Os pedidos continuam
+/// guardando snapshots proprios: editar ou excluir um cliente nunca reescreve
+/// uma entrega historica.
+model CompanyCustomer {
+  id             String   @id @default(uuid())
+  companyId      String
+  name           String   @db.VarChar(120)
+  normalizedName String   @db.VarChar(120)
+  cpf            String   @db.VarChar(11)
+  phone          String   @db.VarChar(11)
+  street         String   @db.VarChar(160)
+  number         String   @db.VarChar(30)
+  complement     String?  @db.VarChar(120)
+  city           String   @db.VarChar(120)
+  state          String   @db.Char(2)
+  zip            String   @db.VarChar(8)
+  lat            Decimal? @db.Decimal(10, 7)
+  lng            Decimal? @db.Decimal(10, 7)
+  referenceNote  String?  @db.VarChar(300)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, cpf])
+  @@unique([companyId, phone])
+  @@index([companyId, normalizedName])
+  @@index([companyId, createdAt])
+  @@map("company_customers")
 }
 
 // ============================================================================

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ClipboardList, FileText, LogOut, UserRound, Wallet } from 'lucide-react';
+import { ClipboardList, FileText, LogOut, UserRound, UsersRound, Wallet } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -26,6 +26,7 @@ import { session } from '@/lib/session';
  */
 const NAV_ITEMS = [
   { href: '/pedidos', label: 'Pedidos', icon: ClipboardList },
+  { href: '/clientes', label: 'Clientes', icon: UsersRound },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
   { href: '/financeiro', label: 'Financeiro', icon: Wallet },
 ];

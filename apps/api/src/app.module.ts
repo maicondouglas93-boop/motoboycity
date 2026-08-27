@@ -15,6 +15,7 @@ import { AdminServiceTypesModule } from './admin/service-types/admin-service-typ
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
 import { CompanyProfileModule } from './company/profile/company-profile.module';
+import { CompanyCustomersModule } from './company/customers/company-customers.module';
 import { CompanyReportsModule } from './company/reports/company-reports.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
@@ -80,6 +81,7 @@ import { RequestPerformanceInterceptor } from './common/request-performance.inte
     GoogleMapsModule,
     CompanyAddressModule,
     CompanyProfileModule,
+    CompanyCustomersModule,
     CompanyReportsModule,
     DispatchModule,
     DriverPresenceModule,

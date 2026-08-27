@@ -1,4 +1,5 @@
 export * from './company.js';
+export * from './company-customer.js';
 export * from './driver.js';
 export * from './user.js';
 export * from './auth.js';

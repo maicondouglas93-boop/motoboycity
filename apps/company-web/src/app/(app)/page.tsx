@@ -12,17 +12,32 @@ import { OrderRow } from '@/components/orders/order-row';
 import { AddressSetupForm } from '@/components/orders/address-setup-form';
 import { CompanyOperationsMap } from '@/components/operations/company-operations-map';
 import { OperationalOrderForm } from '@/components/operations/operational-order-form';
+import { CustomerForm } from '@/components/customers/customer-form';
 import { buildCloneSeed, type CloneSeed } from '@/components/operations/clone-delivery';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
 import {
   updateDeliveryLocationInOperations,
   type DeliveryLocationRealtimeEvent,
 } from '@/lib/delivery-location-cache';
 import { session } from '@/lib/session';
+import {
+  formatCustomerAddress,
+  formatCustomerPhone,
+  type CustomerRegistrationPrefill,
+} from '@/lib/company-customer';
 
 const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
 
@@ -43,6 +58,18 @@ export default function CompanyHomePage() {
     nonce: number;
   } | null>(null);
   const [connected, setConnected] = useState(false);
+  const [customerCandidates, setCustomerCandidates] = useState<CustomerRegistrationPrefill[]>([]);
+  const [customerPromptMode, setCustomerPromptMode] = useState<'prompt' | 'form'>('prompt');
+
+  function receiveCustomerCandidates(candidates: CustomerRegistrationPrefill[]) {
+    setCustomerCandidates(candidates);
+    setCustomerPromptMode('prompt');
+  }
+
+  function advanceCustomerCandidate() {
+    setCustomerCandidates((current) => current.slice(1));
+    setCustomerPromptMode('prompt');
+  }
 
   const addressQuery = useQuery({
     queryKey: ['company', 'address'],
@@ -179,6 +206,7 @@ export default function CompanyHomePage() {
               pickupAddress={pickupAddress}
               serviceTypes={serviceTypes}
               clone={clone}
+              onUnregisteredCustomers={receiveCustomerCandidates}
             />
           </CardContent>
         </Card>
@@ -308,6 +336,65 @@ export default function CompanyHomePage() {
           </Card>
         </div>
       </section>
+
+      <Dialog
+        open={customerCandidates.length > 0}
+        onOpenChange={(open) => {
+          if (!open) advanceCustomerCandidate();
+        }}
+      >
+        <DialogContent>
+          {customerCandidates[0] && customerPromptMode === 'prompt' ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Cliente não cadastrado</DialogTitle>
+                <DialogDescription>
+                  Os dados desta entrega ainda não estão na sua lista. Deseja salvá-los para os
+                  próximos pedidos?
+                </DialogDescription>
+              </DialogHeader>
+              <DialogBody className="space-y-2 text-sm">
+                <p className="font-semibold">{customerCandidates[0].name}</p>
+                <p>{formatCustomerPhone(customerCandidates[0].phone)}</p>
+                <p className="text-muted-foreground">
+                  {formatCustomerAddress(customerCandidates[0].address)}
+                </p>
+                {customerCandidates.length > 1 && (
+                  <p className="text-xs text-muted-foreground">
+                    Restam {customerCandidates.length} clientes deste lote para revisar.
+                  </p>
+                )}
+              </DialogBody>
+              <DialogFooter className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={advanceCustomerCandidate}>
+                  Agora não
+                </Button>
+                <Button type="button" onClick={() => setCustomerPromptMode('form')}>
+                  Cadastrar cliente
+                </Button>
+              </DialogFooter>
+            </>
+          ) : customerCandidates[0] ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Confirmar cadastro</DialogTitle>
+                <DialogDescription>
+                  Complete o CPF e confirme os dados preenchidos pela entrega.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogBody>
+                <CustomerForm
+                  key={`${customerCandidates[0].phone}-${customerCandidates.length}`}
+                  token={token}
+                  initial={customerCandidates[0]}
+                  onCancel={() => setCustomerPromptMode('prompt')}
+                  onSaved={advanceCustomerCandidate}
+                />
+              </DialogBody>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

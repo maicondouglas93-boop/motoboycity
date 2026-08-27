@@ -7656,3 +7656,62 @@ disponivel nesta sessao, portanto o smoke visual autenticado permanece manual.
 Proximo passo concreto: depois do deploy, abrir a Home em 360-430 px, aguardar
 empresas, motoboys, mapa e filas carregarem e confirmar que `scrollWidth`
 permanece igual a largura visivel e que o botao de atividade continua no canto.
+
+## Atualizacao - 2026-08-26: cadastro de clientes da empresa
+
+O Company Web ganhou uma agenda privada de destinatarios em `/clientes`. Cada
+registro pertence a uma empresa e guarda nome, CPF, telefone e endereco
+estruturado com coordenadas opcionais. CPF e telefone sao normalizados sem
+mascara; o telefone tambem aceita entrada brasileira em E.164. O CPF passa pelo
+algoritmo dos digitos verificadores. Indices unicos por `(companyId, cpf)` e
+`(companyId, phone)` evitam duplicidade inclusive em criacoes concorrentes,
+sem impedir que duas empresas diferentes cadastrem a mesma pessoa.
+
+A API nova vive em `company/customers` e oferece listagem/pesquisa paginada,
+detalhe, correspondencia exata, criacao, atualizacao e exclusao. Todas as rotas
+usam `JwtAuthGuard` e `CompanyOnlyGuard`; o service resolve `companyId` somente
+pelo membro ativo da sessao. Detalhe e atualizacao primeiro consultam
+simultaneamente `id` e `companyId`, e exclusao usa `deleteMany` com os dois no
+mesmo filtro atomico. Um ID de outra empresa retorna 404 e nao revela se o
+registro existe. A busca usa nome normalizado sem acentos ou digitos do
+telefone.
+
+Selecionar um cliente no `OperationalOrderForm` preenche destinatario,
+telefone e o snapshot do destino, inclusive em lote. Nao foi adicionada FK na
+entrega: editar ou excluir o cadastro nunca reescreve pedidos historicos. O
+pedido manual continua permitido e com o mesmo payload. Somente depois de uma
+criacao bem-sucedida o painel verifica o telefone dos rascunhos manuais; se nao
+encontrar correspondencia, oferece `Cadastrar cliente` ou `Agora nao`. O
+formulario abre com nome, telefone e endereco preenchidos e exige completar o
+CPF. Em lote, telefones repetidos sao deduplicados e revisados em sequencia.
+Ignorar ou fechar o convite nao faz nova chamada de criacao da entrega.
+
+A pagina permite pesquisar com debounce de 300 ms, cadastrar, visualizar,
+editar e excluir com confirmacao. A exclusao remove apenas a entrada da agenda;
+os snapshots das entregas permanecem. O novo cliente compartilhado esta em
+`packages/{validation,types,api-client}`, o modulo Nest em
+`apps/api/src/company/customers`, a UI em
+`apps/company-web/src/{app/(app)/clientes,components/customers}` e a integracao
+da Home em `app/(app)/page.tsx` e `operational-order-form.tsx`.
+
+O schema Prisma recebeu somente `CompanyCustomer`; a migration aditiva
+`20260826210000_company_customers` foi gerada pelo `prisma migrate diff` entre
+o schema anterior e o novo, sem conexao ou aplicacao em banco. O SQL contem
+somente criacao da tabela, quatro indices e a FK com cascade na remocao da
+empresa. Nao houve backfill nem alteracao de tabela existente.
+
+Validacoes aprovadas: `prisma validate`; build de `@motoboycity/validation`;
+suite unitaria completa da API com 69 suites e 831 testes; Company Web com 7
+arquivos e 20 testes; typecheck e lint na raiz cobrindo os oito workspaces;
+builds de producao da API e do Company Web, que gerou 19 paginas incluindo
+`/clientes`. O E2E novo `company-customers.e2e-spec.ts` cobre dados invalidos,
+duplicidade, busca, match, CRUD e isolamento por ID entre duas empresas, mas nao
+foi executado porque PostgreSQL e Redis isolados nao foram provisionados.
+Tambem nao houve smoke autenticado: a migration nao foi aplicada em ambiente
+seguro nesta sessao.
+
+Proximo passo concreto: validar backup/restore e a migration em copia isolada
+de staging, executar o E2E novo, aplicar pelo deploy controlado e homologar com
+duas empresas: cadastrar o mesmo CPF nas duas, pesquisar, selecionar na Home,
+criar pedido avulso e lote, salvar um destinatario manual depois do sucesso e
+confirmar que `Agora nao` nao altera nem repete a entrega.

@@ -21,6 +21,7 @@ export * from './invoices';
 export * from './deliveries';
 export * from './company-address';
 export * from './company-profile';
+export * from './company-customers';
 export * from './service-types';
 export * from './driver-presence';
 export * from './tracking';
