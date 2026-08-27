@@ -10,29 +10,32 @@ export function HomeDeliveryTrackingShare({
   deliveryId,
   status,
   recipientPhone,
+  recipientName,
+  companyName,
 }: {
   token: string;
   deliveryId: string;
   status: DeliveryStatus;
   recipientPhone: string | null;
+  recipientName: string | null;
+  companyName: string;
 }) {
   if (!canShareDeliveryTrackingFromHome(status)) return null;
 
   return (
-    <section className="space-y-3 rounded-xl border border-portal/20 bg-card/85 p-3 shadow-sm">
-      <div>
-        <p className="font-semibold text-portal-deep">
-          Enviar localização do pedido em tempo real para o cliente
-        </p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          O cliente receberá pelo WhatsApp um link para acompanhar esta entrega.
-        </p>
-      </div>
+    <section className="space-y-2 rounded-xl border border-[#149447]/25 bg-[linear-gradient(135deg,rgba(20,148,71,0.1),rgba(255,255,255,0.78))] p-2.5 shadow-[0_8px_22px_-18px_rgba(20,148,71,0.8)]">
+      <p className="text-[11px] leading-4 font-bold text-[#0f7137]">
+        Enviar localização do pedido em tempo real para o cliente
+      </p>
       <ShareDeliveryTrackingButton
         token={token}
         deliveryId={deliveryId}
         recipientPhone={recipientPhone}
+        recipientName={recipientName}
+        companyName={companyName}
+        status={status}
         label="Enviar localização pelo WhatsApp"
+        prominent
       />
     </section>
   );

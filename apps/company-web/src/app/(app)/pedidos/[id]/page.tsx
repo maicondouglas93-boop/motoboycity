@@ -189,6 +189,9 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
               token={token}
               deliveryId={delivery.id}
               recipientPhone={delivery.recipientPhone}
+              recipientName={delivery.recipientName}
+              companyName={delivery.companyName}
+              status={delivery.status}
             />
           )}
           {companyCanCancel && (

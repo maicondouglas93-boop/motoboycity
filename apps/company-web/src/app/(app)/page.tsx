@@ -265,12 +265,6 @@ export default function CompanyHomePage() {
                 {selected.driver && (
                   <p className="text-muted-foreground">Motoboy: {selected.driver.name}</p>
                 )}
-                <HomeDeliveryTrackingShare
-                  token={token}
-                  deliveryId={selected.id}
-                  status={selected.status}
-                  recipientPhone={selected.recipientPhone}
-                />
                 <div className="flex flex-wrap items-center gap-3 pt-1">
                   <Button
                     type="button"
@@ -310,12 +304,21 @@ export default function CompanyHomePage() {
             </CardHeader>
             <CardContent className="max-h-[310px] space-y-2 overflow-y-auto pt-3">
               {operations?.active.map((order) => (
-                <OrderRow
-                  key={order.id}
-                  order={order}
-                  selected={order.id === selectedId}
-                  onSelect={() => selectOrder(order.id)}
-                />
+                <div key={order.id} className="space-y-1.5">
+                  <OrderRow
+                    order={order}
+                    selected={order.id === selectedId}
+                    onSelect={() => selectOrder(order.id)}
+                  />
+                  <HomeDeliveryTrackingShare
+                    token={token}
+                    deliveryId={order.id}
+                    status={order.status}
+                    recipientPhone={order.recipientPhone}
+                    recipientName={order.recipientName}
+                    companyName={order.companyName}
+                  />
+                </div>
               ))}
               {operations?.active.length === 0 && !operationsQuery.isError && (
                 <p className="text-sm text-muted-foreground">Nenhum pedido ativo.</p>

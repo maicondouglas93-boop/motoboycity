@@ -31,6 +31,8 @@ describe('HomeDeliveryTrackingShare', () => {
           deliveryId="delivery-1"
           status={status}
           recipientPhone="(33) 99999-8877"
+          recipientName="Maria"
+          companyName="Joaozinho Lanches"
         />,
       );
 
@@ -47,8 +49,13 @@ describe('HomeDeliveryTrackingShare', () => {
         expect.stringContaining('https://wa.me/5533999998877?text='),
         '_blank',
       );
-      expect(decodeURIComponent(String(openSpy.mock.calls[0]?.[0]))).toContain(
-        '/rastrear/token-publico.assinatura',
+      const whatsappUrl = decodeURIComponent(String(openSpy.mock.calls[0]?.[0]));
+      expect(whatsappUrl).toContain('/rastrear/token-publico.assinatura');
+      expect(whatsappUrl).toContain('Olá, Maria!');
+      expect(whatsappUrl).toContain(
+        status === 'COLLECTED'
+          ? 'Sua entrega de *Joaozinho Lanches* saiu para entrega.'
+          : 'Um motoboy aceitou sua entrega de *Joaozinho Lanches*.',
       );
       expect(opened.opener).toBeNull();
     },
@@ -69,6 +76,8 @@ describe('HomeDeliveryTrackingShare', () => {
         deliveryId="delivery-1"
         status={status}
         recipientPhone={null}
+        recipientName={null}
+        companyName="Joaozinho Lanches"
       />,
     );
 

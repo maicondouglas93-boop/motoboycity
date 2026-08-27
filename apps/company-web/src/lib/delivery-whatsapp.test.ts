@@ -30,9 +30,36 @@ describe('delivery tracking WhatsApp', () => {
     );
   });
 
-  it('inclui somente a mensagem curta e o link publico', () => {
-    expect(buildDeliveryTrackingMessage(publicUrl)).toBe(
-      `Ola!\n\nAcompanhe sua entrega em tempo real:\n${publicUrl}`,
+  it('avisa que a entrega coletada saiu da empresa e personaliza o cliente', () => {
+    expect(
+      buildDeliveryTrackingMessage(publicUrl, {
+        recipientName: 'Maria',
+        companyName: 'Joaozinho Lanches',
+        status: 'COLLECTED',
+      }),
+    ).toBe(
+      `Olá, Maria!\n\nSua entrega de *Joaozinho Lanches* saiu para entrega. 🛵\n\nAcompanhe o motoboy em tempo real pelo link:\n${publicUrl}`,
     );
+  });
+
+  it('nao diz que saiu para entrega antes da coleta', () => {
+    const message = buildDeliveryTrackingMessage(publicUrl, {
+      companyName: 'Mercado Central',
+      status: 'ACCEPTED',
+    });
+
+    expect(message).toContain('Um motoboy aceitou sua entrega de *Mercado Central*. 🛵');
+    expect(message).not.toContain('saiu para entrega');
+  });
+
+  it('remove quebras e marcacao injetada dos nomes usados na mensagem', () => {
+    const message = buildDeliveryTrackingMessage(publicUrl, {
+      recipientName: '  Maria\n*Silva* ',
+      companyName: ' Loja\n_Teste_ ',
+      status: 'COLLECTED',
+    });
+
+    expect(message).toContain('Olá, Maria Silva!');
+    expect(message).toContain('Sua entrega de *Loja Teste* saiu para entrega.');
   });
 });

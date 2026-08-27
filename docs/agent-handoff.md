@@ -8369,3 +8369,36 @@ hash coincidem nas duas copias. As 19 suites e os 110 testes do Driver App
 passaram depois do build. O APK nao foi instalado nesta sessao. Proximo passo
 concreto: instalar sobre o `pilot.8` em um aparelho e validar fila, ordenacao de
 tres ou quatro pedidos, contador de coleta, redispatch e checks da rota.
+
+## Atualizacao - 2026-08-27: compartilhamento imediato e rastreamento com moto
+
+Na Home da empresa, cada pedido em `ACCEPTED` ou `COLLECTED` agora mostra a
+acao de rastreamento diretamente abaixo do card na lista `Na rua`; nao e mais
+necessario selecionar o pedido para descobrir a funcionalidade. A chamada
+permanece compacta e ganhou um botao verde de largura total para o WhatsApp. O
+painel do pedido selecionado preserva clone e detalhes, sem duplicar a mesma
+acao.
+
+A mensagem do WhatsApp agora usa nome do destinatario, nome fantasia da empresa
+e status real. Em `ACCEPTED`, informa que um motoboy aceitou a entrega; somente
+em `COLLECTED` diz que ela saiu para entrega. Nomes sao normalizados para nao
+injetar quebras de linha nem marcacao do WhatsApp. O detalhe do pedido tambem
+passa o mesmo contexto, inclusive nos estados anteriores em que o link apenas
+mostra as atualizacoes da preparacao.
+
+No rastreamento publico, o marcador padrao do Google foi substituido por um
+marcador circular da marca com icone de motocicleta e ponta ancorada na
+coordenada atual. O marcador continua sendo movido pela mesma instancia e nao
+altera GPS, polling, Socket.IO nem o contrato publico minimo.
+
+Arquivos principais: Home e detalhe de pedido do Company Web; componentes
+`home-delivery-tracking-share` e `share-delivery-tracking-button`; helper
+`delivery-whatsapp`; `public-tracking-map`; e testes correspondentes. Nao houve
+mudanca de API, banco, migration, contrato compartilhado ou Driver App.
+
+Validacoes aprovadas: 3 arquivos e 16 testes focados; suite completa do Company
+Web com 13 arquivos e 53 testes; typecheck, lint, build de producao com 19
+paginas geradas e `git diff --check`. Nao houve smoke autenticado nem abertura
+real do WhatsApp. Proximo passo concreto: conferir na Home um pedido aceito e
+outro coletado, abrir as duas mensagens no WhatsApp e observar o marcador de
+moto em um celular. Commit, push e deploy nao foram executados neste recorte.
