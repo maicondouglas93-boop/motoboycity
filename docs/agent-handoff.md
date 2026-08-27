@@ -7916,3 +7916,40 @@ Proximo passo concreto: revisar o diff, commitar e publicar quando autorizado;
 depois homologar com uma entrega de teste nos quatro status permitidos, confirmar
 o movimento do marcador no celular e verificar que concluir ou cancelar faz uma
 nova abertura do mesmo link responder como expirado.
+
+## Release parcial - 2026-08-27: rastreamento publico por WhatsApp
+
+O commit funcional `4a63b8a` foi enviado para `main`. O deployment oficial
+`main - motoboycity-api` concluiu com sucesso no Render, confirmando que o
+`prisma migrate deploy` aceitou a migration
+`20260827150000_public_delivery_tracking` antes de iniciar a nova API.
+
+O smoke da API em producao foi aprovado: `GET /health` respondeu 200; um token
+publico malformado respondeu 400; a emissao protegida respondeu 401 sem sessao;
+e o preflight do endpoint publico respondeu 204 com a origem oficial do Company
+Web. Nenhum token real de entrega foi criado durante o smoke.
+
+A integracao GitHub -> Vercel nao criou deployment para esse commit. O ultimo
+deployment registrado dos projetos Vercel continuava com aproximadamente tres
+horas, e `/rastrear/token-curto` ainda respondia 404 no alias oficial. A CLI
+Vercel disponivel nesta maquina esta autenticada em outra conta, sem acesso ao
+projeto `movecity`; nenhum projeto ou configuracao oficial foi alterado por ela.
+O metadado local criado durante a verificacao foi removido imediatamente e o
+worktree permaneceu limpo.
+
+O CI aprovou migration isolada, seed, typecheck, lint, 858 testes unitarios da
+API, testes de seguranca do reset e testes do Driver App. A etapa E2E ficou presa
+porque seis suites antigas falham durante a limpeza de empresas por FK de
+`company_status_history` e deixam handles abertos; uma reproducao completa em
+PostgreSQL e Redis isolados confirmou 18 suites e 225 testes aprovados, dois
+cenarios antigos falhando e seis suites com falha de cleanup. O E2E novo de
+rastreamento passou com seus quatro cenarios. A execucao remota travada foi
+cancelada depois da reproducao; os containers locais isolados foram removidos.
+Os builds de producao da API e do Company Web ja haviam passado localmente no
+mesmo commit.
+
+Proximo passo concreto: usar a conta/equipe correta da Vercel para reimplantar o
+Company Web a partir de `main` ou restaurar sua integracao com o GitHub. Depois,
+confirmar 200 em `/rastrear/token-curto` e fazer o smoke autenticado de emissao
+de um link real. Em recorte separado, corrigir o cleanup e os dois testes E2E
+antigos para o CI voltar a encerrar com sucesso.
