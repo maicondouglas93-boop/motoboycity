@@ -10,6 +10,7 @@ import { CircleDot, Copy, MapPin, Search, Wifi, WifiOff } from 'lucide-react';
 import { StatusChip, statusLabel } from '@/components/orders/status-chip';
 import { OrderRow } from '@/components/orders/order-row';
 import { AddressSetupForm } from '@/components/orders/address-setup-form';
+import { HomeDeliveryTrackingShare } from '@/components/orders/home-delivery-tracking-share';
 import { CompanyOperationsMap } from '@/components/operations/company-operations-map';
 import { OperationalOrderForm } from '@/components/operations/operational-order-form';
 import { CustomerForm } from '@/components/customers/customer-form';
@@ -264,6 +265,12 @@ export default function CompanyHomePage() {
                 {selected.driver && (
                   <p className="text-muted-foreground">Motoboy: {selected.driver.name}</p>
                 )}
+                <HomeDeliveryTrackingShare
+                  token={token}
+                  deliveryId={selected.id}
+                  status={selected.status}
+                  recipientPhone={selected.recipientPhone}
+                />
                 <div className="flex flex-wrap items-center gap-3 pt-1">
                   <Button
                     type="button"

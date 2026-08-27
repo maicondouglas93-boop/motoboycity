@@ -7956,3 +7956,31 @@ Proximo passo concreto: fazer o smoke autenticado de emissao e compartilhamento
 de um link real, acompanhar o marcador no celular e confirmar a expiracao ao
 entregar ou cancelar. Em recorte separado, corrigir o cleanup e os dois testes
 E2E antigos para o CI voltar a encerrar com sucesso.
+
+## Atualizacao - 2026-08-27: compartilhamento do rastreamento na Home
+
+O card do pedido selecionado na Home do Company Web agora mostra uma chamada
+explicita para compartilhar a localizacao quando o status estiver em `ACCEPTED`
+ou `COLLECTED`. O texto exibido e `Enviar localizacao do pedido em tempo real
+para o cliente`, seguido do botao `Enviar localizacao pelo WhatsApp`. O bloco
+fica junto do numero, status, cliente e motoboy que a empresa ja consulta na
+coluna `Na rua`; nao aparece em pedidos agendados, aguardando motoboy ou depois
+do encerramento.
+
+A acao reutiliza integralmente o fluxo publico ja implantado: solicita o mesmo
+token estavel e protegido da entrega, usa o telefone do destinatario presente no
+contrato operacional e abre o WhatsApp. O detalhe do pedido preserva seu texto
+anterior. Nao houve mudanca de API, banco, migration, contrato compartilhado,
+GPS, Socket.IO ou Driver App.
+
+Arquivos: `apps/company-web/src/app/(app)/page.tsx`, o novo componente e teste
+`components/orders/home-delivery-tracking-share{.tsx,.test.tsx}` e o suporte a
+rotulo contextual em `share-delivery-tracking-button.tsx`.
+
+Validacoes aprovadas: teste focado com 9 cenarios; suite completa do Company Web
+com 11 arquivos e 41 testes; typecheck e lint do workspace; build de producao
+com as 19 rotas; e `git diff --check`. Nao houve smoke autenticado no navegador,
+commit, push ou deploy nesta alteracao.
+
+Proximo passo concreto: revisar visualmente a Home com um pedido em `ACCEPTED` e
+outro em `COLLECTED`; depois commitar e publicar quando autorizado.
