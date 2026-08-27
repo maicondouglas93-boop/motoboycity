@@ -8070,3 +8070,34 @@ repeticao passou. Nao houve teste em aparelho nem build Android neste recorte.
 
 Proximo passo concreto: conferir visualmente no aparelho um pedido `ACCEPTED` e
 outro `COLLECTED`; gerar APK e publicar somente quando solicitado.
+
+## Atualizacao - 2026-08-27: release Android oficial pilot.8
+
+O card compacto de pedidos em andamento foi publicado no commit funcional
+`f18578a` e o Driver App foi promovido para `0.1.0-pilot.8`, com `versionCode`
+8. Antes do build passaram as 16 suites e 94 testes do aplicativo, typecheck,
+lint e `git diff --check`.
+
+O release foi compilado em uma worktree temporaria curta em `C:\m8`, com a
+chave oficial copiada somente durante a montagem. A primeira tentativa parou no
+portao de ambiente antes de gerar APK porque a URL de producao nao havia sido
+declarada explicitamente; a repeticao definiu
+`https://motoboycity-api.onrender.com` e concluiu `assembleRelease`, assinatura
+e lint vital. Nenhum artefato incorreto foi preservado.
+
+O APK oficial tem 75.089.401 bytes e SHA-256
+`EDDFCAC60D02A82AC4E55F035E0F7E8104F52EF8F5F991F52148B78ADC4F17FA`.
+O `apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial
+dos pilotos anteriores, SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.8`, `versionCode` 8 e compile SDK 36. O bundle contem somente a
+URL oficial entre os endpoints verificados e nao contem `localhost:3333`,
+`127.0.0.1` nem `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.8-vc8.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.8-vc8.apk`; as duas copias
+possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo passo
+concreto: instalar sobre o `pilot.7` e conferir na Home tres a quatro pedidos
+simultaneos, incluindo um `ACCEPTED` e outro `COLLECTED`.
