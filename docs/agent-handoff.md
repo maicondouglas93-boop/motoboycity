@@ -7838,3 +7838,81 @@ Proximo passo concreto: fazer o smoke autenticado no Company Web com um cliente
 real de teste, cadastrar Casa e Trabalho, criar pedidos para os dois enderecos e
 confirmar as contagens no detalhe. No Neon, confirmar visualmente a janela de
 restore em Settings > Restore window.
+
+## Atualizacao - 2026-08-27: rastreamento publico por WhatsApp
+
+O detalhe do pedido da empresa agora oferece `Enviar pelo WhatsApp` enquanto a
+entrega estiver em `SCHEDULED`, `AWAITING_DRIVER`, `ACCEPTED` ou `COLLECTED`. A
+acao cria ou reutiliza um link publico estavel, monta a URL usando a origem atual
+do Company Web e abre o WhatsApp diretamente no telefone do destinatario quando
+ele for valido; sem telefone valido, abre o compartilhamento generico. Nenhum
+envio automatico ou integracao com a API do WhatsApp foi adicionado.
+
+A rota publica `/rastrear/[token]` fica fora do `AuthGate`, e marcada como
+`noindex` e `no-referrer`. Ela exibe apenas o status publico, a ultima posicao
+permitida e o horario da captura. O contrato nao inclui nome, telefone, CPF,
+enderecos, valores, dados do motoboy, ID da entrega ou historico da rota. O mapa
+usa um unico marcador e nao reutiliza o mapa operacional, que contem dados
+privados de coleta e destino.
+
+O aplicativo do motoboy nao foi alterado. A funcionalidade reutiliza os pontos
+enviados pelo `DeliveryLocationTrackingService` Android e armazenados em
+`DeliveryLocationPoint`. Em `ACCEPTED` e `COLLECTED`, a API publica os pontos em
+tempo real numa sala Socket.IO exclusiva da entrega depois de reler status e
+token no banco. A pagina mantem polling de seguranca a cada 30 segundos e usa a
+reconexao padrao do Socket.IO. Atualizacoes tardias de GPS sao ignoradas depois
+do encerramento.
+
+O token possui nonce aleatorio de 256 bits e assinatura HMAC-SHA256 com contexto
+proprio; apenas o identificador aleatorio fica no banco. A API valida a
+assinatura em tempo constante, limita a rota publica a 20 requisicoes por minuto
+e responde com `Cache-Control: no-store`. Os endpoints autenticados de emissao e
+revogacao usam `JwtAuthGuard`, `CompanyOnlyGuard` e filtram a entrega pelas
+empresas ativas da sessao. A criacao usa escrita condicional e reaproveita o
+token vencedor em concorrencia.
+
+Ao entrar em `DELIVERED`, `FAILED`, `COMPLETED` ou `CANCELLED`, o acesso REST
+passa imediatamente a responder 410. Uma pagina ja conectada pode receber apenas
+o estado terminal sanitizado, apaga a posicao e encerra o socket. A emissao de
+status tambem limpa `publicTrackingIssuedAt`; uma revogacao manual limpa tanto o
+identificador quanto a data, de modo que gerar novamente produz outro link.
+
+O schema ganhou somente `Delivery.publicTrackingTokenId` unico e
+`Delivery.publicTrackingIssuedAt`. A migration aditiva
+`20260827150000_public_delivery_tracking`, gerada por `prisma migrate diff`,
+adiciona as duas colunas e o indice unico, sem backfill ou reescrita dos dados.
+Ela passou em banco PostgreSQL 17 vazio com todas as 38 migrations. Os containers
+isolados de PostgreSQL e Redis foram removidos depois dos testes.
+
+Durante a primeira tentativa de validacao isolada, apenas `DATABASE_URL` foi
+sobrescrita e o Prisma priorizou o `DIRECT_URL` ja configurado localmente. Com
+isso, somente esta migration aditiva foi aplicada ao banco de desenvolvimento
+local `motoboycity_dev` em `localhost:5434`. Nenhum banco de producao ou
+compartilhado foi alterado e nenhum dado foi removido. A validacao foi repetida
+com `DATABASE_URL` e `DIRECT_URL` apontando explicitamente para o banco isolado,
+onde passou desde o zero. Nao deve ser feito rollback destrutivo no banco local;
+o schema local apenas ficou antecipadamente compativel com o codigo novo.
+
+Arquivos principais: o schema e a migration Prisma; os servicos de token e
+status em `apps/api/src/common`; controller, service e testes em
+`apps/api/src/tracking`; autenticacao e salas publicas em
+`apps/api/src/realtime`; contratos em `packages/{types,validation,api-client}`;
+botao de WhatsApp, pagina, mapa e estado realtime em `apps/company-web`; e as
+regras confirmadas em `docs/business-rules.md`.
+
+Validacoes aprovadas: `prisma validate`; aplicacao das 38 migrations em banco
+isolado; E2E publico com 4 cenarios cobrindo propriedade da empresa, token
+estavel, contrato minimo sem dados privados, cache, adulteracao e expiracao 410;
+suite completa da API com 70 suites e 858 testes; Company Web com 10 arquivos e
+32 testes; `pnpm typecheck` nos oito workspaces; `pnpm lint`; builds de producao
+da API e do Company Web, incluindo `/rastrear/[token]`; e testes especificos do
+cache realtime que limpam a posicao terminal e rejeitam GPS tardio.
+
+Limitacoes: nao houve smoke em aparelho ou navegador autenticado, abertura real
+do WhatsApp nem deploy nesta sessao. A chave do Google Maps usada pelo Company
+Web precisa aceitar o dominio oficial da pagina publica.
+
+Proximo passo concreto: revisar o diff, commitar e publicar quando autorizado;
+depois homologar com uma entrega de teste nos quatro status permitidos, confirmar
+o movimento do marcador no celular e verificar que concluir ou cancelar faz uma
+nova abertura do mesmo link responder como expirado.

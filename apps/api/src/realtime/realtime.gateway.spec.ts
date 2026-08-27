@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Socket } from 'socket.io';
 import { credentialFingerprint } from '../auth/credential-fingerprint';
 import { PrismaService } from '../prisma/prisma.service';
+import { PublicTrackingTokenService } from '../common/public-tracking-token.service';
 import { RealtimeGateway } from './realtime.gateway';
 
 interface MockSocket {
@@ -51,8 +52,10 @@ describe('RealtimeGateway', () => {
     user: { findUnique: jest.Mock };
     driver: { findUnique: jest.Mock; update: jest.Mock };
     driverPresenceLog: { updateMany: jest.Mock };
+    delivery: { findUnique: jest.Mock; updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
+  let publicTrackingTokens: { identifierFromToken: jest.Mock };
   let serverEmit: jest.Mock;
   let serverTo: jest.Mock;
   let serverSocketGet: jest.Mock;
@@ -63,14 +66,17 @@ describe('RealtimeGateway', () => {
       user: { findUnique: jest.fn() },
       driver: { findUnique: jest.fn(), update: jest.fn() },
       driverPresenceLog: { updateMany: jest.fn() },
+      delivery: { findUnique: jest.fn(), updateMany: jest.fn() },
       $transaction: jest.fn().mockResolvedValue(undefined),
     };
+    publicTrackingTokens = { identifierFromToken: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RealtimeGateway,
         { provide: JwtService, useValue: jwtService },
         { provide: PrismaService, useValue: prisma },
+        { provide: PublicTrackingTokenService, useValue: publicTrackingTokens },
       ],
     }).compile();
 
@@ -194,6 +200,39 @@ describe('RealtimeGateway', () => {
       expect(socket.disconnect).toHaveBeenCalledWith(true);
       expect(socket.join).not.toHaveBeenCalled();
     });
+
+    it('coloca token publico valido somente na sala da propria entrega', async () => {
+      publicTrackingTokens.identifierFromToken.mockReturnValue('public-id');
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'COLLECTED',
+        publicTrackingIssuedAt: new Date(),
+      });
+      const socket = mockSocket('public-1');
+      socket.handshake.auth = { publicTrackingToken: 'public-token' };
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.join).toHaveBeenCalledWith('public-tracking:delivery-1');
+      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(socket.join).not.toHaveBeenCalledWith('admin');
+    });
+
+    it('desconecta token publico expirado', async () => {
+      publicTrackingTokens.identifierFromToken.mockReturnValue('public-id');
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'COMPLETED',
+        publicTrackingIssuedAt: new Date(),
+      });
+      const socket = mockSocket('public-expired');
+      socket.handshake.auth = { publicTrackingToken: 'public-token' };
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+      expect(socket.join).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleDisconnect', () => {
@@ -262,6 +301,70 @@ describe('RealtimeGateway', () => {
         'admin:activity',
         expect.objectContaining({ message: 'Pedido #1 criado', at: expect.any(String) }),
       );
+    });
+
+    it('emite localizacao publica sanitizada somente enquanto a entrega esta ativa', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        status: 'COLLECTED',
+        publicTrackingTokenId: 'public-id',
+        publicTrackingIssuedAt: new Date(),
+      });
+      const location = {
+        lat: -20.15,
+        lng: -41.62,
+        capturedAt: '2026-08-27T12:00:00.000Z',
+      };
+
+      await gateway.emitPublicDeliveryLocation('delivery-1', location);
+
+      expect(serverTo).toHaveBeenCalledWith('public-tracking:delivery-1');
+      expect(serverEmit).toHaveBeenCalledWith('public-tracking:location', location);
+    });
+
+    it('nao emite localizacao publica depois da entrega', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        status: 'DELIVERED',
+        publicTrackingTokenId: 'public-id',
+        publicTrackingIssuedAt: new Date(),
+      });
+
+      await gateway.emitPublicDeliveryLocation('delivery-1', {
+        lat: -20.15,
+        lng: -41.62,
+        capturedAt: '2026-08-27T12:00:00.000Z',
+      });
+
+      expect(serverTo).not.toHaveBeenCalledWith('public-tracking:delivery-1');
+    });
+
+    it('envia somente o estado final e marca o token como expirado', async () => {
+      const issuedAt = new Date('2026-08-27T12:00:00.000Z');
+      prisma.delivery.findUnique.mockResolvedValue({
+        status: 'COMPLETED',
+        statusChangedAt: new Date('2026-08-27T12:30:00.000Z'),
+        publicTrackingTokenId: 'public-id',
+        publicTrackingIssuedAt: issuedAt,
+        recipientPhone: 'nao-deve-vazar',
+      });
+      prisma.delivery.updateMany.mockResolvedValue({ count: 1 });
+
+      await (
+        gateway as unknown as { emitPublicDeliveryUpdated(deliveryId: string): Promise<void> }
+      ).emitPublicDeliveryUpdated('delivery-1');
+
+      expect(serverEmit).toHaveBeenCalledWith('public-tracking:updated', {
+        status: 'COMPLETED',
+        updatedAt: '2026-08-27T12:30:00.000Z',
+        location: null,
+      });
+      expect(prisma.delivery.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'delivery-1',
+          publicTrackingTokenId: 'public-id',
+          publicTrackingIssuedAt: issuedAt,
+        },
+        data: { publicTrackingIssuedAt: null },
+      });
     });
   });
 });

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
 import { StatusChip, statusLabel, statusRailClass } from '@/components/orders/status-chip';
+import { ShareDeliveryTrackingButton } from '@/components/orders/share-delivery-tracking-button';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
@@ -158,6 +159,11 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
   const pickup = delivery.addresses.find((address) => address.type === 'PICKUP');
   const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
   const companyCanCancel = delivery.status === 'SCHEDULED' || delivery.status === 'AWAITING_DRIVER';
+  const companyCanShareTracking =
+    delivery.status === 'SCHEDULED' ||
+    delivery.status === 'AWAITING_DRIVER' ||
+    delivery.status === 'ACCEPTED' ||
+    delivery.status === 'COLLECTED';
 
   return (
     <div className="space-y-6">
@@ -177,6 +183,13 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
         </div>
         <div className="flex items-center gap-2">
           <StatusChip status={delivery.status} />
+          {companyCanShareTracking && (
+            <ShareDeliveryTrackingButton
+              token={token}
+              deliveryId={delivery.id}
+              recipientPhone={delivery.recipientPhone}
+            />
+          )}
           {companyCanCancel && (
             <Button
               variant="outline"

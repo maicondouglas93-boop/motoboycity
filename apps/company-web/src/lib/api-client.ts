@@ -12,16 +12,16 @@ import {
   createPaymentNoticeApi,
 } from '@motoboycity/api-client';
 
-const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
+export const apiBaseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
 
-export const authApi = createAuthApi({ baseUrl });
-export const companyAddressApi = createCompanyAddressApi({ baseUrl });
-export const companyProfileApi = createCompanyProfileApi({ baseUrl });
-export const companyCustomersApi = createCompanyCustomersApi({ baseUrl });
-export const companyInvoicesApi = createCompanyInvoicesApi({ baseUrl });
-export const companyFinancialApi = createCompanyFinancialApi({ baseUrl });
-export const companyReportsApi = createCompanyReportsApi({ baseUrl });
-export const deliveriesApi = createDeliveriesApi({ baseUrl });
-export const trackingApi = createTrackingApi({ baseUrl });
-export const serviceTypesApi = createServiceTypesApi({ baseUrl });
-export const paymentNoticeApi = createPaymentNoticeApi({ baseUrl });
+export const authApi = createAuthApi({ baseUrl: apiBaseUrl });
+export const companyAddressApi = createCompanyAddressApi({ baseUrl: apiBaseUrl });
+export const companyProfileApi = createCompanyProfileApi({ baseUrl: apiBaseUrl });
+export const companyCustomersApi = createCompanyCustomersApi({ baseUrl: apiBaseUrl });
+export const companyInvoicesApi = createCompanyInvoicesApi({ baseUrl: apiBaseUrl });
+export const companyFinancialApi = createCompanyFinancialApi({ baseUrl: apiBaseUrl });
+export const companyReportsApi = createCompanyReportsApi({ baseUrl: apiBaseUrl });
+export const deliveriesApi = createDeliveriesApi({ baseUrl: apiBaseUrl });
+export const trackingApi = createTrackingApi({ baseUrl: apiBaseUrl });
+export const serviceTypesApi = createServiceTypesApi({ baseUrl: apiBaseUrl });
+export const paymentNoticeApi = createPaymentNoticeApi({ baseUrl: apiBaseUrl });

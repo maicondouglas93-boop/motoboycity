@@ -213,6 +213,27 @@ export interface ActiveDeliveryTrackingItem {
   lastLocation: DeliveryTrackingPoint | null;
 }
 
+export type PublicDeliveryTrackingStatus =
+  'WAITING_DRIVER' | 'DRIVER_ASSIGNED' | 'IN_TRANSIT' | 'COMPLETED' | 'CANCELLED';
+
+export interface PublicDeliveryTrackingLocation {
+  lat: number;
+  lng: number;
+  capturedAt: string;
+}
+
+/** Contrato deliberadamente minimo para o link sem login. */
+export interface PublicDeliveryTracking {
+  status: PublicDeliveryTrackingStatus;
+  updatedAt: string;
+  location: PublicDeliveryTrackingLocation | null;
+}
+
+export interface PublicDeliveryTrackingLink {
+  token: string;
+  issuedAt: string;
+}
+
 export interface CompanyAddressItem {
   id: string;
   label: string | null;

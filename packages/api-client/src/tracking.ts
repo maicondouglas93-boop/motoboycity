@@ -2,6 +2,8 @@ import type {
   ActiveDeliveryTrackingItem,
   DeliveryTrackingDetail,
   DeliveryTrackingPoint,
+  PublicDeliveryTracking,
+  PublicDeliveryTrackingLink,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -49,6 +51,30 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ActiveDeliveryTrackingItem[]>(response);
+    },
+
+    async issuePublicLink(
+      accessToken: string,
+      deliveryId: string,
+    ): Promise<PublicDeliveryTrackingLink> {
+      const response = await fetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
+        method: 'POST',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<PublicDeliveryTrackingLink>(response);
+    },
+
+    async revokePublicLink(accessToken: string, deliveryId: string): Promise<{ revoked: true }> {
+      const response = await fetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
+        method: 'DELETE',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<{ revoked: true }>(response);
+    },
+
+    async publicDetail(token: string): Promise<PublicDeliveryTracking> {
+      const response = await fetch(`${baseUrl}/public/tracking/${encodeURIComponent(token)}`);
+      return parseJsonOrThrow<PublicDeliveryTracking>(response);
     },
   };
 }

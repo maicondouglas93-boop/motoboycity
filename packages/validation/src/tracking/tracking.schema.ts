@@ -23,3 +23,9 @@ export const listDeliveryTrackingQuerySchema = z
 
 export type ReportDeliveryLocationPayload = z.infer<typeof reportDeliveryLocationSchema>;
 export type ListDeliveryTrackingQuery = z.infer<typeof listDeliveryTrackingQuerySchema>;
+
+export const publicDeliveryTrackingTokenSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/, 'Token de rastreamento invalido.');
+
+export type PublicDeliveryTrackingToken = z.infer<typeof publicDeliveryTrackingTokenSchema>;

@@ -702,6 +702,12 @@ model Delivery {
   /// entrega.
   batchId String?
 
+  /// Identificador aleatorio usado para reconstruir o token publico assinado.
+  /// O token completo nunca e persistido; nulo significa que nao existe link
+  /// ativo ou que ele foi revogado.
+  publicTrackingTokenId  String?   @unique @db.VarChar(43)
+  publicTrackingIssuedAt DateTime?
+
   /// Carimbo do status atual — denormalizado para leitura rápida;
   /// a trilha completa vive em DeliveryStatusHistory.
   statusChangedAt DateTime @default(now())

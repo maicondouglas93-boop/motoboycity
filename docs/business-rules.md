@@ -372,6 +372,25 @@ somente depois do sucesso do pedido e pode ser ignorado sem qualquer nova chamad
 de criacao. Como a entrega nao coleta CPF, o formulario abre com esse campo vazio;
 a empresa pode salvar assim ou informar um CPF valido.
 
+## Rastreamento publico da entrega
+
+A empresa pode gerar, no detalhe de um pedido ativo, um link publico e envia-lo
+manualmente pelo WhatsApp. O mesmo link e reutilizado enquanto a entrega estiver
+ativa; ele nao substitui o JWT dos paineis e concede acesso somente ao estado
+publico daquela entrega.
+
+O link pode mostrar que a entrega aguarda motoboy, que um entregador foi
+encontrado ou que esta em transito. A posicao em tempo real so e exposta em
+`ACCEPTED` e `COLLECTED`, reutilizando os pontos de GPS que o aplicativo ja envia.
+Nome, telefone, CPF, endereco, valores, dados do motoboy, identificadores internos
+e historico da rota nao fazem parte do contrato publico.
+
+Assim que a entrega entra em `DELIVERED`, `FAILED`, `COMPLETED` ou `CANCELLED`, o
+link expira e nenhuma nova localizacao e disponibilizada. Uma pagina que ja
+estiver aberta pode receber somente o estado final sanitizado antes de encerrar a
+conexao. A empresa tambem pode revogar o link antes disso; gerar novamente depois
+da revogacao cria outro token.
+
 ---
 
 Decisões confirmadas diretamente com o responsável do produto em sessões

@@ -1,14 +1,23 @@
 import {
   ConflictException,
   ForbiddenException,
+  GoneException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import type { PublicDeliveryTracking, PublicDeliveryTrackingLink } from '@motoboycity/types';
 import type {
   ListDeliveryTrackingQuery,
   ReportDeliveryLocationPayload,
 } from '@motoboycity/validation';
-import type { DeliveryStatus, User } from '@prisma/client';
+import { Prisma, type DeliveryStatus, type User } from '@prisma/client';
+import {
+  hasPublicLiveLocation,
+  isPublicTrackingActive,
+  toPublicTrackingStatus,
+} from '../common/public-tracking-status';
+import { PublicTrackingTokenService } from '../common/public-tracking-token.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
@@ -16,6 +25,12 @@ import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-ti
 // FAILED continua rastreavel: o motoboy esta voltando com a mercadoria, e e
 // justamente nesse trecho que a empresa quer saber onde ela esta.
 const ACTIVE_TRACKING_STATUSES: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'];
+const PUBLIC_LINK_STATUSES: DeliveryStatus[] = [
+  'SCHEDULED',
+  'AWAITING_DRIVER',
+  'ACCEPTED',
+  'COLLECTED',
+];
 const LOCATION_RETENTION_DAYS = 30;
 
 export interface DeliveryTrackingPointItem {
@@ -52,6 +67,7 @@ export class DeliveryTrackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly publicTrackingTokens: PublicTrackingTokenService,
   ) {}
 
   async report(
@@ -110,7 +126,123 @@ export class DeliveryTrackingService {
       driverId: driver.id,
       ...item,
     });
+    if (hasPublicLiveLocation(delivery.status)) {
+      void this.realtimeGateway
+        .emitPublicDeliveryLocation(delivery.id, {
+          lat: item.lat,
+          lng: item.lng,
+          capturedAt: item.capturedAt,
+        })
+        .catch(() => undefined);
+    }
     return item;
+  }
+
+  async issuePublicLink(user: User, deliveryId: string): Promise<PublicDeliveryTrackingLink> {
+    const delivery = await this.findCompanyDeliveryForPublicLink(user, deliveryId);
+    if (!isPublicTrackingActive(delivery.status)) {
+      throw new ConflictException('Esta entrega ja foi encerrada e nao pode gerar rastreamento.');
+    }
+
+    if (delivery.publicTrackingTokenId && delivery.publicTrackingIssuedAt) {
+      return {
+        token: this.publicTrackingTokens.tokenFromIdentifier(delivery.publicTrackingTokenId),
+        issuedAt: delivery.publicTrackingIssuedAt.toISOString(),
+      };
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const tokenId = this.publicTrackingTokens.createIdentifier();
+      const issuedAt = new Date();
+      try {
+        const claimed = await this.prisma.delivery.updateMany({
+          where: {
+            id: delivery.id,
+            companyId: delivery.companyId,
+            status: { in: PUBLIC_LINK_STATUSES },
+            OR: [{ publicTrackingTokenId: null }, { publicTrackingIssuedAt: null }],
+          },
+          data: { publicTrackingTokenId: tokenId, publicTrackingIssuedAt: issuedAt },
+        });
+        if (claimed.count === 1) {
+          return {
+            token: this.publicTrackingTokens.tokenFromIdentifier(tokenId),
+            issuedAt: issuedAt.toISOString(),
+          };
+        }
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+          throw error;
+        }
+      }
+
+      const existing = await this.prisma.delivery.findFirst({
+        where: { id: delivery.id, companyId: delivery.companyId },
+        select: { status: true, publicTrackingTokenId: true, publicTrackingIssuedAt: true },
+      });
+      if (existing && !isPublicTrackingActive(existing.status)) {
+        throw new ConflictException('Esta entrega ja foi encerrada e nao pode gerar rastreamento.');
+      }
+      if (existing?.publicTrackingTokenId && existing.publicTrackingIssuedAt) {
+        return {
+          token: this.publicTrackingTokens.tokenFromIdentifier(existing.publicTrackingTokenId),
+          issuedAt: existing.publicTrackingIssuedAt.toISOString(),
+        };
+      }
+    }
+
+    throw new ServiceUnavailableException(
+      'Nao foi possivel criar o link de rastreamento agora. Tente novamente.',
+    );
+  }
+
+  async revokePublicLink(user: User, deliveryId: string): Promise<{ revoked: true }> {
+    const delivery = await this.findCompanyDeliveryForPublicLink(user, deliveryId);
+    await this.prisma.delivery.updateMany({
+      where: { id: delivery.id, companyId: delivery.companyId },
+      data: { publicTrackingTokenId: null, publicTrackingIssuedAt: null },
+    });
+    return { revoked: true };
+  }
+
+  async publicDetail(token: string): Promise<PublicDeliveryTracking> {
+    const tokenId = this.publicTrackingTokens.identifierFromToken(token);
+    if (!tokenId) {
+      throw new NotFoundException('Link de rastreamento invalido ou inexistente.');
+    }
+
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { publicTrackingTokenId: tokenId },
+      select: {
+        status: true,
+        statusChangedAt: true,
+        publicTrackingIssuedAt: true,
+        trackingPoints: {
+          orderBy: { capturedAt: 'desc' },
+          take: 1,
+          select: { lat: true, lng: true, capturedAt: true },
+        },
+      },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Link de rastreamento invalido ou inexistente.');
+    }
+    if (!delivery.publicTrackingIssuedAt || !isPublicTrackingActive(delivery.status)) {
+      throw new GoneException('Este link de rastreamento expirou.');
+    }
+
+    const point = hasPublicLiveLocation(delivery.status) ? delivery.trackingPoints[0] : undefined;
+    return {
+      status: toPublicTrackingStatus(delivery.status),
+      updatedAt: delivery.statusChangedAt.toISOString(),
+      location: point
+        ? {
+            lat: Number(point.lat),
+            lng: Number(point.lng),
+            capturedAt: point.capturedAt.toISOString(),
+          }
+        : null,
+    };
   }
 
   async detail(
@@ -247,6 +379,33 @@ export class DeliveryTrackingService {
       if (membership) return;
     }
     throw new ForbiddenException('Você não pode consultar a localização deste pedido.');
+  }
+
+  private async findCompanyDeliveryForPublicLink(user: User, deliveryId: string) {
+    if (user.type !== 'COMPANY_MEMBER') {
+      throw new ForbiddenException('Acesso restrito a empresas.');
+    }
+    const memberships = await this.prisma.companyTeamMember.findMany({
+      where: { userId: user.id, active: true },
+      select: { companyId: true },
+    });
+    const delivery = await this.prisma.delivery.findFirst({
+      where: {
+        id: deliveryId,
+        companyId: { in: memberships.map((membership) => membership.companyId) },
+      },
+      select: {
+        id: true,
+        companyId: true,
+        status: true,
+        publicTrackingTokenId: true,
+        publicTrackingIssuedAt: true,
+      },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido nao encontrado.');
+    }
+    return delivery;
   }
 
   private async lastPointForDelivery(

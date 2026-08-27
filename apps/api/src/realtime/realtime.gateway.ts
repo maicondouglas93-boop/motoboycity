@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
-import type { OperationalActivityEvent } from '@motoboycity/types';
+import type { OperationalActivityEvent, PublicDeliveryTrackingLocation } from '@motoboycity/types';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -12,6 +12,12 @@ import type { Server, Socket } from 'socket.io';
 import { getAllowedOrigins } from '../common/cors';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { credentialFingerprint } from '../auth/credential-fingerprint';
+import {
+  hasPublicLiveLocation,
+  isPublicTrackingActive,
+  toPublicTrackingStatus,
+} from '../common/public-tracking-status';
+import { PublicTrackingTokenService } from '../common/public-tracking-token.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -34,9 +40,16 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly publicTrackingTokens: PublicTrackingTokenService,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
+    const publicTrackingToken = this.extractPublicTrackingToken(client);
+    if (publicTrackingToken) {
+      await this.handlePublicTrackingConnection(client, publicTrackingToken);
+      return;
+    }
+
     const token = this.extractToken(client);
     if (!token) {
       client.disconnect(true);
@@ -168,6 +181,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitDeliveryUpdated(companyId: string, payload: unknown): void {
     this.server.to('admin').emit('delivery:updated', payload);
     this.server.to(this.companyRoom(companyId)).emit('delivery:updated', payload);
+    const deliveryId = this.deliveryIdFromPayload(payload);
+    if (deliveryId) {
+      void this.emitPublicDeliveryUpdated(deliveryId).catch((error: unknown) =>
+        this.logger.warn(
+          `Falha ao publicar status do rastreamento publico ${deliveryId}: ${String(error)}`,
+        ),
+      );
+    }
   }
 
   emitDriverLocation(payload: unknown): void {
@@ -187,12 +208,93 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(this.companyRoom(companyId)).emit('delivery:location', payload);
   }
 
+  async emitPublicDeliveryLocation(
+    deliveryId: string,
+    location: PublicDeliveryTrackingLocation,
+  ): Promise<void> {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      select: { status: true, publicTrackingTokenId: true, publicTrackingIssuedAt: true },
+    });
+    if (
+      !delivery?.publicTrackingTokenId ||
+      !delivery.publicTrackingIssuedAt ||
+      !hasPublicLiveLocation(delivery.status)
+    ) {
+      return;
+    }
+    this.server.to(this.publicTrackingRoom(deliveryId)).emit('public-tracking:location', location);
+  }
+
   private driverRoom(driverId: string): string {
     return `driver:${driverId}`;
   }
 
   private companyRoom(companyId: string): string {
     return `company:${companyId}`;
+  }
+
+  private publicTrackingRoom(deliveryId: string): string {
+    return `public-tracking:${deliveryId}`;
+  }
+
+  private async handlePublicTrackingConnection(client: Socket, token: string): Promise<void> {
+    const tokenId = this.publicTrackingTokens.identifierFromToken(token);
+    if (!tokenId) {
+      client.disconnect(true);
+      return;
+    }
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { publicTrackingTokenId: tokenId },
+      select: { id: true, status: true, publicTrackingIssuedAt: true },
+    });
+    if (
+      !delivery?.publicTrackingIssuedAt ||
+      !isPublicTrackingActive(delivery.status) ||
+      this.isDisconnected(client)
+    ) {
+      client.disconnect(true);
+      return;
+    }
+    await client.join(this.publicTrackingRoom(delivery.id));
+    this.logger.debug(`Rastreamento publico conectado: ${client.id}`);
+  }
+
+  private async emitPublicDeliveryUpdated(deliveryId: string): Promise<void> {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      select: {
+        status: true,
+        statusChangedAt: true,
+        publicTrackingTokenId: true,
+        publicTrackingIssuedAt: true,
+      },
+    });
+    if (!delivery?.publicTrackingTokenId || !delivery.publicTrackingIssuedAt) return;
+
+    this.server.to(this.publicTrackingRoom(deliveryId)).emit('public-tracking:updated', {
+      status: toPublicTrackingStatus(delivery.status),
+      updatedAt: delivery.statusChangedAt.toISOString(),
+      location: null,
+    });
+
+    if (!isPublicTrackingActive(delivery.status)) {
+      await this.prisma.delivery.updateMany({
+        where: {
+          id: deliveryId,
+          publicTrackingTokenId: delivery.publicTrackingTokenId,
+          publicTrackingIssuedAt: delivery.publicTrackingIssuedAt,
+        },
+        data: { publicTrackingIssuedAt: null },
+      });
+    }
+  }
+
+  private deliveryIdFromPayload(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const record = payload as Record<string, unknown>;
+    const value = record['deliveryId'] ?? record['id'];
+    return typeof value === 'string' && value ? value : null;
   }
 
   private extractToken(client: Socket): string | null {
@@ -207,5 +309,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     return null;
+  }
+
+  private extractPublicTrackingToken(client: Socket): string | null {
+    const value = client.handshake.auth?.['publicTrackingToken'];
+    return typeof value === 'string' && value ? value : null;
   }
 }
