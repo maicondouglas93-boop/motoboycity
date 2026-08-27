@@ -8402,3 +8402,25 @@ paginas geradas e `git diff --check`. Nao houve smoke autenticado nem abertura
 real do WhatsApp. Proximo passo concreto: conferir na Home um pedido aceito e
 outro coletado, abrir as duas mensagens no WhatsApp e observar o marcador de
 moto em um celular. Commit, push e deploy nao foram executados neste recorte.
+
+## Release - 2026-08-27: compartilhamento imediato e rastreamento com moto
+
+O commit funcional `66bdb89` foi enviado para o `main`. A integracao oficial do
+GitHub com a Vercel concluiu com sucesso os deployments do Company Web e do
+Admin Web; o segundo foi reconstruido pelo escopo do monorepo, embora nao tenha
+mudanca funcional neste recorte. Nao houve alteracao de API ou banco.
+
+O alias `https://motoboycity-company-web.vercel.app` foi consultado sem cache
+depois da conclusao. A Home respondeu normalmente e seus 18 bundles carregados
+contem a chamada imediata e a nova mensagem `saiu para entrega`/`Acompanhe o
+motoboy em tempo real`. A rota publica de rastreamento tambem respondeu e seus
+9 bundles contem o marcador SVG com a motocicleta. Isso confirma que o alias
+oficial ja serve o codigo novo, nao apenas que o build remoto terminou.
+
+Antes do commit, a verificacao local aprovou 13 arquivos e 53 testes do Company
+Web, typecheck, lint, build de producao com 19 paginas e `git diff --check`; a
+revisao do staged nao encontrou secrets nem dependencias novas. O CI do commit
+funcional foi iniciado no GitHub e ainda estava em andamento no momento deste
+registro. Nao houve smoke autenticado com pedido real nem envio efetivo pelo
+WhatsApp. Proximo passo concreto: abrir a Home oficial com uma entrega coletada,
+enviar a mensagem para um numero de teste e conferir a moto movendo no mapa.
