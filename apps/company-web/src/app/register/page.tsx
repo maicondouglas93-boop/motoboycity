@@ -153,7 +153,27 @@ export default function RegisterPage() {
 
             <label className="flex items-start gap-2.5 text-xs leading-relaxed text-muted-foreground">
               <Checkbox className="mt-0.5" required />
-              Ao criar sua conta, você concorda com nossos Termos de Uso e Política de Privacidade.
+              <span>
+                Ao criar sua conta, você concorda com nossos{' '}
+                <Link
+                  href="/termos-de-uso"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-portal underline underline-offset-2"
+                >
+                  Termos de Uso
+                </Link>{' '}
+                e com a{' '}
+                <Link
+                  href="/politica-de-privacidade"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-portal underline underline-offset-2"
+                >
+                  Política de Privacidade
+                </Link>
+                .
+              </span>
             </label>
 
             {formError && (

@@ -151,6 +151,23 @@ export default function LoginPage() {
               Cadastrar empresa
             </Link>
           </p>
+          <nav
+            aria-label="Documentos legais"
+            className="mt-4 flex gap-4 text-xs text-muted-foreground"
+          >
+            <Link
+              href="/termos-de-uso"
+              className="underline underline-offset-2 hover:text-portal-deep"
+            >
+              Termos de Uso
+            </Link>
+            <Link
+              href="/politica-de-privacidade"
+              className="underline underline-offset-2 hover:text-portal-deep"
+            >
+              Política de Privacidade
+            </Link>
+          </nav>
         </div>
       </main>
     </div>

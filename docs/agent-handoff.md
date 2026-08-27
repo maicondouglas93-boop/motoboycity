@@ -8447,3 +8447,35 @@ arquivos e 54 testes; typecheck, lint, build de producao com 19 paginas e
 `git diff --check`. Nao houve smoke autenticado nem deploy. Proximo passo
 concreto: homologar no navegador com rede limitada e confirmar que
 `Acompanhando` aparece imediatamente depois do clique.
+
+## Atualizacao - 2026-08-27: Termos de Uso e Politica de Privacidade publicos
+
+A Company Web agora possui as rotas publicas e estaticas `/termos-de-uso` e
+`/politica-de-privacidade`, fora do grupo protegido por `AuthGate`. As duas usam
+um layout juridico compartilhado, responsivo, com marca, sumario por ancora,
+navegacao entre documentos e retorno ao login. Login e cadastro passaram a
+exibir links reais; no cadastro, os documentos abrem em nova aba sem interromper
+o preenchimento.
+
+Os Termos cobrem escopo tecnologico, contas, responsabilidades de empresas e
+entregadores, integracao aiqfome, precificacao/faturamento, localizacao,
+rastreamento publico, usos proibidos, indisponibilidade, suspensao e
+responsabilidade. A Politica descreve categorias, fontes, finalidades, bases
+legais, localizacao em segundo plano, retencao real de 30 dias dos pontos,
+rastreamento temporario, integracao aiqfome, compartilhamentos, transferencia
+internacional, seguranca, armazenamento local e direitos da LGPD. O texto foi
+alinhado ao codigo atual e a orientacoes oficiais da LGPD/ANPD; nao inventa uso
+de cookies publicitarios nem acesso a cardapio/catalogo.
+
+Arquivos principais: `apps/company-web/src/components/legal/legal-page.tsx`,
+as duas novas rotas, teste `legal-pages.test.tsx`, login, cadastro e este
+handoff. Nao houve mudanca de API, banco, contrato, dependencia ou autenticacao.
+
+Validacoes aprovadas: suite completa da Company Web com 15 arquivos e 56
+testes; typecheck, lint, Prettier, build de producao com 21 paginas;
+`GET /termos-de-uso` e `GET /politica-de-privacidade` responderam HTTP 200 sem
+redirecionamento. A revisao visual automatizada nao foi executada porque nenhum
+navegador estava conectado a sessao. O contato publico confirmado pelo usuario,
+`maicondouglas93@gmail.com`, aparece como link de e-mail nos dois documentos.
+Nao houve revisao por advogado nem deploy. Proximo passo concreto: obter revisao
+juridica e entao publicar as URLs para o cadastro no aiqfome.
