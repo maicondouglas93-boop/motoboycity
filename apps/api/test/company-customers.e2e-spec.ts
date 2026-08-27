@@ -97,6 +97,8 @@ describe('CompanyCustomersController (e2e)', () => {
     customerAId = response.body.id as string;
     expect(response.body.cpf).toBe('52998224725');
     expect(response.body.address.street).toBe('Rua das Flores');
+    expect(response.body.addressLabel).toBe('Principal');
+    expect(response.body.addresses).toHaveLength(1);
 
     const withoutCpf = await request(app.getHttpServer())
       .post('/company/customers')
@@ -175,6 +177,53 @@ describe('CompanyCustomersController (e2e)', () => {
       .delete(`/company/customers/${customerAId}`)
       .set('Authorization', `Bearer ${tokens[1]}`)
       .expect(404);
+  });
+
+  it('gerencia enderecos nomeados e retorna estatisticas no detalhe', async () => {
+    const createdAddress = await request(app.getHttpServer())
+      .post(`/company/customers/${customerAId}/addresses`)
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .send({
+        label: 'Trabalho',
+        address: { ...customerPayload.address, street: 'Avenida Dois', number: '25' },
+      })
+      .expect(201);
+    expect(createdAddress.body).toEqual(
+      expect.objectContaining({ label: 'Trabalho', isPrimary: false }),
+    );
+
+    const detail = await request(app.getHttpServer())
+      .get(`/company/customers/${customerAId}`)
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .expect(200);
+    expect(detail.body.addresses).toHaveLength(2);
+    expect(detail.body.statistics).toEqual({
+      totalDeliveries: 0,
+      lastDeliveryAt: null,
+      inProgressDeliveries: 0,
+      completedDeliveries: 0,
+      cancelledDeliveries: 0,
+      mostUsedAddresses: [],
+    });
+
+    await request(app.getHttpServer())
+      .post(`/company/customers/${customerAId}/addresses`)
+      .set('Authorization', `Bearer ${tokens[1]}`)
+      .send({ label: 'Invasao', address: customerPayload.address })
+      .expect(404);
+
+    const primaryAddress = detail.body.addresses.find(
+      (address: { isPrimary: boolean }) => address.isPrimary,
+    );
+    await request(app.getHttpServer())
+      .delete(`/company/customers/${customerAId}/addresses/${primaryAddress.id}`)
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .delete(`/company/customers/${customerAId}/addresses/${createdAddress.body.id}`)
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .expect(200);
   });
 
   it('atualiza e exclui o cliente da propria empresa', async () => {

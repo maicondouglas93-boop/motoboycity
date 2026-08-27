@@ -15,6 +15,7 @@ const customer = {
   name: 'Maria Oliveira',
   cpf: '52998224725',
   phone: '33999999991',
+  addressLabel: 'Casa',
   address: {
     street: 'Rua Um',
     number: '10',
@@ -26,6 +27,22 @@ const customer = {
     lng: -41.62,
     referenceNote: null,
   },
+  addresses: [
+    {
+      id: 'address-1',
+      label: 'Casa',
+      isPrimary: true,
+      street: 'Rua Um',
+      number: '10',
+      complement: null,
+      city: 'Lajinha',
+      state: 'MG',
+      zip: '36930000',
+      lat: -20.15,
+      lng: -41.62,
+      referenceNote: null,
+    },
+  ],
   createdAt: '2026-08-26T12:00:00.000Z',
   updatedAt: '2026-08-26T12:00:00.000Z',
 } satisfies CompanyCustomer;
@@ -57,7 +74,37 @@ describe('CustomerAutocomplete', () => {
     expect(mocks.list).toHaveBeenCalledWith('token', { q: 'Maria', pageSize: 8 });
 
     fireEvent.click(result);
-    expect(onSelect).toHaveBeenCalledWith(customer);
+    expect(onSelect).toHaveBeenCalledWith(customer, customer.addresses[0]);
+  });
+
+  it('permite escolher um dos enderecos do cliente', async () => {
+    const trabalho = {
+      ...customer.addresses[0],
+      id: 'address-2',
+      label: 'Trabalho',
+      isPrimary: false,
+      street: 'Avenida Dois',
+      number: '25',
+    };
+    const customerWithTwoAddresses = {
+      ...customer,
+      addresses: [customer.addresses[0], trabalho],
+    };
+    mocks.list.mockResolvedValue({
+      items: [customerWithTwoAddresses],
+      total: 1,
+      page: 1,
+      pageSize: 8,
+    });
+    const { onSelect } = renderAutocomplete();
+    fireEvent.change(screen.getByLabelText('Pesquisar cliente cadastrado'), {
+      target: { value: 'Maria' },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Maria Oliveira/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Trabalho/ }));
+
+    expect(onSelect).toHaveBeenCalledWith(customerWithTwoAddresses, trabalho);
   });
 
   it('mostra estado sem resultado', async () => {

@@ -1,5 +1,6 @@
 import {
   companyCustomerInputSchema,
+  companyCustomerSavedAddressSchema,
   listCompanyCustomersQuerySchema,
   matchCompanyCustomerQuerySchema,
 } from '@motoboycity/validation';
@@ -24,6 +25,22 @@ describe('company customer validation', () => {
     const result = companyCustomerInputSchema.parse(validCustomer);
     expect(result.cpf).toBe('52998224725');
     expect(result.phone).toBe('33999999991');
+    expect(result.addressLabel).toBe('Principal');
+  });
+
+  it('valida o nome dos enderecos salvos', () => {
+    expect(
+      companyCustomerSavedAddressSchema.parse({
+        label: ' Trabalho ',
+        address: validCustomer.address,
+      }).label,
+    ).toBe('Trabalho');
+    expect(
+      companyCustomerSavedAddressSchema.safeParse({
+        label: ' ',
+        address: validCustomer.address,
+      }).success,
+    ).toBe(false);
   });
 
   it('aceita CPF ausente ou vazio', () => {

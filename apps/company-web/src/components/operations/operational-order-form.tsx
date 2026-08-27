@@ -407,7 +407,9 @@ export function OperationalOrderForm({
                   token={token}
                   selectedName={draft.customerId ? draft.recipientName : undefined}
                   onClear={() => updateDraft(index, { customerId: null })}
-                  onSelect={(customer) => updateDraft(index, customerToDeliveryFields(customer))}
+                  onSelect={(customer, address) =>
+                    updateDraft(index, customerToDeliveryFields(customer, address))
+                  }
                 />
               </div>
               <Input

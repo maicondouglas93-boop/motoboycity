@@ -48,6 +48,17 @@ export const companyCustomerPhoneSchema = z
     'Telefone invalido.',
   );
 
+export const companyCustomerAddressLabelSchema = z
+  .string()
+  .trim()
+  .min(1, 'Informe um nome para o endereco.')
+  .max(40, 'O nome do endereco deve ter no maximo 40 caracteres.');
+
+export const companyCustomerSavedAddressSchema = z.object({
+  label: companyCustomerAddressLabelSchema,
+  address: deliveryAddressInputSchema,
+});
+
 export const companyCustomerInputSchema = z.object({
   name: z
     .string()
@@ -56,6 +67,7 @@ export const companyCustomerInputSchema = z.object({
     .max(120, 'O nome deve ter no maximo 120 caracteres.'),
   cpf: optionalCompanyCustomerCpfSchema,
   phone: companyCustomerPhoneSchema,
+  addressLabel: companyCustomerAddressLabelSchema.default('Principal'),
   address: deliveryAddressInputSchema,
 });
 
@@ -82,3 +94,4 @@ export type CreateCompanyCustomerPayload = z.infer<typeof createCompanyCustomerS
 export type UpdateCompanyCustomerPayload = z.infer<typeof updateCompanyCustomerSchema>;
 export type ListCompanyCustomersQuery = z.infer<typeof listCompanyCustomersQuerySchema>;
 export type MatchCompanyCustomerQuery = z.infer<typeof matchCompanyCustomerQuerySchema>;
+export type CompanyCustomerSavedAddressPayload = z.infer<typeof companyCustomerSavedAddressSchema>;

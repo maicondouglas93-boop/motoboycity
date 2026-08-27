@@ -7756,3 +7756,57 @@ Proximo passo concreto: revisar o diff, commitar e enviar quando autorizado; o
 deploy normal do Render aplicara a migration antes da nova API. Depois, cadastrar
 dois clientes sem CPF e telefones diferentes, editar um deles adicionando CPF e
 confirmar que CPF invalido ou repetido continua recusado.
+
+## Atualizacao - 2026-08-27: multiplos enderecos e estatisticas por cliente
+
+A agenda privada de clientes passou a aceitar varios enderecos nomeados, como
+Casa, Trabalho e Loja. O endereco criado com o cliente continua espelhado nos
+campos antigos de `CompanyCustomer` para compatibilidade e passa a existir tambem
+como endereco principal. Ele pode ser editado, mas nao excluido; enderecos
+adicionais possuem CRUD proprio. O nome normalizado e unico dentro de cada
+cliente.
+
+Ao pesquisar um cliente durante a criacao do pedido, o Company Web abre a escolha
+de endereco quando existe mais de um. A selecao preenche somente o rascunho do
+pedido. A entrega continua guardando o snapshot imutavel de destinatario e
+destino, portanto editar ou excluir dados da agenda nao altera pedidos antigos.
+
+Foi adicionada uma referencia analitica opcional `Delivery.companyCustomerId`.
+Pedidos novos e atualizacoes administrativas resolvem o cliente pelo telefone
+normalizado dentro da mesma empresa; criacao em lote resolve todos os telefones
+em uma unica consulta. A exclusao do cliente usa `ON DELETE SET NULL`. O detalhe
+`/clientes/[id]` mostra total, ultima entrega, contagens em andamento, concluidas
+e canceladas, os cinco destinos mais usados e todos os enderecos salvos. As
+consultas sempre filtram a empresa da sessao. `COMPLETED` conta como concluida,
+`CANCELLED` como cancelada e os demais status contam como andamento.
+
+O schema recebeu `CompanyCustomerSavedAddress` e a FK opcional da entrega. A
+migration aditiva `20260827103000_company_customer_addresses_statistics` foi
+gerada por diff entre o schema commitado e o atual. Alem das estruturas geradas,
+ela cria um endereco `Principal` para cada cliente existente e vincula entregas
+anteriores por empresa e telefone normalizado, sem alterar os snapshots. Ela foi
+aplicada apenas em PostgreSQL 17 isolado: primeiro em banco vazio e depois sobre
+uma copia do schema anterior com cliente, entrega e destino preexistentes. O
+backfill preservou o endereco embutido, criou um principal com UUID valido e
+vinculou corretamente um telefone brasileiro com prefixo `+55`. Nenhum banco
+compartilhado foi alterado durante essa validacao.
+
+Arquivos principais: `apps/api/prisma/{schema.prisma,migrations}`, os modulos de
+clientes e entregas da API, `packages/{validation,types,api-client}`, a pagina
+`apps/company-web/src/app/(app)/clientes/[id]`, os componentes de clientes e o
+formulario operacional. `docs/business-rules.md` registra as regras confirmadas.
+
+Validacoes aprovadas: `prisma format`, `prisma validate` e geracao local do
+Prisma Client; suite completa da API com 69 suites e 839 testes; Company Web com
+8 arquivos e 25 testes; typecheck dos oito workspaces; lint da raiz e lint final
+do Company Web; builds de producao da API e do Company Web, incluindo a rota
+dinamica `/clientes/[id]`. O E2E `company-customers.e2e-spec.ts` passou com 7
+cenarios contra PostgreSQL 17 e Redis 7 isolados, cobrindo enderecos, estatisticas
+vazias, isolamento entre empresas e protecao do principal. Os containers e o
+worktree temporario foram removidos depois da prova. Nao houve smoke autenticado
+no navegador.
+
+Proximo passo concreto: confirmar a janela de restore do Neon, aplicar pelo
+deploy controlado e homologar com um cliente com Casa e Trabalho, confirmando a
+escolha do destino no pedido e as estatisticas depois de entregas concluidas,
+canceladas e em andamento.

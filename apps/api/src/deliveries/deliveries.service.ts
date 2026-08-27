@@ -21,6 +21,7 @@ import type {
   ReturnToQueuePayload,
   SearchDeliveriesQuery,
 } from '@motoboycity/validation';
+import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type {
   DeliveryOperationsResult,
   DeliveryStageTimesResult,
@@ -380,6 +381,10 @@ export class DeliveriesService {
     const dropoffCoordinate = destinationKnownAtCreation
       ? await this.resolverCoordenadaDoDestino(payload.dropoffAddress!)
       : { lat: null, lng: null };
+    const companyCustomerId = await this.resolveCompanyCustomerId(
+      delivery.company.id,
+      payload.recipientPhone,
+    );
 
     const changedAt = new Date();
     await this.prisma.$transaction(async (tx) => {
@@ -403,6 +408,7 @@ export class DeliveriesService {
           surchargeValue,
           recipientName: payload.recipientName ?? null,
           recipientPhone: payload.recipientPhone ?? null,
+          companyCustomerId,
           externalOrderNumber: payload.externalOrderNumber ?? null,
           driverNote: payload.driverNote ?? null,
           customerPaymentMethod: payload.customerPaymentMethod ?? null,
@@ -548,6 +554,10 @@ export class DeliveriesService {
     const coordenadaDoDestino = destinationKnownAtCreation
       ? await this.resolverCoordenadaDoDestino(payload.dropoffAddress!)
       : { lat: null, lng: null };
+    const companyCustomerId = await this.resolveCompanyCustomerId(
+      company.id,
+      payload.recipientPhone,
+    );
 
     let created: Delivery;
     try {
@@ -556,6 +566,7 @@ export class DeliveriesService {
           data: {
             ...(idempotentDeliveryId && { id: idempotentDeliveryId }),
             companyId: company.id,
+            companyCustomerId,
             serviceTypeId: payload.serviceTypeId,
             status: initialStatus,
             scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
@@ -735,6 +746,10 @@ export class DeliveriesService {
           : Promise.resolve({ lat: null, lng: null }),
       ),
     );
+    const companyCustomerIdsByPhone = await this.resolveCompanyCustomerIds(
+      company.id,
+      payload.deliveries.map((item) => item.recipientPhone),
+    );
 
     let created: Delivery[];
     try {
@@ -748,6 +763,10 @@ export class DeliveriesService {
             data: {
               ...(idempotentDeliveryIds?.[indice] && { id: idempotentDeliveryIds[indice] }),
               companyId: company.id,
+              companyCustomerId: this.customerIdFromPhone(
+                item.recipientPhone,
+                companyCustomerIdsByPhone,
+              ),
               serviceTypeId: item.serviceTypeId,
               batchId,
               status: 'AWAITING_DRIVER',
@@ -2520,6 +2539,47 @@ export class DeliveriesService {
    * consulta falha. Nenhum dos dois pode impedir a loja de lancar o pedido —
    * um endereco mal digitado reduz o contexto do mapa, nao trava a operacao.
    */
+  private async resolveCompanyCustomerId(
+    companyId: string,
+    phone?: string,
+  ): Promise<string | null> {
+    const normalized = phone ? companyCustomerPhoneSchema.safeParse(phone) : null;
+    if (!normalized?.success) return null;
+    const customer = await this.prisma.companyCustomer.findUnique({
+      where: { companyId_phone: { companyId, phone: normalized.data } },
+      select: { id: true },
+    });
+    return customer?.id ?? null;
+  }
+
+  private async resolveCompanyCustomerIds(
+    companyId: string,
+    phones: Array<string | undefined>,
+  ): Promise<Map<string, string>> {
+    const normalizedPhones = [
+      ...new Set(
+        phones.flatMap((phone) => {
+          const parsed = phone ? companyCustomerPhoneSchema.safeParse(phone) : null;
+          return parsed?.success ? [parsed.data] : [];
+        }),
+      ),
+    ];
+    if (normalizedPhones.length === 0) return new Map();
+    const customers = await this.prisma.companyCustomer.findMany({
+      where: { companyId, phone: { in: normalizedPhones } },
+      select: { id: true, phone: true },
+    });
+    return new Map(customers.map((customer) => [customer.phone, customer.id]));
+  }
+
+  private customerIdFromPhone(
+    phone: string | undefined,
+    idsByPhone: Map<string, string>,
+  ): string | null {
+    const parsed = phone ? companyCustomerPhoneSchema.safeParse(phone) : null;
+    return parsed?.success ? (idsByPhone.get(parsed.data) ?? null) : null;
+  }
+
   private async resolverCoordenadaDoDestino(endereco: {
     street: string;
     number: string;

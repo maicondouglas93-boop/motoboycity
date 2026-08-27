@@ -482,7 +482,9 @@ model CompanyCustomer {
   lng            Decimal? @db.Decimal(10, 7)
   referenceNote  String?  @db.VarChar(300)
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company        Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  savedAddresses CompanyCustomerSavedAddress[]
+  deliveries     Delivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -492,6 +494,34 @@ model CompanyCustomer {
   @@index([companyId, normalizedName])
   @@index([companyId, createdAt])
   @@map("company_customers")
+}
+
+/// Enderecos reutilizaveis de um cliente. O endereco principal continua
+/// espelhado em CompanyCustomer para compatibilidade com clientes antigos.
+model CompanyCustomerSavedAddress {
+  id              String   @id @default(uuid())
+  customerId      String
+  label           String   @db.VarChar(40)
+  normalizedLabel String   @db.VarChar(40)
+  isPrimary       Boolean  @default(false)
+  street          String   @db.VarChar(160)
+  number          String   @db.VarChar(30)
+  complement      String?  @db.VarChar(120)
+  city            String   @db.VarChar(120)
+  state           String   @db.Char(2)
+  zip             String   @db.VarChar(8)
+  lat             Decimal? @db.Decimal(10, 7)
+  lng             Decimal? @db.Decimal(10, 7)
+  referenceNote   String?  @db.VarChar(300)
+
+  customer CompanyCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customerId, normalizedLabel])
+  @@index([customerId, isPrimary])
+  @@map("company_customer_saved_addresses")
 }
 
 // ============================================================================
@@ -657,12 +687,13 @@ model DriverServiceType {
 // ============================================================================
 
 model Delivery {
-  id            String         @id @default(uuid())
-  displayNumber Int            @unique @default(autoincrement())
-  companyId     String
-  driverId      String?
-  serviceTypeId String
-  status        DeliveryStatus @default(SCHEDULED)
+  id                String         @id @default(uuid())
+  displayNumber     Int            @unique @default(autoincrement())
+  companyId         String
+  companyCustomerId String?
+  driverId          String?
+  serviceTypeId     String
+  status            DeliveryStatus @default(SCHEDULED)
 
   /// Agrupa pedidos criados juntos numa chamada de despacho em lote.
   /// Nulo representa um pedido avulso. O lote não tem entidade própria:
@@ -723,10 +754,11 @@ model Delivery {
   requiresReturn Boolean  @default(false)
   returnValue    Decimal? @db.Decimal(10, 2)
 
-  company     Company     @relation(fields: [companyId], references: [id])
-  driver      Driver?     @relation(fields: [driverId], references: [id])
-  serviceType ServiceType @relation(fields: [serviceTypeId], references: [id])
-  invoice     Invoice?    @relation(fields: [invoiceId], references: [id])
+  company         Company          @relation(fields: [companyId], references: [id])
+  companyCustomer CompanyCustomer? @relation(fields: [companyCustomerId], references: [id], onDelete: SetNull)
+  driver          Driver?          @relation(fields: [driverId], references: [id])
+  serviceType     ServiceType      @relation(fields: [serviceTypeId], references: [id])
+  invoice         Invoice?         @relation(fields: [invoiceId], references: [id])
 
   addresses          DeliveryAddress[]
   statusHistory      DeliveryStatusHistory[]
@@ -742,6 +774,7 @@ model Delivery {
   @@index([status, createdAt])
   @@index([companyId, createdAt])
   @@index([companyId, externalOrderNumber])
+  @@index([companyCustomerId, createdAt])
   @@index([invoiceId])
   @@index([batchId])
   @@map("deliveries")

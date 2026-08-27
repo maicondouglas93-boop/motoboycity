@@ -28,6 +28,7 @@ const customer = {
   name: 'Maria Oliveira',
   cpf: '52998224725',
   phone: '33999999991',
+  addressLabel: 'Casa',
   address: {
     street: 'Rua Um',
     number: '10',
@@ -39,6 +40,22 @@ const customer = {
     lng: -41.62,
     referenceNote: null,
   },
+  addresses: [
+    {
+      id: 'address-1',
+      label: 'Casa',
+      isPrimary: true,
+      street: 'Rua Um',
+      number: '10',
+      complement: null,
+      city: 'Lajinha',
+      state: 'MG',
+      zip: '36930000',
+      lat: -20.15,
+      lng: -41.62,
+      referenceNote: null,
+    },
+  ],
   createdAt: '2026-08-26T12:00:00.000Z',
   updatedAt: '2026-08-26T12:00:00.000Z',
 } satisfies CompanyCustomer;

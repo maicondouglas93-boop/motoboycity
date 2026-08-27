@@ -63,6 +63,7 @@ describe('CustomerForm pos-entrega', () => {
         name: 'Maria Oliveira',
         cpf: undefined,
         phone: '33999999991',
+        addressLabel: 'Principal',
         address: {
           street: 'Rua Um',
           number: '10',

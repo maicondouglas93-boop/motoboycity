@@ -42,6 +42,9 @@ export function CustomerForm({ token, initial, onSaved, onCancel }: Props) {
   const [name, setName] = useState(initial?.name ?? '');
   const [cpf, setCpf] = useState(initial?.cpf ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
+  const [addressLabel, setAddressLabel] = useState(
+    initial && 'addressLabel' in initial ? initial.addressLabel : 'Principal',
+  );
   const [addressSearch, setAddressSearch] = useState(
     initial ? formatCustomerAddress(initial.address) : '',
   );
@@ -69,6 +72,7 @@ export function CustomerForm({ token, initial, onSaved, onCancel }: Props) {
       name,
       cpf,
       phone,
+      addressLabel,
       address: address
         ? {
             street: address.street,
@@ -129,6 +133,16 @@ export function CustomerForm({ token, initial, onSaved, onCancel }: Props) {
             placeholder="(33) 99999-9999"
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="customer-address-label">Nome do endereço</Label>
+        <Input
+          id="customer-address-label"
+          value={addressLabel}
+          onChange={(event) => setAddressLabel(event.target.value)}
+          placeholder="Casa, Trabalho, Loja..."
+        />
       </div>
 
       <div className="space-y-1.5">

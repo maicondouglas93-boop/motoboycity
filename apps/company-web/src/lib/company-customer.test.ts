@@ -11,6 +11,7 @@ const customer: CompanyCustomer = {
   name: 'Maria Oliveira',
   cpf: '52998224725',
   phone: '33999999991',
+  addressLabel: 'Casa',
   address: {
     street: 'Rua Um',
     number: '10',
@@ -22,6 +23,22 @@ const customer: CompanyCustomer = {
     lng: -41.62,
     referenceNote: 'Portao azul',
   },
+  addresses: [
+    {
+      id: 'address-1',
+      label: 'Casa',
+      isPrimary: true,
+      street: 'Rua Um',
+      number: '10',
+      complement: 'Apto 2',
+      city: 'Lajinha',
+      state: 'MG',
+      zip: '36930000',
+      lat: -20.15,
+      lng: -41.62,
+      referenceNote: 'Portao azul',
+    },
+  ],
   createdAt: '2026-08-26T12:00:00.000Z',
   updatedAt: '2026-08-26T12:00:00.000Z',
 };
@@ -54,12 +71,32 @@ describe('company customer delivery integration', () => {
       customerToDeliveryFields({
         ...customer,
         address: { ...customer.address, lat: null, lng: null },
+        addresses: customer.addresses.map((address) => ({ ...address, lat: null, lng: null })),
       }).address,
     ).toBeNull();
   });
 
+  it('usa o endereco nomeado escolhido no pedido', () => {
+    const trabalho = {
+      ...customer.addresses[0]!,
+      id: 'address-2',
+      label: 'Trabalho',
+      isPrimary: false,
+      street: 'Avenida Dois',
+      number: '25',
+      complement: null,
+    };
+
+    expect(customerToDeliveryFields(customer, trabalho)).toEqual(
+      expect.objectContaining({
+        addressSearch: 'Avenida Dois, 25, Lajinha/MG',
+        number: '25',
+      }),
+    );
+  });
+
   it('exibe claramente quando o CPF nao foi informado', () => {
-    expect(formatCustomerCpf(null)).toBe('NÃ£o informado');
+    expect(formatCustomerCpf(null)).toBe('Não informado');
   });
 
   it('detecta cliente manual depois da entrega, normaliza telefone e remove duplicados do lote', () => {

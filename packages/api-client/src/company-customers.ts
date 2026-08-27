@@ -1,5 +1,11 @@
-import type { CompanyCustomer, CompanyCustomerListResult } from '@motoboycity/types';
 import type {
+  CompanyCustomer,
+  CompanyCustomerDetail,
+  CompanyCustomerListResult,
+  CompanyCustomerSavedAddress,
+} from '@motoboycity/types';
+import type {
+  CompanyCustomerSavedAddressPayload,
   CreateCompanyCustomerPayload,
   UpdateCompanyCustomerPayload,
 } from '@motoboycity/validation';
@@ -30,11 +36,11 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       return parseJsonOrThrow<CompanyCustomerListResult>(response);
     },
 
-    async detail(accessToken: string, id: string): Promise<CompanyCustomer> {
+    async detail(accessToken: string, id: string): Promise<CompanyCustomerDetail> {
       const response = await fetch(`${baseUrl}/company/customers/${id}`, {
         headers: withAuth(accessToken),
       });
-      return parseJsonOrThrow<CompanyCustomer>(response);
+      return parseJsonOrThrow<CompanyCustomerDetail>(response);
     },
 
     async match(
@@ -80,6 +86,48 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
         method: 'DELETE',
         headers: withAuth(accessToken),
       });
+      return parseJsonOrThrow<{ deleted: true }>(response);
+    },
+
+    async createAddress(
+      accessToken: string,
+      customerId: string,
+      payload: CompanyCustomerSavedAddressPayload,
+    ): Promise<CompanyCustomerSavedAddress> {
+      const response = await fetch(`${baseUrl}/company/customers/${customerId}/addresses`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<CompanyCustomerSavedAddress>(response);
+    },
+
+    async updateAddress(
+      accessToken: string,
+      customerId: string,
+      addressId: string,
+      payload: CompanyCustomerSavedAddressPayload,
+    ): Promise<CompanyCustomerSavedAddress> {
+      const response = await fetch(
+        `${baseUrl}/company/customers/${customerId}/addresses/${addressId}`,
+        {
+          method: 'PUT',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<CompanyCustomerSavedAddress>(response);
+    },
+
+    async removeAddress(
+      accessToken: string,
+      customerId: string,
+      addressId: string,
+    ): Promise<{ deleted: true }> {
+      const response = await fetch(
+        `${baseUrl}/company/customers/${customerId}/addresses/${addressId}`,
+        { method: 'DELETE', headers: withAuth(accessToken) },
+      );
       return parseJsonOrThrow<{ deleted: true }>(response);
     },
   };

@@ -1,10 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type { CompanyCustomer } from '@motoboycity/types';
-import { MapPin, Pencil, Phone, Plus, Search, Trash2, UserRound } from 'lucide-react';
+import { Eye, MapPin, Pencil, Phone, Plus, Search, Trash2, UserRound } from 'lucide-react';
 import { CustomerForm } from '@/components/customers/customer-form';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -185,7 +186,15 @@ export default function CompanyCustomersPage() {
                 </p>
                 <p className="flex items-start gap-2 text-muted-foreground">
                   <MapPin className="mt-0.5 size-4 shrink-0 text-portal" aria-hidden="true" />
-                  <span>{formatCustomerAddress(customer.address)}</span>
+                  <span>
+                    <span className="font-medium text-foreground">{customer.addressLabel}: </span>
+                    {formatCustomerAddress(customer.address)}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {customer.addresses.length} endereço
+                  {customer.addresses.length === 1 ? '' : 's'} salvo
+                  {customer.addresses.length === 1 ? '' : 's'}
                 </p>
                 {customer.address.referenceNote && (
                   <p className="text-xs text-muted-foreground">
@@ -193,6 +202,12 @@ export default function CompanyCustomersPage() {
                   </p>
                 )}
                 <div className="mt-auto flex gap-2 border-t border-border/60 pt-3">
+                  <Link
+                    href={`/clientes/${customer.id}`}
+                    className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-border bg-card/90 px-2.5 text-[0.8rem] font-semibold text-portal-deep transition-colors hover:border-portal/25 hover:bg-portal-soft"
+                  >
+                    <Eye className="size-3.5" aria-hidden="true" /> Abrir
+                  </Link>
                   <Button
                     type="button"
                     size="sm"

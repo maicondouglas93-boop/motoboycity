@@ -132,6 +132,7 @@ describe('DeliveriesService', () => {
     company: { findUnique: jest.Mock };
     companyTeamMember: { findFirst: jest.Mock };
     companyAddress: { findFirst: jest.Mock };
+    companyCustomer: { findUnique: jest.Mock; findMany: jest.Mock };
     deliveryAddress: { findFirst: jest.Mock; updateMany: jest.Mock };
     businessHour: { findMany: jest.Mock };
     delivery: {
@@ -181,6 +182,10 @@ describe('DeliveriesService', () => {
       company: { findUnique: jest.fn() },
       companyTeamMember: { findFirst: jest.fn() },
       companyAddress: { findFirst: jest.fn() },
+      companyCustomer: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       /** Enderecos antigos podem nao ter coordenada; a operacao deve tolerar. */
       deliveryAddress: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -327,6 +332,25 @@ describe('DeliveriesService', () => {
       expect(dispatchService.scheduleActivation).toHaveBeenCalledWith(
         'delivery-1',
         new Date('2026-12-01T10:00:00.000Z'),
+      );
+    });
+
+    it('vincula a entrega ao cliente cadastrado pelo telefone normalizado', async () => {
+      prisma.companyCustomer.findUnique.mockResolvedValue({ id: 'customer-1' });
+
+      await service.create(companyUser, {
+        ...payload,
+        recipientPhone: '+55 (33) 99999-9991',
+      });
+
+      expect(prisma.companyCustomer.findUnique).toHaveBeenCalledWith({
+        where: { companyId_phone: { companyId: 'company-1', phone: '33999999991' } },
+        select: { id: true },
+      });
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ companyCustomerId: 'customer-1' }),
+        }),
       );
     });
 

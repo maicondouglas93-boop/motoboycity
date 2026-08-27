@@ -338,18 +338,32 @@ criacao manual feita pela propria empresa.
 
 ## Cadastro de clientes da empresa
 
-Cada empresa possui uma agenda privada de clientes. Nome, telefone e endereco
-sao obrigatorios; CPF e opcional. Telefone e CPF informado sao normalizados sem
-mascara e nao podem se repetir dentro da mesma empresa; os mesmos identificadores
-podem existir na agenda de outra empresa. Busca por nome usa uma versao sem
-acentos e busca por telefone usa somente digitos. O backend sempre resolve a
-empresa pelo membro ativo da sessao e nunca aceita `companyId` enviado pelo
-navegador.
+Cada empresa possui uma agenda privada de clientes. Nome, telefone e pelo menos
+um endereco sao obrigatorios; CPF e opcional. Telefone e CPF informado sao
+normalizados sem mascara e nao podem se repetir dentro da mesma empresa; os
+mesmos identificadores podem existir na agenda de outra empresa. Busca por nome
+usa uma versao sem acentos e busca por telefone usa somente digitos. O backend
+sempre resolve a empresa pelo membro ativo da sessao e nunca aceita `companyId`
+enviado pelo navegador.
 
-Selecionar um cliente na criacao de pedido apenas preenche destinatario,
-telefone e o endereco estruturado. A entrega continua armazenando seu proprio
-snapshot, sem referencia mutavel ao cadastro: editar ou excluir o cliente nao
-reescreve pedidos anteriores. A exclusao remove somente a entrada da agenda.
+Cada cliente pode ter varios enderecos nomeados livremente, como `Casa`,
+`Trabalho`, `Loja` ou `Outro`. O nome normalizado do endereco e unico dentro do
+cliente. O endereco criado junto com o cliente e o principal: pode ser editado,
+mas nao excluido. Enderecos adicionais podem ser criados, editados e excluidos.
+
+Selecionar um cliente na criacao de pedido exige escolher um de seus enderecos
+quando houver mais de um e apenas preenche destinatario, telefone e endereco
+estruturado. A entrega continua armazenando seu proprio snapshot imutavel:
+editar um endereco ou excluir o cliente nao reescreve pedidos anteriores. Existe
+uma referencia analitica opcional da entrega para o cliente, com `SET NULL` na
+exclusao, usada somente para historico e estatisticas.
+
+O detalhe do cliente mostra total, ultima entrega, entregas em andamento,
+concluidas e canceladas, alem dos cinco enderecos de destino mais utilizados.
+`COMPLETED` conta como concluida, `CANCELLED` como cancelada e qualquer outro
+status como em andamento. Entregas anteriores sao vinculadas pelo telefone
+normalizado dentro da mesma empresa, sem alterar destinatario ou endereco do
+pedido.
 
 O cadastro previo permanece opcional. Depois que uma entrega manual e criada
 com nome, telefone e destino completo, o Company Web procura correspondencia

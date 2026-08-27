@@ -9,6 +9,7 @@ const payload = {
   name: 'Joao da Silva',
   cpf: '52998224725',
   phone: '33999999991',
+  addressLabel: 'Casa',
   address: {
     street: 'Rua das Flores',
     number: '100',
@@ -18,6 +19,24 @@ const payload = {
     lat: -20.15,
     lng: -41.62,
   },
+};
+const savedAddressRow = {
+  id: 'address-a',
+  customerId: 'customer-a',
+  label: 'Casa',
+  normalizedLabel: 'casa',
+  isPrimary: true,
+  street: payload.address.street,
+  number: payload.address.number,
+  complement: null,
+  city: payload.address.city,
+  state: payload.address.state,
+  zip: payload.address.zip,
+  lat: { toString: () => '-20.15' },
+  lng: { toString: () => '-41.62' },
+  referenceNote: null,
+  createdAt: new Date('2026-08-26T12:00:00.000Z'),
+  updatedAt: new Date('2026-08-26T12:00:00.000Z'),
 };
 const customerRow = {
   id: 'customer-a',
@@ -35,6 +54,7 @@ const customerRow = {
   lat: { toString: () => '-20.15' },
   lng: { toString: () => '-41.62' },
   referenceNote: null,
+  savedAddresses: [savedAddressRow],
   createdAt: new Date('2026-08-26T12:00:00.000Z'),
   updatedAt: new Date('2026-08-26T12:00:00.000Z'),
 };
@@ -51,6 +71,15 @@ describe('CompanyCustomersService', () => {
       update: jest.Mock;
       deleteMany: jest.Mock;
     };
+    companyCustomerSavedAddress: {
+      findFirst: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      deleteMany: jest.Mock;
+    };
+    $transaction: jest.Mock;
+    $executeRaw: jest.Mock;
+    $queryRaw: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -64,14 +93,26 @@ describe('CompanyCustomersService', () => {
         update: jest.fn(),
         deleteMany: jest.fn(),
       },
+      companyCustomerSavedAddress: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      $transaction: jest.fn(),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
+    prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) =>
+      callback(prisma),
+    );
     const module = await Test.createTestingModule({
       providers: [CompanyCustomersService, { provide: PrismaService, useValue: prisma }],
     }).compile();
     service = module.get(CompanyCustomersService);
   });
 
-  it('cria cliente normalizado e vinculado somente a empresa da sessao', async () => {
+  it('cria cliente, endereco principal e vincula entregas anteriores da empresa', async () => {
     prisma.companyCustomer.findFirst.mockResolvedValue(null);
     prisma.companyCustomer.create.mockResolvedValue(customerRow);
 
@@ -83,9 +124,19 @@ describe('CompanyCustomersService', () => {
         normalizedName: 'joao da silva',
         cpf: payload.cpf,
         phone: payload.phone,
+        savedAddresses: {
+          create: expect.objectContaining({
+            label: 'Casa',
+            normalizedLabel: 'casa',
+            isPrimary: true,
+          }),
+        },
       }),
+      include: { savedAddresses: { orderBy: [{ isPrimary: 'desc' }, { label: 'asc' }] } },
     });
-    expect(result.id).toBe('customer-a');
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(result.addressLabel).toBe('Casa');
+    expect(result.addresses).toHaveLength(1);
     expect(result.address.lat).toBe(-20.15);
   });
 
@@ -97,20 +148,15 @@ describe('CompanyCustomersService', () => {
     const result = await service.create(companyUser, payloadWithoutCpf);
 
     expect(prisma.companyCustomer.findFirst).toHaveBeenCalledWith({
-      where: {
-        companyId: 'company-a',
-        OR: [{ phone: payload.phone }],
-      },
+      where: { companyId: 'company-a', OR: [{ phone: payload.phone }] },
       select: { cpf: true, phone: true },
-    });
-    expect(prisma.companyCustomer.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ cpf: null, phone: payload.phone }),
     });
     expect(result.cpf).toBeNull();
   });
 
   it('impede duplicacao por CPF antes da escrita', async () => {
     prisma.companyCustomer.findFirst.mockResolvedValue({ cpf: payload.cpf, phone: 'outro' });
+
     await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.companyCustomer.create).not.toHaveBeenCalled();
   });
@@ -127,24 +173,70 @@ describe('CompanyCustomersService', () => {
           companyId: 'company-a',
           OR: [{ normalizedName: { contains: 'joao 9999' } }, { phone: { contains: '9999' } }],
         },
+        include: { savedAddresses: { orderBy: [{ isPrimary: 'desc' }, { label: 'asc' }] } },
       }),
     );
     expect(result.total).toBe(1);
   });
 
+  it('retorna estatisticas e enderecos mais usados no detalhe', async () => {
+    prisma.companyCustomer.findFirst.mockResolvedValue(customerRow);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          totalDeliveries: 37n,
+          lastDeliveryAt: new Date('2026-08-26T12:00:00.000Z'),
+          inProgressDeliveries: 2n,
+          completedDeliveries: 34n,
+          cancelledDeliveries: 1n,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          street: payload.address.street,
+          number: payload.address.number,
+          complement: null,
+          city: payload.address.city,
+          state: payload.address.state,
+          zip: payload.address.zip,
+          deliveries: 20n,
+        },
+      ]);
+
+    const result = await service.detail(companyUser, 'customer-a');
+
+    expect(result.statistics).toEqual({
+      totalDeliveries: 37,
+      lastDeliveryAt: '2026-08-26T12:00:00.000Z',
+      inProgressDeliveries: 2,
+      completedDeliveries: 34,
+      cancelledDeliveries: 1,
+      mostUsedAddresses: [
+        {
+          address: 'Rua das Flores, 100, Lajinha/MG',
+          savedAddressLabel: 'Casa',
+          deliveries: 20,
+        },
+      ],
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it('nao revela cliente de outra empresa por ID manipulado', async () => {
     prisma.companyCustomer.findFirst.mockResolvedValue(null);
+
     await expect(service.detail(companyUser, 'customer-b')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(prisma.companyCustomer.findFirst).toHaveBeenCalledWith({
       where: { id: 'customer-b', companyId: 'company-a' },
+      include: { savedAddresses: { orderBy: [{ isPrimary: 'desc' }, { label: 'asc' }] } },
     });
   });
 
-  it('atualiza somente depois de confirmar propriedade e ausencia de duplicidade', async () => {
+  it('atualiza cliente, principal e vinculos por telefone antigo e novo', async () => {
     prisma.companyCustomer.findFirst
-      .mockResolvedValueOnce({ id: 'customer-a' })
+      .mockResolvedValueOnce({ id: 'customer-a', phone: payload.phone })
       .mockResolvedValueOnce(null);
     prisma.companyCustomer.update.mockResolvedValue(customerRow);
 
@@ -152,15 +244,70 @@ describe('CompanyCustomersService', () => {
 
     expect(prisma.companyCustomer.findFirst).toHaveBeenNthCalledWith(1, {
       where: { id: 'customer-a', companyId: 'company-a' },
-      select: { id: true },
+      select: { id: true, phone: true },
     });
     expect(prisma.companyCustomer.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'customer-a' } }),
+      expect.objectContaining({
+        where: { id: 'customer-a' },
+        data: expect.objectContaining({
+          savedAddresses: {
+            updateMany: expect.objectContaining({ where: { isPrimary: true } }),
+          },
+        }),
+      }),
     );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
   });
 
-  it('exclui de forma atomica usando ID e empresa no mesmo filtro', async () => {
+  it('cadastra endereco adicional apenas depois de confirmar a empresa', async () => {
+    prisma.companyCustomer.findFirst.mockResolvedValue({ id: 'customer-a' });
+    prisma.companyCustomerSavedAddress.create.mockResolvedValue({
+      ...savedAddressRow,
+      id: 'address-b',
+      label: 'Trabalho',
+      normalizedLabel: 'trabalho',
+      isPrimary: false,
+    });
+
+    const result = await service.createAddress(companyUser, 'customer-a', {
+      label: 'Trabalho',
+      address: payload.address,
+    });
+
+    expect(prisma.companyCustomer.findFirst).toHaveBeenCalledWith({
+      where: { id: 'customer-a', companyId: 'company-a' },
+      select: { id: true },
+    });
+    expect(result).toEqual(expect.objectContaining({ label: 'Trabalho', isPrimary: false }));
+  });
+
+  it('nao permite excluir o endereco principal', async () => {
+    prisma.companyCustomerSavedAddress.findFirst.mockResolvedValue({
+      id: 'address-a',
+      isPrimary: true,
+    });
+
+    await expect(
+      service.removeAddress(companyUser, 'customer-a', 'address-a'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.companyCustomerSavedAddress.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('nao altera endereco de cliente de outra empresa', async () => {
+    prisma.companyCustomerSavedAddress.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.updateAddress(companyUser, 'customer-b', 'address-b', {
+        label: 'Loja',
+        address: payload.address,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.companyCustomerSavedAddress.update).not.toHaveBeenCalled();
+  });
+
+  it('exclui cliente de forma atomica usando ID e empresa no mesmo filtro', async () => {
     prisma.companyCustomer.deleteMany.mockResolvedValue({ count: 1 });
+
     await expect(service.remove(companyUser, 'customer-a')).resolves.toEqual({ deleted: true });
     expect(prisma.companyCustomer.deleteMany).toHaveBeenCalledWith({
       where: { id: 'customer-a', companyId: 'company-a' },

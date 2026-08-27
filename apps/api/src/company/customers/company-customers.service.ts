@@ -4,8 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { CompanyCustomer } from '@motoboycity/types';
 import type {
+  CompanyCustomer,
+  CompanyCustomerDetail,
+  CompanyCustomerSavedAddress,
+  CompanyCustomerStatistics,
+} from '@motoboycity/types';
+import type {
+  CompanyCustomerSavedAddressPayload,
   CreateCompanyCustomerPayload,
   ListCompanyCustomersQuery,
   MatchCompanyCustomerQuery,
@@ -28,9 +34,48 @@ interface CustomerRow {
   lat: { toString(): string } | null;
   lng: { toString(): string } | null;
   referenceNote: string | null;
+  savedAddresses: SavedAddressRow[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+interface SavedAddressRow {
+  id: string;
+  label: string;
+  isPrimary: boolean;
+  street: string;
+  number: string;
+  complement: string | null;
+  city: string;
+  state: string;
+  zip: string;
+  lat: { toString(): string } | null;
+  lng: { toString(): string } | null;
+  referenceNote: string | null;
+}
+
+interface DeliveryStatisticsRow {
+  totalDeliveries: bigint;
+  lastDeliveryAt: Date | null;
+  inProgressDeliveries: bigint;
+  completedDeliveries: bigint;
+  cancelledDeliveries: bigint;
+}
+
+interface MostUsedAddressRow {
+  street: string;
+  number: string | null;
+  complement: string | null;
+  city: string;
+  state: string;
+  zip: string | null;
+  deliveries: bigint;
+}
+
+const SAVED_ADDRESS_ORDER: Prisma.CompanyCustomerSavedAddressOrderByWithRelationInput[] = [
+  { isPrimary: 'desc' },
+  { label: 'asc' },
+];
 
 export function normalizeCustomerName(value: string): string {
   return value
@@ -65,6 +110,7 @@ export class CompanyCustomersService {
     const [rows, total] = await Promise.all([
       this.prisma.companyCustomer.findMany({
         where,
+        include: { savedAddresses: { orderBy: SAVED_ADDRESS_ORDER } },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -80,11 +126,22 @@ export class CompanyCustomersService {
     };
   }
 
-  async detail(user: User, id: string): Promise<CompanyCustomer> {
+  async detail(user: User, id: string): Promise<CompanyCustomerDetail> {
     const companyId = await this.resolveCompanyId(user);
-    const customer = await this.prisma.companyCustomer.findFirst({ where: { id, companyId } });
+    const customer = await this.prisma.companyCustomer.findFirst({
+      where: { id, companyId },
+      include: { savedAddresses: { orderBy: SAVED_ADDRESS_ORDER } },
+    });
     if (!customer) throw new NotFoundException('Cliente nao encontrado.');
-    return this.toItem(customer);
+    return {
+      ...this.toItem(customer),
+      statistics: await this.statistics(
+        companyId,
+        customer.id,
+        customer.phone,
+        customer.savedAddresses,
+      ),
+    };
   }
 
   async match(
@@ -100,6 +157,7 @@ export class CompanyCustomersService {
           ...(identifiers.phone ? [{ phone: identifiers.phone }] : []),
         ],
       },
+      include: { savedAddresses: { orderBy: SAVED_ADDRESS_ORDER } },
       take: 2,
     });
     if (matches.length > 1) {
@@ -113,15 +171,28 @@ export class CompanyCustomersService {
     await this.assertNoDuplicate(companyId, payload.cpf, payload.phone);
 
     try {
-      const customer = await this.prisma.companyCustomer.create({
-        data: {
-          companyId,
-          name: payload.name,
-          normalizedName: normalizeCustomerName(payload.name),
-          cpf: payload.cpf ?? null,
-          phone: payload.phone,
-          ...this.addressData(payload.address),
-        },
+      const customer = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.companyCustomer.create({
+          data: {
+            companyId,
+            name: payload.name,
+            normalizedName: normalizeCustomerName(payload.name),
+            cpf: payload.cpf ?? null,
+            phone: payload.phone,
+            ...this.addressData(payload.address),
+            savedAddresses: {
+              create: {
+                label: payload.addressLabel,
+                normalizedLabel: normalizeCustomerName(payload.addressLabel),
+                isPrimary: true,
+                ...this.addressData(payload.address),
+              },
+            },
+          },
+          include: { savedAddresses: { orderBy: SAVED_ADDRESS_ORDER } },
+        });
+        await this.linkUnassignedDeliveries(tx, companyId, created.id, payload.phone);
+        return created;
       });
       return this.toItem(customer);
     } catch (error) {
@@ -138,27 +209,124 @@ export class CompanyCustomersService {
     const companyId = await this.resolveCompanyId(user);
     const existing = await this.prisma.companyCustomer.findFirst({
       where: { id, companyId },
-      select: { id: true },
+      select: { id: true, phone: true },
     });
     if (!existing) throw new NotFoundException('Cliente nao encontrado.');
 
     await this.assertNoDuplicate(companyId, payload.cpf, payload.phone, id);
     try {
-      const customer = await this.prisma.companyCustomer.update({
-        where: { id },
-        data: {
-          name: payload.name,
-          normalizedName: normalizeCustomerName(payload.name),
-          cpf: payload.cpf ?? null,
-          phone: payload.phone,
-          ...this.addressData(payload.address),
-        },
+      const customer = await this.prisma.$transaction(async (tx) => {
+        await this.linkUnassignedDeliveries(tx, companyId, id, existing.phone);
+        const updated = await tx.companyCustomer.update({
+          where: { id },
+          data: {
+            name: payload.name,
+            normalizedName: normalizeCustomerName(payload.name),
+            cpf: payload.cpf ?? null,
+            phone: payload.phone,
+            ...this.addressData(payload.address),
+            savedAddresses: {
+              updateMany: {
+                where: { isPrimary: true },
+                data: {
+                  label: payload.addressLabel,
+                  normalizedLabel: normalizeCustomerName(payload.addressLabel),
+                  ...this.addressData(payload.address),
+                },
+              },
+            },
+          },
+          include: { savedAddresses: { orderBy: SAVED_ADDRESS_ORDER } },
+        });
+        await this.linkUnassignedDeliveries(tx, companyId, id, payload.phone);
+        return updated;
       });
       return this.toItem(customer);
     } catch (error) {
       this.rethrowUniqueConstraint(error);
       throw error;
     }
+  }
+
+  async createAddress(
+    user: User,
+    customerId: string,
+    payload: CompanyCustomerSavedAddressPayload,
+  ): Promise<CompanyCustomerSavedAddress> {
+    const companyId = await this.resolveCompanyId(user);
+    await this.assertCustomerOwnership(companyId, customerId);
+    try {
+      const address = await this.prisma.companyCustomerSavedAddress.create({
+        data: {
+          customerId,
+          label: payload.label,
+          normalizedLabel: normalizeCustomerName(payload.label),
+          isPrimary: false,
+          ...this.addressData(payload.address),
+        },
+      });
+      return this.toSavedAddress(address);
+    } catch (error) {
+      this.rethrowUniqueConstraint(error);
+      throw error;
+    }
+  }
+
+  async updateAddress(
+    user: User,
+    customerId: string,
+    addressId: string,
+    payload: CompanyCustomerSavedAddressPayload,
+  ): Promise<CompanyCustomerSavedAddress> {
+    const companyId = await this.resolveCompanyId(user);
+    const existing = await this.prisma.companyCustomerSavedAddress.findFirst({
+      where: { id: addressId, customerId, customer: { companyId } },
+    });
+    if (!existing) throw new NotFoundException('Endereco do cliente nao encontrado.');
+
+    try {
+      const address = await this.prisma.$transaction(async (tx) => {
+        if (existing.isPrimary) {
+          await tx.companyCustomer.update({
+            where: { id: customerId },
+            data: this.addressData(payload.address),
+          });
+        }
+        return tx.companyCustomerSavedAddress.update({
+          where: { id: addressId },
+          data: {
+            label: payload.label,
+            normalizedLabel: normalizeCustomerName(payload.label),
+            ...this.addressData(payload.address),
+          },
+        });
+      });
+      return this.toSavedAddress(address);
+    } catch (error) {
+      this.rethrowUniqueConstraint(error);
+      throw error;
+    }
+  }
+
+  async removeAddress(
+    user: User,
+    customerId: string,
+    addressId: string,
+  ): Promise<{ deleted: true }> {
+    const companyId = await this.resolveCompanyId(user);
+    const existing = await this.prisma.companyCustomerSavedAddress.findFirst({
+      where: { id: addressId, customerId, customer: { companyId } },
+      select: { id: true, isPrimary: true },
+    });
+    if (!existing) throw new NotFoundException('Endereco do cliente nao encontrado.');
+    if (existing.isPrimary) {
+      throw new ConflictException('O endereco principal nao pode ser excluido.');
+    }
+    const result = await this.prisma.companyCustomerSavedAddress.deleteMany({
+      where: { id: addressId, customerId },
+    });
+    if (result.count !== 1) throw new NotFoundException('Endereco do cliente nao encontrado.');
+    return { deleted: true };
   }
 
   async remove(user: User, id: string): Promise<{ deleted: true }> {
@@ -203,9 +371,19 @@ export class CompanyCustomersService {
     throw new ConflictException('Ja existe um cliente com este telefone.');
   }
 
+  private async assertCustomerOwnership(companyId: string, customerId: string): Promise<void> {
+    const customer = await this.prisma.companyCustomer.findFirst({
+      where: { id: customerId, companyId },
+      select: { id: true },
+    });
+    if (!customer) throw new NotFoundException('Cliente nao encontrado.');
+  }
+
   private rethrowUniqueConstraint(error: unknown): void {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new ConflictException('Ja existe um cliente com este telefone ou CPF informado.');
+      throw new ConflictException(
+        'Ja existe um cliente com este telefone, CPF informado ou nome de endereco.',
+      );
     }
   }
 
@@ -224,11 +402,13 @@ export class CompanyCustomersService {
   }
 
   private toItem(customer: CustomerRow): CompanyCustomer {
+    const primary = customer.savedAddresses.find((address) => address.isPrimary);
     return {
       id: customer.id,
       name: customer.name,
       cpf: customer.cpf,
       phone: customer.phone,
+      addressLabel: primary?.label ?? 'Principal',
       address: {
         street: customer.street,
         number: customer.number,
@@ -240,8 +420,144 @@ export class CompanyCustomersService {
         lng: customer.lng === null ? null : Number(customer.lng),
         referenceNote: customer.referenceNote,
       },
+      addresses: customer.savedAddresses.map((address) => this.toSavedAddress(address)),
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
     };
+  }
+
+  private toSavedAddress(address: SavedAddressRow): CompanyCustomerSavedAddress {
+    return {
+      id: address.id,
+      label: address.label,
+      isPrimary: address.isPrimary,
+      street: address.street,
+      number: address.number,
+      complement: address.complement,
+      city: address.city,
+      state: address.state,
+      zip: address.zip,
+      lat: address.lat === null ? null : Number(address.lat),
+      lng: address.lng === null ? null : Number(address.lng),
+      referenceNote: address.referenceNote,
+    };
+  }
+
+  private async linkUnassignedDeliveries(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    customerId: string,
+    phone: string,
+  ): Promise<void> {
+    await tx.$executeRaw`
+      UPDATE "deliveries" AS d
+      SET "companyCustomerId" = ${customerId}
+      WHERE d."companyId" = ${companyId}
+        AND d."companyCustomerId" IS NULL
+        AND (
+          CASE
+            WHEN length(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')) IN (12, 13)
+              AND left(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g'), 2) = '55'
+            THEN substring(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g') FROM 3)
+            ELSE regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')
+          END
+        ) = ${phone}
+    `;
+  }
+
+  private async statistics(
+    companyId: string,
+    customerId: string,
+    phone: string,
+    savedAddresses: SavedAddressRow[],
+  ): Promise<CompanyCustomerStatistics> {
+    const stats = await this.prisma.$queryRaw<DeliveryStatisticsRow[]>`
+      WITH customer_deliveries AS (
+        SELECT d."id", d."status", d."createdAt"
+        FROM "deliveries" AS d
+        WHERE d."companyId" = ${companyId}
+          AND (
+            d."companyCustomerId" = ${customerId}
+            OR (
+              d."companyCustomerId" IS NULL
+              AND (
+                CASE
+                  WHEN length(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')) IN (12, 13)
+                    AND left(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g'), 2) = '55'
+                  THEN substring(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g') FROM 3)
+                  ELSE regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')
+                END
+              ) = ${phone}
+            )
+          )
+      )
+      SELECT
+        COUNT(*)::bigint AS "totalDeliveries",
+        MAX("createdAt") AS "lastDeliveryAt",
+        COUNT(*) FILTER (WHERE "status" NOT IN ('COMPLETED', 'CANCELLED'))::bigint AS "inProgressDeliveries",
+        COUNT(*) FILTER (WHERE "status" = 'COMPLETED')::bigint AS "completedDeliveries",
+        COUNT(*) FILTER (WHERE "status" = 'CANCELLED')::bigint AS "cancelledDeliveries"
+      FROM customer_deliveries
+    `;
+    const mostUsed = await this.prisma.$queryRaw<MostUsedAddressRow[]>`
+      WITH customer_deliveries AS (
+        SELECT d."id"
+        FROM "deliveries" AS d
+        WHERE d."companyId" = ${companyId}
+          AND (
+            d."companyCustomerId" = ${customerId}
+            OR (
+              d."companyCustomerId" IS NULL
+              AND (
+                CASE
+                  WHEN length(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')) IN (12, 13)
+                    AND left(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g'), 2) = '55'
+                  THEN substring(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g') FROM 3)
+                  ELSE regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')
+                END
+              ) = ${phone}
+            )
+          )
+      )
+      SELECT
+        a."street", a."number", a."complement", a."city", a."state", a."zip",
+        COUNT(*)::bigint AS "deliveries"
+      FROM customer_deliveries AS d
+      INNER JOIN "delivery_addresses" AS a ON a."deliveryId" = d."id" AND a."type" = 'DROPOFF'
+      WHERE a."street" IS NOT NULL AND a."city" IS NOT NULL AND a."state" IS NOT NULL
+      GROUP BY a."street", a."number", a."complement", a."city", a."state", a."zip"
+      ORDER BY COUNT(*) DESC, MAX(d."id") DESC
+      LIMIT 5
+    `;
+    const row = stats[0];
+    return {
+      totalDeliveries: Number(row?.totalDeliveries ?? 0),
+      lastDeliveryAt: row?.lastDeliveryAt?.toISOString() ?? null,
+      inProgressDeliveries: Number(row?.inProgressDeliveries ?? 0),
+      completedDeliveries: Number(row?.completedDeliveries ?? 0),
+      cancelledDeliveries: Number(row?.cancelledDeliveries ?? 0),
+      mostUsedAddresses: mostUsed.map((address) => ({
+        address: this.formatStatisticsAddress(address),
+        savedAddressLabel:
+          savedAddresses.find((saved) => this.sameAddress(saved, address))?.label ?? null,
+        deliveries: Number(address.deliveries),
+      })),
+    };
+  }
+
+  private sameAddress(saved: SavedAddressRow, used: MostUsedAddressRow): boolean {
+    return (
+      normalizeCustomerName(saved.street) === normalizeCustomerName(used.street) &&
+      normalizeCustomerName(saved.number) === normalizeCustomerName(used.number ?? '') &&
+      normalizeCustomerName(saved.city) === normalizeCustomerName(used.city) &&
+      saved.state.toUpperCase() === used.state.toUpperCase() &&
+      saved.zip.replace(/\D/g, '') === (used.zip ?? '').replace(/\D/g, '')
+    );
+  }
+
+  private formatStatisticsAddress(address: MostUsedAddressRow): string {
+    return `${address.street}, ${address.number ?? 's/n'}${
+      address.complement ? ` - ${address.complement}` : ''
+    }, ${address.city}/${address.state}`;
   }
 }

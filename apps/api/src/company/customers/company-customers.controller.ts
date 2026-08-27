@@ -1,10 +1,16 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import type { CompanyCustomer } from '@motoboycity/types';
+import type {
+  CompanyCustomer,
+  CompanyCustomerDetail,
+  CompanyCustomerSavedAddress,
+} from '@motoboycity/types';
 import {
+  companyCustomerSavedAddressSchema,
   createCompanyCustomerSchema,
   listCompanyCustomersQuerySchema,
   matchCompanyCustomerQuerySchema,
   updateCompanyCustomerSchema,
+  type CompanyCustomerSavedAddressPayload,
   type CreateCompanyCustomerPayload,
   type ListCompanyCustomersQuery,
   type MatchCompanyCustomerQuery,
@@ -39,7 +45,7 @@ export class CompanyCustomersController {
   }
 
   @Get(':id')
-  detail(@CurrentUser() user: User, @Param('id') id: string): Promise<CompanyCustomer> {
+  detail(@CurrentUser() user: User, @Param('id') id: string): Promise<CompanyCustomerDetail> {
     return this.companyCustomersService.detail(user, id);
   }
 
@@ -63,5 +69,35 @@ export class CompanyCustomersController {
   @Delete(':id')
   remove(@CurrentUser() user: User, @Param('id') id: string): Promise<{ deleted: true }> {
     return this.companyCustomersService.remove(user, id);
+  }
+
+  @Post(':id/addresses')
+  createAddress(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(companyCustomerSavedAddressSchema))
+    body: CompanyCustomerSavedAddressPayload,
+  ): Promise<CompanyCustomerSavedAddress> {
+    return this.companyCustomersService.createAddress(user, id, body);
+  }
+
+  @Put(':id/addresses/:addressId')
+  updateAddress(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+    @Body(new ZodValidationPipe(companyCustomerSavedAddressSchema))
+    body: CompanyCustomerSavedAddressPayload,
+  ): Promise<CompanyCustomerSavedAddress> {
+    return this.companyCustomersService.updateAddress(user, id, addressId, body);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  removeAddress(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Param('addressId') addressId: string,
+  ): Promise<{ deleted: true }> {
+    return this.companyCustomersService.removeAddress(user, id, addressId);
   }
 }
