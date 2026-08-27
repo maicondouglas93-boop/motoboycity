@@ -8424,3 +8424,26 @@ funcional foi iniciado no GitHub e ainda estava em andamento no momento deste
 registro. Nao houve smoke autenticado com pedido real nem envio efetivo pelo
 WhatsApp. Proximo passo concreto: abrir a Home oficial com uma entrega coletada,
 enviar a mensagem para um numero de teste e conferir a moto movendo no mapa.
+
+## Atualizacao - 2026-08-27: acompanhamento imediato ao chamar entregador
+
+O modal `Chamar entregador` da Company Web agora entra no estado
+`Acompanhando` no mesmo clique que envia o pedido. Antes, essa transicao
+dependia da resposta completa de criacao da API e, em conexoes lentas, o
+formulario permanecia visivel com `Chamando...` por varios segundos. Durante a
+requisicao, a tela informa que esta enviando o pedido e iniciando a busca; assim
+que a API devolve os IDs, o acompanhamento real por polling continua como ja
+funcionava. Se a criacao falhar, o modal retorna ao formulario e conserva a
+mensagem de erro e a tentativa idempotente.
+
+O botao `Chamar outro` fica desabilitado enquanto a criacao esta em andamento,
+evitando iniciar um segundo fluxo antes de existir um resultado. Nao houve
+mudanca de API, contrato, banco, dispatch ou regra de negocio. Arquivos:
+`apps/company-web/src/components/operations/call-driver-dialog.tsx`, seu novo
+teste de regressao e este handoff.
+
+Validacoes aprovadas: teste focado; suite completa da Company Web com 14
+arquivos e 54 testes; typecheck, lint, build de producao com 19 paginas e
+`git diff --check`. Nao houve smoke autenticado nem deploy. Proximo passo
+concreto: homologar no navegador com rede limitada e confirmar que
+`Acompanhando` aparece imediatamente depois do clique.

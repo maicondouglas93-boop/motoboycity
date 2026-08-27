@@ -98,6 +98,9 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   const cancelledCount = tracked.filter((delivery) => delivery.status === 'CANCELLED').length;
 
   function trackingMessage(): string {
+    if (mutation.isPending) {
+      return 'Enviando o pedido e iniciando a busca por um entregador...';
+    }
     if (trackedOperationsQuery.isError) {
       return 'Não foi possível consultar o andamento. Tente novamente.';
     }
@@ -238,7 +241,9 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     setError(null);
   }
 
-  const isTracking = trackedIds.length > 0;
+  // A confirmacao da API pode levar alguns segundos. Entrar no acompanhamento
+  // no mesmo clique evita deixar a empresa presa no formulario ate a resposta.
+  const isTracking = mutation.isPending || trackedIds.length > 0;
 
   return (
     <Dialog
@@ -264,7 +269,9 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                 aceitar" depois que ja aceitaram seria a tela mentindo para quem
                 esta olhando justamente para saber disso.
               */}
-              <p className="text-sm text-muted-foreground">{trackingMessage()}</p>
+              <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+                {trackingMessage()}
+              </p>
 
               {trackedOperationsQuery.isError ? (
                 <Button
@@ -278,7 +285,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
               ) : tracked.length === 0 ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                  Carregando...
+                  {mutation.isPending ? 'Iniciando busca...' : 'Carregando...'}
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -377,7 +384,13 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
             </DialogBody>
 
             <DialogFooter className="flex gap-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={reset}>
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                disabled={mutation.isPending}
+                onClick={reset}
+              >
                 Chamar outro
               </Button>
               <Button type="button" className="flex-1" onClick={() => setOpen(false)}>
