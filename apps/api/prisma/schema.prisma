@@ -470,7 +470,7 @@ model CompanyCustomer {
   companyId      String
   name           String   @db.VarChar(120)
   normalizedName String   @db.VarChar(120)
-  cpf            String   @db.VarChar(11)
+  cpf            String?  @db.VarChar(11)
   phone          String   @db.VarChar(11)
   street         String   @db.VarChar(160)
   number         String   @db.VarChar(30)

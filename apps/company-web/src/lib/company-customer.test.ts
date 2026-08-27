@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCustomerRegistrationCandidates,
   customerToDeliveryFields,
+  formatCustomerCpf,
 } from '@/lib/company-customer';
 
 const customer: CompanyCustomer = {
@@ -55,6 +56,10 @@ describe('company customer delivery integration', () => {
         address: { ...customer.address, lat: null, lng: null },
       }).address,
     ).toBeNull();
+  });
+
+  it('exibe claramente quando o CPF nao foi informado', () => {
+    expect(formatCustomerCpf(null)).toBe('NÃ£o informado');
   });
 
   it('detecta cliente manual depois da entrega, normaliza telefone e remove duplicados do lote', () => {

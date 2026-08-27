@@ -13,7 +13,7 @@ export interface CompanyCustomerAddress {
 export interface CompanyCustomer {
   id: string;
   name: string;
-  cpf: string;
+  cpf: string | null;
   phone: string;
   address: CompanyCustomerAddress;
   createdAt: string;

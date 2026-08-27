@@ -338,12 +338,13 @@ criacao manual feita pela propria empresa.
 
 ## Cadastro de clientes da empresa
 
-Cada empresa possui uma agenda privada de clientes. CPF e telefone sao
-normalizados sem mascara e nao podem se repetir dentro da mesma empresa; os
-mesmos identificadores podem existir na agenda de outra empresa. Busca por nome
-usa uma versao sem acentos e busca por telefone usa somente digitos. O backend
-sempre resolve a empresa pelo membro ativo da sessao e nunca aceita `companyId`
-enviado pelo navegador.
+Cada empresa possui uma agenda privada de clientes. Nome, telefone e endereco
+sao obrigatorios; CPF e opcional. Telefone e CPF informado sao normalizados sem
+mascara e nao podem se repetir dentro da mesma empresa; os mesmos identificadores
+podem existir na agenda de outra empresa. Busca por nome usa uma versao sem
+acentos e busca por telefone usa somente digitos. O backend sempre resolve a
+empresa pelo membro ativo da sessao e nunca aceita `companyId` enviado pelo
+navegador.
 
 Selecionar um cliente na criacao de pedido apenas preenche destinatario,
 telefone e o endereco estruturado. A entrega continua armazenando seu proprio
@@ -353,9 +354,9 @@ reescreve pedidos anteriores. A exclusao remove somente a entrada da agenda.
 O cadastro previo permanece opcional. Depois que uma entrega manual e criada
 com nome, telefone e destino completo, o Company Web procura correspondencia
 exata pelo telefone normalizado e oferece salvar o cliente. O convite acontece
-somente depois do sucesso do pedido, pode ser ignorado sem qualquer nova chamada
-de criacao e, como a entrega nao coleta CPF, o CPF precisa ser completado e
-validado no formulario antes de salvar.
+somente depois do sucesso do pedido e pode ser ignorado sem qualquer nova chamada
+de criacao. Como a entrega nao coleta CPF, o formulario abre com esse campo vazio;
+a empresa pode salvar assim ou informar um CPF valido.
 
 ---
 

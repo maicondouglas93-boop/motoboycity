@@ -40,7 +40,8 @@ export function formatCustomerPhone(phone: string): string {
   return phone;
 }
 
-export function formatCustomerCpf(cpf: string): string {
+export function formatCustomerCpf(cpf: string | null): string {
+  if (!cpf) return 'NÃ£o informado';
   const digits = cpf.replace(/\D/g, '');
   if (digits.length !== 11) return cpf;
   return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;

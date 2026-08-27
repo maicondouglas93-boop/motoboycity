@@ -47,8 +47,8 @@ describe('CustomerForm pos-entrega', () => {
     mocks.update.mockReset();
   });
 
-  it('abre preenchido, exige CPF valido e salva sem alterar a entrega', async () => {
-    const saved = { id: 'customer-1', cpf: '52998224725', ...initial };
+  it('abre preenchido e salva sem CPF sem alterar a entrega', async () => {
+    const saved = { id: 'customer-1', cpf: null, ...initial };
     mocks.create.mockResolvedValue(saved);
     const onSaved = renderForm();
 
@@ -57,16 +57,11 @@ describe('CustomerForm pos-entrega', () => {
     expect(screen.getByLabelText('Endereco selecionado')).toHaveValue('Rua Um, 10, Lajinha/MG');
 
     fireEvent.click(screen.getByRole('button', { name: 'Cadastrar cliente' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('CPF invalido.');
-    expect(mocks.create).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '529.982.247-25' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Cadastrar cliente' }));
 
     await waitFor(() => {
       expect(mocks.create).toHaveBeenCalledWith('token', {
         name: 'Maria Oliveira',
-        cpf: '52998224725',
+        cpf: undefined,
         phone: '33999999991',
         address: {
           street: 'Rua Um',
@@ -82,5 +77,14 @@ describe('CustomerForm pos-entrega', () => {
       });
     });
     expect(onSaved).toHaveBeenCalledWith(saved);
+  });
+
+  it('rejeita CPF invalido quando ele e informado', async () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText('CPF (opcional)'), { target: { value: '123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cadastrar cliente' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('CPF invalido.');
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 });

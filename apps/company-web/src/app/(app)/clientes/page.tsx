@@ -173,7 +173,7 @@ export default function CompanyCustomersPage() {
                   <span className="min-w-0">
                     <span className="block truncate">{customer.name}</span>
                     <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                      CPF {formatCustomerCpf(customer.cpf)}
+                      CPF: {formatCustomerCpf(customer.cpf)}
                     </span>
                   </span>
                 </CardTitle>
@@ -258,7 +258,8 @@ export default function CompanyCustomersPage() {
           <DialogHeader>
             <DialogTitle>{editing ? 'Editar cliente' : 'Cadastrar cliente'}</DialogTitle>
             <DialogDescription>
-              CPF e telefone nao podem se repetir dentro da sua empresa.
+              O telefone não pode se repetir. Quando informado, o CPF também deve ser único na sua
+              empresa.
             </DialogDescription>
           </DialogHeader>
           <DialogBody>

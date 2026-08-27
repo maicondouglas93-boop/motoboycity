@@ -26,6 +26,13 @@ describe('company customer validation', () => {
     expect(result.phone).toBe('33999999991');
   });
 
+  it('aceita CPF ausente ou vazio', () => {
+    expect(
+      companyCustomerInputSchema.parse({ ...validCustomer, cpf: undefined }).cpf,
+    ).toBeUndefined();
+    expect(companyCustomerInputSchema.parse({ ...validCustomer, cpf: '' }).cpf).toBeUndefined();
+  });
+
   it('normaliza telefone brasileiro em E.164 para o mesmo cadastro nacional', () => {
     const result = companyCustomerInputSchema.parse({
       ...validCustomer,

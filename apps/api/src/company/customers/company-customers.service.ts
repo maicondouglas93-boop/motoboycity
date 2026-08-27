@@ -17,7 +17,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 interface CustomerRow {
   id: string;
   name: string;
-  cpf: string;
+  cpf: string | null;
   phone: string;
   street: string;
   number: string;
@@ -118,7 +118,7 @@ export class CompanyCustomersService {
           companyId,
           name: payload.name,
           normalizedName: normalizeCustomerName(payload.name),
-          cpf: payload.cpf,
+          cpf: payload.cpf ?? null,
           phone: payload.phone,
           ...this.addressData(payload.address),
         },
@@ -149,7 +149,7 @@ export class CompanyCustomersService {
         data: {
           name: payload.name,
           normalizedName: normalizeCustomerName(payload.name),
-          cpf: payload.cpf,
+          cpf: payload.cpf ?? null,
           phone: payload.phone,
           ...this.addressData(payload.address),
         },
@@ -184,7 +184,7 @@ export class CompanyCustomersService {
 
   private async assertNoDuplicate(
     companyId: string,
-    cpf: string,
+    cpf: string | undefined,
     phone: string,
     excludedId?: string,
   ): Promise<void> {
@@ -192,18 +192,20 @@ export class CompanyCustomersService {
       where: {
         companyId,
         ...(excludedId && { id: { not: excludedId } }),
-        OR: [{ cpf }, { phone }],
+        OR: [...(cpf ? [{ cpf }] : []), { phone }],
       },
       select: { cpf: true, phone: true },
     });
     if (!duplicate) return;
-    if (duplicate.cpf === cpf) throw new ConflictException('Ja existe um cliente com este CPF.');
+    if (cpf && duplicate.cpf === cpf) {
+      throw new ConflictException('Ja existe um cliente com este CPF.');
+    }
     throw new ConflictException('Ja existe um cliente com este telefone.');
   }
 
   private rethrowUniqueConstraint(error: unknown): void {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      throw new ConflictException('Ja existe um cliente com este CPF ou telefone.');
+      throw new ConflictException('Ja existe um cliente com este telefone ou CPF informado.');
     }
   }
 

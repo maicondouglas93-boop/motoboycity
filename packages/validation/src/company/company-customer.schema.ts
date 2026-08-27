@@ -32,6 +32,11 @@ export const companyCustomerCpfSchema = z
   .transform(onlyDigits)
   .refine(hasValidCpfCheckDigits, 'CPF invalido.');
 
+export const optionalCompanyCustomerCpfSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  companyCustomerCpfSchema.optional(),
+);
+
 export const companyCustomerPhoneSchema = z
   .string()
   .transform(normalizeBrazilPhone)
@@ -49,7 +54,7 @@ export const companyCustomerInputSchema = z.object({
     .trim()
     .min(2, 'Informe o nome completo.')
     .max(120, 'O nome deve ter no maximo 120 caracteres.'),
-  cpf: companyCustomerCpfSchema,
+  cpf: optionalCompanyCustomerCpfSchema,
   phone: companyCustomerPhoneSchema,
   address: deliveryAddressInputSchema,
 });
@@ -65,7 +70,7 @@ export const listCompanyCustomersQuerySchema = z.object({
 
 export const matchCompanyCustomerQuerySchema = z
   .object({
-    cpf: companyCustomerCpfSchema.optional(),
+    cpf: optionalCompanyCustomerCpfSchema,
     phone: companyCustomerPhoneSchema.optional(),
   })
   .refine((query) => Boolean(query.cpf || query.phone), {

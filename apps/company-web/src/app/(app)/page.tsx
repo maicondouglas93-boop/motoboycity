@@ -379,7 +379,7 @@ export default function CompanyHomePage() {
               <DialogHeader>
                 <DialogTitle>Confirmar cadastro</DialogTitle>
                 <DialogDescription>
-                  Complete o CPF e confirme os dados preenchidos pela entrega.
+                  O CPF é opcional. Confirme os dados preenchidos pela entrega.
                 </DialogDescription>
               </DialogHeader>
               <DialogBody>

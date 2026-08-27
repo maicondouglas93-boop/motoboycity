@@ -7715,3 +7715,44 @@ de staging, executar o E2E novo, aplicar pelo deploy controlado e homologar com
 duas empresas: cadastrar o mesmo CPF nas duas, pesquisar, selecionar na Home,
 criar pedido avulso e lote, salvar um destinatario manual depois do sucesso e
 confirmar que `Agora nao` nao altera nem repete a entrega.
+
+## Atualizacao - 2026-08-26: CPF opcional no cadastro de clientes
+
+Por decisao do responsavel do produto, o CPF deixou de ser obrigatorio na agenda
+privada de clientes da empresa. Nome, telefone e endereco continuam obrigatorios.
+Quando informado, o CPF ainda e normalizado, validado pelos digitos verificadores
+e unico dentro da empresa; registros sem CPF armazenam `null`, e o telefone
+permanece sempre normalizado e unico por empresa. Clientes existentes nao sao
+alterados.
+
+Como a migration de criacao da agenda ja havia sido publicada, ela foi preservada
+imutavel. A migration nova
+`20260826223500_company_customer_optional_cpf` foi gerada por `prisma migrate
+diff` entre o schema commitado e o schema novo e contem somente `ALTER COLUMN
+"cpf" DROP NOT NULL`. O rollback exige preencher todos os valores nulos antes de
+restaurar `NOT NULL`; nenhuma migration foi aplicada em banco nesta sessao.
+
+O contrato de entrada aceita CPF ausente ou string vazia e transforma ambos em
+ausencia. A resposta compartilhada usa `string | null`. O service ignora CPF na
+consulta de duplicidade quando ele nao foi informado e grava `null` em criacao e
+edicao. No Company Web, o campo aparece como `CPF (opcional)`, o card informa
+`CPF: Nao informado`, e o convite pos-entrega nao pede mais que a empresa complete
+o documento antes de salvar.
+
+Arquivos principais: `apps/api/prisma/schema.prisma`, a migration nova,
+`packages/{validation,types}`, `apps/api/src/company/customers`,
+`apps/company-web/src/{components/customers,lib/company-customer.ts}`, as telas de
+Clientes e Home, testes e `docs/business-rules.md`.
+
+Validacoes aprovadas: `prisma validate`; build de `@motoboycity/validation`;
+geracao local do Prisma Client; 2 suites focadas da API com 16 testes; suite
+unitaria completa da API com 69 suites e 833 testes; Company Web com 7 arquivos e
+22 testes; typecheck e lint da raiz nos oito workspaces; builds de producao da API
+e do Company Web com 19 rotas; formatacao Prettier dos arquivos alterados. O E2E
+foi atualizado para criar um cliente sem CPF, mas nao foi executado porque requer
+PostgreSQL e Redis isolados. Nao houve smoke autenticado no navegador.
+
+Proximo passo concreto: revisar o diff, commitar e enviar quando autorizado; o
+deploy normal do Render aplicara a migration antes da nova API. Depois, cadastrar
+dois clientes sem CPF e telefones diferentes, editar um deles adicionando CPF e
+confirmar que CPF invalido ou repetido continua recusado.

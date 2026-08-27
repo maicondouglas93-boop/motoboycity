@@ -97,6 +97,20 @@ describe('CompanyCustomersController (e2e)', () => {
     customerAId = response.body.id as string;
     expect(response.body.cpf).toBe('52998224725');
     expect(response.body.address.street).toBe('Rua das Flores');
+
+    const withoutCpf = await request(app.getHttpServer())
+      .post('/company/customers')
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .send({ ...customerPayload, name: 'Maria Sem CPF', cpf: undefined, phone: '33999999993' })
+      .expect(201);
+    expect(withoutCpf.body.cpf).toBeNull();
+
+    const secondWithoutCpf = await request(app.getHttpServer())
+      .post('/company/customers')
+      .set('Authorization', `Bearer ${tokens[0]}`)
+      .send({ ...customerPayload, name: 'Ana Sem CPF', cpf: undefined, phone: '33999999994' })
+      .expect(201);
+    expect(secondWithoutCpf.body.cpf).toBeNull();
   });
 
   it('pesquisa por nome sem acento e por telefone', async () => {

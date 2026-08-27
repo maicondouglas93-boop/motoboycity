@@ -109,7 +109,7 @@ export function CustomerForm({ token, initial, onSaved, onCancel }: Props) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="customer-cpf">CPF</Label>
+          <Label htmlFor="customer-cpf">CPF (opcional)</Label>
           <Input
             id="customer-cpf"
             value={cpf}

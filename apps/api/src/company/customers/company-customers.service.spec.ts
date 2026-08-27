@@ -89,6 +89,26 @@ describe('CompanyCustomersService', () => {
     expect(result.address.lat).toBe(-20.15);
   });
 
+  it('cria cliente sem CPF e verifica duplicidade apenas pelo telefone', async () => {
+    const payloadWithoutCpf = { ...payload, cpf: undefined };
+    prisma.companyCustomer.findFirst.mockResolvedValue(null);
+    prisma.companyCustomer.create.mockResolvedValue({ ...customerRow, cpf: null });
+
+    const result = await service.create(companyUser, payloadWithoutCpf);
+
+    expect(prisma.companyCustomer.findFirst).toHaveBeenCalledWith({
+      where: {
+        companyId: 'company-a',
+        OR: [{ phone: payload.phone }],
+      },
+      select: { cpf: true, phone: true },
+    });
+    expect(prisma.companyCustomer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cpf: null, phone: payload.phone }),
+    });
+    expect(result.cpf).toBeNull();
+  });
+
   it('impede duplicacao por CPF antes da escrita', async () => {
     prisma.companyCustomer.findFirst.mockResolvedValue({ cpf: payload.cpf, phone: 'outro' });
     await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(ConflictException);
