@@ -7810,3 +7810,31 @@ Proximo passo concreto: confirmar a janela de restore do Neon, aplicar pelo
 deploy controlado e homologar com um cliente com Casa e Trabalho, confirmando a
 escolha do destino no pedido e as estatisticas depois de entregas concluidas,
 canceladas e em andamento.
+
+## Release - 2026-08-27: clientes com multiplos enderecos em producao
+
+O commit funcional `a6dbd72` foi enviado para `main`. Os deployments oficiais do
+GitHub registraram sucesso para `main - motoboycity-api` no Render e para
+`Production - motoboycity-company-web` e `Production - motoboycity-admin-web` na
+Vercel. O build do Render executa `prisma migrate deploy` antes do build da API;
+como o deployment concluiu, a migration
+`20260827103000_company_customer_addresses_statistics` foi aceita pelo ambiente
+de producao.
+
+Smoke publico aprovado depois da troca: `GET /health` retornou 200 com
+`{"status":"ok"}`; a nova rota protegida de cliente retornou 401 sem token; o
+preflight do novo endpoint de enderecos retornou 204 com a origem oficial do
+Company Web; e `/clientes/[id]` respondeu 200 no dominio oficial da Vercel. O
+SHA local, `origin/main` e o commit implantado eram
+`a6dbd72df0a099d748888957306571c8c455827b`.
+
+A configuracao especifica da janela de restore do projeto Neon nao pode ser
+inspecionada nesta sessao porque nao havia navegador autenticado nem chave de API
+do Neon/Render. A migration e aditiva, foi validada sobre dados preexistentes e
+o codigo anterior permanece compativel com as novas estruturas. Nenhum segredo
+ou `.env` de producao foi lido ou alterado.
+
+Proximo passo concreto: fazer o smoke autenticado no Company Web com um cliente
+real de teste, cadastrar Casa e Trabalho, criar pedidos para os dois enderecos e
+confirmar as contagens no detalhe. No Neon, confirmar visualmente a janela de
+restore em Settings > Restore window.
