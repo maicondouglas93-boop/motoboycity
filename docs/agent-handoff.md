@@ -9038,9 +9038,31 @@ O preflight da copia de producao encontrou
 `deliveryProximityRadiusMeters=50`, `returnProximityRadiusMeters=50` e uma
 entrega em `ACCEPTED`. Portanto a API nova nao deve ser publicada antes do APK
 novo estar instalado no aparelho que conclui essa entrega: a versao anterior
-nao envia o fix exigido pelas regras novas. A chave oficial existe e seu alias
-e `motoboycity`, mas as senhas de assinatura nao estavam carregadas na sessao;
-nenhum segredo foi lido ou registrado. Neste ponto ainda nao houve APK, push
-ou deploy. Ordem concreta: carregar as senhas de forma segura, gerar e validar
-o APK oficial, instala-lo nos aparelhos ativos e somente depois enviar o commit
+nao envia o fix exigido pelas regras novas.
+
+O APK oficial foi compilado em `C:\m10`, com a chave oficial e a configuracao
+Firebase local ignorada pelo Git. A primeira compilacao de preflight detectou a
+ausencia dessa configuracao na worktree curta e nao foi distribuida; depois de
+copiar o arquivo correto, o Gradle executou `processReleaseGoogleServices` e o
+`assembleRelease` final terminou com sucesso. As senhas foram lidas somente de
+arquivos DPAPI criados pelo responsavel fora do repositorio, usadas no processo
+e removidas da memoria/ambiente ao final; nenhum valor foi exibido ou
+registrado.
+
+O artefato final tem 75.119.337 bytes e SHA-256
+`859875705CA25DF266A6CE83212C70EE76F61F756BA73E8D18F904C298C0D13B`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.10`, `versionCode` 10, minSdk 24 e targetSdk 36. O APK contem os
+recursos Firebase, a URL oficial e nenhuma referencia a `localhost:3333`,
+`127.0.0.1` ou `10.0.2.2`.
+
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.10-vc10.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.10-vc10.apk`. Nenhum aparelho
+ADB estava conectado, portanto o APK nao foi instalado. O commit funcional
+local e `ecb6d22`; ainda nao houve push nem deploy. Ordem concreta restante:
+instalar o `pilot.10` nos aparelhos ativos e somente depois enviar o commit
 para disparar Render/Vercel.
