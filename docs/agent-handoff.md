@@ -8667,3 +8667,32 @@ payload inbound, identificador estavel e redelivery. Proximo passo concreto:
 concluir o release tecnico do refresh sem iniciar OAuth; depois, rotacionar os
 dois segredos expostos e obter fixture/contrato oficial do webhook antes de
 modelar a inbox append-only.
+
+## Atualizacao - 2026-08-28: destravamento da suite E2E apos o release aiqfome
+
+O refresh atomico foi commitado e enviado em `b5940b4`. O CI desse commit
+aplicou as migrations, passou typecheck, lint, testes unitarios e Driver App,
+mas ficou preso na etapa E2E. O mesmo sintoma ja havia ocorrido no CI anterior
+da base OAuth: o job permaneceu nessa etapa ate o timeout.
+
+A reproducao usou PostgreSQL 17 e Redis 7 descartaveis, em portas de loopback
+separadas dos servicos locais persistentes. O E2E novo do aiqfome passou. A
+causa do travamento era anterior: seis teardowns tentavam apagar `Company`
+antes de `CompanyStatusHistory`; a restricao de chave estrangeira interrompia
+o `afterAll` antes de `app.close()`, deixando Nest, Redis e filas abertos. Os
+teardowns agora apagam somente o historico das empresas ficticias da propria
+suite e cinco deles usam `try/finally` para sempre fechar o app, sem suprimir
+erros de limpeza.
+
+Tambem foram atualizados dois contratos de teste que estavam atrasados: o
+fechamento automatico de fatura agora prova idempotencia chamando o scheduler
+pela segunda vez, em vez de enviar o antigo payload `issueDate` para a rota
+manual por empresa; e as respostas de configuracao esperam
+`pickupAssignmentTimeoutMinutes`. Nenhuma regra, rota, schema ou codigo de
+producao foi alterado nesse reparo.
+
+Validacao final no ambiente descartavel: 25 suites E2E e 230 testes passaram em
+37,555 segundos, e o processo encerrou normalmente. Proximo passo concreto:
+commit/push do reparo de testes, acompanhar o novo CI e confirmar o deploy da
+API no painel do Render. O OAuth continua proibido para loja real ate a rotacao
+dos dois segredos expostos e a aprovacao do cadastro pelo aiqfome.

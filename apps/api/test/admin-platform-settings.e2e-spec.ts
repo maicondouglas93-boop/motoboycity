@@ -79,6 +79,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: null,
+      pickupAssignmentTimeoutMinutes: null,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
@@ -105,6 +106,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
+      pickupAssignmentTimeoutMinutes: null,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
@@ -139,6 +141,7 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
+      pickupAssignmentTimeoutMinutes: null,
       returnProximityRadiusMeters: 150,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,

@@ -97,11 +97,23 @@ describe('DeliveriesController (e2e)', () => {
     await request(server)
       .put('/company/address')
       .set('Authorization', `Bearer ${companyAToken}`)
-      .send({ street: 'Rua da Loja A', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+      .send({
+        street: 'Rua da Loja A',
+        number: '100',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+      });
     await request(server)
       .put('/company/address')
       .set('Authorization', `Bearer ${companyBToken}`)
-      .send({ street: 'Rua da Loja B', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+      .send({
+        street: 'Rua da Loja B',
+        number: '100',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+      });
     // Empresa C fica sem endereço de propósito, pra testar o erro.
 
     await request(server).post('/auth/register/driver').send({
@@ -115,7 +127,9 @@ describe('DeliveriesController (e2e)', () => {
       hasCnpj: false,
       password,
     });
-    const driverLogin = await request(server).post('/auth/login').send({ email: driverEmail, password });
+    const driverLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: driverEmail, password });
     driverToken = driverLogin.body.accessToken;
 
     const serviceTypeResponse = await request(server)
@@ -136,25 +150,29 @@ describe('DeliveriesController (e2e)', () => {
   });
 
   afterAll(async () => {
-    await religarTaxas();
-    await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.delivery.deleteMany({ where: { serviceTypeId } });
-    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
-    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+    try {
+      await religarTaxas();
+      await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+      await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+      await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
-    for (const document of [companyADocument, companyBDocument, companyCDocument]) {
-      await prisma.companyAddress.deleteMany({ where: { company: { document } } });
-      await prisma.companyTeamMember.deleteMany({ where: { company: { document } } });
-      await prisma.company.deleteMany({ where: { document } });
+      for (const document of [companyADocument, companyBDocument, companyCDocument]) {
+        await prisma.companyAddress.deleteMany({ where: { company: { document } } });
+        await prisma.companyStatusHistory.deleteMany({ where: { company: { document } } });
+        await prisma.companyTeamMember.deleteMany({ where: { company: { document } } });
+        await prisma.company.deleteMany({ where: { document } });
+      }
+      for (const email of [companyAEmail, companyBEmail, companyCEmail]) {
+        await prisma.user.deleteMany({ where: { email } });
+      }
+      await prisma.driver.deleteMany({ where: { user: { email: driverEmail } } });
+      await prisma.user.deleteMany({ where: { email: driverEmail } });
+    } finally {
+      await app.close();
     }
-    for (const email of [companyAEmail, companyBEmail, companyCEmail]) {
-      await prisma.user.deleteMany({ where: { email } });
-    }
-    await prisma.driver.deleteMany({ where: { user: { email: driverEmail } } });
-    await prisma.user.deleteMany({ where: { email: driverEmail } });
-    await app.close();
   });
 
   it('rejeita criação sem token com 401', async () => {

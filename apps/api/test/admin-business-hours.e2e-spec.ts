@@ -72,6 +72,9 @@ describe('AdminBusinessHoursController (e2e)', () => {
       }
 
       await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.companyStatusHistory.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
       await prisma.companyTeamMember.deleteMany({
         where: { company: { document: companyDocument } },
       });

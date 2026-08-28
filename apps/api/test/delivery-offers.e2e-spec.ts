@@ -179,30 +179,35 @@ describe('DeliveryOffersController (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.delivery.deleteMany({ where: { serviceTypeId } });
-    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
-    await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
-    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+    try {
+      await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+      await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+      await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
+      await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
-    await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({
-      where: { company: { document: companyDocument } },
-    });
-    await prisma.company.deleteMany({ where: { document: companyDocument } });
-    await prisma.user.deleteMany({ where: { email: companyEmail } });
+      await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.companyStatusHistory.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.companyTeamMember.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.company.deleteMany({ where: { document: companyDocument } });
+      await prisma.user.deleteMany({ where: { email: companyEmail } });
 
-    await prisma.driverPresenceLog.deleteMany({
-      where: { driver: { user: { email: { in: [driverEmail, otherDriverEmail] } } } },
-    });
-    await prisma.driver.deleteMany({
-      where: { user: { email: { in: [driverEmail, otherDriverEmail] } } },
-    });
-    await prisma.user.deleteMany({ where: { email: { in: [driverEmail, otherDriverEmail] } } });
-
-    await app.close();
+      await prisma.driverPresenceLog.deleteMany({
+        where: { driver: { user: { email: { in: [driverEmail, otherDriverEmail] } } } },
+      });
+      await prisma.driver.deleteMany({
+        where: { user: { email: { in: [driverEmail, otherDriverEmail] } } },
+      });
+      await prisma.user.deleteMany({ where: { email: { in: [driverEmail, otherDriverEmail] } } });
+    } finally {
+      await app.close();
+    }
   });
 
   it('rejeita sem token com 401', async () => {

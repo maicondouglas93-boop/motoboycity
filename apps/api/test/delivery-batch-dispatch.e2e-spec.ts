@@ -169,25 +169,35 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
     await request(server)
       .patch(`/admin/companies/${companyRegister.body.companyId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`);
-    const companyLogin = await request(server).post('/auth/login').send({ email: companyEmail, password });
+    const companyLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: companyEmail, password });
     companyToken = companyLogin.body.accessToken;
     await request(server)
       .put('/company/address')
       .set('Authorization', `Bearer ${companyToken}`)
-      .send({ street: 'Rua da Loja', number: '100', city: 'Lajinha', state: 'MG', zip: '36930000' });
+      .send({
+        street: 'Rua da Loja',
+        number: '100',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+      });
 
     async function registerApproveDriver(email: string, cpf: string) {
-      const register = await request(server).post('/auth/register/driver').send({
-        name: `Motoboy Lote E2E ${email}`,
-        email,
-        phone: '33999887799',
-        cpf,
-        birthDate: '1990-05-20',
-        pixKey: email,
-        pixKeyType: 'EMAIL',
-        hasCnpj: false,
-        password,
-      });
+      const register = await request(server)
+        .post('/auth/register/driver')
+        .send({
+          name: `Motoboy Lote E2E ${email}`,
+          email,
+          phone: '33999887799',
+          cpf,
+          birthDate: '1990-05-20',
+          pixKey: email,
+          pixKeyType: 'EMAIL',
+          hasCnpj: false,
+          password,
+        });
       const registeredDriverId = register.body.driverId as string;
       await request(server)
         .patch(`/admin/drivers/${registeredDriverId}/approve`)
@@ -236,30 +246,39 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
   });
 
   afterAll(async () => {
-    await religarTaxas();
-    await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.delivery.deleteMany({ where: { serviceTypeId } });
-    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
-    await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
-    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+    try {
+      await religarTaxas();
+      await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+      await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+      await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
+      await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
-    await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.company.deleteMany({ where: { document: companyDocument } });
-    await prisma.user.deleteMany({ where: { email: companyEmail } });
+      await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.companyStatusHistory.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.companyTeamMember.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.company.deleteMany({ where: { document: companyDocument } });
+      await prisma.user.deleteMany({ where: { email: companyEmail } });
 
-    await prisma.driverServiceType.deleteMany({
-      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
-    });
-    await prisma.driverPresenceLog.deleteMany({
-      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
-    });
-    await prisma.driver.deleteMany({ where: { user: { email: { in: [driver1Email, driver2Email] } } } });
-    await prisma.user.deleteMany({ where: { email: { in: [driver1Email, driver2Email] } } });
-
-    await app.close();
+      await prisma.driverServiceType.deleteMany({
+        where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+      });
+      await prisma.driverPresenceLog.deleteMany({
+        where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+      });
+      await prisma.driver.deleteMany({
+        where: { user: { email: { in: [driver1Email, driver2Email] } } },
+      });
+      await prisma.user.deleteMany({ where: { email: { in: [driver1Email, driver2Email] } } });
+    } finally {
+      await app.close();
+    }
   });
 
   beforeEach(() => {
@@ -293,7 +312,8 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
 
     it('rejeita item de lote com scheduledAt (400)', async () => {
       const payload = batchPayload(serviceTypeId, 2);
-      (payload.deliveries[0] as Record<string, unknown>)['scheduledAt'] = '2030-01-01T10:00:00.000Z';
+      (payload.deliveries[0] as Record<string, unknown>)['scheduledAt'] =
+        '2030-01-01T10:00:00.000Z';
 
       await request(app.getHttpServer())
         .post('/deliveries/batch')
@@ -393,7 +413,9 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
       const acceptStatus = acceptOutcome.status === 'fulfilled' ? acceptOutcome.value.status : null;
       const cancelStatus = cancelOutcome.status === 'fulfilled' ? cancelOutcome.value.status : null;
 
-      const finalDeliveries = await prisma.delivery.findMany({ where: { id: { in: deliveryIds } } });
+      const finalDeliveries = await prisma.delivery.findMany({
+        where: { id: { in: deliveryIds } },
+      });
       const finalOffers = await prisma.deliveryOffer.findMany({
         where: { deliveryId: { in: deliveryIds } },
       });
@@ -433,7 +455,9 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
       expect(expireOutcome.status).toBe('fulfilled');
       const acceptStatus = acceptOutcome.status === 'fulfilled' ? acceptOutcome.value.status : null;
 
-      const finalDeliveries = await prisma.delivery.findMany({ where: { id: { in: deliveryIds } } });
+      const finalDeliveries = await prisma.delivery.findMany({
+        where: { id: { in: deliveryIds } },
+      });
       const finalOffers = await prisma.deliveryOffer.findMany({
         where: { deliveryId: { in: deliveryIds } },
       });
@@ -443,7 +467,9 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
         expect(finalOffers.every((item) => item.response === 'ACCEPTED')).toBe(true);
       } else {
         expect(acceptStatus).toBe(409);
-        expect(finalDeliveries.every((delivery) => delivery.status === 'AWAITING_DRIVER')).toBe(true);
+        expect(finalDeliveries.every((delivery) => delivery.status === 'AWAITING_DRIVER')).toBe(
+          true,
+        );
         expect(finalOffers.every((item) => item.response === 'EXPIRED')).toBe(true);
       }
 
@@ -492,7 +518,9 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
         .set('Authorization', `Bearer ${driver2Token}`)
         .expect(200);
 
-      const finalDeliveries = await prisma.delivery.findMany({ where: { id: { in: deliveryIds } } });
+      const finalDeliveries = await prisma.delivery.findMany({
+        where: { id: { in: deliveryIds } },
+      });
       expect(finalDeliveries.every((delivery) => delivery.status === 'AWAITING_DRIVER')).toBe(true);
       expect(await pendingOffersFor(deliveryIds)).toHaveLength(0);
 
@@ -518,7 +546,9 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
         expect.objectContaining({ batchId, deliveryIds: expect.arrayContaining(deliveryIds) }),
       );
 
-      const finalDeliveries = await prisma.delivery.findMany({ where: { id: { in: deliveryIds } } });
+      const finalDeliveries = await prisma.delivery.findMany({
+        where: { id: { in: deliveryIds } },
+      });
       expect(finalDeliveries.every((delivery) => delivery.status === 'ACCEPTED')).toBe(true);
       expect(finalDeliveries.every((delivery) => delivery.driverId === driver1Id)).toBe(true);
 

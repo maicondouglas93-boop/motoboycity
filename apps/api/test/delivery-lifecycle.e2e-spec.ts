@@ -272,54 +272,59 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   afterAll(async () => {
-    await religarTaxas();
-    await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
-    await prisma.delivery.deleteMany({ where: { serviceTypeId } });
-    await prisma.invoiceStatusHistory.deleteMany({
-      where: { invoice: { company: { document: companyDocument } } },
-    });
-    await prisma.invoice.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.withdrawalRequestStatusHistory.deleteMany({
-      where: {
-        withdrawalRequest: {
-          wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+    try {
+      await religarTaxas();
+      await prisma.deliveryOffer.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryStatusHistory.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.deliveryAddress.deleteMany({ where: { delivery: { serviceTypeId } } });
+      await prisma.delivery.deleteMany({ where: { serviceTypeId } });
+      await prisma.invoiceStatusHistory.deleteMany({
+        where: { invoice: { company: { document: companyDocument } } },
+      });
+      await prisma.invoice.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.withdrawalRequestStatusHistory.deleteMany({
+        where: {
+          withdrawalRequest: {
+            wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+          },
         },
-      },
-    });
-    await prisma.withdrawalRequest.deleteMany({
-      where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
-    });
-    await prisma.walletTransaction.deleteMany({
-      where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
-    });
-    await prisma.wallet.deleteMany({
-      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
-    });
-    await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
-    await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
-    await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
+      });
+      await prisma.withdrawalRequest.deleteMany({
+        where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
+      });
+      await prisma.walletTransaction.deleteMany({
+        where: { wallet: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } } },
+      });
+      await prisma.wallet.deleteMany({
+        where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+      });
+      await prisma.pricingTable.deleteMany({ where: { serviceTypeId } });
+      await prisma.driverServiceType.deleteMany({ where: { serviceTypeId } });
+      await prisma.serviceType.deleteMany({ where: { code: serviceTypeCode } });
 
-    await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
-    await prisma.companyTeamMember.deleteMany({
-      where: { company: { document: companyDocument } },
-    });
-    await prisma.company.deleteMany({ where: { document: companyDocument } });
-    await prisma.user.deleteMany({ where: { email: companyEmail } });
+      await prisma.companyAddress.deleteMany({ where: { company: { document: companyDocument } } });
+      await prisma.companyStatusHistory.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.companyTeamMember.deleteMany({
+        where: { company: { document: companyDocument } },
+      });
+      await prisma.company.deleteMany({ where: { document: companyDocument } });
+      await prisma.user.deleteMany({ where: { email: companyEmail } });
 
-    await prisma.driverServiceType.deleteMany({
-      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
-    });
-    await prisma.driverPresenceLog.deleteMany({
-      where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
-    });
-    await prisma.driver.deleteMany({
-      where: { user: { email: { in: [driver1Email, driver2Email] } } },
-    });
-    await prisma.user.deleteMany({ where: { email: { in: [driver1Email, driver2Email] } } });
-
-    await app.close();
+      await prisma.driverServiceType.deleteMany({
+        where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+      });
+      await prisma.driverPresenceLog.deleteMany({
+        where: { driver: { user: { email: { in: [driver1Email, driver2Email] } } } },
+      });
+      await prisma.driver.deleteMany({
+        where: { user: { email: { in: [driver1Email, driver2Email] } } },
+      });
+      await prisma.user.deleteMany({ where: { email: { in: [driver1Email, driver2Email] } } });
+    } finally {
+      await app.close();
+    }
   });
 
   beforeEach(() => {
@@ -617,11 +622,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       );
       const closingDate = companyInvoice!.issueDate.slice(0, 10);
 
-      await request(app.getHttpServer())
-        .post('/admin/financial/invoices/close')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ issueDate: closingDate })
-        .expect(201, []);
+      await expect(invoiceService.closeScheduledInvoices(financialMonday)).resolves.toEqual([]);
 
       const companyInvoicesForAdmin = await request(app.getHttpServer())
         .get(`/admin/financial/invoices?companyId=${created.body.companyId}`)
@@ -665,7 +666,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       expect(paidInvoice.body.statusHistory[0]).toEqual(
         expect.objectContaining({
           changedBy: null,
-          note: 'Fechamento automático semanal de 1 pedido(s).',
+          note: 'Fechamento automatico semanal de 1 pedido(s).',
         }),
       );
 

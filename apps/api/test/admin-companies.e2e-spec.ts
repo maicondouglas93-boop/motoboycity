@@ -64,15 +64,25 @@ describe('AdminCompaniesController (e2e)', () => {
   });
 
   afterAll(async () => {
-    const cleanupEmails = [testEmail, adminCreatedEmail, invalidConfigEmail];
-    await prisma.companyTeamMember.deleteMany({
-      where: { user: { email: { in: cleanupEmails } } },
-    });
-    await prisma.company.deleteMany({
-      where: { document: { in: [testDocument, adminCreatedDocument, invalidConfigDocument] } },
-    });
-    await prisma.user.deleteMany({ where: { email: { in: cleanupEmails } } });
-    await app.close();
+    try {
+      const cleanupEmails = [testEmail, adminCreatedEmail, invalidConfigEmail];
+      await prisma.companyStatusHistory.deleteMany({
+        where: {
+          company: {
+            document: { in: [testDocument, adminCreatedDocument, invalidConfigDocument] },
+          },
+        },
+      });
+      await prisma.companyTeamMember.deleteMany({
+        where: { user: { email: { in: cleanupEmails } } },
+      });
+      await prisma.company.deleteMany({
+        where: { document: { in: [testDocument, adminCreatedDocument, invalidConfigDocument] } },
+      });
+      await prisma.user.deleteMany({ where: { email: { in: cleanupEmails } } });
+    } finally {
+      await app.close();
+    }
   });
 
   it('rejeita listagem sem token com 401', async () => {
