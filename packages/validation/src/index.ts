@@ -48,3 +48,4 @@ export * from './deliveries/mark-failed.schema';
 export * from './deliveries/return-to-queue.schema';
 export * from './deliveries/retroactive-marking.schema';
 export * from './tracking/tracking.schema';
+export * from './integrations/aiqfome.schema';

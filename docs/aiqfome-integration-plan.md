@@ -231,7 +231,7 @@ Usar a linha `provider=AIQFOME` já existente, com:
 - `config` validado por schema Zod, contendo somente dados não sensíveis:
   `aiqfomeStoreId`, nome da loja, versão `V2`, `serviceTypeId`, gatilho de
   dispatch, IDs dos webhooks, escopos, último evento e códigos de erro;
-- `credentialsRef` apontando para o cofre de segredos;
+- `credentialsRef` apontando para o registro cifrado separado;
 - `connectedAt` e `lastSyncAt` atualizados apenas depois de operações reais.
 
 Adicionar unicidade para uma integração aiqfome por empresa. Antes da migration,
@@ -239,12 +239,16 @@ consultar duplicidades existentes; não aplicar a constraint cegamente.
 
 ### Credenciais
 
-No cofre referenciado por `credentialsRef`, por loja:
+No `IntegrationCredential` referenciado por `credentialsRef`, por loja:
 
 - access token;
 - refresh token;
 - instante de expiração;
 - versão para rotação atômica.
+
+O payload é cifrado com AES-256-GCM e contexto vinculado ao ID da integração.
+A chave mestra de 32 bytes fica somente no ambiente da API. Banco, respostas e
+logs nunca recebem access token ou refresh token em texto puro.
 
 `client_id`, `client_secret` e redirect URI são configuração global do backend,
 nunca `NEXT_PUBLIC_*`. O segredo do webhook é gerado aleatoriamente; guardar
@@ -310,7 +314,7 @@ interface.
 
 ### Callbacks públicos
 
-- `GET /integrations/aiqfome/oauth/callback` — valida `state` de uso único e
+- `GET /integrations/aiqfome/callback` — valida `state` de uso único e
   troca o `code` no servidor;
 - `POST /integrations/aiqfome/webhooks/:publicId` — recebe eventos V2.
 
@@ -552,6 +556,18 @@ teste no cofre e nenhuma loja real ativada.
 - tela real de conexão da empresa e monitor administrativo;
 - auditoria sem secrets.
 
+Estado em 2026-08-27: o recorte inicial implementa state opaco no Redis,
+callback, troca do code, validação de escopos, loja e CNPJ, persistência cifrada,
+consulta/desconexão pela empresa e a tela real do Company Web. Refresh atômico,
+cadastro de webhooks e monitor administrativo permanecem para o próximo recorte;
+nenhum pedido é importado ou despachado ainda.
+
+Cada tentativa OAuth recebe também um identificador persistido na integração.
+Desconectar ou iniciar outra tentativa invalida o callback anterior, e a gravação
+final usa update condicional na mesma transação das credenciais. Um erro ao
+reautorizar uma loja já conectada preserva a conexão válida anterior. A tela
+explicita que este recorte prepara apenas o vínculo e ainda não importa pedidos.
+
 ### Fase 3 — ingestão em modo sombra
 
 - webhook autenticado e fila inbound;
@@ -698,22 +714,28 @@ Rollback não apaga dados nem migration:
 - driver recebe oferta em primeiro e segundo plano;
 - piloto real sem duplicidade, pedido órfão ou divergência financeira.
 
-## Decisões pendentes do responsável
+## Decisões confirmadas e pendentes
 
-1. Aprovar `ready-order` como gatilho padrão ou preferir `read-order`.
-2. Aprovar o ator sistêmico para cancelamento aiqfome pós-aceite.
-3. Definir o que ocorre se o cancelamento chegar depois da coleta.
-4. Aprovar piloto somente PREPAID.
-5. Se pagamento offline entrar, definir custódia, troco, maquininha/Pix e
-   conciliação com a loja.
-6. Definir quem pode conectar/desconectar a integração pela empresa.
-7. Confirmar retenção do recebimento bruto e dos dados importados após
-   desligamento.
+Confirmado em 2026-08-27:
+
+1. `ready-order` é o gatilho padrão.
+2. O piloto aceita somente `PREPAID`; pagamentos offline ficam desabilitados.
+3. Somente `OWNER` ativo conecta ou desconecta a loja.
+4. `cancel-order` depois do aceite ou da coleta entra em revisão e não cancela
+   automaticamente a entrega local.
+5. Tokens por loja ficam cifrados no servidor e nunca são enviados ao browser.
+
+Ainda pendente de confirmação externa/operacional:
+
+1. rate limits, retries e disponibilidade do `ready-order` no tipo da loja de
+   teste;
+2. retenção do recebimento bruto e dos dados importados após desligamento;
+3. processo humano para concluir a revisão de cancelamentos pós-aceite/coleta.
 
 ## Próximo passo exato
 
-Executar a **Fase 0** antes de escrever código: cadastrar a aplicação de teste,
-obter uma loja de homologação e enviar ao time do aiqfome as perguntas sobre
-integração exclusivamente logística, gatilho `ready-order`, retries/rate limits
-e cancelamento. Com essas respostas confirmadas, registrar as decisões em
-`docs/business-rules.md` e só então fechar o schema da Fase 1.
+Antes de qualquer deploy, consultar duplicidades legadas em `integrations`,
+aplicar a migration em cópia de staging e configurar a chave mestra de cifra no
+Render. Em seguida, publicar API e Company Web, conectar somente a loja de teste
+e validar OAuth/CNPJ. Depois disso, implementar refresh atômico e webhooks em
+modo sombra, sem criar `Delivery` nem chamar motoboy.

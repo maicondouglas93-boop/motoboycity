@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ClipboardList, FileText, LogOut, UserRound, UsersRound, Wallet } from 'lucide-react';
+import {
+  ClipboardList,
+  FileText,
+  LogOut,
+  PlugZap,
+  UserRound,
+  UsersRound,
+  Wallet,
+} from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -29,6 +37,7 @@ const NAV_ITEMS = [
   { href: '/clientes', label: 'Clientes', icon: UsersRound },
   { href: '/relatorios', label: 'Relatórios', icon: FileText },
   { href: '/financeiro', label: 'Financeiro', icon: Wallet },
+  { href: '/integracoes', label: 'Integrações', icon: PlugZap },
 ];
 
 export function TopNav() {

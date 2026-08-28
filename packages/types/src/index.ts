@@ -12,3 +12,4 @@ export * from './operations.js';
 export * from './virtual-secretary.js';
 export * from './administrative-audit.js';
 export * from './region.js';
+export * from './integration.js';

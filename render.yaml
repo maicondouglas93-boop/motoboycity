@@ -121,6 +121,19 @@ services:
       - key: GROQ_TIMEOUT_MS
         value: '30000'
 
+      # OAuth aiqfome / ID Magalu. Os segredos sao preenchidos somente no
+      # painel; redirect e retorno da Company Web permanecem publicos e fixos.
+      - key: AIQFOME_CLIENT_ID
+        sync: false
+      - key: AIQFOME_CLIENT_SECRET
+        sync: false
+      - key: AIQFOME_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: AIQFOME_REDIRECT_URI
+        value: https://motoboycity-api.onrender.com/integrations/aiqfome/callback
+      - key: COMPANY_WEB_URL
+        value: https://motoboycity-company-web.vercel.app
+
       # --- segredos: preencher no painel do Render --------------------------
       #
       # Cada um destes desliga uma parte do produto se ficar vazio. Nenhum

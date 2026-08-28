@@ -8074,8 +8074,7 @@ outro `COLLECTED`; gerar APK e publicar somente quando solicitado.
 ## Atualizacao - 2026-08-27: release Android oficial pilot.8
 
 O card compacto de pedidos em andamento foi publicado no commit funcional
-`f18578a` e o Driver App foi promovido para `0.1.0-pilot.8`, com `versionCode`
-8. Antes do build passaram as 16 suites e 94 testes do aplicativo, typecheck,
+`f18578a` e o Driver App foi promovido para `0.1.0-pilot.8`, com `versionCode` 8. Antes do build passaram as 16 suites e 94 testes do aplicativo, typecheck,
 lint e `git diff --check`.
 
 O release foi compilado em uma worktree temporaria curta em `C:\m8`, com a
@@ -8479,3 +8478,98 @@ navegador estava conectado a sessao. O contato publico confirmado pelo usuario,
 `maicondouglas93@gmail.com`, aparece como link de e-mail nos dois documentos.
 Nao houve revisao por advogado nem deploy. Proximo passo concreto: obter revisao
 juridica e entao publicar as URLs para o cadastro no aiqfome.
+
+## Atualizacao - 2026-08-27: base OAuth da integracao aiqfome
+
+Foi implementado o primeiro recorte real da integracao aiqfome, ainda sem
+webhook, importacao de pedido ou dispatch. A Company Web ganhou a rota protegida
+`/integracoes` e o item correspondente na navegacao. A tela consulta o estado
+real da API, mostra as regras do piloto e permite ao `OWNER` conectar ou
+desconectar a loja; operadores podem visualizar, mas nao gerenciar o vinculo.
+
+A API agora expoe `GET /company/integrations/aiqfome`,
+`POST /company/integrations/aiqfome/connect`,
+`POST /company/integrations/aiqfome/disconnect` e o callback publico
+`GET /integrations/aiqfome/callback`. O connect gera `state` opaco de 256 bits,
+com TTL de dez minutos e consumo atomico no Redis, e monta a autorizacao por
+loja no ID Magalu. O callback troca o code somente no backend, valida os escopos
+de loja/pedidos, consulta `/api/v2/store` e `/store/:id/info`, exige que o CNPJ
+autorizado corresponda ao da empresa e nunca devolve tokens ao navegador.
+
+Access token e refresh token sao cifrados com AES-256-GCM em
+`IntegrationCredential`; o ID da integracao entra como contexto autenticado,
+impedindo mover o blob para outra loja. A chave mestra de 32 bytes em Base64
+fica em `AIQFOME_TOKEN_ENCRYPTION_KEY`. `client_id`, `client_secret`, redirect e
+chave de cifra permanecem exclusivamente no ambiente da API. O `.env` real nao
+foi lido, exibido nem alterado; apenas os `.env.example` receberam os nomes.
+
+A migration aditiva gerada pelo Prisma e
+`20260828011000_add_aiqfome_oauth_credentials`. `publicId` e opcional para linhas
+legadas e recebe UUID nas novas criacoes; `updatedAt` ganhou default seguro. A
+migration foi aplicada em PostgreSQL 17 descartavel depois de todas as 39
+migrations anteriores, com uma linha ficticia preexistente em `integrations`.
+Ela preservou a linha e criou a tabela cifrada. O container temporario foi
+encerrado e removido. Nenhuma migration foi executada no banco do `.env` ou em
+ambiente compartilhado.
+
+Decisoes registradas em `docs/business-rules.md`: `ready-order`, piloto somente
+`PREPAID`, gestao apenas por `OWNER`, cancelamento pos-aceite/coleta em revisao
+sem cancelamento automatico e tokens cifrados. O plano detalhado foi atualizado
+com o callback real e o estado das fases.
+
+Validacoes aprovadas: Prisma format/validate/generate; migration em banco vazio
+com dado legado; 3 suites focadas da API com 7 testes; suite completa da API com
+73 suites e 874 testes; suite completa do Company Web com 16 arquivos e 59
+testes; typecheck e lint dos oito workspaces; builds de producao da API e do
+Company Web com 22 paginas. O primeiro build web ficou sem rede para Google
+Fonts e foi repetido com acesso permitido, quando passou. `git diff --check`
+tambem foi aprovado.
+
+Limitacoes: refresh token atomico, cadastro/rotacao de webhooks, ingestao em
+modo sombra, monitor Admin, criacao de `Delivery`, dispatch e sincronizacao de
+status ainda nao existem. Antes de deploy compartilhado, gerar/configurar a
+chave de cifra no Render, consultar duplicidades reais em `integrations`,
+validar backup/restore e aplicar a migration em copia de staging. Depois,
+conectar somente a loja de teste e homologar OAuth/CNPJ. Nao houve commit, push
+ou deploy neste recorte.
+
+## Atualizacao - 2026-08-27: preflight final do OAuth aiqfome
+
+Antes do rollout, a revisao independente encontrou e o coordenador corrigiu
+tres riscos. A chave de cifra agora precisa ser Base64 canonica de exatamente
+32 bytes antes de a API permitir iniciar OAuth. Cada tentativa ganhou
+`Integration.oauthAttemptId`: desconectar ou iniciar outro vinculo invalida o
+callback anterior, e o callback usa update condicional na mesma transacao que
+grava a credencial. Cancelar uma reautorizacao de loja ja conectada preserva a
+conexao anterior em vez de muda-la para `ERROR`.
+
+A Company Web deixou de prometer uma importacao ainda inexistente. A tela
+informa que esta fase conecta somente a loja de teste, que nenhum pedido e
+importado e que nenhum motoboy e chamado automaticamente. O aviso de callback
+conectado so aparece quando o GET autenticado confirma `CONNECTED`. O callback
+aceita parametros adicionais do provedor sem deixar de validar code/state.
+
+A migration final e
+`20260828011000_add_aiqfome_oauth_credentials`, gerada pelo Prisma a partir de
+uma restauracao do banco. Ela adiciona `oauthAttemptId`, `publicId`, `updatedAt`,
+a tabela cifrada e os indices/constraints; nao toca em `Delivery`, precos ou
+dispatch. `render.yaml` agora declara os tres segredos aiqfome como `sync:
+false` e fixa apenas as URLs publicas de callback e Company Web.
+
+Preflight de dados concluido antes do push: backup logico de producao
+`motoboycity-postgres-20260827-220338.dump`, 0,38 MB, SHA-256
+`36180D4818D6B92137E14E5D0A78688E805DEFAEBEFC2C42C5B0E7537D00B878`. O dump
+foi restaurado em PostgreSQL 17 descartavel, continha 33 usuarios, 94 entregas
+e zero integracoes, portanto zero grupos duplicados em `(companyId, provider)`.
+A migration final foi aplicada nessa copia: tabela e coluna novas confirmadas,
+33 usuarios e 94 entregas preservados. O container foi encerrado e removido;
+nenhuma migration foi executada diretamente em producao nesta verificacao.
+
+Validacoes finais aprovadas ate este registro: Prisma validate/generate; 4
+suites focadas da API com 15 testes; suite completa da API com 74 suites e 882
+testes; suite completa da Company Web com 16 arquivos e 60 testes; typecheck e
+lint dos oito workspaces; builds de producao da API e Company Web com 22
+paginas. A disputa callback/desconexao tambem foi coberta e aprovada. A chave
+foi configurada manualmente pelo responsavel no Render com `Save only`; nenhum
+valor foi lido ou registrado. Neste ponto ainda nao houve commit, push, deploy
+ou OAuth real com a loja de teste.

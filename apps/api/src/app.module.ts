@@ -37,6 +37,7 @@ import { ProfileModule } from './profile/profile.module';
 import { AdminAuditModule } from './admin/audit/admin-audit.module';
 import { AdminRegionsModule } from './admin/regions/admin-regions.module';
 import { RequestPerformanceInterceptor } from './common/request-performance.interceptor';
+import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
 
 @Module({
   imports: [
@@ -92,6 +93,7 @@ import { RequestPerformanceInterceptor } from './common/request-performance.inte
     TrackingModule,
     PushModule,
     ProfileModule,
+    AiqfomeModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

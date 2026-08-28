@@ -1433,20 +1433,46 @@ model SurchargeSchedule {
 /// REFERÊNCIA a um cofre de segredos externo, nunca o token em si.
 model Integration {
   id             String              @id @default(uuid())
+  publicId       String?             @unique @default(uuid())
   companyId      String?
   provider       IntegrationProvider
   status         IntegrationStatus   @default(DISCONNECTED)
   config         Json?
   credentialsRef String?
+  oauthAttemptId String?
   connectedAt    DateTime?
   lastSyncAt     DateTime?
 
-  company Company? @relation(fields: [companyId], references: [id])
+  company    Company?               @relation(fields: [companyId], references: [id])
+  credential IntegrationCredential?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
+  @@unique([companyId, provider])
   @@index([companyId])
+  @@index([provider, status])
   @@map("integrations")
+}
+
+/// Tokens OAuth por loja. O payload e cifrado com AES-256-GCM no backend;
+/// nenhuma credencial em texto puro e persistida ou devolvida ao navegador.
+model IntegrationCredential {
+  id               String   @id @default(uuid())
+  integrationId    String   @unique
+  encryptedPayload String   @db.Text
+  iv               String   @db.VarChar(24)
+  authTag          String   @db.VarChar(24)
+  keyVersion       Int      @default(1)
+  expiresAt        DateTime
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("integration_credentials")
 }
 
 /// Notificação persistida (independente do canal de envio). O disparo

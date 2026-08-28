@@ -263,6 +263,21 @@ real.
 Pedidos vêm tanto de criação manual (company-web) quanto do webhook do
 Aiqfome, em paralelo — nenhum bloqueia o outro.
 
+## Piloto da integração Aiqfome
+
+Decisões confirmadas em 2026-08-27:
+
+- o gatilho padrão de importação e despacho é o evento `ready-order`;
+- o piloto aceita somente pedidos pagos online (`PREPAID`);
+- somente um membro ativo com papel `OWNER` pode conectar ou desconectar a
+  loja;
+- cancelamento externo depois do aceite não cancela automaticamente a entrega:
+  ele entra em revisão operacional;
+- access token e refresh token são armazenados criptografados no servidor e
+  nunca retornam para o navegador;
+- pedidos manuais continuam funcionando em paralelo e nenhuma rota AiqEntrega
+  deve ser usada.
+
 ## Arquitetura de sessão/token
 
 Revisitada em 2026-08-09 e mantida como está, deliberadamente: JWT em
