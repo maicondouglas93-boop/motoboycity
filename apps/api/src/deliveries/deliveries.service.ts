@@ -33,9 +33,11 @@ import type {
 import { Prisma } from '@prisma/client';
 import type { Delivery, DeliveryStatus, User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
+import { haversineDistanceMeters } from '../common/haversine';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
-import { PricingService } from '../pricing/pricing.service';
+import { ReturnNotSupportedError } from '../pricing/pricing-calculator';
+import { PricingService, type PricingQuoteInput } from '../pricing/pricing.service';
 import {
   GoogleMapsNotConfiguredError,
   type ReverseGeocodedAddress,
@@ -52,6 +54,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 import { deliveryActivityMessage } from '../common/status-labels';
 import { checkBusinessHours } from './business-hours';
+import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 const ACTIVE_OPERATION_STATUSES: DeliveryStatus[] = [
@@ -84,6 +87,12 @@ export interface DeliveryOperationsRecentWindow {
   changedSince?: Date;
   /** `null` remove o limite por quantidade; `undefined` preserva o padrao 20. */
   limit?: number | null;
+}
+
+interface IntegrationCreationMetadata {
+  integrationId: string;
+  externalOrderId: string;
+  historyNote: string;
 }
 
 const OPERATIONAL_DELIVERY_INCLUDE = Prisma.validator<Prisma.DeliveryInclude>()({
@@ -195,6 +204,19 @@ interface DeferredDestinationPricing {
   lng: number;
 }
 
+interface FailureReturnPricing {
+  totalValue: number;
+  driverValue: number;
+  platformValue: number;
+  returnValue: number | null;
+}
+
+interface ProximityPayload {
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
+}
+
 export interface AdminDeliverySearchSummary {
   total: number;
   items: Array<{
@@ -223,6 +245,7 @@ export class DeliveriesService {
     private readonly financeLedgerService: FinanceLedgerService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly integrationOutbox: IntegrationOutboxRecorder,
   ) {}
 
   async create(user: User, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {
@@ -263,6 +286,51 @@ export class DeliveriesService {
     }
 
     return this.createForResolvedCompany(admin, company, payload);
+  }
+
+  /**
+   * Entrada interna para conectores. Reaproveita exatamente o mesmo calculo
+   * de rota, preco, retorno e agendamento dos pedidos manuais, mas deixa o
+   * autor humano nulo no historico e grava a identidade externa atomica.
+   */
+  async createFromIntegration(
+    companyId: string,
+    integrationId: string,
+    externalOrderId: string,
+    payload: CreateDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, status: true, regionId: true },
+    });
+    if (!company || company.status !== 'ACTIVE') {
+      throw new ConflictException('A empresa da integracao nao esta ativa.');
+    }
+
+    const owner = await this.prisma.companyTeamMember.findFirst({
+      where: { companyId, role: 'OWNER', active: true },
+      orderBy: { joinedAt: 'asc' },
+      select: { user: true },
+    });
+    if (!owner) {
+      throw new ConflictException('A empresa da integracao nao possui responsavel ativo.');
+    }
+
+    return this.createForResolvedCompany(
+      owner.user,
+      company,
+      {
+        ...payload,
+        idempotencyKey: this.deterministicUuid(
+          `integration:${integrationId}:order:${externalOrderId}`,
+        ),
+      },
+      {
+        integrationId,
+        externalOrderId,
+        historyNote: 'Pedido importado automaticamente do aiqfome.',
+      },
+    );
   }
 
   /**
@@ -478,6 +546,7 @@ export class DeliveriesService {
     user: User,
     company: { id: string; status: string; regionId: string },
     payload: CreateDeliveryPayload,
+    integration?: IntegrationCreationMetadata,
   ): Promise<DeliveryDetail> {
     const idempotentDeliveryId = payload.idempotencyKey
       ? this.deterministicUuid(`delivery:${company.id}:${payload.idempotencyKey}`)
@@ -568,6 +637,10 @@ export class DeliveriesService {
             ...(idempotentDeliveryId && { id: idempotentDeliveryId }),
             companyId: company.id,
             companyCustomerId,
+            ...(integration && {
+              integrationId: integration.integrationId,
+              externalOrderId: integration.externalOrderId,
+            }),
             serviceTypeId: payload.serviceTypeId,
             status: initialStatus,
             scheduledAt: payload.scheduledAt ? new Date(payload.scheduledAt) : null,
@@ -629,7 +702,8 @@ export class DeliveriesService {
             deliveryId: delivery.id,
             fromStatus: null,
             toStatus: initialStatus,
-            changedByUserId: user.id,
+            changedByUserId: integration ? null : user.id,
+            note: integration?.historyNote,
           },
         });
 
@@ -1308,10 +1382,15 @@ export class DeliveriesService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of cancellable) {
-        await tx.delivery.update({
-          where: { id: item.id },
+        const updated = await tx.delivery.updateMany({
+          where: { id: item.id, status: item.status },
           data: { status: 'CANCELLED', statusChangedAt: new Date() },
         });
+        if (updated.count !== 1) {
+          throw new ConflictException(
+            'O pedido mudou enquanto era cancelado. Atualize a tela e tente novamente.',
+          );
+        }
         await tx.deliveryStatusHistory.create({
           data: {
             deliveryId: item.id,
@@ -1321,6 +1400,7 @@ export class DeliveriesService {
             note: reason?.trim() || null,
           },
         });
+        await this.integrationOutbox.record(tx, item.id, 'CANCELLED');
       }
     });
 
@@ -1373,6 +1453,71 @@ export class DeliveriesService {
     return this.detail(user, id);
   }
 
+  async cancelFromIntegration(
+    integrationId: string,
+    externalOrderId: string,
+    reason?: string,
+  ): Promise<'CANCELLED' | 'NOT_FOUND' | 'TERMINAL' | 'REVIEW'> {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { integrationId_externalOrderId: { integrationId, externalOrderId } },
+      include: {
+        company: { select: { tradeName: true } },
+        driver: { include: { user: { select: { name: true } } } },
+      },
+    });
+    if (!delivery) return 'NOT_FOUND';
+    if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
+    if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
+
+    const changedAt = new Date();
+    const changed = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.delivery.updateMany({
+        where: { id: delivery.id, status: delivery.status },
+        data: { status: 'CANCELLED', statusChangedAt: changedAt },
+      });
+      if (updated.count !== 1) return false;
+      await tx.deliveryStatusHistory.create({
+        data: {
+          deliveryId: delivery.id,
+          fromStatus: delivery.status,
+          toStatus: 'CANCELLED',
+          changedByUserId: null,
+          note: reason?.trim().slice(0, 500) || 'Cancelado no aiqfome.',
+        },
+      });
+      return true;
+    });
+    if (!changed) return 'REVIEW';
+
+    if (delivery.status === 'SCHEDULED') {
+      await this.dispatchService.cancelScheduledActivation(delivery.id);
+    } else {
+      await this.dispatchService.cancelPendingOfferForDelivery(delivery.id);
+    }
+    this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      companyId: delivery.companyId,
+      batchId: delivery.batchId,
+      status: 'CANCELLED',
+    });
+    this.realtimeGateway.emitAdminActivity({
+      type: 'DELIVERY_CANCELLED',
+      message: deliveryActivityMessage({
+        displayNumber: delivery.displayNumber,
+        companyName: delivery.company.tradeName,
+        status: 'CANCELLED',
+        driverName: delivery.driver?.user.name,
+      }),
+      deliveryId: delivery.id,
+      displayNumber: delivery.displayNumber,
+      companyId: delivery.companyId,
+      companyName: delivery.company.tradeName,
+      status: 'CANCELLED',
+    });
+    return 'CANCELLED';
+  }
+
   /** Ação única pro lote inteiro — "cheguei na empresa, peguei tudo".
    * Exige que todos os itens estejam ACCEPTED: divergência de status entre
    * itens do mesmo lote só começa a existir depois de coletado. */
@@ -1404,6 +1549,12 @@ export class DeliveriesService {
     }
 
     const settings = await this.platformSettingsService.get();
+    const collectionDistanceMeters = await this.assertNearCompanyAddress(
+      delivery.companyId,
+      settings.collectionProximityRadiusMeters,
+      payload ?? {},
+      'marcar a coleta',
+    );
     const occurredAt = this.resolveRetroactiveAt(
       payload?.occurredAt,
       // O piso e o aceite mais recente do lote: um item aceito depois nao pode
@@ -1412,6 +1563,17 @@ export class DeliveriesService {
       settings.minMinutesBeforeCollect,
     );
     const agora = new Date();
+    const collectionHistoryNote = [
+      occurredAt
+        ? `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
+        : null,
+      collectionDistanceMeters === null
+        ? null
+        : `Coleta validada a ${Math.round(collectionDistanceMeters)}m do endereço da empresa ` +
+          `(raio configurado: ${settings.collectionProximityRadiusMeters}m).`,
+    ]
+      .filter((note): note is string => note !== null)
+      .join(' ');
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -1435,12 +1597,11 @@ export class DeliveriesService {
               fromStatus: 'ACCEPTED',
               toStatus: 'COLLECTED',
               changedByUserId: user.id,
-              ...(occurredAt && {
-                occurredAt,
-                note: `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
-              }),
+              ...(occurredAt && { occurredAt }),
+              ...(collectionHistoryNote && { note: collectionHistoryNote }),
             },
           });
+          await this.integrationOutbox.record(tx, item.id, 'COLLECTED');
         }
       });
     } catch (error) {
@@ -1500,18 +1661,84 @@ export class DeliveriesService {
    * para a loja e a empresa paga a corrida normal — entao o pedido NAO fecha
    * aqui: ele vai para FAILED e so fecha quando o motoboy confirmar o retorno,
    * pelo mesmo `completeReturn` de uma entrega bem-sucedida com retorno. Isso
-   * faz o repasse sair pelo caminho ja existente, com o valor normal da
-   * corrida. Quando o destino era conhecido, esse valor ja veio congelado da
-   * criacao. Quando o destino seria definido pelo GPS, a posicao da tentativa
-   * de entrega congela agora distancia, cobranca e repasse.
+   * faz o repasse sair pelo caminho ja existente. A corrida normal continua
+   * congelada e a taxa de retorno vigente e acrescentada integralmente ao
+   * total e ao repasse do motoboy, sem comissao da plataforma. Quando o destino
+   * seria definido pelo GPS, a posicao da tentativa de entrega congela agora
+   * distancia, cobranca e repasse ja incluindo o retorno.
    *
-   * Nao ha desconto nem cobranca extra por causa do insucesso.
+   * Pedido que ja nasceu com retorno nao recebe a taxa novamente.
    */
+  private async quoteRequiredReturn(input: Omit<PricingQuoteInput, 'requiresReturn'>) {
+    try {
+      return await this.pricingService.quote({ ...input, requiresReturn: true });
+    } catch (error) {
+      if (error instanceof ReturnNotSupportedError) {
+        throw new ConflictException(
+          'O valor de retorno não está configurado para esta empresa e modalidade. Contate o suporte.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async calculateFailureReturnPricing(
+    delivery: Pick<
+      Delivery,
+      'companyId' | 'serviceTypeId' | 'distanceKm' | 'totalValue' | 'driverValue' | 'platformValue'
+    > & { company: { regionId: string } },
+    failedAt: Date,
+  ): Promise<FailureReturnPricing> {
+    if (
+      delivery.distanceKm === null ||
+      delivery.totalValue === null ||
+      delivery.driverValue === null ||
+      delivery.platformValue === null
+    ) {
+      throw new InternalServerErrorException(
+        'Não foi possível calcular o retorno: o pedido está sem os valores originais.',
+      );
+    }
+
+    const quote = await this.quoteRequiredReturn({
+      companyId: delivery.companyId,
+      regionId: delivery.company.regionId,
+      serviceTypeId: delivery.serviceTypeId,
+      distanceKm: Number(delivery.distanceKm),
+      at: failedAt,
+    });
+
+    const totalValueCents = Math.round(Number(delivery.totalValue) * 100);
+    const driverValueCents = Math.round(Number(delivery.driverValue) * 100);
+    const platformValueCents = Math.round(Number(delivery.platformValue) * 100);
+    const returnValueCents = Math.round(quote.returnValue * 100);
+    const moneyValues = [totalValueCents, driverValueCents, platformValueCents, returnValueCents];
+
+    if (moneyValues.some((value) => !Number.isSafeInteger(value)) || returnValueCents < 0) {
+      throw new InternalServerErrorException(
+        'Não foi possível calcular o retorno: a tabela de preços retornou um valor inválido.',
+      );
+    }
+    if (driverValueCents + platformValueCents !== totalValueCents) {
+      throw new InternalServerErrorException(
+        'Não foi possível calcular o retorno: os valores originais do pedido estão inconsistentes.',
+      );
+    }
+
+    return {
+      totalValue: (totalValueCents + returnValueCents) / 100,
+      driverValue: (driverValueCents + returnValueCents) / 100,
+      platformValue: platformValueCents / 100,
+      returnValue: returnValueCents > 0 ? returnValueCents / 100 : null,
+    };
+  }
+
   private async calculateDeferredDestinationPricing(
-    delivery: Pick<Delivery, 'companyId' | 'serviceTypeId' | 'requiresReturn'> & {
+    delivery: Pick<Delivery, 'companyId' | 'serviceTypeId'> & {
       company: { regionId: string };
     },
     payload: { lat?: number; lng?: number; accuracy?: number },
+    failedAt: Date,
   ): Promise<DeferredDestinationPricing> {
     if (payload.lat === undefined || payload.lng === undefined) {
       throw new ConflictException(
@@ -1549,12 +1776,12 @@ export class DeliveriesService {
       );
     }
 
-    const quote = await this.pricingService.quote({
+    const quote = await this.quoteRequiredReturn({
       companyId: delivery.companyId,
       regionId: delivery.company.regionId,
       serviceTypeId: delivery.serviceTypeId,
       distanceKm: distance.distanceKm,
-      requiresReturn: delivery.requiresReturn,
+      at: failedAt,
     });
 
     return {
@@ -1596,9 +1823,14 @@ export class DeliveriesService {
       throw new ConflictException('Só é possível registrar insucesso depois de coletar o pedido.');
     }
 
+    const failedAt = new Date();
     const deferredPricing = delivery.destinationKnownAtCreation
       ? null
-      : await this.calculateDeferredDestinationPricing(delivery, payload);
+      : await this.calculateDeferredDestinationPricing(delivery, payload, failedAt);
+    const failureReturnPricing =
+      delivery.destinationKnownAtCreation && !delivery.requiresReturn
+        ? await this.calculateFailureReturnPricing(delivery, failedAt)
+        : null;
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -1606,10 +1838,17 @@ export class DeliveriesService {
           where: { id, status: 'COLLECTED', driverId: driver.id },
           data: {
             status: 'FAILED',
-            statusChangedAt: new Date(),
-            failedAt: new Date(),
+            statusChangedAt: failedAt,
+            failedAt,
             failureReason: payload.reason,
             failureNote: payload.note ?? null,
+            requiresReturn: true,
+            ...(failureReturnPricing && {
+              totalValue: failureReturnPricing.totalValue,
+              driverValue: failureReturnPricing.driverValue,
+              platformValue: failureReturnPricing.platformValue,
+              returnValue: failureReturnPricing.returnValue,
+            }),
             ...(deferredPricing && {
               distanceKm: deferredPricing.distanceKm,
               totalValue: deferredPricing.totalValue,
@@ -1649,6 +1888,7 @@ export class DeliveriesService {
             note: this.describeFailure(payload),
           },
         });
+        await this.integrationOutbox.record(tx, id, 'FAILED');
       });
     } catch (error) {
       if (error instanceof ConflictException) {
@@ -1739,6 +1979,24 @@ export class DeliveriesService {
       delivery.statusChangedAt,
       settings.minMinutesBeforeDeliver,
     );
+    const deliveryDistanceMeters = delivery.destinationKnownAtCreation
+      ? await this.assertNearDeliveryAddress(
+          delivery.id,
+          settings.deliveryProximityRadiusMeters,
+          payload,
+        )
+      : null;
+    const deliveryHistoryNote = [
+      occurredAt
+        ? `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
+        : null,
+      deliveryDistanceMeters === null
+        ? null
+        : `Entrega validada a ${Math.round(deliveryDistanceMeters)}m do destino ` +
+          `(raio configurado: ${settings.deliveryProximityRadiusMeters}m).`,
+    ]
+      .filter((note): note is string => note !== null)
+      .join(' ');
 
     let distanceKm = delivery.distanceKm === null ? null : Number(delivery.distanceKm);
     let totalValue = delivery.totalValue === null ? null : Number(delivery.totalValue);
@@ -1856,12 +2114,11 @@ export class DeliveriesService {
             fromStatus: 'COLLECTED',
             toStatus: 'DELIVERED',
             changedByUserId: user.id,
-            ...(occurredAt && {
-              occurredAt,
-              note: `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`,
-            }),
+            ...(occurredAt && { occurredAt }),
+            ...(deliveryHistoryNote && { note: deliveryHistoryNote }),
           },
         });
+        await this.integrationOutbox.record(tx, delivery.id, 'DELIVERED');
 
         if (autoComplete) {
           await tx.deliveryStatusHistory.create({
@@ -1901,12 +2158,11 @@ export class DeliveriesService {
     return detail;
   }
 
-  /** Fecha os itens do lote que exigem retorno e já foram entregues.
-   * A confirmação do motoboy é suficiente; GPS não bloqueia a operação. */
+  /** Fecha os itens do lote que exigem retorno e já foram entregues. */
   async completeReturn(
     user: User,
     id: string,
-    _payload: CompleteReturnPayload,
+    payload: CompleteReturnPayload,
   ): Promise<DeliveryGroupResult> {
     const driver = await this.findDriverForUser(user);
     const delivery = await this.prisma.delivery.findUnique({ where: { id } });
@@ -1939,6 +2195,14 @@ export class DeliveriesService {
       throw new ConflictException('Não há entregas aguardando retorno neste pedido.');
     }
 
+    const settings = await this.platformSettingsService.get();
+    const returnDistanceMeters = await this.assertNearCompanyAddress(
+      delivery.companyId,
+      settings.returnProximityRadiusMeters,
+      payload,
+      'concluir o retorno',
+    );
+
     if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
       throw new InternalServerErrorException(
         'Não foi possível gerar o repasse: há uma entrega de retorno sem entregador ou valor definido.',
@@ -1961,7 +2225,11 @@ export class DeliveriesService {
               fromStatus: item.status,
               toStatus: 'COMPLETED',
               changedByUserId: user.id,
-              note: 'Retorno confirmado pelo motoboy.',
+              note:
+                returnDistanceMeters === null
+                  ? 'Retorno confirmado pelo motoboy.'
+                  : `Retorno validado a ${Math.round(returnDistanceMeters)}m do endereço da empresa ` +
+                    `(raio configurado: ${settings.returnProximityRadiusMeters}m).`,
             },
           });
           await this.financeLedgerService.creditDriverRepasse(tx, {
@@ -2294,6 +2562,96 @@ export class DeliveriesService {
       throw new ConflictException(describeRetroactiveProblem(problema));
     }
     return declaredAt;
+  }
+
+  private async assertNearCompanyAddress(
+    companyId: string,
+    radiusMeters: number | null,
+    payload: ProximityPayload,
+    actionLabel: string,
+  ): Promise<number | null> {
+    if (radiusMeters == null) return null;
+
+    const pickupAddress = await this.prisma.companyAddress.findFirst({
+      where: { companyId, isPrimary: true },
+      select: { lat: true, lng: true },
+    });
+    if (!pickupAddress || pickupAddress.lat === null || pickupAddress.lng === null) {
+      throw new ConflictException(
+        'O endereço principal da empresa não tem coordenadas para validar a proximidade. ' +
+          'Peça à empresa ou ao administrador para atualizar o endereço.',
+      );
+    }
+
+    return this.assertWithinConfiguredRadius({
+      payload,
+      radiusMeters,
+      target: { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) },
+      actionLabel,
+      targetLabel: 'endereço da empresa',
+    });
+  }
+
+  private async assertNearDeliveryAddress(
+    deliveryId: string,
+    radiusMeters: number | null,
+    payload: ProximityPayload,
+  ): Promise<number | null> {
+    if (radiusMeters == null) return null;
+
+    const dropoff = await this.prisma.deliveryAddress.findFirst({
+      where: { deliveryId, type: 'DROPOFF' },
+      select: { lat: true, lng: true },
+    });
+    if (!dropoff || dropoff.lat === null || dropoff.lng === null) {
+      throw new ConflictException(
+        'O endereço de entrega não tem coordenadas para validar a proximidade. ' +
+          'Peça à empresa ou ao administrador para corrigir o destino.',
+      );
+    }
+
+    return this.assertWithinConfiguredRadius({
+      payload,
+      radiusMeters,
+      target: { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
+      actionLabel: 'concluir a entrega',
+      targetLabel: 'endereço de entrega',
+    });
+  }
+
+  private assertWithinConfiguredRadius(input: {
+    payload: ProximityPayload;
+    radiusMeters: number;
+    target: { lat: number; lng: number };
+    actionLabel: string;
+    targetLabel: string;
+  }): number {
+    const { payload, radiusMeters, target, actionLabel, targetLabel } = input;
+    if (payload.lat === undefined || payload.lng === undefined) {
+      throw new ConflictException(
+        `É necessário obter sua localização atual para ${actionLabel}. Ative o GPS e tente novamente.`,
+      );
+    }
+    if (payload.accuracy === undefined) {
+      throw new ConflictException(
+        `Não foi possível validar a precisão do GPS para ${actionLabel}. Aguarde o sinal estabilizar e tente novamente.`,
+      );
+    }
+    if (payload.accuracy > radiusMeters) {
+      throw new ConflictException(
+        `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é maior que o raio aceito ` +
+          `(${radiusMeters}m). Aguarde o sinal melhorar e tente novamente.`,
+      );
+    }
+
+    const distanceMeters = haversineDistanceMeters({ lat: payload.lat, lng: payload.lng }, target);
+    if (distanceMeters > radiusMeters) {
+      throw new ConflictException(
+        `Você precisa estar a até ${radiusMeters}m do ${targetLabel} para ${actionLabel} ` +
+          `(está a ${Math.round(distanceMeters)}m).`,
+      );
+    }
+    return distanceMeters;
   }
 
   private async findDriverForUser(user: User) {

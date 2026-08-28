@@ -28,8 +28,8 @@ const adminPassword = process.env['ADMIN_SEED_PASSWORD'] ?? 'admin_dev_only_chan
 
 const pickupLat = -20.15;
 const pickupLng = -41.74;
-const nearPickup = { lat: -20.1501, lng: -41.7401 };
-const farFromPickup = { lat: -20.3, lng: -41.9 };
+const nearPickup = { lat: -20.1501, lng: -41.7401, accuracy: 10 };
+const farFromPickup = { lat: -20.3, lng: -41.9, accuracy: 10 };
 
 function dropoff(n: number) {
   return {
@@ -717,7 +717,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   describe('requiresReturn com endereço conhecido', () => {
-    it('deliver fica em DELIVERED; a confirmação do retorno fecha mesmo sem proximidade GPS', async () => {
+    it('deliver fica em DELIVERED; o retorno só fecha dentro do raio configurado', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
 
       const created = await request(app.getHttpServer())
@@ -744,10 +744,16 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .expect(200);
       expect(delivered.body.status).toBe('DELIVERED');
 
-      const completed = await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
         .send(farFromPickup)
+        .expect(409);
+
+      const completed = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(nearPickup)
         .expect(200);
       expect(completed.body.deliveries).toHaveLength(1);
       expect(completed.body.deliveries[0].status).toBe('COMPLETED');
@@ -756,7 +762,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
-        .send(nearPickup)
+        .send({})
         .expect(200);
       expect(
         await prisma.walletTransaction.count({
@@ -1041,7 +1047,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
 
-    it('não bloqueia o retorno por precisão GPS baixa', async () => {
+    it('bloqueia retorno com precisão ruim e aceita após o GPS estabilizar', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
 
       const criado = await request(app.getHttpServer())
@@ -1066,12 +1072,16 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({})
         .expect(200);
 
-      // No retorno, a confirmação do motoboy é soberana. O GPS permanece como
-      // dado de auditoria e não impede a operação.
-      const concluido = await request(app.getHttpServer())
+      await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
         .send({ ...nearPickup, accuracy: 500 })
+        .expect(409);
+
+      const concluido = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/complete-return`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(nearPickup)
         .expect(200);
       expect(concluido.body.deliveries[0].status).toBe('COMPLETED');
 
@@ -1080,7 +1090,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
   });
 
   describe('insucesso de entrega', () => {
-    it('coletou e nao entregou: volta para a loja, fecha COMPLETED e paga a corrida normal', async () => {
+    it('coletou e nao entregou: cobra o retorno uma vez e repassa integralmente ao motoboy', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');
 
       const created = await request(app.getHttpServer())
@@ -1090,7 +1100,11 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({ serviceTypeId, dropoffAddress: dropoff(1), requiresReturn: false })
         .expect(201);
       const deliveryId = created.body.id as string;
-      const valorCombinado = created.body.driverValue as number;
+      const valorOriginal = {
+        total: created.body.totalValue as number,
+        driver: created.body.driverValue as number,
+        platform: created.body.platformValue as number,
+      };
 
       const offer = await pendingOfferFor(deliveryId);
       await request(app.getHttpServer())
@@ -1117,18 +1131,29 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         .send({ reason: 'OTHER', lat: -20.1385, lng: -41.7415 })
         .expect(400);
 
-      const falhou = await request(app.getHttpServer())
-        .patch(`/deliveries/${deliveryId}/fail`)
-        .set('Authorization', `Bearer ${driver1Token}`)
-        .send({
-          reason: 'RECIPIENT_ABSENT',
-          note: 'Tocou a campainha tres vezes, ninguem atendeu.',
-          lat: -20.1385,
-          lng: -41.7415,
-          accuracy: 9,
-        })
-        .expect(200);
-      expect(falhou.body.status).toBe('FAILED');
+      const registrarInsucesso = () =>
+        request(app.getHttpServer())
+          .patch(`/deliveries/${deliveryId}/fail`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .send({
+            reason: 'RECIPIENT_ABSENT',
+            note: 'Tocou a campainha tres vezes, ninguem atendeu.',
+            lat: -20.1385,
+            lng: -41.7415,
+            accuracy: 9,
+          })
+          .expect(200);
+      const [falhou, repetido] = await Promise.all([registrarInsucesso(), registrarInsucesso()]);
+      for (const resposta of [falhou, repetido]) {
+        expect(resposta.body).toMatchObject({
+          status: 'FAILED',
+          requiresReturn: true,
+          returnValue: 3,
+          totalValue: valorOriginal.total + 3,
+          driverValue: valorOriginal.driver + 3,
+          platformValue: valorOriginal.platform,
+        });
+      }
 
       // Nada foi creditado ainda: o pedido nao fechou.
       const semCredito = await prisma.walletTransaction.count({
@@ -1136,20 +1161,20 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       });
       expect(semCredito).toBe(0);
 
-      // A confirmação do motoboy fecha o retorno mesmo sem proximidade GPS.
+      // A confirmação fecha somente depois de o motoboy voltar ao raio da loja.
       const fechado = await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
-        .send({ ...farFromPickup, accuracy: 8 })
+        .send(nearPickup)
         .expect(200);
       expect(fechado.body.deliveries[0].status).toBe('COMPLETED');
 
-      // A regra do negocio: a empresa paga a corrida normal, e o motoboy
-      // recebe o mesmo valor que receberia numa entrega bem-sucedida.
+      // A empresa paga a corrida original + retorno. O retorno inteiro vai
+      // para o motoboy e a parte da plataforma permanece congelada.
       const credito = await prisma.walletTransaction.findFirstOrThrow({
         where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
       });
-      expect(Number(credito.amount)).toBe(valorCombinado);
+      expect(Number(credito.amount)).toBe(valorOriginal.driver + 3);
 
       // A trilha registra o caminho real, nao um cancelamento.
       const detalhe = await request(app.getHttpServer())
@@ -1201,10 +1226,11 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         status: 'FAILED',
         driver: { id: driver1Id },
         distanceKm: 5,
-        totalValue: 12.5,
-        driverValue: 10,
+        requiresReturn: true,
+        totalValue: 15.5,
+        driverValue: 13,
         platformValue: 2.5,
-        returnValue: null,
+        returnValue: 3,
       });
 
       const dropoffAddress = await prisma.deliveryAddress.findFirstOrThrow({
@@ -1216,11 +1242,12 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       const completed = await request(app.getHttpServer())
         .patch(`/deliveries/${deliveryId}/complete-return`)
         .set('Authorization', `Bearer ${driver1Token}`)
+        .send(nearPickup)
         .expect(200);
       expect(completed.body.deliveries[0]).toMatchObject({
         id: deliveryId,
         status: 'COMPLETED',
-        driverValue: 10,
+        driverValue: 13,
       });
 
       // Repetir após uma resposta perdida devolve o resultado já aplicado.
@@ -1233,7 +1260,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
         where: { relatedDeliveryId: deliveryId, type: 'CREDIT_REPASSE' },
       });
       expect(credits).toHaveLength(1);
-      expect(Number(credits[0]!.amount)).toBe(10);
+      expect(Number(credits[0]!.amount)).toBe(13);
       expect(credits[0]!.idempotencyKey).toBe(`driver-repasse:${deliveryId}`);
       expect(
         await prisma.deliveryStatusHistory.count({
@@ -1861,6 +1888,63 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
 
       const finalFirst = await prisma.delivery.findUniqueOrThrow({ where: { id: firstId } });
       expect(finalFirst.status).toBe('COMPLETED');
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
+  describe('raios operacionais configurados', () => {
+    it('bloqueia coleta e entrega fora do raio e aceita dentro dele', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          collectionProximityRadiusMeters: 100,
+          deliveryProximityRadiusMeters: 100,
+        })
+        .expect(200);
+
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(99) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+      const dropoffFix = { lat: -20.14, lng: -41.73, accuracy: 10 };
+      await prisma.deliveryAddress.updateMany({
+        where: { deliveryId, type: 'DROPOFF' },
+        data: { lat: dropoffFix.lat, lng: dropoffFix.lng },
+      });
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(farFromPickup)
+        .expect(409);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(nearPickup)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(farFromPickup)
+        .expect(409);
+      const delivered = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(dropoffFix)
+        .expect(200);
+      expect(delivered.body.status).toBe('COMPLETED');
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });

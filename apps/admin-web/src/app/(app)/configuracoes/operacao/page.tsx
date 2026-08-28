@@ -221,6 +221,8 @@ export default function OperationSettingsPage() {
 
   const [timeoutInput, setTimeoutInput] = useState('');
   const [pickupTimeoutInput, setPickupTimeoutInput] = useState('');
+  const [aiqfomeDelayInput, setAiqfomeDelayInput] = useState('');
+  const [collectionRadiusInput, setCollectionRadiusInput] = useState('');
   const [radiusInput, setRadiusInput] = useState('');
   const [minCollectInput, setMinCollectInput] = useState('');
   const [minDeliverInput, setMinDeliverInput] = useState('');
@@ -243,6 +245,8 @@ export default function OperationSettingsPage() {
   function resetInputs() {
     setTimeoutInput('');
     setPickupTimeoutInput('');
+    setAiqfomeDelayInput('');
+    setCollectionRadiusInput('');
     setRadiusInput('');
     setMinCollectInput('');
     setMinDeliverInput('');
@@ -274,6 +278,8 @@ export default function OperationSettingsPage() {
   const hasChanges = [
     timeoutInput,
     pickupTimeoutInput,
+    aiqfomeDelayInput,
+    collectionRadiusInput,
     radiusInput,
     minCollectInput,
     minDeliverInput,
@@ -323,11 +329,23 @@ export default function OperationSettingsPage() {
       SLA_MIN_MINUTES,
       SLA_MAX_MINUTES,
     );
+    const aiqfomeDelay = parseField(
+      aiqfomeDelayInput,
+      'O preparo padrao do aiqfome',
+      SLA_MIN_MINUTES,
+      SLA_MAX_MINUTES,
+    );
     const radius = parseField(
       radiusInput,
       'O raio de retorno',
       RADIUS_MIN_METERS,
       RADIUS_MAX_METERS,
+    );
+    const collectionRadius = parseField(
+      collectionRadiusInput,
+      'O raio para marcar a coleta',
+      DELIVERY_RADIUS_MIN,
+      DELIVERY_RADIUS_MAX,
     );
     const minCollect = parseField(
       minCollectInput,
@@ -387,6 +405,8 @@ export default function OperationSettingsPage() {
     const error =
       timeout.error ??
       pickupTimeout.error ??
+      aiqfomeDelay.error ??
+      collectionRadius.error ??
       radius.error ??
       minCollect.error ??
       minDeliver.error ??
@@ -405,6 +425,8 @@ export default function OperationSettingsPage() {
     if (
       timeout.value === undefined &&
       pickupTimeout.value === undefined &&
+      aiqfomeDelay.value === undefined &&
+      collectionRadius.value === undefined &&
       radius.value === undefined &&
       minCollect.value === undefined &&
       minDeliver.value === undefined &&
@@ -424,6 +446,12 @@ export default function OperationSettingsPage() {
       ...(timeout.value !== undefined && { dispatchOfferTimeoutSeconds: timeout.value }),
       ...(pickupTimeout.value !== undefined && {
         pickupAssignmentTimeoutMinutes: pickupTimeout.value,
+      }),
+      ...(aiqfomeDelay.value !== undefined && {
+        aiqfomeDispatchDelayMinutes: aiqfomeDelay.value,
+      }),
+      ...(collectionRadius.value !== undefined && {
+        collectionProximityRadiusMeters: collectionRadius.value,
       }),
       ...(radius.value !== undefined && { returnProximityRadiusMeters: radius.value }),
       ...(minCollect.value !== undefined && { minMinutesBeforeCollect: minCollect.value }),
@@ -555,6 +583,38 @@ export default function OperationSettingsPage() {
                   description="Ao zerar antes da coleta, o pedido volta para a fila e toca para outro motoboy."
                 />
                 <SettingField
+                  id="aiqfome-delay"
+                  label="Preparo padrao dos pedidos aiqfome"
+                  placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
+                  unit="minutos"
+                  value={aiqfomeDelayInput}
+                  onValueChange={setAiqfomeDelayInput}
+                  currentValue={
+                    settings.aiqfomeDispatchDelayMinutes === null
+                      ? 'nao configurado'
+                      : `${settings.aiqfomeDispatchDelayMinutes} min`
+                  }
+                  estado={settings.aiqfomeDispatchDelayMinutes === null ? 'faltando' : 'definido'}
+                  description="Pedidos importados ficam agendados por este tempo antes de chamar um motoboy. A empresa pode sobrescrever o valor."
+                />
+                <SettingField
+                  id="collection-radius"
+                  label="Raio para marcar como coletado"
+                  placeholder={`${DELIVERY_RADIUS_MIN} a ${DELIVERY_RADIUS_MAX}`}
+                  unit="metros"
+                  value={collectionRadiusInput}
+                  onValueChange={setCollectionRadiusInput}
+                  currentValue={
+                    settings.collectionProximityRadiusMeters === null
+                      ? 'não configurado'
+                      : `${settings.collectionProximityRadiusMeters}m`
+                  }
+                  estado={
+                    settings.collectionProximityRadiusMeters === null ? 'faltando' : 'definido'
+                  }
+                  description="Exige GPS válido e proximidade do endereço principal da empresa para registrar a coleta."
+                />
+                <SettingField
                   id="return-radius"
                   label="Raio para concluir o retorno"
                   placeholder={`${RADIUS_MIN_METERS} a ${RADIUS_MAX_METERS}`}
@@ -567,7 +627,7 @@ export default function OperationSettingsPage() {
                       : `${settings.returnProximityRadiusMeters}m`
                   }
                   estado={settings.returnProximityRadiusMeters === null ? 'faltando' : 'definido'}
-                  description="Distância em linha reta até a coleta aceita pelo sistema como retorno concluído."
+                  description="Exige GPS válido e proximidade do endereço principal da empresa para concluir o retorno."
                 />
                 <SettingField
                   id="delivery-radius"
@@ -581,10 +641,8 @@ export default function OperationSettingsPage() {
                       ? 'não configurado'
                       : `${settings.deliveryProximityRadiusMeters}m`
                   }
-                  estado={
-                    settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'
-                  }
-                  description="Exige que o motoboy esteja próximo do destino. Pedidos sem coordenadas continuam sem conferência."
+                  estado={settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'}
+                  description="Exige GPS válido e proximidade do destino. Endereço sem coordenadas precisa ser corrigido antes da conclusão."
                 />
               </SettingsSection>
 
@@ -704,7 +762,9 @@ export default function OperationSettingsPage() {
                       ? 'sem limite'
                       : String(settings.maxConcurrentDeliveriesPerDriver)
                   }
-                  estado={settings.maxConcurrentDeliveriesPerDriver === null ? 'desligado' : 'definido'}
+                  estado={
+                    settings.maxConcurrentDeliveriesPerDriver === null ? 'desligado' : 'definido'
+                  }
                   description="Limita quantas entregas um motoboy pode manter em andamento ao mesmo tempo."
                 />
                 <SettingField
@@ -769,8 +829,36 @@ export default function OperationSettingsPage() {
                         settings.pickupAssignmentTimeoutMinutes === null ? 'faltando' : 'definido'
                       }
                       pendente={
-                        pickupTimeoutInput.trim()
-                          ? `${pickupTimeoutInput.trim()} min`
+                        pickupTimeoutInput.trim() ? `${pickupTimeoutInput.trim()} min` : undefined
+                      }
+                    />
+                    <CurrentValueRow
+                      label="Preparo aiqfome"
+                      value={
+                        settings.aiqfomeDispatchDelayMinutes === null
+                          ? 'Nao configurado'
+                          : `${settings.aiqfomeDispatchDelayMinutes} min`
+                      }
+                      estado={
+                        settings.aiqfomeDispatchDelayMinutes === null ? 'faltando' : 'definido'
+                      }
+                      pendente={
+                        aiqfomeDelayInput.trim() ? `${aiqfomeDelayInput.trim()} min` : undefined
+                      }
+                    />
+                    <CurrentValueRow
+                      label="Raio de coleta"
+                      value={
+                        settings.collectionProximityRadiusMeters === null
+                          ? 'Não configurado'
+                          : `${settings.collectionProximityRadiusMeters} metros`
+                      }
+                      estado={
+                        settings.collectionProximityRadiusMeters === null ? 'faltando' : 'definido'
+                      }
+                      pendente={
+                        collectionRadiusInput.trim()
+                          ? `${collectionRadiusInput.trim()} metros`
                           : undefined
                       }
                     />
@@ -797,7 +885,9 @@ export default function OperationSettingsPage() {
                         settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'
                       }
                       pendente={
-                        deliveryRadiusInput.trim() ? `${deliveryRadiusInput.trim()} metros` : undefined
+                        deliveryRadiusInput.trim()
+                          ? `${deliveryRadiusInput.trim()} metros`
+                          : undefined
                       }
                     />
                     <CurrentValueRow

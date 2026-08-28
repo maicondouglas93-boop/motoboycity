@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -26,7 +26,9 @@ import {
   type AiqfomeOauthState,
 } from './aiqfome.schemas';
 import type { AiqfomeOauthCallbackQuery } from '@motoboycity/validation';
+import type { UpdateAiqfomeSettingsPayload } from '@motoboycity/validation';
 import { AiqfomeTokenService } from './aiqfome-token.service';
+import { AiqfomeWebhookService } from './aiqfome-webhook.service';
 
 @Injectable()
 export class AiqfomeService {
@@ -37,6 +39,7 @@ export class AiqfomeService {
     private readonly credentials: AiqfomeCredentialsService,
     private readonly oauthState: AiqfomeOAuthStateService,
     private readonly tokenService: AiqfomeTokenService,
+    private readonly webhookService: AiqfomeWebhookService,
   ) {}
 
   async getForCompany(user: User): Promise<CompanyAiqfomeIntegration> {
@@ -47,15 +50,37 @@ export class AiqfomeService {
     });
     const storedConfig = parseAiqfomeIntegrationConfig(integration?.config);
     const missingCredential = integration?.status === 'CONNECTED' && !integration.credential;
+    const global = await this.prisma.platformSettings.findUnique({
+      where: { id: 'global' },
+      select: { aiqfomeDispatchDelayMinutes: true },
+    });
+    const effectiveDelay =
+      storedConfig.dispatchDelayMinutes ?? global?.aiqfomeDispatchDelayMinutes ?? null;
+    const status = missingCredential ? 'ERROR' : (integration?.status ?? 'DISCONNECTED');
 
     return {
       provider: 'AIQFOME',
-      status: missingCredential ? 'ERROR' : (integration?.status ?? 'DISCONNECTED'),
+      status,
       configured: readAiqfomeRuntimeConfig(this.config) !== null,
+      operationalReady:
+        status === 'CONNECTED' &&
+        storedConfig.serviceTypeId !== null &&
+        effectiveDelay !== null &&
+        storedConfig.webhook.status === 'ACTIVE',
       canManage: membership.role === 'OWNER',
       store: storedConfig.store,
-      dispatchTrigger: 'READY_ORDER',
-      acceptedPayment: 'PREPAID_ONLY',
+      dispatchTrigger: 'NEW_ORDER_DELAYED',
+      acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
+      serviceTypeId: storedConfig.serviceTypeId,
+      dispatchDelayMinutes: storedConfig.dispatchDelayMinutes,
+      effectiveDispatchDelayMinutes: effectiveDelay,
+      delaySource:
+        effectiveDelay === null
+          ? null
+          : storedConfig.dispatchDelayMinutes !== null
+            ? 'COMPANY'
+            : 'ADMIN',
+      webhookStatus: storedConfig.webhook.status,
       connectedAt: integration?.connectedAt?.toISOString() ?? null,
       lastSyncAt: integration?.lastSyncAt?.toISOString() ?? null,
       errorCode: missingCredential ? 'MISSING_CREDENTIAL' : storedConfig.errorCode,
@@ -125,11 +150,15 @@ export class AiqfomeService {
     const membership = await this.resolveOwnerMembership(user);
     const integration = await this.prisma.integration.findUnique({
       where: { companyId_provider: { companyId: membership.companyId, provider: 'AIQFOME' } },
-      select: { id: true },
+      select: { id: true, config: true, status: true },
     });
 
     if (!integration) return { disconnected: true };
 
+    const storedConfig = parseAiqfomeIntegrationConfig(integration.config);
+    if (integration.status === 'CONNECTED' && storedConfig.webhook.status === 'ACTIVE') {
+      await this.webhookService.deactivate(integration.id, storedConfig);
+    }
     await this.tokenService.runExclusive(integration.id, async () => {
       await this.prisma.$transaction([
         this.prisma.integrationCredential.deleteMany({ where: { integrationId: integration.id } }),
@@ -147,6 +176,79 @@ export class AiqfomeService {
       ]);
     });
     return { disconnected: true };
+  }
+
+  async updateSettings(
+    user: User,
+    payload: UpdateAiqfomeSettingsPayload,
+  ): Promise<CompanyAiqfomeIntegration> {
+    const membership = await this.resolveOwnerMembership(user);
+    const integration = await this.prisma.integration.findUnique({
+      where: { companyId_provider: { companyId: membership.companyId, provider: 'AIQFOME' } },
+      include: { credential: { select: { id: true } }, company: { select: { regionId: true } } },
+    });
+    if (!integration || integration.status !== 'CONNECTED' || !integration.credential) {
+      throw new ConflictException('Conecte uma loja aiqfome antes de configurar a importacao.');
+    }
+
+    const current = parseAiqfomeIntegrationConfig(integration.config);
+    const next: AiqfomeIntegrationConfig = {
+      ...current,
+      ...(payload.serviceTypeId !== undefined && { serviceTypeId: payload.serviceTypeId }),
+      ...(payload.dispatchDelayMinutes !== undefined && {
+        dispatchDelayMinutes: payload.dispatchDelayMinutes,
+      }),
+      errorCode: null,
+    };
+    if (next.serviceTypeId) {
+      const serviceType = await this.prisma.serviceType.findFirst({
+        where: { id: next.serviceTypeId, active: true },
+        select: { id: true },
+      });
+      if (!serviceType) throw new ConflictException('A modalidade selecionada nao esta ativa.');
+      const pricing = await this.prisma.pricingTable.findFirst({
+        where: {
+          regionId: integration.company!.regionId,
+          serviceTypeId: next.serviceTypeId,
+          active: true,
+          OR: [{ companyId: membership.companyId }, { companyId: null }],
+        },
+        select: { id: true },
+      });
+      if (!pricing) {
+        throw new ConflictException('Nao existe tabela de preco ativa para esta modalidade.');
+      }
+    }
+    const global = await this.prisma.platformSettings.findUnique({
+      where: { id: 'global' },
+      select: { aiqfomeDispatchDelayMinutes: true },
+    });
+    const effectiveDelay = next.dispatchDelayMinutes ?? global?.aiqfomeDispatchDelayMinutes ?? null;
+    try {
+      next.webhook =
+        next.serviceTypeId && effectiveDelay !== null
+          ? await this.webhookService.activate(integration.id, next)
+          : await this.webhookService.deactivate(integration.id, next);
+    } catch (error) {
+      const errorCode = safeCallbackErrorCode(error);
+      await this.prisma.integration.update({
+        where: { id: integration.id },
+        data: {
+          config: {
+            ...next,
+            webhook: { ...next.webhook, status: 'ERROR', updatedAt: new Date().toISOString() },
+            errorCode,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      throw error;
+    }
+
+    await this.prisma.integration.update({
+      where: { id: integration.id },
+      data: { config: next as Prisma.InputJsonValue, lastSyncAt: new Date() },
+    });
+    return this.getForCompany(user);
   }
 
   async handleCallback(query: AiqfomeOauthCallbackQuery): Promise<string> {
@@ -199,12 +301,38 @@ export class AiqfomeService {
         return this.callbackRedirect('error', 'STORE_DOCUMENT_MISMATCH');
       }
 
+      const previousConfig = parseAiqfomeIntegrationConfig(
+        (
+          await this.prisma.integration.findUnique({
+            where: { id: state.integrationId },
+            select: { config: true },
+          })
+        )?.config,
+      );
+      if (
+        previousConfig.webhook.status === 'ACTIVE' &&
+        previousConfig.store &&
+        previousConfig.store.id !== store.id
+      ) {
+        throw new AiqfomeProviderError('DISCONNECT_BEFORE_CHANGING_STORE');
+      }
+      const keepActiveWebhook =
+        previousConfig.webhook.status === 'ACTIVE' && previousConfig.store?.id === store.id;
       const integrationConfig: AiqfomeIntegrationConfig = {
-        version: 1,
-        dispatchTrigger: 'READY_ORDER',
-        acceptedPayment: 'PREPAID_ONLY',
+        ...previousConfig,
+        version: 2,
+        dispatchTrigger: 'NEW_ORDER_DELAYED',
+        acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
         store,
         scopes,
+        webhook: keepActiveWebhook
+          ? previousConfig.webhook
+          : {
+              status: 'INACTIVE',
+              secretDigest: null,
+              registrations: [],
+              updatedAt: null,
+            },
         errorCode: null,
       };
       const expiresAt = new Date(Date.now() + token.expires_in * 1000);

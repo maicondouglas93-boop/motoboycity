@@ -160,7 +160,8 @@ export class DeliveriesController {
   /**
    * Insucesso: coletou mas nao conseguiu entregar. Nao fecha o pedido — ele
    * vai para FAILED e so encerra quando o motoboy confirmar o retorno da
-   * mercadoria na loja, pelo mesmo `complete-return`.
+   * mercadoria na loja, pelo mesmo `complete-return`. Se o retorno nao estava
+   * previsto, a taxa vigente e congelada junto com esta transicao.
    */
   @Patch(':id/fail')
   @UseGuards(DriverOnlyGuard)

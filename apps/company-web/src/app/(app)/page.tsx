@@ -14,6 +14,7 @@ import { HomeDeliveryTrackingShare } from '@/components/orders/home-delivery-tra
 import { CompanyOperationsMap } from '@/components/operations/company-operations-map';
 import { OperationalOrderForm } from '@/components/operations/operational-order-form';
 import { CustomerForm } from '@/components/customers/customer-form';
+import { FmSoftwarePromo } from '@/components/layout/fm-software-promo';
 import { buildCloneSeed, type CloneSeed } from '@/components/operations/clone-delivery';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -346,6 +347,8 @@ export default function CompanyHomePage() {
           </Card>
         </div>
       </section>
+
+      <FmSoftwarePromo />
 
       <Dialog
         open={customerCandidates.length > 0}

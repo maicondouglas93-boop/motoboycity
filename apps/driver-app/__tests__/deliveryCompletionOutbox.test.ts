@@ -170,6 +170,7 @@ describe('delivery completion outbox', () => {
   });
 
   it('deduplica o retorno pelo lote e nunca envia a fila de outra conta', async () => {
+    const returnFix = { lat: -20.1501, lng: -41.7401, accuracy: 12 };
     await enqueueDeliveryCompletion({
       ownerUserId: 'user-1',
       action: 'COMPLETE_RETURN',
@@ -177,6 +178,7 @@ describe('delivery completion outbox', () => {
       batchId: 'batch-1',
       displayNumber: 15,
       companyName: 'Loja A',
+      payload: returnFix,
     });
     await enqueueDeliveryCompletion({
       ownerUserId: 'user-1',
@@ -191,7 +193,9 @@ describe('delivery completion outbox', () => {
     await synchronizePendingDeliveryCompletions('token-user-2', 'user-2', api);
 
     expect(api.completeReturn).not.toHaveBeenCalled();
-    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(1);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([
+      expect.objectContaining({ payload: returnFix }),
+    ]);
   });
 
   it('oculta no retorno local somente os itens elegiveis do lote', async () => {

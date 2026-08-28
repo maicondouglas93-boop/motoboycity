@@ -110,6 +110,7 @@ export default function SettingsPage() {
       ? null
       : [
           operacao.dispatchOfferTimeoutSeconds,
+          operacao.collectionProximityRadiusMeters,
           operacao.returnProximityRadiusMeters,
           operacao.deliveryProximityRadiusMeters,
         ].filter((valor) => valor === null).length;

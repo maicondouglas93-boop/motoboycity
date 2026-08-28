@@ -7,6 +7,9 @@
 @property(nonatomic, copy) NSString *baseUrl;
 @property(nonatomic, copy) NSString *accessToken;
 @property(nonatomic, copy) NSString *appVersion;
+@property(nonatomic, strong) CLLocation *latestLocation;
+@property(nonatomic, strong) NSTimer *presenceTimer;
+@property(nonatomic, assign) BOOL presenceRecoveryInFlight;
 @end
 
 @implementation LocationTrackingModule
@@ -55,6 +58,7 @@ RCT_REMAP_METHOD(start,
       [self.locationManager requestAlwaysAuthorization];
     }
     [self.locationManager startUpdatingLocation];
+    [self startPresenceTimer];
     resolve(nil);
   });
 }
@@ -103,6 +107,7 @@ RCT_REMAP_METHOD(stop,
     return;
   }
 
+  self.latestLocation = location;
   [self reportPresence:location];
   NSArray<NSString *> *trackedDeliveries = [self.deliveryIds copy];
   for (NSString *deliveryId in trackedDeliveries) {
@@ -134,7 +139,81 @@ RCT_REMAP_METHOD(stop,
 
   NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
     NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
-    if (statusCode == 401 || statusCode == 403 || statusCode == 409) {
+    if (statusCode == 401) {
+      dispatch_async(dispatch_get_main_queue(), ^{ [self stopTracking]; });
+    } else if (statusCode == 403 || statusCode == 409) {
+      [self restorePresence:location];
+    }
+  }];
+  [task resume];
+}
+
+- (void)startPresenceTimer
+{
+  [self.presenceTimer invalidate];
+  self.presenceTimer = [NSTimer timerWithTimeInterval:45.0
+                                               target:self
+                                             selector:@selector(sendScheduledPresence:)
+                                             userInfo:nil
+                                              repeats:YES];
+  [[NSRunLoop mainRunLoop] addTimer:self.presenceTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)sendScheduledPresence:(__unused NSTimer *)timer
+{
+  CLLocation *location = self.latestLocation;
+  if (location != nil && self.accessToken.length > 0) {
+    [self reportPresence:location];
+  }
+}
+
+- (void)restorePresence:(CLLocation *)location
+{
+  @synchronized(self) {
+    if (self.presenceRecoveryInFlight) return;
+    self.presenceRecoveryInFlight = YES;
+  }
+
+  NSString *normalizedBaseUrl = [self.baseUrl copy];
+  NSString *accessToken = [self.accessToken copy];
+  NSString *appVersion = [self.appVersion copy];
+  if (normalizedBaseUrl.length == 0 || accessToken.length == 0 || appVersion.length == 0) {
+    self.presenceRecoveryInFlight = NO;
+    return;
+  }
+  while ([normalizedBaseUrl hasSuffix:@"/"]) {
+    normalizedBaseUrl = [normalizedBaseUrl substringToIndex:normalizedBaseUrl.length - 1];
+  }
+  NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/driver/presence", normalizedBaseUrl]];
+  if (url == nil) {
+    self.presenceRecoveryInFlight = NO;
+    return;
+  }
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+  request.HTTPMethod = @"PUT";
+  request.timeoutInterval = 15.0;
+  [request setValue:[NSString stringWithFormat:@"Bearer %@", accessToken] forHTTPHeaderField:@"Authorization"];
+  [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  NSMutableDictionary *locationPayload = [@{
+    @"lat": @(location.coordinate.latitude),
+    @"lng": @(location.coordinate.longitude),
+  } mutableCopy];
+  if (location.horizontalAccuracy >= 0) locationPayload[@"accuracy"] = @(location.horizontalAccuracy);
+  NSDictionary *payload = @{
+    @"availability": @"AVAILABLE",
+    @"location": locationPayload,
+    @"appVersion": appVersion,
+    @"trackingCapability": @"BACKGROUND_V1",
+  };
+  request.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+
+  NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
+    NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
+    @synchronized(self) {
+      self.presenceRecoveryInFlight = NO;
+    }
+    if (statusCode == 401 || statusCode == 403) {
       dispatch_async(dispatch_get_main_queue(), ^{ [self stopTracking]; });
     }
   }];
@@ -189,6 +268,10 @@ RCT_REMAP_METHOD(stop,
 - (void)stopTracking
 {
   [self.locationManager stopUpdatingLocation];
+  [self.presenceTimer invalidate];
+  self.presenceTimer = nil;
+  self.latestLocation = nil;
+  self.presenceRecoveryInFlight = NO;
   self.deliveryIds = @[];
   self.baseUrl = nil;
   self.accessToken = nil;

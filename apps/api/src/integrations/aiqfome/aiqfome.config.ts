@@ -4,7 +4,12 @@ import type { ConfigService } from '@nestjs/config';
 export const AIQFOME_AUTHORIZE_URL = 'https://id.magalu.com/login';
 export const AIQFOME_TOKEN_URL = 'https://id.magalu.com/oauth/token';
 export const AIQFOME_API_BASE_URL = 'https://plataforma.aiqfome.com/api/v2';
-export const AIQFOME_SCOPES = ['aqf:store:read', 'aqf:order:read', 'aqf:order:create'] as const;
+export const AIQFOME_SCOPES = [
+  'aqf:store:read',
+  'aqf:store:create',
+  'aqf:order:read',
+  'aqf:order:create',
+] as const;
 
 const DEFAULT_COMPANY_WEB_URL = 'https://motoboycity-company-web.vercel.app';
 
@@ -60,10 +65,23 @@ export function resolveCompanyWebUrl(config: ConfigService): string {
   return isAllowedApplicationUrl(raw) ? new URL(raw).origin : DEFAULT_COMPANY_WEB_URL;
 }
 
+export function resolveAiqfomeWebhookUrl(config: ConfigService, publicId: string): string {
+  const runtime = requireAiqfomeRuntimeConfig(config);
+  return new URL(
+    `/integrations/aiqfome/webhooks/${encodeURIComponent(publicId)}`,
+    runtime.redirectUri,
+  ).toString();
+}
+
 export function hasRequiredAiqfomeScopes(scopes: readonly string[]): boolean {
   const values = new Set(scopes);
   const canWriteOrders = values.has('aqf:order:create') || values.has('aqf:order:write');
-  return values.has('aqf:store:read') && values.has('aqf:order:read') && canWriteOrders;
+  return (
+    values.has('aqf:store:read') &&
+    values.has('aqf:store:create') &&
+    values.has('aqf:order:read') &&
+    canWriteOrders
+  );
 }
 
 function isAllowedApplicationUrl(raw: string): boolean {

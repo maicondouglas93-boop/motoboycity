@@ -8696,3 +8696,351 @@ Validacao final no ambiente descartavel: 25 suites E2E e 230 testes passaram em
 commit/push do reparo de testes, acompanhar o novo CI e confirmar o deploy da
 API no painel do Render. O OAuth continua proibido para loja real ate a rotacao
 dos dois segredos expostos e a aprovacao do cadastro pelo aiqfome.
+
+## Atualizacao - 2026-08-28: importacao e ciclo logistico aiqfome
+
+O recorte atual conclui o nucleo tecnico da integracao de pedidos, ainda apenas
+no worktree. Nao houve commit, push, deploy, migration em ambiente compartilhado
+ou chamada usando uma loja real. Nenhum valor de `.env` ou segredo foi lido,
+alterado ou registrado; todos os testes de infraestrutura usaram credenciais
+ficticias e servicos descartaveis em loopback.
+
+O OAuth passa a solicitar tambem `aqf:store:create`, necessario para registrar
+webhooks na API V2. A loja conectada recebe cinco webhooks oficiais
+(`new-order`, `read-order`, `ready-order`, `cancel-order` e `order-refund`) em
+uma URL publica por integracao. O segredo enviado ao provedor e aleatorio; o
+banco guarda apenas seu SHA-256 e a validacao usa comparacao em tempo constante.
+Antes de trocar de loja e obrigatorio desconectar a anterior. Reautorizar a
+mesma loja preserva o webhook ativo e nao cria uma janela silenciosa.
+
+Cada notificacao autenticada e gravada primeiro em
+`IntegrationInboundEvent`, com deduplicacao por hash e somente o envelope
+operacional normalizado. Dados do consumidor nao sao copiados para a inbox; o
+pedido completo e consultado no endpoint oficial com o token da loja. BullMQ
+processa o evento depois da persistencia. Um scanner a cada 30 segundos recupera
+eventos que ficaram entre PostgreSQL e Redis, `PROCESSING` abandonado e falhas
+transitorias. Reentregas e workers concorrentes convergem para uma unica
+`Delivery` por `(integrationId, externalOrderId)`.
+
+O evento `new-order` cria um pedido local pela mesma rota interna de endereco,
+Google Maps, precificacao e agendamento dos pedidos manuais. Todo importado
+nasce `SCHEDULED`, com `scheduledAt = receivedAt + atraso efetivo`. A empresa
+pode definir de 1 a 480 minutos no Company Web; `null` herda o padrao do ADM,
+configurado no Admin Web. Sem modalidade ativa, tabela de preco ou algum tempo
+efetivo, o webhook nao e ativado. Alterar o padrao nao muda pedidos ja
+agendados.
+
+As regras de pagamento confirmadas ficaram congeladas assim: `pre_paid=true`
+vira `PREPAID` e `requiresReturn=false`; `pre_paid=false` vira
+`requiresReturn=true`, preserva dinheiro, Pix ou cartao quando reconhecidos e
+leva pagamento/troco para a observacao do motoboy. Um meio desconhecido nao e
+inventado. Retirada, AiqEntrega, pedido originalmente agendado, identidade
+inconsistente ou endereco ausente ficam em `REVIEW`, sem chamar motoboy.
+Cancelamento externo antes do aceite cancela condicionalmente a entrega local;
+depois do aceite fica em `REVIEW`, sem interromper uma corrida em andamento.
+
+Aceite, coleta, entrega e cancelamento/falha locais gravam
+`IntegrationOutboundEvent` na mesma transacao da mudanca de status. O worker
+chama os marcos logisticos oficiais, faz retry exponencial para falha
+transitoria, falha fechado em 4xx permanente e nao permite que um marco posterior
+ultrapasse outro anterior do mesmo pedido. A dependencia da outbox e obrigatoria
+nos modulos de entrega, dispatch e intervencao Admin; uma montagem incorreta nao
+desativa a sincronizacao silenciosamente.
+
+O schema ganhou `Delivery.integrationId`, `Delivery.externalOrderId`, o atraso
+global e as tabelas/enums de inbox e outbox. A migration aditiva e
+`20260828132617_aiqfome_order_import`; nao altera migrations anteriores nem
+remove dados. Em PostgreSQL 17 descartavel, as migrations anteriores foram
+aplicadas, a nova migration foi aplicada, seu rollback estrutural exato foi
+executado e a mesma migration foi reaplicada. Tabelas centrais permaneceram
+presentes. A restricao unica nova e segura para as linhas antigas porque as duas
+colunas adicionadas iniciam `NULL`. Isso nao substitui backup/restore e ensaio em
+copia de staging antes do deploy compartilhado.
+
+Durante a verificacao, o E2E revelou uma disputa antiga entre aceite e
+cancelamento manual: ambos podiam responder sucesso depois de ler o mesmo status.
+O cancelamento agora usa update condicional dentro da transacao; se o status
+mudar, ele aborta sem historico ou efeito colateral. O E2E concorrente e a suite
+completa passaram depois da correcao. Tambem foram atualizados o contrato de
+escopos do refresh e os retornos E2E da nova configuracao global.
+
+Arquivos principais: `apps/api/prisma/schema.prisma` e a migration nova;
+`apps/api/src/integrations/aiqfome/*`;
+`apps/api/src/integrations/integration-events.module.ts` e
+`integration-outbox-recorder.service.ts`; `DeliveriesService`, `DispatchService`
+e `AdminDeliveriesService`; contratos em `packages/types`, `validation` e
+`api-client`; painel aiqfome da Company Web; configuracao operacional do Admin
+Web; testes unitarios/E2E e `docs/business-rules.md`.
+
+Validacoes aprovadas antes deste registro: Prisma format/validate/generate;
+migration, rollback e reaplicacao em PostgreSQL isolado; teste E2E concorrente
+com 10 casos; suite E2E completa com 25 suites e 231 testes; suite unitaria da
+API com 79 suites e 909 testes antes dos ultimos testes de reautorizacao/outbox;
+suite completa da Company Web com 16 arquivos e 60 testes; typecheck e lint dos
+oito workspaces; builds da API, Company Web (22 paginas) e Admin Web (37
+paginas); e `git diff --check`. Os contadores finais apos os ultimos testes
+serao registrados abaixo ao concluir o recorte.
+
+Limitacoes operacionais: ainda nao houve fixture/webhook real nem smoke test na
+loja de homologacao, porque o cadastro depende da aprovacao do provedor. Eventos
+`REVIEW` e falhas finais ficam duraveis no banco, mas ainda nao existe uma tela
+Admin dedicada para essa fila. O cadastro exposto anteriormente tambem continua
+proibido para uso real ate a rotacao de `AIQFOME_CLIENT_SECRET` e
+`AIQFOME_TOKEN_ENCRYPTION_KEY`; depois disso, qualquer loja cifrada com a chave
+antiga precisa ser reconectada.
+
+Proximo passo concreto: concluir a validacao final e revisar o diff; depois,
+somente com autorizacao expressa, fazer commit/push. Antes de producao: rotacionar
+os dois segredos, atualizar o Render, gerar backup, validar a migration em copia
+de staging, publicar API e paineis, reconectar apenas a loja de teste com o novo
+escopo, escolher modalidade/tempo e homologar quatro cenarios: online, pagamento
+na entrega com retorno, cancelamento pre-aceite e ciclo logistico completo.
+
+Fechamento da validacao local: depois das ultimas correcoes, a API passou 80
+suites unitarias e 915 testes; o Company Web passou 16 arquivos e 60 testes;
+typecheck e lint passaram nos oito workspaces; os builds finais passaram para
+API, Company Web (22 paginas) e Admin Web (37 paginas); e o E2E foi recriado do
+zero e repetido com o codigo final, aprovando 25 suites e 231 testes em 40,136
+segundos. Os testes focados novos cobrem reautorizacao da mesma loja, bloqueio
+de troca sem desconectar, retry da outbox, falha permanente e preservacao da
+ordem dos marcos.
+Os dois containers isolados desta verificacao estavam com `autoRemove=true` e
+foram encerrados/removidos ao final; nenhum servico persistente do projeto foi
+parado.
+
+## Atualizacao - 2026-08-28: taxa no retorno por insucesso pos-coleta
+
+O responsavel confirmou uma mudanca na regra financeira: toda entrega que der
+problema depois da coleta e exigir devolucao da mercadoria deve cobrar retorno,
+mesmo quando nasceu com `requiresReturn=false`. A empresa paga a taxa e 100%
+dela vai para o motoboy; a plataforma preserva sua parcela original. Pedido que
+ja nasceu com retorno nao recebe a taxa novamente.
+
+`DeliveriesService.markFailed` agora consulta `PricingService.quote` com
+retorno obrigatorio e o instante do insucesso. Para destino conhecido, somente
+o `returnValue` vigente e somado ao `totalValue` e ao `driverValue` ja
+congelados; `platformValue` permanece igual e a invariante
+`driverValue + platformValue = totalValue` e validada em centavos antes da
+escrita. Para destino definido por GPS, a cotacao completa feita no local da
+tentativa ja inclui o retorno. `requiresReturn`, valores, motivo, horario e a
+transicao `COLLECTED -> FAILED` sao gravados na mesma escrita condicional e
+transacao. O repasse continua ocorrendo uma unica vez apenas em
+`FAILED -> COMPLETED`, depois da confirmacao na loja.
+
+Se a modalidade nao possuir `returnFee`, o insucesso falha com conflito
+explicito antes de alterar o pedido, evitando registrar uma devolucao gratuita.
+Retries depois de `FAILED` devolvem o resultado existente sem nova cotacao;
+duas chamadas concorrentes disputam a mesma atualizacao condicional. Nao houve
+migration, backfill ou recalculo de pedidos antigos: a regra vale somente para
+novos insucessos registrados depois do deploy. Rollback de codigo nao remove
+taxas que ja tenham sido corretamente congeladas.
+
+Arquivos deste recorte: `DeliveriesService`, controller e testes unitarios;
+`delivery-lifecycle.e2e-spec.ts`; comentarios de contrato em
+`mark-failed.schema.ts` e `schema.prisma`; e `docs/business-rules.md`. A tela do
+motoboy e os paineis ja consumiam `requiresReturn`/`returnValue`, portanto nao
+precisaram de mudanca de contrato ou UI.
+
+Validacoes aprovadas: teste focado de `DeliveriesService` com 105 casos; suite
+unitaria completa da API com 80 suites e 918 testes; build da validation; build
+da API; typecheck e lint dos oito workspaces; e `git diff --check`. O E2E de
+ciclo de vida foi atualizado para disparar dois insucessos concorrentes, provar
+uma unica taxa, total da empresa, repasse e idempotencia do ledger. Sua execucao
+isolada nao ocorreu nesta sessao: o runner bloqueou a orquestracao local antes
+de criar containers. A checagem posterior confirmou zero containers de teste;
+a pasta temporaria vazia foi removida. Nenhum banco local, compartilhado ou de
+producao foi acessado.
+
+Nao houve commit, push ou deploy deste recorte. Proximo passo concreto: executar
+`delivery-lifecycle.e2e-spec.ts` no ambiente E2E isolado/CI e, com autorizacao
+expressa, incluir esta correcao no mesmo commit do worktree atual ou separa-la
+cuidadosamente antes do release da API.
+
+## 2026-08-28 - Divulgacao da FM Software na home da empresa
+
+A home operacional do `company-web` recebeu uma faixa promocional compacta e
+responsiva, posicionada depois do painel de operacoes para nao disputar espaco
+com pedidos, filtros ou acoes principais. A faixa informa que o sistema foi
+desenvolvido por Franklim Melo, da FM Software, divulga servicos de software e
+exibe o telefone `(19) 99705-0303`.
+
+O botao de contato abre o WhatsApp em uma nova aba usando o numero internacional
+`5519997050303` e uma mensagem inicial sobre os servicos da FM Software. O link
+usa `noopener noreferrer`. Nao houve alteracao de API, autenticacao, contratos,
+variaveis de ambiente ou backend.
+
+Arquivos deste recorte: `apps/company-web/src/app/(app)/page.tsx`,
+`apps/company-web/src/components/layout/fm-software-promo.tsx` e o teste
+`fm-software-promo.test.tsx`.
+
+Validacoes aprovadas: teste focado do novo componente (1 teste), suite completa
+do `company-web` (17 arquivos e 61 testes), typecheck, lint e build de producao
+do `company-web` (22 paginas geradas), formatacao dos novos arquivos e
+`git diff --check`. Nao houve commit, push ou deploy deste recorte.
+
+## 2026-08-28 - Guia de conexao aiqfome para empresas
+
+A pagina `company-web/integracoes` recebeu um guia responsivo de seis etapas
+para o responsavel da empresa conectar uma loja aiqfome. O conteudo segue o
+fluxo real do codigo e a documentacao oficial vigente: conferir CNPJ e
+endereco de coleta; abrir `Integracoes` no Geraldo; selecionar a unidade;
+vincular o ID Magalu usando a conta do dono; voltar ao MOTOboyCity; autorizar
+somente uma loja; e concluir modalidade e tempo de preparo.
+
+O guia informa que tokens, codigos e URLs de webhook nao precisam ser copiados
+manualmente. Seu aviso final acompanha o estado real retornado pela API:
+preparar a loja quando desconectada, concluir a configuracao quando conectada
+sem webhook operacional ou confirmar `Conectado` e `Importacao ativa` quando
+pronta. O link tecnico anterior foi substituido pelo guia oficial de vinculo do
+aiqfome. O callback `STORE_COUNT_INVALID` agora orienta explicitamente a
+autorizar apenas uma loja por vez.
+
+Arquivos deste recorte:
+`apps/company-web/src/components/integrations/aiqfome-connection-guide.tsx`,
+`aiqfome-integration-panel.tsx` e `aiqfome-integration-panel.test.tsx`. Nao
+houve alteracao de API, contrato, autenticacao, banco, `.env` ou segredo.
+
+Validacoes aprovadas: teste focado do painel (6 testes), suite completa do
+`company-web` (17 arquivos e 63 testes), typecheck, lint, build de producao (22
+paginas) e Prettier nos tres arquivos do recorte. O OAuth real e a aparencia
+externa das telas do Geraldo/ID Magalu nao foram testados nesta sessao porque o
+aplicativo ainda depende da liberacao do provedor e do release seguro; por isso,
+o texto admite que o nome do botao de vinculo pode variar no painel externo.
+`git diff --check` tambem passou. Nao houve commit, push ou deploy deste recorte.
+
+## 2026-08-28 - Raios de coleta, entrega e retorno ativos
+
+O responsavel pediu para colocar em funcionamento as tres validacoes de
+proximidade configuradas pelo ADM. Os raios agora sao independentes e opcionais:
+`collectionProximityRadiusMeters`, `deliveryProximityRadiusMeters` e
+`returnProximityRadiusMeters`. Valor `null` mantem apenas aquela regra desligada;
+quando preenchido, a API exige `lat`, `lng` e `accuracy`, recusa precisao maior
+que o raio e recusa distancia Haversine acima do limite.
+
+Coleta e retorno usam as coordenadas do endereco principal da empresa. Entrega
+com destino conhecido usa o `DROPOFF`. Se o endereco de referencia nao tiver
+coordenadas, a API devolve conflito orientando a corrigir o cadastro, sem
+aprovacao silenciosa. A regra vale tambem para marcacao retroativa. Retries de
+uma transicao ja aplicada continuam idempotentes e retornam o estado confirmado
+sem exigir outro fix.
+
+O app do motoboy captura posicao nova e precisa antes dos botoes de coletar,
+entregar e concluir retorno. Entrega e retorno preservam o fix original na
+outbox offline. O Admin Web recebeu o terceiro campo, resumo e validacao de 50 a
+5000 metros para coleta. Contratos Zod, tipos compartilhados e API client foram
+atualizados no mesmo recorte.
+
+A migration `20260828180838_collection_proximity_radius` foi gerada pelo
+`prisma migrate dev` contra PostgreSQL temporario isolado, depois de aplicar as
+42 migrations anteriores. O SQL foi conferido: somente `ADD COLUMN` nullable em
+`platform_settings`; linhas existentes ficam `NULL`, sem backfill e sem bloqueio
+novo por causa da coluna de coleta. O container temporario foi encerrado e
+removido. Rollback de banco, se indispensavel antes de usar o campo, e remover a
+coluna nova; depois de valores reais serem gravados, prefira rollback apenas de
+codigo para nao perder configuracao.
+
+Arquivos principais: `apps/api/prisma/schema.prisma` e a migration nova;
+`DeliveriesService` e testes; `AdminPlatformSettingsService`; contratos em
+`packages/validation`, `packages/types` e `packages/api-client`; configuracao do
+`admin-web`; operacao/localizacao e teste da outbox no `driver-app`;
+`delivery-lifecycle.e2e-spec.ts`, `admin-platform-settings.e2e-spec.ts` e
+`docs/business-rules.md`.
+
+Validacoes aprovadas: Prisma validate/format; build da validation; 80 suites e
+921 testes unitarios da API; 19 suites e 110 testes do driver-app; typecheck e
+lint dos oito workspaces; build da API; build do Admin Web com 37 paginas; E2E
+de configuracao do ADM com 12 testes; ciclo de vida E2E completo com 38 testes;
+e o novo caso E2E focado que prova coleta e entrega fora/dentro dos respectivos
+raios. Os E2E usaram PostgreSQL e Redis efemeros isolados, com throttle elevado
+apenas no processo de teste; todos os containers foram removidos.
+
+Nao houve commit, push, deploy nem APK. Ordem segura de release: validar
+backup/restore e migration em copia de staging; distribuir o APK novo; conferir
+se os enderecos principais e destinos possuem coordenadas; aplicar a migration;
+publicar API e Admin Web; somente entao preencher/confirmar os raios. Antes de
+publicar a API, verificar especialmente os valores antigos de raio de entrega e
+retorno: se ja estiverem preenchidos, a nova API passara a aplica-los
+imediatamente, enquanto APKs antigos nao enviam GPS nessas tres acoes.
+
+## 2026-08-28 - Persistencia online apos queda de sinal no Driver App
+
+Foi confirmado que o heartbeat nativo sobrevivia a uma falha curta de rede, mas
+uma ausencia superior ao TTL de 150 segundos fazia o reconciliador marcar o
+motoboy `UNAVAILABLE`. Quando a internet voltava, o heartbeat recebia 403 e o
+servico nativo se encerrava; a Home apenas copiava o estado offline, exigindo que
+o motoboy ligasse o botao novamente.
+
+O aplicativo agora separa a presenca confirmada pelo servidor da intencao local
+do botao **Ativo**. Essa intencao fica no AsyncStorage enquanto a sessao existe e
+e reconciliada no bootstrap, reconexao Socket.IO, retorno ao primeiro plano,
+refresh e evento de expiracao. Em falha transitoria, o toggle permanece ligado,
+o rastreamento continua tentando e a tela informa que a recuperacao e
+automatica. Saida manual, logout/sessao removida, notificacao obrigatoria
+desativada, GPS/permissao invalida ou recusa definitiva da conta limpam a
+intencao e param o servico. A saida manual para primeiro o servico local; se o
+PUT offline falhar, a proxima reconexao repete a conciliacao e o TTL continua
+sendo a protecao no servidor.
+
+No Android, o foreground service passou de heartbeat a cada 60 para 45 segundos
+e, ao receber 403/409 depois de uma queda, tenta um `PUT /driver/presence` com a
+ultima coordenada valida antes de desistir. 401 ou nova recusa 403 encerram o
+servico, evitando repeticao com sessao ou conta invalida. O iOS recebeu o mesmo
+fluxo de reativacao e um timer de 45 segundos enquanto o Core Location mantiver
+o processo executavel. A presenca Redis/TTL e a elegibilidade do backend nao
+foram relaxadas: durante a ausencia o motoboy permanece fora do mapa e do
+dispatch, e a reentrada segue a ordem normal da fila sem restaurar a prioridade
+Redis expirada.
+
+Arquivos principais: `apps/driver-app/src/lib/{session,presencePersistence}.ts`,
+`store/dispatchStore.ts`, `screens/{HomeScreen,DeliveryOperationScreen}.tsx`,
+`android/.../DeliveryLocationTrackingService.kt`,
+`ios/DriverApp/LocationTrackingModule.m`, os testes novos de sessao/presenca e
+`docs/business-rules.md`. Nao houve endpoint, contrato compartilhado, schema,
+migration, dependencia ou permissao nova.
+
+Validacoes aprovadas: 2 suites focadas/8 testes; suite completa do Driver App
+com 21 suites/118 testes; typecheck e lint do workspace; e
+`gradlew.bat :app:compileDebugKotlin` com `BUILD SUCCESSFUL` (somente avisos de
+depreciacao pre-existentes nas dependencias/codigo Android). O codigo iOS nao
+pode ser compilado no host Windows. Nao houve teste controlado em aparelho,
+commit, push, deploy nem APK.
+
+Proximo passo concreto: em um aparelho Android, ficar online, cortar dados e
+Wi-Fi por mais de tres minutos, religar a rede e confirmar sem tocar no toggle:
+notificacao de foreground continua, Home volta a mostrar posicao na fila, Admin
+volta a mostrar o motoboy e uma oferta controlada chega. Repetir com app aberto,
+minimizado e tela bloqueada; no iOS, validar o mesmo fluxo em aparelho/Mac antes
+de publicar.
+
+## 2026-08-28 - Preflight do release integrado pilot.10
+
+O Driver App foi promovido no worktree para `0.1.0-pilot.10`; o `versionCode`
+reservado para o APK e `10`. O release reune a importacao/ciclo logistico
+aiqfome, a taxa de retorno por insucesso pos-coleta, os tres raios de
+proximidade, as melhorias da Company Web e a persistencia online do motoboy.
+
+Antes de qualquer publicacao foi criado um backup novo de producao em
+`F:\MOTOboyCity\database-backups\motoboycity-postgres-20260828-155153.dump`,
+com 0,56 MB e SHA-256
+`0AFDD5CF103F23AA36EDD3801C75B71EFADA5E43FE26702A7ACF53EF70247E92`.
+O dump foi restaurado em PostgreSQL 17 descartavel. As duas migrations
+pendentes foram aplicadas nessa copia sem erro; 34 usuarios, 146 entregas e 1
+integracao foram preservados, e nao restou migration incompleta. PostgreSQL,
+Redis e containers usados nessa auditoria/E2E foram removidos ao final.
+
+A validacao final aprovou Prisma validate; 80 suites/921 testes unitarios da
+API; 21 suites/118 testes do Driver App; 17 arquivos/63 testes da Company Web;
+25 suites/233 testes E2E em PostgreSQL e Redis isolados; typecheck e lint dos
+oito workspaces; builds de producao da API, Company Web (22 paginas) e Admin
+Web (37 paginas); e `git diff --check`.
+
+O preflight da copia de producao encontrou
+`deliveryProximityRadiusMeters=50`, `returnProximityRadiusMeters=50` e uma
+entrega em `ACCEPTED`. Portanto a API nova nao deve ser publicada antes do APK
+novo estar instalado no aparelho que conclui essa entrega: a versao anterior
+nao envia o fix exigido pelas regras novas. A chave oficial existe e seu alias
+e `motoboycity`, mas as senhas de assinatura nao estavam carregadas na sessao;
+nenhum segredo foi lido ou registrado. Neste ponto ainda nao houve APK, push
+ou deploy. Ordem concreta: carregar as senhas de forma segura, gerar e validar
+o APK oficial, instala-lo nos aparelhos ativos e somente depois enviar o commit
+para disparar Render/Vercel.

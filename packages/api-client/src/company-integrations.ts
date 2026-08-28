@@ -2,6 +2,7 @@ import type {
   AiqfomeConnectResult,
   AiqfomeDisconnectResult,
   CompanyAiqfomeIntegration,
+  UpdateAiqfomeSettingsInput,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
 
@@ -36,6 +37,18 @@ export function createCompanyIntegrationsApi({ baseUrl }: CompanyIntegrationsApi
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AiqfomeDisconnectResult>(response);
+    },
+
+    async updateAiqfomeSettings(
+      accessToken: string,
+      payload: UpdateAiqfomeSettingsInput,
+    ): Promise<CompanyAiqfomeIntegration> {
+      const response = await fetch(`${baseUrl}/company/integrations/aiqfome/settings`, {
+        method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<CompanyAiqfomeIntegration>(response);
     },
   };
 }

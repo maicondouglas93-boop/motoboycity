@@ -16,6 +16,7 @@ import { LiveDriverPresenceService } from '../live-presence/live-driver-presence
 import { PushService, type PushMessage } from '../push/push.service';
 import { deliveryActivityMessage } from '../common/status-labels';
 import { buildOfferPayload, remainingSeconds } from './offer-payload';
+import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
@@ -61,6 +62,7 @@ export class DispatchService {
     private readonly livePresence: LiveDriverPresenceService,
     private readonly pushService: PushService,
     @InjectQueue(DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
+    private readonly integrationOutbox: IntegrationOutboxRecorder,
   ) {}
 
   /** Chamado antes de criar um pedido AWAITING_DRIVER — falha alto e claro
@@ -671,6 +673,7 @@ export class DispatchService {
             changedByUserId: respondingUserId,
           },
         });
+        await this.integrationOutbox.record(tx, offer.deliveryId, 'ACCEPTED');
 
         return tx.delivery.findUniqueOrThrow({ where: { id: offer.deliveryId } });
       });
@@ -795,6 +798,9 @@ export class DispatchService {
             changedByUserId: respondingUserId,
           })),
         });
+        for (const id of deliveryIds) {
+          await this.integrationOutbox.record(tx, id, 'ACCEPTED');
+        }
       });
     } catch (error) {
       if (error instanceof ConflictException) {
@@ -1253,6 +1259,7 @@ export class DispatchService {
               note: 'Assumido pelo motoboy a partir dos pedidos disponíveis.',
             },
           });
+          await this.integrationOutbox.record(tx, id, 'ACCEPTED');
         }
 
         return tx.delivery.findUniqueOrThrow({ where: { id: deliveryId } });

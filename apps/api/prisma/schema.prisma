@@ -201,6 +201,30 @@ enum IntegrationStatus {
   ERROR
 }
 
+enum IntegrationInboundStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  IGNORED
+  REVIEW
+  FAILED
+}
+
+enum IntegrationLogisticAction {
+  PICKUP_ONGOING
+  DELIVERY_ONGOING
+  ORDER_DELIVERED
+  DELIVERY_CANCELED
+}
+
+enum IntegrationOutboundStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
 enum NotificationType {
   NEW_DELIVERY_OFFER
   DELIVERY_STATUS_CHANGED
@@ -691,6 +715,8 @@ model Delivery {
   displayNumber     Int            @unique @default(autoincrement())
   companyId         String
   companyCustomerId String?
+  integrationId     String?
+  externalOrderId   String?        @db.VarChar(100)
   driverId          String?
   serviceTypeId     String
   status            DeliveryStatus @default(SCHEDULED)
@@ -760,33 +786,39 @@ model Delivery {
   requiresCollectionRecipient    Boolean @default(false)
   pickupSurchargeChargedToDriver Boolean @default(false)
 
-  /// Retorno ao local de coleta: flag marcada pela empresa na criação +
-  /// valor congelado (de PricingTable.returnFee no momento da criação).
-  /// Não é um DeliveryStatus novo — acontece entre DELIVERED e COMPLETED.
+  /// Retorno ao local de coleta: pode nascer marcado pela empresa ou ser
+  /// ativado por insucesso após a coleta. O valor de PricingTable.returnFee é
+  /// congelado na criação ou no insucesso, sem recalcular a corrida original.
+  /// Não é um DeliveryStatus novo — fecha via complete-return.
   requiresReturn Boolean  @default(false)
   returnValue    Decimal? @db.Decimal(10, 2)
 
   company         Company          @relation(fields: [companyId], references: [id])
   companyCustomer CompanyCustomer? @relation(fields: [companyCustomerId], references: [id], onDelete: SetNull)
+  integration     Integration?     @relation(fields: [integrationId], references: [id], onDelete: SetNull)
   driver          Driver?          @relation(fields: [driverId], references: [id])
   serviceType     ServiceType      @relation(fields: [serviceTypeId], references: [id])
   invoice         Invoice?         @relation(fields: [invoiceId], references: [id])
 
-  addresses          DeliveryAddress[]
-  statusHistory      DeliveryStatusHistory[]
-  offers             DeliveryOffer[]
-  walletTransactions WalletTransaction[]
-  trackingPoints     DeliveryLocationPoint[]
+  addresses                 DeliveryAddress[]
+  statusHistory             DeliveryStatusHistory[]
+  offers                    DeliveryOffer[]
+  walletTransactions        WalletTransaction[]
+  trackingPoints            DeliveryLocationPoint[]
+  integrationInboundEvents  IntegrationInboundEvent[]
+  integrationOutboundEvents IntegrationOutboundEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([integrationId, externalOrderId])
   @@index([companyId, status])
   @@index([driverId, status])
   @@index([status, createdAt])
   @@index([companyId, createdAt])
   @@index([companyId, externalOrderNumber])
   @@index([companyCustomerId, createdAt])
+  @@index([integrationId])
   @@index([invoiceId])
   @@index([batchId])
   @@index([status, pickupDeadlineAt])
@@ -1279,15 +1311,23 @@ model PlatformSettings {
   /// erro claro em vez de usar um valor inventado.
   dispatchOfferTimeoutSeconds Int?
 
+  /// Espera padrao, em minutos, entre a importacao de um pedido do aiqfome e
+  /// sua entrada na fila de despacho. A empresa pode sobrescrever este valor
+  /// na configuracao da propria integracao. Null exige configuracao antes de
+  /// ativar a importacao, evitando chamar motoboy sem tempo de preparo.
+  aiqfomeDispatchDelayMinutes Int?
+
   /// Tempo maximo (minutos) entre o aceite e a coleta. O valor vigente e
   /// congelado em Delivery.pickupDeadlineAt no aceite; mudar a configuracao
   /// nao altera pedidos que ja estao com um motoboy. Null = regra desligada.
   pickupAssignmentTimeoutMinutes Int?
 
-  /// Raio (metros) de tolerância pra fechar "retorno ao local de coleta" —
-  /// distância em linha reta (Haversine) entre o motoboy e o endereço de
-  /// coleta da empresa. Null = ainda não configurado — completeReturn falha
-  /// com erro claro em vez de usar um raio inventado.
+  /// Raio de tolerancia para marcar a coleta no endereco principal da empresa.
+  /// A distancia e calculada em linha reta (Haversine). Null = regra desligada.
+  collectionProximityRadiusMeters Int?
+
+  /// Raio para concluir o retorno no endereco principal da empresa.
+  /// A distancia e calculada em linha reta (Haversine). Null = regra desligada.
   returnProximityRadiusMeters Int?
 
   /// Liga o bloqueio de pedido fora do horário de funcionamento. Desligado por
@@ -1347,12 +1387,8 @@ model PlatformSettings {
   /// Raio, em metros, dentro do qual o motoboy pode marcar a entrega como feita
   /// quando o destino foi informado na criacao.
   ///
-  /// NULO usa o padrao de 200 m. Existe para o admin apertar ou afrouxar
-  /// conforme a cidade: GPS urbano encosta em falso negativo abaixo de ~100 m.
-  ///
-  /// A checagem so acontece quando o endereco de entrega TEM coordenada. Sem
-  /// coordenada nao ha o que comparar, e travar o motoboy por erro de cadastro
-  /// da loja o deixaria sem receber por uma entrega que fez.
+  /// NULO desliga a regra. Quando configurado, o endereco precisa ter
+  /// coordenadas e o aplicativo precisa enviar um fix com precisao valida.
   deliveryProximityRadiusMeters Int?
 
   updatedByUserId String?
@@ -1443,8 +1479,11 @@ model Integration {
   connectedAt    DateTime?
   lastSyncAt     DateTime?
 
-  company    Company?               @relation(fields: [companyId], references: [id])
-  credential IntegrationCredential?
+  company        Company?                   @relation(fields: [companyId], references: [id])
+  credential     IntegrationCredential?
+  deliveries     Delivery[]
+  inboundEvents  IntegrationInboundEvent[]
+  outboundEvents IntegrationOutboundEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -1453,6 +1492,60 @@ model Integration {
   @@index([companyId])
   @@index([provider, status])
   @@map("integrations")
+}
+
+/// Caixa de entrada duravel dos webhooks. O payload persistido e apenas o
+/// envelope operacional normalizado (sem nome, telefone ou endereco do
+/// cliente); os detalhes do pedido sao consultados na API do provedor.
+model IntegrationInboundEvent {
+  id              String                   @id @default(uuid())
+  integrationId   String
+  deliveryId      String?
+  eventType       String                   @db.VarChar(60)
+  externalOrderId String                   @db.VarChar(100)
+  storeId         String                   @db.VarChar(100)
+  eventHash       String                   @db.VarChar(64)
+  status          IntegrationInboundStatus @default(RECEIVED)
+  payload         Json?
+  attempts        Int                      @default(0)
+  errorCode       String?                  @db.VarChar(100)
+  eventAt         DateTime?
+  processedAt     DateTime?
+  receivedAt      DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  delivery    Delivery?   @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+
+  @@unique([integrationId, eventHash])
+  @@index([integrationId, externalOrderId])
+  @@index([status, receivedAt])
+  @@map("integration_inbound_events")
+}
+
+/// Caixa de saida transacional para sincronizar o ciclo logistico local com
+/// o provedor. A unicidade impede que repeticoes de uma transicao enviem o
+/// mesmo marco mais de uma vez.
+model IntegrationOutboundEvent {
+  id              String                    @id @default(uuid())
+  integrationId   String
+  deliveryId      String
+  externalOrderId String                    @db.VarChar(100)
+  action          IntegrationLogisticAction
+  status          IntegrationOutboundStatus @default(PENDING)
+  attempts        Int                       @default(0)
+  nextAttemptAt   DateTime?
+  errorCode       String?                   @db.VarChar(100)
+  sentAt          DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  delivery    Delivery    @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, deliveryId, action])
+  @@index([status, nextAttemptAt])
+  @@map("integration_outbound_events")
 }
 
 /// Tokens OAuth por loja. O payload e cifrado com AES-256-GCM no backend;

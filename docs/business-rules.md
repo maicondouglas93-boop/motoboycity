@@ -16,12 +16,19 @@
 
 Não é um `DeliveryStatus` novo. É uma flag (`requiresReturn`) + valor
 congelado (`returnValue`) em `Delivery`, vindo de `PricingTable.returnFee`
-(valor fixo, não proporcional à distância). A empresa marca na criação do
-pedido. A empresa paga o extra (aumenta o valor total do pedido). Repassado
-100% ao motoboy, sem comissão da plataforma na perna de retorno. Acontece
-entre `DELIVERED` e `COMPLETED` — sem status novo. O fechamento
-(`complete-return`) usa a confirmação do motoboy e não pode ser bloqueado por
-GPS, distância ou precisão do aparelho.
+(valor fixo, não proporcional à distância). A flag pode nascer marcada pela
+empresa ou ser ativada quando uma entrega dá problema depois da coleta e a
+mercadoria precisa voltar. A empresa paga o extra (aumenta o valor total do
+pedido). O valor é repassado 100% ao motoboy, sem comissão da plataforma na
+perna de retorno.
+
+No retorno planejado, a taxa fica congelada na criação e acontece entre
+`DELIVERED` e `COMPLETED`. No insucesso, a corrida original permanece congelada
+e somente a taxa de retorno vigente no momento do problema é acrescentada,
+entre `FAILED` e `COMPLETED`. Pedido que já nasceu com retorno não recebe a taxa
+novamente. O fechamento (`complete-return`) usa a confirmação do motoboy e,
+quando o ADM configurar o raio de retorno, também exige GPS válido e proximidade
+do endereço principal da empresa.
 
 ## Comissão (motoboy/plataforma)
 
@@ -55,8 +62,27 @@ divisão personalizada da tabela.
 
 Rota real via Google Maps Routes API — explicitamente não é distância em
 linha reta. O GPS continua obrigatório quando a posição capturada é o próprio
-destino usado para calcular distância e preço; não é usado para bloquear a
-confirmação de entrega com endereço já conhecido nem a confirmação de retorno.
+destino usado para calcular distância e preço. As conferências operacionais de
+proximidade usam Haversine e só bloqueiam quando o respectivo raio foi
+configurado pelo ADM.
+
+## Validação de proximidade operacional
+
+O ADM possui três raios globais independentes: coleta, entrega e retorno. `null`
+mantém cada regra desligada, preservando pedidos e instalações existentes. Ao
+configurar um raio, a API exige `lat`, `lng` e precisão do fix; recusa precisão
+maior que o próprio raio e recusa distância Haversine acima do limite.
+
+Coleta e retorno usam as coordenadas do endereço principal da empresa. Entrega
+com destino conhecido usa as coordenadas do endereço de destino. Se o endereço
+de referência não tiver coordenadas, a etapa é recusada com orientação para
+atualizar o cadastro; não existe aprovação silenciosa. A conferência também vale
+para marcação retroativa, pois o raio configurado representa uma trava
+operacional. Exceções precisam de intervenção auditada do administrador.
+
+Retries idempotentes de uma etapa já aplicada não exigem outro fix. O aplicativo
+captura a posição antes de coleta, entrega e retorno; entrega e retorno mantêm o
+fix original na fila offline até a API confirmar.
 
 ## Cancelamento
 
@@ -70,24 +96,26 @@ cancelamento.
 
 “Problema na entrega” não devolve o pedido à fila e não troca o entregador. A
 ação só existe depois da coleta: mantém o mesmo motoboy responsável, muda o
-pedido para devolução pendente e preserva o valor normal da corrida. O repasse
-é liberado uma única vez quando ele confirma que devolveu a mercadoria à
-empresa. O insucesso não cria desconto nem cobrança adicional; uma taxa de
-retorno só existe quando o pedido já nasceu com `requiresReturn=true`.
+pedido para devolução pendente e preserva o valor normal da corrida. Se o
+pedido ainda não tinha retorno, acrescenta a taxa vigente ao total da empresa e
+ao repasse do motoboy; a plataforma não participa desse adicional. O repasse
+completo é liberado uma única vez quando ele confirma que devolveu a mercadoria
+à empresa. Não há desconto e a taxa nunca pode ser duplicada.
 
 As ações do motoboy usam o horário atual do servidor. O aplicativo não exige
-mais declaração retroativa, texto de justificativa para devolver à fila ou
-prova de proximidade. Confirmações simples continuam existindo para evitar
-toques acidentais e todas as transições permanecem no histórico auditável.
+mais declaração retroativa nem texto de justificativa para devolver à fila.
+Quando um raio operacional estiver configurado, a proximidade é obrigatória.
+Confirmações simples continuam existindo para evitar toques acidentais e todas
+as transições permanecem no histórico auditável.
 
 ## Encerramento offline pelo motoboy
 
 O motoboy pode marcar a entrega e concluir o retorno mesmo durante uma queda de
 internet. A ação é salva primeiro no aparelho e fica claramente identificada
 como pendente de sincronização; o aplicativo tenta enviá-la novamente ao abrir,
-voltar ao primeiro plano, reconectar ou por comando manual. Quando o destino é
-definido no momento da entrega, a coordenada e a precisão capturadas naquele
-momento ficam congeladas junto da ação e não podem ser recapturadas depois.
+voltar ao primeiro plano, reconectar ou por comando manual. A coordenada e a
+precisão capturadas ao marcar a entrega ou concluir o retorno ficam congeladas
+junto da ação e não podem ser recapturadas depois.
 
 O encerramento local não antecipa efeitos oficiais. Status auditável, horário
 da transição, cálculo definitivo, faturamento e repasse só passam a valer após
@@ -134,6 +162,23 @@ Na Home do motoboy, pedidos já aceitos são ordenados pelo aceite da atribuiç�
 atual, do mais antigo no topo para o mais novo abaixo. Coleta, entrega ou retorno
 não mudam essa posição; se o pedido voltar à fila e for aceito novamente, vale o
 novo aceite.
+
+## Persistência da disponibilidade do motoboy
+
+O botão **Ativo** representa a intenção explícita do motoboy de permanecer
+online. Uma queda temporária de internet não desliga essa intenção: o aplicativo
+mantém o serviço de localização e tenta reafirmar a presença automaticamente no
+bootstrap, na reconexão, ao voltar ao primeiro plano e nos heartbeats nativos.
+Se a ausência superar o TTL, o servidor continua removendo o motoboy do despacho
+e do mapa até receber um novo fix válido; a recuperação não cria presença
+fantasma. Ao reentrar depois de uma expiração, ele volta conforme a regra normal
+da fila vigente, sem recuperar uma prioridade Redis já removida.
+
+Ficar offline manualmente, sair da conta, perder a sessão, ter a conta bloqueada
+ou não possuir permissão/GPS válidos encerra o rastreamento e cancela a intenção
+persistida. Falhas transitórias de rede, limite ou servidor mantêm a intenção e
+continuam sendo tentadas; recusas definitivas de autenticação ou conta não são
+repetidas indefinidamente.
 
 ## Suspensão/bloqueio de motoboy
 
@@ -263,18 +308,38 @@ real.
 Pedidos vêm tanto de criação manual (company-web) quanto do webhook do
 Aiqfome, em paralelo — nenhum bloqueia o outro.
 
-## Piloto da integração Aiqfome
+## Integração Aiqfome
 
-Decisões confirmadas em 2026-08-27:
+As decisões de 2026-08-28 abaixo substituem o recorte de piloto definido no
+dia anterior:
 
-- o gatilho padrão de importação e despacho é o evento `ready-order`;
-- o piloto aceita somente pedidos pagos online (`PREPAID`);
-- somente um membro ativo com papel `OWNER` pode conectar ou desconectar a
-  loja;
-- cancelamento externo depois do aceite não cancela automaticamente a entrega:
-  ele entra em revisão operacional;
+- o gatilho de importação é o evento `new-order`;
+- todo pedido importado nasce como `SCHEDULED` e só entra no despacho depois do
+  tempo de preparo configurado. A empresa pode definir seu próprio tempo; sem
+  valor próprio, vale o padrão configurado pelo ADM;
+- `payment_method.pre_paid = true` representa pagamento online: o pedido é
+  gravado como `PREPAID` e não exige retorno;
+- `payment_method.pre_paid = false` representa pagamento na entrega: o meio de
+  pagamento conhecido é preservado, a observação informa pagamento/troco ao
+  motoboy e o pedido exige retorno à empresa;
+- cada empresa precisa selecionar uma modalidade ativa com tabela de preço
+  válida antes de ativar a importação;
+- pedidos de retirada, AiqEntrega ou agendados originalmente no provedor não
+  são importados automaticamente; ficam para revisão operacional;
+- cancelamento externo antes do aceite cancela o pedido local. Depois do
+  aceite, ele não interrompe automaticamente a corrida e fica para revisão;
+- aceite, coleta, entrega e cancelamento/falha locais são sincronizados com os
+  marcos logísticos oficiais por uma caixa de saída transacional e idempotente;
+- somente um membro ativo com papel `OWNER` pode conectar, configurar ou
+  desconectar a loja;
 - access token e refresh token são armazenados criptografados no servidor e
   nunca retornam para o navegador;
+- reautorizar a mesma loja preserva o webhook ativo; para trocar de loja, a
+  empresa deve desconectar a loja atual primeiro;
+- a caixa de saída respeita a ordem dos marcos por pedido: um evento posterior
+  não pode ultrapassar outro anterior ainda pendente ou falho;
+- a inbox persiste apenas o envelope operacional normalizado. Nome, telefone e
+  endereço do consumidor não são copiados para o log do webhook;
 - pedidos manuais continuam funcionando em paralelo e nenhuma rota AiqEntrega
   deve ser usada.
 
@@ -311,14 +376,15 @@ entre dois modos:
 Se uma entrega com destino desconhecido termina em problema depois da coleta,
 a localização da tentativa de entrega — não a localização posterior da
 devolução — vira o destino e congela distância, cobrança e repasse antes de o
-pedido entrar em `FAILED`. Sem essa coordenada o insucesso não é registrado,
-evitando uma devolução sem valor. A confirmação posterior na loja não recalcula
-o preço e continua sem bloqueio de proximidade.
+pedido entrar em `FAILED`, já incluindo a taxa de retorno. Sem essa coordenada
+o insucesso não é registrado, evitando uma devolução sem valor. A confirmação
+posterior na loja não recalcula o preço; se o raio de retorno estiver
+configurado, ela exige proximidade da empresa.
 
 Fechamento: item sem `requiresReturn` fecha sozinho (`COMPLETED`) assim que
 marcado entregue. Item com `requiresReturn=true` fica em `DELIVERED` até o
 motoboy confirmar o retorno via `complete-return`. A confirmação permanece
-auditada, mas GPS e proximidade da empresa não bloqueiam essa ação.
+auditada e respeita o raio de retorno configurado pelo ADM.
 
 **Contexto histórico, pra não reabrir a discussão sem necessidade**: uma
 versão anterior deste mesmo conceito (2026-08-10) tinha sido explicitamente

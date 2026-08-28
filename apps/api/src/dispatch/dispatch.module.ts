@@ -6,6 +6,7 @@ import { LivePresenceModule } from '../live-presence/live-presence.module';
 import { PushModule } from '../push/push.module';
 import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 import { DispatchProcessor } from './dispatch.processor';
+import { IntegrationEventsModule } from '../integrations/integration-events.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { DispatchProcessor } from './dispatch.processor';
     RealtimeModule,
     LivePresenceModule,
     PushModule,
+    IntegrationEventsModule,
   ],
   providers: [DispatchService, DispatchProcessor],
   exports: [DispatchService],

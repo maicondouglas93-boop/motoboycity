@@ -13,7 +13,7 @@ import type {
 import { AiqfomeTokenService } from '../src/integrations/aiqfome/aiqfome-token.service';
 
 const LOCK_KEY_PREFIX = 'motoboycity:aiqfome:token-refresh:';
-const requiredScopes = ['aqf:store:read', 'aqf:order:read', 'aqf:order:create'];
+const requiredScopes = ['aqf:store:read', 'aqf:store:create', 'aqf:order:read', 'aqf:order:create'];
 const runtimeValues: Record<string, string> = {
   AIQFOME_CLIENT_ID: 'isolated-client-id',
   AIQFOME_CLIENT_SECRET: 'isolated-client-secret',

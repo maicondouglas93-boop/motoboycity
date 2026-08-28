@@ -306,7 +306,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     await syncDeliveryTracking(
       token,
       active.map((activeDelivery) => activeDelivery.id),
-      useDispatchStore.getState().availability === 'AVAILABLE',
+      useDispatchStore.getState().wantsToBeAvailable,
     ).catch(() => undefined);
 
     if (!active.some((activeDelivery) => activeDelivery.id === delivery.id)) {
@@ -408,7 +408,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           await syncDeliveryTracking(
             token,
             active.map((activeDelivery) => activeDelivery.id),
-            useDispatchStore.getState().availability === 'AVAILABLE',
+            useDispatchStore.getState().wantsToBeAvailable,
           ).catch(() => undefined);
         })
         .catch(() => undefined);
@@ -477,7 +477,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     await syncDeliveryTracking(
       token,
       remainingDeliveries.map((activeDelivery) => activeDelivery.id),
-      useDispatchStore.getState().availability === 'AVAILABLE',
+      useDispatchStore.getState().wantsToBeAvailable,
     ).catch(() => undefined);
 
     Alert.alert(
@@ -497,19 +497,22 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       if (!token) return;
 
       if (nextOperation === 'collect') {
-        const result = await deliveriesApi.collect(token, delivery.id);
+        const fix = await captureCurrentLocation();
+        const result = await deliveriesApi.collect(token, delivery.id, {
+          lat: fix.lat,
+          lng: fix.lng,
+          accuracy: fix.accuracy,
+        });
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
         setSuccessMessage('O pedido foi marcado como coletado!');
       } else if (nextOperation === 'deliver') {
         // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
         // tentativa posterior nunca pode recapturar outra rua por engano.
-        const payload = delivery.destinationKnownAtCreation
-          ? {}
-          : await captureCurrentLocation().then((fix) => ({
-              lat: fix.lat,
-              lng: fix.lng,
-              accuracy: fix.accuracy,
-            }));
+        const payload = await captureCurrentLocation().then((fix) => ({
+          lat: fix.lat,
+          lng: fix.lng,
+          accuracy: fix.accuracy,
+        }));
         const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
         if (queued === undefined) return;
         if (queued) {
@@ -565,7 +568,16 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         navigation.popToTop();
         return;
       } else {
-        const queued = await queueAndSynchronizeCompletion(token, 'COMPLETE_RETURN');
+        const returnLocation = await captureCurrentLocation().then((fix) => ({
+          lat: fix.lat,
+          lng: fix.lng,
+          accuracy: fix.accuracy,
+        }));
+        const queued = await queueAndSynchronizeCompletion(
+          token,
+          'COMPLETE_RETURN',
+          returnLocation,
+        );
         if (queued === undefined) return;
         if (queued) {
           await keepCompletionPendingLocally(token, queued);

@@ -10,9 +10,9 @@ export const deliveryFailureReasonValues = [
 /**
  * Insucesso de entrega: o motoboy coletou mas nao conseguiu entregar.
  *
- * Nao e cancelamento — a mercadoria volta para a loja e a empresa paga a
- * corrida normal, entao o pedido fecha pela mesma confirmacao de retorno que
- * uma entrega bem-sucedida com `requiresReturn`.
+ * Nao e cancelamento — a mercadoria volta para a loja, a empresa paga a
+ * corrida normal mais a taxa de retorno e o pedido fecha pela mesma confirmacao
+ * usada por uma entrega bem-sucedida com `requiresReturn`.
  *
  * lat/lng podem registrar onde a tentativa aconteceu, mas são opcionais: uma
  * falha de GPS não pode impedir o motoboy de informar o problema.

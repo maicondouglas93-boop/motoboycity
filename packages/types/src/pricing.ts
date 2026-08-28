@@ -27,15 +27,18 @@ export interface PricingTableItem {
 }
 
 /**
- * `null` em qualquer um dos três significa "ainda não configurado pelo admin".
- * Nenhum cálculo assume valor padrão: precificar um pedido exige a comissão,
- * despachar exige o timeout e fechar um retorno exige o raio.
+ * `null` em comissão e timeout significa "ainda não configurado pelo admin".
+ * Nos raios de proximidade, `null` desliga somente a respectiva validação.
  */
 export interface PlatformSettingsItem {
   driverCommissionPercentage: number | null;
   dispatchOfferTimeoutSeconds: number | null;
+  /** Preparo padrao para pedidos aiqfome; a empresa pode sobrescrever. */
+  aiqfomeDispatchDelayMinutes: number | null;
   /** Minutos entre aceite e coleta; null desliga a devolucao automatica a fila. */
   pickupAssignmentTimeoutMinutes: number | null;
+  /** Raio para marcar coleta no endereco da empresa. `null` desliga a regra. */
+  collectionProximityRadiusMeters: number | null;
   returnProximityRadiusMeters: number | null;
   /** Liga o bloqueio de pedido fora do horário de funcionamento. */
   businessHoursEnabled: boolean;
@@ -64,7 +67,7 @@ export interface PlatformSettingsItem {
   maxConcurrentDeliveriesPerDriver: number | null;
   /** Tamanho maximo do lote. 1 desliga o lote. `null` = teto do formato. */
   maxDeliveriesPerBatch: number | null;
-  /** Raio para marcar entrega com destino informado. `null` = padrao de 200 m. */
+  /** Raio para marcar entrega com destino informado. `null` desliga a regra. */
   deliveryProximityRadiusMeters: number | null;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
@@ -79,7 +82,9 @@ export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
   businessHoursEnabled?: boolean;
   dispatchOfferTimeoutSeconds?: number;
+  aiqfomeDispatchDelayMinutes?: number;
   pickupAssignmentTimeoutMinutes?: number;
+  collectionProximityRadiusMeters?: number;
   returnProximityRadiusMeters?: number;
   minMinutesBeforeCollect?: number;
   minMinutesBeforeDeliver?: number;

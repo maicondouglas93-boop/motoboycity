@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 /**
- * A localização é opcional e serve apenas como contexto de auditoria. A
- * confirmação do retorno não depende de GPS ou proximidade.
+ * A localizacao continua opcional no contrato porque o ADM pode deixar a
+ * validacao desligada. Quando ha raio configurado, o service exige coordenada
+ * e precisao do fix antes de concluir o retorno.
  */
 export const completeReturnSchema = z
   .object({

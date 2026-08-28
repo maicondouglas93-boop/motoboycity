@@ -11,6 +11,7 @@ import type {
   DeliverySearchResult,
   DeliverySummaryResult,
   DeliveryStatus,
+  MarkCollectedPayload,
   MarkDeliveredPayload,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
@@ -216,7 +217,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     async collect(
       accessToken: string,
       id: string,
-      payload?: { occurredAt: string },
+      payload?: MarkCollectedPayload,
     ): Promise<DeliveryGroupResult> {
       const response = await fetch(`${baseUrl}/deliveries/${id}/collect`, {
         method: 'PATCH',

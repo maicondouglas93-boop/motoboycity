@@ -7,6 +7,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { DeliveriesController } from './deliveries.controller';
 import { DeliveriesService } from './deliveries.service';
+import { IntegrationEventsModule } from '../integrations/integration-events.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DeliveriesService } from './deliveries.service';
     FinanceModule,
     AdminPlatformSettingsModule,
     RealtimeModule,
+    IntegrationEventsModule,
   ],
   controllers: [DeliveriesController],
   providers: [DeliveriesService],

@@ -16,7 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type { AvailableDeliveryItem, DriverDispatchQueueResult } from '@motoboycity/types';
+import type {
+  AvailableDeliveryItem,
+  DriverDispatchQueueResult,
+  DriverPresenceItem,
+} from '@motoboycity/types';
 import { ActiveToggle } from '../components/ActiveToggle';
 import { BottomSheet } from '../components/BottomSheet';
 import { DeliveryCard } from '../components/DeliveryCard';
@@ -42,8 +46,7 @@ import {
   type PendingDeliveryCompletion,
 } from '../lib/deliveryCompletionOutbox';
 import { deliveryPaymentLabel, formatDeliveryAddress } from '../lib/deliveryOperation';
-import { syncDeliveryTracking } from '../lib/deliveryTracking';
-import { stopDeliveryTracking } from '../lib/deliveryTracking';
+import { stopDeliveryTracking, syncDeliveryTracking } from '../lib/deliveryTracking';
 import { getDriverProfile } from '../lib/driverProfileCache';
 import {
   capturePresenceLocation,
@@ -51,6 +54,7 @@ import {
   LocationError,
 } from '../lib/location';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
+import { isTransientPresenceError, restoreDesiredPresence } from '../lib/presencePersistence';
 import { session } from '../lib/session';
 import { API_BASE_URL } from '../lib/config';
 import {
@@ -168,6 +172,7 @@ function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
 export function HomeScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
   const acceptingPendingRef = useRef(false);
+  const presenceRecoveryRef = useRef<Promise<DriverPresenceItem | null> | null>(null);
   const pendingListVersionRef = useRef(0);
   const queueRequestVersionRef = useRef(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -194,9 +199,11 @@ export function HomeScreen({ navigation }: Props) {
   const [pickupCountdownNow, setPickupCountdownNow] = useState(() => Date.now());
 
   const availability = useDispatchStore((state) => state.availability);
+  const wantsToBeAvailable = useDispatchStore((state) => state.wantsToBeAvailable);
   const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
   const socketConnected = useDispatchStore((state) => state.socketConnected);
   const setPresence = useDispatchStore((state) => state.setPresence);
+  const setWantsToBeAvailable = useDispatchStore((state) => state.setWantsToBeAvailable);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
@@ -332,6 +339,93 @@ export function HomeScreen({ navigation }: Props) {
     }
   }
 
+  async function recoverDesiredOnlinePresence(
+    token: string,
+    knownPresence?: DriverPresenceItem | null,
+  ): Promise<DriverPresenceItem | null> {
+    if (presenceRecoveryRef.current) return presenceRecoveryRef.current;
+
+    const recovery = (async () => {
+      const desiredAvailability = await session.getDesiredAvailability();
+      const shouldStayOnline = desiredAvailability === true;
+      setWantsToBeAvailable(shouldStayOnline);
+      let currentPresence = knownPresence;
+      if (!shouldStayOnline) {
+        await stopDeliveryTracking().catch(() => undefined);
+        if (currentPresence === undefined) {
+          currentPresence = await driverPresenceApi.get(token).catch(() => null);
+        }
+        if (currentPresence?.availability === 'AVAILABLE') {
+          await driverPresenceApi
+            .set(token, { availability: 'UNAVAILABLE' })
+            .catch(() => undefined);
+        }
+        const unavailable = { availability: 'UNAVAILABLE' as const, since: null };
+        setPresence(unavailable.availability, unavailable.since);
+        return unavailable;
+      }
+
+      if (currentPresence === undefined) {
+        currentPresence = await driverPresenceApi.get(token).catch(() => null);
+        if (currentPresence) {
+          setPresence(currentPresence.availability, currentPresence.since);
+        }
+      }
+
+      try {
+        const restored = await restoreDesiredPresence(currentPresence ?? null, {
+          captureLocation: capturePresenceLocation,
+          startTracking: () =>
+            syncDeliveryTracking(
+              token,
+              useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
+              true,
+            ),
+          stopTracking: stopDeliveryTracking,
+          activate: (location) =>
+            driverPresenceApi.set(token, {
+              availability: 'AVAILABLE',
+              location,
+              appVersion: DRIVER_APP_VERSION,
+              trackingCapability: 'BACKGROUND_V1',
+            }),
+        });
+        setPresence(restored.availability, restored.since);
+        setWantsToBeAvailable(true);
+        setPresenceError(null);
+        setTrackingError(null);
+        return restored;
+      } catch (error) {
+        const retryAutomatically =
+          !(error instanceof LocationError) && isTransientPresenceError(error);
+        if (retryAutomatically) {
+          setPresenceError(
+            'Sinal instavel. O aplicativo continuara tentando manter voce online automaticamente.',
+          );
+          return currentPresence ?? null;
+        }
+
+        await session.setDesiredAvailability(false);
+        setWantsToBeAvailable(false);
+        setPresence('UNAVAILABLE', null);
+        clearDriverQueue();
+        setPresenceError(
+          error instanceof ApiError || error instanceof LocationError
+            ? error.message
+            : 'Nao foi possivel restaurar sua disponibilidade automaticamente.',
+        );
+        return null;
+      }
+    })();
+
+    presenceRecoveryRef.current = recovery;
+    try {
+      return await recovery;
+    } finally {
+      if (presenceRecoveryRef.current === recovery) presenceRecoveryRef.current = null;
+    }
+  }
+
   async function retirarDaFilaSemNotificacao(
     token: string,
     readiness: NotificationReadiness,
@@ -339,13 +433,16 @@ export function HomeScreen({ navigation }: Props) {
   ) {
     if (
       !notificacaoBloqueiaPresenca(readiness) ||
-      useDispatchStore.getState().availability !== 'AVAILABLE'
+      (useDispatchStore.getState().availability !== 'AVAILABLE' &&
+        !useDispatchStore.getState().wantsToBeAvailable)
     ) {
       return;
     }
 
     await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
     await stopDeliveryTracking().catch(() => undefined);
+    await session.setDesiredAvailability(false);
+    setWantsToBeAvailable(false);
     setPresence('UNAVAILABLE', null);
     clearDriverQueue();
     setPresenceError(mensagemNotificacaoObrigatoria(readiness));
@@ -476,17 +573,28 @@ export function HomeScreen({ navigation }: Props) {
       let presence = await syncPresence(token);
       if (cancelled) return;
 
+      let desiredAvailability = await session.getDesiredAvailability();
+      if (desiredAvailability === null && presence) {
+        desiredAvailability = presence.availability === 'AVAILABLE';
+        await session.setDesiredAvailability(desiredAvailability);
+      }
+      setWantsToBeAvailable(desiredAvailability === true);
+
       if (
-        presence?.availability === 'AVAILABLE' &&
+        (presence?.availability === 'AVAILABLE' || desiredAvailability === true) &&
         notificacaoBloqueiaPresenca(notificationReadiness)
       ) {
         presence = await driverPresenceApi
           .set(token, { availability: 'UNAVAILABLE' })
           .catch(() => null);
         await stopDeliveryTracking().catch(() => undefined);
+        await session.setDesiredAvailability(false);
+        setWantsToBeAvailable(false);
         setPresence('UNAVAILABLE', null);
         setPresenceError(mensagemNotificacaoObrigatoria(notificationReadiness));
         alertarNotificacaoObrigatoria(notificationReadiness);
+      } else {
+        presence = await recoverDesiredOnlinePresence(token, presence);
       }
 
       try {
@@ -497,7 +605,7 @@ export function HomeScreen({ navigation }: Props) {
             await syncDeliveryTracking(
               token,
               deliveries.map((delivery) => delivery.id),
-              presence?.availability === 'AVAILABLE' &&
+              useDispatchStore.getState().wantsToBeAvailable &&
                 !notificacaoBloqueiaPresenca(notificationReadiness),
             );
             if (!cancelled) setTrackingError(null);
@@ -529,8 +637,14 @@ export function HomeScreen({ navigation }: Props) {
             .then(async (readiness) => {
               const reconnectCompletionSync = await syncCompletionQueue(token).catch(() => null);
               if (reconnectCompletionSync?.authRequired) return;
-              const reconnectedPresence = await syncPresence(token);
+              let reconnectedPresence = await syncPresence(token);
               await retirarDaFilaSemNotificacao(token, readiness, false);
+              if (!notificacaoBloqueiaPresenca(readiness)) {
+                reconnectedPresence = await recoverDesiredOnlinePresence(
+                  token,
+                  reconnectedPresence,
+                );
+              }
               if (
                 reconnectedPresence?.availability === 'AVAILABLE' &&
                 useDispatchStore.getState().availability === 'AVAILABLE'
@@ -545,7 +659,7 @@ export function HomeScreen({ navigation }: Props) {
                 await syncDeliveryTracking(
                   token,
                   deliveries.map((delivery) => delivery.id),
-                  useDispatchStore.getState().availability === 'AVAILABLE',
+                  useDispatchStore.getState().wantsToBeAvailable,
                 ).catch(() => undefined);
               }
             })
@@ -581,7 +695,7 @@ export function HomeScreen({ navigation }: Props) {
           syncDeliveryTracking(
             token,
             remainingDeliveries.map((delivery) => delivery.id),
-            useDispatchStore.getState().availability === 'AVAILABLE',
+            useDispatchStore.getState().wantsToBeAvailable,
           ).catch(() => undefined);
           Alert.alert('Pedido cancelado', 'Este pedido foi cancelado pela administracao.');
           navigation.popToTop();
@@ -594,7 +708,7 @@ export function HomeScreen({ navigation }: Props) {
           syncDeliveryTracking(
             token,
             remainingDeliveries.map((delivery) => delivery.id),
-            useDispatchStore.getState().availability === 'AVAILABLE',
+            useDispatchStore.getState().wantsToBeAvailable,
           ).catch(() => undefined);
           Alert.alert(
             'Prazo de coleta encerrado',
@@ -607,6 +721,8 @@ export function HomeScreen({ navigation }: Props) {
           const offerId = useDispatchStore.getState().incomingOffer?.offerId;
           if (offerId) dispensarOfertaNativa(offerId).catch(() => undefined);
           setIncomingOffer(null);
+          session.setDesiredAvailability(false).catch(() => undefined);
+          setWantsToBeAvailable(false);
           setPresence('UNAVAILABLE', null);
           clearDriverQueue();
           stopDeliveryTracking().catch(() => undefined);
@@ -619,14 +735,10 @@ export function HomeScreen({ navigation }: Props) {
         onPresenceExpired: () => {
           setPresence('UNAVAILABLE', null);
           clearDriverQueue();
-          stopDeliveryTracking().catch(() => undefined);
           setPresenceError(
-            'Você ficou offline porque o servidor parou de receber sua localização. Ligue a localização e fique online novamente.',
+            'O sinal foi interrompido. Estamos tentando colocar voce online novamente.',
           );
-          Alert.alert(
-            'Você ficou offline',
-            'O servidor parou de receber sua localização. Verifique a localização do aparelho antes de ficar online novamente.',
-          );
+          recoverDesiredOnlinePresence(token).catch(() => undefined);
         },
         onQueueUpdated: () => {
           if (useDispatchStore.getState().availability !== 'AVAILABLE') return;
@@ -687,7 +799,7 @@ export function HomeScreen({ navigation }: Props) {
             await syncDeliveryTracking(
               atual,
               deliveries.map((delivery) => delivery.id),
-              useDispatchStore.getState().availability === 'AVAILABLE',
+              useDispatchStore.getState().wantsToBeAvailable,
             )
               .then(() => setTrackingError(null))
               .catch((error: unknown) =>
@@ -706,6 +818,9 @@ export function HomeScreen({ navigation }: Props) {
           await mostrarOfertaPendente(atual);
           const readiness = await verificarNotificacaoObrigatoria();
           await retirarDaFilaSemNotificacao(atual, readiness, true);
+          if (!notificacaoBloqueiaPresenca(readiness)) {
+            await recoverDesiredOnlinePresence(atual);
+          }
           if (useDispatchStore.getState().availability === 'AVAILABLE') {
             await loadDriverQueue(atual, true);
           } else {
@@ -760,7 +875,8 @@ export function HomeScreen({ navigation }: Props) {
     const token = await session.getToken();
     if (!token) return;
     setPresenceLoading(true);
-    const presence = await syncPresence(token);
+    let presence = await syncPresence(token);
+    presence = await recoverDesiredOnlinePresence(token, presence);
     if (presence?.availability === 'AVAILABLE') {
       await loadDriverQueue(token);
     } else {
@@ -775,11 +891,19 @@ export function HomeScreen({ navigation }: Props) {
     setPresenceLoading(true);
     try {
       if (!value) {
-        const result = await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' });
-        await stopDeliveryTracking();
-        setPresence(result.availability, result.since);
+        await session.setDesiredAvailability(false);
+        setWantsToBeAvailable(false);
+        await stopDeliveryTracking().catch(() => undefined);
+        setPresence('UNAVAILABLE', null);
         clearDriverQueue();
         setPresenceError(null);
+        await driverPresenceApi
+          .set(token, { availability: 'UNAVAILABLE' })
+          .catch(() =>
+            setPresenceError(
+              'Voce saiu da fila neste aparelho. O servidor concluira a saida assim que a conexao voltar.',
+            ),
+          );
         return;
       }
 
@@ -791,30 +915,15 @@ export function HomeScreen({ navigation }: Props) {
       }
 
       await ensureBackgroundTrackingPermission();
-      const location = await capturePresenceLocation();
-      const result = await driverPresenceApi.set(token, {
-        availability: 'AVAILABLE',
-        location,
-        appVersion: DRIVER_APP_VERSION,
-        trackingCapability: 'BACKGROUND_V1',
-      });
-      try {
-        await syncDeliveryTracking(
-          token,
-          useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
-          true,
-        );
-      } catch (trackingStartError) {
-        await driverPresenceApi.set(token, { availability: 'UNAVAILABLE' }).catch(() => undefined);
-        await stopDeliveryTracking();
-        setPresence('UNAVAILABLE', null);
-        throw trackingStartError;
-      }
-      setPresence(result.availability, result.since);
-      await loadDriverQueue(token);
-      setPresenceError(null);
+      await session.setDesiredAvailability(true);
+      setWantsToBeAvailable(true);
+      const result = await recoverDesiredOnlinePresence(token);
+      if (result?.availability === 'AVAILABLE') await loadDriverQueue(token);
     } catch (error) {
-      await syncPresence(token);
+      await session.setDesiredAvailability(false);
+      setWantsToBeAvailable(false);
+      await stopDeliveryTracking().catch(() => undefined);
+      setPresence('UNAVAILABLE', null);
       Alert.alert(
         'Disponibilidade nao atualizada',
         error instanceof ApiError || error instanceof LocationError
@@ -832,7 +941,7 @@ export function HomeScreen({ navigation }: Props) {
       syncDeliveryTracking(
         token,
         useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
-        useDispatchStore.getState().availability === 'AVAILABLE',
+        useDispatchStore.getState().wantsToBeAvailable,
       )
         .then(() => setTrackingError(null))
         .catch((error: unknown) =>
@@ -857,7 +966,7 @@ export function HomeScreen({ navigation }: Props) {
       await syncDeliveryTracking(
         token,
         deliveries.map((delivery) => delivery.id),
-        useDispatchStore.getState().availability === 'AVAILABLE',
+        useDispatchStore.getState().wantsToBeAvailable,
       ).catch(() => undefined);
     }
   }
@@ -874,15 +983,16 @@ export function HomeScreen({ navigation }: Props) {
       }
       const result = await syncCompletionQueue(token);
       if (result?.authRequired) return;
+      const presence = await recoverDesiredOnlinePresence(token);
       const deliveries = await getActiveDeliveries(token);
       setActiveDeliveries(deliveries);
-      if (useDispatchStore.getState().availability === 'AVAILABLE') {
+      if (presence?.availability === 'AVAILABLE') {
         await loadDriverQueue(token, true);
       }
       await syncDeliveryTracking(
         token,
         deliveries.map((delivery) => delivery.id),
-        useDispatchStore.getState().availability === 'AVAILABLE',
+        useDispatchStore.getState().wantsToBeAvailable,
       ).catch(() => undefined);
     } catch {
       // Os avisos persistentes acima continuam sendo a fonte de erro da tela.
@@ -945,7 +1055,7 @@ export function HomeScreen({ navigation }: Props) {
           {aba === 'andamento' && (
             <View style={styles.areaToggle}>
               <ActiveToggle
-                value={isAvailable}
+                value={wantsToBeAvailable}
                 onChange={handleToggleAvailability}
                 disabled={presenceLoading}
               />

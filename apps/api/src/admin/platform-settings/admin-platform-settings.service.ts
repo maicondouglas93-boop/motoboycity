@@ -28,7 +28,9 @@ export class AdminPlatformSettingsService {
       return {
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        aiqfomeDispatchDelayMinutes: null,
         pickupAssignmentTimeoutMinutes: null,
+        collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
@@ -59,8 +61,14 @@ export class AdminPlatformSettingsService {
       ...(payload.dispatchOfferTimeoutSeconds !== undefined && {
         dispatchOfferTimeoutSeconds: payload.dispatchOfferTimeoutSeconds,
       }),
+      ...(payload.aiqfomeDispatchDelayMinutes !== undefined && {
+        aiqfomeDispatchDelayMinutes: payload.aiqfomeDispatchDelayMinutes,
+      }),
       ...(payload.pickupAssignmentTimeoutMinutes !== undefined && {
         pickupAssignmentTimeoutMinutes: payload.pickupAssignmentTimeoutMinutes,
+      }),
+      ...(payload.collectionProximityRadiusMeters !== undefined && {
+        collectionProximityRadiusMeters: payload.collectionProximityRadiusMeters,
       }),
       ...(payload.returnProximityRadiusMeters !== undefined && {
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
@@ -126,7 +134,9 @@ export class AdminPlatformSettingsService {
   private toItem(settings: {
     driverCommissionPercentage: { toString(): string } | null;
     dispatchOfferTimeoutSeconds: number | null;
+    aiqfomeDispatchDelayMinutes: number | null;
     pickupAssignmentTimeoutMinutes: number | null;
+    collectionProximityRadiusMeters: number | null;
     returnProximityRadiusMeters: number | null;
     businessHoursEnabled: boolean;
     minMinutesBeforeCollect: number | null;
@@ -147,7 +157,9 @@ export class AdminPlatformSettingsService {
           ? null
           : Number(settings.driverCommissionPercentage),
       dispatchOfferTimeoutSeconds: settings.dispatchOfferTimeoutSeconds,
+      aiqfomeDispatchDelayMinutes: settings.aiqfomeDispatchDelayMinutes,
       pickupAssignmentTimeoutMinutes: settings.pickupAssignmentTimeoutMinutes,
+      collectionProximityRadiusMeters: settings.collectionProximityRadiusMeters,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
       businessHoursEnabled: settings.businessHoursEnabled,
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,

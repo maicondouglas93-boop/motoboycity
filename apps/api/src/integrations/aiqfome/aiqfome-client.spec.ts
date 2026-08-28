@@ -26,7 +26,7 @@ describe('AiqfomeClient token refresh', () => {
           refresh_token: 'new-refresh',
           token_type: 'Bearer',
           expires_in: 7200,
-          scope: 'aqf:store:read aqf:order:read aqf:order:create',
+          scope: 'aqf:store:read aqf:store:create aqf:order:read aqf:order:create',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -61,5 +61,22 @@ describe('AiqfomeClient token refresh', () => {
       code: 'TOKEN_REFRESH_FAILED',
       httpStatus: 401,
     });
+  });
+
+  it('sincroniza a etapa logistica pela rota V2 autenticada', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const client = new AiqfomeClient(config);
+
+    await client.markLogisticStatus('68670787', 'delivery-ongoing', 'access-token');
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://plataforma.aiqfome.com/api/v2/logistic/68670787/delivery-ongoing',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    );
   });
 });

@@ -62,7 +62,34 @@ const storedStoreSchema = z.object({
     .nullable(),
 });
 
+const aiqfomeWebhookConfigSchema = z.object({
+  status: z.enum(['INACTIVE', 'ACTIVE', 'ERROR']),
+  secretDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
+  registrations: z.array(
+    z.object({
+      id: z.string().min(1),
+      event: z.enum(['new-order', 'read-order', 'ready-order', 'cancel-order', 'order-refund']),
+    }),
+  ),
+  updatedAt: z.string().datetime().nullable(),
+});
+
 export const aiqfomeIntegrationConfigSchema = z.object({
+  version: z.literal(2),
+  dispatchTrigger: z.literal('NEW_ORDER_DELAYED'),
+  acceptedPayment: z.literal('PREPAID_AND_ON_DELIVERY'),
+  store: storedStoreSchema.nullable(),
+  scopes: z.array(z.string()),
+  serviceTypeId: z.string().uuid().nullable(),
+  dispatchDelayMinutes: z.number().int().min(1).max(480).nullable(),
+  webhook: aiqfomeWebhookConfigSchema,
+  errorCode: z.string().nullable(),
+});
+
+const legacyAiqfomeIntegrationConfigSchema = z.object({
   version: z.literal(1),
   dispatchTrigger: z.literal('READY_ORDER'),
   acceptedPayment: z.literal('PREPAID_ONLY'),
@@ -76,7 +103,16 @@ export type AiqfomeTokenResponse = z.infer<typeof aiqfomeTokenResponseSchema>;
 
 export function parseAiqfomeIntegrationConfig(value: unknown): AiqfomeIntegrationConfig {
   const parsed = aiqfomeIntegrationConfigSchema.safeParse(value);
-  return parsed.success ? parsed.data : emptyAiqfomeIntegrationConfig();
+  if (parsed.success) return parsed.data;
+
+  const legacy = legacyAiqfomeIntegrationConfigSchema.safeParse(value);
+  if (!legacy.success) return emptyAiqfomeIntegrationConfig();
+  return {
+    ...emptyAiqfomeIntegrationConfig(),
+    store: legacy.data.store,
+    scopes: legacy.data.scopes,
+    errorCode: legacy.data.errorCode,
+  };
 }
 
 export const aiqfomeStoredCredentialsSchema = z.object({
@@ -101,11 +137,19 @@ export type AiqfomeOauthState = z.infer<typeof aiqfomeOauthStateSchema>;
 
 export function emptyAiqfomeIntegrationConfig(): AiqfomeIntegrationConfig {
   return {
-    version: 1,
-    dispatchTrigger: 'READY_ORDER',
-    acceptedPayment: 'PREPAID_ONLY',
+    version: 2,
+    dispatchTrigger: 'NEW_ORDER_DELAYED',
+    acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
     store: null,
     scopes: [],
+    serviceTypeId: null,
+    dispatchDelayMinutes: null,
+    webhook: {
+      status: 'INACTIVE',
+      secretDigest: null,
+      registrations: [],
+      updatedAt: null,
+    },
     errorCode: null,
   };
 }

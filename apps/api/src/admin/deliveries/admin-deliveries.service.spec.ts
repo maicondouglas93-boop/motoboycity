@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
+import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminDeliveriesService } from './admin-deliveries.service';
 
@@ -70,6 +71,7 @@ describe('AdminDeliveriesService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: DeliveriesService, useValue: deliveriesService },
         { provide: FinanceLedgerService, useValue: financeLedgerService },
+        { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
       ],
     }).compile();
 

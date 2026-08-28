@@ -39,7 +39,9 @@ describe('AdminPlatformSettingsService', () => {
       expect(result).toEqual({
         driverCommissionPercentage: null,
         dispatchOfferTimeoutSeconds: null,
+        aiqfomeDispatchDelayMinutes: null,
         pickupAssignmentTimeoutMinutes: null,
+        collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
@@ -187,6 +189,30 @@ describe('AdminPlatformSettingsService', () => {
         include: { updatedBy: true },
       });
       expect(result.returnProximityRadiusMeters).toBe(150);
+    });
+
+    it('atualiza só o raio de coleta (partial update)', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        driverCommissionPercentage: null,
+        dispatchOfferTimeoutSeconds: null,
+        collectionProximityRadiusMeters: 180,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const result = await service.update({ collectionProximityRadiusMeters: 180 }, 'admin-1');
+
+      expect(prisma.platformSettings.upsert).toHaveBeenCalledWith({
+        where: { id: 'global' },
+        update: { collectionProximityRadiusMeters: 180, updatedByUserId: 'admin-1' },
+        create: {
+          id: 'global',
+          collectionProximityRadiusMeters: 180,
+          updatedByUserId: 'admin-1',
+        },
+        include: { updatedBy: true },
+      });
+      expect(result.collectionProximityRadiusMeters).toBe(180);
     });
 
     it('atualiza o prazo de coleta sem alterar o alerta visual de coleta', async () => {

@@ -109,9 +109,9 @@ function obterPosicao(opcoes: OpcoesDeCaptura): Promise<LocationFix> {
 /**
  * Captura unica, precisa e sem rastreamento em segundo plano.
  *
- * Exige posicao nova em folha (`maximumAge: 0`) de proposito: e usada na coleta
- * e na entrega, onde a posicao serve de comprovacao de presenca fisica. Uma
- * posicao guardada de minutos atras nao comprova nada.
+ * Exige posicao nova em folha (`maximumAge: 0`) de proposito: e usada na coleta,
+ * entrega e retorno, onde a posicao serve de comprovacao de presenca fisica.
+ * Uma posicao guardada de minutos atras nao comprova nada.
  */
 export async function captureCurrentLocation(): Promise<LocationFix> {
   await ensurePreciseLocationPermission();

@@ -7,6 +7,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { PushService } from '../push/push.service';
+import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 
 const offerPickupAddress = {
   type: 'PICKUP',
@@ -138,6 +139,7 @@ describe('DispatchService', () => {
         { provide: LiveDriverPresenceService, useValue: livePresence },
         { provide: PushService, useValue: push },
         { provide: getQueueToken(DISPATCH_QUEUE), useValue: queue },
+        { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
       ],
     }).compile();
 

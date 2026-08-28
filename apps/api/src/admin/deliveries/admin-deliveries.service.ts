@@ -14,6 +14,7 @@ import type {
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
 
 /**
  * Intervenções manuais do admin sobre um pedido.
@@ -48,6 +49,7 @@ export class AdminDeliveriesService {
     private readonly prisma: PrismaService,
     private readonly deliveriesService: DeliveriesService,
     private readonly financeLedgerService: FinanceLedgerService,
+    private readonly integrationOutbox: IntegrationOutboxRecorder,
   ) {}
 
   createForCompany(
@@ -201,6 +203,7 @@ export class AdminDeliveriesService {
               note: `Coleta marcada manualmente pelo administrador. Motivo: ${payload.reason}`,
             },
           });
+          await this.integrationOutbox.record(tx, item.id, 'COLLECTED');
         }
       });
     } catch (error) {
@@ -283,6 +286,7 @@ export class AdminDeliveriesService {
             note: `Entrega marcada manualmente pelo administrador. Motivo: ${payload.reason}`,
           },
         });
+        await this.integrationOutbox.record(tx, deliveryId, 'DELIVERED');
 
         if (nextStatus === 'COMPLETED') {
           await tx.deliveryStatusHistory.create({

@@ -19,11 +19,23 @@ export const updatePlatformSettingsSchema = z
       .min(10, 'O tempo de resposta deve ser de pelo menos 10 segundos.')
       .max(600, 'O tempo de resposta deve ser de no máximo 600 segundos.')
       .optional(),
+    aiqfomeDispatchDelayMinutes: z
+      .number()
+      .int('O tempo de preparo do aiqfome deve ser um numero inteiro de minutos.')
+      .min(1, 'O tempo de preparo do aiqfome deve ser de pelo menos 1 minuto.')
+      .max(480, 'O tempo de preparo do aiqfome deve ser de no maximo 480 minutos.')
+      .optional(),
     pickupAssignmentTimeoutMinutes: z
       .number()
       .int('O prazo de coleta deve ser um numero inteiro de minutos.')
       .min(1, 'O prazo de coleta deve ser de pelo menos 1 minuto.')
       .max(480, 'O prazo de coleta deve ser de no maximo 480 minutos.')
+      .optional(),
+    collectionProximityRadiusMeters: z
+      .number()
+      .int('O raio de coleta deve ser um numero inteiro de metros.')
+      .min(50, 'O raio de coleta deve ser de pelo menos 50 metros.')
+      .max(5000, 'O raio de coleta deve ser de no maximo 5000 metros.')
       .optional(),
     returnProximityRadiusMeters: z
       .number()
@@ -115,7 +127,9 @@ export const updatePlatformSettingsSchema = z
     (data) =>
       data.driverCommissionPercentage !== undefined ||
       data.dispatchOfferTimeoutSeconds !== undefined ||
+      data.aiqfomeDispatchDelayMinutes !== undefined ||
       data.pickupAssignmentTimeoutMinutes !== undefined ||
+      data.collectionProximityRadiusMeters !== undefined ||
       data.returnProximityRadiusMeters !== undefined ||
       data.businessHoursEnabled !== undefined ||
       data.minMinutesBeforeCollect !== undefined ||

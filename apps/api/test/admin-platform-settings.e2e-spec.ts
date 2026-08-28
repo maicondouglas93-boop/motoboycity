@@ -79,7 +79,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: null,
+      aiqfomeDispatchDelayMinutes: null,
       pickupAssignmentTimeoutMinutes: null,
+      collectionProximityRadiusMeters: null,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
@@ -106,7 +108,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
+      aiqfomeDispatchDelayMinutes: null,
       pickupAssignmentTimeoutMinutes: null,
+      collectionProximityRadiusMeters: null,
       returnProximityRadiusMeters: null,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
@@ -131,6 +135,23 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       .expect(400);
   });
 
+  it('valida e configura o raio de coleta separadamente', async () => {
+    await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ collectionProximityRadiusMeters: 20 })
+      .expect(400);
+
+    const response = await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ collectionProximityRadiusMeters: 200 })
+      .expect(200);
+
+    expect(response.body.collectionProximityRadiusMeters).toBe(200);
+    expect(response.body.dispatchOfferTimeoutSeconds).toBe(60);
+  });
+
   it('admin configura o raio de retorno separadamente, sem mexer nos outros campos', async () => {
     const response = await request(app.getHttpServer())
       .patch('/admin/platform-settings')
@@ -141,7 +162,9 @@ describe('AdminPlatformSettingsController (e2e)', () => {
     expect(response.body).toEqual({
       driverCommissionPercentage: 80,
       dispatchOfferTimeoutSeconds: 60,
+      aiqfomeDispatchDelayMinutes: null,
       pickupAssignmentTimeoutMinutes: null,
+      collectionProximityRadiusMeters: 200,
       returnProximityRadiusMeters: 150,
       businessHoursEnabled: false,
       minMinutesBeforeCollect: null,
@@ -165,6 +188,23 @@ describe('AdminPlatformSettingsController (e2e)', () => {
       .expect(200);
 
     expect(response.body.driverCommissionPercentage).toBe(80);
+    expect(response.body.dispatchOfferTimeoutSeconds).toBe(60);
+  });
+
+  it('valida e configura o preparo padrao dos pedidos aiqfome', async () => {
+    await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ aiqfomeDispatchDelayMinutes: 0 })
+      .expect(400);
+
+    const response = await request(app.getHttpServer())
+      .patch('/admin/platform-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ aiqfomeDispatchDelayMinutes: 20 })
+      .expect(200);
+
+    expect(response.body.aiqfomeDispatchDelayMinutes).toBe(20);
     expect(response.body.dispatchOfferTimeoutSeconds).toBe(60);
   });
 

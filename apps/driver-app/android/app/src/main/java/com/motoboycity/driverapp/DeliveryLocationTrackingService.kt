@@ -184,14 +184,13 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
         currentAppVersion,
         location,
       ) ?: return
-    if (
-      status == HttpURLConnection.HTTP_UNAUTHORIZED ||
-        status == HttpURLConnection.HTTP_FORBIDDEN ||
-        status == HttpURLConnection.HTTP_CONFLICT
-    ) {
-      Log.w(TAG, "Heartbeat recusado pela API: HTTP $status")
-      stopTracking()
-    }
+    ensurePresenceAvailable(
+      status,
+      currentBaseUrl,
+      currentAccessToken,
+      currentAppVersion,
+      location,
+    )
   }
 
   private fun hasLocationPermission(): Boolean =
@@ -231,14 +230,15 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
       currentAppVersion,
       location,
     ) ?: return
-    if (heartbeatStatus == HttpURLConnection.HTTP_UNAUTHORIZED ||
-      heartbeatStatus == HttpURLConnection.HTTP_FORBIDDEN ||
-      heartbeatStatus == HttpURLConnection.HTTP_CONFLICT
-    ) {
-      stopTracking()
-      return
-    }
-    if (heartbeatStatus >= 500 || heartbeatStatus == 429) return
+    if (
+      !ensurePresenceAvailable(
+        heartbeatStatus,
+        currentBaseUrl,
+        currentAccessToken,
+        currentAppVersion,
+        location,
+      )
+    ) return
 
     for (deliveryId in ids) {
       val status = sendLocation(currentBaseUrl, currentAccessToken, deliveryId, location) ?: break
@@ -265,6 +265,63 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     return sendJson("${baseUrl.trimEnd('/')}/driver/presence/heartbeat", token, payload)
   }
 
+  /**
+   * Uma queda de internet maior que o TTL faz a API expirar a presenca. O
+   * servico ainda em foreground representa a escolha explicita do motoboy de
+   * permanecer online, portanto reafirma essa escolha com um fix atual quando
+   * a rede volta. Logout, bloqueio e saida manual param o servico e nao passam
+   * por esta recuperacao.
+   */
+  private fun ensurePresenceAvailable(
+    heartbeatStatus: Int,
+    baseUrl: String,
+    token: String,
+    version: String,
+    location: Location,
+  ): Boolean {
+    if (heartbeatStatus in 200..299) return true
+    if (heartbeatStatus == HttpURLConnection.HTTP_UNAUTHORIZED) {
+      Log.w(TAG, "Sessao recusada ao renovar presenca: HTTP $heartbeatStatus")
+      stopTracking()
+      return false
+    }
+    if (
+      heartbeatStatus != HttpURLConnection.HTTP_FORBIDDEN &&
+        heartbeatStatus != HttpURLConnection.HTTP_CONFLICT
+    ) return false
+
+    val recoveryStatus = sendPresenceActivation(baseUrl, token, version, location) ?: return false
+    if (recoveryStatus in 200..299) {
+      Log.i(TAG, "Presenca restaurada automaticamente depois da reconexao")
+      return true
+    }
+    if (
+      recoveryStatus == HttpURLConnection.HTTP_UNAUTHORIZED ||
+        recoveryStatus == HttpURLConnection.HTTP_FORBIDDEN
+    ) {
+      Log.w(TAG, "Reativacao da presenca recusada pela API: HTTP $recoveryStatus")
+      stopTracking()
+    }
+    return false
+  }
+
+  private fun sendPresenceActivation(
+    baseUrl: String,
+    token: String,
+    version: String,
+    location: Location,
+  ): Int? {
+    val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
+    val payload =
+      "{\"availability\":\"AVAILABLE\",\"location\":{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy},\"appVersion\":\"${escapeJson(version)}\",\"trackingCapability\":\"BACKGROUND_V1\"}"
+    return sendJson(
+      "${baseUrl.trimEnd('/')}/driver/presence",
+      token,
+      payload,
+      method = "PUT",
+    )
+  }
+
   private fun sendLocation(baseUrl: String, token: String, deliveryId: String, location: Location): Int? {
     val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
     val payload = "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy}"
@@ -275,11 +332,16 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     )
   }
 
-  private fun sendJson(url: String, token: String, payload: String): Int? {
+  private fun sendJson(
+    url: String,
+    token: String,
+    payload: String,
+    method: String = "POST",
+  ): Int? {
     return try {
       val connection = (URL(url).openConnection()
         as HttpURLConnection).apply {
-        requestMethod = "POST"
+        requestMethod = method
         connectTimeout = NETWORK_TIMEOUT_MS
         readTimeout = NETWORK_TIMEOUT_MS
         doOutput = true
@@ -412,7 +474,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     private const val ACTIVE_UPDATE_DISTANCE_METERS = 50f
     private const val IDLE_UPDATE_INTERVAL_MS = 60_000L
     private const val IDLE_UPDATE_DISTANCE_METERS = 100f
-    private const val HEARTBEAT_INTERVAL_MS = 60_000L
+    private const val HEARTBEAT_INTERVAL_MS = 45_000L
     private const val NETWORK_TIMEOUT_MS = 8_000
 
     fun startOrUpdate(

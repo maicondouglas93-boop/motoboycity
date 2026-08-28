@@ -16,7 +16,7 @@ describe('AiqfomeTokenService', () => {
       dispatchTrigger: 'READY_ORDER',
       acceptedPayment: 'PREPAID_ONLY',
       store: null,
-      scopes: ['aqf:store:read', 'aqf:order:read', 'aqf:order:create'],
+      scopes: ['aqf:store:read', 'aqf:store:create', 'aqf:order:read', 'aqf:order:create'],
       errorCode: null as string | null,
     };
     const payloads = new Map<string, AiqfomeStoredCredentials>([
@@ -245,7 +245,7 @@ describe('AiqfomeTokenService', () => {
       refresh_token: 'new-refresh',
       token_type: 'Bearer',
       expires_in: 7200,
-      scope: 'aqf:store:read aqf:order:read aqf:order:create',
+      scope: 'aqf:store:read aqf:store:create aqf:order:read aqf:order:create',
     });
 
     await expect(Promise.all([first, second])).resolves.toEqual(['new-access', 'new-access']);

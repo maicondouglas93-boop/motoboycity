@@ -6,6 +6,7 @@ import { AiqfomeCredentialsService } from './aiqfome-credentials.service';
 import { AiqfomeOAuthStateService } from './aiqfome-oauth-state.service';
 import { AiqfomeService } from './aiqfome.service';
 import { AiqfomeTokenService } from './aiqfome-token.service';
+import { AiqfomeWebhookService } from './aiqfome-webhook.service';
 
 describe('AiqfomeService', () => {
   const companyId = '11111111-1111-4111-8111-111111111111';
@@ -46,6 +47,9 @@ describe('AiqfomeService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       integrationCredential: { deleteMany: jest.fn() },
+      platformSettings: { findUnique: jest.fn().mockResolvedValue(null) },
+      serviceType: { findFirst: jest.fn().mockResolvedValue({ id: 'service-type' }) },
+      pricingTable: { findFirst: jest.fn().mockResolvedValue({ id: 'pricing-table' }) },
       $transaction: jest.fn(async (callback: unknown) => {
         if (typeof callback === 'function') {
           return callback(transactionClient);
@@ -62,7 +66,7 @@ describe('AiqfomeService', () => {
         refresh_token: 'refresh-secret',
         token_type: 'Bearer',
         expires_in: 7200,
-        scope: 'aqf:store:read aqf:order:read aqf:order:create',
+        scope: 'aqf:store:read aqf:store:create aqf:order:read aqf:order:create',
       }),
       resolveAuthorizedStore: jest.fn().mockResolvedValue({
         id: '54044',
@@ -94,6 +98,10 @@ describe('AiqfomeService', () => {
     const tokenService = {
       runExclusive: jest.fn(async (_id: string, operation: () => Promise<unknown>) => operation()),
     };
+    const webhookService = {
+      activate: jest.fn(),
+      deactivate: jest.fn(),
+    };
 
     return {
       service: new AiqfomeService(
@@ -103,6 +111,7 @@ describe('AiqfomeService', () => {
         credentials as unknown as AiqfomeCredentialsService,
         oauthState as unknown as AiqfomeOAuthStateService,
         tokenService as unknown as AiqfomeTokenService,
+        webhookService as unknown as AiqfomeWebhookService,
       ),
       prisma,
       transactionClient,
@@ -110,6 +119,7 @@ describe('AiqfomeService', () => {
       credentials,
       oauthState,
       tokenService,
+      webhookService,
     };
   }
 
@@ -181,6 +191,92 @@ describe('AiqfomeService', () => {
     );
   });
 
+  it('preserva o webhook ativo ao reautorizar a mesma loja', async () => {
+    const { service, prisma, transactionClient, webhookService } = createSubject();
+    const activeWebhook = {
+      status: 'ACTIVE' as const,
+      secretDigest: 'a'.repeat(64),
+      registrations: [{ id: 'webhook-1', event: 'new-order' as const }],
+      updatedAt: '2026-08-28T14:00:00.000Z',
+    };
+    prisma.companyTeamMember.findFirst.mockReset().mockResolvedValue({
+      companyId,
+      company: { document: '12.345.678/0001-90' },
+    });
+    prisma.integration.findUnique.mockResolvedValue({
+      config: {
+        version: 2,
+        dispatchTrigger: 'NEW_ORDER_DELAYED',
+        acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
+        store: {
+          id: '54044',
+          name: 'Loja Teste',
+          status: 'OPEN',
+          document: '12345678000190',
+          address: null,
+        },
+        scopes: ['aqf:store:read'],
+        serviceTypeId: null,
+        dispatchDelayMinutes: null,
+        webhook: activeWebhook,
+        errorCode: null,
+      },
+    });
+
+    await expect(
+      service.handleCallback({ code: 'single-use-code', state: 's'.repeat(43) }),
+    ).resolves.toBe('https://company.example.com/integracoes?aiqfome=connected');
+
+    expect(webhookService.deactivate).not.toHaveBeenCalled();
+    expect(transactionClient.integration.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          config: expect.objectContaining({ webhook: activeWebhook }),
+        }),
+      }),
+    );
+  });
+
+  it('exige desconectar antes de trocar uma loja com webhook ativo', async () => {
+    const { service, prisma, transactionClient } = createSubject();
+    prisma.companyTeamMember.findFirst.mockReset().mockResolvedValue({
+      companyId,
+      company: { document: '12.345.678/0001-90' },
+    });
+    prisma.integration.findUnique.mockResolvedValue({
+      config: {
+        version: 2,
+        dispatchTrigger: 'NEW_ORDER_DELAYED',
+        acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
+        store: {
+          id: 'old-store',
+          name: 'Loja anterior',
+          status: 'OPEN',
+          document: '12345678000190',
+          address: null,
+        },
+        scopes: [],
+        serviceTypeId: null,
+        dispatchDelayMinutes: null,
+        webhook: {
+          status: 'ACTIVE',
+          secretDigest: 'a'.repeat(64),
+          registrations: [{ id: 'webhook-1', event: 'new-order' }],
+          updatedAt: '2026-08-28T14:00:00.000Z',
+        },
+        errorCode: null,
+      },
+    });
+
+    await expect(
+      service.handleCallback({ code: 'single-use-code', state: 's'.repeat(43) }),
+    ).resolves.toBe(
+      'https://company.example.com/integracoes?aiqfome=error&reason=DISCONNECT_BEFORE_CHANGING_STORE',
+    );
+
+    expect(transactionClient.integrationCredential.upsert).not.toHaveBeenCalled();
+  });
+
   it('invalida o callback pendente quando a loja e desconectada', async () => {
     const { service, prisma, tokenService } = createSubject();
     prisma.companyTeamMember.findFirst.mockReset().mockResolvedValue({ companyId, role: 'OWNER' });
@@ -227,6 +323,64 @@ describe('AiqfomeService', () => {
       'https://company.example.com/integracoes?aiqfome=error&reason=INVALID_OR_EXPIRED_STATE',
     );
     expect(client.exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it('ativa a importacao com modalidade valida e prazo proprio da empresa', async () => {
+    const { service, prisma, webhookService } = createSubject();
+    const serviceTypeId = '55555555-5555-4555-8555-555555555555';
+    const activeWebhook = {
+      status: 'ACTIVE' as const,
+      secretDigest: 'a'.repeat(64),
+      registrations: [{ id: 'webhook-1', event: 'new-order' as const }],
+      updatedAt: '2026-08-28T14:00:00.000Z',
+    };
+    prisma.companyTeamMember.findFirst.mockReset().mockResolvedValue({ companyId, role: 'OWNER' });
+    prisma.integration.findUnique.mockResolvedValue({
+      id: integrationId,
+      status: 'CONNECTED',
+      credential: { id: 'credential-1' },
+      company: { regionId: 'region-1' },
+      connectedAt: new Date('2026-08-28T13:00:00.000Z'),
+      lastSyncAt: new Date('2026-08-28T13:00:00.000Z'),
+      config: {
+        version: 2,
+        dispatchTrigger: 'NEW_ORDER_DELAYED',
+        acceptedPayment: 'PREPAID_AND_ON_DELIVERY',
+        store: { id: '54044', name: 'Loja', status: 'OPEN', document: '123', address: null },
+        scopes: [],
+        serviceTypeId: null,
+        dispatchDelayMinutes: null,
+        webhook: {
+          status: 'INACTIVE',
+          secretDigest: null,
+          registrations: [],
+          updatedAt: null,
+        },
+        errorCode: null,
+      },
+    });
+    webhookService.activate.mockResolvedValue(activeWebhook);
+
+    await service.updateSettings(user, {
+      serviceTypeId,
+      dispatchDelayMinutes: 18,
+    });
+
+    expect(prisma.serviceType.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: serviceTypeId, active: true } }),
+    );
+    expect(webhookService.activate).toHaveBeenCalledWith(
+      integrationId,
+      expect.objectContaining({ serviceTypeId, dispatchDelayMinutes: 18 }),
+    );
+    expect(prisma.integration.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: integrationId },
+        data: expect.objectContaining({
+          config: expect.objectContaining({ webhook: activeWebhook }),
+        }),
+      }),
+    );
   });
 
   it('nao reconecta se a tentativa for invalidada durante a persistencia', async () => {

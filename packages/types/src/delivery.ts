@@ -179,6 +179,14 @@ export interface MarkDeliveredPayload {
   occurredAt?: string;
 }
 
+export interface MarkCollectedPayload {
+  lat?: number;
+  lng?: number;
+  /** Raio de erro do fix em metros, quando o aparelho disponibilizar. */
+  accuracy?: number;
+  occurredAt?: string;
+}
+
 export interface CompleteReturnPayload {
   lat?: number;
   lng?: number;

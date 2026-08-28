@@ -1,17 +1,16 @@
 import { create } from 'zustand';
-import type {
-  DeliveryOfferPayload,
-  DriverAvailability,
-} from '@motoboycity/types';
+import type { DeliveryOfferPayload, DriverAvailability } from '@motoboycity/types';
 import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
 
 interface DispatchState {
   availability: DriverAvailability;
+  wantsToBeAvailable: boolean;
   since: string | null;
   incomingOffer: DeliveryOfferPayload | null;
   activeDeliveries: ActiveDeliveryItem[];
   socketConnected: boolean;
   setPresence: (availability: DriverAvailability, since: string | null) => void;
+  setWantsToBeAvailable: (available: boolean) => void;
   setIncomingOffer: (offer: DeliveryOfferPayload | null) => void;
   setActiveDeliveries: (deliveries: ActiveDeliveryItem[]) => void;
   setSocketConnected: (connected: boolean) => void;
@@ -25,11 +24,13 @@ interface DispatchState {
  */
 export const useDispatchStore = create<DispatchState>((set) => ({
   availability: 'UNAVAILABLE',
+  wantsToBeAvailable: false,
   since: null,
   incomingOffer: null,
   activeDeliveries: [],
   socketConnected: false,
   setPresence: (availability, since) => set({ availability, since }),
+  setWantsToBeAvailable: (wantsToBeAvailable) => set({ wantsToBeAvailable }),
   setIncomingOffer: (incomingOffer) => set({ incomingOffer }),
   setActiveDeliveries: (activeDeliveries) => set({ activeDeliveries }),
   setSocketConnected: (socketConnected) => set({ socketConnected }),
