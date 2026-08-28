@@ -9078,3 +9078,33 @@ terminaram com sucesso; as duas URLs publicas responderam HTTP 200. O `main`
 local e `origin/main` ficaram sincronizados. Nao foi realizado smoke test
 autenticado nem ciclo real aiqfome nesta sessao; a integracao permanece sujeita
 a aprovacao do provedor e a rotacao dos segredos expostos registrada acima.
+
+## 2026-08-28 - Compatibilidade do callback OAuth aiqfome
+
+O primeiro smoke real do OAuth mostrou que o aplicativo bloqueado para edicao
+no portal do provedor esta registrado com o redirect
+`/integrations/aiqfome/oauth/callback`, enquanto a API expunha somente
+`/integrations/aiqfome/callback`. O ID Magalu concluiu a autorizacao, mas o
+codigo temporario chegou a uma rota inexistente e recebeu HTTP 404.
+
+O `PublicAiqfomeController` agora aceita as duas rotas no mesmo handler. A rota
+com `/oauth/callback` passa a ser a canonica em `render.yaml`,
+`apps/api/.env.example` e no plano da integracao; o caminho anterior permanece
+como alias compativel. Nao houve alteracao de schema, persistencia, payload,
+credencial ou regra de seguranca. Em especial, `state` continua obrigatorio e
+de uso unico. O retorno observado no navegador mostrava apenas `code`; depois
+do deploy deve ser repetido um OAuth completo para confirmar se o provedor
+tambem devolve `state`, como exige o contrato documentado. A protecao nao deve
+ser removida caso o provedor omita esse parametro; nesse caso sera necessario
+obter evidencias do request/response e acionar o suporte do provedor.
+
+Arquivos afetados: `apps/api/src/integrations/aiqfome/aiqfome.controller.ts`,
+novo teste `aiqfome.controller.spec.ts`, `apps/api/.env.example`, `render.yaml`,
+`docs/aiqfome-integration-plan.md` e este handoff.
+
+Validacoes aprovadas: teste focado do controller (1 teste), build da API,
+`git diff --check` e Prettier nos arquivos com parser suportado. A primeira verificacao Prettier
+incluiu `.env.example` e nao executou porque esse formato nao possui parser
+inferido; a nova execucao sem esse arquivo passou. Nao houve commit, push ou
+deploy. Proximo passo: revisar o diff, publicar a API quando autorizado e
+repetir a conexao com um novo codigo OAuth.

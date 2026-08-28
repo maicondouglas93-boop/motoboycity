@@ -130,7 +130,7 @@ services:
       - key: AIQFOME_TOKEN_ENCRYPTION_KEY
         sync: false
       - key: AIQFOME_REDIRECT_URI
-        value: https://motoboycity-api.onrender.com/integrations/aiqfome/callback
+        value: https://motoboycity-api.onrender.com/integrations/aiqfome/oauth/callback
       - key: COMPANY_WEB_URL
         value: https://motoboycity-company-web.vercel.app
 

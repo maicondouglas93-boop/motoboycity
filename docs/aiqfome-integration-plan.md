@@ -314,8 +314,9 @@ interface.
 
 ### Callbacks públicos
 
-- `GET /integrations/aiqfome/callback` — valida `state` de uso único e
-  troca o `code` no servidor;
+- `GET /integrations/aiqfome/oauth/callback` — callback registrado no provedor,
+  valida `state` de uso único e troca o `code` no servidor. O alias legado
+  `GET /integrations/aiqfome/callback` permanece aceito;
 - `POST /integrations/aiqfome/webhooks/:publicId` — recebe eventos V2.
 
 O callback OAuth usa `state` aleatório, com TTL no Redis e vínculo server-side

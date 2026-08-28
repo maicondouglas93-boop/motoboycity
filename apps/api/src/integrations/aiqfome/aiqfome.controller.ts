@@ -74,7 +74,7 @@ export class PublicAiqfomeController {
     private readonly webhookService: AiqfomeWebhookService,
   ) {}
 
-  @Get('callback')
+  @Get(['callback', 'oauth/callback'])
   @Redirect(undefined, 302)
   async callback(
     @Query(new ZodValidationPipe(aiqfomeOauthCallbackQuerySchema))
