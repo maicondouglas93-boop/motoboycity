@@ -9063,6 +9063,18 @@ As copias verificadas estao em
 `apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.10-vc10.apk`
 e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.10-vc10.apk`. Nenhum aparelho
 ADB estava conectado, portanto o APK nao foi instalado. O commit funcional
-local e `ecb6d22`; ainda nao houve push nem deploy. Ordem concreta restante:
-instalar o `pilot.10` nos aparelhos ativos e somente depois enviar o commit
-para disparar Render/Vercel.
+local e `ecb6d22`.
+
+Depois de o responsavel liberar o rollout, `ecb6d22` e o registro do artefato
+`5894b41` foram enviados ao `main`. O CI `33207212547` concluiu em 3m24s: 43
+migrations em PostgreSQL isolado, seed, typecheck, lint, testes unitarios da
+API, seguranca do reset de pre-producao, testes do Driver App, 25 suites/233
+testes E2E e builds de API, Company Web e Admin Web passaram.
+
+O deploy Render `dep-da8un7bncjis738sttp0` terminou com sucesso e o endpoint
+publico `https://motoboycity-api.onrender.com/health` respondeu HTTP 200 com
+`{"status":"ok"}`. Os deploys Vercel do Company Web e Admin Web tambem
+terminaram com sucesso; as duas URLs publicas responderam HTTP 200. O `main`
+local e `origin/main` ficaram sincronizados. Nao foi realizado smoke test
+autenticado nem ciclo real aiqfome nesta sessao; a integracao permanece sujeita
+a aprovacao do provedor e a rotacao dos segredos expostos registrada acima.
