@@ -9108,3 +9108,13 @@ incluiu `.env.example` e nao executou porque esse formato nao possui parser
 inferido; a nova execucao sem esse arquivo passou. Nao houve commit, push ou
 deploy. Proximo passo: revisar o diff, publicar a API quando autorizado e
 repetir a conexao com um novo codigo OAuth.
+
+O recorte foi publicado no commit `4ee0300`. O CI `33208861702` terminou com
+sucesso em 3m44s, incluindo migrations e seed isolados, typecheck, lint, testes
+unitarios da API, seguranca do reset, testes do Driver App, E2E e builds da API,
+Company Web e Admin Web. O Render publicou a nova API: `/health` respondeu HTTP
+200 com `{"status":"ok"}` e o callback `/integrations/aiqfome/oauth/callback`
+sem parametros respondeu HTTP 400 com a validacao esperada de `code` e `state`,
+provando que a rota nova esta ativa em vez do antigo 404. `main` local e remoto
+ficaram sincronizados. Resta repetir o OAuth real no navegador e confirmar que
+o ID Magalu devolve `state` junto com um novo `code`.
