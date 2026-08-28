@@ -74,6 +74,11 @@ export const aiqfomeIntegrationConfigSchema = z.object({
 export type AiqfomeIntegrationConfig = z.infer<typeof aiqfomeIntegrationConfigSchema>;
 export type AiqfomeTokenResponse = z.infer<typeof aiqfomeTokenResponseSchema>;
 
+export function parseAiqfomeIntegrationConfig(value: unknown): AiqfomeIntegrationConfig {
+  const parsed = aiqfomeIntegrationConfigSchema.safeParse(value);
+  return parsed.success ? parsed.data : emptyAiqfomeIntegrationConfig();
+}
+
 export const aiqfomeStoredCredentialsSchema = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1),

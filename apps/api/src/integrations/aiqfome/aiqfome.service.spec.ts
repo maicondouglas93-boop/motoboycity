@@ -5,6 +5,7 @@ import { AiqfomeClient } from './aiqfome-client';
 import { AiqfomeCredentialsService } from './aiqfome-credentials.service';
 import { AiqfomeOAuthStateService } from './aiqfome-oauth-state.service';
 import { AiqfomeService } from './aiqfome.service';
+import { AiqfomeTokenService } from './aiqfome-token.service';
 
 describe('AiqfomeService', () => {
   const companyId = '11111111-1111-4111-8111-111111111111';
@@ -41,6 +42,7 @@ describe('AiqfomeService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
         findFirst: jest.fn().mockResolvedValue({ id: integrationId }),
         upsert: jest.fn().mockResolvedValue({ id: integrationId }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
       },
       integrationCredential: { deleteMany: jest.fn() },
@@ -89,6 +91,9 @@ describe('AiqfomeService', () => {
         createdAt: '2026-08-27T20:00:00.000Z',
       }),
     };
+    const tokenService = {
+      runExclusive: jest.fn(async (_id: string, operation: () => Promise<unknown>) => operation()),
+    };
 
     return {
       service: new AiqfomeService(
@@ -97,17 +102,19 @@ describe('AiqfomeService', () => {
         client as unknown as AiqfomeClient,
         credentials as unknown as AiqfomeCredentialsService,
         oauthState as unknown as AiqfomeOAuthStateService,
+        tokenService as unknown as AiqfomeTokenService,
       ),
       prisma,
       transactionClient,
       client,
       credentials,
       oauthState,
+      tokenService,
     };
   }
 
   it('gera URL OAuth com state opaco sem expor o client secret', async () => {
-    const { service, oauthState } = createSubject();
+    const { service, oauthState, prisma, tokenService } = createSubject();
 
     const result = await service.connect(user);
     const url = new URL(result.authorizationUrl);
@@ -123,6 +130,11 @@ describe('AiqfomeService', () => {
       integrationId,
       oauthAttemptId: expect.any(String),
     });
+    expect(tokenService.runExclusive).toHaveBeenCalledWith(integrationId, expect.any(Function));
+    expect(prisma.integration.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: {} }));
+    expect(prisma.integration.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { oauthAttemptId: expect.any(String) } }),
+    );
   });
 
   it('impede operador de iniciar a conexao', async () => {
@@ -152,7 +164,10 @@ describe('AiqfomeService', () => {
     expect(transactionClient.integrationCredential.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ encryptedPayload: 'ciphertext' }),
-        update: expect.objectContaining({ encryptedPayload: 'ciphertext' }),
+        update: expect.objectContaining({
+          encryptedPayload: 'ciphertext',
+          tokenVersion: { increment: 1 },
+        }),
       }),
     );
     expect(JSON.stringify(transactionClient.integrationCredential.upsert.mock.calls)).not.toContain(
@@ -167,7 +182,7 @@ describe('AiqfomeService', () => {
   });
 
   it('invalida o callback pendente quando a loja e desconectada', async () => {
-    const { service, prisma } = createSubject();
+    const { service, prisma, tokenService } = createSubject();
     prisma.companyTeamMember.findFirst.mockReset().mockResolvedValue({ companyId, role: 'OWNER' });
     prisma.integration.findUnique.mockResolvedValue({ id: integrationId });
 
@@ -179,6 +194,7 @@ describe('AiqfomeService', () => {
         data: expect.objectContaining({ oauthAttemptId: null, status: 'DISCONNECTED' }),
       }),
     );
+    expect(tokenService.runExclusive).toHaveBeenCalledWith(integrationId, expect.any(Function));
   });
 
   it('nao troca uma conexao valida para erro quando a reconexao e cancelada', async () => {

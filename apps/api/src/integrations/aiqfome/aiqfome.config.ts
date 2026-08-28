@@ -60,6 +60,12 @@ export function resolveCompanyWebUrl(config: ConfigService): string {
   return isAllowedApplicationUrl(raw) ? new URL(raw).origin : DEFAULT_COMPANY_WEB_URL;
 }
 
+export function hasRequiredAiqfomeScopes(scopes: readonly string[]): boolean {
+  const values = new Set(scopes);
+  const canWriteOrders = values.has('aqf:order:create') || values.has('aqf:order:write');
+  return values.has('aqf:store:read') && values.has('aqf:order:read') && canWriteOrders;
+}
+
 function isAllowedApplicationUrl(raw: string): boolean {
   try {
     const url = new URL(raw);

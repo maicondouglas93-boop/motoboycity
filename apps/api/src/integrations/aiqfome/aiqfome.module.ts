@@ -7,6 +7,7 @@ import { AiqfomeCredentialsService } from './aiqfome-credentials.service';
 import { CompanyAiqfomeController, PublicAiqfomeController } from './aiqfome.controller';
 import { AIQFOME_REDIS, AiqfomeOAuthStateService } from './aiqfome-oauth-state.service';
 import { AiqfomeService } from './aiqfome.service';
+import { AiqfomeTokenService } from './aiqfome-token.service';
 
 @Module({
   controllers: [CompanyAiqfomeController, PublicAiqfomeController],
@@ -16,6 +17,7 @@ import { AiqfomeService } from './aiqfome.service';
     AiqfomeCredentialsService,
     AiqfomeOAuthStateService,
     AiqfomeService,
+    AiqfomeTokenService,
     {
       provide: AIQFOME_REDIS,
       useFactory: () =>

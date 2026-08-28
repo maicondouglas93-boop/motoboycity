@@ -732,10 +732,38 @@ Ainda pendente de confirmação externa/operacional:
 2. retenção do recebimento bruto e dos dados importados após desligamento;
 3. processo humano para concluir a revisão de cancelamentos pós-aceite/coleta.
 
+## Estado em 2026-08-28
+
+A base OAuth foi publicada no commit `2646a6d`. O recorte seguinte implementa,
+ainda apenas no worktree local, refresh atômico com rotação conjunta de access e
+refresh token, `tokenVersion` como fencing no PostgreSQL e lock renovável no
+Redis. Refresh, conectar e desconectar usam o mesmo lock; uma reautorização
+pendente bloqueia refresh. Perda do lock, escopo rebaixado, falha de cifra ou de
+persistência e um segundo 401 falham de forma fechada sem reutilizar o refresh
+token antigo. A migration aditiva é
+`20260828120000_aiqfome_token_refresh_fencing`.
+
+A migration foi validada em PostgreSQL 17 descartável tanto sobre uma
+credencial fictícia preexistente quanto sobre uma restauração do backup local.
+As contagens agregadas da restauração permaneceram iguais. Um E2E específico
+com PostgreSQL e Redis reais provou uma única renovação entre dois workers e
+falha fechada após perda intencional do lock. Ele reutiliza a configuração
+Redis da aplicação e recusa bancos cujo nome não indique ambiente isolado de
+teste ou cujo host não seja loopback. Nenhum banco remoto foi usado.
+
+Este recorte não cadastra webhooks, não recebe payload externo, não cria
+`Delivery` e não chama dispatch. A documentação pública consultada confirma os
+endpoints de cadastro de webhook, mas ainda não estabelece de forma suficiente
+o corpo real entregue, o identificador estável de cada entrega nem as regras de
+redelivery. Esses campos não devem ser inventados.
+
 ## Próximo passo exato
 
-Antes de qualquer deploy, consultar duplicidades legadas em `integrations`,
-aplicar a migration em cópia de staging e configurar a chave mestra de cifra no
-Render. Em seguida, publicar API e Company Web, conectar somente a loja de teste
-e validar OAuth/CNPJ. Depois disso, implementar refresh atômico e webhooks em
-modo sombra, sem criar `Delivery` nem chamar motoboy.
+O responsavel decidiu adiar a rotacao enquanto aguarda a aprovacao do cadastro
+pelo aiqfome, mas isso nao autoriza usar as credenciais expostas. O codigo pode
+ser entregue sem iniciar OAuth. Antes do primeiro teste OAuth ou ativacao para
+empresa, rotacionar `AIQFOME_CLIENT_SECRET` e
+`AIQFOME_TOKEN_ENCRYPTION_KEY`; se ja existir credencial cifrada, reconectar a
+loja apos a troca da chave. Depois, obter do aiqfome uma fixture/contrato oficial
+do webhook e implementar uma inbox append-only em modo sombra, autenticada e
+idempotente, sem criar `Delivery` nem chamar motoboy.

@@ -8573,3 +8573,97 @@ paginas. A disputa callback/desconexao tambem foi coberta e aprovada. A chave
 foi configurada manualmente pelo responsavel no Render com `Save only`; nenhum
 valor foi lido ou registrado. Neste ponto ainda nao houve commit, push, deploy
 ou OAuth real com a loja de teste.
+
+## Atualizacao - 2026-08-28: refresh atomico do OAuth aiqfome
+
+A base OAuth foi commitada e enviada anteriormente em `2646a6d`; o recorte
+descrito aqui continua apenas no worktree e nao foi commitado, enviado nem
+publicado. Ele nao leu nem alterou `.env` e nenhum valor de credencial foi
+registrado em teste, log ou documentacao.
+
+Foi adicionado `AiqfomeTokenService`. Tokens com menos de 60 segundos de
+validade sao renovados no endpoint oficial do ID Magalu; uma resposta 401
+tambem provoca exatamente um refresh e uma unica repeticao da operacao. Access
+e refresh token rotacionados sao cifrados e gravados juntos. Falha de escopo,
+perda do lock, rejeicao do token novo, falha de cifra ou falha de banco deixam a
+integracao em estado seguro e nunca voltam a usar conscientemente o refresh
+token antigo.
+
+A concorrencia usa lock Redis com owner, TTL de 60 segundos, renovacao e
+verificacao de posse antes/depois da chamada externa. O banco ganhou
+`IntegrationCredential.tokenVersion` para compare-and-swap. Conectar,
+desconectar e renovar compartilham o mesmo lock; `oauthAttemptId` impede refresh
+durante reautorizacao; o callback incrementa `tokenVersion`; e a transicao para
+`ERROR` tambem verifica a versao, impedindo uma requisicao antiga de derrubar
+credenciais recem-autorizadas.
+
+A migration aditiva gerada pelo Prisma e
+`20260828120000_aiqfome_token_refresh_fencing`; ela executa somente `ADD COLUMN
+"tokenVersion" INTEGER NOT NULL DEFAULT 1`, preservando linhas existentes. O
+impacto de dados previsto e uma coluna inteira com valor inicial `1`, sem
+exclusao ou reescrita de tokens. Rollback operacional: voltar o codigo antes de
+remover a coluna; a coluna pode permanecer inerte. A migration nova nao foi
+executada em producao nem em banco compartilhado.
+
+Validacoes aprovadas neste recorte: Prisma validate; diff da migration gerado
+entre datamodels pelo Prisma; 6 suites focadas aiqfome com 31 testes; suite
+unitaria completa da API com 76 suites e 898 testes; typecheck e lint dos oito
+workspaces; build da API; e `git diff --check`.
+
+O Docker Desktop estava ativo fora do `PATH`. Em PostgreSQL 17 e Redis 7
+descartaveis, com portas dinamicas e sem reutilizar os containers persistentes
+do projeto, as 40 migrations anteriores foram aplicadas. Uma
+`IntegrationCredential` ficticia foi inserida antes da migration nova; depois
+do deploy ela permaneceu intacta e recebeu `tokenVersion = 1`, com coluna `NOT
+NULL DEFAULT 1`. O E2E novo
+`test/aiqfome-token-refresh.e2e-spec.ts` usou dois clientes Prisma e duas
+conexoes Redis reais: dois workers concorrentes causaram exatamente uma chamada
+de refresh, e a remocao intencional da chave de lock durante a chamada externa
+falhou de forma fechada sem persistir o par rotacionado. O teste reutiliza
+`buildRedisConnectionOptions`, portanto aceita tanto `REDIS_URL` quanto o
+`REDIS_HOST`/`REDIS_PORT` do CI, e recusa iniciar se `NODE_ENV` nao for `test`
+ou se o PostgreSQL nao estiver em loopback e com nome contendo `ci`, `e2e`,
+`test` ou `isolated`. Os 3 testes passaram tambem com a mesma forma de
+configuracao Redis usada pelo CI.
+
+O backup local de 2026-08-28 tambem foi restaurado em outro banco descartavel.
+Antes e depois da migration permaneceram 33 usuarios, 26 empresas, 94 entregas
+e 1 integracao; o backup continha zero `IntegrationCredential`. A coluna passou
+de ausente para `NOT NULL DEFAULT 1` e a migration ficou registrada como
+concluida. Nenhum registro pessoal foi consultado; somente contagens agregadas.
+Os containers, bancos restaurados, volumes anonimos e arquivos temporarios
+foram removidos ao final.
+
+Desvio operacional registrado: a primeira tentativa de `migrate deploy`, feita
+em pasta temporaria ainda dentro do repositorio, carregou automaticamente o
+`.env` da raiz apesar de `DATABASE_URL` ter sido exportada. Ela alcançou apenas
+o PostgreSQL local de desenvolvimento em `localhost:5434` e aplicou as duas
+migrations commitadas que estavam pendentes:
+`20260827170000_add_pickup_assignment_deadline` e
+`20260828011000_add_aiqfome_oauth_credentials`. Ambas sao aditivas; a migration
+nova nao estava nessa copia, nenhum dado foi removido e nenhum ambiente remoto
+foi acessado. Nao houve rollback destrutivo. As validacoes seguintes foram
+executadas de uma pasta fora do repositorio, com `.env` ficticio e alvo
+confirmado antes de cada deploy.
+
+Incidente de segredo: uma captura de tela enviada na conversa exibiu o
+`AIQFOME_CLIENT_SECRET` e `AIQFOME_TOKEN_ENCRYPTION_KEY`. Os valores nao foram
+copiados para codigo, teste, log ou documentacao, mas devem ser considerados
+comprometidos e rotacionados antes de OAuth/deploy real. Se existir credencial
+cifrada com a chave antiga, a loja precisara ser reconectada depois da troca.
+
+Decisao operacional posterior, em 2026-08-28: o responsavel optou por adiar a
+rotacao enquanto aguarda a aprovacao do cadastro pelo aiqfome e autorizou seguir
+com a entrega do codigo. Isso nao libera o OAuth para uso: nenhuma loja real deve
+ser conectada e os valores expostos nao devem ser usados para homologacao. Antes
+do primeiro teste OAuth ou ativacao para empresa, rotacionar os dois segredos no
+provedor e no Render; depois da troca da chave de cifra, reconectar qualquer loja
+de teste que eventualmente tenha credencial cifrada com a chave anterior.
+
+Webhooks, inbox em modo sombra, importacao, `Delivery`, precificacao, dispatch e
+sincronizacao de status continuam ausentes/desligados. A documentacao publica
+confirma cadastro e listagem de webhooks, mas nao define de forma suficiente o
+payload inbound, identificador estavel e redelivery. Proximo passo concreto:
+concluir o release tecnico do refresh sem iniciar OAuth; depois, rotacionar os
+dois segredos expostos e obter fixture/contrato oficial do webhook antes de
+modelar a inbox append-only.

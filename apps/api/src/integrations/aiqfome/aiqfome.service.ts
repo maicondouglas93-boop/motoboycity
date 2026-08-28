@@ -12,6 +12,7 @@ import { AiqfomeClient, AiqfomeProviderError, normalizeDocument } from './aiqfom
 import {
   AIQFOME_AUTHORIZE_URL,
   AIQFOME_SCOPES,
+  hasRequiredAiqfomeScopes,
   readAiqfomeRuntimeConfig,
   requireAiqfomeRuntimeConfig,
   resolveCompanyWebUrl,
@@ -19,12 +20,13 @@ import {
 import { AiqfomeCredentialsService } from './aiqfome-credentials.service';
 import { AiqfomeOAuthStateService } from './aiqfome-oauth-state.service';
 import {
-  aiqfomeIntegrationConfigSchema,
   emptyAiqfomeIntegrationConfig,
+  parseAiqfomeIntegrationConfig,
   type AiqfomeIntegrationConfig,
   type AiqfomeOauthState,
 } from './aiqfome.schemas';
 import type { AiqfomeOauthCallbackQuery } from '@motoboycity/validation';
+import { AiqfomeTokenService } from './aiqfome-token.service';
 
 @Injectable()
 export class AiqfomeService {
@@ -34,6 +36,7 @@ export class AiqfomeService {
     private readonly client: AiqfomeClient,
     private readonly credentials: AiqfomeCredentialsService,
     private readonly oauthState: AiqfomeOAuthStateService,
+    private readonly tokenService: AiqfomeTokenService,
   ) {}
 
   async getForCompany(user: User): Promise<CompanyAiqfomeIntegration> {
@@ -42,7 +45,7 @@ export class AiqfomeService {
       where: { companyId_provider: { companyId: membership.companyId, provider: 'AIQFOME' } },
       include: { credential: { select: { id: true } } },
     });
-    const storedConfig = parseStoredConfig(integration?.config);
+    const storedConfig = parseAiqfomeIntegrationConfig(integration?.config);
     const missingCredential = integration?.status === 'CONNECTED' && !integration.credential;
 
     return {
@@ -70,16 +73,43 @@ export class AiqfomeService {
         provider: 'AIQFOME',
         status: 'DISCONNECTED',
         config: emptyAiqfomeIntegrationConfig() as Prisma.InputJsonValue,
-        oauthAttemptId,
       },
-      update: { oauthAttemptId },
+      update: {},
       select: { id: true },
     });
-    const state = await this.oauthState.create({
-      companyId: membership.companyId,
-      userId: user.id,
-      integrationId: integration.id,
-      oauthAttemptId,
+    let state = '';
+    await this.tokenService.runExclusive(integration.id, async () => {
+      const activated = await this.prisma.integration.updateMany({
+        where: {
+          id: integration.id,
+          companyId: membership.companyId,
+          provider: 'AIQFOME',
+        },
+        data: { oauthAttemptId },
+      });
+      if (activated.count !== 1) {
+        throw new AiqfomeProviderError('INTEGRATION_NOT_FOUND');
+      }
+
+      try {
+        state = await this.oauthState.create({
+          companyId: membership.companyId,
+          userId: user.id,
+          integrationId: integration.id,
+          oauthAttemptId,
+        });
+      } catch (error) {
+        await this.prisma.integration.updateMany({
+          where: {
+            id: integration.id,
+            companyId: membership.companyId,
+            provider: 'AIQFOME',
+            oauthAttemptId,
+          },
+          data: { oauthAttemptId: null },
+        });
+        throw error;
+      }
     });
     const url = new URL(AIQFOME_AUTHORIZE_URL);
     url.searchParams.set('client_id', runtime.clientId);
@@ -100,20 +130,22 @@ export class AiqfomeService {
 
     if (!integration) return { disconnected: true };
 
-    await this.prisma.$transaction([
-      this.prisma.integrationCredential.deleteMany({ where: { integrationId: integration.id } }),
-      this.prisma.integration.update({
-        where: { id: integration.id },
-        data: {
-          status: 'DISCONNECTED',
-          config: emptyAiqfomeIntegrationConfig() as Prisma.InputJsonValue,
-          credentialsRef: null,
-          oauthAttemptId: null,
-          connectedAt: null,
-          lastSyncAt: new Date(),
-        },
-      }),
-    ]);
+    await this.tokenService.runExclusive(integration.id, async () => {
+      await this.prisma.$transaction([
+        this.prisma.integrationCredential.deleteMany({ where: { integrationId: integration.id } }),
+        this.prisma.integration.update({
+          where: { id: integration.id },
+          data: {
+            status: 'DISCONNECTED',
+            config: emptyAiqfomeIntegrationConfig() as Prisma.InputJsonValue,
+            credentialsRef: null,
+            oauthAttemptId: null,
+            connectedAt: null,
+            lastSyncAt: new Date(),
+          },
+        }),
+      ]);
+    });
     return { disconnected: true };
   }
 
@@ -188,7 +220,7 @@ export class AiqfomeService {
         const credential = await tx.integrationCredential.upsert({
           where: { integrationId: state.integrationId },
           create: { integrationId: state.integrationId, ...sealed },
-          update: sealed,
+          update: { ...sealed, tokenVersion: { increment: 1 } },
           select: { id: true },
         });
         const updated = await tx.integration.updateMany({
@@ -255,7 +287,7 @@ export class AiqfomeService {
       });
       if (!existing) return;
 
-      const config = { ...parseStoredConfig(existing.config), errorCode };
+      const config = { ...parseAiqfomeIntegrationConfig(existing.config), errorCode };
       await tx.integration.updateMany({
         where: {
           id: state.integrationId,
@@ -280,15 +312,8 @@ export class AiqfomeService {
   }
 }
 
-function parseStoredConfig(value: unknown): AiqfomeIntegrationConfig {
-  const parsed = aiqfomeIntegrationConfigSchema.safeParse(value);
-  return parsed.success ? parsed.data : emptyAiqfomeIntegrationConfig();
-}
-
 function assertRequiredScopes(scopes: string[]): void {
-  const values = new Set(scopes);
-  const canWriteOrders = values.has('aqf:order:create') || values.has('aqf:order:write');
-  if (!values.has('aqf:store:read') || !values.has('aqf:order:read') || !canWriteOrders) {
+  if (!hasRequiredAiqfomeScopes(scopes)) {
     throw new AiqfomeProviderError('INSUFFICIENT_SCOPE');
   }
 }

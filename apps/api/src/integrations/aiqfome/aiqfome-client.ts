@@ -30,12 +30,32 @@ export class AiqfomeClient {
       grant_type: 'authorization_code',
     });
 
+    return this.requestToken(body, 'TOKEN_EXCHANGE_FAILED');
+  }
+
+  async refreshToken(refreshToken: string): Promise<AiqfomeTokenResponse> {
+    const runtime = requireAiqfomeRuntimeConfig(this.config);
+    const body = new URLSearchParams({
+      client_id: runtime.clientId,
+      client_secret: runtime.clientSecret,
+      redirect_uri: runtime.redirectUri,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    });
+
+    return this.requestToken(body, 'TOKEN_REFRESH_FAILED');
+  }
+
+  private async requestToken(
+    body: URLSearchParams,
+    errorCode: string,
+  ): Promise<AiqfomeTokenResponse> {
     const response = await this.safeFetch(AIQFOME_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
     });
-    return this.parseResponse(response, aiqfomeTokenResponseSchema, 'TOKEN_EXCHANGE_FAILED');
+    return this.parseResponse(response, aiqfomeTokenResponseSchema, errorCode);
   }
 
   async resolveAuthorizedStore(accessToken: string): Promise<AiqfomeStoreSummary> {
