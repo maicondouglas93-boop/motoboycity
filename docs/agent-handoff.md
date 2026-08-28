@@ -9118,3 +9118,27 @@ sem parametros respondeu HTTP 400 com a validacao esperada de `code` e `state`,
 provando que a rota nova esta ativa em vez do antigo 404. `main` local e remoto
 ficaram sincronizados. Resta repetir o OAuth real no navegador e confirmar que
 o ID Magalu devolve `state` junto com um novo `code`.
+
+## 2026-08-28 - Correcao de coordenadas da empresa pelo ADM
+
+O detalhe administrativo da empresa agora permite corrigir o endereco
+principal pela busca do Google. Tanto `Editar empresa` quanto o gerenciador de
+enderecos exigem selecionar uma sugestao valida, mostram rua, cidade, CEP e as
+coordenadas antes de salvar e enviam `lat`/`lng` pelo contrato administrativo
+ja existente. Enderecos antigos sem ponto geografico aparecem com o aviso
+`Sem coordenadas - corrija antes da coleta`; enderecos validos mostram
+`Coordenadas confirmadas`.
+
+O recorte reutiliza as rotas, schemas e auditoria ja existentes. Nao houve
+endpoint, schema Prisma, migration, segredo ou permissao nova. O objetivo e
+permitir que o ADM desbloqueie com seguranca coleta e retorno quando um cadastro
+legado possui somente o texto do endereco, sem desligar globalmente os raios de
+proximidade.
+
+Arquivos: novo
+`apps/admin-web/src/components/companies/google-address-autocomplete.tsx` e
+ajustes em `edit-company-dialog.tsx` e `company-related-records.tsx`.
+Validacoes aprovadas: typecheck, lint e build de producao do Admin Web, com 37
+paginas geradas; `git diff --check` tambem passou. Nao houve commit, push ou
+deploy. Proximo passo: publicar o Admin Web e, no detalhe da empresa afetada,
+selecionar o endereco no Google e salvar antes de o motoboy repetir a coleta.

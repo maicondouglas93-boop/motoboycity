@@ -28,6 +28,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { PendingButtonLabel } from '@/components/ui/pending-button-label';
+import {
+  GoogleAddressAutocomplete,
+  type SelectedGoogleAddress,
+} from '@/components/companies/google-address-autocomplete';
 
 type AddressForm = {
   label: string;
@@ -37,6 +41,8 @@ type AddressForm = {
   city: string;
   state: string;
   zip: string;
+  lat: number | null;
+  lng: number | null;
 };
 
 function profileFrom(company: AdminCompanyDetail): UpdateCompanyProfilePayload {
@@ -58,7 +64,15 @@ function addressFrom(company: AdminCompanyDetail): AddressForm {
     city: address?.city ?? '',
     state: address?.state ?? '',
     zip: address?.zip ?? '',
+    lat: address?.lat ?? null,
+    lng: address?.lng ?? null,
   };
+}
+
+function addressSearchFrom(company: AdminCompanyDetail): string {
+  const address = company.addresses.find((item) => item.isPrimary) ?? company.addresses[0];
+  if (!address) return '';
+  return `${address.street}, ${address.number} - ${address.city}/${address.state}`;
 }
 
 export function EditCompanyDialog({
@@ -78,6 +92,7 @@ export function EditCompanyDialog({
     regionId: company.region.id,
   }));
   const [address, setAddress] = useState(() => addressFrom(company));
+  const [addressSearch, setAddressSearch] = useState(() => addressSearchFrom(company));
   const [profileError, setProfileError] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -103,6 +118,7 @@ export function EditCompanyDialog({
       regionId: company.region.id,
     });
     setAddress(addressFrom(company));
+    setAddressSearch(addressSearchFrom(company));
     setProfileError(null);
     setAddressError(null);
     setSuccess(null);
@@ -172,11 +188,17 @@ export function EditCompanyDialog({
   function submitAddress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSuccess(null);
+    if (address.lat === null || address.lng === null) {
+      setAddressError('Selecione o endereço na lista do Google para confirmar as coordenadas.');
+      return;
+    }
     const candidate = {
       ...address,
       label: address.label.trim() || undefined,
       complement: address.complement.trim() || undefined,
       state: address.state.trim().toUpperCase(),
+      lat: address.lat,
+      lng: address.lng,
     };
     const parsed = upsertCompanyAddressSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -293,6 +315,33 @@ export function EditCompanyDialog({
               <MapPinned className="size-4 text-primary" />
               <h3 className="font-semibold">Endereco principal</h3>
             </div>
+            <div className="space-y-1.5">
+              <Label>Buscar endereço no Google</Label>
+              <GoogleAddressAutocomplete
+                value={addressSearch}
+                onValueChange={setAddressSearch}
+                onAddressChange={(selected: SelectedGoogleAddress | null) => {
+                  if (!selected) {
+                    setAddress((current) => ({ ...current, lat: null, lng: null }));
+                    return;
+                  }
+                  setAddress((current) => ({
+                    ...current,
+                    street: selected.street,
+                    number: selected.number || current.number,
+                    city: selected.city,
+                    state: selected.state,
+                    zip: selected.zip,
+                    lat: selected.lat,
+                    lng: selected.lng,
+                  }));
+                  setAddressError(null);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Selecione uma sugestão: este ponto libera coleta e retorno por proximidade.
+              </p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-6">
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="admin-company-address-label">Identificacao</Label>
@@ -303,14 +352,6 @@ export function EditCompanyDialog({
                   onChange={(event) => setAddress({ ...address, label: event.target.value })}
                 />
               </div>
-              <div className="space-y-1.5 sm:col-span-3">
-                <Label htmlFor="admin-company-street">Rua</Label>
-                <Input
-                  id="admin-company-street"
-                  value={address.street}
-                  onChange={(event) => setAddress({ ...address, street: event.target.value })}
-                />
-              </div>
               <div className="space-y-1.5 sm:col-span-1">
                 <Label htmlFor="admin-company-number">Numero</Label>
                 <Input
@@ -319,7 +360,7 @@ export function EditCompanyDialog({
                   onChange={(event) => setAddress({ ...address, number: event.target.value })}
                 />
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-3">
                 <Label htmlFor="admin-company-complement">Complemento</Label>
                 <Input
                   id="admin-company-complement"
@@ -327,36 +368,17 @@ export function EditCompanyDialog({
                   onChange={(event) => setAddress({ ...address, complement: event.target.value })}
                 />
               </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="admin-company-city">Cidade</Label>
-                <Input
-                  id="admin-company-city"
-                  value={address.city}
-                  onChange={(event) => setAddress({ ...address, city: event.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-1">
-                <Label htmlFor="admin-company-state">UF</Label>
-                <Input
-                  id="admin-company-state"
-                  maxLength={2}
-                  value={address.state}
-                  onChange={(event) => setAddress({ ...address, state: event.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-1">
-                <Label htmlFor="admin-company-zip">CEP</Label>
-                <Input
-                  id="admin-company-zip"
-                  value={address.zip}
-                  onChange={(event) => setAddress({ ...address, zip: event.target.value })}
-                />
-              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Ao alterar o texto do endereco, coordenadas antigas sao removidas para nao apontar a
-              coleta para o local anterior.
-            </p>
+            {address.lat !== null && address.lng !== null && (
+              <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {address.street}, {address.number} · {address.city}/{address.state}
+                </p>
+                <p>
+                  CEP {address.zip} · Coordenadas {address.lat.toFixed(6)}, {address.lng.toFixed(6)}
+                </p>
+              </div>
+            )}
             {addressError && (
               <ActionFeedback tone="error" title="Revise o endereço">
                 {addressError}

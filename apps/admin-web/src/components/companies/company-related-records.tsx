@@ -23,11 +23,28 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
+import {
+  GoogleAddressAutocomplete,
+  type SelectedGoogleAddress,
+} from '@/components/companies/google-address-autocomplete';
 
 type Address = AdminCompanyDetail['addresses'][number];
 type Member = AdminCompanyDetail['teamMembers'][number];
 
-const emptyAddress = {
+type AddressForm = {
+  label: string;
+  street: string;
+  number: string;
+  complement: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number | null;
+  lng: number | null;
+  isPrimary: boolean;
+};
+
+const emptyAddress: AddressForm = {
   label: '',
   street: '',
   number: '',
@@ -35,8 +52,14 @@ const emptyAddress = {
   city: '',
   state: '',
   zip: '',
+  lat: null,
+  lng: null,
   isPrimary: false,
 };
+
+function addressSearch(address: Address): string {
+  return `${address.street}, ${address.number} - ${address.city}/${address.state}`;
+}
 
 export function CompanyAddressesManager({
   company,
@@ -49,6 +72,7 @@ export function CompanyAddressesManager({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Address | null>(null);
   const [form, setForm] = useState(emptyAddress);
+  const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   function publish(updated: AdminCompanyDetail) {
@@ -68,10 +92,13 @@ export function CompanyAddressesManager({
             city: address.city,
             state: address.state,
             zip: address.zip,
+            lat: address.lat,
+            lng: address.lng,
             isPrimary: address.isPrimary,
           }
         : emptyAddress,
     );
+    setSearch(address ? addressSearch(address) : '');
     setError(null);
     setOpen(true);
   }
@@ -93,11 +120,17 @@ export function CompanyAddressesManager({
   });
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (form.lat === null || form.lng === null) {
+      setError('Selecione o endereço na lista do Google para confirmar as coordenadas.');
+      return;
+    }
     const parsed = adminCompanyAddressSchema.safeParse({
       ...form,
       label: form.label || undefined,
       complement: form.complement || undefined,
       state: form.state.toUpperCase(),
+      lat: form.lat,
+      lng: form.lng,
     });
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? 'Revise o endereco.');
     save.mutate(parsed.data);
@@ -122,6 +155,17 @@ export function CompanyAddressesManager({
                 <p className="text-xs text-muted-foreground">
                   {address.city} - {address.state} · {address.zip}
                 </p>
+                <p
+                  className={
+                    address.lat === null || address.lng === null
+                      ? 'mt-1 text-xs font-medium text-destructive'
+                      : 'mt-1 text-xs font-medium text-emerald-700'
+                  }
+                >
+                  {address.lat === null || address.lng === null
+                    ? 'Sem coordenadas · corrija antes da coleta'
+                    : 'Coordenadas confirmadas'}
+                </p>
               </div>
               <Button
                 size="icon-sm"
@@ -145,32 +189,59 @@ export function CompanyAddressesManager({
           </DialogHeader>
           <DialogBody>
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
-              {(['label', 'street', 'number', 'complement', 'city', 'state', 'zip'] as const).map(
-                (field) => (
-                  <div key={field} className="space-y-1.5">
-                    <Label htmlFor={`address-${field}`}>
-                      {
-                        (
-                          {
-                            label: 'Identificacao',
-                            street: 'Rua',
-                            number: 'Numero',
-                            complement: 'Complemento',
-                            city: 'Cidade',
-                            state: 'UF',
-                            zip: 'CEP',
-                          } as const
-                        )[field]
-                      }
-                    </Label>
-                    <Input
-                      id={`address-${field}`}
-                      value={form[field]}
-                      maxLength={field === 'state' ? 2 : undefined}
-                      onChange={(event) => setForm({ ...form, [field]: event.target.value })}
-                    />
-                  </div>
-                ),
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>Buscar endereço no Google</Label>
+                <GoogleAddressAutocomplete
+                  value={search}
+                  onValueChange={setSearch}
+                  onAddressChange={(selected: SelectedGoogleAddress | null) => {
+                    if (!selected) {
+                      setForm((current) => ({ ...current, lat: null, lng: null }));
+                      return;
+                    }
+                    setForm((current) => ({
+                      ...current,
+                      street: selected.street,
+                      number: selected.number || current.number,
+                      city: selected.city,
+                      state: selected.state,
+                      zip: selected.zip,
+                      lat: selected.lat,
+                      lng: selected.lng,
+                    }));
+                    setError(null);
+                  }}
+                />
+              </div>
+              {(['label', 'number', 'complement'] as const).map((field) => (
+                <div key={field} className="space-y-1.5">
+                  <Label htmlFor={`address-${field}`}>
+                    {
+                      (
+                        {
+                          label: 'Identificacao',
+                          number: 'Numero',
+                          complement: 'Complemento',
+                        } as const
+                      )[field]
+                    }
+                  </Label>
+                  <Input
+                    id={`address-${field}`}
+                    value={form[field]}
+                    onChange={(event) => setForm({ ...form, [field]: event.target.value })}
+                  />
+                </div>
+              ))}
+              {form.lat !== null && form.lng !== null && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground sm:col-span-2">
+                  <p className="font-medium text-foreground">
+                    {form.street}, {form.number} · {form.city}/{form.state}
+                  </p>
+                  <p>
+                    CEP {form.zip} · Coordenadas {form.lat.toFixed(6)}, {form.lng.toFixed(6)}
+                  </p>
+                </div>
               )}
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input
@@ -196,7 +267,10 @@ export function CompanyAddressesManager({
                 ) : (
                   <span />
                 )}
-                <Button type="submit" disabled={save.isPending}>
+                <Button
+                  type="submit"
+                  disabled={save.isPending || form.lat === null || form.lng === null}
+                >
                   {save.isPending ? 'Salvando...' : 'Salvar endereco'}
                 </Button>
               </div>
