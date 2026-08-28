@@ -9142,3 +9142,12 @@ Validacoes aprovadas: typecheck, lint e build de producao do Admin Web, com 37
 paginas geradas; `git diff --check` tambem passou. Nao houve commit, push ou
 deploy. Proximo passo: publicar o Admin Web e, no detalhe da empresa afetada,
 selecionar o endereco no Google e salvar antes de o motoboy repetir a coleta.
+
+O recorte foi publicado no commit `ae1ca7b`. O CI `33211864511` concluiu com
+sucesso e o deployment Vercel de producao do Admin Web `6148687452` terminou
+com estado `success`; a URL oficial `https://motoboycity-admin-web.vercel.app`
+respondeu HTTP 200. Como os dois projetos Vercel estao conectados ao mesmo
+monorepo, a Company Web tambem gerou um deployment automatico do mesmo commit,
+sem mudanca em seus arquivos. A API/Render e o banco nao foram reiniciados nem
+alterados neste recorte. Resta somente o smoke autenticado: abrir a empresa no
+ADM, escolher a sugestao do Google, salvar e repetir a coleta no pedido ativo.
