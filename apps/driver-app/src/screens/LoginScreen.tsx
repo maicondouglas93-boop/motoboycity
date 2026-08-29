@@ -10,6 +10,7 @@ import { colors } from '../theme/colors';
 import { authApi } from '../lib/apiClient';
 import { setDriverProfile } from '../lib/driverProfileCache';
 import { session } from '../lib/session';
+import { resetSessionExpiry } from '../lib/sessionExpiry';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -48,6 +49,8 @@ export function LoginScreen({ navigation }: Props) {
         return;
       }
       await session.setToken(loginResult.accessToken, loginResult.user.id);
+      // Credencial nova: uma expiracao futura precisa poder disparar de novo.
+      resetSessionExpiry();
       setDriverProfile(loginResult.accessToken, loginResult.user);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (error) {

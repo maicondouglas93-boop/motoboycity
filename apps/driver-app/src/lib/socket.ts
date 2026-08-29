@@ -34,6 +34,17 @@ export interface DriverSocketHandlers {
    * ai quem ve o problema e o admin.
    */
   onLocationLost: (info: { activeDeliveryCount: number; silentMinutes: number }) => void;
+  /**
+   * O servidor recusou esta conexao e a derrubou.
+   *
+   * E o unico desligamento que o socket.io NAO tenta reconectar sozinho: com o
+   * motivo `io server disconnect` ele marca a conexao como inativa e para de
+   * vez. O gateway usa exatamente esse caminho quando o JWT nao vale, quando o
+   * usuario sumiu ou quando a senha foi trocada — entao, sem este aviso, o
+   * canal em tempo real morria em silencio pelo resto da vida do aplicativo
+   * enquanto a tela continuava dizendo "Reconectando...".
+   */
+  onServerRefused: () => void;
 }
 
 let socket: Socket | null = null;
@@ -56,7 +67,10 @@ export function connectDriverSocket(token: string, handlers: DriverSocketHandler
     useDispatchStore.getState().setSocketConnected(true);
     handlers.onConnected();
   });
-  socket.on('disconnect', () => useDispatchStore.getState().setSocketConnected(false));
+  socket.on('disconnect', (reason) => {
+    useDispatchStore.getState().setSocketConnected(false);
+    if (reason === 'io server disconnect') handlers.onServerRefused();
+  });
   socket.on('delivery:offer', (payload: DeliveryOfferPayload) => handlers.onOffer(payload));
   socket.on('delivery:offer-expired', (payload: { offerId: string }) =>
     handlers.onOfferExpired(payload.offerId),
@@ -86,6 +100,17 @@ export function connectDriverSocket(token: string, handlers: DriverSocketHandler
   );
 
   return socket;
+}
+
+/**
+ * Religa a conexao que o servidor derrubou, reusando os mesmos handlers.
+ *
+ * So faz sentido depois de confirmar que a credencial continua valendo: o
+ * socket.io nao reconecta sozinho apos `io server disconnect`, e insistir com um
+ * token recusado apenas repetiria o ciclo.
+ */
+export function reconnectDriverSocket(): void {
+  socket?.connect();
 }
 
 export function disconnectDriverSocket(): void {

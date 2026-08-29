@@ -68,7 +68,11 @@ import {
   salvarSessaoNativa,
 } from '../lib/offerSession';
 import { ativarPush } from '../lib/push';
-import { connectDriverSocket, disconnectDriverSocket } from '../lib/socket';
+import {
+  connectDriverSocket,
+  disconnectDriverSocket,
+  reconnectDriverSocket,
+} from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -118,6 +122,26 @@ function mensagemNotificacaoObrigatoria(status: NotificationReadiness): string {
     return 'Ative as notificacoes e mantenha o canal Ofertas de entrega em prioridade alta.';
   }
   return 'Nao foi possivel ativar e registrar as notificacoes deste aparelho.';
+}
+
+/**
+ * Erro de localizacao com o caminho de saida junto, quando existe um.
+ *
+ * O texto sozinho ja dizia "ative nas configuracoes", e era tudo o que o motoboy
+ * recebia: nenhum botao levava ate la, e o unico disponivel repetia a permissao
+ * que o Android 11+ nao concede mais por dialogo. As notificacoes ja tinham esse
+ * atalho; a localizacao ficou sem ele.
+ */
+function alertarLocalizacaoBloqueada(error: LocationError, titulo: string) {
+  if (!error.requiresSettings) {
+    Alert.alert(titulo, error.message);
+    return;
+  }
+
+  Alert.alert(titulo, error.message, [
+    { text: 'Agora nao', style: 'cancel' },
+    { text: 'Abrir ajustes', onPress: () => Linking.openSettings().catch(() => undefined) },
+  ]);
 }
 
 function alertarNotificacaoObrigatoria(status: NotificationReadiness) {
@@ -319,6 +343,16 @@ export function HomeScreen({ navigation }: Props) {
         }
         const result = await synchronizePendingDeliveryCompletions(token, ownerUserId);
         setCompletionQueue(await getPendingDeliveryCompletions(ownerUserId));
+        if (result.discardedIds.length > 0) {
+          // Uma vez, e nao um banner permanente: a acao saiu da fila porque o
+          // pedido foi cancelado, e nao ha nada que o motoboy possa fazer a
+          // respeito. Ficar mostrando o aviso so o deixaria tentando de novo.
+          Alert.alert(
+            'Pedido cancelado durante a sincronizacao',
+            `${result.discardedIds.length} finalizacao(oes) foram descartadas porque o pedido ` +
+              'foi cancelado pela administracao antes de o aparelho conseguir enviar.',
+          );
+        }
         if (result.authRequired && (await session.getToken()) === token) {
           await clearExpiredDriverSession();
           setCompletionQueue([]);
@@ -717,12 +751,23 @@ export function HomeScreen({ navigation }: Props) {
         },
         onOffer: (offer) => {
           /**
-           * Em segundo plano, o FCM abre o cartão Android nativo. Navegar a
-           * pilha React ao mesmo tempo deixaria outra oferta escondida por
-           * baixo e permitiria uma segunda resposta ao desbloquear.
+           * A oferta e SEMPRE guardada; o que depende do primeiro plano e so a
+           * navegacao.
+           *
+           * Antes, o retorno antecipado descartava a oferta inteira quando o
+           * aplicativo estava minimizado, apostando todas as fichas no push. Se
+           * o FCM nao entregasse — token renovado fora de hora, gerenciador de
+           * bateria de fabricante, Firebase fora do ar — a oferta sumia mesmo
+           * tendo chegado pelo socket. E oferta perdida vira expiracao, que
+           * conta como recusa para a punicao automatica: o motoboy saia do
+           * despacho por ofertas que nunca viu.
+           *
+           * Navegar em segundo plano continua proibido pelo motivo original:
+           * deixaria a tela React por baixo do cartao nativo do Android e
+           * permitiria uma segunda resposta ao desbloquear.
            */
-          if (AppState.currentState !== 'active') return;
           setIncomingOffer(offer);
+          if (AppState.currentState !== 'active') return;
           navigation.navigate('IncomingOffer');
         },
         onOfferExpired: (offerId) => {
@@ -821,6 +866,21 @@ export function HomeScreen({ navigation }: Props) {
               'sua posição. Confira se a permissão de localização e o GPS estão ligados.',
           );
         },
+        /**
+         * O servidor recusou a conexao e nao havera reconexao automatica.
+         *
+         * Uma consulta autenticada barata decide qual dos dois casos e: se a
+         * credencial nao vale mais, o 401 dispara o encerramento de sessao pelo
+         * caminho unico e esta tela sai do ar; se vale, o motivo foi outro
+         * (deploy, reinicio do gateway) e religar aqui evita ficar sem tempo
+         * real ate o motoboy reabrir o aplicativo.
+         */
+        onServerRefused: () => {
+          driverPresenceApi
+            .get(token)
+            .then(() => reconnectDriverSocket())
+            .catch(() => undefined);
+        },
       });
 
       /**
@@ -913,9 +973,17 @@ export function HomeScreen({ navigation }: Props) {
       }
 
       setIncomingOffer(pendente);
-      if (!current || current.offerId !== pendente.offerId) {
-        navigation.navigate('IncomingOffer');
-      }
+      /**
+       * Navega sempre que existe oferta pendente, e nao so quando ela e
+       * diferente da que estava guardada.
+       *
+       * A comparacao por id existia porque a oferta so entrava na store junto
+       * com a navegacao. Agora ela tambem entra em segundo plano, e manter a
+       * comparacao esconderia exatamente a oferta que este caminho existe para
+       * mostrar: a que chegou com o aplicativo minimizado. Repetir a navegacao
+       * para a tela ja focada nao empilha nada.
+       */
+      navigation.navigate('IncomingOffer');
     }
 
     bootstrap().catch(() => {
@@ -987,9 +1055,22 @@ export function HomeScreen({ navigation }: Props) {
       setWantsToBeAvailable(false);
       await stopDeliveryTracking().catch(() => undefined);
       setPresence('UNAVAILABLE', null);
+      if (error instanceof LocationError) {
+        /**
+         * Ficar online e onde a permissao de segundo plano e exigida, entao e
+         * aqui que o atalho mais faz falta.
+         *
+         * Sem banner de propósito: o aviso de presenca tem "tocar para tentar
+         * novamente", e tentar de novo e exatamente o que NAO resolve no
+         * Android 11+. O proprio botao Ativo, que voltou a ficar desligado, e o
+         * lembrete — e toca-lo mostra este alerta de novo, com o caminho junto.
+         */
+        alertarLocalizacaoBloqueada(error, 'Disponibilidade nao atualizada');
+        return;
+      }
       Alert.alert(
         'Disponibilidade nao atualizada',
-        error instanceof ApiError || error instanceof LocationError
+        error instanceof ApiError
           ? error.message
           : 'Nao foi possivel atualizar sua disponibilidade. Tente novamente.',
       );
@@ -1007,13 +1088,17 @@ export function HomeScreen({ navigation }: Props) {
         useDispatchStore.getState().wantsToBeAvailable,
       )
         .then(() => setTrackingError(null))
-        .catch((error: unknown) =>
-          setTrackingError(
-            error instanceof LocationError
-              ? error.message
-              : 'Não foi possível ativar o rastreamento agora.',
-          ),
-        );
+        .catch((error: unknown) => {
+          if (error instanceof LocationError) {
+            setTrackingError(error.message);
+            // Quando o sistema so libera pela tela de configuracoes, tocar o
+            // aviso precisa levar ate la. Repetir a permissao devolveria o mesmo
+            // erro, e o motoboy ficava tocando um botao que nunca ia funcionar.
+            alertarLocalizacaoBloqueada(error, 'Rastreamento nao ativado');
+            return;
+          }
+          setTrackingError('Não foi possível ativar o rastreamento agora.');
+        });
     });
   }
 
