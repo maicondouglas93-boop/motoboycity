@@ -252,6 +252,119 @@ describe('delivery completion outbox', () => {
    * antes disso o item ficava em revisao permanentemente — banner que nao saia
    * da tela, toque que repetia a mesma recusa, e nenhum jeito de descartar.
    */
+  /**
+   * O fantasma do pedido #307, visto em producao.
+   *
+   * A acao subiu antes de a coleta existir e foi para revisao com "precisa
+   * estar coletado". Doze minutos depois o administrador marcou a coleta, o
+   * motoboy entregou, e o pedido fechou normalmente — mas o aviso vermelho
+   * continuou na tela dele no dia seguinte, porque nada mais olhava para aquele
+   * item. "Precisa estar coletado" e condicao TEMPORARIA travestida de recusa
+   * definitiva.
+   */
+  it('reconfere o item em revisao e o remove quando o pedido ja foi entregue', async () => {
+    await enqueueDeliveryCompletion(deliveryInput);
+    const recusa = executor({
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new ApiError(409, { message: 'precisa estar coletado' })),
+      detail: jest
+        .fn()
+        .mockResolvedValue({ ...deliveredDetail(), status: 'ACCEPTED', statusHistory: [] }),
+    });
+    await synchronizePendingDeliveryCompletions('token', 'user-1', recusa);
+    expect((await getPendingDeliveryCompletions('user-1'))[0]?.state).toBe('NEEDS_REVIEW');
+
+    // O mundo andou: coleta feita pelo admin, entrega feita pelo motoboy.
+    const depois = executor({
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COMPLETED',
+        statusHistory: [
+          { fromStatus: 'ACCEPTED', toStatus: 'COLLECTED', changedAt: '2026-08-29T22:14:00.000Z' },
+          { fromStatus: 'COLLECTED', toStatus: 'DELIVERED', changedAt: '2026-08-29T22:26:00.000Z' },
+        ],
+      }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', depois);
+
+    expect(result.syncedIds).toHaveLength(1);
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(0);
+    // Reconferir NAO e reenviar: a acao recusada continua sendo decisao do motoboy.
+    expect(depois.deliver).not.toHaveBeenCalled();
+  });
+
+  /**
+   * O caso do pedido #307, visto em producao.
+   *
+   * O motoboy tocou "entregue", a acao nao passou, e ele entao fez o CERTO:
+   * registrou problema na entrega e devolveu a mercadoria. O pedido terminou
+   * `COMPLETED`, mas por insucesso — e a API so trata "ja entregue" como
+   * repeticao inofensiva quando NAO houve insucesso. A fila levava um "precisa
+   * estar coletado" para sempre, e o aviso vermelho nao saia mais da tela de
+   * quem tinha agido corretamente.
+   */
+  it('descarta a entrega guardada quando o pedido terminou por insucesso', async () => {
+    await enqueueDeliveryCompletion(deliveryInput);
+    const api = executor({
+      deliver: jest
+        .fn()
+        .mockRejectedValue(
+          new ApiError(409, { message: 'O pedido precisa estar coletado antes de ser entregue.' }),
+        ),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COMPLETED',
+        statusHistory: [
+          { fromStatus: 'ACCEPTED', toStatus: 'COLLECTED', changedAt: '2026-08-29T22:14:00.000Z' },
+          { fromStatus: 'COLLECTED', toStatus: 'FAILED', changedAt: '2026-08-29T22:26:00.000Z' },
+          { fromStatus: 'FAILED', toStatus: 'COMPLETED', changedAt: '2026-08-29T22:26:30.000Z' },
+        ],
+      }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(result.discardedIds).toHaveLength(1);
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(0);
+  });
+
+  /**
+   * O retorno nao tem equivalente: se o pedido fechou, `operationWasApplied` ja
+   * reconhece pela transicao para COMPLETED. Descartar por insucesso aqui
+   * jogaria fora justamente a confirmacao que fecha a devolucao.
+   */
+  it('nao descarta o retorno pendente so porque houve insucesso', async () => {
+    await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-1',
+      batchId: null,
+      displayNumber: 15,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+    const api = executor({
+      completeReturn: jest
+        .fn()
+        .mockRejectedValue(new ApiError(422, { message: 'voce esta longe da loja' })),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'FAILED',
+        statusHistory: [
+          { fromStatus: 'COLLECTED', toStatus: 'FAILED', changedAt: '2026-08-29T22:26:00.000Z' },
+        ],
+      }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(result.discardedIds).toHaveLength(0);
+    expect(result.needsReviewCount).toBe(1);
+  });
+
   it('descarta a finalizacao cujo pedido foi cancelado, em vez de deixar em revisao', async () => {
     await enqueueDeliveryCompletion(deliveryInput);
     const api = executor({

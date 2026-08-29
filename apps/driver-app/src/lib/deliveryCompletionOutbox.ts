@@ -70,8 +70,10 @@ export type EnqueueDeliveryCompletionInput =
 export interface DeliveryCompletionSyncResult {
   syncedIds: string[];
   /**
-   * Itens retirados da fila porque o pedido acabou por outro caminho — hoje,
-   * cancelamento. Nao foram sincronizados; deixaram de ter onde ser aplicados.
+   * Itens retirados da fila porque o pedido acabou por outro caminho —
+   * cancelamento pela administracao, ou o insucesso que o proprio motoboy
+   * registrou depois. Nao foram sincronizados; deixaram de ter onde ser
+   * aplicados.
    */
   discardedIds: string[];
   pendingCount: number;
@@ -388,14 +390,33 @@ async function markPendingError(
 /**
  * O pedido acabou por outro caminho e esta acao nao tem mais onde ser aplicada.
  *
- * Cancelamento e o caso real: o motoboy marca entregue sem rede, o admin cancela
- * o pedido, e a fila volta a rodar. A API recusa — corretamente — porque o
- * pedido nao esta mais coletado, e a acao guardada perdeu o objeto. Sem
- * reconhecer isso, o item ficava em revisao para sempre: o banner nao saia mais
- * da tela, tocar nele repetia a mesma recusa, e nao havia como descartar.
+ * Sao dois caminhos, e o segundo foi descoberto em producao:
+ *
+ * 1. **Cancelamento.** O motoboy marca entregue sem rede, o admin cancela o
+ *    pedido, e a fila volta a rodar. A acao guardada perdeu o objeto.
+ * 2. **Insucesso.** O caso do pedido #307: o motoboy tocou "entregue", a acao
+ *    nao passou, e ele entao fez o certo — registrou problema na entrega e
+ *    devolveu a mercadoria. O pedido terminou `COMPLETED`, mas POR INSUCESSO.
+ *    A API trata "ja entregue" como repeticao inofensiva somente quando nao
+ *    houve insucesso; com `failedAt` preenchido ela recusa com "precisa estar
+ *    coletado", e a fila ficava em revisao para sempre.
+ *
+ * O segundo caso e o mais importante justamente porque o motoboy agiu
+ * corretamente: ele nao insistiu numa entrega que nao aconteceu. Punir isso com
+ * um aviso permanente na tela e o pior desfecho possivel.
+ *
+ * A regra depende da acao. Para `DELIVER`, uma passagem por `FAILED` no
+ * historico encerra a questao: a mercadoria voltou, a entrega nao aconteceu, e
+ * nenhuma tentativa futura vai mudar isso. Para `COMPLETE_RETURN` nao existe
+ * equivalente — se o pedido fechou, `operationWasApplied` ja reconhece.
  */
-function completionNoLongerApplicable(delivery: DeliveryDetail): boolean {
-  return delivery.status === 'CANCELLED';
+function completionNoLongerApplicable(
+  item: PendingDeliveryCompletion,
+  delivery: DeliveryDetail,
+): boolean {
+  if (delivery.status === 'CANCELLED') return true;
+  if (item.action !== 'DELIVER') return false;
+  return delivery.statusHistory.some((history) => history.toStatus === 'FAILED');
 }
 
 type CompletionResolution = 'applied' | 'obsolete' | 'unresolved';
@@ -417,7 +438,7 @@ async function resolveCompletionAgainstServer(
   );
   if (!current) return 'unresolved';
   if (operationWasApplied(item, current)) return 'applied';
-  return completionNoLongerApplicable(current) ? 'obsolete' : 'unresolved';
+  return completionNoLongerApplicable(item, current) ? 'obsolete' : 'unresolved';
 }
 
 async function synchronizeQueue(
@@ -433,7 +454,32 @@ async function synchronizeQueue(
   const queue = await getPendingDeliveryCompletions(ownerUserId);
 
   for (const item of queue) {
-    if (item.state !== 'PENDING' || blockedGroups.has(item.groupKey)) continue;
+    /**
+     * Item em revisao NAO e reenviado — isso continua sendo decisao do motoboy —
+     * mas e RECONFERIDO contra o servidor.
+     *
+     * O caso que revelou a falta: o pedido #307 foi para revisao com "precisa
+     * estar coletado", porque a acao subiu antes de a coleta existir. Doze
+     * minutos depois o administrador marcou a coleta, o motoboy entregou, e o
+     * pedido fechou normalmente — mas o aviso vermelho continuou na tela dele
+     * no dia seguinte, porque nada mais olhava para aquele item.
+     *
+     * "Precisa estar coletado" e uma condicao TEMPORARIA travestida de recusa
+     * definitiva. Perguntar ao servidor custa uma consulta e desfaz o fantasma
+     * sozinho; reenviar a acao, nao — e por isso so a conferencia acontece aqui.
+     */
+    if (item.state === 'NEEDS_REVIEW') {
+      const resolucao = await resolveCompletionAgainstServer(accessToken, item, executor);
+      if (resolucao === 'applied') {
+        await removeItem(item.id);
+        syncedIds.push(item.id);
+      } else if (resolucao === 'obsolete') {
+        await removeItem(item.id);
+        discardedIds.push(item.id);
+      }
+      continue;
+    }
+    if (blockedGroups.has(item.groupKey)) continue;
     try {
       if (item.action === 'DELIVER') {
         await withSyncTimeout(executor.deliver(accessToken, item.deliveryId, item.payload));

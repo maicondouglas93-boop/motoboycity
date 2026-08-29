@@ -344,13 +344,17 @@ export function HomeScreen({ navigation }: Props) {
         const result = await synchronizePendingDeliveryCompletions(token, ownerUserId);
         setCompletionQueue(await getPendingDeliveryCompletions(ownerUserId));
         if (result.discardedIds.length > 0) {
-          // Uma vez, e nao um banner permanente: a acao saiu da fila porque o
-          // pedido foi cancelado, e nao ha nada que o motoboy possa fazer a
-          // respeito. Ficar mostrando o aviso so o deixaria tentando de novo.
+          /**
+           * Uma vez, e nao um banner permanente: o pedido ja fechou por outro
+           * caminho — cancelamento pela administracao, ou o proprio insucesso
+           * que o motoboy registrou depois. Nao ha nada que ele possa fazer, e
+           * insistir so o deixaria tocando um botao que nunca vai funcionar.
+           */
           Alert.alert(
-            'Pedido cancelado durante a sincronizacao',
-            `${result.discardedIds.length} finalizacao(oes) foram descartadas porque o pedido ` +
-              'foi cancelado pela administracao antes de o aparelho conseguir enviar.',
+            'Pedido ja encerrado',
+            `${result.discardedIds.length} finalizacao(oes) guardada(s) no aparelho foram ` +
+              'descartadas: o pedido ja tinha sido encerrado por outro caminho. Nada ficou ' +
+              'pendente e nao ha nada a refazer.',
           );
         }
         if (result.authRequired && (await session.getToken()) === token) {
