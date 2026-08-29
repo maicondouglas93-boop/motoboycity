@@ -1,6 +1,7 @@
 import type { AdministrativeAuditEvent } from '@motoboycity/types';
 import type { AdministrativeAuditQuery } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export function createAdminAuditApi({ baseUrl }: { baseUrl: string }) {
   return {
@@ -13,7 +14,7 @@ export function createAdminAuditApi({ baseUrl }: { baseUrl: string }) {
         if (value !== undefined && value !== '') params.set(key, String(value));
       });
       const suffix = params.size ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/admin/audit${suffix}`, {
+      const response = await apiFetch(`${baseUrl}/admin/audit${suffix}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<AdministrativeAuditEvent[]>(response);

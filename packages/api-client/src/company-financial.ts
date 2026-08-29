@@ -4,6 +4,7 @@ import type {
   CompanyUnbilledDeliveries,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface CompanyFinancialApiConfig {
   baseUrl: string;
@@ -22,14 +23,14 @@ export function createCompanyFinancialApi({ baseUrl }: CompanyFinancialApiConfig
 
   return {
     async position(accessToken: string): Promise<CompanyFinancialPosition> {
-      const response = await fetch(`${baseUrl}/company/financial/position`, {
+      const response = await apiFetch(`${baseUrl}/company/financial/position`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyFinancialPosition>(response);
     },
 
     async unbilled(accessToken: string): Promise<CompanyUnbilledDeliveries> {
-      const response = await fetch(`${baseUrl}/company/financial/unbilled`, {
+      const response = await apiFetch(`${baseUrl}/company/financial/unbilled`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyUnbilledDeliveries>(response);
@@ -40,7 +41,7 @@ export function createCompanyFinancialApi({ baseUrl }: CompanyFinancialApiConfig
       periodo: { from: string; to: string },
     ): Promise<CompanyFinancialSummary> {
       const query = new URLSearchParams(periodo);
-      const response = await fetch(`${baseUrl}/company/financial/summary?${query.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/company/financial/summary?${query.toString()}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyFinancialSummary>(response);
@@ -58,7 +59,7 @@ export function createCompanyFinancialApi({ baseUrl }: CompanyFinancialApiConfig
       periodo: { from: string; to: string },
     ): Promise<string> {
       const query = new URLSearchParams(periodo);
-      const response = await fetch(`${baseUrl}/company/financial/export?${query.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/company/financial/export?${query.toString()}`, {
         headers: withAuth(accessToken),
       });
       if (!response.ok) {

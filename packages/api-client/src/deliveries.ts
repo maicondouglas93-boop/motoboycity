@@ -15,6 +15,7 @@ import type {
   MarkDeliveredPayload,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface DeliveriesApiConfig {
   baseUrl: string;
@@ -46,7 +47,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       }
       const query = params.toString();
 
-      const response = await fetch(`${baseUrl}/deliveries/stage-times${query ? `?${query}` : ''}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/stage-times${query ? `?${query}` : ''}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryStageTimesResult>(response);
@@ -71,7 +72,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       if (filters?.batchId) params.set('batchId', filters.batchId);
       if (filters?.deliveryId) params.set('deliveryId', filters.deliveryId);
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/deliveries/operations${query}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/operations${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryOperationsResult>(response);
@@ -100,7 +101,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       if (filters?.page) params.set('page', String(filters.page));
       if (filters?.pageSize) params.set('pageSize', String(filters.pageSize));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/deliveries/search${query}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/search${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliverySearchResult>(response);
@@ -121,7 +122,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       if (filters?.from) params.set('from', filters.from);
       if (filters?.to) params.set('to', filters.to);
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/deliveries/summary${query}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/summary${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliverySummaryResult>(response);
@@ -145,28 +146,28 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       if (filters?.to) params.set('to', filters.to);
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/deliveries${query}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryListItem[]>(response);
     },
 
     async detail(accessToken: string, id: string): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
     },
 
     async group(accessToken: string, id: string): Promise<DeliveryGroupResult> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/group`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/group`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryGroupResult>(response);
     },
 
     async create(accessToken: string, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries`, {
+      const response = await apiFetch(`${baseUrl}/deliveries`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -178,7 +179,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       accessToken: string,
       payload: CreateDeliveryBatchPayload,
     ): Promise<DeliveryBatchDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/batch`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/batch`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -193,7 +194,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
      * uma nota curta para deixar o contexto no historico.
      */
     async cancel(accessToken: string, id: string, reason?: string): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/cancel`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/cancel`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(reason ? { reason } : {}),
@@ -202,7 +203,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     },
 
     async redispatch(accessToken: string, id: string): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/redispatch`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/redispatch`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -219,7 +220,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       id: string,
       payload?: MarkCollectedPayload,
     ): Promise<DeliveryGroupResult> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/collect`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/collect`, {
         method: 'PATCH',
         headers: payload
           ? { ...withAuth(accessToken), 'Content-Type': 'application/json' }
@@ -238,7 +239,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       id: string,
       payload: { reason: string },
     ): Promise<{ deliveryId: string; displayNumber: number; returnedCount: number }> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/return-to-queue`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/return-to-queue`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -261,7 +262,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         accuracy?: number;
       },
     ): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/fail`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/fail`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -274,7 +275,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       id: string,
       payload: MarkDeliveredPayload,
     ): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/deliver`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/deliver`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -287,7 +288,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       id: string,
       payload?: CompleteReturnPayload,
     ): Promise<DeliveryGroupResult> {
-      const response = await fetch(`${baseUrl}/deliveries/${id}/complete-return`, {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/complete-return`, {
         method: 'PATCH',
         headers: payload
           ? { ...withAuth(accessToken), 'Content-Type': 'application/json' }

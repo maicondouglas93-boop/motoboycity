@@ -1,5 +1,6 @@
 import type { ServiceTypeItem } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminServiceTypesApiConfig {
   baseUrl: string;
@@ -16,7 +17,7 @@ export function createAdminServiceTypesApi({ baseUrl }: AdminServiceTypesApiConf
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/admin/service-types${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/service-types${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ServiceTypeItem[]>(response);
@@ -26,7 +27,7 @@ export function createAdminServiceTypesApi({ baseUrl }: AdminServiceTypesApiConf
       accessToken: string,
       payload: { code: string; name: string },
     ): Promise<ServiceTypeItem> {
-      const response = await fetch(`${baseUrl}/admin/service-types`, {
+      const response = await apiFetch(`${baseUrl}/admin/service-types`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -39,7 +40,7 @@ export function createAdminServiceTypesApi({ baseUrl }: AdminServiceTypesApiConf
       id: string,
       payload: { name?: string; active?: boolean },
     ): Promise<ServiceTypeItem> {
-      const response = await fetch(`${baseUrl}/admin/service-types/${id}`, {
+      const response = await apiFetch(`${baseUrl}/admin/service-types/${id}`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

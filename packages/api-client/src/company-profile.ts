@@ -1,6 +1,7 @@
 import type { CompanyProfile } from '@motoboycity/types';
 import type { UpdateCompanyProfilePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface CompanyProfileApiConfig {
   baseUrl: string;
@@ -13,7 +14,7 @@ export function createCompanyProfileApi({ baseUrl }: CompanyProfileApiConfig) {
 
   return {
     async get(accessToken: string): Promise<CompanyProfile> {
-      const response = await fetch(`${baseUrl}/company/profile`, {
+      const response = await apiFetch(`${baseUrl}/company/profile`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyProfile>(response);
@@ -23,7 +24,7 @@ export function createCompanyProfileApi({ baseUrl }: CompanyProfileApiConfig) {
       accessToken: string,
       payload: UpdateCompanyProfilePayload,
     ): Promise<CompanyProfile> {
-      const response = await fetch(`${baseUrl}/company/profile`, {
+      const response = await apiFetch(`${baseUrl}/company/profile`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

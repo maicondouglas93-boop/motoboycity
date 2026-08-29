@@ -1,4 +1,5 @@
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface RegisterDeviceTokenInput {
   token: string;
@@ -19,7 +20,7 @@ export function createPushTokensApi({ baseUrl }: { baseUrl: string }) {
 
   return {
     async register(accessToken: string, payload: RegisterDeviceTokenInput): Promise<{ ok: true }> {
-      const response = await fetch(`${baseUrl}/driver/push-tokens`, {
+      const response = await apiFetch(`${baseUrl}/driver/push-tokens`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -28,7 +29,7 @@ export function createPushTokensApi({ baseUrl }: { baseUrl: string }) {
     },
 
     async unregister(accessToken: string, token: string): Promise<{ ok: true }> {
-      const response = await fetch(`${baseUrl}/driver/push-tokens/${encodeURIComponent(token)}`, {
+      const response = await apiFetch(`${baseUrl}/driver/push-tokens/${encodeURIComponent(token)}`, {
         method: 'DELETE',
         headers: withAuth(accessToken),
       });

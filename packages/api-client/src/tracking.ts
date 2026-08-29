@@ -6,6 +6,7 @@ import type {
   PublicDeliveryTrackingLink,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface TrackingApiConfig {
   baseUrl: string;
@@ -22,7 +23,7 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
       deliveryId: string,
       payload: { lat: number; lng: number; accuracy?: number },
     ): Promise<DeliveryTrackingPoint> {
-      const response = await fetch(`${baseUrl}/tracking/driver/deliveries/${deliveryId}/points`, {
+      const response = await apiFetch(`${baseUrl}/tracking/driver/deliveries/${deliveryId}/points`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -40,14 +41,14 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
       if (filters?.to) params.set('to', filters.to);
       if (filters?.limit) params.set('limit', String(filters.limit));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/tracking/deliveries/${deliveryId}${query}`, {
+      const response = await apiFetch(`${baseUrl}/tracking/deliveries/${deliveryId}${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryTrackingDetail>(response);
     },
 
     async active(accessToken: string): Promise<ActiveDeliveryTrackingItem[]> {
-      const response = await fetch(`${baseUrl}/tracking/active`, {
+      const response = await apiFetch(`${baseUrl}/tracking/active`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ActiveDeliveryTrackingItem[]>(response);
@@ -57,7 +58,7 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
       accessToken: string,
       deliveryId: string,
     ): Promise<PublicDeliveryTrackingLink> {
-      const response = await fetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
+      const response = await apiFetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
         method: 'POST',
         headers: withAuth(accessToken),
       });
@@ -65,7 +66,7 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
     },
 
     async revokePublicLink(accessToken: string, deliveryId: string): Promise<{ revoked: true }> {
-      const response = await fetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
+      const response = await apiFetch(`${baseUrl}/tracking/deliveries/${deliveryId}/public-link`, {
         method: 'DELETE',
         headers: withAuth(accessToken),
       });
@@ -73,7 +74,7 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
     },
 
     async publicDetail(token: string): Promise<PublicDeliveryTracking> {
-      const response = await fetch(`${baseUrl}/public/tracking/${encodeURIComponent(token)}`);
+      const response = await apiFetch(`${baseUrl}/public/tracking/${encodeURIComponent(token)}`);
       return parseJsonOrThrow<PublicDeliveryTracking>(response);
     },
   };

@@ -4,6 +4,7 @@ import type {
   DeliveryOfferPayload,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface DeliveryOffersApiConfig {
   baseUrl: string;
@@ -17,7 +18,7 @@ export function createDeliveryOffersApi({ baseUrl }: DeliveryOffersApiConfig) {
   return {
     /** Pedidos que ninguem aceitou e ficaram sem oferta pendente. */
     async listAvailable(accessToken: string): Promise<AvailableDeliveryItem[]> {
-      const response = await fetch(`${baseUrl}/delivery-offers/available`, {
+      const response = await apiFetch(`${baseUrl}/delivery-offers/available`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AvailableDeliveryItem[]>(response);
@@ -30,14 +31,14 @@ export function createDeliveryOffersApi({ baseUrl }: DeliveryOffersApiConfig) {
      * e ai o socket nao estava la para receber.
      */
     async pending(accessToken: string): Promise<DeliveryOfferPayload | null> {
-      const response = await fetch(`${baseUrl}/delivery-offers/pending`, {
+      const response = await apiFetch(`${baseUrl}/delivery-offers/pending`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DeliveryOfferPayload | null>(response);
     },
 
     async claim(accessToken: string, deliveryId: string): Promise<AcceptOfferResult> {
-      const response = await fetch(`${baseUrl}/delivery-offers/available/${deliveryId}/claim`, {
+      const response = await apiFetch(`${baseUrl}/delivery-offers/available/${deliveryId}/claim`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -45,7 +46,7 @@ export function createDeliveryOffersApi({ baseUrl }: DeliveryOffersApiConfig) {
     },
 
     async accept(accessToken: string, offerId: string): Promise<AcceptOfferResult> {
-      const response = await fetch(`${baseUrl}/delivery-offers/${offerId}/accept`, {
+      const response = await apiFetch(`${baseUrl}/delivery-offers/${offerId}/accept`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -53,7 +54,7 @@ export function createDeliveryOffersApi({ baseUrl }: DeliveryOffersApiConfig) {
     },
 
     async decline(accessToken: string, offerId: string): Promise<{ ok: true }> {
-      const response = await fetch(`${baseUrl}/delivery-offers/${offerId}/decline`, {
+      const response = await apiFetch(`${baseUrl}/delivery-offers/${offerId}/decline`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });

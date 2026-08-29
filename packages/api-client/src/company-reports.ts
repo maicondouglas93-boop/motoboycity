@@ -1,5 +1,6 @@
 import type { CompanyOperationsReport } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface CompanyReportsApiConfig {
   baseUrl: string;
@@ -13,7 +14,7 @@ export function createCompanyReportsApi({ baseUrl }: CompanyReportsApiConfig) {
       period: { from: string; to: string },
     ): Promise<CompanyOperationsReport> {
       const query = new URLSearchParams(period);
-      const response = await fetch(`${baseUrl}/company/reports/operations?${query.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/company/reports/operations?${query.toString()}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<CompanyOperationsReport>(response);

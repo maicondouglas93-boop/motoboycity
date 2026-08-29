@@ -22,6 +22,7 @@ import type {
   RevokeDriverPunishmentPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminDriversApiConfig {
   baseUrl: string;
@@ -34,7 +35,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
 
   return {
     async registrationOptions(accessToken: string): Promise<AdminDriverRegistrationOptions> {
-      const response = await fetch(`${baseUrl}/admin/drivers/registration-options`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/registration-options`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverRegistrationOptions>(response);
@@ -44,7 +45,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       accessToken: string,
       payload: CreateAdminDriverPayload,
     ): Promise<RegisterDriverResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -61,14 +62,14 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       if (filters?.accountStatus) params.set('accountStatus', filters.accountStatus);
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/admin/drivers${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverListItem[]>(response);
     },
 
     async detail(accessToken: string, driverId: string): Promise<AdminDriverDetail> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverDetail>(response);
@@ -78,7 +79,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       accessToken: string,
       driverId: string,
     ): Promise<AdminDriverCompanyBlockItem[]> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverCompanyBlockItem[]>(response);
@@ -89,7 +90,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       payload: CreateDriverCompanyBlockPayload,
     ): Promise<AdminDriverCompanyBlockItem> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -102,7 +103,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       companyId: string,
     ): Promise<{ driverId: string; companyId: string; blocked: false }> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/drivers/${driverId}/company-blocks/${companyId}`,
         { method: 'DELETE', headers: withAuth(accessToken) },
       );
@@ -114,7 +115,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       payload: AdminUpdateDriverPayload,
     ): Promise<AdminDriverDetail> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -127,7 +128,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       formData: FormData,
     ): Promise<AdminDriverDetail> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/documents`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/documents`, {
         method: 'POST',
         headers: withAuth(accessToken),
         body: formData,
@@ -141,7 +142,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       documentId: string,
       payload: AdminReviewDriverDocumentPayload,
     ): Promise<AdminDriverDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/drivers/${driverId}/documents/${documentId}/review`,
         {
           method: 'PATCH',
@@ -157,7 +158,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       documentId: string,
     ): Promise<AdminDriverDetail> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/documents/${documentId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/documents/${documentId}`, {
         method: 'DELETE',
         headers: withAuth(accessToken),
       });
@@ -165,7 +166,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async approve(accessToken: string, driverId: string): Promise<DriverReviewResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/approve`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/approve`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -173,7 +174,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async reject(accessToken: string, driverId: string): Promise<DriverReviewResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/reject`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/reject`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -181,7 +182,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async suspend(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/suspend`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/suspend`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -189,7 +190,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async block(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/block`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/block`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -197,7 +198,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async reactivate(accessToken: string, driverId: string): Promise<DriverAccountStatusResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/reactivate`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/reactivate`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -209,7 +210,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       payload: ChangeAdminPasswordPayload,
     ): Promise<AdminPasswordChangeResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/password`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/password`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -222,7 +223,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       driverId: string,
       payload: ReplaceDriverServiceTypesPayload,
     ): Promise<DriverServiceTypesResult> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/service-types`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/service-types`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -231,7 +232,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     },
 
     async punishments(accessToken: string, driverId: string): Promise<AdminDriverPunishmentItem[]> {
-      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/punishments`, {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/punishments`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverPunishmentItem[]>(response);
@@ -243,7 +244,7 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
       punishmentId: string,
       payload: RevokeDriverPunishmentPayload,
     ): Promise<AdminDriverPunishmentItem> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/drivers/${driverId}/punishments/${punishmentId}/revoke`,
         {
           method: 'POST',

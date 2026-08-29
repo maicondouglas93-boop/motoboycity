@@ -1,18 +1,19 @@
 import type { AdminRegion } from '@motoboycity/types';
 import type { AdminRegionPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export function createAdminRegionsApi({ baseUrl }: { baseUrl: string }) {
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   return {
     async list(token: string): Promise<AdminRegion[]> {
       return parseJsonOrThrow<AdminRegion[]>(
-        await fetch(`${baseUrl}/admin/regions`, { headers: auth(token) }),
+        await apiFetch(`${baseUrl}/admin/regions`, { headers: auth(token) }),
       );
     },
     async create(token: string, payload: AdminRegionPayload): Promise<AdminRegion> {
       return parseJsonOrThrow<AdminRegion>(
-        await fetch(`${baseUrl}/admin/regions`, {
+        await apiFetch(`${baseUrl}/admin/regions`, {
           method: 'POST',
           headers: { ...auth(token), 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -21,7 +22,7 @@ export function createAdminRegionsApi({ baseUrl }: { baseUrl: string }) {
     },
     async update(token: string, id: string, payload: AdminRegionPayload): Promise<AdminRegion> {
       return parseJsonOrThrow<AdminRegion>(
-        await fetch(`${baseUrl}/admin/regions/${id}`, {
+        await apiFetch(`${baseUrl}/admin/regions/${id}`, {
           method: 'PUT',
           headers: { ...auth(token), 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -30,7 +31,7 @@ export function createAdminRegionsApi({ baseUrl }: { baseUrl: string }) {
     },
     async setActive(token: string, id: string, active: boolean): Promise<AdminRegion> {
       return parseJsonOrThrow<AdminRegion>(
-        await fetch(`${baseUrl}/admin/regions/${id}/${active ? 'reactivate' : 'deactivate'}`, {
+        await apiFetch(`${baseUrl}/admin/regions/${id}/${active ? 'reactivate' : 'deactivate'}`, {
           method: 'PATCH',
           headers: auth(token),
         }),

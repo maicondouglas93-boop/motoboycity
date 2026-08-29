@@ -1,6 +1,7 @@
 import type { SurchargeItem } from '@motoboycity/types';
 import type { UpsertSurchargePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminSurchargesApiConfig {
   baseUrl: string;
@@ -16,7 +17,7 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
   }
 
   async function patch(accessToken: string, id: string, action: string): Promise<SurchargeItem> {
-    const response = await fetch(`${baseUrl}/admin/surcharges/${id}/${action}`, {
+    const response = await apiFetch(`${baseUrl}/admin/surcharges/${id}/${action}`, {
       method: 'PATCH',
       headers: withAuth(accessToken),
     });
@@ -25,14 +26,14 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
 
   return {
     async list(accessToken: string): Promise<SurchargeItem[]> {
-      const response = await fetch(`${baseUrl}/admin/surcharges`, {
+      const response = await apiFetch(`${baseUrl}/admin/surcharges`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<SurchargeItem[]>(response);
     },
 
     async create(accessToken: string, payload: UpsertSurchargePayload): Promise<SurchargeItem> {
-      const response = await fetch(`${baseUrl}/admin/surcharges`, {
+      const response = await apiFetch(`${baseUrl}/admin/surcharges`, {
         method: 'POST',
         headers: jsonHeaders(accessToken),
         body: JSON.stringify(payload),
@@ -45,7 +46,7 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
       id: string,
       payload: UpsertSurchargePayload,
     ): Promise<SurchargeItem> {
-      const response = await fetch(`${baseUrl}/admin/surcharges/${id}`, {
+      const response = await apiFetch(`${baseUrl}/admin/surcharges/${id}`, {
         method: 'PATCH',
         headers: jsonHeaders(accessToken),
         body: JSON.stringify(payload),
@@ -60,7 +61,7 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
     deactivate: (accessToken: string, id: string) => patch(accessToken, id, 'deactivate'),
 
     async remove(accessToken: string, id: string): Promise<void> {
-      const response = await fetch(`${baseUrl}/admin/surcharges/${id}`, {
+      const response = await apiFetch(`${baseUrl}/admin/surcharges/${id}`, {
         method: 'DELETE',
         headers: withAuth(accessToken),
       });

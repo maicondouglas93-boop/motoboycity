@@ -10,6 +10,7 @@ import type {
 } from '@motoboycity/types';
 import type { ManualInvoicePayload, UpdateInvoiceDueDatePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 type InvoiceFilters = { status?: InvoiceStatus; from?: string; to?: string; companyId?: string };
 
@@ -33,14 +34,14 @@ export interface CompanyInvoicesApiConfig {
 export function createCompanyInvoicesApi({ baseUrl }: CompanyInvoicesApiConfig) {
   return {
     async list(accessToken: string, filters?: InvoiceFilters): Promise<CompanyInvoiceListItem[]> {
-      const response = await fetch(`${baseUrl}/company/invoices${queryFromFilters(filters)}`, {
+      const response = await apiFetch(`${baseUrl}/company/invoices${queryFromFilters(filters)}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyInvoiceListItem[]>(response);
     },
 
     async detail(accessToken: string, invoiceId: string): Promise<CompanyInvoiceDetail> {
-      const response = await fetch(`${baseUrl}/company/invoices/${invoiceId}`, {
+      const response = await apiFetch(`${baseUrl}/company/invoices/${invoiceId}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyInvoiceDetail>(response);
@@ -55,7 +56,7 @@ export interface AdminInvoicesApiConfig {
 export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
   return {
     async list(accessToken: string, filters?: InvoiceFilters): Promise<InvoiceListItem[]> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/invoices${queryFromFilters(filters)}`,
         {
           headers: withAuth(accessToken),
@@ -65,14 +66,14 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
     },
 
     async detail(accessToken: string, invoiceId: string): Promise<InvoiceDetail> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/${invoiceId}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<InvoiceDetail>(response);
     },
 
     async close(accessToken: string, companyId: string): Promise<InvoiceListItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/close`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/close`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId }),
@@ -85,7 +86,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       companyId: string,
     ): Promise<ManualInvoiceCandidate[]> {
       const params = new URLSearchParams({ companyId });
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/invoices/manual/candidates?${params.toString()}`,
         { headers: withAuth(accessToken) },
       );
@@ -96,7 +97,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       accessToken: string,
       payload: ManualInvoicePayload,
     ): Promise<ManualInvoicePreview> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/manual/preview`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/manual/preview`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -105,7 +106,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
     },
 
     async createManual(accessToken: string, payload: ManualInvoicePayload): Promise<InvoiceDetail> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/manual`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/manual`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -121,7 +122,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       invoiceId: string,
       payload: { reason: string },
     ): Promise<InvoiceDetail> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/cancel`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/cancel`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -134,7 +135,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       invoiceId: string,
       payload: { paymentDate: string; paymentMethod: PaymentMethod },
     ): Promise<InvoiceDetail> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/mark-paid`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/mark-paid`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -147,7 +148,7 @@ export function createAdminInvoicesApi({ baseUrl }: AdminInvoicesApiConfig) {
       invoiceId: string,
       payload: UpdateInvoiceDueDatePayload,
     ): Promise<InvoiceDetail> {
-      const response = await fetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/due-date`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/invoices/${invoiceId}/due-date`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

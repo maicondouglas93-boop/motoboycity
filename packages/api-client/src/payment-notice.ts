@@ -5,6 +5,7 @@ import type {
   RejectPaymentNoticePayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface PaymentNoticeApiConfig {
   baseUrl: string;
@@ -27,7 +28,7 @@ export function createPaymentNoticeApi({ baseUrl }: PaymentNoticeApiConfig) {
       invoiceId: string,
       payload: CreatePaymentNoticePayload,
     ): Promise<PaymentNotice> {
-      const response = await fetch(`${baseUrl}/company/invoices/${invoiceId}/payment-notice`, {
+      const response = await apiFetch(`${baseUrl}/company/invoices/${invoiceId}/payment-notice`, {
         method: 'POST',
         headers: headers(accessToken),
         body: JSON.stringify(payload),
@@ -36,7 +37,7 @@ export function createPaymentNoticeApi({ baseUrl }: PaymentNoticeApiConfig) {
     },
 
     async listForInvoice(accessToken: string, invoiceId: string): Promise<PaymentNotice[]> {
-      const response = await fetch(`${baseUrl}/company/invoices/${invoiceId}/payment-notices`, {
+      const response = await apiFetch(`${baseUrl}/company/invoices/${invoiceId}/payment-notices`, {
         headers: headers(accessToken),
       });
       return parseJsonOrThrow<PaymentNotice[]>(response);
@@ -46,7 +47,7 @@ export function createPaymentNoticeApi({ baseUrl }: PaymentNoticeApiConfig) {
       accessToken: string,
       status: 'PENDING' | 'CONFIRMED' | 'REJECTED' = 'PENDING',
     ): Promise<PaymentNoticeQueueItem[]> {
-      const response = await fetch(`${baseUrl}/admin/payment-notices?status=${status}`, {
+      const response = await apiFetch(`${baseUrl}/admin/payment-notices?status=${status}`, {
         headers: headers(accessToken),
       });
       return parseJsonOrThrow<PaymentNoticeQueueItem[]>(response);
@@ -57,7 +58,7 @@ export function createPaymentNoticeApi({ baseUrl }: PaymentNoticeApiConfig) {
       noticeId: string,
       payload: ConfirmPaymentNoticePayload,
     ): Promise<PaymentNotice> {
-      const response = await fetch(`${baseUrl}/admin/payment-notices/${noticeId}/confirm`, {
+      const response = await apiFetch(`${baseUrl}/admin/payment-notices/${noticeId}/confirm`, {
         method: 'POST',
         headers: headers(accessToken),
         body: JSON.stringify(payload),
@@ -70,7 +71,7 @@ export function createPaymentNoticeApi({ baseUrl }: PaymentNoticeApiConfig) {
       noticeId: string,
       payload: RejectPaymentNoticePayload,
     ): Promise<PaymentNotice> {
-      const response = await fetch(`${baseUrl}/admin/payment-notices/${noticeId}/reject`, {
+      const response = await apiFetch(`${baseUrl}/admin/payment-notices/${noticeId}/reject`, {
         method: 'POST',
         headers: headers(accessToken),
         body: JSON.stringify(payload),

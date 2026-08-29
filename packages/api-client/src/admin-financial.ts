@@ -15,6 +15,7 @@ import type {
   ReceiptsReport,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminFinancialApiConfig {
   baseUrl: string;
@@ -28,7 +29,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
   return {
     /** Posicao de caixa agora. Sem periodo: e estado, nao relatorio. */
     async cashPosition(accessToken: string): Promise<CashPositionItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/cash-position`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/cash-position`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CashPositionItem>(response);
@@ -36,7 +37,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
 
     /** Contas a receber e aging no instante atual, sem filtro de período. */
     async receivablesAging(accessToken: string): Promise<ReceivablesAgingReport> {
-      const response = await fetch(`${baseUrl}/admin/financial/receivables-aging`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/receivables-aging`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ReceivablesAgingReport>(response);
@@ -44,7 +45,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
 
     /** Obrigações, saques abertos e aging atual por entregador. */
     async payoutsAging(accessToken: string): Promise<PayoutsAgingReport> {
-      const response = await fetch(`${baseUrl}/admin/financial/payouts-aging`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/payouts-aging`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<PayoutsAgingReport>(response);
@@ -56,7 +57,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       filters: { from: string; to: string },
     ): Promise<FinancialStatementReport> {
       const params = new URLSearchParams({ from: filters.from, to: filters.to });
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/financial-statement?${params.toString()}`,
         { headers: withAuth(accessToken) },
       );
@@ -69,7 +70,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       filters: { from: string; to: string },
     ): Promise<FinancialCycleReport> {
       const params = new URLSearchParams({ from: filters.from, to: filters.to });
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/financial-cycle?${params.toString()}`,
         { headers: withAuth(accessToken) },
       );
@@ -82,7 +83,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       filters: { from: string; to: string },
     ): Promise<CashFlowForecastReport> {
       const params = new URLSearchParams({ from: filters.from, to: filters.to });
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/cash-flow-forecast?${params.toString()}`,
         { headers: withAuth(accessToken) },
       );
@@ -95,7 +96,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       filters: { from: string; to: string },
     ): Promise<FinancialAuditReport> {
       const params = new URLSearchParams({ from: filters.from, to: filters.to });
-      const response = await fetch(`${baseUrl}/admin/financial/audit-trail?${params.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/audit-trail?${params.toString()}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<FinancialAuditReport>(response);
@@ -109,7 +110,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       if (filters?.from) params.set('from', filters.from);
       if (filters?.to) params.set('to', filters.to);
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/admin/financial/overview${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/overview${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminFinancialOverview>(response);
@@ -126,7 +127,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       const params = new URLSearchParams({ from: filters.from, to: filters.to });
       if (filters.onlineOnly) params.set('onlineOnly', 'true');
 
-      const response = await fetch(`${baseUrl}/admin/financial/receipts?${params.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/receipts?${params.toString()}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ReceiptsReport>(response);
@@ -140,7 +141,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       driverId: string,
       payload: { type: 'CREDIT' | 'DEBIT'; amount: number; reason: string },
     ): Promise<AdminDriverWalletDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/driver-wallets/${driverId}/adjustments`,
         {
           method: 'POST',
@@ -159,7 +160,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       if (filters?.search) params.set('search', filters.search);
       if (filters?.limit) params.set('limit', String(filters.limit));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/admin/financial/driver-wallets${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/driver-wallets${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverWalletItem[]>(response);
@@ -176,7 +177,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       if (filters?.to) params.set('to', filters.to);
       if (filters?.limit) params.set('limit', String(filters.limit));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/driver-wallets/${driverId}${query}`,
         {
           headers: withAuth(accessToken),
@@ -202,14 +203,14 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       if (filters?.to) params.set('to', filters.to);
       if (filters?.limit) params.set('limit', String(filters.limit));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/admin/financial/withdrawals${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/withdrawals${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<WithdrawalRequestItem[]>(response);
     },
 
     async getWithdrawal(accessToken: string, withdrawalId: string): Promise<WithdrawalRequestItem> {
-      const response = await fetch(`${baseUrl}/admin/financial/withdrawals/${withdrawalId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/financial/withdrawals/${withdrawalId}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<WithdrawalRequestItem>(response);
@@ -220,7 +221,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/approve`,
         {
           method: 'POST',
@@ -236,7 +237,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note: string; paymentReference?: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/mark-paid`,
         {
           method: 'POST',
@@ -252,7 +253,7 @@ export function createAdminFinancialApi({ baseUrl }: AdminFinancialApiConfig) {
       withdrawalId: string,
       payload: { note: string },
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/admin/financial/withdrawals/${withdrawalId}/reject`,
         {
           method: 'POST',

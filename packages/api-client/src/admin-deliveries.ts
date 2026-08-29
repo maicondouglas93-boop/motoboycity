@@ -7,6 +7,7 @@ import type {
   ReassignDriverPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminDeliveriesApiConfig {
   baseUrl: string;
@@ -24,7 +25,7 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
     action: string,
     payload: unknown,
   ): Promise<DeliveryDetail> {
-    const response = await fetch(`${baseUrl}/admin/deliveries/${id}/${action}`, {
+    const response = await apiFetch(`${baseUrl}/admin/deliveries/${id}/${action}`, {
       method: 'PATCH',
       headers: jsonHeaders(accessToken),
       body: JSON.stringify(payload),
@@ -38,7 +39,7 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
       companyId: string,
       payload: CreateDeliveryPayload,
     ): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/admin/deliveries/company/${companyId}`, {
+      const response = await apiFetch(`${baseUrl}/admin/deliveries/company/${companyId}`, {
         method: 'POST',
         headers: jsonHeaders(accessToken),
         body: JSON.stringify(payload),
@@ -50,7 +51,7 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
       id: string,
       payload: CreateDeliveryPayload,
     ): Promise<DeliveryDetail> {
-      const response = await fetch(`${baseUrl}/admin/deliveries/${id}`, {
+      const response = await apiFetch(`${baseUrl}/admin/deliveries/${id}`, {
         method: 'PUT',
         headers: jsonHeaders(accessToken),
         body: JSON.stringify(payload),

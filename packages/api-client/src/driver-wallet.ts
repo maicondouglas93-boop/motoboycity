@@ -5,6 +5,7 @@ import type {
 } from '@motoboycity/types';
 import type { RequestWithdrawalPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface DriverWalletApiConfig {
   baseUrl: string;
@@ -23,14 +24,14 @@ export function createDriverWalletApi({ baseUrl }: DriverWalletApiConfig) {
       if (filters?.limit) params.set('limit', String(filters.limit));
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/driver/wallet${query}`, {
+      const response = await apiFetch(`${baseUrl}/driver/wallet${query}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<DriverWalletSummary>(response);
     },
 
     async listWithdrawals(accessToken: string): Promise<WithdrawalRequestItem[]> {
-      const response = await fetch(`${baseUrl}/driver/wallet/withdrawals`, {
+      const response = await apiFetch(`${baseUrl}/driver/wallet/withdrawals`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<WithdrawalRequestItem[]>(response);
@@ -40,7 +41,7 @@ export function createDriverWalletApi({ baseUrl }: DriverWalletApiConfig) {
       accessToken: string,
       payload: RequestWithdrawalPayload,
     ): Promise<WithdrawalRequestItem> {
-      const response = await fetch(`${baseUrl}/driver/wallet/withdrawals`, {
+      const response = await apiFetch(`${baseUrl}/driver/wallet/withdrawals`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

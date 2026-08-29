@@ -1,6 +1,7 @@
 import type { BusinessHoursResult } from '@motoboycity/types';
 import type { ReplaceBusinessHoursPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminBusinessHoursApiConfig {
   baseUrl: string;
@@ -13,7 +14,7 @@ export function createAdminBusinessHoursApi({ baseUrl }: AdminBusinessHoursApiCo
 
   return {
     async get(accessToken: string): Promise<BusinessHoursResult> {
-      const response = await fetch(`${baseUrl}/admin/business-hours`, {
+      const response = await apiFetch(`${baseUrl}/admin/business-hours`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<BusinessHoursResult>(response);
@@ -24,7 +25,7 @@ export function createAdminBusinessHoursApi({ baseUrl }: AdminBusinessHoursApiCo
       accessToken: string,
       payload: ReplaceBusinessHoursPayload,
     ): Promise<BusinessHoursResult> {
-      const response = await fetch(`${baseUrl}/admin/business-hours`, {
+      const response = await apiFetch(`${baseUrl}/admin/business-hours`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

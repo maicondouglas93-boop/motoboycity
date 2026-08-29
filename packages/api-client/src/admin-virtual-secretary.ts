@@ -3,6 +3,7 @@ import type {
   VirtualSecretaryChatResult,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminVirtualSecretaryApiConfig {
   baseUrl: string;
@@ -14,7 +15,7 @@ export function createAdminVirtualSecretaryApi({ baseUrl }: AdminVirtualSecretar
       accessToken: string,
       payload: VirtualSecretaryChatPayload,
     ): Promise<VirtualSecretaryChatResult> {
-      const response = await fetch(`${baseUrl}/admin/virtual-secretary/chat`, {
+      const response = await apiFetch(`${baseUrl}/admin/virtual-secretary/chat`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,

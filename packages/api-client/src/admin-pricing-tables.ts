@@ -1,5 +1,6 @@
 import type { PricingTableItem } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminPricingTablesApiConfig {
   baseUrl: string;
@@ -21,7 +22,7 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/admin/pricing-tables${query}`, {
+      const response = await apiFetch(`${baseUrl}/admin/pricing-tables${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<PricingTableItem[]>(response);
@@ -40,7 +41,7 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
         driverCommissionPercentage?: number;
       },
     ): Promise<PricingTableItem> {
-      const response = await fetch(`${baseUrl}/admin/pricing-tables`, {
+      const response = await apiFetch(`${baseUrl}/admin/pricing-tables`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -49,7 +50,7 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
     },
 
     async deactivate(accessToken: string, id: string): Promise<PricingTableItem> {
-      const response = await fetch(`${baseUrl}/admin/pricing-tables/${id}/deactivate`, {
+      const response = await apiFetch(`${baseUrl}/admin/pricing-tables/${id}/deactivate`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });
@@ -58,7 +59,7 @@ export function createAdminPricingTablesApi({ baseUrl }: AdminPricingTablesApiCo
 
     /** Recusa com 409 se ja houver outra tabela ativa no mesmo escopo. */
     async reactivate(accessToken: string, id: string): Promise<PricingTableItem> {
-      const response = await fetch(`${baseUrl}/admin/pricing-tables/${id}/reactivate`, {
+      const response = await apiFetch(`${baseUrl}/admin/pricing-tables/${id}/reactivate`, {
         method: 'PATCH',
         headers: withAuth(accessToken),
       });

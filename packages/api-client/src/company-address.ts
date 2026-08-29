@@ -1,5 +1,6 @@
 import type { CompanyAddressItem, UpsertCompanyAddressPayload } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface CompanyAddressApiConfig {
   baseUrl: string;
@@ -12,7 +13,7 @@ export function createCompanyAddressApi({ baseUrl }: CompanyAddressApiConfig) {
 
   return {
     async get(accessToken: string): Promise<{ address: CompanyAddressItem | null }> {
-      const response = await fetch(`${baseUrl}/company/address`, {
+      const response = await apiFetch(`${baseUrl}/company/address`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<{ address: CompanyAddressItem | null }>(response);
@@ -22,7 +23,7 @@ export function createCompanyAddressApi({ baseUrl }: CompanyAddressApiConfig) {
       accessToken: string,
       payload: UpsertCompanyAddressPayload,
     ): Promise<{ address: CompanyAddressItem }> {
-      const response = await fetch(`${baseUrl}/company/address`, {
+      const response = await apiFetch(`${baseUrl}/company/address`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

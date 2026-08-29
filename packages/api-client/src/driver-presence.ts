@@ -5,6 +5,7 @@ import type {
   SetDriverPresencePayload,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface DriverPresenceApiConfig {
   baseUrl: string;
@@ -17,14 +18,14 @@ export function createDriverPresenceApi({ baseUrl }: DriverPresenceApiConfig) {
 
   return {
     async get(accessToken: string): Promise<DriverPresenceItem> {
-      const response = await fetch(`${baseUrl}/driver/presence`, {
+      const response = await apiFetch(`${baseUrl}/driver/presence`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DriverPresenceItem>(response);
     },
 
     async queue(accessToken: string): Promise<DriverDispatchQueueResult> {
-      const response = await fetch(`${baseUrl}/driver/presence/queue`, {
+      const response = await apiFetch(`${baseUrl}/driver/presence/queue`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<DriverDispatchQueueResult>(response);
@@ -34,7 +35,7 @@ export function createDriverPresenceApi({ baseUrl }: DriverPresenceApiConfig) {
       accessToken: string,
       payload: SetDriverPresencePayload,
     ): Promise<DriverPresenceItem> {
-      const response = await fetch(`${baseUrl}/driver/presence`, {
+      const response = await apiFetch(`${baseUrl}/driver/presence`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -46,7 +47,7 @@ export function createDriverPresenceApi({ baseUrl }: DriverPresenceApiConfig) {
       accessToken: string,
       payload: DriverPresenceHeartbeatPayload,
     ): Promise<DriverPresenceItem> {
-      const response = await fetch(`${baseUrl}/driver/presence/heartbeat`, {
+      const response = await apiFetch(`${baseUrl}/driver/presence/heartbeat`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

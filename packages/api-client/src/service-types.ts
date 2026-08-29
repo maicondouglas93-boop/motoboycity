@@ -1,5 +1,6 @@
 import type { ServiceTypeItem } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface ServiceTypesApiConfig {
   baseUrl: string;
@@ -13,7 +14,7 @@ export function createServiceTypesApi({ baseUrl }: ServiceTypesApiConfig) {
       if (filters?.active !== undefined) params.set('active', String(filters.active));
       const query = params.toString() ? `?${params.toString()}` : '';
 
-      const response = await fetch(`${baseUrl}/service-types${query}`, {
+      const response = await apiFetch(`${baseUrl}/service-types${query}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<ServiceTypeItem[]>(response);

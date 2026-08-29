@@ -10,6 +10,7 @@ import type {
   UpdateCompanyCustomerPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface CompanyCustomersApiConfig {
   baseUrl: string;
@@ -30,14 +31,14 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       if (filters?.page) params.set('page', String(filters.page));
       if (filters?.pageSize) params.set('pageSize', String(filters.pageSize));
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`${baseUrl}/company/customers${query}`, {
+      const response = await apiFetch(`${baseUrl}/company/customers${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyCustomerListResult>(response);
     },
 
     async detail(accessToken: string, id: string): Promise<CompanyCustomerDetail> {
-      const response = await fetch(`${baseUrl}/company/customers/${id}`, {
+      const response = await apiFetch(`${baseUrl}/company/customers/${id}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyCustomerDetail>(response);
@@ -50,7 +51,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       const params = new URLSearchParams();
       if (identifiers.cpf) params.set('cpf', identifiers.cpf);
       if (identifiers.phone) params.set('phone', identifiers.phone);
-      const response = await fetch(`${baseUrl}/company/customers/match?${params.toString()}`, {
+      const response = await apiFetch(`${baseUrl}/company/customers/match?${params.toString()}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<{ customer: CompanyCustomer | null }>(response);
@@ -60,7 +61,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       accessToken: string,
       payload: CreateCompanyCustomerPayload,
     ): Promise<CompanyCustomer> {
-      const response = await fetch(`${baseUrl}/company/customers`, {
+      const response = await apiFetch(`${baseUrl}/company/customers`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -73,7 +74,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       id: string,
       payload: UpdateCompanyCustomerPayload,
     ): Promise<CompanyCustomer> {
-      const response = await fetch(`${baseUrl}/company/customers/${id}`, {
+      const response = await apiFetch(`${baseUrl}/company/customers/${id}`, {
         method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -82,7 +83,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
     },
 
     async remove(accessToken: string, id: string): Promise<{ deleted: true }> {
-      const response = await fetch(`${baseUrl}/company/customers/${id}`, {
+      const response = await apiFetch(`${baseUrl}/company/customers/${id}`, {
         method: 'DELETE',
         headers: withAuth(accessToken),
       });
@@ -94,7 +95,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       customerId: string,
       payload: CompanyCustomerSavedAddressPayload,
     ): Promise<CompanyCustomerSavedAddress> {
-      const response = await fetch(`${baseUrl}/company/customers/${customerId}/addresses`, {
+      const response = await apiFetch(`${baseUrl}/company/customers/${customerId}/addresses`, {
         method: 'POST',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -108,7 +109,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       addressId: string,
       payload: CompanyCustomerSavedAddressPayload,
     ): Promise<CompanyCustomerSavedAddress> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/company/customers/${customerId}/addresses/${addressId}`,
         {
           method: 'PUT',
@@ -124,7 +125,7 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
       customerId: string,
       addressId: string,
     ): Promise<{ deleted: true }> {
-      const response = await fetch(
+      const response = await apiFetch(
         `${baseUrl}/company/customers/${customerId}/addresses/${addressId}`,
         { method: 'DELETE', headers: withAuth(accessToken) },
       );

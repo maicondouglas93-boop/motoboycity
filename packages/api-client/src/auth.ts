@@ -10,6 +10,7 @@ import type {
   RegisterDriverResult,
 } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AuthApiConfig {
   baseUrl: string;
@@ -18,7 +19,7 @@ export interface AuthApiConfig {
 export function createAuthApi({ baseUrl }: AuthApiConfig) {
   return {
     async registerCompany(payload: RegisterCompanyPayload): Promise<RegisterCompanyResult> {
-      const response = await fetch(`${baseUrl}/auth/register/company`, {
+      const response = await apiFetch(`${baseUrl}/auth/register/company`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -27,7 +28,7 @@ export function createAuthApi({ baseUrl }: AuthApiConfig) {
     },
 
     async registerDriver(payload: RegisterDriverPayload): Promise<RegisterDriverResult> {
-      const response = await fetch(`${baseUrl}/auth/register/driver`, {
+      const response = await apiFetch(`${baseUrl}/auth/register/driver`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -36,7 +37,7 @@ export function createAuthApi({ baseUrl }: AuthApiConfig) {
     },
 
     async login(payload: LoginPayload): Promise<LoginResult> {
-      const response = await fetch(`${baseUrl}/auth/login`, {
+      const response = await apiFetch(`${baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -45,14 +46,14 @@ export function createAuthApi({ baseUrl }: AuthApiConfig) {
     },
 
     async me(accessToken: string): Promise<AuthUser> {
-      const response = await fetch(`${baseUrl}/auth/me`, {
+      const response = await apiFetch(`${baseUrl}/auth/me`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<AuthUser>(response);
     },
 
     async uploadAvatar(accessToken: string, formData: FormData): Promise<AuthUser> {
-      const response = await fetch(`${baseUrl}/profile/avatar`, {
+      const response = await apiFetch(`${baseUrl}/profile/avatar`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,

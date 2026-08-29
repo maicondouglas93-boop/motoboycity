@@ -1,5 +1,6 @@
 import type { PlatformSettingsItem, UpdatePlatformSettingsInput } from '@motoboycity/types';
 import { parseJsonOrThrow } from './api-error';
+import { apiFetch } from './http';
 
 export interface AdminPlatformSettingsApiConfig {
   baseUrl: string;
@@ -12,7 +13,7 @@ export function createAdminPlatformSettingsApi({ baseUrl }: AdminPlatformSetting
 
   return {
     async get(accessToken: string): Promise<PlatformSettingsItem> {
-      const response = await fetch(`${baseUrl}/admin/platform-settings`, {
+      const response = await apiFetch(`${baseUrl}/admin/platform-settings`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<PlatformSettingsItem>(response);
@@ -22,7 +23,7 @@ export function createAdminPlatformSettingsApi({ baseUrl }: AdminPlatformSetting
       accessToken: string,
       payload: UpdatePlatformSettingsInput,
     ): Promise<PlatformSettingsItem> {
-      const response = await fetch(`${baseUrl}/admin/platform-settings`, {
+      const response = await apiFetch(`${baseUrl}/admin/platform-settings`, {
         method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
