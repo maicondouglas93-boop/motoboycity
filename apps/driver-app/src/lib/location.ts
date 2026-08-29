@@ -7,7 +7,23 @@ export type LocationFix = {
   accuracy: number | undefined;
 };
 
-export class LocationError extends Error {}
+export class LocationError extends Error {
+  /**
+   * O diálogo do sistema não resolve mais: só a tela de configurações resolve.
+   *
+   * Quem trata o erro precisa saber disso para oferecer o atalho em vez de um
+   * botão "tentar de novo" que vai falhar do mesmo jeito — foi exatamente o que
+   * deixou motoboy preso no Android 11+, lendo "ative nas configurações" sem
+   * nenhum caminho até lá.
+   */
+  constructor(
+    message: string,
+    readonly requiresSettings = false,
+  ) {
+    super(message);
+    this.name = 'LocationError';
+  }
+}
 
 export async function ensurePreciseLocationPermission(): Promise<void> {
   if (Platform.OS !== 'android') return;
@@ -23,10 +39,12 @@ export async function ensurePreciseLocationPermission(): Promise<void> {
   );
 
   if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+    const bloqueada = permission === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN;
     throw new LocationError(
-      permission === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN
-        ? 'A localizacao precisa esta bloqueada. Ative-a nas configuracoes do aplicativo.'
+      bloqueada
+        ? 'A localizacao precisa esta bloqueada. Abra as configuracoes e permita o acesso a localizacao.'
         : 'A localizacao precisa e necessaria para concluir esta acao.',
+      bloqueada,
     );
   }
 }
@@ -53,10 +71,25 @@ export async function ensureBackgroundTrackingPermission(): Promise<void> {
     );
 
     if (backgroundPermission !== PermissionsAndroid.RESULTS.GRANTED) {
+      /**
+       * No Android 11 (API 30) em diante, "Permitir o tempo todo" DEIXOU de ser
+       * concedível por diálogo dentro do aplicativo: o sistema só oferece
+       * "Durante o uso do app", e a opção que precisamos vive na tela de
+       * configurações. Ou seja, a partir dali a recusa nunca é recuperável
+       * pedindo de novo — insistir no mesmo botão devolve o mesmo erro para
+       * sempre, que era o beco em que o motoboy ficava.
+       *
+       * No Android 10 o diálogo ainda resolve, então só o bloqueio explícito
+       * ("não perguntar de novo") manda para as configurações.
+       */
+      const precisaDosAjustes =
+        Number(Platform.Version) >= 30 ||
+        backgroundPermission === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN;
       throw new LocationError(
-        backgroundPermission === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN
-          ? 'A localização em segundo plano está bloqueada. Ative-a nas configurações do aplicativo.'
+        precisaDosAjustes
+          ? 'Para ficar online, o Android exige que voce escolha "Permitir o tempo todo" na tela de configuracoes de localizacao do aplicativo.'
           : 'A localização em segundo plano é necessária para ficar online.',
+        precisaDosAjustes,
       );
     }
   }
