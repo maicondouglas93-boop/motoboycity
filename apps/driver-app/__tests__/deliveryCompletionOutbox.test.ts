@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ApiError } from '@motoboycity/api-client';
 import type { DeliveryDetail } from '@motoboycity/types';
 import {
+  COMPLETION_QUIET_WINDOW_MS,
+  completionDeservesAttention,
   DELIVERY_COMPLETION_SYNC_TIMEOUT_MS,
   completionClosesDeliveryLocally,
   enqueueDeliveryCompletion,
@@ -9,6 +11,7 @@ import {
   retryDeliveryCompletionQueue,
   synchronizePendingDeliveryCompletions,
   type DeliveryCompletionSyncExecutor,
+  type PendingDeliveryCompletion,
 } from '../src/lib/deliveryCompletionOutbox';
 
 const storage = new Map<string, string>();
@@ -663,5 +666,46 @@ describe('delivery completion outbox', () => {
 
     expect(result.authRequired).toBe(true);
     expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(1);
+  });
+
+  /**
+   * Um aviso que aparece sempre deixa de ser aviso. A sincronizacao normal
+   * responde em um ou dois segundos, e o alerta amarelo piscava em TODA entrega
+   * bem-sucedida — o motoboy concluia que algo tinha dado errado.
+   */
+  describe('janela de silencio antes de avisar', () => {
+    function item(overrides: Partial<PendingDeliveryCompletion> = {}) {
+      return {
+        ...deliveryInput,
+        id: 'user-1:DELIVER:delivery-1',
+        groupKey: 'delivery-1',
+        queuedAt: new Date('2026-08-29T02:00:00.000Z').toISOString(),
+        state: 'PENDING' as const,
+        lastError: null,
+        ...overrides,
+      } as PendingDeliveryCompletion;
+    }
+    const enfileiradoEm = new Date('2026-08-29T02:00:00.000Z').getTime();
+
+    it('fica calado enquanto a espera e normal', () => {
+      expect(completionDeservesAttention(item(), enfileiradoEm + 1_500)).toBe(false);
+    });
+
+    it('avisa quando a espera passa da janela', () => {
+      expect(completionDeservesAttention(item(), enfileiradoEm + COMPLETION_QUIET_WINDOW_MS)).toBe(
+        true,
+      );
+    });
+
+    it('avisa na hora quando o servidor recusou, sem esperar a janela', () => {
+      expect(
+        completionDeservesAttention(item({ state: 'NEEDS_REVIEW' }), enfileiradoEm + 100),
+      ).toBe(true);
+    });
+
+    it('avisa de imediato num item retomado de outra sessao', () => {
+      // Ao reabrir o aplicativo, o que ficou da vez anterior ja esperou muito.
+      expect(completionDeservesAttention(item(), enfileiradoEm + 3_600_000)).toBe(true);
+    });
   });
 });

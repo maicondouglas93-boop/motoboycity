@@ -129,6 +129,35 @@ function payloadHasCoordinates(payload: CompleteReturnPayload): boolean {
   );
 }
 
+/**
+ * Quanto tempo uma finalizacao pode esperar em silencio antes de virar aviso.
+ *
+ * O aviso aparecia no instante do toque, e a sincronizacao normal responde em
+ * um ou dois segundos — entao o motoboy via um alerta amarelo em TODA entrega
+ * bem-sucedida e concluia que algo tinha dado errado. Um aviso que aparece
+ * sempre deixa de ser aviso.
+ *
+ * Seis segundos ficam confortavelmente acima do tempo normal de resposta e bem
+ * abaixo do limite de 15 s da sincronizacao: quando o aviso aparecer, a espera
+ * e real.
+ */
+export const COMPLETION_QUIET_WINDOW_MS = 6_000;
+
+/**
+ * Esta finalizacao merece ocupar a tela agora?
+ *
+ * Recusa do servidor aparece na hora — e problema, nao demora. Espera ainda
+ * dentro da janela fica calada; o botao ja mostra que a acao esta em curso.
+ */
+export function completionDeservesAttention(
+  item: PendingDeliveryCompletion,
+  now: number = Date.now(),
+): boolean {
+  if (item.state === 'NEEDS_REVIEW') return true;
+  const esperandoHa = now - new Date(item.queuedAt).getTime();
+  return Number.isFinite(esperandoHa) && esperandoHa >= COMPLETION_QUIET_WINDOW_MS;
+}
+
 /** Identifica retornos gravados pelo APK antigo, que persistia `payload: {}`. */
 export function completionNeedsFreshReturnLocation(item: PendingDeliveryCompletion): boolean {
   return item.action === 'COMPLETE_RETURN' && !payloadHasCoordinates(item.payload);

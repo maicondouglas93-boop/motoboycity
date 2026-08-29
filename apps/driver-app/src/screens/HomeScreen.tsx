@@ -39,6 +39,7 @@ import { activeDeliveryStops, pickupCountdownLabel } from '../lib/activeDelivery
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
+  completionDeservesAttention,
   completionNeedsFreshReturnLocation,
   getPendingDeliveryCompletions,
   retryDeliveryCompletionQueue,
@@ -197,6 +198,14 @@ export function HomeScreen({ navigation }: Props) {
   const [aceitandoPendenteId, setAceitandoPendenteId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [completionQueue, setCompletionQueue] = useState<PendingDeliveryCompletion[]>([]);
+  /**
+   * Relogio usado so para revelar o aviso quando a janela de silencio fecha.
+   *
+   * Ele corre apenas enquanto existe finalizacao esperando DENTRO da janela —
+   * fila vazia ou item que ja merece aviso nao mantem timer nenhum ligado numa
+   * tela que fica aberta o dia inteiro.
+   */
+  const [agora, setAgora] = useState(Date.now());
   const [completionSyncing, setCompletionSyncing] = useState(false);
   const completionRetryInFlight = useRef(false);
   const [pickupCountdownNow, setPickupCountdownNow] = useState(() => Date.now());
@@ -277,6 +286,16 @@ export function HomeScreen({ navigation }: Props) {
       }
     }
   }, []);
+
+  // Mantem o relogio vivo somente enquanto alguem espera dentro da janela.
+  const esperandoEmSilencio = completionQueue.some(
+    (item) => !completionDeservesAttention(item, agora),
+  );
+  useEffect(() => {
+    if (!esperandoEmSilencio) return undefined;
+    const timer = setInterval(() => setAgora(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [esperandoEmSilencio]);
 
   const syncCompletionQueue = useCallback(
     async (token: string, retryItem?: { id: string; needsFreshReturnLocation: boolean }) => {
@@ -1067,14 +1086,24 @@ export function HomeScreen({ navigation }: Props) {
    * confirmou. A punicao vem por ultimo: ela informa, mas nao ha nada que o
    * motoboy possa fazer a respeito.
    */
+  /**
+   * So entram na conta as finalizacoes que ja passaram da janela de silencio.
+   *
+   * A sincronizacao normal responde em um ou dois segundos; contar tudo desde o
+   * primeiro instante fazia o banner piscar em toda entrega bem-sucedida, e um
+   * aviso que aparece sempre deixa de ser aviso.
+   */
+  const finalizacoesQueMerecemAviso = completionQueue.filter((item) =>
+    completionDeservesAttention(item, agora),
+  );
   const avisos = [
-    completionQueue.length > 0 && queuedCompletionForBanner
+    finalizacoesQueMerecemAviso.length > 0 && queuedCompletionForBanner
       ? {
           chave: 'sincronizacao',
           titulo:
             queuedCompletionForBanner.state === 'NEEDS_REVIEW'
               ? `Pedido #${queuedCompletionForBanner.displayNumber} precisa de atencao`
-              : `${completionQueue.length} finalizacao(oes) aguardando confirmacao`,
+              : `${finalizacoesQueMerecemAviso.length} finalizacao(oes) aguardando confirmacao`,
           texto: completionSyncing
             ? 'Sincronizando com o servidor...'
             : queuedCompletionForBanner.lastError

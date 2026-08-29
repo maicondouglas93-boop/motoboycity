@@ -32,6 +32,7 @@ import { getActiveDeliveries } from '../lib/activeDeliveries';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionClosesDeliveryLocally,
+  COMPLETION_QUIET_WINDOW_MS,
   enqueueDeliveryCompletion,
   getPendingDeliveryCompletions,
   pendingCompletionForDelivery,
@@ -155,6 +156,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [pendingCompletion, setPendingCompletion] = useState<PendingDeliveryCompletion | null>(
     null,
   );
+  /**
+   * O aviso so ocupa a tela depois da janela de silencio.
+   *
+   * Sem isso ele aparecia no instante do toque, e a sincronizacao normal
+   * responde em um ou dois segundos — o motoboy via um alerta amarelo em TODA
+   * entrega bem-sucedida e concluia que algo tinha dado errado. Recusa do
+   * servidor continua aparecendo na hora: ali e problema, nao demora.
+   */
+  const [avisoPendenteVisivel, setAvisoPendenteVisivel] = useState(false);
   const previousPendingCompletionId = useRef<string | null>(null);
   const operationInFlight = useRef(false);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -290,6 +300,36 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     const timer = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, [delivery?.status]);
+
+  /**
+   * Primitivos, e nao o objeto: a fila reemite `pendingCompletion` a cada
+   * notificacao, e observar a referencia reiniciaria o relogio para sempre —
+   * o aviso nunca apareceria, nem quando a espera fosse real.
+   */
+  const pendenteId = pendingCompletion?.id ?? null;
+  const pendenteEstado = pendingCompletion?.state ?? null;
+  const pendenteQueuedAt = pendingCompletion?.queuedAt ?? null;
+
+  useEffect(() => {
+    if (!pendenteId || !pendenteQueuedAt) {
+      setAvisoPendenteVisivel(false);
+      return undefined;
+    }
+    // Recusa do servidor aparece na hora: e problema, nao demora.
+    if (pendenteEstado === 'NEEDS_REVIEW') {
+      setAvisoPendenteVisivel(true);
+      return undefined;
+    }
+    const faltando =
+      COMPLETION_QUIET_WINDOW_MS - (Date.now() - new Date(pendenteQueuedAt).getTime());
+    if (faltando <= 0) {
+      setAvisoPendenteVisivel(true);
+      return undefined;
+    }
+    setAvisoPendenteVisivel(false);
+    const timer = setTimeout(() => setAvisoPendenteVisivel(true), faltando);
+    return () => clearTimeout(timer);
+  }, [pendenteId, pendenteEstado, pendenteQueuedAt]);
 
   useEffect(() => {
     if (!successMessage) return undefined;
@@ -807,7 +847,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {pendingCompletion ? (
+        {pendingCompletion && avisoPendenteVisivel ? (
           <View
             style={[
               styles.pendingBanner,

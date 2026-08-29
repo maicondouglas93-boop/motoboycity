@@ -10265,3 +10265,60 @@ tela, a lacuna de E2E do Google e este limite.
 Aberto: a criacao com destino conhecido responde "tente novamente em instantes"
 mesmo quando o endereco e irroteavel — afirma uma causa temporaria que nao sabe
 ser temporaria — e nao tem os tres fallbacks que a conclusao tem.
+
+## 2026-08-29 - O aviso de sincronizacao parou de aparecer em toda entrega
+
+Relato do responsavel, com a tela do pedido #211 aberta: o alerta amarelo
+"Aguardando sincronizacao" surgia no instante do toque, em TODA finalizacao
+bem-sucedida. A sincronizacao normal responde em um ou dois segundos, entao o
+motoboy via um aviso, o botao girando, e concluia que algo tinha dado errado
+numa operacao que estava indo bem.
+
+Um aviso que aparece sempre deixa de ser aviso — e o custo real e o oposto do
+pretendido: quando um problema de verdade aparecer, ele nao vai chamar atencao.
+
+### A regra
+
+`completionDeservesAttention`, na propria fila, usada pelas duas telas:
+
+- recusa do servidor (`NEEDS_REVIEW`) aparece NA HORA — e problema, nao demora;
+- espera dentro de `COMPLETION_QUIET_WINDOW_MS` (6 s) fica calada; o botao ja
+  mostra que a acao esta em curso;
+- item retomado de outra sessao aparece de imediato, porque seu `queuedAt` ja e
+  antigo.
+
+Seis segundos ficam confortavelmente acima do tempo normal de resposta e bem
+abaixo do limite de 15 s da sincronizacao: quando o aviso aparecer, a espera e
+real.
+
+### Duas armadilhas de implementacao
+
+O efeito que revela o aviso depende de PRIMITIVOS (`id`, `state`, `queuedAt`), e
+nao do objeto: a fila reemite `pendingCompletion` a cada notificacao, e observar
+a referencia reiniciaria o relogio para sempre — o aviso nunca apareceria, nem
+quando a espera fosse real. O lint pediu o objeto na lista de dependencias; a
+saida foi extrair os primitivos para constantes, e nao suprimir a regra.
+
+Na Home, o relogio de um segundo corre SOMENTE enquanto existe finalizacao
+esperando dentro da janela. Fila vazia ou item que ja merece aviso nao mantem
+timer ligado numa tela que fica aberta o dia inteiro.
+
+### Arquivos
+
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/driver-app/src/screens/HomeScreen.tsx`.
+
+Precisa de APK: entra no proximo release depois do pilot.13.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 22 suites, 136 testes aprovados |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: quatro testes da janela — silencio na espera normal, aviso ao
+passar da janela, aviso imediato na recusa do servidor e aviso imediato num item
+retomado de outra sessao.
