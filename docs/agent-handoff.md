@@ -27,11 +27,11 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `a4fb9aa` — `main` sincronizado com `origin/main` |
+| Commit publicado | `1a5aee7` — `main` sincronizado com `origin/main` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 47 migrations |
-| APK nos aparelhos | **`pilot.15`** — confirmado no painel, não nesta linha (veja abaixo) |
+| APK nos aparelhos | **`pilot.15`** — o `pilot.16` está pronto e **não instalado**. Confirme no painel, não nesta linha (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -50,16 +50,20 @@ volta no próximo boot da API.
 
 ### APK atual
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.15-vc15.apk`
-SHA-256 `550F7C8AF13007FAD089C255259340E407740479FC94E33CC72F574B34E2E775`,
-75.144.657 bytes, `versionCode` 15, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.16-vc16.apk`
+SHA-256 `2CD4877E859540FBDDF2A2365031A975F259A61EF22862985F7155375A196A2A`,
+75.147.349 bytes, `versionCode` 16, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima do `pilot.12` já instalado.
+anteriores, então ele atualiza por cima do `pilot.15` já instalado.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-`localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As cinco correções da auditoria
-foram conferidas por texto dentro do bundle, e não só pelo commit.
+`localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As correções foram conferidas por
+texto dentro do bundle, e não só pelo commit.
+
+O `pilot.16` traz as duas correções da fila offline: item em revisão passa a ser
+reconferido contra o servidor, e insucesso conta como fim de linha para uma
+entrega guardada.
 
 Os `pilot.13` e `pilot.14` foram compilados, verificados e **descartados** sem
 chegar a nenhum aparelho.
@@ -102,9 +106,8 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Testes de aparelho que o `pilot.15` ainda não teve.** Ele já está
-   instalado, mas dois cenários só existem em aparelho e continuam sem
-   confirmação: **negar "Permitir o tempo todo"** num Android 11+ e num
+1. **Instalar o `pilot.16`** e, junto, os testes de aparelho que ainda não
+   aconteceram — dois cenários que só existem em aparelho: **negar "Permitir o tempo todo"** num Android 11+ e num
    Android 10, conferindo que o alerta oferece "Abrir ajustes" e que o atalho
    abre a tela certa; e **matar a rede no meio de uma finalização**, conferindo
    que a espera termina em 15 s com mensagem em vez de ficar girando.
@@ -156,7 +159,7 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **83 suítes / 1020** testes unitários da API, **25 / 152** do
+Cobertura atual: **83 suítes / 1020** testes unitários da API, **25 / 155** do
 Driver App, **19 arquivos / 72** da Company Web, **25 / 247** E2E.
 
 ### E2E

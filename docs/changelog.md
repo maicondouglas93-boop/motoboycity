@@ -10801,3 +10801,85 @@ ativa, isso vira ruído e precisa de filtro.
 Não há como dispensar um aviso. É proposital enquanto todos forem acionáveis; se
 algum passar a ser informativo e recorrente, aí sim vale um estado de dispensa —
 provavelmente local ao navegador, não no servidor.
+
+## 2026-08-29 — Release `pilot.16`: a fila offline para de guardar fantasma
+
+APK de produção com as duas correções da fila de finalizações, nascidas de um
+caso real na rua — o pedido #307.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.16-vc16.apk`
+SHA-256 `2CD4877E859540FBDDF2A2365031A975F259A61EF22862985F7155375A196A2A`,
+75.147.349 bytes.
+
+`aapt` confirmou `versionName` `0.1.0-pilot.16`, `versionCode` 16, minSdk 24,
+targetSdk 36. `apksigner` confirmou v2, RSA 4096 e o certificado oficial
+`BD42D61D…F51D50B9` — o mesmo de sempre, então ele atualiza por cima do
+`pilot.15`. Bundle com a URL de produção e sem `localhost`, `127.0.0.1` ou
+`10.0.2.2`; os textos novos foram conferidos dentro do bundle.
+
+### O caso que originou
+
+Um motoboy abriu o aplicativo pela manhã com um aviso vermelho: *"Pedido #307
+precisa de atenção — o pedido precisa estar coletado antes de ser marcado como
+entregue"*. O pedido estava concluído desde a noite anterior.
+
+A reconstrução pelo histórico: a ação "entregue" subiu **antes de a coleta
+existir**, quando o pedido ainda estava em `ACCEPTED`. O servidor recusou
+corretamente, e a fila marcou como revisão — que por desenho **não retenta
+sozinha**. Doze minutos depois o administrador marcou a coleta manualmente, o
+motoboy entregou, e o pedido fechou. Mas nada mais olhou para aquele item.
+
+**"Precisa estar coletado" é uma condição temporária travestida de recusa
+definitiva.** Esse é o defeito.
+
+### As duas correções
+
+**Item em revisão passa a ser reconferido**, não reenviado. Reenviar continua
+sendo decisão do motoboy; perguntar ao servidor se aquilo já foi resolvido custa
+uma consulta e desfaz o fantasma sozinho.
+
+**Insucesso conta como fim de linha** para uma entrega guardada. A API só trata
+"já entregue" como repetição inofensiva quando não houve insucesso; com
+`failedAt` preenchido ela recusa, e o item ficava preso. Esse caso é o mais
+importante justamente porque o motoboy agiu corretamente — não insistiu numa
+entrega que não aconteceu.
+
+O retorno não ganhou regra equivalente: se o pedido fechou, a reconciliação já
+reconhece pela transição para `COMPLETED`, e descartar por insucesso ali jogaria
+fora a confirmação que fecha a devolução.
+
+### Dois erros meus, registrados
+
+**Li o chip de status errado.** Afirmei que o #307 tinha terminado em insucesso
+porque o histórico dizia "Voltando à loja". Esse rótulo é `DELIVERED`
+(`status-chip.tsx:20`); `FAILED` é "Não entregue — voltando". O pedido foi
+entregue normalmente. Como consequência, também levantei falsamente a suspeita de
+taxa de retorno não cobrada — `Retorno: Não` estava certo, porque não houve
+devolução.
+
+**Afirmei a versão instalada lendo o handoff.** Ele dizia `pilot.12`; os
+aparelhos estavam no `pilot.15`. Aquela linha é escrita à mão e ninguém a
+atualiza ao instalar um APK — exatamente o que o `AI_INSTRUCTIONS.md` §1 manda
+não transformar em fato.
+
+A fonte confiável existe e é o próprio aparelho: ele manda a versão em todo
+heartbeat, a API grava em `Driver.appVersion`, e o painel mostra em **Home → Fila
+de despacho → clique no motoboy**. O handoff agora diz isso em vez de fingir que
+sabe.
+
+### Validações
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 25 suítes, **155** testes |
+| testes novos com a correção revertida | falharam, como esperado |
+| `aapt`, `apksigner` e inspeção do bundle | descritos acima |
+
+### Enquanto o APK não chega aos aparelhos
+
+O aviso preso resolve com um toque: a retentativa manual encontra o pedido já
+concluído, a API responde que está tudo certo, e o item sai da fila. Não é
+preciso limpar dados nem reinstalar.
