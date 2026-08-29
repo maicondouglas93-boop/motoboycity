@@ -27,7 +27,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `9a04e4c` — `main` sincronizado com `origin/main` |
+| Commit publicado | `96ccc78` — `main` sincronizado com `origin/main` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 47 migrations |
