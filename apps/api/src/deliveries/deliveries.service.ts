@@ -1789,6 +1789,9 @@ export class DeliveriesService {
         this.formatAddress(pickupAddress),
         payload.lat,
         payload.lng,
+        pickupAddress.lat !== null && pickupAddress.lng !== null
+          ? { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) }
+          : undefined,
       );
     } catch (error) {
       if (error instanceof GoogleMapsNotConfiguredError) {
@@ -2068,6 +2071,9 @@ export class DeliveriesService {
           this.formatAddress(pickupAddress),
           payload.lat,
           payload.lng,
+          pickupAddress.lat !== null && pickupAddress.lng !== null
+            ? { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) }
+            : undefined,
         );
       } catch (error) {
         const failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -2891,6 +2897,7 @@ export class DeliveriesService {
     originAddress: string,
     lat: number,
     lng: number,
+    storedOrigin?: { lat: number; lng: number },
   ): Promise<{ distanceKm: number }> {
     try {
       return await this.googleMapsService.getDistance({
@@ -2902,7 +2909,7 @@ export class DeliveriesService {
         error instanceof GoogleMapsApiError && error.message.includes('sem rota válida');
       if (!noRoute) throw error;
 
-      const origin = await this.googleMapsService.geocode(originAddress);
+      const origin = storedOrigin ?? (await this.googleMapsService.geocode(originAddress));
       if (origin) {
         try {
           return await this.googleMapsService.getDistance({

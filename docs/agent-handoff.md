@@ -9859,3 +9859,13 @@ era insuficiente. A Routes API agora tenta tambem a origem da empresa
 geocodificada como coordenada antes do fallback pelo endereco do destino. A
 distancia continua obrigatoriamente vindo da Routes API. Validacoes: 110 testes
 do `DeliveriesService` e build da API aprovados; nenhum novo APK e necessario.
+
+O teste externo seguinte (`#208`) tambem falhou, mas o diagnostico ADB comprovou
+que o GPS fino respondeu rapidamente; a alternativa aproximada do pilot.11 nao
+foi usada. A auditoria encontrou que o retry acima re-geocodificava o texto da
+origem mesmo quando a empresa ja tinha coordenadas persistidas. Como o geocode
+do projeto rejeita resultados `GEOMETRIC_CENTER`/`APPROXIMATE`, o retry
+coordenada-a-coordenada podia nunca acontecer. O servico agora prioriza as
+coordenadas cadastradas da origem e so geocodifica o texto quando elas faltam.
+Validacoes locais: 111 testes do `DeliveriesService`, build da API e
+`git diff --check` aprovados. Mudanca ainda nao publicada neste registro.

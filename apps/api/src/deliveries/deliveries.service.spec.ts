@@ -2409,6 +2409,46 @@ describe('DeliveriesService', () => {
       );
     });
 
+    it('prioriza a coordenada cadastrada da empresa no retry da rota', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          serviceType: { name: 'Moto' },
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue({
+        ...pickupAddress,
+        lat: -20.1574643,
+        lng: -41.6207115,
+      });
+      googleMapsService.getDistance
+        .mockRejectedValueOnce(new GoogleMapsApiError('Resposta da API sem rota válida.'))
+        .mockResolvedValueOnce({ distanceKm: 1.2, durationMinutes: 5 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 5,
+        subtotal: 10,
+        returnValue: 0,
+        totalValue: 10,
+        driverValue: 8,
+        platformValue: 2,
+      });
+
+      await service.markDelivered(driverUser, 'delivery-1', { lat: -20.153, lng: -41.621 });
+
+      expect(googleMapsService.geocode).not.toHaveBeenCalled();
+      expect(googleMapsService.getDistance).toHaveBeenNthCalledWith(2, {
+        origin: { lat: -20.1574643, lng: -41.6207115 },
+        destination: { lat: -20.153, lng: -41.621 },
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ distanceKm: 1.2 }) }),
+      );
+    });
+
     it('repete a rota pelo endereco identificado pelo Google quando o GPS nao gera rota', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
