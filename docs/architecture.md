@@ -46,6 +46,22 @@ compilador acusou quatro chamadas com o mesmo defeito.
 `types` e `api-client` apontam para `src/`. Por isso um build do aplicativo
 exige `pnpm --filter @motoboycity/validation build` antes.
 
+### O transporte é compartilhado, a política é de cada aplicativo
+
+Toda rota tipada passa por `apiFetch` e `parseJsonOrThrow` (`api-client/http.ts`
+e `api-error.ts`). Ali vivem duas decisões que não podem ser tomadas por tela:
+
+- **timeout por requisição** — `fetch` não tem prazo padrão, e uma rede móvel que
+  conecta sem trafegar deixa a chamada pendurada para sempre. O padrão do pacote
+  é **sem prazo**, para não mudar telas de painel que ninguém pediu para tocar;
+  cada aplicativo escolhe o seu em `configureApiClient`. O aplicativo do motoboy
+  usa 15 s. O prazo é local: encerra a espera, não a requisição no servidor — só
+  é seguro porque toda escrita já é idempotente na retentativa;
+- **401 tem uma única reação** em todo o aplicativo. **Somente 401**: nesta API o
+  403 é decisão de negócio — motoboy em punição, oferta de outra pessoa — e
+  tratá-lo como sessão inválida deslogaria alguém no meio do expediente por uma
+  regra funcionando como deveria.
+
 ## 3. A máquina de estados da entrega
 
 ```
@@ -271,6 +287,15 @@ Classificação da resposta do servidor — é ela que decide o comportamento:
 Confundir 422 com 503 foi o que deixou um motoboy retentando a noite inteira uma
 operação que nunca ia passar. Item em `NEEDS_REVIEW` **não sincroniza sozinho**,
 por desenho — e todo caminho que o conserta precisa devolvê-lo a `PENDING`.
+
+**Revisão só existe para o que o motoboy ainda pode resolver.** Depois de uma
+recusa definitiva, a fila consulta o pedido de verdade e separa três desfechos:
+já aplicado (sai como sincronizado), **obsoleto** — o pedido foi cancelado e a
+ação perdeu o objeto — ou não resolvido, que é o único que vira revisão. Sem essa
+distinção, uma entrega marcada offline num pedido que o admin cancelou ficava em
+revisão para sempre: o banner não saía da tela e tocar nele repetia a mesma
+recusa. O obsoleto sai da fila com aviso único e **não** conta como sincronizado,
+porque nada foi.
 
 O aviso de espera só aparece depois de seis segundos, ou de imediato se o
 servidor recusou. Um aviso que aparece sempre deixa de ser aviso.

@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-29**, depois da auditoria de concorrência.
+> Última revisão: **2026-08-29**, depois da auditoria do aplicativo do motoboy.
 
 ## Como atualizar
 
@@ -31,7 +31,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 47 migrations |
-| APK nos aparelhos | **`pilot.12`** — o `pilot.14` está pronto e **não instalado** |
+| APK nos aparelhos | **`pilot.12`** — o `pilot.14` ficou **obsoleto** antes de ser instalado |
 
 **Atenção ao publicar:** o Render publica no push, **sem esperar o CI**. As duas
 coisas correm em paralelo.
@@ -90,9 +90,12 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Instalar o `pilot.14`** e repetir o ciclo completo com destino definido na
-   entrega e retorno. Conferir que o aviso de sincronização não aparece numa
-   finalização normal, e aparece quando a espera passa de seis segundos.
+1. **Compilar e instalar um APK novo.** O `pilot.14` ficou obsoleto: as
+   correções da auditoria do aplicativo (sessão expirada, timeout de requisição,
+   oferta em segundo plano, fila offline sem saída, permissão de localização no
+   Android 11+) são todas do lado do aplicativo. Repetir o ciclo completo com destino definido na entrega e
+   retorno, e conferir que o aviso de sincronização não aparece numa finalização
+   normal e aparece quando a espera passa de seis segundos.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
@@ -105,16 +108,21 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
    vê o erro na hora.
 2. **`deliveries.service.ts` com ~3.400 linhas** — candidato a fatiamento por
    ciclo de vida, sem mudar comportamento.
-3. **Lacunas que a auditoria de concorrência deixou abertas**: webhook aiqfome
+3. **Lacunas que a auditoria do aplicativo deixou abertas**:
+   `getActiveDeliveries` custa 8+ requisições por evento; token em AsyncStorage
+   sem criptografia, com `allowBackup="false"` como única barreira; e
+   `HomeScreen` e `DeliveryOperationScreen` (~3.000 linhas somadas) seguem sem
+   teste nenhum.
+4. **Lacunas que a auditoria de concorrência deixou abertas**: webhook aiqfome
    entregue duas vezes (a idempotência tem só teste unitário), dois admins na
    mesma intervenção, e o resgate de `PROCESSING` travado do outbound — que
    existe e funciona, mas nunca foi exercitado em teste.
-4. **`reassignDriver` não confere punição.** Defensável como intervenção
+5. **`reassignDriver` não confere punição.** Defensável como intervenção
    deliberada do admin, mas não está escrito em lugar nenhum — decidir e
    registrar.
-5. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
+6. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
    continuam pendentes.
-6. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
+7. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
 
 ## Ambiente de desenvolvimento
 
@@ -136,7 +144,7 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **82 suítes / 1006** testes unitários da API, **22 / 136** do
+Cobertura atual: **82 suítes / 1006** testes unitários da API, **25 / 152** do
 Driver App, **17 arquivos / 63** da Company Web, **25 / 243** E2E.
 
 ### E2E

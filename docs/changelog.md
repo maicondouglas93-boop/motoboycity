@@ -10295,3 +10295,186 @@ do Admin Web aprovados (38 páginas); `git diff --check` aprovado.
 
 Atualizada a página de configurações (pps/admin-web/src/app/(app)/configuracoes/page.tsx) para usar um layout de 3 colunas em telas grandes (lg:grid-cols-3) ao invés de 2. Além disso, os cartões de configuração receberam um visual mais premium: adição de sombras suaves, efeito de flutuação no hover, fundo com gradiente sutil, bordas e aumento da largura da barra colorida lateral indicadora de status.
 
+## 2026-08-29 — Auditoria do aplicativo do motoboy: as quatro bordas que faltavam
+
+Auditoria somente-leitura do `driver-app`, dos contratos que ele consome e dos
+fluxos de API correspondentes. O ciclo da entrega, a fila offline e o caminho do
+dinheiro se mostraram sólidos — idempotência real, escrita condicional, GPS
+congelado na ação, fila vinculada ao motoboy. **Não existe caminho para creditar
+o repasse duas vezes.**
+
+O que não estava defendido era a borda entre o aplicativo e a autenticação, e a
+borda entre o aplicativo e a rede. Quatro achados foram corrigidos.
+
+### A sessão revogada travava o aplicativo em silêncio
+
+O caso real: o admin redefine a senha do motoboy, e o JWT é revogado pela
+impressão do hash. A partir daí o gateway derruba o socket e toda chamada volta
+401 — mas o aplicativo só tratava 401 em quatro lugares, nenhum global. A tela de
+operação dizia "Pedido indisponível", a Home dizia "Reconectando..." para sempre,
+e o botão Ativo continuava ligado. O motoboy achava que estava trabalhando.
+
+**Correção em um ponto só.** `parseJsonOrThrow` — por onde passa toda rota
+tipada, inclusive as que só inspecionam `response.ok` — avisa a sessão em 401. O
+aplicativo limpa credencial, rastreamento e push, derruba o socket e leva o
+motoboy para o Login com a mensagem que faltava. O aviso é idempotente: uma tela
+dispara várias requisições juntas e todas voltam 401, então sem guarda o alerta
+apareceria cinco vezes.
+
+**Somente 401.** Nesta API o 403 é decisão de negócio — motoboy em punição,
+oferta de outra pessoa, pedido de outra empresa. Tratá-lo como sessão inválida
+deslogaria o motoboy no meio do expediente por uma regra funcionando como
+deveria.
+
+#### Correção de um erro do relatório de auditoria
+
+O diagnóstico afirmou que a recusa do servidor produzia uma **tempestade de
+reconexão**, com ressincronização completa a cada ciclo. **Isso está errado.** A
+fonte do `socket.io-client@4.8.3` confirma o oposto: no motivo
+`io server disconnect` o cliente marca a conexão como inativa e **não tenta
+reconectar**. Não há tempestade — há morte silenciosa, que é pior de perceber e
+igualmente grave. O texto "Reconectando..." era literalmente falso: nada estava
+reconectando.
+
+A correção mudou de forma por causa disso. Em vez de conter um laço, o socket
+agora escuta o desligamento pelo servidor e decide: uma consulta autenticada
+barata separa "a credencial não vale mais" (o 401 dispara o encerramento único)
+de "foi outro motivo" — deploy, reinício do gateway — e nesse caso religa
+manualmente, porque ninguém mais faria isso.
+
+### Nenhuma requisição REST tinha timeout
+
+`fetch` não tem prazo padrão. Um 4G que conecta e não trafega — elevador,
+subsolo, borda de célula — deixava a requisição pendurada para sempre. O
+`presenceLoading` da Home nasce `true`, então o botão Ativo ficava desabilitado
+esperando uma resposta que nunca vinha: indistinguível de travamento. O lado
+nativo já fazia certo, com `connectTimeout` e `readTimeout` explícitos; o lado
+JavaScript, não.
+
+`apiFetch` centraliza o transporte com `AbortController` e substitui as 167
+chamadas do pacote. **O padrão do pacote é sem timeout**, de propósito: ligar um
+prazo global mudaria o comportamento de telas dos painéis que ninguém pediu para
+tocar, e exportação de CSV e relatório administrativo podem passar de meio minuto
+sem que nada esteja errado. Quem quer prazo, pede — o aplicativo do motoboy pede
+15 segundos.
+
+O timeout é local: encerra a espera, não a requisição no servidor. Isso só é
+seguro porque toda ação que muda estado já é idempotente na retentativa, pela
+outbox e pelas escritas condicionais da API.
+
+### A oferta que chegava pelo socket com o app minimizado era descartada
+
+Um retorno antecipado jogava a oferta fora quando `AppState` não era `active`,
+apostando todas as fichas no push. Se o FCM não entregasse — token renovado fora
+de hora, gerenciador de bateria de fabricante, Firebase fora do ar — a oferta
+sumia mesmo tendo chegado pelo socket. E oferta perdida vira expiração, que conta
+como recusa para a punição automática: **o motoboy saía do despacho por ofertas
+que nunca viu.**
+
+Agora a oferta é sempre guardada; o que depende do primeiro plano é só a
+navegação — a proibição original continua valendo, porque navegar em segundo
+plano deixaria a tela React por baixo do cartão nativo. Junto, `mostrarOfertaPendente`
+deixou de comparar o id antes de navegar: a comparação existia porque a oferta só
+entrava na store junto com a navegação, e mantê-la esconderia exatamente a oferta
+que aquele caminho existe para mostrar.
+
+### O item da fila offline ficava preso em revisão para sempre
+
+O motoboy marca entregue sem rede; o admin cancela o pedido; a fila volta a
+rodar. A API recusa — corretamente, porque o pedido não está mais coletado — e a
+reconciliação procurava só a transição `COLLECTED → DELIVERED`, que nunca vai
+existir. O item ficava em `NEEDS_REVIEW` **permanentemente**: banner vermelho que
+não saía da tela, toque que repetia a mesma recusa, e nenhuma forma de descartar.
+
+A reconciliação agora distingue três desfechos — aplicado, obsoleto, não
+resolvido — e roda para qualquer 4xx, não só para 409: um 404 ou um 422 também
+podem significar "isto já foi resolvido no servidor". Pedido cancelado sai da
+fila com um aviso único, e **não** entra em `syncedIds`, porque nada foi
+sincronizado.
+
+### O Android 11+ deixava o motoboy sem caminho para ficar online
+
+A partir da API 30 o sistema **deixou de conceder "Permitir o tempo todo" por
+diálogo dentro do aplicativo**: ele só oferece "Durante o uso do app", e a opção
+que o rastreamento precisa vive na tela de configurações. A recusa deixa de ser
+recuperável pedindo de novo.
+
+O aplicativo tratava essa recusa como qualquer outra: mostrava "ative nas
+configurações" e oferecia um botão que repetia a permissão — o mesmo erro, para
+sempre. O caminho de notificações já tinha o atalho certo ("Abrir ajustes", com
+deep link por tipo de bloqueio); o de localização ficou sem.
+
+`LocationError` agora carrega `requiresSettings`, e quem trata o erro oferece o
+atalho quando ele existe. Nos dois lugares que importam: ao ligar o botão Ativo,
+onde a permissão é exigida, e no aviso de rastreamento.
+
+O aviso de presença **não** é preenchido nesse caso, de propósito: ele diz "tocar
+para tentar novamente", e tentar de novo é exatamente o que não resolve. O botão
+Ativo voltando a ficar desligado é o lembrete, e tocá-lo mostra o alerta com o
+caminho junto.
+
+No Android 10 o diálogo ainda resolve, então lá só o bloqueio explícito ("não
+perguntar de novo") manda para as configurações — mandar numa recusa simples
+seria um desvio desnecessário.
+
+### O que a auditoria confirmou como correto
+
+Registrado para não ser reinvestigado: o bootstrap não confunde API fora do ar
+com sessão expirada; a fila offline é por motoboy e não vaza entre contas; o fix
+de GPS é congelado e nunca recapturado por cima de um válido; localização
+simulada é recusada; notificação bloqueia ficar online com deep link certo para
+cada caso; o duplo toque no aceite é protegido por ref; a ordem dos pedidos
+ativos segue a regra de negócio com desempate determinístico; o heartbeat de 45 s
+resolve o motoboy parado contra o TTL de 150 s; e o portão de release falha sem
+keystore, sem senha, sem alias e sem `versionCode` explícito.
+
+### Testes
+
+Dois testes da outbox **fixavam o comportamento defeituoso** — usavam pedido
+cancelado como exemplo de "conflito real" e exigiam `NEEDS_REVIEW`. Foram
+reescritos para o contrato novo, com o conflito legítimo (recusa por
+proximidade, pedido ainda vivo) coberto separadamente, para a revisão continuar
+existindo onde ela faz sentido.
+
+Cobertura: **152 testes em 25 suítes** (eram 136 em 22). Entraram
+`sessionExpiry.test.ts` — idempotência, notificação, reinício após novo login,
+ouvinte com problema —, `apiTransport.test.ts` — desistência no prazo,
+preservação de método e cabeçalhos, timeout zero, e a distinção 401/403 — e
+`backgroundLocationPermission.test.ts`, que fixa a diferença entre Android 10 e
+11+ exatamente onde ela muda o comportamento.
+
+### Arquivos
+
+`packages/api-client/src/http.ts` (novo), `api-error.ts`, `index.ts` e as 30
+rotas tipadas; `apps/driver-app/src/lib/sessionExpiry.ts` (novo), `apiClient.ts`,
+`socket.ts`, `deliveryCompletionOutbox.ts`, `location.ts`; `App.tsx`,
+`HomeScreen.tsx`, `LoginScreen.tsx`; e os testes.
+
+**Nenhuma migration e nenhuma mudança de contrato de API.** `ApiTimeoutError` e
+`configureApiClient` são adições ao pacote cliente, não à API.
+
+### Validações executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 workspaces) | aprovado |
+| `pnpm lint` (8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 25 suítes, **152** testes |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suítes, 1006 testes |
+| `pnpm --filter @motoboycity/company-web test` | 17 arquivos, 63 testes |
+| build de produção do Admin Web | aprovado |
+| `git diff --check` | aprovado |
+
+Prettier **não** foi aplicado: os 10 arquivos que ele acusa já estavam
+desformatados antes desta alteração, e reformatá-los encheria o diff de ruído
+sem relação com o recorte.
+
+### Continua aberto
+
+Da auditoria, sem correção nesta rodada: `getActiveDeliveries` custa 8+
+requisições por evento; token em AsyncStorage sem criptografia, com
+`allowBackup="false"` como única barreira; e as duas maiores telas
+(`HomeScreen`, `DeliveryOperationScreen`, ~3.000 linhas somadas) continuam sem
+teste nenhum.
+
+**Exige APK novo.** Toda a correção é do lado do aplicativo; o servidor não muda.
