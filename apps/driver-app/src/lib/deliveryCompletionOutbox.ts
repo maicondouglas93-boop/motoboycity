@@ -69,6 +69,11 @@ export type EnqueueDeliveryCompletionInput =
 
 export interface DeliveryCompletionSyncResult {
   syncedIds: string[];
+  /**
+   * Itens retirados da fila porque o pedido acabou por outro caminho — hoje,
+   * cancelamento. Nao foram sincronizados; deixaram de ter onde ser aplicados.
+   */
+  discardedIds: string[];
   pendingCount: number;
   needsReviewCount: number;
   authRequired: boolean;
@@ -380,15 +385,39 @@ async function markPendingError(
   );
 }
 
-async function reconcileAppliedOperation(
+/**
+ * O pedido acabou por outro caminho e esta acao nao tem mais onde ser aplicada.
+ *
+ * Cancelamento e o caso real: o motoboy marca entregue sem rede, o admin cancela
+ * o pedido, e a fila volta a rodar. A API recusa — corretamente — porque o
+ * pedido nao esta mais coletado, e a acao guardada perdeu o objeto. Sem
+ * reconhecer isso, o item ficava em revisao para sempre: o banner nao saia mais
+ * da tela, tocar nele repetia a mesma recusa, e nao havia como descartar.
+ */
+function completionNoLongerApplicable(delivery: DeliveryDetail): boolean {
+  return delivery.status === 'CANCELLED';
+}
+
+type CompletionResolution = 'applied' | 'obsolete' | 'unresolved';
+
+/**
+ * Consulta o estado real do pedido depois de uma recusa definitiva.
+ *
+ * Roda para qualquer 4xx, e nao so para 409: um 404 ou um 422 tambem podem
+ * significar "isto ja foi resolvido no servidor", e descobrir isso custa uma
+ * consulta no caminho de erro — nunca no caminho normal.
+ */
+async function resolveCompletionAgainstServer(
   accessToken: string,
   item: PendingDeliveryCompletion,
   executor: DeliveryCompletionSyncExecutor,
-): Promise<boolean> {
+): Promise<CompletionResolution> {
   const current = await withSyncTimeout(executor.detail(accessToken, item.deliveryId)).catch(
     () => null,
   );
-  return current ? operationWasApplied(item, current) : false;
+  if (!current) return 'unresolved';
+  if (operationWasApplied(item, current)) return 'applied';
+  return completionNoLongerApplicable(current) ? 'obsolete' : 'unresolved';
 }
 
 async function synchronizeQueue(
@@ -397,6 +426,7 @@ async function synchronizeQueue(
   executor: DeliveryCompletionSyncExecutor,
 ): Promise<DeliveryCompletionSyncResult> {
   const syncedIds: string[] = [];
+  const discardedIds: string[] = [];
   const blockedGroups = new Set<string>();
   let authRequired = false;
   let serverUnavailable = false;
@@ -433,9 +463,18 @@ async function synchronizeQueue(
         break;
       }
 
-      if (error.status === 409 && (await reconcileAppliedOperation(accessToken, item, executor))) {
+      const resolucao = await resolveCompletionAgainstServer(accessToken, item, executor);
+      if (resolucao === 'applied') {
         await removeItem(item.id);
         syncedIds.push(item.id);
+        continue;
+      }
+      if (resolucao === 'obsolete') {
+        // Sai da fila, mas NAO entra em `syncedIds`: nada foi sincronizado, o
+        // pedido simplesmente deixou de existir para esta acao. Quem chamou
+        // avisa o motoboy uma vez, em vez de deixar um banner permanente.
+        await removeItem(item.id);
+        discardedIds.push(item.id);
         continue;
       }
 
@@ -447,6 +486,7 @@ async function synchronizeQueue(
   const remaining = await getPendingDeliveryCompletions(ownerUserId);
   return {
     syncedIds,
+    discardedIds,
     pendingCount: remaining.filter((item) => item.state === 'PENDING').length,
     needsReviewCount: remaining.filter((item) => item.state === 'NEEDS_REVIEW').length,
     authRequired,

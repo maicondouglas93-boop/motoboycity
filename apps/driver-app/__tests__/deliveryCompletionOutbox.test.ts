@@ -217,6 +217,44 @@ describe('delivery completion outbox', () => {
   it('separa conflito real para revisao e so repete por acao manual', async () => {
     await enqueueDeliveryCompletion(deliveryInput);
     const api = executor({
+      // Recusa que o motoboy ainda pode resolver: ele esta longe da loja. O
+      // pedido continua vivo, entao a acao continua tendo onde ser aplicada.
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new ApiError(422, { message: 'voce esta a 800m do destino' })),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COLLECTED',
+        statusHistory: [],
+      }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    expect(result.needsReviewCount).toBe(1);
+    expect(result.discardedIds).toHaveLength(0);
+    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
+      state: 'NEEDS_REVIEW',
+      lastError: 'voce esta a 800m do destino',
+    });
+
+    await retryDeliveryCompletionQueue('user-1');
+    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
+      state: 'PENDING',
+      lastError: null,
+    });
+  });
+
+  /**
+   * O beco sem saida da fila offline.
+   *
+   * O motoboy marca entregue sem rede, o admin cancela o pedido, e a fila volta
+   * a rodar. A acao guardada perdeu o objeto: o servidor recusa para sempre, e
+   * antes disso o item ficava em revisao permanentemente — banner que nao saia
+   * da tela, toque que repetia a mesma recusa, e nenhum jeito de descartar.
+   */
+  it('descarta a finalizacao cujo pedido foi cancelado, em vez de deixar em revisao', async () => {
+    await enqueueDeliveryCompletion(deliveryInput);
+    const api = executor({
       deliver: jest.fn().mockRejectedValue(new ApiError(409, { message: 'pedido cancelado' })),
       detail: jest.fn().mockResolvedValue({
         ...deliveredDetail(),
@@ -226,17 +264,11 @@ describe('delivery completion outbox', () => {
     });
 
     const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
-    expect(result.needsReviewCount).toBe(1);
-    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
-      state: 'NEEDS_REVIEW',
-      lastError: 'pedido cancelado',
-    });
 
-    await retryDeliveryCompletionQueue('user-1');
-    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
-      state: 'PENDING',
-      lastError: null,
-    });
+    expect(result.discardedIds).toHaveLength(1);
+    expect(result.syncedIds).toHaveLength(0);
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(0);
   });
 
   it('deduplica o retorno pelo lote e nunca envia a fila de outra conta', async () => {
@@ -593,10 +625,14 @@ describe('delivery completion outbox', () => {
       payload: returnFix,
     });
     const api = executor({
-      deliver: jest.fn().mockRejectedValue(new ApiError(409, { message: 'pedido cancelado' })),
+      // Recusa que NAO encerra o pedido: ele segue coletado, entao a entrega
+      // ainda pode acontecer e a ordem do lote precisa ser preservada.
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new ApiError(422, { message: 'voce esta a 800m do destino' })),
       detail: jest.fn().mockResolvedValue({
         ...deliveredDetail(),
-        status: 'CANCELLED',
+        status: 'COLLECTED',
         statusHistory: [],
       }),
     });
