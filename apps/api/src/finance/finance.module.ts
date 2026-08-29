@@ -46,6 +46,8 @@ import { RealtimeModule } from '../realtime/realtime.module';
     FinancialPayoutProcessor,
     FinancialReleaseScheduler,
   ],
-  exports: [FinanceLedgerService],
+  //  sai daqui para a central de avisos poder reusar a mesma
+  // atualizacao de vencimento, em vez de reimplementar a regra de OVERDUE.
+  exports: [FinanceLedgerService, InvoiceService],
 })
 export class FinanceModule {}

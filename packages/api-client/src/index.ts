@@ -30,3 +30,4 @@ export * from './driver-wallet';
 export * from './delivery-offers';
 export * from './push-tokens';
 export * from './company-integrations';
+export * from './notifications';

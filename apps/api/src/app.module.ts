@@ -20,6 +20,7 @@ import { CompanyReportsModule } from './company/reports/company-reports.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
 import { FinanceModule } from './finance/finance.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { DriverPresenceModule } from './driver-presence/driver-presence.module';
 import { HealthModule } from './health/health.module';
@@ -89,6 +90,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     DeliveriesModule,
     DeliveryOffersModule,
     FinanceModule,
+    NotificationsModule,
     ServiceTypesModule,
     TrackingModule,
     PushModule,
