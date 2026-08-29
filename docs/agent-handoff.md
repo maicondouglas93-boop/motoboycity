@@ -9490,3 +9490,254 @@ do Google ou cadastro pontual.
 Lint dos cinco workspaces afetados e builds de producao da API e do Admin Web
 foram aprovados. Proximo passo: publicar API e Admin Web e fazer um teste real
 com pedido em `Buscando motoboy`. Nao e necessario novo APK para esta acao.
+
+## 2026-08-28 - GPS tolerante na coleta, entrega e retorno
+
+Levantamento pedido pelo responsavel depois do incidente da finalizacao: quais
+regras podem travar o motoboy, e quais delas ele consegue desligar sozinho no
+ADM numa emergencia.
+
+O resultado util foi a lista do que NAO tem interruptor. A mais grave era o
+proprio aplicativo: `captureCurrentLocation` exige um fix de alta precisao em
+ate 20 segundos, sem cache, e era chamada incondicionalmente antes de coleta,
+entrega e retorno — inclusive com todos os raios desligados no painel. Se o GPS
+nao fechasse (garagem, predio, economia de bateria, permissao negada), a acao
+nem saia do celular, e nenhuma configuracao do ADM alcancava isso.
+
+O projeto ja tinha resolvido esse mesmo problema no botao de ficar online: o
+comentario de `capturePresenceLocation` registra que "com a regra estrita o
+motoboy simplesmente nao consegue comecar a trabalhar, que foi o que travou o
+teste no aparelho". A finalizacao tinha ficado para tras.
+
+### O que mudou
+
+Nova `captureCompletionLocation`, usada nas tres etapas: tenta o fix fino
+(20 s, sem cache) e, se ele nao vier, cai para a posicao aproximada; se nem
+essa vier, ou se a permissao estiver negada, devolve `null` e a etapa segue sem
+posicao.
+
+A posicao deixou de ser pre-requisito local e virou informacao enviada ao
+servidor. Quem decide se ela basta e a regra de proximidade:
+
+- raio desligado — a etapa passa, ninguem trava;
+- raio ligado e precisao pior que o raio — o servidor recusa com o numero
+  exato ("a precisao agora e 800m, maior que o raio de 500m");
+- entrega com destino definido por GPS — continua protegida pelo teto proprio
+  de 100 m em `MAX_LOCATION_ACCURACY_METERS`, que independe do raio, porque ali
+  a coordenada vira destino e preco.
+
+Nao ha teto de precisao no cliente, ao contrario da captura de presenca. O teto
+e o raio configurado, e quem escolhe o raio e o administrador. Um teto local
+seria mais uma trava fora do alcance de quem opera — exatamente o defeito que
+este recorte remove.
+
+A decisao sai do aparelho do motoboy e volta para a tela de configuracoes.
+
+### Correcoes incluidas
+
+A nota de auditoria do retorno saia com concordancia errada — "Retorno
+validada" — desde o recorte anterior, que unificou os tres textos num helper
+com o adjetivo fixo no feminino. O genero agora vem de quem chama: "Coleta
+validada", "Entrega validada", "Retorno validado".
+
+As mensagens da fila offline culpavam a conexao por um estado que o aplicativo
+nao tem como diagnosticar. O aviso que o motoboy mais ve dizia "assim que a
+internet voltar", mas ele aparece sempre que o servidor demora mais que os
+2,5 s de `IMMEDIATE_COMPLETION_SYNC_WAIT_MS` — e depois de um deploy, com a
+instancia fria, passar disso e banal. O motoboy lia aquilo, via o sinal cheio e
+concluia que o aplicativo estava perdido.
+
+Os quatro textos passaram a descrever o que de fato acontece — "assim que o
+servidor responder", "aguardando confirmacao" — e o alerta principal agora
+aponta onde o problema aparece se houver: a tela inicial. A frase sobre a conta
+("abra o aplicativo uma vez com internet") ficou como estava, porque ali a
+conexao e mesmo o requisito.
+
+### O defeito que o levantamento desenterrou
+
+Com a tela ainda mostrando `Pedido #201 precisa de atencao — e necessario obter
+sua localizacao atual para concluir o retorno`, ficou claro que o retorno tinha
+uma causa PROPRIA, diferente da falta de coordenada no cadastro.
+
+A tela capturava o fix do retorno e o DESCARTAVA ao enfileirar: em
+`queueAndSynchronizeCompletion`, o ramo de `COMPLETE_RETURN` montava o item sem
+`payload`, e `enqueueDeliveryCompletion` transformava a ausencia em `{}` por
+causa do `input.payload ?? {}`. O tipo permitia, porque o campo era opcional
+so nesse ramo — nenhum erro de compilacao, nenhum teste quebrado.
+
+Consequencia: com `returnProximityRadiusMeters` configurado, NENHUMA conclusao
+de retorno funcionava pelo aplicativo, para nenhum motoboy, em lugar nenhum. A
+posicao existia no aparelho e nunca chegava ao servidor. Isso explica "nem
+mesmo perto da loja" melhor do que a hipotese do cadastro, e explica por que
+aumentar o raio nao mudava nada.
+
+O `payload` do retorno passou a ser OBRIGATORIO no tipo e o `?? {}` saiu. A
+mudanca de tipo imediatamente acusou quatro chamadas nos proprios testes que
+faziam a mesma omissao — a prova de que o opcional era o buraco. A regra de
+negocio ja dizia o comportamento esperado ("entrega e retorno mantem o fix
+original na fila offline ate a API confirmar"); era a implementacao que
+divergia.
+
+### Nao alterado, e por que
+
+`fail` (problema na entrega) continua com a captura estrita. Ali a posicao so e
+capturada quando o destino nao foi informado na criacao, e nesse caso ela
+define o preco do insucesso — e o mesmo caminho de dinheiro protegido pelo teto
+de 100 m. Vale revisar em outro recorte se a mesma tolerancia se aplica.
+
+### Arquivos
+
+`apps/driver-app/src/lib/location.ts`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` (textos),
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste, novo
+`apps/driver-app/__tests__/completionLocation.test.ts` e
+`apps/api/src/deliveries/deliveries.service.ts` (concordancia).
+
+### Validacoes executadas
+
+| Comando                                                           | Resultado                       |
+| ----------------------------------------------------------------- | ------------------------------- |
+| `pnpm typecheck` (raiz, 8 workspaces)                             | aprovado                        |
+| `pnpm lint` (raiz, 8 workspaces)                                  | aprovado                        |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`     | 22 suites, 124 testes aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand deliveries` | 6 suites, 189 testes aprovados  |
+| Prettier nos arquivos alterados e `git diff --check`              | aprovados                       |
+
+Cobertura nova: 5 testes em `completionLocation.test.ts` — GPS fino quando
+responde, queda para a aproximada, ausencia de teto local, `null` quando
+nenhuma tentativa responde e `null` quando a permissao foi negada — mais um em
+`deliveryCompletionOutbox.test.ts` que prova que a posicao capturada chega ao
+`completeReturn`.
+
+### Limitacoes e proximo passo
+
+- **Precisa de APK.** A mudanca e toda do lado do aplicativo; a API nao muda.
+  Enquanto o `pilot.11` nao for instalado, a trava do GPS continua valendo nos
+  aparelhos.
+- Nao houve compilacao nativa, teste em aparelho, commit, push nem deploy.
+- Continua sem interruptor: modalidade nao atribuida ao motoboy (ele nunca
+  recebe oferta, sem aviso nenhum) e `dispatchOfferTimeoutSeconds` vazio, que
+  congela o despacho inteiro sem representar um estado "desligado".
+
+Proximo passo concreto: revisar o diff e decidir o conteudo do `pilot.11`, que
+hoje reuniria a punicao, este GPS tolerante e tudo do `pilot.10` que nunca
+chegou aos aparelhos.
+
+## 2026-08-28 - Interruptores para regras operacionais opcionais
+
+### Estado implementado
+
+- O PATCH de configuracoes agora distingue campo ausente (`manter`) de `null`
+  (`desligar`) em cinco campos: raios de coleta, entrega e retorno; prazo de
+  coleta; limite de entregas simultaneas por motoboy.
+- `dispatchOfferTimeoutSeconds` e `driverCommissionPercentage` continuam
+  recusando `null`, pois sao requisitos para despacho e precificacao.
+- A tela `Configuracoes > Operacao` ganhou `Desligar esta regra` somente quando
+  a regra esta ligada. A intencao fica destacada e so e aplicada ao salvar.
+- Um numero digitado e depois marcado para desligar nao bloqueia o salvamento;
+  o `null` explicito vence. Campo vazio sem o interruptor continua sem alterar.
+- Nao houve migration: as cinco colunas ja eram opcionais no Prisma.
+- Nenhuma alteracao nem execucao direta foi feita em banco de producao.
+
+### Arquivos do recorte
+
+- `packages/validation/src/admin/update-platform-settings.schema.ts`
+- `packages/types/src/pricing.ts`
+- `apps/api/src/admin/platform-settings/admin-platform-settings.service.spec.ts`
+- `apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`
+- `docs/business-rules.md`
+
+### Validacoes
+
+- Build de validation, typecheck de types/API/Admin Web: aprovados.
+- Teste focado de platform settings: 18 testes aprovados, incluindo os cinco
+  `null` permitidos, os dois proibidos e payload vazio.
+- Lint dos workspaces afetados: aprovado sem avisos.
+- Builds de producao da API e do Admin Web: aprovados.
+
+### Proximo passo
+
+Fazer teste visual seguro no ADM e, quando autorizado, publicar API e Admin Web.
+O interruptor funciona no painel web e nao exige APK.
+
+## 2026-08-28 - Fechamento das lacunas de GPS, retorno legado e resumo do ADM
+
+### Correcoes aplicadas
+
+- A captura para coleta, entrega e retorno nao espera mais ate 35 segundos. O
+  GPS fino tem 8 segundos e a alternativa aproximada 4 segundos, total maximo
+  de 12 segundos depois da permissao.
+- As duas tentativas usam `maximumAge: 0`. A alternativa nao aceita mais um
+  ponto de ate dois minutos atras, pois ele nao comprova a etapa e poderia virar
+  destino e preco em pedidos sem destino conhecido.
+- O toque manual no aviso de sincronizacao identifica retornos gravados pelo APK
+  antigo com `payload: {}` e captura uma posicao nova antes de tentar outra vez.
+  Essa recaptura nunca ocorre silenciosamente no bootstrap/reconnect.
+- A reparacao e atomica na outbox, vale para itens `PENDING` e `NEEDS_REVIEW`,
+  preserva conta/item e nunca substitui um fix valido ja congelado. Tambem cobre
+  a corrida em que a tentativa antiga ainda esta no ar: a recusa do payload
+  vazio nao rebaixa o item reparado para `NEEDS_REVIEW`, e o sync encadeado envia
+  a nova posicao.
+- O resumo lateral do ADM agora apresenta `Desligado` para prazo/raios e
+  `Sem limite` para simultaneas, mostra o desligamento ainda pendente e separa
+  simultaneas de tamanho do lote. Textos de ajuda e salvamento foram alinhados
+  ao payload real.
+- A explicacao dos raios agora corresponde ao servidor: quando o endereco de
+  referencia nao possui coordenadas, a etapa passa com registro de auditoria e
+  aviso ao ADM; nao afirma mais que o motoboy sera bloqueado.
+
+### Arquivos diretamente afetados neste fechamento
+
+- `apps/driver-app/src/lib/location.ts`
+- `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`
+- `apps/driver-app/src/screens/HomeScreen.tsx`
+- `apps/driver-app/__tests__/completionLocation.test.ts`
+- `apps/driver-app/__tests__/deliveryCompletionOutbox.test.ts`
+- `apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`
+- `docs/business-rules.md`
+
+Nao houve alteracao de rota, schema Prisma, migration, banco ou `.env`.
+
+### Validacoes executadas
+
+| Comando                                                 | Resultado                       |
+| ------------------------------------------------------- | ------------------------------- |
+| Jest completo do Driver App                             | 22 suites, 129 testes aprovados |
+| testes focados de localizacao + outbox                  | 2 suites, 24 testes aprovados   |
+| typecheck e lint do Driver App                          | aprovados                       |
+| typecheck, lint e build do Admin Web                    | aprovados; 38 rotas geradas     |
+| testes focados de deliveries + platform settings da API | 7 suites, 207 testes aprovados  |
+| build de validation, typecheck de types e build da API  | aprovados                       |
+| Prettier dos arquivos tocados e `git diff --check`      | aprovados                       |
+
+### Limitacoes e proximo passo
+
+- GPS historico perdido nao pode ser reconstruido. O toque registra a posicao
+  atual; se o motoboy ja saiu da loja e o raio estiver ligado, o servidor deve
+  continuar recusando corretamente.
+- Nao houve smoke em aparelho, build nativo, APK, teste visual autenticado no
+  ADM, commit, push ou deploy.
+- A correcao de GPS/outbox exige novo APK. Os interruptores/resumo exigem API e
+  Admin Web publicados juntos.
+
+Proximo passo concreto: smoke seguro no ADM e em um aparelho; depois, somente
+quando solicitado, separar os commits, publicar API/Admin Web e gerar o APK com
+versionCode novo e assinatura oficial.
+
+## 2026-08-28 - Inicio do release pilot.11
+
+O responsavel autorizou iniciar a publicacao. O Driver App foi promovido para
+`0.1.0-pilot.11`; o proximo `versionCode` reservado e `11`. O release deve usar
+a mesma chave oficial do `pilot.10` e apontar para a API HTTPS de producao.
+
+O preflight nao encontrou, no processo nem nos escopos User/Machine do Windows,
+as variaveis `MOTOBOYCITY_APP_ENV`, `MOTOBOYCITY_API_URL`, as quatro variaveis
+da chave oficial e `MOTOBOYCITY_VERSION_CODE`. Nenhum valor foi lido ou exibido.
+Por isso o APK assinado ainda nao foi gerado; o gate do Gradle impediria um
+release com assinatura debug ou sem versionCode explicito.
+
+Ordem preservada: validar o codigo com a versao nova, carregar as credenciais de
+release na sessao, gerar e verificar o APK oficial, criar os commits, fazer push,
+acompanhar CI/deploys e so entao distribuir o mesmo artefato conferido. Ate este
+ponto nao houve commit, push, deploy nem APK novo.

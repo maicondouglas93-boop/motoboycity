@@ -75,14 +75,26 @@ maior que o próprio raio e recusa distância Haversine acima do limite.
 
 Coleta e retorno usam as coordenadas do endereço principal da empresa. Entrega
 com destino conhecido usa as coordenadas do endereço de destino. Se o endereço
-de referência não tiver coordenadas, a etapa é recusada com orientação para
-atualizar o cadastro; não existe aprovação silenciosa. A conferência também vale
-para marcação retroativa, pois o raio configurado representa uma trava
-operacional. Exceções precisam de intervenção auditada do administrador.
+de referência não tiver coordenadas, a etapa é aceita sem a validação de
+proximidade, registra essa exceção no histórico e avisa o administrador em tempo
+real para corrigir o cadastro. A conferência também vale para marcação
+retroativa quando há coordenadas, pois o raio configurado representa uma trava
+operacional.
 
 Retries idempotentes de uma etapa já aplicada não exigem outro fix. O aplicativo
 captura a posição antes de coleta, entrega e retorno; entrega e retorno mantêm o
-fix original na fila offline até a API confirmar.
+fix original na fila offline até a API confirmar. As duas tentativas de captura
+para essas etapas aceitam somente posição atual (`maximumAge: 0`) e têm espera
+total limitada. Retornos legados salvos sem coordenadas só recapturam a posição
+quando o motoboy toca manualmente para sincronizar; um fix válido já congelado
+nunca é substituído.
+
+O painel administrativo permite desligar explicitamente os três raios. No
+contrato parcial, campo ausente continua significando "manter o valor atual" e
+`null` significa "desligar". A mesma distinção vale para o prazo automático de
+coleta e para o teto de entregas simultâneas por motoboy. O tempo de resposta da
+oferta e a comissão do entregador não aceitam `null`, porque isso impediria o
+despacho e a precificação em vez de desligar uma regra opcional.
 
 ## Cancelamento
 
@@ -104,7 +116,8 @@ completo é liberado uma única vez quando ele confirma que devolveu a mercadori
 
 As ações do motoboy usam o horário atual do servidor. O aplicativo não exige
 mais declaração retroativa nem texto de justificativa para devolver à fila.
-Quando um raio operacional estiver configurado, a proximidade é obrigatória.
+Quando um raio operacional estiver configurado e o endereço de referência tiver
+coordenadas, a proximidade é obrigatória.
 Confirmações simples continuam existindo para evitar toques acidentais e todas
 as transições permanecem no histórico auditável.
 
