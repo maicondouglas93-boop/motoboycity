@@ -55,7 +55,16 @@ export type EnqueueDeliveryCompletionInput =
       batchId: string | null;
       displayNumber: number;
       companyName: string;
-      payload?: CompleteReturnPayload;
+      /**
+       * OBRIGATORIO, e nao opcional.
+       *
+       * Enquanto era opcional, a tela capturava o GPS do retorno e o enfileirava
+       * sem ele — o `?? {}` abaixo transformava o esquecimento em objeto vazio,
+       * sem erro de compilacao. Com o raio de retorno configurado, o servidor
+       * recusava TODA conclusao de retorno pedindo a localizacao que o aparelho
+       * tinha obtido e descartado um instante antes.
+       */
+      payload: CompleteReturnPayload;
     };
 
 export interface DeliveryCompletionSyncResult {
@@ -71,7 +80,7 @@ export interface DeliveryCompletionSyncExecutor {
   completeReturn(
     accessToken: string,
     deliveryId: string,
-    payload?: CompleteReturnPayload,
+    payload: CompleteReturnPayload,
   ): Promise<unknown>;
   detail(accessToken: string, deliveryId: string): Promise<DeliveryDetail>;
 }
@@ -109,6 +118,20 @@ function isPendingDeliveryCompletion(value: unknown): value is PendingDeliveryCo
     !!item.payload &&
     typeof item.payload === 'object'
   );
+}
+
+function payloadHasCoordinates(payload: CompleteReturnPayload): boolean {
+  return (
+    typeof payload.lat === 'number' &&
+    Number.isFinite(payload.lat) &&
+    typeof payload.lng === 'number' &&
+    Number.isFinite(payload.lng)
+  );
+}
+
+/** Identifica retornos gravados pelo APK antigo, que persistia `payload: {}`. */
+export function completionNeedsFreshReturnLocation(item: PendingDeliveryCompletion): boolean {
+  return item.action === 'COMPLETE_RETURN' && !payloadHasCoordinates(item.payload);
 }
 
 async function readQueueUnsafe(): Promise<PendingDeliveryCompletion[]> {
@@ -183,6 +206,17 @@ export async function enqueueDeliveryCompletion(
   await replaceQueue((current) => {
     const existing = current.find((item) => item.id === id);
     if (existing) {
+      // Compatibilidade com o APK antigo: se uma nova tentativa trouxer o GPS
+      // que faltava, enriquece o item legado sem substituir um fix ja salvo.
+      if (
+        input.action === 'COMPLETE_RETURN' &&
+        completionNeedsFreshReturnLocation(existing) &&
+        payloadHasCoordinates(input.payload)
+      ) {
+        const repaired = { ...existing, payload: input.payload };
+        queued = repaired;
+        return current.map((item) => (item.id === id ? repaired : item));
+      }
       queued = existing;
       return current;
     }
@@ -202,7 +236,7 @@ export async function enqueueDeliveryCompletion(
     queued =
       input.action === 'DELIVER'
         ? { ...base, action: 'DELIVER', payload: input.payload }
-        : { ...base, action: 'COMPLETE_RETURN', payload: input.payload ?? {} };
+        : { ...base, action: 'COMPLETE_RETURN', payload: input.payload };
     return [...current, queued];
   });
   if (!queued) throw new Error('Nao foi possivel salvar a finalizacao no aparelho.');
@@ -271,12 +305,19 @@ async function removeItem(id: string): Promise<void> {
   await replaceQueue((current) => current.filter((item) => item.id !== id));
 }
 
-async function markNeedsReview(id: string, message: string): Promise<void> {
+async function markNeedsReview(
+  attempted: PendingDeliveryCompletion,
+  message: string,
+): Promise<void> {
   await replaceQueue((current) =>
     current.map((item) =>
-      item.id === id
-        ? { ...item, state: 'NEEDS_REVIEW' as const, lastError: message.slice(0, 240) }
-        : item,
+      item.id !== attempted.id
+        ? item
+        : completionNeedsFreshReturnLocation(attempted) && !completionNeedsFreshReturnLocation(item)
+          ? // Uma tentativa antiga com `{}` perdeu a corrida para a recaptura
+            // manual. Mantem PENDING para o sync encadeado usar o fix novo.
+            item
+          : { ...item, state: 'NEEDS_REVIEW' as const, lastError: message.slice(0, 240) },
     ),
   );
 }
@@ -333,7 +374,7 @@ async function synchronizeQueue(
         continue;
       }
 
-      await markNeedsReview(item.id, error.message);
+      await markNeedsReview(item, error.message);
       blockedGroups.add(item.groupKey);
     }
   }
@@ -377,14 +418,26 @@ export function synchronizePendingDeliveryCompletions(
 export async function retryDeliveryCompletionQueue(
   ownerUserId: string,
   itemId?: string,
+  freshReturnLocation?: CompleteReturnPayload,
 ): Promise<void> {
   await replaceQueue((current) =>
-    current.map((item) =>
-      item.ownerUserId === ownerUserId &&
-      item.state === 'NEEDS_REVIEW' &&
-      (itemId === undefined || item.id === itemId)
-        ? { ...item, state: 'PENDING' as const, lastError: null }
-        : item,
-    ),
+    current.map((item) => {
+      const selected =
+        item.ownerUserId === ownerUserId && (itemId === undefined || item.id === itemId);
+      if (!selected) return item;
+
+      const repairedPayload =
+        completionNeedsFreshReturnLocation(item) &&
+        freshReturnLocation &&
+        payloadHasCoordinates(freshReturnLocation)
+          ? freshReturnLocation
+          : item.payload;
+
+      if (item.state === 'NEEDS_REVIEW') {
+        return { ...item, payload: repairedPayload, state: 'PENDING' as const, lastError: null };
+      }
+
+      return repairedPayload === item.payload ? item : { ...item, payload: repairedPayload };
+    }),
   );
 }

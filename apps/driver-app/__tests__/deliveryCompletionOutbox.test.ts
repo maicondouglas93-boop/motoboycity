@@ -12,6 +12,17 @@ import {
 } from '../src/lib/deliveryCompletionOutbox';
 
 const storage = new Map<string, string>();
+const STORAGE_KEY = 'motoboycity.driver.deliveryCompletionOutbox.v1';
+
+/**
+ * O fix do retorno e obrigatorio no contrato da fila.
+ *
+ * Ele era opcional, e a tela enfileirava o retorno sem a posicao que tinha
+ * acabado de capturar — com o raio de retorno ligado, o servidor recusava toda
+ * conclusao pedindo a localizacao. Estes testes agora carregam a posicao
+ * porque o tipo exige, que e a defesa contra o mesmo esquecimento.
+ */
+const returnFix = { lat: -20.1501, lng: -41.7401, accuracy: 12 };
 
 function executor(
   overrides: Partial<DeliveryCompletionSyncExecutor> = {},
@@ -170,7 +181,6 @@ describe('delivery completion outbox', () => {
   });
 
   it('deduplica o retorno pelo lote e nunca envia a fila de outra conta', async () => {
-    const returnFix = { lat: -20.1501, lng: -41.7401, accuracy: 12 };
     await enqueueDeliveryCompletion({
       ownerUserId: 'user-1',
       action: 'COMPLETE_RETURN',
@@ -187,6 +197,7 @@ describe('delivery completion outbox', () => {
       batchId: 'batch-1',
       displayNumber: 16,
       companyName: 'Loja A',
+      payload: returnFix,
     });
     const api = executor();
 
@@ -198,6 +209,206 @@ describe('delivery completion outbox', () => {
     ]);
   });
 
+  /**
+   * Regressao de producao: o retorno chegava ao servidor SEM a posicao.
+   *
+   * A tela capturava o GPS e o descartava ao enfileirar, porque o payload do
+   * retorno era opcional e virava `{}`. Com o raio de retorno configurado, a
+   * API recusava toda conclusao — "e necessario obter sua localizacao atual
+   * para concluir o retorno" — e o motoboy nao tinha o que fazer, porque a
+   * posicao existia e havia sido jogada fora um instante antes.
+   */
+  it('envia a posicao capturada ao concluir o retorno', async () => {
+    await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-9',
+      batchId: null,
+      displayNumber: 201,
+      companyName: 'cariocas burguers',
+      payload: returnFix,
+    });
+    const api = executor();
+
+    await synchronizePendingDeliveryCompletions('token-user-1', 'user-1', api);
+
+    expect(api.completeReturn).toHaveBeenCalledWith('token-user-1', 'delivery-9', returnFix);
+  });
+
+  it('repara com uma posicao nova o retorno vazio salvo pelo APK antigo', async () => {
+    storage.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'user-1:COMPLETE_RETURN:delivery-legacy',
+          ownerUserId: 'user-1',
+          action: 'COMPLETE_RETURN',
+          deliveryId: 'delivery-legacy',
+          batchId: null,
+          groupKey: 'delivery-legacy',
+          displayNumber: 202,
+          companyName: 'Loja antiga',
+          queuedAt: new Date().toISOString(),
+          state: 'NEEDS_REVIEW',
+          lastError: 'e necessario obter sua localizacao atual',
+          payload: {},
+        },
+      ]),
+    );
+    const api = executor();
+
+    await retryDeliveryCompletionQueue(
+      'user-1',
+      'user-1:COMPLETE_RETURN:delivery-legacy',
+      returnFix,
+    );
+    await synchronizePendingDeliveryCompletions('token-user-1', 'user-1', api);
+
+    expect(api.completeReturn).toHaveBeenCalledWith('token-user-1', 'delivery-legacy', returnFix);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
+  it('repara retorno legado ainda pendente sem alterar outra conta', async () => {
+    const legacy = (ownerUserId: string) => ({
+      id: `${ownerUserId}:COMPLETE_RETURN:delivery-legacy`,
+      ownerUserId,
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-legacy',
+      batchId: null,
+      groupKey: 'delivery-legacy',
+      displayNumber: 202,
+      companyName: 'Loja antiga',
+      queuedAt: new Date().toISOString(),
+      state: 'PENDING',
+      lastError: null,
+      payload: {},
+    });
+    storage.set(STORAGE_KEY, JSON.stringify([legacy('user-1'), legacy('user-2')]));
+
+    await retryDeliveryCompletionQueue(
+      'user-1',
+      'user-1:COMPLETE_RETURN:delivery-legacy',
+      returnFix,
+    );
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([
+      expect.objectContaining({ payload: returnFix, state: 'PENDING' }),
+    ]);
+    expect(await getPendingDeliveryCompletions('user-2')).toEqual([
+      expect.objectContaining({ payload: {} }),
+    ]);
+  });
+
+  it('nunca substitui uma posicao de retorno que ja estava congelada', async () => {
+    const item = await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-10',
+      batchId: null,
+      displayNumber: 203,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+
+    await retryDeliveryCompletionQueue('user-1', item.id, {
+      lat: -21,
+      lng: -42,
+      accuracy: 5,
+    });
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([
+      expect.objectContaining({ payload: returnFix }),
+    ]);
+  });
+
+  it('enriquece uma duplicata legada sem perder o registro original', async () => {
+    storage.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'user-1:COMPLETE_RETURN:delivery-11',
+          ownerUserId: 'user-1',
+          action: 'COMPLETE_RETURN',
+          deliveryId: 'delivery-11',
+          batchId: null,
+          groupKey: 'delivery-11',
+          displayNumber: 204,
+          companyName: 'Loja A',
+          queuedAt: '2026-08-28T20:00:00.000Z',
+          state: 'PENDING',
+          lastError: null,
+          payload: {},
+        },
+      ]),
+    );
+
+    const repaired = await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-11',
+      batchId: null,
+      displayNumber: 204,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+
+    expect(repaired).toMatchObject({ queuedAt: '2026-08-28T20:00:00.000Z', payload: returnFix });
+  });
+
+  it('usa o GPS reparado mesmo quando uma sincronizacao antiga ainda estava em andamento', async () => {
+    storage.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'user-1:COMPLETE_RETURN:delivery-race',
+          ownerUserId: 'user-1',
+          action: 'COMPLETE_RETURN',
+          deliveryId: 'delivery-race',
+          batchId: null,
+          groupKey: 'delivery-race',
+          displayNumber: 205,
+          companyName: 'Loja A',
+          queuedAt: new Date().toISOString(),
+          state: 'PENDING',
+          lastError: null,
+          payload: {},
+        },
+      ]),
+    );
+    let rejectLegacy: ((reason: unknown) => void) | undefined;
+    const legacyRequest = new Promise<never>((_resolve, reject) => {
+      rejectLegacy = reject;
+    });
+    const api = executor({
+      completeReturn: jest
+        .fn()
+        .mockImplementationOnce(() => legacyRequest)
+        .mockResolvedValueOnce({}),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'DELIVERED',
+        statusHistory: [],
+      }),
+    });
+
+    const staleSync = synchronizePendingDeliveryCompletions('token-user-1', 'user-1', api);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await retryDeliveryCompletionQueue('user-1', 'user-1:COMPLETE_RETURN:delivery-race', returnFix);
+    const repairedSync = synchronizePendingDeliveryCompletions('token-user-1', 'user-1', api);
+    rejectLegacy?.(new ApiError(409, { message: 'localizacao obrigatoria' }));
+
+    await Promise.all([staleSync, repairedSync]);
+
+    expect(api.completeReturn).toHaveBeenNthCalledWith(1, 'token-user-1', 'delivery-race', {});
+    expect(api.completeReturn).toHaveBeenNthCalledWith(
+      2,
+      'token-user-1',
+      'delivery-race',
+      returnFix,
+    );
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
   it('oculta no retorno local somente os itens elegiveis do lote', async () => {
     const item = await enqueueDeliveryCompletion({
       ownerUserId: 'user-1',
@@ -206,6 +417,7 @@ describe('delivery completion outbox', () => {
       batchId: 'batch-1',
       displayNumber: 15,
       companyName: 'Loja A',
+      payload: returnFix,
     });
 
     expect(
@@ -243,6 +455,7 @@ describe('delivery completion outbox', () => {
       batchId: 'batch-1',
       displayNumber: 15,
       companyName: 'Loja A',
+      payload: returnFix,
     });
     const calls: string[] = [];
     const api = executor({
@@ -269,6 +482,7 @@ describe('delivery completion outbox', () => {
       batchId: 'batch-1',
       displayNumber: 15,
       companyName: 'Loja A',
+      payload: returnFix,
     });
     const api = executor({
       deliver: jest.fn().mockRejectedValue(new ApiError(409, { message: 'pedido cancelado' })),

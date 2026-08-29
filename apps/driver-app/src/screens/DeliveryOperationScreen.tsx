@@ -49,7 +49,12 @@ import {
 } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { getDriverProfile } from '../lib/driverProfileCache';
-import { captureCurrentLocation, LocationError } from '../lib/location';
+import {
+  captureCompletionLocation,
+  captureCurrentLocation,
+  LocationError,
+  type LocationFix,
+} from '../lib/location';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -59,6 +64,23 @@ type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
 type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
 
 const IMMEDIATE_COMPLETION_SYNC_WAIT_MS = 2_500;
+
+/**
+ * Converte o fix em payload, ou em payload VAZIO quando nao houve fix.
+ *
+ * Mandar vazio e deliberado: quem decide se a posicao era necessaria e o
+ * servidor, olhando o raio configurado. Com o raio desligado a etapa passa;
+ * com o raio ligado ele recusa com o motivo exato, em vez de o aplicativo
+ * barrar sozinho por um GPS que nao fechou.
+ */
+function posicaoParaEnvio(fix: LocationFix | null): {
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
+} {
+  if (!fix) return {};
+  return { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy };
+}
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -370,6 +392,9 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             batchId: delivery.batchId,
             displayNumber: delivery.displayNumber,
             companyName: delivery.companyName,
+            // O mesmo fix capturado para o retorno. Omiti-lo aqui era o defeito:
+            // a posicao existia e nao chegava ao servidor.
+            payload,
           },
     );
 
@@ -448,8 +473,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
     setSuccessMessage(
       finalLocally
-        ? 'Finalizacao salva no aparelho. Aguardando internet para confirmar no servidor.'
-        : 'Entrega salva no aparelho. Aguardando internet antes da etapa de retorno.',
+        ? 'Finalizacao salva no aparelho. Aguardando a confirmacao do servidor.'
+        : 'Entrega salva no aparelho. Aguardando a confirmacao do servidor antes do retorno.',
     );
 
     if (!finalLocally) {
@@ -482,7 +507,9 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
     Alert.alert(
       'Finalizacao salva no celular',
-      'A corrida sera confirmada, auditada e liberada financeiramente assim que a internet voltar.',
+      'A corrida esta salva neste aparelho e sera confirmada, auditada e liberada ' +
+        'financeiramente assim que o servidor responder. Se algo falhar, o aviso aparece na ' +
+        'tela inicial.',
     );
     navigation.popToTop();
   }
@@ -497,22 +524,17 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       if (!token) return;
 
       if (nextOperation === 'collect') {
-        const fix = await captureCurrentLocation();
-        const result = await deliveriesApi.collect(token, delivery.id, {
-          lat: fix.lat,
-          lng: fix.lng,
-          accuracy: fix.accuracy,
-        });
+        const result = await deliveriesApi.collect(
+          token,
+          delivery.id,
+          posicaoParaEnvio(await captureCompletionLocation()),
+        );
         setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
         setSuccessMessage('O pedido foi marcado como coletado!');
       } else if (nextOperation === 'deliver') {
         // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
         // tentativa posterior nunca pode recapturar outra rua por engano.
-        const payload = await captureCurrentLocation().then((fix) => ({
-          lat: fix.lat,
-          lng: fix.lng,
-          accuracy: fix.accuracy,
-        }));
+        const payload = posicaoParaEnvio(await captureCompletionLocation());
         const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
         if (queued === undefined) return;
         if (queued) {
@@ -568,11 +590,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         navigation.popToTop();
         return;
       } else {
-        const returnLocation = await captureCurrentLocation().then((fix) => ({
-          lat: fix.lat,
-          lng: fix.lng,
-          accuracy: fix.accuracy,
-        }));
+        const returnLocation = posicaoParaEnvio(await captureCompletionLocation());
         const queued = await queueAndSynchronizeCompletion(
           token,
           'COMPLETE_RETURN',
@@ -807,7 +825,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               </Text>
               <Text style={styles.pendingBannerText}>
                 {pendingCompletion.lastError ??
-                  'A acao esta salva neste aparelho e sera confirmada quando a internet voltar.'}
+                  'A acao esta salva neste aparelho e sera confirmada quando o servidor responder.'}
               </Text>
             </View>
           </View>

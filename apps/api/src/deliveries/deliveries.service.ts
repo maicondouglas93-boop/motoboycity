@@ -1591,6 +1591,7 @@ export class DeliveriesService {
         settings.collectionProximityRadiusMeters,
         payload ?? {},
         'Coleta',
+        'validada',
       ),
     ]
       .filter((note): note is string => note !== null)
@@ -2017,6 +2018,7 @@ export class DeliveriesService {
         settings.deliveryProximityRadiusMeters,
         payload,
         'Entrega',
+        'validada',
       ),
     ]
       .filter((note): note is string => note !== null)
@@ -2234,6 +2236,7 @@ export class DeliveriesService {
         settings.returnProximityRadiusMeters,
         payload,
         'Retorno',
+        'validado',
       ) ?? 'Retorno confirmado pelo motoboy.';
 
     if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
@@ -2688,11 +2691,13 @@ export class DeliveriesService {
     radiusMeters: number | null,
     payload: ProximityPayload,
     stageLabel: string,
+    /** "Coleta validada", mas "Retorno validado" — o genero segue o substantivo. */
+    participio: 'validada' | 'validado',
   ): string | null {
     if (outcome.kind === 'DESLIGADA') return null;
     if (outcome.kind === 'VALIDADA') {
       return (
-        `${stageLabel} validada a ${Math.round(outcome.distanceMeters)}m do ` +
+        `${stageLabel} ${participio} a ${Math.round(outcome.distanceMeters)}m do ` +
         `${outcome.targetLabel} (raio configurado: ${radiusMeters}m).`
       );
     }

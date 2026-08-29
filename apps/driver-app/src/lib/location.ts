@@ -119,6 +119,62 @@ export async function captureCurrentLocation(): Promise<LocationFix> {
   return obterPosicao({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 });
 }
 
+const COMPLETION_PRECISE_TIMEOUT_MS = 8_000;
+const COMPLETION_APPROXIMATE_TIMEOUT_MS = 4_000;
+
+/**
+ * Captura para coleta, entrega e retorno — tenta o melhor fix, mas nunca
+ * impede definitivamente a acao.
+ *
+ * A versao estrita acima trancava o motoboy no aparelho: se o GPS fino nao
+ * fechasse no prazo — garagem, predio, economia de bateria, permissao
+ * negada — a acao nem chegava a sair do celular. E trancava mesmo com todos os
+ * raios desligados no painel, porque a decisao estava aqui, no lugar onde o
+ * administrador nao alcanca.
+ *
+ * Agora a posicao e uma INFORMACAO enviada ao servidor, nao um pre-requisito
+ * local. Quem decide se ela basta e a regra de proximidade: com o raio
+ * desligado qualquer coisa serve, e com o raio ligado o servidor recusa
+ * dizendo o numero exato ("a precisao agora e 800m, maior que o raio de
+ * 500m"). A decisao volta para a tela de configuracoes.
+ *
+ * Nao ha teto de precisao aqui, ao contrario da captura de presenca: o teto e
+ * o proprio raio configurado, e quem escolheu o raio foi o administrador.
+ */
+export async function captureCompletionLocation(): Promise<LocationFix | null> {
+  try {
+    await ensurePreciseLocationPermission();
+  } catch {
+    // Permissao negada ou bloqueada. O servidor decide se isso impede a etapa.
+    return null;
+  }
+
+  // `maximumAge: 0` no primeiro tento: a posicao serve de comprovacao, entao
+  // vale insistir por uma nova antes de aceitar qualquer alternativa. A espera
+  // total fica limitada a 12 segundos para a tela nao parecer travada.
+  try {
+    return await obterPosicao({
+      enableHighAccuracy: true,
+      timeout: COMPLETION_PRECISE_TIMEOUT_MS,
+      maximumAge: 0,
+    });
+  } catch (erroDoGpsFino) {
+    if (!(erroDoGpsFino instanceof LocationError)) throw erroDoGpsFino;
+  }
+
+  try {
+    return await obterPosicao({
+      enableHighAccuracy: false,
+      timeout: COMPLETION_APPROXIMATE_TIMEOUT_MS,
+      // Um ponto antigo nao comprova a etapa e pode virar destino e preco.
+      maximumAge: 0,
+    });
+  } catch (erroDaAproximada) {
+    if (!(erroDaAproximada instanceof LocationError)) throw erroDaAproximada;
+    return null;
+  }
+}
+
 /** Acima disso a posicao e grosseira demais para escolher o motoboy mais proximo. */
 const PRECISAO_MAXIMA_PARA_FICAR_ONLINE = 1_000;
 

@@ -39,6 +39,7 @@ import { activeDeliveryStops, pickupCountdownLabel } from '../lib/activeDelivery
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
+  completionNeedsFreshReturnLocation,
   getPendingDeliveryCompletions,
   retryDeliveryCompletionQueue,
   subscribeDeliveryCompletionOutbox,
@@ -49,6 +50,7 @@ import { deliveryPaymentLabel, formatDeliveryAddress } from '../lib/deliveryOper
 import { stopDeliveryTracking, syncDeliveryTracking } from '../lib/deliveryTracking';
 import { getDriverProfile } from '../lib/driverProfileCache';
 import {
+  captureCompletionLocation,
   capturePresenceLocation,
   ensureBackgroundTrackingPermission,
   LocationError,
@@ -196,6 +198,7 @@ export function HomeScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [completionQueue, setCompletionQueue] = useState<PendingDeliveryCompletion[]>([]);
   const [completionSyncing, setCompletionSyncing] = useState(false);
+  const completionRetryInFlight = useRef(false);
   const [pickupCountdownNow, setPickupCountdownNow] = useState(() => Date.now());
 
   const availability = useDispatchStore((state) => state.availability);
@@ -273,12 +276,25 @@ export function HomeScreen({ navigation }: Props) {
   }, []);
 
   const syncCompletionQueue = useCallback(
-    async (token: string, retryReviewId?: string) => {
+    async (token: string, retryItem?: { id: string; needsFreshReturnLocation: boolean }) => {
       const ownerUserId = await resolveOwnerUserId(token);
       if (!ownerUserId) return null;
       setCompletionSyncing(true);
       try {
-        if (retryReviewId) await retryDeliveryCompletionQueue(ownerUserId, retryReviewId);
+        if (retryItem) {
+          // So recaptura no toque manual. Fazer isso automaticamente ao abrir o
+          // app mudaria a prova de local sem uma acao consciente do motoboy.
+          const freshFix = retryItem.needsFreshReturnLocation
+            ? await captureCompletionLocation()
+            : null;
+          await retryDeliveryCompletionQueue(
+            ownerUserId,
+            retryItem.id,
+            freshFix
+              ? { lat: freshFix.lat, lng: freshFix.lng, accuracy: freshFix.accuracy }
+              : undefined,
+          );
+        }
         const result = await synchronizePendingDeliveryCompletions(token, ownerUserId);
         setCompletionQueue(await getPendingDeliveryCompletions(ownerUserId));
         if (result.authRequired && (await session.getToken()) === token) {
@@ -981,18 +997,33 @@ export function HomeScreen({ navigation }: Props) {
 
   async function retryQueuedCompletions() {
     const token = await session.getToken();
-    if (!token || completionSyncing) return;
-    const retryReview = completionQueue.find((item) => item.state === 'NEEDS_REVIEW');
-    const result = await syncCompletionQueue(token, retryReview?.id);
-    if (result?.authRequired) return;
-    const deliveries = await getActiveDeliveries(token).catch(() => null);
-    if (deliveries) {
-      setActiveDeliveries(deliveries);
-      await syncDeliveryTracking(
+    if (!token || completionSyncing || completionRetryInFlight.current) return;
+    completionRetryInFlight.current = true;
+    try {
+      const retryReview = completionQueue.find((item) => item.state === 'NEEDS_REVIEW');
+      const legacyReturn = completionQueue.find(completionNeedsFreshReturnLocation);
+      const retryItem = retryReview ?? legacyReturn;
+      const result = await syncCompletionQueue(
         token,
-        deliveries.map((delivery) => delivery.id),
-        useDispatchStore.getState().wantsToBeAvailable,
-      ).catch(() => undefined);
+        retryItem
+          ? {
+              id: retryItem.id,
+              needsFreshReturnLocation: completionNeedsFreshReturnLocation(retryItem),
+            }
+          : undefined,
+      );
+      if (result?.authRequired) return;
+      const deliveries = await getActiveDeliveries(token).catch(() => null);
+      if (deliveries) {
+        setActiveDeliveries(deliveries);
+        await syncDeliveryTracking(
+          token,
+          deliveries.map((delivery) => delivery.id),
+          useDispatchStore.getState().wantsToBeAvailable,
+        ).catch(() => undefined);
+      }
+    } finally {
+      completionRetryInFlight.current = false;
     }
   }
 
@@ -1102,7 +1133,7 @@ export function HomeScreen({ navigation }: Props) {
               <Text style={styles.avisoSincronizacaoTitulo}>
                 {queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
                   ? `Pedido #${queuedCompletionForBanner.displayNumber} precisa de atencao`
-                  : `${completionQueue.length} finalizacao(oes) aguardando internet`}
+                  : `${completionQueue.length} finalizacao(oes) aguardando confirmacao`}
               </Text>
               <Text style={styles.avisoSincronizacaoTexto}>
                 {completionSyncing
