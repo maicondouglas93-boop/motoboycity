@@ -10554,3 +10554,138 @@ aparelho: negar "Permitir o tempo todo" num Android 11+ e num Android 10,
 conferindo que o alerta oferece "Abrir ajustes" e que o atalho abre a tela certa;
 e matar a rede no meio de uma finalização, conferindo que a espera termina em
 15 s com mensagem em vez de ficar girando.
+
+## 2026-08-29 — Company Web: o cadastro de clientes vira operação
+
+Análise do painel da empresa cruzando o que a tela oferece com o que a API já
+entrega, seguida da correção dos quatro itens de melhor relação valor/custo. O
+painel já consumia quase toda a API disponível; o que faltava era o dado virar
+ação.
+
+### Correção de um diagnóstico errado, antes de qualquer código
+
+A análise afirmou que **o endereço do cliente cadastrado nunca tinha
+coordenada**, e que isso reproduzia a família de incidentes de geocodificação
+silenciosa documentada em `architecture.md` §4. **Isso estava errado.**
+
+A verificação antes de implementar mostrou o oposto: `CustomerForm` e
+`CustomerAddressForm` usam Google Places e gravam `lat`/`lng`, o convite
+pós-pedido carrega as coordenadas, e o autocomplete **só consegue** produzir
+endereço com ponto — ele aborta quando `geometry.location` não vem. A conclusão
+errada veio de ler as colunas no serviço da API sem seguir até o formulário.
+
+Também foi afirmado que não existia criação em lote com endereços conhecidos.
+Existe: o formulário operacional tem modo lote de 2 a 50. O que não existe é
+importação por CSV, deixada de fora por decisão do responsável.
+
+O que sobrou de real é menor e continua valendo: **a API aceita endereço de
+cliente sem coordenada**. Se um existir, escolher aquele cliente devolve
+`address: null` e o pedido é barrado com "Selecione no Google um endereço
+completo para cada destino" — mensagem que não diz que o problema está no
+cadastro. Hoje nenhum cliente criado pelo painel cai nisso; qualquer outro
+caminho que venha a criar cliente cai.
+
+### A armadilha fechada dos dois lados
+
+**No servidor**, `CompanyCustomersService` passou a geocodificar quando a
+coordenada não vem no payload, nos quatro pontos de escrita — cliente, endereço
+principal e endereços adicionais, na criação e na edição. A resolução acontece
+**sempre fora da transação**: geocodificar é chamada de rede, e segurar uma
+transação aberta esperando o Google prenderia conexão do banco.
+
+Falha do Google **não impede o cadastro**. A agenda de clientes não pode depender
+do Google estar de pé; sem coordenada o cliente é salvo do mesmo jeito, e quem
+decide se ela faz falta é a regra de proximidade, lá na entrega.
+
+**No painel**, a mensagem de erro passou a distinguir os dois casos: quando o
+rascunho barrado veio de um cliente salvo, ela diz que o endereço do cadastro
+está sem localização e aponta os dois caminhos — resolver no Google agora, ou
+abrir o cliente e salvar o endereço de novo para corrigir de vez.
+
+### A busca que não achava cliente
+
+`q` casava apenas `externalOrderNumber`, nome da modalidade, número do pedido e
+id. A empresa construiu uma agenda de clientes e continuava sem conseguir
+responder "cadê o pedido da Maria?".
+
+Agora casa também nome e telefone do destinatário. O telefone é gravado só com
+dígitos e quem digita costuma trazer máscara, então a busca normaliza antes de
+comparar: procurar `(33) 98888-7777` acha o pedido de quem está com o cliente na
+linha. O escopo por empresa continua valendo — há teste provando que buscar pelo
+nome certo na conta errada não revela nada.
+
+### O cadastro que não levava a lugar nenhum
+
+O detalhe do cliente mostrava "12 entregas concluídas" sem deixar ver quais, e
+criar um pedido para o cliente aberto na tela exigia sair, ir em Pedidos e
+digitar o nome de novo no autocomplete.
+
+Dois caminhos novos, ambos **reusando tela que já existe** em vez de duplicar
+operação:
+
+- **Ver entregas** → `/pedidos?q=<telefone>`, que só passou a funcionar por
+  causa da busca acima;
+- **Novo pedido** → `/?cliente=<id>`, que semeia o formulário operacional pelo
+  mesmo mecanismo do clone de pedido. O vínculo do pedido ao cliente continua
+  acontecendo no servidor, pelo telefone, então a semente não precisa carregar o
+  id.
+
+Ambas as telas ganharam limite de `Suspense` para o `useSearchParams`. O build
+confirma que continuam **estáticas**: sem o limite elas virariam renderização
+dinâmica no cliente.
+
+### Revogar o link de rastreio
+
+Existia na API (`revokePublicLink`) e em `business-rules.md` — "a empresa também
+pode revogar o link antes disso" — e **nenhum componente chamava**. Quem mandava
+o link para o número errado não tinha como cancelar.
+
+O botão só aparece depois de o link existir, e a confirmação diz o que a
+revogação significa para quem já recebeu.
+
+### Nota de ambiente — não era defeito do recorte
+
+A suíte E2E quebrou com 500 em toda criação de pedido. Investigado com `git
+stash`: **falhava também sem as alterações desta sessão**. O banco isolado
+`motoboycity_e2e_local` estava sem a migration `20260829120000_driver_company_blocks`,
+de um recorte publicado em paralelo; o código consultava uma tabela inexistente.
+
+Aplicada só naquele banco com `prisma db execute --url` e registrada em
+`_prisma_migrations`. Vale como aviso: **um recorte com migration pode ser
+publicado sem que a base de E2E acompanhe**, e o sintoma aparece longe da causa,
+como 500 num teste que não tem relação nenhuma com a mudança.
+
+### Arquivos
+
+`apps/api/src/company/customers/company-customers.service.ts` e `.module.ts`;
+`apps/api/src/deliveries/deliveries.service.ts`;
+`apps/company-web/src/app/(app)/page.tsx`, `pedidos/page.tsx`,
+`clientes/[id]/page.tsx`;
+`apps/company-web/src/components/operations/operational-order-form.tsx` e
+`components/orders/share-delivery-tracking-button.tsx`; e os testes.
+
+**Nenhuma migration** — as colunas `lat`/`lng` já existiam nos dois modelos de
+cliente. **Nenhuma mudança de contrato**: `deliveryAddressInputSchema`, que os
+endereços de cliente reusam, já aceitava coordenada opcional e pareada.
+
+### Validações executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suítes, **1009** testes |
+| `test:e2e` em `motoboycity_e2e_local` | 25 suítes, **247** testes (eram 243) |
+| `pnpm --filter @motoboycity/company-web test` | 18 arquivos, **66** testes (eram 63) |
+| build de produção do Company Web | aprovado, `/` e `/pedidos` seguem estáticas |
+| E2E de busca com a correção revertida | os 2 testes novos **falharam**, como esperado |
+
+O teste da busca foi rodado contra o código antigo antes de ser aceito: sem a
+correção, procurar por "aparecida" e pelo telefone com máscara não acha nada.
+
+### Continua aberto
+
+Da análise, sem correção nesta rodada: **avisos ativos** para a empresa — o
+realtime só faz refresh do painel, e ninguém avisa "seu pedido está há 25 minutos
+sem motoboy" ou "a entrega deu problema"; **observação permanente do cliente**,
+hoje redigitada em todo pedido; e importação por CSV, descartada por decisão do
+responsável.

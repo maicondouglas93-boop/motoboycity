@@ -142,6 +142,17 @@ bloqueado por ele.
 Isto é um *padrão a vigiar*, não um bug resolvido: qualquer dado novo que a
 criação aceite frouxo e a conclusão exija rígido reproduz a família inteira.
 
+**O endereço salvo do cliente carrega coordenada, e é aí que ela deve nascer.**
+O painel resolve pelo Google Places, que só devolve resultado com ponto; a API
+geocodifica como rede de segurança quando a coordenada não vem, para nenhum
+outro cliente da API conseguir gravar um endereço sem ela. Falha do Google não
+impede o cadastro — a agenda de clientes não pode depender dele estar de pé, e
+quem decide se a coordenada faz falta é a regra de proximidade, na entrega.
+`deliveryAddressInputSchema`, reusado pelo endereço de cliente, aceita
+`lat`/`lng` opcionais e **pareados**, e `resolverCoordenadaDoDestino` usa o que
+vier em vez de geocodificar de novo: o endereço já conferido uma vez não volta a
+depender do Google a cada pedido.
+
 ## 5. Onde o dinheiro passa
 
 **Todo preço sai de `PricingService.quote()`.** Não existe cálculo de valor fora

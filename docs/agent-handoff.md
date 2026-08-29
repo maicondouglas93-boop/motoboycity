@@ -67,11 +67,11 @@ conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
 aiqfome (importação e ciclo logístico).
 
-**No worktree, ainda não publicado:** bloqueio seletivo motoboy × empresa pelo
-detalhe do entregador no ADM. O vínculo é persistente e auditado; filtra despacho
-automático, reoferta, vitrine, aceite e reatribuição, solta oferta pendente da
-empresa escolhida e preserva entregas já em andamento. A migration aditiva é
-`20260829120000_driver_company_blocks`.
+Também está publicado o bloqueio seletivo motoboy × empresa pelo detalhe do
+entregador no ADM (commit `8c3edfd`). O vínculo é persistente e auditado; filtra
+despacho automático, reoferta, vitrine, aceite e reatribuição, solta oferta
+pendente da empresa escolhida e preserva entregas já em andamento. A migration
+aditiva é `20260829120000_driver_company_blocks`.
 
 O `README.md` descreve uma "Fase 0" que não corresponde à implementação. **Não
 use o README como fonte de verdade.**
@@ -150,8 +150,8 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **82 suítes / 1006** testes unitários da API, **25 / 152** do
-Driver App, **17 arquivos / 63** da Company Web, **25 / 243** E2E.
+Cobertura atual: **82 suítes / 1009** testes unitários da API, **25 / 152** do
+Driver App, **18 arquivos / 66** da Company Web, **25 / 247** E2E.
 
 ### E2E
 
@@ -161,6 +161,14 @@ num teste qualquer, longe da causa.
 
 `delivery-lifecycle` depende do estado do banco: se um run anterior abortou,
 apague `platform_settings` antes de repetir.
+
+**O banco de E2E pode ficar para trás de uma migration.** Já aconteceu: um
+recorte publicado em paralelo criou `driver_company_blocks`, o
+`motoboycity_e2e_local` não acompanhou, e a suíte passou a dar 500 em toda
+criação de pedido — sintoma longe da causa. Antes de investigar uma quebra
+estranha, confira se a tabela nova existe lá. O CLI do Prisma ignora
+`DATABASE_URL` da linha de comando, então aplique com
+`prisma db execute --url` e registre a linha em `_prisma_migrations`.
 
 ### Armadilhas do ambiente
 
