@@ -2902,11 +2902,26 @@ export class DeliveriesService {
         error instanceof GoogleMapsApiError && error.message.includes('sem rota válida');
       if (!noRoute) throw error;
 
+      const origin = await this.googleMapsService.geocode(originAddress);
+      if (origin) {
+        try {
+          return await this.googleMapsService.getDistance({
+            origin,
+            destination: { lat, lng },
+          });
+        } catch (coordinateError) {
+          const stillNoRoute =
+            coordinateError instanceof GoogleMapsApiError &&
+            coordinateError.message.includes('sem rota válida');
+          if (!stillNoRoute) throw coordinateError;
+        }
+      }
+
       const destination = await this.googleMapsService.reverseGeocode({ lat, lng });
       if (!destination?.street || !destination.city || !destination.state) throw error;
 
       return this.googleMapsService.getDistance({
-        origin: { address: originAddress },
+        origin: origin ?? { address: originAddress },
         destination: {
           address: this.formatAddress({
             street: destination.street,

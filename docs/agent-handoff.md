@@ -9853,3 +9853,9 @@ pos-coleta com destino definido no local.
 
 Validacoes do hotfix: 139 testes focados de deliveries e build da API
 aprovados. O hotfix e somente de servidor e nao exige outro APK.
+
+Um retry real depois desse deploy mostrou que normalizar apenas o destino ainda
+era insuficiente. A Routes API agora tenta tambem a origem da empresa
+geocodificada como coordenada antes do fallback pelo endereco do destino. A
+distancia continua obrigatoriamente vindo da Routes API. Validacoes: 110 testes
+do `DeliveriesService` e build da API aprovados; nenhum novo APK e necessario.

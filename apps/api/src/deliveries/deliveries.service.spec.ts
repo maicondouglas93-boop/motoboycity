@@ -150,7 +150,7 @@ describe('DeliveriesService', () => {
     $transaction: jest.Mock;
   };
   let pricingService: { quote: jest.Mock };
-  let googleMapsService: { getDistance: jest.Mock; reverseGeocode: jest.Mock };
+  let googleMapsService: { getDistance: jest.Mock; geocode: jest.Mock; reverseGeocode: jest.Mock };
   let dispatchService: {
     assertConfigured: jest.Mock;
     dispatchDelivery: jest.Mock;
@@ -211,6 +211,7 @@ describe('DeliveriesService', () => {
     pricingService = { quote: jest.fn() };
     googleMapsService = {
       getDistance: jest.fn(),
+      geocode: jest.fn().mockResolvedValue(null),
       reverseGeocode: jest.fn().mockResolvedValue(null),
     };
     dispatchService = {
@@ -2369,6 +2370,43 @@ describe('DeliveriesService', () => {
           platformValue: 3,
         }),
       });
+    });
+
+    it('repete a rota com a origem geocodificada quando o endereco de origem nao gera rota', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          serviceType: { name: 'Moto' },
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance
+        .mockRejectedValueOnce(new GoogleMapsApiError('Resposta da API sem rota válida.'))
+        .mockResolvedValueOnce({ distanceKm: 8, durationMinutes: 25 });
+      googleMapsService.geocode.mockResolvedValue({ lat: -20.151, lng: -41.615 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 12,
+        subtotal: 17,
+        returnValue: 0,
+        totalValue: 17,
+        driverValue: 14,
+        platformValue: 3,
+      });
+
+      await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+      expect(googleMapsService.getDistance).toHaveBeenNthCalledWith(2, {
+        origin: { lat: -20.151, lng: -41.615 },
+        destination: { lat: -20.15, lng: -41.74 },
+      });
+      expect(googleMapsService.reverseGeocode).not.toHaveBeenCalled();
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ distanceKm: 8 }) }),
+      );
     });
 
     it('repete a rota pelo endereco identificado pelo Google quando o GPS nao gera rota', async () => {
