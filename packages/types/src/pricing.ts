@@ -87,26 +87,31 @@ export interface PlatformSettingsItem {
 
 /**
  * Espelha `updatePlatformSettingsSchema`: atualização parcial, ao menos um
- * campo. Não aceita `null` — limpar um valor já configurado não é uma
- * operação suportada, já que isso pararia a operação da plataforma.
+ * campo. Campo ausente mantém o valor atual.
+ *
+ * `null` DESLIGA a regra, e só é aceito onde o nulo já é um estado válido do
+ * domínio: os três raios, o prazo de coleta e o teto de entregas simultâneas.
+ * O tempo de resposta da oferta e a comissão continuam sem essa opção — ali o
+ * nulo congelaria o despacho e impediria precificar, que era a razão original
+ * de nenhum campo aceitar null. A razão valia para esses dois, não para todos.
  */
 export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
   businessHoursEnabled?: boolean;
   dispatchOfferTimeoutSeconds?: number;
   aiqfomeDispatchDelayMinutes?: number;
-  pickupAssignmentTimeoutMinutes?: number;
-  collectionProximityRadiusMeters?: number;
-  returnProximityRadiusMeters?: number;
+  pickupAssignmentTimeoutMinutes?: number | null;
+  collectionProximityRadiusMeters?: number | null;
+  returnProximityRadiusMeters?: number | null;
   minMinutesBeforeCollect?: number;
   minMinutesBeforeDeliver?: number;
   locationSilenceAlertMinutes?: number;
   slaAlertMinutesToAccept?: number;
   slaAlertMinutesToCollect?: number;
   slaAlertMinutesToDeliver?: number;
-  maxConcurrentDeliveriesPerDriver?: number;
+  maxConcurrentDeliveriesPerDriver?: number | null;
   maxDeliveriesPerBatch?: number;
-  deliveryProximityRadiusMeters?: number;
+  deliveryProximityRadiusMeters?: number | null;
   driverPunishmentEnabled?: boolean;
   driverPunishmentTrigger?: DriverPunishmentTrigger;
   driverPunishmentOfferCount?: number;

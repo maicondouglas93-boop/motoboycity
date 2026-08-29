@@ -6,6 +6,20 @@ const slaMinutesSchema = z
   .min(1, 'O limite de alerta deve ser de pelo menos 1 minuto.')
   .max(480, 'O limite de alerta deve ser de no máximo 480 minutos.');
 
+/**
+ * `null` DESLIGA a regra; ausente mantem o valor atual.
+ *
+ * A distincao existe porque nao havia caminho de volta: uma vez configurado, um
+ * raio nao podia mais ser desligado pelo painel, e campo vazio significava
+ * "mantenha como esta". Numa emergencia — um defeito no aplicativo travando a
+ * conclusao — o administrador ficava sem interruptor e dependia de alguem mexer
+ * no banco.
+ *
+ * So aceitam `null` os campos cujo nulo ja e um estado valido do dominio:
+ * os tres raios, o prazo de coleta e o teto de entregas simultaneas. O tempo de
+ * resposta da oferta e a comissao continuam sem essa opcao — ali o nulo nao
+ * desliga uma regra, congela o despacho e impede precificar.
+ */
 export const updatePlatformSettingsSchema = z
   .object({
     driverCommissionPercentage: z
@@ -30,18 +44,21 @@ export const updatePlatformSettingsSchema = z
       .int('O prazo de coleta deve ser um numero inteiro de minutos.')
       .min(1, 'O prazo de coleta deve ser de pelo menos 1 minuto.')
       .max(480, 'O prazo de coleta deve ser de no maximo 480 minutos.')
+      .nullable()
       .optional(),
     collectionProximityRadiusMeters: z
       .number()
       .int('O raio de coleta deve ser um numero inteiro de metros.')
       .min(50, 'O raio de coleta deve ser de pelo menos 50 metros.')
       .max(5000, 'O raio de coleta deve ser de no maximo 5000 metros.')
+      .nullable()
       .optional(),
     returnProximityRadiusMeters: z
       .number()
       .int('O raio de retorno deve ser um número inteiro de metros.')
       .min(10, 'O raio de retorno deve ser de pelo menos 10 metros.')
       .max(2000, 'O raio de retorno deve ser de no máximo 2000 metros.')
+      .nullable()
       .optional(),
     businessHoursEnabled: z.boolean().optional(),
     /**
@@ -97,6 +114,7 @@ export const updatePlatformSettingsSchema = z
       .int('O limite de entregas simultaneas deve ser um numero inteiro.')
       .min(1, 'O limite de entregas simultaneas deve ser de pelo menos 1.')
       .max(200, 'O limite de entregas simultaneas deve ser de no maximo 200.')
+      .nullable()
       .optional(),
     /**
      * Tamanho maximo do lote que a empresa pode lancar de uma vez.
@@ -121,6 +139,7 @@ export const updatePlatformSettingsSchema = z
       .int('O raio de entrega deve ser um numero inteiro de metros.')
       .min(50, 'O raio de entrega deve ser de pelo menos 50 metros.')
       .max(5000, 'O raio de entrega deve ser de no maximo 5000 metros.')
+      .nullable()
       .optional(),
     /**
      * Punicao automatica por recusa/expiracao de oferta.

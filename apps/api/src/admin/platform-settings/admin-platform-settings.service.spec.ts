@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { updatePlatformSettingsSchema } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPlatformSettingsService } from './admin-platform-settings.service';
@@ -28,6 +29,29 @@ describe('AdminPlatformSettingsService', () => {
     }).compile();
 
     service = module.get(AdminPlatformSettingsService);
+  });
+
+  describe('contrato de desligamento', () => {
+    it.each([
+      { pickupAssignmentTimeoutMinutes: null },
+      { collectionProximityRadiusMeters: null },
+      { returnProximityRadiusMeters: null },
+      { deliveryProximityRadiusMeters: null },
+      { maxConcurrentDeliveriesPerDriver: null },
+    ])('aceita null somente como intencao explicita de desligar: %o', (payload) => {
+      expect(updatePlatformSettingsSchema.safeParse(payload).success).toBe(true);
+    });
+
+    it.each([
+      { dispatchOfferTimeoutSeconds: null },
+      { driverCommissionPercentage: null },
+    ])('continua recusando null em configuracao obrigatoria: %o', (payload) => {
+      expect(updatePlatformSettingsSchema.safeParse(payload).success).toBe(false);
+    });
+
+    it('continua recusando payload vazio', () => {
+      expect(updatePlatformSettingsSchema.safeParse({}).success).toBe(false);
+    });
   });
 
   describe('get', () => {
@@ -149,6 +173,48 @@ describe('AdminPlatformSettingsService', () => {
         updatedBy: { id: 'admin-1', name: 'Admin Um' },
         updatedAt: '2026-01-02T00:00:00.000Z',
       });
+    });
+
+    /**
+     * `null` desliga; ausente mantem. A distincao e o que devolve ao
+     * administrador o interruptor de emergencia: antes, um raio configurado
+     * nao tinha caminho de volta pelo painel, porque campo vazio significava
+     * "mantenha como esta" e o contrato recusava `null`.
+     */
+    it('grava null nos cinco campos desligaveis, sem tocar nos outros', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        returnProximityRadiusMeters: null,
+        collectionProximityRadiusMeters: null,
+        deliveryProximityRadiusMeters: null,
+        pickupAssignmentTimeoutMinutes: null,
+        maxConcurrentDeliveriesPerDriver: null,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      await service.update(
+        {
+          returnProximityRadiusMeters: null,
+          collectionProximityRadiusMeters: null,
+          deliveryProximityRadiusMeters: null,
+          pickupAssignmentTimeoutMinutes: null,
+          maxConcurrentDeliveriesPerDriver: null,
+        },
+        'admin-1',
+      );
+
+      expect(prisma.platformSettings.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: {
+            returnProximityRadiusMeters: null,
+            collectionProximityRadiusMeters: null,
+            deliveryProximityRadiusMeters: null,
+            pickupAssignmentTimeoutMinutes: null,
+            maxConcurrentDeliveriesPerDriver: null,
+            updatedByUserId: 'admin-1',
+          },
+        }),
+      );
     });
 
     it('atualiza só o campo informado (partial update)', async () => {

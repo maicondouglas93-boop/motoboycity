@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Crosshair,
   LoaderCircle,
+  PowerOff,
   RotateCcw,
   Save,
   SlidersHorizontal,
@@ -64,6 +65,23 @@ const BATCH_MAX = 50;
 const DELIVERY_RADIUS_MIN = 50;
 const DELIVERY_RADIUS_MAX = 5000;
 
+const NAO_CONFIGURADO = 'não configurado';
+const DESLIGADO = 'desligado';
+
+/**
+ * As regras que podem ser DESLIGADAS pelo painel.
+ *
+ * Sao exatamente aquelas cujo nulo ja e um estado valido do dominio. Ficam de
+ * fora o tempo de resposta da oferta e a comissao: ali o nulo nao desliga uma
+ * regra, congela o despacho e impede precificar.
+ */
+type CampoDesligavel =
+  | 'collectionProximityRadiusMeters'
+  | 'deliveryProximityRadiusMeters'
+  | 'returnProximityRadiusMeters'
+  | 'pickupAssignmentTimeoutMinutes'
+  | 'maxConcurrentDeliveriesPerDriver';
+
 type SettingFieldProps = {
   id: string;
   label: string;
@@ -74,6 +92,17 @@ type SettingFieldProps = {
   currentValue: string;
   unit: string;
   estado?: EstadoDaConfiguracao;
+  /**
+   * Presente = este campo pode ser DESLIGADO, e nao apenas alterado.
+   *
+   * So aparece onde o nulo e um estado valido da regra. Onde ele pararia a
+   * plataforma — tempo de resposta da oferta, comissao — a opcao nao existe.
+   */
+  desligar?: {
+    marcado: boolean;
+    disponivel: boolean;
+    onToggle: (marcado: boolean) => void;
+  };
 };
 
 function SettingField({
@@ -86,6 +115,7 @@ function SettingField({
   currentValue,
   unit,
   estado = 'definido',
+  desligar,
 }: SettingFieldProps) {
   /**
    * Campo preenchido = alteração pendente.
@@ -94,14 +124,18 @@ function SettingField({
    * nada dizia QUAIS foram preenchidos. Com oito campos, quem se distrai no
    * meio do caminho salva sem saber o que está mandando.
    */
-  const vaiMudar = value.trim().length > 0;
+  const vaiDesligar = desligar?.marcado === true;
+  const vaiMudar = !vaiDesligar && value.trim().length > 0;
+  const podeDesligar = desligar?.disponivel === true;
 
   return (
     <div
       className={`flex min-h-48 flex-col rounded-xl border p-4 transition-colors ${
-        vaiMudar
-          ? 'border-primary/45 bg-primary/[0.04] ring-1 ring-inset ring-primary/15'
-          : 'border-border/70 bg-muted/20 focus-within:border-primary/40 focus-within:bg-primary/[0.025]'
+        vaiDesligar
+          ? 'border-alerta/45 bg-alerta/[0.05] ring-1 ring-inset ring-alerta/20'
+          : vaiMudar
+            ? 'border-primary/45 bg-primary/[0.04] ring-1 ring-inset ring-primary/15'
+            : 'border-border/70 bg-muted/20 focus-within:border-primary/40 focus-within:bg-primary/[0.025]'
       }`}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -118,7 +152,8 @@ function SettingField({
           autoComplete="off"
           aria-describedby={`${id}-description`}
           placeholder={placeholder}
-          value={value}
+          value={vaiDesligar ? '' : value}
+          disabled={vaiDesligar}
           onChange={(event) => onValueChange(event.target.value)}
           className="h-10 bg-background pr-24 text-base"
         />
@@ -127,7 +162,12 @@ function SettingField({
         </span>
       </div>
 
-      {vaiMudar ? (
+      {vaiDesligar ? (
+        <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-alerta">
+          <PowerOff className="size-3.5 shrink-0" aria-hidden="true" />
+          Vai DESLIGAR esta regra — valor atual: {currentValue}
+        </p>
+      ) : vaiMudar ? (
         <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary">
           <ArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
           Vai passar de {currentValue} para {value.trim()} {unit}
@@ -136,6 +176,20 @@ function SettingField({
         <p id={`${id}-description`} className="mt-3 text-xs leading-5 text-muted-foreground">
           {description}
         </p>
+      )}
+
+      {podeDesligar && (
+        <button
+          type="button"
+          onClick={() => desligar?.onToggle(!vaiDesligar)}
+          className={`mt-2 self-start text-xs font-semibold underline underline-offset-2 transition-colors ${
+            vaiDesligar
+              ? 'text-muted-foreground hover:text-admin-deep'
+              : 'text-alerta/90 hover:text-alerta'
+          }`}
+        >
+          {vaiDesligar ? 'Manter ligada' : 'Desligar esta regra'}
+        </button>
       )}
     </div>
   );
@@ -235,6 +289,14 @@ export default function OperationSettingsPage() {
   const [concurrentInput, setConcurrentInput] = useState('');
   const [batchSizeInput, setBatchSizeInput] = useState('');
   const [deliveryRadiusInput, setDeliveryRadiusInput] = useState('');
+  /**
+   * Regras marcadas para DESLIGAR neste salvamento.
+   *
+   * Fica separado dos inputs de texto porque "desligar" nao e um valor: campo
+   * vazio sempre significou "mantenha como esta", e continuar assim e o que
+   * impede desligar uma regra por distracao. O conjunto e a intencao explicita.
+   */
+  const [aDesligar, setADesligar] = useState<Set<CampoDesligavel>>(new Set());
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -244,7 +306,30 @@ export default function OperationSettingsPage() {
     enabled: Boolean(token),
   });
 
+  function alternarDesligar(campo: CampoDesligavel, marcado: boolean) {
+    setADesligar((atual) => {
+      const proximo = new Set(atual);
+      if (marcado) proximo.add(campo);
+      else proximo.delete(campo);
+      return proximo;
+    });
+  }
+
+  /** Monta as props do botao de desligar de um campo. */
+  function controleDeDesligar(campo: CampoDesligavel, disponivel: boolean) {
+    return {
+      marcado: aDesligar.has(campo),
+      disponivel,
+      onToggle: (marcado: boolean) => alternarDesligar(campo, marcado),
+    };
+  }
+
+  function valorParaValidar(campo: CampoDesligavel, valor: string) {
+    return aDesligar.has(campo) ? '' : valor;
+  }
+
   function resetInputs() {
+    setADesligar(new Set());
     setTimeoutInput('');
     setPickupTimeoutInput('');
     setAiqfomeDelayInput('');
@@ -277,22 +362,23 @@ export default function OperationSettingsPage() {
   });
 
   const settings = settingsQuery.data;
-  const hasChanges = [
-    timeoutInput,
-    pickupTimeoutInput,
-    aiqfomeDelayInput,
-    collectionRadiusInput,
-    radiusInput,
-    minCollectInput,
-    minDeliverInput,
-    silenceInput,
-    slaAcceptInput,
-    slaCollectInput,
-    slaDeliverInput,
-    concurrentInput,
-    batchSizeInput,
-    deliveryRadiusInput,
-  ].some((value) => value.trim().length > 0);
+  const hasChanges =
+    [
+      timeoutInput,
+      pickupTimeoutInput,
+      aiqfomeDelayInput,
+      collectionRadiusInput,
+      radiusInput,
+      minCollectInput,
+      minDeliverInput,
+      silenceInput,
+      slaAcceptInput,
+      slaCollectInput,
+      slaDeliverInput,
+      concurrentInput,
+      batchSizeInput,
+      deliveryRadiusInput,
+    ].some((value) => value.trim().length > 0) || aDesligar.size > 0;
 
   function parseField(
     raw: string,
@@ -326,25 +412,25 @@ export default function OperationSettingsPage() {
       TIMEOUT_MAX_SECONDS,
     );
     const pickupTimeout = parseField(
-      pickupTimeoutInput,
+      valorParaValidar('pickupAssignmentTimeoutMinutes', pickupTimeoutInput),
       'O prazo para coletar',
       SLA_MIN_MINUTES,
       SLA_MAX_MINUTES,
     );
     const aiqfomeDelay = parseField(
       aiqfomeDelayInput,
-      'O preparo padrao do aiqfome',
+      'O preparo padrão do aiqfome',
       SLA_MIN_MINUTES,
       SLA_MAX_MINUTES,
     );
     const radius = parseField(
-      radiusInput,
+      valorParaValidar('returnProximityRadiusMeters', radiusInput),
       'O raio de retorno',
       RADIUS_MIN_METERS,
       RADIUS_MAX_METERS,
     );
     const collectionRadius = parseField(
-      collectionRadiusInput,
+      valorParaValidar('collectionProximityRadiusMeters', collectionRadiusInput),
       'O raio para marcar a coleta',
       DELIVERY_RADIUS_MIN,
       DELIVERY_RADIUS_MAX,
@@ -386,7 +472,7 @@ export default function OperationSettingsPage() {
       SLA_MAX_MINUTES,
     );
     const concurrent = parseField(
-      concurrentInput,
+      valorParaValidar('maxConcurrentDeliveriesPerDriver', concurrentInput),
       'O limite de entregas simultâneas',
       CONCURRENT_MIN,
       CONCURRENT_MAX,
@@ -398,7 +484,7 @@ export default function OperationSettingsPage() {
       BATCH_MAX,
     );
     const deliveryRadius = parseField(
-      deliveryRadiusInput,
+      valorParaValidar('deliveryProximityRadiusMeters', deliveryRadiusInput),
       'O raio para concluir a entrega',
       DELIVERY_RADIUS_MIN,
       DELIVERY_RADIUS_MAX,
@@ -438,11 +524,22 @@ export default function OperationSettingsPage() {
       slaDeliver.value === undefined &&
       concurrent.value === undefined &&
       batchSize.value === undefined &&
-      deliveryRadius.value === undefined
+      deliveryRadius.value === undefined &&
+      aDesligar.size === 0
     ) {
       setFormError('Preencha ao menos um dos campos para salvar.');
       return;
     }
+
+    /**
+     * O desligamento vem POR ULTIMO no objeto, de proposito.
+     *
+     * Se alguem marcar "desligar" e ainda deixar um numero digitado no mesmo
+     * campo, a intencao explicita vence o texto esquecido — e nao o contrario.
+     */
+    const desligamentos = Object.fromEntries(
+      [...aDesligar].map((campo) => [campo, null]),
+    ) as Partial<Record<CampoDesligavel, null>>;
 
     updateMutation.mutate({
       ...(timeout.value !== undefined && { dispatchOfferTimeoutSeconds: timeout.value }),
@@ -469,6 +566,7 @@ export default function OperationSettingsPage() {
       ...(deliveryRadius.value !== undefined && {
         deliveryProximityRadiusMeters: deliveryRadius.value,
       }),
+      ...desligamentos,
     });
   }
 
@@ -511,7 +609,8 @@ export default function OperationSettingsPage() {
           </div>
           <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
             Ajuste os limites usados no despacho, no acompanhamento e na conclusão dos pedidos.
-            Campos em branco mantêm o valor atual.
+            Campos em branco mantêm o valor atual; para remover uma trava, use “Desligar esta
+            regra”.
           </p>
         </div>
       </header>
@@ -561,7 +660,7 @@ export default function OperationSettingsPage() {
                   onValueChange={setTimeoutInput}
                   currentValue={
                     settings.dispatchOfferTimeoutSeconds === null
-                      ? 'não configurado'
+                      ? NAO_CONFIGURADO
                       : `${settings.dispatchOfferTimeoutSeconds}s`
                   }
                   estado={settings.dispatchOfferTimeoutSeconds === null ? 'faltando' : 'definido'}
@@ -569,6 +668,10 @@ export default function OperationSettingsPage() {
                 />
                 <SettingField
                   id="pickup-timeout"
+                  desligar={controleDeDesligar(
+                    'pickupAssignmentTimeoutMinutes',
+                    settings.pickupAssignmentTimeoutMinutes !== null,
+                  )}
                   label="Tempo para coletar depois do aceite"
                   placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
                   unit="minutos"
@@ -576,17 +679,17 @@ export default function OperationSettingsPage() {
                   onValueChange={setPickupTimeoutInput}
                   currentValue={
                     settings.pickupAssignmentTimeoutMinutes === null
-                      ? 'não configurado'
+                      ? DESLIGADO
                       : `${settings.pickupAssignmentTimeoutMinutes} min`
                   }
                   estado={
-                    settings.pickupAssignmentTimeoutMinutes === null ? 'faltando' : 'definido'
+                    settings.pickupAssignmentTimeoutMinutes === null ? 'desligado' : 'definido'
                   }
                   description="Ao zerar antes da coleta, o pedido volta para a fila e toca para outro motoboy."
                 />
                 <SettingField
                   id="aiqfome-delay"
-                  label="Preparo padrao dos pedidos aiqfome"
+                  label="Preparo padrão dos pedidos aiqfome"
                   placeholder={`${SLA_MIN_MINUTES} a ${SLA_MAX_MINUTES}`}
                   unit="minutos"
                   value={aiqfomeDelayInput}
@@ -601,6 +704,10 @@ export default function OperationSettingsPage() {
                 />
                 <SettingField
                   id="collection-radius"
+                  desligar={controleDeDesligar(
+                    'collectionProximityRadiusMeters',
+                    settings.collectionProximityRadiusMeters !== null,
+                  )}
                   label="Raio para marcar como coletado"
                   placeholder={`${DELIVERY_RADIUS_MIN} a ${DELIVERY_RADIUS_MAX}`}
                   unit="metros"
@@ -608,16 +715,20 @@ export default function OperationSettingsPage() {
                   onValueChange={setCollectionRadiusInput}
                   currentValue={
                     settings.collectionProximityRadiusMeters === null
-                      ? 'não configurado'
+                      ? DESLIGADO
                       : `${settings.collectionProximityRadiusMeters}m`
                   }
                   estado={
-                    settings.collectionProximityRadiusMeters === null ? 'faltando' : 'definido'
+                    settings.collectionProximityRadiusMeters === null ? 'desligado' : 'definido'
                   }
-                  description="Exige GPS válido e proximidade do endereço principal da empresa para registrar a coleta."
+                  description="Quando o endereço principal tem coordenadas, exige GPS válido e proximidade para registrar a coleta. Sem coordenadas, a coleta é aceita sem essa validação e o ADM é avisado."
                 />
                 <SettingField
                   id="return-radius"
+                  desligar={controleDeDesligar(
+                    'returnProximityRadiusMeters',
+                    settings.returnProximityRadiusMeters !== null,
+                  )}
                   label="Raio para concluir o retorno"
                   placeholder={`${RADIUS_MIN_METERS} a ${RADIUS_MAX_METERS}`}
                   unit="metros"
@@ -625,14 +736,18 @@ export default function OperationSettingsPage() {
                   onValueChange={setRadiusInput}
                   currentValue={
                     settings.returnProximityRadiusMeters === null
-                      ? 'não configurado'
+                      ? DESLIGADO
                       : `${settings.returnProximityRadiusMeters}m`
                   }
-                  estado={settings.returnProximityRadiusMeters === null ? 'faltando' : 'definido'}
-                  description="Exige GPS válido e proximidade do endereço principal da empresa para concluir o retorno."
+                  estado={settings.returnProximityRadiusMeters === null ? 'desligado' : 'definido'}
+                  description="Quando o endereço principal tem coordenadas, exige GPS válido e proximidade para concluir o retorno. Sem coordenadas, o retorno é aceito sem essa validação e o ADM é avisado."
                 />
                 <SettingField
                   id="delivery-radius"
+                  desligar={controleDeDesligar(
+                    'deliveryProximityRadiusMeters',
+                    settings.deliveryProximityRadiusMeters !== null,
+                  )}
                   label="Raio para concluir a entrega"
                   placeholder={`${DELIVERY_RADIUS_MIN} a ${DELIVERY_RADIUS_MAX}`}
                   unit="metros"
@@ -640,11 +755,13 @@ export default function OperationSettingsPage() {
                   onValueChange={setDeliveryRadiusInput}
                   currentValue={
                     settings.deliveryProximityRadiusMeters === null
-                      ? 'não configurado'
+                      ? DESLIGADO
                       : `${settings.deliveryProximityRadiusMeters}m`
                   }
-                  estado={settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'}
-                  description="Exige GPS válido e proximidade do destino. Endereço sem coordenadas precisa ser corrigido antes da conclusão."
+                  estado={
+                    settings.deliveryProximityRadiusMeters === null ? 'desligado' : 'definido'
+                  }
+                  description="Em pedidos com destino conhecido e coordenadas cadastradas, exige GPS válido e proximidade. Sem coordenadas, a conclusão é aceita sem essa validação e o ADM é avisado."
                 />
               </SettingsSection>
 
@@ -754,6 +871,10 @@ export default function OperationSettingsPage() {
               >
                 <SettingField
                   id="max-concurrent"
+                  desligar={controleDeDesligar(
+                    'maxConcurrentDeliveriesPerDriver',
+                    settings.maxConcurrentDeliveriesPerDriver !== null,
+                  )}
                   label="Entregas simultâneas por motoboy"
                   placeholder={`${CONCURRENT_MIN} a ${CONCURRENT_MAX}`}
                   unit="pedidos"
@@ -801,7 +922,7 @@ export default function OperationSettingsPage() {
                     <div>
                       <CardTitle className="text-sm">Configuração atual</CardTitle>
                       <CardDescription className="text-xs">
-                        Valores ativos na operação
+                        Valores ativos e alterações pendentes
                       </CardDescription>
                     </div>
                   </div>
@@ -824,21 +945,25 @@ export default function OperationSettingsPage() {
                       label="Prazo para coletar"
                       value={
                         settings.pickupAssignmentTimeoutMinutes === null
-                          ? 'Não configurado'
+                          ? 'Desligado'
                           : `${settings.pickupAssignmentTimeoutMinutes} min`
                       }
                       estado={
-                        settings.pickupAssignmentTimeoutMinutes === null ? 'faltando' : 'definido'
+                        settings.pickupAssignmentTimeoutMinutes === null ? 'desligado' : 'definido'
                       }
                       pendente={
-                        pickupTimeoutInput.trim() ? `${pickupTimeoutInput.trim()} min` : undefined
+                        aDesligar.has('pickupAssignmentTimeoutMinutes')
+                          ? 'Desligado'
+                          : pickupTimeoutInput.trim()
+                            ? `${pickupTimeoutInput.trim()} min`
+                            : undefined
                       }
                     />
                     <CurrentValueRow
                       label="Preparo aiqfome"
                       value={
                         settings.aiqfomeDispatchDelayMinutes === null
-                          ? 'Nao configurado'
+                          ? 'Não configurado'
                           : `${settings.aiqfomeDispatchDelayMinutes} min`
                       }
                       estado={
@@ -852,44 +977,54 @@ export default function OperationSettingsPage() {
                       label="Raio de coleta"
                       value={
                         settings.collectionProximityRadiusMeters === null
-                          ? 'Não configurado'
+                          ? 'Desligado'
                           : `${settings.collectionProximityRadiusMeters} metros`
                       }
                       estado={
-                        settings.collectionProximityRadiusMeters === null ? 'faltando' : 'definido'
+                        settings.collectionProximityRadiusMeters === null ? 'desligado' : 'definido'
                       }
                       pendente={
-                        collectionRadiusInput.trim()
-                          ? `${collectionRadiusInput.trim()} metros`
-                          : undefined
+                        aDesligar.has('collectionProximityRadiusMeters')
+                          ? 'Desligado'
+                          : collectionRadiusInput.trim()
+                            ? `${collectionRadiusInput.trim()} metros`
+                            : undefined
                       }
                     />
                     <CurrentValueRow
                       label="Raio de retorno"
                       value={
                         settings.returnProximityRadiusMeters === null
-                          ? 'Não configurado'
+                          ? 'Desligado'
                           : `${settings.returnProximityRadiusMeters} metros`
                       }
                       estado={
-                        settings.returnProximityRadiusMeters === null ? 'faltando' : 'definido'
+                        settings.returnProximityRadiusMeters === null ? 'desligado' : 'definido'
                       }
-                      pendente={radiusInput.trim() ? `${radiusInput.trim()} metros` : undefined}
+                      pendente={
+                        aDesligar.has('returnProximityRadiusMeters')
+                          ? 'Desligado'
+                          : radiusInput.trim()
+                            ? `${radiusInput.trim()} metros`
+                            : undefined
+                      }
                     />
                     <CurrentValueRow
                       label="Raio de entrega"
                       value={
                         settings.deliveryProximityRadiusMeters === null
-                          ? 'Não configurado'
+                          ? 'Desligado'
                           : `${settings.deliveryProximityRadiusMeters} metros`
                       }
                       estado={
-                        settings.deliveryProximityRadiusMeters === null ? 'faltando' : 'definido'
+                        settings.deliveryProximityRadiusMeters === null ? 'desligado' : 'definido'
                       }
                       pendente={
-                        deliveryRadiusInput.trim()
-                          ? `${deliveryRadiusInput.trim()} metros`
-                          : undefined
+                        aDesligar.has('deliveryProximityRadiusMeters')
+                          ? 'Desligado'
+                          : deliveryRadiusInput.trim()
+                            ? `${deliveryRadiusInput.trim()} metros`
+                            : undefined
                       }
                     />
                     <CurrentValueRow
@@ -938,15 +1073,35 @@ export default function OperationSettingsPage() {
                       }
                     />
                     <CurrentValueRow
-                      label="Simultâneas / lote"
-                      value={`${settings.maxConcurrentDeliveriesPerDriver ?? 'sem limite'} / ${
-                        settings.maxDeliveriesPerBatch ?? 'sem limite'
-                      }`}
+                      label="Entregas simultâneas"
+                      value={
+                        settings.maxConcurrentDeliveriesPerDriver === null
+                          ? 'Sem limite'
+                          : `${settings.maxConcurrentDeliveriesPerDriver} pedidos`
+                      }
                       estado={
-                        settings.maxConcurrentDeliveriesPerDriver === null &&
-                        settings.maxDeliveriesPerBatch === null
+                        settings.maxConcurrentDeliveriesPerDriver === null
                           ? 'desligado'
                           : 'definido'
+                      }
+                      pendente={
+                        aDesligar.has('maxConcurrentDeliveriesPerDriver')
+                          ? 'Sem limite'
+                          : concurrentInput.trim()
+                            ? `${concurrentInput.trim()} pedidos`
+                            : undefined
+                      }
+                    />
+                    <CurrentValueRow
+                      label="Pedidos por lote"
+                      value={
+                        settings.maxDeliveriesPerBatch === null
+                          ? 'Sem limite'
+                          : `${settings.maxDeliveriesPerBatch} pedidos`
+                      }
+                      estado={settings.maxDeliveriesPerBatch === null ? 'desligado' : 'definido'}
+                      pendente={
+                        batchSizeInput.trim() ? `${batchSizeInput.trim()} pedidos` : undefined
                       }
                     />
                   </dl>
@@ -966,7 +1121,7 @@ export default function OperationSettingsPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">Salvar alterações</CardTitle>
                   <CardDescription className="text-xs leading-5">
-                    Apenas os campos preenchidos serão atualizados.
+                    Somente campos preenchidos e regras marcadas para desligar serão atualizados.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
