@@ -5,7 +5,10 @@
 > `AI_INSTRUCTIONS.md` (protocolo operacional e uso de skills),
 > `docs/ai-agent-guide.md` (fluxo de trabalho, armadilhas conhecidas) e
 > `docs/business-rules.md` (decisoes de negocio confirmadas), alem deste
-> arquivo e de `docs/agent-handoff.md`.
+> arquivo, de `docs/agent-handoff.md` (estado atual) e de
+> `docs/architecture.md` (como o sistema e organizado). O historico de cada
+> recorte fica em `docs/changelog.md` — consulte quando precisar do porque de
+> uma decisao passada, nao como referencia do que vale hoje.
 
 ## Visao geral
 
@@ -38,14 +41,18 @@ Execute E2E somente com PostgreSQL e Redis isolados e configurados. Nao execute 
 
 1. Localize os consumidores antes de alterar um contrato em `packages/*`, uma rota ou um schema Zod.
 2. Faça a menor alteracao que resolva a solicitacao; nao refatore codigo adjacente sem necessidade demonstravel.
-3. O usuario decidiu manter pedidos em lote. Preserve o contrato descrito em `docs/agent-handoff.md`; a migration aditiva foi validada em banco vazio, mas ainda precisa de backup/restore e validacao em copia de staging antes de qualquer aplicacao compartilhada.
+3. O usuario decidiu manter pedidos em lote. Preserve o contrato descrito em `docs/architecture.md`.
 4. Nao altere migrations ja aplicadas. Para schema Prisma, avalie dados, crie migration aditiva e valide rollback antes de aplicar em qualquer ambiente compartilhado.
 5. Nao exponha ou edite `.env`, secrets, `JWT_SECRET` ou `GOOGLE_MAPS_API_KEY` sem autorizacao explicita.
 6. Nao altere contratos de API sem atualizar validacao, service/controller, `api-client`, `types`, clientes e testes no mesmo recorte.
 7. Para dispatch, mantenha operacoes idempotentes e proteja transicoes concorrentes com operacoes condicionais/transacoes.
 8. Nao trate telas que usam `mock-data` como funcionalidade integrada sem confirmar API e fluxo correspondente.
 9. Depois de cada alteracao, execute a menor validacao relevante e informe arquivos modificados, testes e resultados.
-10. Atualize `docs/agent-handoff.md` em toda alteracao funcional, de contrato, infraestrutura ou validacao. Registre decisao, estado atual, limitacoes, arquivos afetados, comandos executados e proximo passo concreto. O documento e a fonte de continuidade para agentes e colaboradores; nao registre secrets ou conteudo de `.env`.
+10. Em toda alteracao funcional, de contrato, infraestrutura ou validacao:
+    acrescente a entrada em `docs/changelog.md` (decisao, motivo, arquivos,
+    comandos e resultado honesto); atualize `docs/agent-handoff.md` apenas no
+    que deixou de ser verdade; e `docs/architecture.md` se a organizacao do
+    sistema mudou. Nao registre secrets nem conteudo de `.env`.
 
 ## Areas criticas
 

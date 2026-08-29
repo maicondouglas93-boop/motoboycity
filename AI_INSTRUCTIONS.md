@@ -10,7 +10,9 @@ Use esta ordem. Se houver conflito, a fonte anterior prevalece:
 
 1. instruções do sistema, do usuário e `AGENTS.md`;
 2. `docs/business-rules.md`, para decisões de negócio confirmadas;
-3. `docs/agent-handoff.md`, para o estado atual da implementação;
+3. `docs/agent-handoff.md`, para o estado atual, e `docs/architecture.md`,
+   para a organização do sistema. O histórico fica em `docs/changelog.md`,
+   que é registro de época e não referência do que vale hoje;
 4. `docs/ai-agent-guide.md`, para o fluxo de trabalho e armadilhas conhecidas;
 5. este protocolo, como complemento operacional.
 
@@ -109,7 +111,8 @@ Não repita localmente a mesma investigação sem motivo demonstrável.
   auditáveis e protegidos contra concorrência.
 - Não trate UI com mock, fallback estático ou estado local como integração real.
 - Preserve mudanças não relacionadas e revise o diff antes de concluir.
-- Atualize `docs/agent-handoff.md` quando houver mudança funcional, de contrato,
+- Registre em `docs/changelog.md` e atualize `docs/agent-handoff.md` e
+  `docs/architecture.md` quando houver mudança funcional, de contrato,
   infraestrutura ou validação, sem registrar secrets.
 - Commit, push, PR e APK exigem pedido explícito para aquela ação. Um pedido
   antigo não concede autorização permanente.

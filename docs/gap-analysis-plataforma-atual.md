@@ -1,5 +1,13 @@
 # Levantamento — o que a plataforma atual tem e o MOTOboyCity não
 
+> **Documento de época — leia com data.** Registra o levantamento de 2026-08-22. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+>
+> **Superado em parte:** a punição de entregadores, listada aqui como ausente,
+> foi implementada em 2026-08-28.
+
 > Atualizado em 2026-08-22. Baseado em navegação **somente leitura** no sistema
 > hoje em produção, feita com autorização do responsável. Nenhum dado pessoal,
 > endereço de cliente, nome de entregador ou valor individual foi copiado para

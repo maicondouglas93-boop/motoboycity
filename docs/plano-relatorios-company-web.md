@@ -1,5 +1,10 @@
 # Plano — melhoria dos relatórios do Company Web
 
+> **Documento de época — leia com data.** Registra o plano de 2026-08-24. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Documento de execução para transformar `/relatorios` em uma central gerencial
 com páginas específicas, dados agregados no servidor e escopo obrigatório na
 empresa do usuário autenticado.

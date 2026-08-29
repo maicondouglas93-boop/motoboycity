@@ -1,5 +1,10 @@
 # Auditoria do aplicativo do motoboy (`apps/driver-app`)
 
+> **Documento de época — leia com data.** Registra o auditoria de 2026-08-24. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Data da revisão: 24/08/2026.
 
 Escopo: as 12 telas do aplicativo Android, os componentes e bibliotecas usados nos fluxos de sessão, presença, ofertas, operação, GPS, carteira e cadastro, os 13 arquivos Kotlin do aplicativo e os serviços da API que definem dispatch, aceite, transições e saque. A revisão encontrou **5 achados de gravidade alta, 4 de gravidade média e 1 de gravidade baixa**. Nenhum código da aplicação foi alterado nesta auditoria.

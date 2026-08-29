@@ -1,5 +1,10 @@
 # Plano de evolução e homologação do aplicativo do motoboy
 
+> **Documento de época — leia com data.** Registra o plano de 2026-08-20. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 > Atualizado em 2026-08-20. Este documento transforma a análise do aplicativo
 > de referência e o estado real do repositório em uma sequência executável.
 > `docs/business-rules.md` continua sendo a fonte de verdade das regras de

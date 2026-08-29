@@ -1,5 +1,10 @@
 # Financeiro — o que falta implementar
 
+> **Documento de época — leia com data.** Registra o plano de 2026-08-24. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Documento de execução, escrito para quem chegar sem contexto. Cada item diz o
 que existe, o que falta e por quê.
 

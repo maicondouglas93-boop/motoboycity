@@ -1,5 +1,10 @@
 # Plano — refatoração da área Financeiro (admin-web)
 
+> **Documento de época — leia com data.** Registra o plano de 2026-08-23. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Documento de execução. Quem implementar não precisa de contexto além daqui.
 
 ---

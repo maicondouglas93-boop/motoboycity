@@ -1,5 +1,13 @@
 # Plano de implementação — agosto/2026
 
+> **Documento de época — leia com data.** Registra o plano de 2026-08-23. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+>
+> **Superado em parte:** a punição de entregadores, classificada aqui como fora
+> de escopo, foi implementada em 2026-08-28.
+
 Este documento é **autossuficiente**. Foi escrito para ser entregue a um agente
 de IA que não participou do levantamento e não tem a conversa anterior. Tudo que
 é necessário para executar está aqui ou apontado por caminho de arquivo.

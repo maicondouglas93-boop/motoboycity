@@ -1,5 +1,10 @@
 # Auditoria do painel da empresa (`apps/company-web`)
 
+> **Documento de época — leia com data.** Registra o auditoria de 2026-08-24. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Data da revisão: 24/08/2026.
 
 Escopo: as 17 rotas do painel da empresa, seus componentes de operação e financeiro, os clientes compartilhados usados por elas e os serviços da API que definem autorização, isolamento, pedidos, faturas, relatórios e rastreamento. A revisão encontrou **2 achados de gravidade alta, 7 de gravidade média e 3 de gravidade baixa**. Nenhum código da aplicação foi alterado nesta auditoria.

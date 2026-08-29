@@ -1,0 +1,10068 @@
+# Changelog de engenharia — MOTOboyCity
+
+> Registro APPEND-ONLY do que foi feito, em ordem cronológica. Cada entrada
+> guarda a decisão, o motivo, os arquivos e as validações daquele recorte.
+>
+> **Este arquivo não descreve o estado atual do sistema.** Para isso use
+> `agent-handoff.md` (o que está valendo hoje) e `architecture.md` (como o
+> sistema é organizado). Uma entrada aqui era verdade na data em que foi
+> escrita; consulte-a como história, não como referência.
+>
+> As entradas até 2026-08-20 vinham de uma seção que era mantida em ordem
+> decrescente. O conteúdo não foi alterado — apenas reordenado para ficar
+> cronológico como o resto.
+
+## 2026-08-13 — P1-02: elegibilidade formal e backfill controlado de modalidades
+
+Implementada a decisao de produto de atribuir modalidades explicitamente pelo
+admin, sem habilitacao em massa dos entregadores existentes. Nao foi criada
+migration: a relacao `DriverServiceType` ja existia no schema e passa a ser
+usada pelo fluxo operacional.
+
+- Novo contrato administrativo `PUT /admin/drivers/:id/service-types` com
+  `{ serviceTypeIds: uuid[] }` (1 a 20 IDs unicos). Ele aceita apenas
+  modalidades existentes e ativas e substitui os vinculos em uma transacao;
+  o primeiro ID informado e marcado como `isPrimary`.
+- `GET /admin/drivers` agora retorna as modalidades atribuidas. O
+  `admin-web` permite selecionar e salvar as modalidades por entregador e
+  identifica explicitamente quem ainda nao recebera ofertas.
+- O dispatch exige que o entregador esteja na mesma `company.regionId`, tenha
+  conta `APPROVED`/`ACTIVE`/`AVAILABLE`, possua **todas** as modalidades dos
+  pedidos de um lote (e que elas ainda estejam ativas) e nao possua entrega em
+  estado operacional `ACCEPTED`, `COLLECTED` ou `DELIVERED`.
+- A consulta escolhe o candidato mais antigo online e a criacao revalida os
+  mesmos criterios na transacao serializavel antes de inserir a oferta. Uma
+  alteracao de conta, modalidade, regiao ou carga entre as duas leituras nao
+  gera oferta.
+- Entregadores antigos sem vinculos nao sao elegiveis ate que um admin os
+  configure no painel. Isso e o backfill controlado; nao ha script que infira
+  ou atribua capacidades automaticamente.
+
+Arquivos principais:
+
+- `packages/validation/src/admin/replace-driver-service-types.schema.ts`;
+- `packages/types/src/driver.ts` e `packages/api-client/src/admin-drivers.ts`;
+- `apps/api/src/admin/drivers/admin-drivers.controller.ts` e
+  `apps/api/src/admin/drivers/admin-drivers.service.ts`;
+- `apps/admin-web/src/app/(app)/entregadores/page.tsx`;
+- `apps/api/src/dispatch/dispatch.service.ts` e os testes correspondentes.
+
+## 2026-08-13 — P1-01: oferta pendente unica sob concorrencia
+
+Implementada a primeira correcao do nucleo operacional de dispatch.
+
+- Nova migration aditiva:
+  `apps/api/prisma/migrations/20260813210000_enforce_one_pending_offer_per_delivery/migration.sql`.
+  Ela falha antes de criar o indice se uma base existente tiver mais de uma
+  oferta `PENDING` para a mesma entrega; esse e o impacto de dados que precisa
+  ser verificado antes do deploy em staging.
+- O indice parcial unico
+  `delivery_offers_one_pending_per_delivery_key` garante no PostgreSQL que
+  cada `deliveryId` tenha no maximo uma oferta `PENDING`.
+- `DispatchService` passou a bloquear as entregas com `FOR UPDATE`, revalidar
+  que todas seguem `AWAITING_DRIVER` e verificar oferta pendente dentro de
+  transacao `Serializable` antes de inserir. Isto sincroniza dispatch com
+  cancelamento e protege lotes como uma unica unidade.
+- Corridas esperadas de banco (`P2002` por unicidade e `P2034` por serializacao)
+  sao tratadas como resultado idempotente: nao ha job ou evento duplicado.
+- Rollback manual da migration: remover apenas o indice parcial. O banco de
+  teste foi descartado apos essa verificacao.
+
+Arquivos principais:
+
+- `apps/api/src/dispatch/dispatch.service.ts`;
+- `apps/api/src/dispatch/dispatch.service.spec.ts`;
+- `apps/api/prisma/migrations/20260813210000_enforce_one_pending_offer_per_delivery/migration.sql`.
+
+## 2026-08-13 — pedidos em lote
+
+Implementado o contrato completo de lote solicitado apos a auditoria P0-01.
+
+Arquivos principais alterados:
+
+- `apps/api/prisma/schema.prisma`;
+- `apps/api/prisma/migrations/20260813195000_add_delivery_batch/migration.sql`;
+- `apps/api/src/deliveries/deliveries.controller.ts`;
+- `apps/api/src/deliveries/deliveries.service.ts`;
+- `apps/api/src/dispatch/dispatch.service.ts`;
+- contratos de `packages/validation`, `packages/types` e `packages/api-client`;
+- `apps/driver-app/src/screens/IncomingOfferScreen.tsx`;
+- testes unitarios de deliveries e dispatch.
+
+O app mobile apenas identifica visualmente a oferta como lote. Ainda nao ha
+tela para criar lote no company-web nem visualizacao detalhada do grupo no app
+ou admin-web.
+
+## 2026-08-16 — E2E de lote/dispatch e correcoes de isolamento de teste
+
+Implementado o item 2 da lista de prioridades (cobertura E2E do lote e do
+dispatch sob concorrencia). No caminho, tres problemas reais e independentes
+foram encontrados e corrigidos — nenhum deles introduzido por este trabalho,
+todos pre-existentes e descobertos por serem bloqueadores diretos da tarefa:
+
+1. **Postgres local (docker-compose) estava com schema desatualizado.** As
+   duas migrations de 2026-08-13 (lote e indice unico de oferta pendente)
+   nunca haviam sido aplicadas no banco de desenvolvimento local — só no Neon
+   (ver secao de staging). Isso fazia `POST /deliveries` retornar 500 em
+   qualquer E2E que tocasse `deliveries.batchId`. Aplicado
+   `prisma migrate deploy` no Postgres local (`docker-compose.yml`,
+   porta 5434); as 2 migrations pendentes foram aplicadas com sucesso.
+2. **`delivery-offers.e2e-spec.ts` estava quebrado pela elegibilidade P1-02.**
+   O motoboy de teste nunca recebia `DriverServiceType`, entao nenhuma oferta
+   era criada e 3 dos 8 testes falhavam. Corrigido adicionando a chamada
+   `PUT /admin/drivers/:id/service-types` no `beforeAll`. Isso expos um
+   segundo problema: os testes de aceite bem-sucedido nunca liberavam o
+   motoboy depois (uma entrega `ACCEPTED` torna o motoboy inelegivel sob
+   P1-02), travando os testes seguintes que dependiam dele — corrigido com um
+   cancelamento por admin apos cada aceite bem-sucedido. Tambem corrigida a
+   ordem de limpeza do `afterAll` (excluir `DriverServiceType` antes de
+   `ServiceType`, por causa da FK).
+3. **Suites de E2E rodando em paralelo corrompiam o estado umas das outras.**
+   `jest --config ./test/jest-e2e.json` sem `--runInBand` roda arquivos de
+   teste em workers paralelos; como `DispatchService` usa checagens globais
+   (ex.: "algum motoboy com oferta pendente em qualquer lugar do banco" em
+   `findNextEligibleDriverId`), dois arquivos de teste manipulando motoboys
+   reais ao mesmo tempo contra o mesmo Postgres/Redis produziam falhas
+   nao-deterministicas (motoboy errado recebendo a oferta, oferta
+   inexistente). Corrigido adicionando `--runInBand` ao script `test:e2e` em
+   `apps/api/package.json` — suite inteira roda serial agora. Validado: 16
+   suites / 110 testes passando de forma repetida com essa flag; sem ela, o
+   mesmo lote de arquivos falhava de forma intermitente.
+
+Arquivos principais:
+
+- `apps/api/test/delivery-batch-dispatch.e2e-spec.ts` (novo);
+- `apps/api/test/delivery-offers.e2e-spec.ts` (corrigido);
+- `apps/api/package.json` (`test:e2e` com `--runInBand`).
+
+Cada teste de lote que nao leva a entrega a um estado terminal (`ACCEPTED`
+por aceite de verdade) fecha o lote via cancelamento por admin no fim —
+necessario porque `driver-presence.service` chama
+`dispatchService.dispatchAvailableDeliveries()` sempre que um motoboy fica
+disponivel, varrendo TODAS as entregas `AWAITING_DRIVER` do banco; um lote
+orfao de um teste anterior pode ser redespachado pro motoboy do teste
+seguinte de forma inesperada.
+
+## 2026-08-16 — Ciclo de entrega (backend) + destino capturado por GPS
+
+Implementado o ciclo pos-aceite completo (item 7 da lista de prioridades) e a
+opcao de pedido/lote sem endereco na criacao, com preco calculado
+retroativamente a partir da localizacao do motoboy na entrega. So backend
+nesta fase — decisao explicita do responsavel, dado que nao existe biblioteca
+de GPS nem tela pos-aceite no driver-app hoje.
+
+Arquivos principais:
+
+- `apps/api/prisma/schema.prisma` e a migration
+  `20260816195435_delivery_lifecycle_gps_deferred_pricing`;
+- `apps/api/src/deliveries/deliveries.service.ts` (`collect`, `markDelivered`,
+  `completeReturn`, fix em `cancel()`, `create`/`createBatch` com o novo
+  ramo sem destino) e `.controller.ts`;
+- `apps/api/src/dispatch/dispatch.service.ts` (payload de oferta com
+  `driverValue`/`distanceKm` nulos quando o destino nao e conhecido —
+  `Number(null)` seria silenciosamente `0`, nao `null`);
+- `apps/api/src/common/haversine.ts` (novo);
+- `apps/api/src/admin/platform-settings/` e
+  `apps/api/src/company/company-address.*` (novos campos);
+- contratos de `packages/validation` (`mark-delivered.schema.ts` e
+  `complete-return.schema.ts`, novos; `create-delivery.schema.ts` e
+  `update-platform-settings.schema.ts` e `upsert-company-address.schema.ts`,
+  editados), `packages/types` e `packages/api-client`;
+- `apps/api/test/delivery-lifecycle.e2e-spec.ts` (novo, 13 testes).
+
+Consumidores de `@motoboycity/types` fora do backend foram checados e
+corrigidos por causa da mudanca de `totalValue`/`driverValue`/`platformValue`
+pra `number | null`: `apps/company-web` (lista de pedidos e mensagem de
+sucesso da criacao) e `apps/admin-web` (lista de pedidos) mostram
+"A calcular na entrega" quando nulo; `apps/driver-app`
+(`IncomingOfferScreen`) mostra "A calcular" no lugar do valor da oferta.
+Nenhuma dessas telas tem UI pra _criar_ um pedido sem destino ainda — so
+passaram a exibir corretamente o caso quando ele existir via API.
+
+## 2026-08-19 — Preco por regiao da empresa (P1-06)
+
+`PricingService.quote()` escolhia a praca sozinho, com
+`region.findFirst({ active: true })` — a primeira regiao ativa numa ordem que o
+Postgres nao garante. Com uma praca cadastrada isso acertava por acidente; na
+segunda, uma empresa passaria a ser cobrada pela tabela de outra cidade,
+silenciosamente e sem erro nenhum. `Company.regionId` ja existia, obrigatorio, e
+era simplesmente ignorado.
+
+Decisao: `regionId` virou parametro **obrigatorio** de `PricingQuoteInput`, e
+nao opcional com fallback. Quem cota precisa dizer de qual praca esta falando;
+assim nao sobra caminho de volta ao palpite e o compilador cobra isso em
+qualquer chamada nova. A regiao informada e conferida (`id` + `active`): praca
+desativada interrompe a cotacao com 409 proprio, em vez de cair para outra —
+cair seria cobrar o cliente por uma tabela que nao e a dele. O erro anterior era
+500 "nenhuma regiao configurada", que descrevia um problema de plataforma.
+
+Os tres pontos de cotacao passaram a informar a praca da empresa dona do pedido:
+criacao individual e em lote via `company.regionId` (que `findCompanyForUser`
+passou a carregar), e `markDelivered` — onde o preco nasce na entrega, no modo
+GPS — via `delivery.company.regionId`, incluido na consulta. Ali importa a praca
+da EMPRESA, nao a de quem entrega: o motoboy pode atender fora da regiao dela.
+
+Sem mudanca de schema e sem migration.
+
+Arquivos: `apps/api/src/pricing/pricing.service.ts`,
+`apps/api/src/pricing/pricing.service.spec.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`.
+
+Validacao: `npx tsc --noEmit` limpo; `npx jest --runInBand` 211/211;
+`npx jest --config test/jest-e2e.json --runInBand` 126/126. Revertendo a selecao
+para a antiga, o teste novo falha (conferido).
+
+## 2026-08-19 — Bloqueio/suspensao com efeito real (P1-03)
+
+`setAccountStatus` so trocava o enum. Na pratica o motoboy suspenso ou bloqueado
+seguia marcado como `AVAILABLE`, com o log de presenca aberto contando tempo
+online, e as ofertas que ja estavam na mao dele ficavam paradas ate expirar
+sozinhas — durante esse tempo o pedido nao ia para mais ninguem, mesmo havendo
+motoboy livre. E o aceite nao olhava `accountStatus`: quem fosse bloqueado
+segurando uma oferta ainda conseguia assumir o pedido.
+
+O que passou a acontecer ao suspender/bloquear:
+
+1. `availability` cai para `UNAVAILABLE` e o `DriverPresenceLog` aberto e
+   fechado, na mesma transacao da troca de status (mesmo caminho de ficar
+   offline);
+2. as ofertas pendentes voltam para a fila via
+   `DispatchService.releasePendingOffersForDriver()`, que reaproveita
+   `handleOfferExpired` — ela ja trata lote, cancela o job de timeout, avisa o
+   app e redespacha, entao nao existe um segundo fluxo para manter em acordo;
+3. o app do motoboy recebe `driver:account-status-changed`, para nao continuar
+   exibindo uma oferta que ja nao e dele.
+
+Reativar devolve o direito de trabalhar, mas **nao** a disponibilidade: ficar
+online e escolha do motoboy, e reativar sozinho o colocaria para receber pedido
+sem ter pedido.
+
+A guarda de aceite entrou em `DeliveryOffersService.findDriverForUser()`, ponto
+unico de aceite e recusa; recusar tambem fica bloqueado, para o motoboy impedido
+nao operar a fila de nenhum lado.
+
+Sem mudanca de schema e sem migration. `AdminDriversModule` passou a importar
+`DispatchModule` e `RealtimeModule`.
+
+Arquivos: `apps/api/src/dispatch/dispatch.service.ts`,
+`apps/api/src/delivery-offers/delivery-offers.service.ts` (+spec),
+`apps/api/src/admin/drivers/admin-drivers.service.ts` (+spec e module).
+
+Validacao: `npx tsc --noEmit` limpo; `npx jest --runInBand` 217/217;
+`npx jest --config test/jest-e2e.json --runInBand` 126/126. Removendo a guarda
+de aceite, os tres testes novos de conta impedida falham (conferido).
+
+**Pendente:** nao ha cobertura e2e do bloqueio ponta a ponta (admin bloqueia →
+oferta volta para a fila → aceite recusado). Os testes acima sao unitarios.
+
+## 2026-08-19 — Seletor de destino no company-web
+
+O modo "destino informado na entrega" existia na API desde 16/08 e nenhuma tela
+alcancava: o formulario de pedido so sabia criar com endereco. A empresa agora
+escolhe entre informar o endereco na criacao (padrao, comportamento de sempre) ou
+deixar o motoboy definir na entrega.
+
+No modo sem destino os campos de endereco somem e o payload **nao** inclui
+`dropoffAddress` — o contrato recusa o pedido se ele vier junto de
+`destinationKnownAtCreation: false`, para nao existir pedido meio definido. A
+validacao do formulario tambem deixa de exigir endereco. Os rotulos dizem a
+consequencia (o pedido fica sem valor ate a entrega), nao o nome do campo.
+
+O padrao continua destino conhecido, para nao mudar sem aviso o que a empresa ja
+conhece.
+
+Cobertura: o modo GPS so tinha prova e2e no LOTE. O caminho que esta tela dispara
+e o pedido INDIVIDUAL, que tinha apenas os dois casos de recusa. Foi adicionado o
+ciclo completo do individual sem destino (nasce sem DROPOFF e sem valor; preco e
+distancia aparecem na entrega por GPS).
+
+Arquivos: `apps/company-web/src/components/orders/create-order-form.tsx`,
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: `tsc --noEmit` do company-web limpo; `next build` limpo; e2e da API
+127/127 (era 126).
+
+**Pendente:** a tela de LOTE no company-web continua nao existindo, entao o modo
+sem destino em lote segue sem interface. O aviso de "sem valor ate a entrega" nao
+aparece na lista de pedidos — la o valor nulo ja e exibido como "a calcular na
+entrega", texto que existia antes desta fase.
+
+## 2026-08-19 — Precisao do GPS nas acoes que valem dinheiro
+
+Preparacao para as telas do driver-app, feita ANTES delas de proposito: o
+contrato aceitava `lat`/`lng` e nada mais, e nesses dois fluxos a coordenada nao e
+informativa. Na entrega sem endereco ela DEFINE destino, distancia e preco; no
+retorno ela decide se o motoboy esta de volta na loja. Sem saber a precisao, o
+servidor nao distinguia um GPS travado no satelite de uma triangulacao de antena
+com centenas de metros de erro — e as duas viravam valor cobrado.
+
+`accuracy` (metros, opcional) entrou nos dois schemas e payloads. O app manda o
+que o aparelho reportar; quem decide se serve e o servico.
+
+Dois criterios, porque protegem coisas diferentes:
+
+- **Entrega sem destino:** `MAX_LOCATION_ACCURACY_METERS` = 100 m, constante em
+  `deliveries.service.ts`. Nao virou campo de `PlatformSettings` de proposito —
+  e piso tecnico de qualidade do dado, nao politica comercial. Ajustavel pelo
+  painel, alguem subiria para 5 km no dia em que o GPS estivesse ruim, e o efeito
+  seria cobrar preco de uma rota inventada.
+- **Fechamento de retorno:** criterio RELATIVO — precisao maior que o proprio
+  `returnProximityRadiusMeters` torna a checagem vazia (raio de 200 m com fix de
+  800 m faz "voltei na loja" ser verdade em qualquer lugar do bairro).
+
+Nos dois casos a acao e recusada sem gravar nada; o motoboy repete com o sinal
+estabilizado.
+
+Arquivos: `packages/validation/src/deliveries/{mark-delivered,complete-return}.schema.ts`,
+`packages/types/src/delivery.ts`, `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: `tsc --noEmit` limpo; unit 217/217; e2e 129/129 (era 127). Removendo as
+duas travas, os dois testes novos falham (conferido).
+
+**Decidido para a proxima fase:** biblioteca de GPS do driver-app sera
+`@react-native-community/geolocation` — o app e RN CLI puro (0.86.2), essa e a
+oficial da comunidade, mantida, e usa o fused provider do Play Services. O fluxo
+precisa so de captura PONTUAL (marcar entregue, fechar retorno): sem rastreamento
+continuo, sem localizacao em segundo plano, sem foreground service. Permissao
+necessaria: `ACCESS_FINE_LOCATION` em uso.
+
+## 2026-08-20 — Ciclo operacional no driver-app
+
+O app agora consome o ciclo de entrega ja existente na API. Depois de aceitar
+uma oferta, ele abre o pedido atribuido e mostra uma acao por estado:
+`ACCEPTED` confirma coleta, `COLLECTED` marca a entrega e `DELIVERED` conclui
+o retorno quando exigido. Pedido sem destino conhecido captura um fix GPS para
+definir o destino e o preco; retorno sempre captura um fix para a validacao de
+proximidade. Pedido com destino conhecido nao envia coordenada desnecessaria.
+
+- Adicionado `@react-native-community/geolocation` (3.x), permissao precisa no
+  Android e texto de permissao no iOS. A captura e pontual, em primeiro plano,
+  com alta precisao, timeout de 20 s e sem rastreamento em segundo plano.
+  Fix marcado pelo sistema como simulado e recusado no app antes da chamada.
+- `GET /deliveries` passou a aceitar motoboy, sempre filtrando por `driverId`
+  no servidor. Isso permite recuperar os pedidos `ACCEPTED`, `COLLECTED` e
+  `DELIVERED` ao reabrir o app; nenhuma entrega de outro motoboy e exposta.
+- Ao concluir um item sem retorno, o app avanca para o proximo pedido ativo,
+  quando existir. Enquanto uma entrega esta operacional, a tela nao permite
+  voltar acidentalmente para a home e perder o acesso a ela.
+- O Jest do app passou a mockar AsyncStorage e geolocalizacao; antes, o unico
+  teste de renderizacao falhava por tentar acessar o modulo nativo real.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/lib/{location,activeDeliveries}.ts` e permissoes nativas.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces;
+`pnpm --filter @motoboycity/driver-app test -- --runInBand` aprovado;
+`pnpm --filter @motoboycity/api exec jest src/deliveries/deliveries.service.spec.ts --runInBand`
+aprovado (46 testes); e E2E focado de ofertas aprovado (8 testes), incluindo
+listagem isolada por motoboy. Lint do driver-app sem erros, com 75 warnings de
+estilos inline/no-void preexistentes ou ja adotados pelo padrao atual.
+
+Limitacao: nao ha mapa, navegacao externa, rastreamento continuo, segundo plano
+ou foreground service neste recorte; isso continua fora do contrato atual de
+captura pontual de GPS.
+
+## 2026-08-20 — Realtime para cancelamento e conta impedida no app
+
+Cancelamento administrativo de entrega ja aceita/coletada/em retorno agora
+notifica o motoboy por `delivery:cancelled`, com todos os IDs do lote afetado.
+O evento e emitido apenas apos a transacao de cancelamento e o app remove esses
+pedidos do estado ativo, informa o motivo e volta para a home. Isso evita manter
+uma tela operacional cujo proximo CTA inevitavelmente falharia em conflito.
+
+O socket do app tambem passou a tratar o evento ja existente
+`driver:account-status-changed`: ao receber `SUSPENDED` ou `BLOCKED`, remove a
+oferta pendente, marca a presenca local como indisponivel e encerra a tela de
+operacao com orientacao para suporte. `ACTIVE` nao muda disponibilidade, como
+define a regra de negocio.
+
+Arquivos: `apps/api/src/deliveries/{deliveries.module,deliveries.service}.ts`,
+`apps/driver-app/src/lib/socket.ts` e `apps/driver-app/src/screens/HomeScreen.tsx`.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces e teste unitario de
+`DeliveriesService` aprovado (46 testes), incluindo emissao para o motorista
+afetado pelo cancelamento.
+
+## 2026-08-20 — Historico e detalhe reais no driver-app
+
+As rotas `History` e `OrderDetail` do app nao usam mais os pedidos e valores
+ficticios de `mockData`. O historico consulta somente entregas `COMPLETED` do
+motoboy autenticado e mostra a soma de `driverValue` como **ganhos por
+entregas**, nao como saldo, carteira ou repasse. O detalhe busca o pedido por
+ID e exibe valores congelados, coleta, destino, empresa e modalidade reais.
+
+`mockData` mantem somente as telas que ainda nao tem backend (carteira,
+perfil/configuracoes); os mocks de historico e detalhe foram removidos para
+nao reaparecerem acidentalmente em producao.
+
+Arquivos: `apps/driver-app/src/screens/{DriverHistoryScreen,DriverOrderDetailScreen}.tsx`,
+`apps/driver-app/App.tsx` e `apps/driver-app/src/lib/mockData.ts`.
+
+Validacao: typecheck e teste do driver-app aprovados. O lint nao tem erros e
+reporta 79 warnings de estilo no app, incluindo estilos inline das telas novas.
+
+Limitacao: `driverValue` e a remuneracao congelada da entrega, mas nao existe
+carteira, credito ou estado de repasse no backend ainda; por isso esta tela nao
+declara pagamento recebido.
+
+## 2026-08-20 — Base financeira real para o motoboy
+
+Ao concluir uma entrega, a mesma transacao que grava `COMPLETED` agora cria um
+`WalletTransaction` `CREDIT_REPASSE` em `PENDING` e soma o valor congelado em
+`Wallet.cachedBlockedBalance`. A chave unica `idempotencyKey` garante que duas
+finalizacoes concorrentes nao gerem dois repasses; a segunda recebe conflito e
+o unico credito confirmado permanece no ledger.
+
+Nova rota autenticada de motorista: `GET /driver/wallet`, com filtros por
+status e periodo, retorna saldo disponivel, saldo a liberar, reserva de saque,
+checagem cache-versus-ledger e extrato com referencia da entrega. O app trocou
+a carteira mockada por essa rota, mostra os tres estados de extrato, permite
+filtrar e abrir o pedido associado. As telas de saque e antecipacao eram apenas
+formularios ficticios; foram removidas da navegacao ate haver as regras e
+operacoes reais.
+
+Migration aditiva aplicada somente no PostgreSQL local:
+`20260820121751_wallet_transaction_idempotency` adiciona
+`wallet_transactions.idempotencyKey` e indice unico. O SQL foi obtido com
+`prisma migrate diff`, pois `prisma migrate dev --create-only` nao pode abrir
+o prompt interativo neste ambiente; o resultado foi inspecionado antes do
+`prisma migrate deploy` local.
+
+Arquivos principais: `apps/api/src/finance/*`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`packages/{types,validation,api-client}/src/finance*`,
+`apps/driver-app/src/screens/DriverWalletScreen.tsx` e a migration acima.
+
+Validacao: `prisma validate`, `prisma migrate status`, `pnpm typecheck`, tres
+suites unitarias de API (50 testes) e `pnpm --filter @motoboycity/api test:e2e`
+(17 suites, 130 testes) aprovados. A e2e cobre o credito pendente no endpoint
+e duas finalizacoes concorrentes gerando exatamente um repasse.
+
+Limitacoes/proximo passo: ainda nao existem as acoes financeiras para liberar
+repasse, solicitar/pagar saque, antecipar ou faturar empresas. Logo o saldo
+disponivel continuara em zero para novos creditos; isso e exibido como
+"a liberar", sem prometer pagamento ao motoboy. A proxima fase deve definir a
+regra de liberacao e ligar faturas/controles auditaveis do admin e da empresa.
+
+## 2026-08-20 — Faturas auditáveis para empresa e administrador
+
+Implementadas rotas reais de fatura: o admin fecha, somente em segunda-feira,
+todas as entregas `COMPLETED`, `BILLED` e ainda sem `invoiceId`, agrupadas por
+empresa. Os valores total, repasse e plataforma são congelados na emissão e os
+pedidos são vinculados condicionalmente na mesma transação para não entrar em
+duas faturas concorrentes. O admin também pode marcar uma fatura `PENDING` ou
+`OVERDUE` como paga de forma manual; a empresa só lista/detalha as próprias
+faturas.
+
+Nova tabela append-only `InvoiceStatusHistory` registra emissão, vencimento
+automático na consulta financeira e confirmação de pagamento, incluindo o
+usuário quando a mudança é humana. Migration aditiva local aplicada:
+`20260820123825_invoice_status_history`.
+
+Rotas: `POST/GET/PATCH /admin/financial/invoices`,
+`GET /company/invoices` e `GET /company/invoices/:id`. Arquivos centrais:
+`apps/api/src/finance/invoice.{service,controller}.ts`, contratos Zod/types e
+a migration acima.
+
+Validação: `prisma validate`, `prisma migrate status`, typecheck da API e E2E
+do ciclo de entrega aprovados (17 testes). A E2E cria repasse, fecha a fatura,
+consulta como empresa e a marca como paga, verificando o histórico
+`PENDING → PAID`.
+
+As telas `company-web/faturas` e `admin-web/faturas` agora usam as rotas reais:
+ambas têm filtro por status/período e detalhe de valores, pedidos e trilha de
+auditoria. O admin fecha o ciclo selecionando uma segunda-feira e confirma o
+pagamento manual no detalhe; a empresa só visualiza, sem qualquer ação de
+cobrança. Builds dos dois Next.js e a suíte E2E completa da API (17 suítes,
+130 testes) foram aprovados após a integração.
+
+Pendente: substituir os detalhes mockados de cliente/entregador no admin por
+dados financeiros reais e ampliar os relatórios por período. Saque, liberação
+de repasse e antecipação ainda não possuem operação financeira.
+
+## 2026-08-20 - detalhes administrativos reais de entregador, cliente e pedido
+
+O painel de detalhe de entregador deixou de usar `mockDriverDetailStats`,
+`mockWalletTransactions` e solicitacoes de saque ficticias. Ele agora consulta
+o cadastro real, os pedidos vinculados e o ledger da carteira, com filtros de
+status para pedidos e de status/periodo para o extrato. Os valores de carteira
+sao sempre derivados do ledger; nao ha botoes para inserir/remover saldo sem
+uma operacao financeira real por tras.
+
+Foram adicionados `GET /admin/drivers/:id` e o detalhe administrativo da
+carteira em `GET /admin/financial/driver-wallets/:driverId`. Este ultimo aceita
+os mesmos filtros de `GET /driver/wallet` (`status`, `from`, `to`, `limit`) e
+retorna o extrato associado ao resumo e a conferencia cache-versus-ledger.
+`GET /deliveries` aceita `driverId` somente para administradores; empresa ou
+motoboy que tentarem ampliar o escopo recebem 403.
+
+O contrato de detalhe de pedido passou a expor status atualizado, metodo de
+pagamento, fatura vinculada, entregador e historico de status. A nova tela
+`admin-web/pedidos/[id]` usa esses dados para navegar entre pedido, entregador
+e fatura e mostra valores congelados, enderecos e auditoria operacional.
+Nenhuma migration foi necessaria.
+
+Arquivos principais: `apps/admin-web/src/app/(app)/{entregadores/[id],pedidos/[id]}`,
+`apps/api/src/{admin/drivers,deliveries,finance}` e contratos em
+`packages/{types,validation,api-client}`.
+
+Validacao: `pnpm typecheck` aprovado nos 8 workspaces; E2E completa da API
+aprovada (17 suites, 130 testes), cobrindo detalhe administrativo de motorista,
+extrato filtrado, isolamento do filtro por entregador e auditoria do pedido.
+
+O detalhe de cliente tambem deixou de usar `mockClientDetailStats`. A tela usa
+o cadastro administrativo de empresa (responsavel, praca, aprovacao), equipe e
+enderecos cadastrados, alem dos pedidos e faturas daquela empresa. O admin pode
+filtrar pedidos por status e faturas por status; os cards financeiros mostram
+somente agregados de entregas/faturas retornados pela API, sem uma carteira
+ficticia. A lista de clientes ganhou o atalho para este detalhe real.
+
+`GET /admin/companies/:id` entrega cadastro, praca, equipe e enderecos.
+`GET /deliveries?companyId=` e `GET /admin/financial/invoices?companyId=`
+permitem recortar pedidos e faturas por empresa somente para administradores;
+a listagem de faturas da propria empresa continua ignorando esse filtro externo
+e mantem o escopo da associacao autenticada. Nenhuma migration foi necessaria.
+
+Arquivos adicionais: `apps/admin-web/src/app/(app)/clientes/{page,[id]/page}.tsx`,
+`apps/api/src/admin/companies/*`, `apps/api/src/finance/invoice.service.ts` e
+os contratos de empresa, fatura e pedidos compartilhados. A E2E completa foi
+executada novamente apos este recorte e permaneceu aprovada (17 suites, 130
+testes), incluindo o detalhe de empresa e os filtros administrativos por
+empresa.
+
+O antigo indice mockado de relatorios foi substituido por
+`GET /admin/reports/operations`. Sem periodo informado, a API usa os ultimos
+30 dias; `from` e `to` restringem o periodo em UTC. O resultado separa
+explicitamente pedidos criados (com distribuicao pelo status atual) de entregas
+concluidas (onde valor total, repasse, receita e ticket medio fazem sentido).
+Tambem agrega empresas, entregadores e modalidades, com links para os detalhes
+de investigacao no painel. O endpoint e exclusivo do admin e foi coberto na
+E2E com uma tentativa de acesso de empresa recebendo 403.
+
+Arquivos adicionais: `apps/api/src/admin/reports/*`,
+`packages/{validation,types,api-client}/src/{admin,report}*` e
+`apps/admin-web/src/app/(app)/relatorios/page.tsx`. Nenhuma migration foi
+necessaria.
+
+O painel da empresa agora tem detalhe de pedido em `company-web/pedidos/[id]`,
+com coleta/destino, status, entregador, fatura e historico real. A lista ganhou
+filtro de status e links de detalhe. O filtro compartilhado de pedidos tambem
+passou a aceitar `from` e `to` pela data de criacao, sempre combinado ao escopo
+autenticado da empresa, entregador ou administrador.
+
+`company-web/indicadores` e `company-web/relatorios` nao usam mais arrays
+mockados: calculam pedidos, valores, cancelamentos, modalidades, distribuicao
+de status e faturas diretamente das APIs. Os dois permitem periodo; o relatorio
+de faturamento ainda filtra o status das faturas e abre os detalhes de pedido e
+fatura. Validacao: typecheck dos 8 workspaces, build de producao do company-web
+e a E2E completa da API (17 suites, 130 testes) aprovados, incluindo o filtro
+de data da empresa. Nenhuma migration foi necessaria.
+
+O dashboard inicial do admin tambem foi refeito com dados reais: pedidos por
+estado operacional, entregas concluidas recentes, primeira fatura pendente ou
+vencida, indicadores financeiros e disponibilidade declarada pelos entregadores.
+`AdminDriverListItem` agora inclui `availability`, que e o estado registrado no
+app - nao uma fila Redis ou rastreamento de mapa, dados que a API nao expoe.
+
+Os dois painéis web nao possuem mais imports de arquivos `mock-data`: foram
+removidos o dashboard administrativo, indicadores/relatorios ficticios da
+empresa, identidades falsas no topo e formularios de integracao sem backend.
+As paginas de integracao agora deixam claro que Aiqfome e o unico escopo e que
+nao ha credencial/webhook implementado; nao simulam salvamento ou ativacao.
+Configuracoes tambem mostra somente as rotas realmente operaveis (modalidades e
+tabelas de preco). Nenhuma migration foi necessaria.
+
+O perfil do driver-app passou a consultar `/auth/me` e mostra nome/e-mail reais;
+os antigos campos editaveis, senha, foto e exclusao foram removidos porque nao
+ha endpoints que executem essas acoes com seguranca. Validacao adicional:
+typecheck completo e o teste do driver-app aprovados.
+
+O menu lateral do driver-app tambem deixou de usar a identidade simulada: ele
+consulta `/auth/me` para mostrar o entregador autenticado e o comando Sair agora
+remove o token persistido e reinicia a navegacao na tela de login. O arquivo
+`src/lib/mockData.ts` foi removido. A tela Ajustes nao mostra mais chaves de
+mapa, sobreposicao, som ou tela sempre ligada, pois esses recursos nao sao
+persistidos nem executados pelo aplicativo; ela explica essa limitacao e aponta
+o seletor de disponibilidade real na tela inicial.
+
+Arquivos: `apps/driver-app/src/components/DrawerMenu.tsx`,
+`apps/driver-app/src/screens/SettingsScreen.tsx` e
+`apps/driver-app/src/navigation/types.ts`. Validacao: Prettier nos tres
+arquivos, `pnpm typecheck`, `pnpm --filter @motoboycity/driver-app test --
+--runInBand`, `pnpm lint` e `git diff --check` aprovados. O lint do driver-app
+termina sem erros e com 52 avisos pre-existentes de estilos inline e `no-void`.
+
+A Home do entregador nao mostra mais um mapa de fase futura nem abas sem dados.
+Ela informa online/offline pelo valor retornado de `GET /driver/presence`, o
+estado da conexao Socket.IO, erro recuperavel de sincronizacao e entregas ativas
+obtidas da API. A cada reconexao do Socket, o app consulta a presenca novamente:
+isso evita continuar exibindo online quando o backend marcou o entregador como
+indisponivel depois de uma queda de conexao. O menu manteve somente carteira,
+historico, perfil e ajustes; escalas, desafios, suporte e listas sem API nao sao
+mais oferecidos como recursos operacionais.
+
+Arquivos: `apps/driver-app/src/screens/HomeScreen.tsx`,
+`apps/driver-app/src/lib/socket.ts` e `apps/driver-app/src/components/DrawerMenu.tsx`.
+Validacao: Prettier, `pnpm typecheck`, `pnpm --filter @motoboycity/driver-app
+test -- --runInBand`, lint do driver-app e `git diff --check` aprovados. O lint
+permanece sem erros e com 48 avisos pre-existentes.
+
+O evento Socket.IO `delivery:offer` foi ampliado para uma decisao operacional
+real: empresa, forma de pagamento, valor total, comissao da plataforma, ganho
+do entregador, distancia e a lista de todos os itens do lote. Cada item inclui
+modalidade, coleta e destino congelados no pedido, seus valores e a exigencia
+de retorno. O app mostra esses dados antes de Aceitar/Recusar. Quando o destino
+e definido somente na entrega, o contrato preserva valores e destino como nulos
+e a UI deixa claro que ambos serao informados/calculados na conclusao; nao usa
+zero ou endereco ficticio.
+
+Arquivos: `packages/types/src/delivery-offer.ts`,
+`apps/api/src/dispatch/dispatch.service.ts`,
+`apps/driver-app/src/screens/IncomingOfferScreen.tsx` e testes de dispatch/
+ciclo de entrega. Nenhuma migration foi necessaria. Validacao: `pnpm typecheck`,
+teste unitario focado de dispatch (37 testes) e E2E completa da API (17 suites,
+130 testes) aprovados; `pnpm lint` e o teste do driver-app tambem aprovados.
+
+A carteira e o historico do entregador passaram a aceitar periodo por data,
+reaproveitando os filtros `from` e `to` ja validados nas APIs de ledger e
+entregas. Ambos validam `AAAA-MM-DD` e ordem das datas no aplicativo, permitem
+limpar o filtro e mantem o link para o detalhe do pedido. A carteira tambem
+inclui transacoes canceladas e esclarece que os saldos sao atuais, enquanto
+somente as linhas do extrato sao filtradas. Erros de periodo nao escondem os
+campos usados para corrigi-los.
+
+Arquivos: `apps/driver-app/src/screens/{DriverWalletScreen,DriverHistoryScreen}.tsx`.
+Validacao: Prettier, `pnpm typecheck`, teste do driver-app, lint do driver-app
+e `git diff --check` aprovados. O lint do app termina sem erros e com 37 avisos
+pre-existentes de estilo inline e `no-void`.
+
+Durante uma entrega ativa, o entregador pode abrir a navegacao externa para a
+coleta (`ACCEPTED`), destino (`COLLECTED`) ou retorno a coleta (`DELIVERED`).
+O link usa coordenadas quando existentes e, caso contrario, o endereco
+estruturado congelado no pedido. Destino ainda indefinido nao mostra atalho de
+rota, evitando sugerir um local inexistente. Arquivo:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`. Validacao: Prettier,
+`pnpm typecheck`, teste e lint do driver-app e `git diff --check` aprovados.
+
+As antigas rotas de "Disponiveis", "Pedidos agendados", "Minhas escalas",
+"Desafios" e "Suporte" tambem foram removidas do registro de navegacao e do
+tipo de rotas. Elas eram telas locais de fase zero, sem endpoint, acao de
+suporte ou contrato operacional correspondente; deixa-las acessiveis criaria
+uma promessa falsa de funcionalidade. O menu ja nao as oferecia e agora nao ha
+rota interna para alcança-las. Arquivos removidos:
+`apps/driver-app/src/screens/{AvailableOrdersScreen,ScheduledOrdersScreen,MyShiftsScreen,ChallengesScreen,SupportScreen}.tsx`
+e `src/components/NotSpecifiedNotice.tsx`; o registro foi atualizado em
+`apps/driver-app/App.tsx` e `src/navigation/types.ts`.
+
+Validacao: Prettier, `pnpm typecheck` (8 workspaces) e teste do driver-app
+aprovados. O lint do app segue sem erros, agora com 24 avisos de estilo
+inline/no-void; `git diff --check` ainda deve ser executado apos o proximo
+bloco de alteracoes.
+
+O painel administrativo tambem deixou de oferecer os atalhos "IAGo", "Lancar
+Pedido" e "Ver mais", que levavam a telas sem fluxo ou itens definidos. As
+duas paginas de fase zero foram removidas e a navegacao agora lista somente
+modulos com dados e operacoes reais. O unico item do menu da conta e `Sair`,
+que limpa o token da sessao e redireciona para `/login`. Arquivos:
+`apps/admin-web/src/components/layout/top-nav.tsx` e remocao de
+`src/app/(app)/{iago,lancar-pedido}/page.tsx`.
+
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/admin-web` aprovados. A exclusao de rotas exigiu regenerar os
+tipos de rota do Next antes da validacao, pois o cache local de desenvolvimento
+mantinha as entradas removidas.
+
+No painel da empresa, o item decorativo `Suporte` e o item `Perfil` sem tela
+foram retirados da barra. `Sair` passou a limpar a sessao do lojista e a
+redirecionar para `/login`, deixando o menu de conta com uma unica operacao
+executavel. Arquivo: `apps/company-web/src/components/layout/top-nav.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/company-web` aprovados.
+
+Na pagina inicial do lojista tambem foi removido o card de "Mapa" marcado como fase
+futura. Ela agora concentra o fluxo existente: consultar/configurar o endereco
+de coleta e lancar pedido, sem representar visualmente uma integracao de mapa
+ou rastreamento que nao existe. Arquivo: `apps/company-web/src/app/(app)/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e novo build de
+producao do `@motoboycity/company-web` aprovados.
+
+`InvoiceService.markPaid()` passou a fazer a transicao financeira de modo
+condicional no banco: tenta `PENDING -> PAID` e `OVERDUE -> PAID`, gravando o
+historico somente quando uma das atualizacoes afetar exatamente uma fatura.
+Uma segunda confirmacao concorrente agora recebe conflito e nao cria uma linha
+`PAID` duplicada nem sobrescreve a origem da transicao. Arquivos:
+`apps/api/src/finance/invoice.service.ts` e
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`.
+
+Validacao: Prettier, E2E focado de ciclo de entrega (17 testes, incluindo duas
+confirmacoes simultaneas de pagamento), `pnpm typecheck` nos 8 workspaces e
+lint da API aprovados.
+
+As tabelas de pedidos dentro do detalhe de fatura, nos paineis administrativo
+e da empresa, agora ligam cada numero ao detalhe do pedido correspondente.
+Isso permite conferir endereco, entregador, transicoes de status e valores
+congelados sem perder o contexto financeiro da fatura. Arquivos:
+`apps/{admin-web,company-web}/src/app/(app)/faturas/[id]/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+dos dois paineis aprovados.
+
+Os filtros financeiros do admin passaram a validar o intervalo antes de chamar
+a API e permitem limpar o periodo aplicado. A listagem de faturas tambem limpa
+status e datas, enquanto a busca de carteiras limpa o texto aplicado. Assim o
+operador nao fica preso a um recorte anterior ou recebe apenas um erro generico
+da consulta para datas invertidas. Arquivos:
+`apps/admin-web/src/app/(app)/{financeiro,faturas}/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+do `@motoboycity/admin-web` aprovados.
+
+As rotas de integracao dos paineis admin e empresa foram removidas porque so
+exibiam um aviso de que Aiqfome, credenciais e webhook ainda nao existem. Sem
+consulta ou operacao real, mante-las no menu contrariava o criterio de nao
+oferecer recursos simulados. O fluxo manual de pedidos continua intacto;
+integracao deve voltar apenas com contrato, armazenamento seguro de credenciais
+e auditoria de webhook ponta a ponta. Arquivos removidos:
+`apps/{admin-web,company-web}/src/app/(app)/integracoes/page.tsx`; a barra da
+empresa foi atualizada em `apps/company-web/src/components/layout/top-nav.tsx`.
+Validacao: Prettier, regeneracao dos tipos de rota, `pnpm typecheck` (8
+workspaces), lint e build de producao dos dois paineis aprovados.
+
+Relatorios e indicadores passaram a usar o mesmo comportamento de filtros do
+financeiro: datas invertidas sao informadas antes da consulta e `Limpar`
+restaura o recorte completo. No relatorio da empresa, o status da fatura agora
+e aplicado junto com o periodo, em vez de disparar uma consulta diferente ao
+alterar somente o seletor. Arquivos:
+`apps/admin-web/src/app/(app)/relatorios/page.tsx` e
+`apps/company-web/src/app/(app)/{relatorios,indicadores}/page.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), lint e build de producao
+dos dois paineis aprovados.
+
+Regressao integrada apos os recortes financeiros e de navegacao: `pnpm --filter
+@motoboycity/api test:e2e` passou com 17 suites e 130 testes; `pnpm lint` da
+raiz passou nos 8 workspaces. O Jest ainda informa o aviso conhecido de handles
+abertos ao encerrar a suite E2E, sem teste pendente ou falha. O lint permanece
+sem erros, com 24 avisos de estilos inline/no-void no driver-app.
+
+O detalhe de pedido do driver-app deixou de mostrar o status fixo "Concluido"
+e passou a consumir todo o detalhe ja retornado pela API: status atual, data de
+criacao e atualizacao, valores total/repasse/comissao/retorno, distancia,
+enderecos e referencia, empresa/modalidade, obrigacao de retorno, cobranca,
+fatura e trilha de transicoes com ator e nota. Os estilos claro/escuro foram
+consolidados em `StyleSheet`, sem avisos inline nessa tela. Arquivo:
+`apps/driver-app/src/screens/DriverOrderDetailScreen.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste do driver-app e
+lint do driver-app aprovados; o lint segue sem erros e agora totaliza 11 avisos
+remanescentes em outros arquivos.
+
+Ao concluir uma entrega no fluxo operacional, o motoboy agora recebe o atalho
+`Ver detalhes e histórico` antes de voltar ao inicio. Ele abre o registro
+detalhado da mesma entrega, preservando a auditoria de status e os valores que
+acabaram de ser calculados. Arquivo:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste e lint do
+driver-app aprovados; o lint continua sem erros e com 11 avisos remanescentes.
+
+Os avisos remanescentes do lint do driver-app foram eliminados sem alterar
+fluxos: estilos condicionais de botao, carregamento, login/cadastro, carteira
+e operacao passaram a usar estilos nomeados. Arquivos:
+`apps/driver-app/{App.tsx,src/components/PrimaryButton.tsx,src/screens/{LoginScreen,RegisterScreen,DriverWalletScreen,DeliveryOperationScreen}.tsx}`.
+Validacao: Prettier, `pnpm typecheck` (8 workspaces), teste e lint do
+driver-app aprovados; lint sem avisos ou erros.
+
+Limitacao operacional importante: o app captura GPS real apenas pontualmente
+para destino indefinido e retorno. Nao ha rastreamento continuo, atualizacao em
+segundo plano, mapa de rota ou notificacao push nativa; o mapa de fase futura
+foi removido da Home para nao aparentar cobertura GPS que nao existe. A proxima
+decisao de produto precisa definir a politica de rastreamento (somente durante
+entrega ativa ou tambem enquanto online), permissao de segundo plano e retencao
+da localizacao antes de implementar esse fluxo.
+
+Limitacao: liberacao de repasse, solicitacao/pagamento de saque e antecipacao
+continuam sem regras ou operacoes implementadas; o painel mostra os estados
+existentes sem inferir que qualquer valor pendente foi pago.
+
+## Atualização — 2026-08-20: ciclo semanal de repasse e saques auditáveis
+
+Decisão de produto confirmada: o crédito do entregador nasce `PENDING` ao
+concluir a entrega e recebe a data da **próxima segunda-feira**. A fila BullMQ
+`finance` agenda a liberação semanal às 00:00 de `America/Sao_Paulo`; na
+inicialização, créditos cuja data já venceu também são liberados de forma
+idempotente. Créditos antigos sem `releaseAt` são incluídos somente no job
+semanal de transição. A entrega concluída numa segunda entra no ciclo seguinte.
+
+O saque é permitido ao motoboy somente na segunda-feira, sem taxa nem valor
+mínimo. A solicitação reserva saldo disponível por meio de um lançamento
+`DEBIT_WITHDRAWAL` pendente. O administrador pode aprovar, marcar como pago
+com referência opcional de comprovante/protocolo, ou rejeitar com motivo
+obrigatório; a rejeição cancela o débito e devolve o saldo. Cada transição
+(`PENDING → APPROVED → PAID` ou `PENDING/APPROVED → REJECTED`) gera uma linha
+append-only de auditoria, com responsável, data e nota. As mutações usam
+transação serializável com retentativa de `P2034` e atualização condicional;
+as corridas de solicitação, aprovação e pagamento não duplicam dinheiro.
+
+Foi criada e aplicada **somente no PostgreSQL local** a migration aditiva
+`20260820173418_withdrawal_request_audit`: adiciona `paymentReference` opcional
+em `withdrawal_requests` e cria `withdrawal_request_status_history` com FKs e
+índice. O SQL foi revisado: não remove nem altera colunas existentes. Não foi
+executada contra staging/Neon.
+
+Principais arquivos:
+
+- `apps/api/src/finance/financial-payout.service.ts`,
+  `financial-payout.processor.ts`, `financial-release.scheduler.ts`,
+  `financial-clock.service.ts` e `finance-release.utils.ts`;
+- `apps/api/src/finance/withdrawal.controller.ts`, `finance.module.ts`,
+  `finance-ledger.service.ts` e `apps/api/src/app.module.ts` (o
+  `FinanceModule` passou a ser registrado no módulo principal; antes disso as
+  rotas financeiras não eram carregadas em execução);
+- contratos em `packages/validation/src/finance/withdrawal.schema.ts`,
+  `packages/types/src/finance.ts` e os clientes financeiros tipados;
+- `apps/driver-app/src/screens/DriverWalletScreen.tsx`: pedido, saldo
+  reservado e linha do tempo de cada saque;
+- `apps/admin-web/src/app/(app)/financeiro/saques/`: fila filtrável e detalhe
+  de pagamento com PIX, referência e auditoria.
+
+Validações desta fase:
+
+| Comando                                                                                    | Resultado                                                                                       |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `pnpm --filter @motoboycity/api exec prisma validate --schema prisma/schema.prisma`        | aprovado antes da migration                                                                     |
+| `pnpm --filter @motoboycity/api exec prisma migrate dev --name withdrawal_request_audit`   | migration aditiva aplicada no Postgres local                                                    |
+| `pnpm --filter @motoboycity/validation build`                                              | aprovado                                                                                        |
+| `pnpm typecheck`                                                                           | aprovado nos 8 workspaces                                                                       |
+| testes unitários focados de `finance-release`, `financial-payout` e `finance-ledger`       | 3 suítes / 7 testes aprovados                                                                   |
+| `apps/api/test/withdrawal-payout.e2e-spec.ts`                                              | 2 testes E2E aprovados: concorrência, aprovação, pagamento, rejeição e saldo derivado conferido |
+| `pnpm --filter @motoboycity/driver-app lint` e `pnpm --filter @motoboycity/admin-web lint` | aprovados                                                                                       |
+| `pnpm --filter @motoboycity/api test:e2e`                                                  | 18 suítes / 132 testes aprovados                                                                |
+| `pnpm lint`                                                                                | aprovado nos 8 workspaces                                                                       |
+| builds de `@motoboycity/admin-web` e `@motoboycity/company-web`                            | aprovados; rotas de saque incluídas no admin                                                    |
+| `git diff --check`                                                                         | aprovado (avisos de CRLF preexistentes no worktree)                                             |
+
+Próximo passo concreto: executar a suíte E2E e os lints completos após esta
+fase; a próxima decisão de produto ainda em aberto é rastreamento GPS contínuo
+durante entrega ativa (permissão, retenção e visibilidade), que não deve ser
+implementado sem essa política explícita.
+
+## Atualização — 2026-08-20: rastreamento GPS contínuo durante entrega ativa
+
+Política de produto confirmada pelo responsável: o rastreamento começa no
+aceite e termina em `COMPLETED`/`CANCELLED`; deve continuar com a tela bloqueada
+ou o aplicativo em segundo plano; admin acompanha todas as entregas ativas e a
+empresa somente as suas; a trajetória bruta é removida após 30 dias; GPS serve
+para acompanhamento, sem alterar status nem aplicar punições automaticamente.
+
+Persistência e contrato:
+
+- Migration aditiva local `20260820175719_delivery_location_tracking` cria
+  `delivery_location_points`, com FKs de pedido/motoboy e índices por
+  entrega/data e data. Foi aplicada **somente no PostgreSQL local** após
+  revisão do SQL; não altera dados nem migrations anteriores.
+- `POST /tracking/driver/deliveries/:deliveryId/points` aceita ponto somente
+  do motoboy atribuído a uma entrega em `ACCEPTED`, `COLLECTED` ou `DELIVERED`.
+  Além do ponto, atualiza a última posição do perfil e emite
+  `delivery:location` para o admin e a empresa dona do pedido.
+- `GET /tracking/active` aplica o escopo no servidor (todas as entregas para
+  admin; empresas ativas do membro para empresa; próprias para motoboy).
+  `GET /tracking/deliveries/:deliveryId` entrega a trajetória por pedido para
+  quem tem acesso. A fila BullMQ `tracking` remove pontos mais antigos que 30
+  dias diariamente às 03:00 de `America/Sao_Paulo` e também na inicialização.
+
+Aplicativo do motoboy:
+
+- Android: `DeliveryLocationTrackingService` é um foreground service visível
+  com atualização GPS por intervalo/distância (20 s / 50 m), enviando os
+  pontos diretamente à API para cada entrega ativa. Inclui permissões precisa,
+  background, foreground-location e notificação.
+- iOS: `LocationTrackingModule` usa Core Location com autorização “Sempre”,
+  `UIBackgroundModes=location`, distância de 50 m e envio direto à API.
+- O app sincroniza o serviço no aceite, na reabertura, após cada transição de
+  status e no cancelamento; para no logout e sem nenhuma entrega ativa. A tela
+  operacional explica o uso e a interrupção automática ao motoboy.
+
+Painéis:
+
+- As listas de pedidos administrativa e da empresa exibem rastreamento ao
+  vivo, com atualização Socket.IO e link da última posição para o mapa. Os
+  detalhes do pedido exibem a última posição e a sequência de pontos
+  disponíveis, deixando explícita a retenção máxima de 30 dias.
+
+Arquivos principais: `apps/api/src/tracking/`,
+`apps/api/src/realtime/realtime.gateway.ts`,
+`apps/driver-app/{android,ios,src/lib/deliveryTracking.ts}`, detalhes/listas de
+`pedidos` dos dois painéis e contratos em `packages/{validation,types,api-client}`.
+
+Validações já executadas nesta fase:
+
+| Comando                                                                       | Resultado                                                          |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `prisma validate` antes da migration                                          | aprovado                                                           |
+| `prisma migrate dev --name delivery_location_tracking`                        | migration aplicada no PostgreSQL local; SQL aditivo revisado       |
+| `pnpm --filter @motoboycity/{validation,api,api-client} typecheck`            | aprovado                                                           |
+| `pnpm --filter @motoboycity/{driver-app,admin-web,company-web,api} typecheck` | aprovado                                                           |
+| `apps/api/src/tracking/delivery-tracking.service.spec.ts`                     | 3 testes aprovados: registro/emissão, escopo de empresa e retenção |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`                   | 1 suíte / 1 teste aprovado                                         |
+| lints específicos de driver, admin, empresa e API                             | aprovados                                                          |
+| `pnpm typecheck`                                                              | aprovado nos 8 workspaces                                          |
+| `pnpm lint`                                                                   | aprovado nos 8 workspaces                                          |
+| `pnpm --filter @motoboycity/api test:e2e`                                     | 18 suítes / 132 testes aprovados                                   |
+| `git diff --check`                                                            | aprovado (somente avisos CRLF já presentes no worktree)            |
+
+Não foi executado build nativo Android/iOS nesta sessão. Antes de publicar,
+validar em dispositivo físico as permissões, a notificação Android e o fluxo
+Core Location em segundo plano; em iOS, encerramento forçado pelo usuário é
+uma limitação do sistema operacional e não pode ser contornado pelo app.
+
+## Atualização — 2026-08-20: centrais operacionais, presença e GPS online
+
+Foram implementadas as centrais operacionais da empresa e do administrador,
+junto com o contrato de presença necessário para que o mapa administrativo
+mostre somente motoboys realmente online. A Home da empresa agora combina
+criação individual ou em lote (2–50 itens), destino conhecido ou capturado na
+entrega, busca, operação ativa/recente e mapa. A Home administrativa passou a
+ser um mapa global filtrável de pedidos e motoboys, com filas operacionais,
+atividade auditável, resumo do item selecionado e cancelamento dentro das
+regras existentes. As rotas reais de clientes, entregadores, financeiro,
+faturas, saques, relatórios e configurações foram preservadas.
+
+### Dados, contratos e segurança operacional
+
+- A migration aditiva `20260820211800_delivery_operational_metadata` cria o
+  enum `CustomerPaymentMethod`, adiciona a `Delivery` os campos opcionais
+  `recipientName`, `recipientPhone`, `externalOrderNumber`, `driverNote` e
+  `customerPaymentMethod`, e cria índice não único por empresa/número externo.
+  Não existe backfill, remoção de coluna ou alteração de migrations antigas.
+- Endereços de criação aceitam `lat/lng` somente em par e com limites
+  geográficos válidos. Dados antigos sem coordenadas continuam aceitos; o
+  formulário novo exige seleção válida do Google em destinos conhecidos.
+- Foram adicionados os contratos tipados `GET /deliveries/operations`,
+  `GET /deliveries/search`, `GET /deliveries/:id/group`,
+  `GET /admin/operations`, `GET /admin/operations/activity` e
+  `GET /admin/operations/deliveries/:id/dispatch-audit`, com escopo de empresa
+  aplicado no servidor. A busca administrativa aceita os filtros globais.
+- Os eventos `delivery:updated` e `admin:activity` agora são estruturados;
+  `driver:location` e `driver:presence` são emitidos somente para a sala de
+  administradores. As ofertas de dispatch permanecem sem os novos dados
+  pessoais do destinatário; esses metadados só aparecem ao motoboy após o
+  aceite.
+- A presença online vive no Redis com TTL de 150 segundos. Ativar
+  `AVAILABLE` exige posição inicial, versão do aplicativo e capacidade
+  `BACKGROUND_V1`; `POST /driver/presence/heartbeat` renova o estado. O
+  reconciliador por minuto fecha o `DriverPresenceLog` expirado e marca o
+  perfil offline. Dispatch e mapa administrativo exigem presença Redis
+  válida. Uma desconexão Socket.IO isolada não encerra outras sessões.
+
+### Aplicativo e interfaces
+
+- O driver-app solicita permissão e posição antes de ficar disponível, faz
+  rollback para offline se o serviço nativo não iniciar e encerra presença e
+  rastreamento em offline, logout ou bloqueio. Sem entrega ativa usa cerca de
+  60 s/100 m; com entrega ativa usa 20 s/50 m e reaproveita o mesmo fix no
+  heartbeat e nos pedidos ativos. Android mantém foreground service e iOS usa
+  Core Location em segundo plano. Os dados do destinatário aparecem na tela
+  operacional somente após o aceite.
+- Os dois painéis usam `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY`, que deve receber
+  uma chave web separada e restrita aos domínios publicados. A central da
+  empresa usa Places Autocomplete e invalida texto digitado que não tenha uma
+  sugestão válida. Detalhes de empresa e admin exibem mapa, lote, tempos por
+  etapa e linha do tempo; o detalhe admin também exibe a auditoria das ofertas.
+
+Principais arquivos afetados: migration e `apps/api/prisma/schema.prisma`;
+`apps/api/src/{deliveries,driver-presence,live-presence,dispatch,realtime}`;
+`apps/api/src/admin/operations`; contratos em
+`packages/{validation,types,api-client}`; componentes em
+`apps/{company-web,admin-web}/src/components/operations`; Homes e detalhes dos
+dois painéis; e rastreamento/presença em `apps/driver-app/{src,android,ios}`.
+
+Validações desta entrega:
+
+| Comando                                                                               | Resultado                                                       |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm typecheck`                                                                      | aprovado nos 8 workspaces                                       |
+| `pnpm lint` e lints específicos de API, painéis e driver-app                          | aprovados                                                       |
+| `pnpm --filter @motoboycity/api test -- --runInBand`                                  | 24 suítes / 235 testes aprovados                                |
+| `pnpm --filter @motoboycity/api test:e2e` com PostgreSQL/Redis temporários e isolados | 18 suítes / 133 testes aprovados; containers removidos ao final |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`                           | 1 suíte / 1 teste aprovado                                      |
+| builds de API, company-web e admin-web                                                | aprovados                                                       |
+| `gradlew.bat :app:compileDebugKotlin`                                                 | aprovado no Android, somente avisos de dependências/depreciação |
+| `prisma validate` e aplicação das 14 migrations em banco vazio isolado                | aprovados                                                       |
+| `git diff --check`                                                                    | aprovado; somente avisos de normalização CRLF do worktree       |
+
+A nova migration foi aplicada no PostgreSQL local e validada também em banco
+vazio isolado. Ela **não foi aplicada nem validada em cópia atual de
+staging/Neon**, e não houve backup/restore de dados reais nesta entrega. Antes
+de qualquer ambiente compartilhado, executar backup, restaurar uma cópia de
+staging, aplicar a migration nessa cópia e validar consultas/rollback.
+
+Também permanecem obrigatórios antes da publicação: teste Android e iOS em
+aparelhos reais (permissão negada, segundo plano, reinício, logout e bloqueio),
+smoke visual dos mapas com chave Google web restrita e sessão com dados reais,
+e coordenação do rollout API/contratos → driver-app → central da empresa →
+exigência de heartbeat/central administrativa. O código já exige GPS para
+`AVAILABLE`; portanto API e app incompatíveis não devem ser publicados em
+ordem invertida. `apps/driver-app/src/lib/appVersion.ts` acompanha por enquanto
+a versão `0.0.1` do pacote e precisa ser atualizado junto com cada release.
+
+## Atualização — 2026-08-20: corte financeiro automático e CI do caminho dourado
+
+Horário confirmado pelo responsável: o fechamento semanal das faturas ocorre
+na segunda-feira às **00:05 de `America/Sao_Paulo`**, cinco minutos após a
+liberação dos repasses. O pagamento da fatura e do saque continua manual e
+auditável, sem gateway.
+
+O scheduler da fila `finance` agora mantém dois jobs idempotentes: repasses às
+00:00 e faturas às 00:05. No boot, além de liberar créditos vencidos, a API
+recupera o último corte de faturas que já deveria ter ocorrido. Se iniciar na
+segunda antes de 00:05, usa o corte da semana anterior; se iniciar depois do
+horário ou em outro dia, recupera a segunda mais recente. O corte usa o
+instante exato de 00:05 no fuso operacional, portanto entregas concluídas
+depois dele ficam para a semana seguinte mesmo em uma recuperação tardia.
+
+`InvoiceService.closeScheduledInvoices()` registra `changedByUserId=null` e
+nota explícita de fechamento automático. O fechamento manual foi preservado,
+mas não aceita antecipação antes do corte. A atualização de `PENDING` para
+`OVERDUE` passou a usar a data civil de São Paulo, evitando vencimento
+antecipado por diferença entre UTC e o fuso operacional. Não houve alteração
+de schema Prisma nem migration nesta fase.
+
+O contrato Zod de faturas agora rejeita datas civis inexistentes, como
+`2026-02-30`, no fechamento, confirmação de pagamento e filtros. Isso impede
+que a normalização automática de `Date` gere número de fatura e auditoria com
+datas divergentes. Payloads e respostas não mudaram; somente entradas antes
+aceitas incorretamente passam a retornar 400.
+
+O E2E de ciclo de entrega foi estendido para provar o caminho dourado sem saldo
+artificial: empresa cria, motoboy aceita/coleta/conclui, o crédito nasce
+`PENDING`, o job o libera, o motoboy solicita o saque, o admin aprova e marca o
+PIX pago, o scheduler fecha a fatura da empresa e o admin confirma o pagamento
+de forma concorrente/idempotente. Ao final, saldos derivados conferem com o
+ledger e as trilhas de saque e fatura permanecem completas.
+
+Foi criado `.github/workflows/ci.yml` com permissão somente de leitura,
+cancelamento de execução obsoleta, PostgreSQL 17 e Redis 7 isolados. O workflow
+aplica as 14 migrations, executa seed de teste, typecheck, lint, testes da API
+e driver-app, E2E e builds da API/company-web/admin-web. Usa Node 22.18 e pnpm
+11.20. O README raiz foi atualizado do texto obsoleto de “Fase 0” para o estado
+real do MVP e seus portões de verificação.
+
+Arquivos principais: `apps/api/src/finance/{finance-release.utils,
+financial-release.scheduler,financial-payout.processor,invoice.service}.ts` e
+seus specs; `apps/api/test/delivery-lifecycle.e2e-spec.ts`;
+`packages/validation/src/finance/invoice.schema.ts`; `.github/workflows/ci.yml`;
+e `README.md`.
+
+Validações executadas:
+
+| Comando                                                           | Resultado                                                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| testes unitários focados do scheduler, processor, datas e faturas | 5 suítes / 12 testes aprovados                                                                                                  |
+| `pnpm --filter @motoboycity/validation build`                     | aprovado                                                                                                                        |
+| `pnpm typecheck`                                                  | aprovado nos 8 workspaces                                                                                                       |
+| `pnpm lint`                                                       | aprovado nos 8 workspaces                                                                                                       |
+| `pnpm --filter @motoboycity/api test -- --runInBand`              | 28 suítes / 244 testes aprovados                                                                                                |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand`       | 1 suíte / 1 teste aprovado                                                                                                      |
+| E2E focado `delivery-lifecycle.e2e-spec.ts`                       | 1 suíte / 17 testes aprovados em PostgreSQL/Redis isolados                                                                      |
+| `pnpm --filter @motoboycity/api test:e2e`                         | 18 suítes / 133 testes aprovados no mesmo ambiente isolado                                                                      |
+| builds de API, company-web e admin-web                            | aprovados                                                                                                                       |
+| `prettier --check .github/workflows/ci.yml`                       | aprovado                                                                                                                        |
+| `pnpm audit --audit-level high`                                   | falhou por 3 alertas altos transitivos conhecidos: dois em `image-size@1.2.1` (Metro) e um em `deepmerge-ts@7.1.5` (Prisma CLI) |
+
+Limitações: o workflow foi validado localmente quanto a formato e todos os
+comandos que ele executa passaram, mas a execução dentro do GitHub Actions só
+ocorrerá depois de commit/push. Build nativo Android/iOS continua fora deste
+workflow e deve ganhar jobs próprios em fase posterior. Nenhum ambiente de
+staging/Neon foi alterado. Próximo passo concreto: publicar esta branch para
+exercitar o CI e, depois, homologar o caminho dourado em staging com aparelho
+real e conferência manual dos valores financeiros.
+
+Risco de dependências: os dois advisories de `image-size` indicam correção em
+`2.0.3`, mas essa versão ainda não está publicada; além disso, a linha 2.x
+removeu a API síncrona atualmente usada pelo Metro 0.84/React Native 0.86. O
+alerta de `deepmerge-ts` chega por `@prisma/config` 6.19.3 e a correção exige
+8.x; override de major não foi aplicado sem validação do Prisma. Os caminhos
+afetados são ferramentas de bundling/configuração, não entrada HTTP da API,
+mas o audit continua vermelho e deve ser acompanhado até existir atualização
+upstream compatível. Não adicionar `pnpm audit` como portão bloqueante do CI
+enquanto não houver versão corrigida instalável; registrar e revisar o risco a
+cada atualização de React Native/Metro e Prisma.
+
+## Atualização — 2026-08-20: auditoria do app de referência e roadmap mobile
+
+O aplicativo de referência instalado em aparelho Android foi navegado em modo
+somente leitura. Foram observados: mapa e lista na Home, disponibilidade
+destacada, modal de oferta, execução da entrega, carteira/extrato, histórico,
+agendamentos, escalas, desafios, suporte e perfil. Nenhum pedido, presença,
+saldo ou perfil da conta de referência foi alterado. Dados pessoais e valores
+vistos durante a análise não foram copiados para o repositório.
+
+A comparação confirmou que o núcleo do MOTOboyCity já está implementado, mas o
+driver-app ainda não é distribuível: `src/lib/config.ts` aponta para
+`http://localhost:3333`, a versão JavaScript `0.0.1` diverge do Android `1.0`,
+o release Android ainda usa assinatura debug, não há mapa móvel nem push nativo
+para ofertas em segundo plano, e a cobertura automatizada do app continua em
+um único smoke test. O build debug atual foi instalado e abriu com Metro em um
+aparelho Android; typecheck, lint e o smoke Jest do driver-app passaram nessa
+verificação. O fluxo autenticado do nosso app não foi executado porque a API
+local não estava ativa, e iOS não foi testado.
+
+Foi criado `docs/driver-app-roadmap.md` com a definição do caminho dourado,
+estado de partida, decisões extraídas da referência, fases, critérios de
+aceite, matriz de testes, rollout, rollback e instruções para retomada. O
+escopo prioritário é: preservar/publicar o checkpoint financeiro/CI atual;
+configurar ambiente, versão e assinatura; evoluir Home/oferta/operação; criar
+push seguro; polir carteira/histórico; homologar o ciclo completo; e publicar
+de forma controlada. Agendamentos, escalas, desafios, chat e antecipação sem
+regra permanecem fora desta versão.
+
+Validação final antes do checkpoint: build de `@motoboycity/validation`,
+`pnpm typecheck` e `pnpm lint` aprovados nos oito workspaces; cinco suítes
+financeiras focadas, com 12 testes, aprovadas; Prettier aprovado no novo roadmap
+e nos demais arquivos do recorte; `git diff --check` aprovado. O arquivo
+histórico `docs/agent-handoff.md` ainda não passa no Prettier quando verificado
+por inteiro por formatação antiga fora deste recorte; ele não foi reformatado
+em massa para evitar um diff não relacionado.
+
+Esta atualização é somente documentação; nenhum código, banco, ambiente ou
+conta foi modificado. Próximo passo concreto: revisar e, mediante pedido
+expresso, commitar/pushar separadamente o recorte financeiro/CI que já está no
+worktree; em seguida iniciar a Fase 1 do roadmap pela configuração de ambiente
+e versionamento do driver-app.
+
+## Atualização — 2026-08-20: pesquisa oficial e plano de integração aiqfome
+
+Foi pesquisada a documentação oficial atual do aiqfome para receber pedidos de
+lojas parceiras e despachá-los aos motoboys do MOTOboyCity. A API V2 é o caminho
+principal recomendado: OAuth 2.0/ID Magalu e tokens são individuais por loja;
+os webhooks V2 são cadastrados por estabelecimento com segredo enviado no
+header `Authorization`; e existem eventos de pedido e endpoints próprios para
+informar os marcos da logística de terceiros. A camada Open Delivery permanece
+como alternativa de compatibilidade/contingência sujeita à homologação. O módulo
+AiqEntrega foi explicitamente excluído, pois ele chama entregadores do próprio
+aiqfome, não a frota do MOTOboyCity.
+
+O plano completo está em `docs/aiqfome-integration-plan.md`, com fontes
+oficiais, escopo, elegibilidade, mapeamento de dados e pagamentos, persistência
+aditiva, OAuth, webhook, filas inbound/outbound, outbox, idempotência,
+observabilidade, interfaces, segurança, fases, testes, homologação, rollout e
+rollback. A integração deve convergir no `DeliveriesService`,
+`PricingService` e `DispatchService` existentes; não haverá segundo fluxo de
+preço, oferta ou financeiro. Pedidos manuais continuam em paralelo.
+
+Decisões ainda obrigatórias antes do schema/código: confirmar com o aiqfome que
+a aplicação pode atuar somente na logística sem assumir o PDV/aceite da loja;
+escolher `ready-order` (recomendado) ou `read-order` como gatilho; definir
+cancelamento externo após aceite/coleta; decidir o piloto somente PREPAID ou
+modelar custódia/conciliação de pagamento offline; definir permissão de conexão
+e retenção dos dados. Essas decisões não foram adicionadas a
+`docs/business-rules.md` porque ainda não foram confirmadas pelo responsável.
+
+Nenhum código, migration, credencial, ambiente ou loja foi alterado. Próximo
+passo concreto: cadastrar Aplicativo de Integração e loja de teste no Portal do
+Desenvolvedor, obter as respostas de homologação acima e registrar as decisões
+antes de implementar a Fase 1.
+
+Validação documental: `pnpm exec prettier --check
+docs/aiqfome-integration-plan.md` e `git diff --check` aprovados. Não foram
+executados typecheck, testes ou builds porque o recorte contém somente
+documentação.
+
+## Atualização — 2026-08-20: runbook de publicação e piloto de rua
+
+Foi criado `docs/go-live-pilot-runbook.md` com o procedimento detalhado para
+publicar um ambiente de piloto, cadastrar e aprovar empresa/motoboy, configurar
+operação e preço, gerar um APK Android assinado, executar o caminho dourado na
+rua, conferir o financeiro, monitorar, interromper e fazer rollback. O runbook
+separa explicitamente um piloto Android privado — possível após fechar os
+portões P0 — de um lançamento público, que ainda não deve ser prometido no
+estado atual.
+
+A inspeção do primeiro GitHub Actions publicado confirmou a causa exata da
+falha: o run `32426789496`, no commit `34d2c5e`, executou
+`jest -- --runInBand`; o Jest interpretou `--runInBand` como padrão e encerrou
+com “No tests found”. Typecheck, lint, migrations e seed haviam passado antes
+disso. Enquanto o workflow não for corrigido e reexecutado, o CI permanece um
+portão vermelho, mesmo não sendo uma falha de regra de negócio. O runbook
+recomenda chamadas inequívocas via `pnpm --filter <pacote> exec jest
+--runInBand` para API e driver-app.
+
+Outros bloqueios objetivos documentados: URL mobile fixa em localhost; versão
+inconsistente e release Android assinado com debug; ausência de push para
+ofertas com app suspenso; falta de homologação física Android/iOS; Redis de
+produção sem suporte atual a URL/usuário/senha/TLS; healthcheck apenas de
+liveness; Socket.IO sem adapter distribuído, exigindo uma réplica no piloto;
+migration mais recente ainda não validada em cópia restaurada de staging; e
+necessidade de completar configuração operacional antes de criar pedidos.
+
+Foram identificadas duas lacunas de interface relevantes para o ensaio. A tela
+`AddressSetupForm` não envia `lat/lng`, embora `complete-return` exija
+coordenadas da coleta; o runbook prioriza corrigir a tela com Places e fornece
+um PUT autenticado provisório somente para piloto. O percentual do motoboy tem
+UI, mas `dispatchOfferTimeoutSeconds` e `returnProximityRadiusMeters` não têm;
+o runbook fornece PATCH autenticado provisório e registra que os dois campos
+precisam entrar no admin antes da abertura pública. Nenhum valor de comissão,
+timeout, raio ou preço foi decidido — os números mostrados são exemplos
+técnicos e continuam dependentes da decisão do responsável.
+
+O caminho de rua começa com dados sintéticos, pagamento PREPAID, destino
+conhecido e sem retorno. Depois de três execuções bem-sucedidas, o runbook
+orienta testar retorno, lote de dois itens, cancelamentos, perda de rede/GPS e
+expiração/recusa com dois motoboys. O ciclo financeiro não deve ser acelerado
+alterando relógio ou banco: no dia do piloto valida-se o crédito pendente; a
+liberação, saque e fatura são conferidos na segunda-feira às 00:00/00:05 de
+`America/Sao_Paulo`, mantendo o E2E isolado como prova com relógio controlado.
+
+Fontes oficiais atuais foram incorporadas para segurança das chaves Google,
+monorepos/variáveis Vercel, deploy/pre-deploy/health/Redis/rede privada
+Railway, assinatura e localização Android, política Google Play, distribuição
+Apple/TestFlight, migrations Neon e orientação de segurança da ANPD.
+
+Esta atualização é somente documentação. Nenhum código, migration, banco,
+segredo, conta, deploy ou dado externo foi alterado. Próximo passo concreto:
+corrigir as duas chamadas Jest em `.github/workflows/ci.yml`, repetir as
+validações e obter CI verde; em seguida executar os portões P0 mobile, Redis,
+pickup/configurações e migration antes de provisionar o piloto.
+
+## Atualização — 2026-08-21: portão P0.1 (CI) corrigido e todos os gates validados
+
+O bug do CI foi reproduzido localmente antes da correção, não apenas assumido a
+partir do log do GitHub. Rodar `pnpm --filter @motoboycity/driver-app test --
+--runInBand` faz o pnpm repassar `jest "--" "--runInBand"`; o Jest trata o que
+vem depois de `--` como posicional, ou seja `testPathPattern`. A saída mostra
+`Pattern: --runInBand - 0 matches` e encerra com "No tests found, exiting with
+code 1". A causa é o `--` extra, não o `--runInBand` em si, e vale para
+qualquer script cujo comando seja apenas `jest` (é o caso de `test` na API e no
+driver-app). `test:e2e` nunca foi afetado porque já embute as flags no próprio
+script e é chamado sem argumentos extras.
+
+Correção aplicada nas três ocorrências do padrão quebrado, não só na do CI:
+
+- `.github/workflows/ci.yml` — passos "API unit tests" e "Driver app tests"
+  agora usam `pnpm --filter <pacote> exec jest --runInBand`;
+- `AGENTS.md` — bloco de comandos (a linha do driver-app também passou a fixar
+  `--runInBand`, antes rodava sem);
+- `README.md` — bloco "Verificação contínua".
+
+### Banco isolado para E2E
+
+Os E2E não tinham ambiente isolado local e o `test/jest-e2e.json` não
+sobrescreve `DATABASE_URL`, então herdariam o banco de desenvolvimento. A
+limpeza dos specs é escopada (`deleteMany` por e-mail/documento/código), mas
+`test/admin-platform-settings.e2e-spec.ts` apaga a linha `platformSettings` de
+id `global` — ou seja, comissão, timeout de oferta e raio de retorno do
+ambiente. Rodar E2E contra o dev destruiria essa configuração.
+
+Foi criado o banco `motoboycity_e2e_local` no mesmo container PostgreSQL do
+`docker-compose`, espelhando o `motoboycity_ci` do workflow. `motoboycity_dev`
+não foi tocado em nenhum momento; a URL de destino é derivada da de dev por
+substituição do nome do banco e o comando aborta se o resultado não contiver
+`motoboycity_e2e_local`. Use override de `DATABASE_URL` na própria chamada, não
+edite `apps/api/.env`. O banco foi mantido para reuso; se for descartado, basta
+recriar com `CREATE DATABASE`, `prisma migrate deploy` e o seed.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                                    | Resultado                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------ |
+| `pnpm --filter @motoboycity/driver-app test -- --runInBand` (forma antiga) | falhou: "No tests found" — bug reproduzido |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`              | 1 suíte, 1 teste aprovado                  |
+| `pnpm --filter @motoboycity/api exec jest --runInBand`                     | 28 suítes, 244 testes aprovados            |
+| `pnpm typecheck`                                                           | aprovado nos 8 workspaces                  |
+| `pnpm lint`                                                                | aprovado nos 8 workspaces                  |
+| `prisma migrate deploy` no `motoboycity_e2e_local` (banco vazio)           | 14 migrations aplicadas                    |
+| `prisma:seed` no `motoboycity_e2e_local`                                   | aprovado                                   |
+| `pnpm --filter @motoboycity/api run test:e2e` no banco isolado             | 18 suítes, 133 testes aprovados            |
+| `pnpm --filter @motoboycity/api run build`                                 | aprovado                                   |
+| `pnpm --filter @motoboycity/company-web run build`                         | aprovado (11 rotas)                        |
+| `pnpm --filter @motoboycity/admin-web run build`                           | aprovado (17 rotas)                        |
+| `pnpm exec prettier --check` nos arquivos do recorte                       | aprovado                                   |
+| `git diff --check`                                                         | aprovado                                   |
+
+Todos os passos do workflow foram exercitados localmente na mesma ordem do CI.
+Os passos posteriores aos testes unitários (E2E e os três builds) nunca tinham
+rodado no GitHub, porque o job morria antes; agora existe evidência local de que
+passam. A contagem de E2E subiu de 126 (2026-08-16) para 133, e a de unitários
+de 210 para 244, refletindo os recortes financeiro e operacional intermediários.
+
+A aplicação das 14 migrations do zero num banco vazio ficou comprovada. Isso
+**não** substitui o item P0.7 do runbook: continua faltando validar a migration
+mais recente contra uma cópia restaurada com dado real, que é um cenário
+diferente de banco vazio.
+
+### Estado e próximo passo
+
+Nenhum código de aplicação, contrato, schema Prisma ou migration foi alterado —
+o recorte é workflow e documentação, mais a criação de um banco local isolado.
+Nenhum secret foi lido, impresso ou versionado; `.env` não foi editado.
+
+O CI só pode ser declarado verde depois de um run real no GitHub. Próximo passo
+concreto: mediante pedido expresso, commitar e pushar este recorte para
+disparar o workflow e confirmar o run verde de ponta a ponta; em seguida seguir
+para o P0.2 (URL da API configurável no driver-app, hoje fixa em
+`http://localhost:3333` em `apps/driver-app/src/lib/config.ts`).
+
+## Atualização — 2026-08-21: portão P0.2 (URL da API configurável no app)
+
+`API_BASE_URL` era a constante `http://localhost:3333` em
+`apps/driver-app/src/lib/config.ts`, o que só funciona com `adb reverse` — na
+rua o telefone tentaria acessar a si mesmo. Agora a URL é resolvida em tempo de
+build por ambiente e congelada no artefato.
+
+### Como funciona
+
+`apps/driver-app/app.env.js` (CommonJS, carregado por `babel.config.js` e
+`metro.config.js`) resolve e valida duas variáveis:
+
+| Variável              | Valores                                       |
+| --------------------- | --------------------------------------------- |
+| `MOTOBOYCITY_APP_ENV` | `development` (padrão), `pilot`, `production` |
+| `MOTOBOYCITY_API_URL` | obrigatória em `pilot`/`production`           |
+
+Um plugin Babel local em `babel.config.js` substitui os identificadores
+`__MOTOBOYCITY_APP_ENV__` e `__MOTOBOYCITY_API_URL__` por literais. Verificado
+na saída compilada: `exports.API_BASE_URL="http://localhost:3333"` em
+development e `"https://api-pilot.exemplo.com"` em pilot.
+
+**Nenhuma dependência nova.** O comentário antigo do `config.ts` registrava a
+decisão de não adotar `react-native-config` só por causa disso; essa decisão
+foi preservada. Também não foi necessário
+`babel-plugin-transform-inline-environment-variables`: o preset
+`@react-native/babel-preset` 0.86.2 não inlina `process.env` (confirmado no
+fonte instalado), mas `babel.config.js` aceita um plugin como função e
+`@babel/core` já era devDependency.
+
+`pilot` e `production` exigem HTTPS e recusam `localhost`, IPs privados
+(10/8, 172.16–31, 192.168/16, 127/8, 169.254/16), `::1`, `0.x` e hosts
+`.local`. A falha é de build, no escopo do módulo, antes de gerar bundle.
+`development` mantém o padrão localhost e aceita override (ex.: `10.0.2.2` no
+emulador). A URL é normalizada sem barra final, porque o `api-client`
+concatena `${baseUrl}/rota`.
+
+### Duas armadilhas encontradas na implementação
+
+1. **Cache do Metro.** A chave de cache do Metro deriva do conteúdo dos
+   arquivos de configuração, não das variáveis de ambiente que eles leem. Sem
+   tratamento, trocar `MOTOBOYCITY_APP_ENV` reaproveitaria transformações em
+   cache e o APK de piloto sairia apontando para localhost — exatamente a falha
+   que este portão existe para impedir. `metro.config.js` agora define
+   `cacheVersion` derivado do ambiente e da URL.
+2. **Lookup por objeto literal no plugin Babel.** A primeira versão usava
+   `constants[path.node.name]`, que para identificadores chamados `toString` ou
+   `constructor` — ambos presentes no fonte do React — retornava o método
+   herdado de `Object.prototype` e tentava inliná-lo como string. Isso quebrava
+   o bundle inteiro, não só um teste. Corrigido com `Map`. O `App.test.tsx`
+   pegou a regressão.
+
+### Arquivos
+
+- `apps/driver-app/app.env.js` (novo) — resolução e validação;
+- `apps/driver-app/babel.config.js` — plugin local de inline;
+- `apps/driver-app/metro.config.js` — `cacheVersion` por ambiente;
+- `apps/driver-app/src/lib/config.ts` — exporta `API_BASE_URL` (nome
+  preservado, os três consumidores não mudaram), `APP_ENV` e `APP_ENV_LABEL`;
+- `apps/driver-app/src/screens/SettingsScreen.tsx` — bloco "Diagnóstico" com
+  ambiente, servidor e versão;
+- `apps/driver-app/__tests__/appEnv.test.js` (novo) — 21 testes.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                          | Resultado                               |
+| ---------------------------------------------------------------- | --------------------------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`    | 2 suítes, 22 testes aprovados           |
+| inline verificado na saída do Babel (development e pilot)        | literal congelado nos dois casos        |
+| build com production + URL vazia / HTTP / localhost / IP privado | falhou nos quatro, com mensagem legível |
+| build com pilot + URL vazia                                      | falhou, como esperado                   |
+| `pnpm typecheck`                                                 | aprovado nos 8 workspaces               |
+| `pnpm lint`                                                      | aprovado nos 8 workspaces               |
+| `pnpm exec prettier --check` nos 6 arquivos do recorte           | aprovado                                |
+
+### Limitações
+
+- O domínio real do piloto **não foi decidido**, então `pilot` não tem URL
+  padrão de propósito: passar `MOTOBOYCITY_API_URL` é obrigatório e a ausência
+  falha o build em vez de cair em localhost silenciosamente.
+- Nenhum APK release foi gerado nem instalado nesta sessão; a verificação do
+  inline foi feita pela saída do Babel, não por build Android. O portão P0.3
+  (versão e assinatura) continua aberto e é pré-requisito para gerar o APK de
+  piloto — `DRIVER_APP_VERSION` segue `0.0.1` contra `versionName "1.0"` no
+  Android, divergência que esta sessão não tocou.
+- iOS não foi verificado.
+
+Próximo passo concreto: P0.3 — alinhar versão visível, `versionName` e
+`versionCode`, e substituir `signingConfigs.debug` no release Android por uma
+chave real fora do repositório, com caminho e senhas injetados por ambiente.
+
+## Atualização — 2026-08-21: portão P0.3 (versão e assinatura Android)
+
+Existiam três versões divergentes: `package.json` `0.0.1`, a constante
+`DRIVER_APP_VERSION` `0.0.1` e o Android com `versionName "1.0"`. E o release
+Android assinava com `signingConfigs.debug`.
+
+### Versão com fonte única
+
+O `version` do `package.json` do driver-app passou a ser a única fonte, hoje
+`0.1.0-pilot.1`. O bundle lê via `resolveAppVersion()` em `app.env.js` e o
+`versionName` do Android lê o mesmo arquivo com `JsonSlurper`. Reaproveitei o
+plugin Babel do P0.2 em vez de criar um segundo mecanismo: `appVersion.ts`
+agora só reexporta o literal inlinado `__MOTOBOYCITY_APP_VERSION__`.
+
+Confirmado nos dois lados: `DRIVER_APP_VERSION="0.1.0-pilot.1"` na saída do
+Babel e `versionName = 0.1.0-pilot.1` consultando o Gradle.
+
+`versionCode` **não** deriva da versão, de propósito: é um inteiro que precisa
+crescer a cada APK e nunca ser reaproveitado, inclusive num rollback, porque o
+Android recusa reinstalar um `versionCode` já usado. Vem de
+`MOTOBOYCITY_VERSION_CODE` (ou da propriedade Gradle `motoboycity.versionCode`),
+com padrão `1` apenas para debug local.
+
+### Assinatura
+
+`signingConfigs.debug` saiu do buildType de release. Existe um `signingConfigs.release`
+que lê `MOTOBOYCITY_KEYSTORE_FILE`, `MOTOBOYCITY_KEYSTORE_PASSWORD`,
+`MOTOBOYCITY_KEY_ALIAS` e `MOTOBOYCITY_KEY_PASSWORD` do ambiente. Um
+`gradle.taskGraph.whenReady` derruba o build de release se faltar qualquer
+variável, se o keystore não existir no caminho informado, ou se o `versionCode`
+não for explícito. A checagem filtra por tarefas de release do próprio módulo,
+então build de debug não é afetado.
+
+O motivo de falhar em vez de avisar: a chave de debug é pública e conhecida, e
+o Android só aceita atualizar um app se a assinatura for a mesma — publicar com
+ela inviabiliza qualquer atualização futura do app.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                       | Resultado                                 |
+| ------------------------------------------------------------- | ----------------------------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 2 suítes, 25 testes aprovados             |
+| versão inlinada conferida na saída do Babel                   | `DRIVER_APP_VERSION="0.1.0-pilot.1"`      |
+| `./gradlew help`                                              | configuração válida, trava não dispara    |
+| `assembleRelease --dry-run` sem variáveis                     | falhou listando as quatro faltantes       |
+| `assembleRelease --dry-run` com keystore inexistente          | falhou apontando o caminho                |
+| `assembleRelease --dry-run` sem `MOTOBOYCITY_VERSION_CODE`    | falhou explicando o inteiro crescente     |
+| `assembleRelease --dry-run` com tudo definido                 | passou a trava                            |
+| `versionName`/`versionCode` consultados via init script       | `0.1.0-pilot.1` / `1` padrão, `7` por env |
+| `pnpm typecheck` e `pnpm lint`                                | aprovados nos 8 workspaces                |
+| `pnpm exec prettier --check` nos arquivos do recorte          | aprovado                                  |
+
+`--dry-run` monta o grafo de tarefas sem compilar, então as travas foram
+exercitadas sem nenhum build nativo real e sem nenhuma chave verdadeira: o
+teste usou um arquivo descartável no scratchpad e valores obviamente fictícios,
+que `--dry-run` nunca chega a usar para assinar.
+
+### Limitações
+
+- **Nenhuma chave de assinatura foi criada.** Isso é deliberado: gerar e
+  guardar a chave de produção é do responsável, não de um agente. Perder essa
+  chave significa nunca mais atualizar o app publicado. O encanamento está
+  pronto e aguarda a chave.
+- **Nenhum APK foi gerado ou instalado.** A verificação foi de configuração
+  (`--dry-run` e consulta de propriedades), não de build real. O primeiro
+  `assembleRelease` de verdade ainda pode revelar problemas de compilação,
+  ProGuard ou empacotamento que este recorte não cobre.
+- `0.1.0-pilot.1` veio do exemplo do runbook; se preferir outra numeração,
+  agora é um campo só no `package.json`.
+- iOS não foi tocado — continua sem tratamento de versão ou assinatura.
+
+Próximo passo concreto: P0.4 — `QueueModule` e `LiveDriverPresenceService` só
+usam `REDIS_HOST`/`REDIS_PORT`, e Redis gerenciado normalmente exige URL,
+usuário, senha e TLS.
+
+## Atualização — 2026-08-21: portão P0.4 (Redis gerenciado)
+
+`QueueModule` e `LiveDriverPresenceService` montavam cada um o seu objeto de
+conexão, ambos lendo só `REDIS_HOST`/`REDIS_PORT`. Isso impede usar qualquer
+Redis gerenciado — eles exigem autenticação e normalmente TLS — e deixava as
+duas conexões livres para divergirem.
+
+### Fonte única
+
+Novo `apps/api/src/common/redis-connection.ts`, seguindo o padrão de
+`common/cors.ts` (função pura sobre `process.env`, com spec ao lado). Os dois
+consumidores passaram a usar `buildRedisConnectionOptions()`, então fila e
+presença não podem mais apontar para Redis diferentes.
+
+Precedência: `REDIS_URL` vence; sem ela, cai em `REDIS_HOST`/`REDIS_PORT` com
+padrão `localhost:6379`. Variáveis aceitas: `REDIS_URL`, `REDIS_HOST`,
+`REDIS_PORT`, `REDIS_USERNAME` (ou `REDISUSER`), `REDIS_PASSWORD` (ou
+`REDISPASSWORD`), `REDIS_TLS` e `REDIS_FAMILY`.
+
+Optei por `process.env` em vez de `ConfigService` porque a função é chamada de
+uma fábrica de módulo e de um construtor de serviço, e o `ConfigModule` é
+global sem `load` próprio — ou seja, `ConfigService` apenas reflete
+`process.env`. Mesmo raciocínio já registrado em `cors.ts`.
+
+Detalhes que evitam falha silenciosa em produção:
+
+- senha percent-encoded na URL é decodificada antes de conectar (um `%40` que
+  deveria ser `@` quebraria a autenticação);
+- host IPv6 vem sem colchetes, que é o que o ioredis espera;
+- índice de banco lido do caminho (`redis://host:6379/2`);
+- `rediss://` liga TLS sem flag separada;
+- porta, protocolo e `REDIS_FAMILY` inválidos falham na inicialização, com
+  mensagem direta, em vez de deixarem a API subir sem fila;
+- `describeRedisTarget()` monta o log de conexão com host, porta, TLS e se há
+  autenticação — nunca usuário, senha ou a URL inteira.
+
+`LiveDriverPresenceService` deixou de injetar `ConfigService` (era usado só
+para o Redis). Nenhum teste instanciava o serviço diretamente, então a mudança
+de construtor não quebrou nada.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                          | Resultado                       |
+| ---------------------------------------------------------------- | ------------------------------- |
+| `pnpm --filter @motoboycity/api exec jest --runInBand`           | 29 suítes, 269 testes aprovados |
+| E2E completo no banco isolado                                    | 18 suítes, 133 testes aprovados |
+| E2E de presença e ofertas com `REDIS_URL` no lugar de host/porta | 2 suítes, 16 testes aprovados   |
+| `pnpm typecheck` e `pnpm lint`                                   | aprovados nos 8 workspaces      |
+| `pnpm exec prettier --check` nos arquivos do recorte             | aprovado                        |
+
+Os unitários subiram de 244 para 269 (25 testes novos). O terceiro item é o
+que importa de verdade: exercita o caminho novo contra um Redis real, não só o
+fallback — sem ele, `REDIS_URL` estaria coberta apenas por teste de unidade.
+
+### Limitações
+
+- **Não foi testado contra um Redis gerenciado real.** A prova de conexão usou
+  `redis://localhost:6379` do `docker-compose`, que valida o parsing e a
+  conexão, mas não exercita TLS real, `rediss://` com certificado de provedor,
+  nem `family: 0` numa rede só-IPv6. Esses três só se provam no provedor
+  escolhido.
+- `apps/api/.env.example` foi atualizado com as variáveis novas; o `.env` local
+  não foi tocado.
+- O workflow de CI continua usando `REDIS_HOST`/`REDIS_PORT`, que segue sendo
+  o caminho de fallback e passou nos E2E.
+
+Próximo passo concreto: P0.5 — `dispatchOfferTimeoutSeconds` e
+`returnProximityRadiusMeters` não têm tela no admin (só o percentual do motoboy
+tem), e os três valores precisam ser decididos pelo responsável antes do
+piloto.
+
+## Atualização — 2026-08-21: portão P0.5 (telas de configuração operacional)
+
+O runbook pedia "implemente os dois campos faltantes no painel". A investigação
+mostrou que a lacuna era maior: **o contrato compartilhado estava mais estreito
+que o backend**.
+
+`updatePlatformSettingsSchema`, o service e o controller já aceitavam e
+devolviam os três campos, mas:
+
+- `PlatformSettingsItem` em `packages/types` declarava só
+  `driverCommissionPercentage`;
+- `adminPlatformSettingsApi.update()` tipava o payload como
+  `{ driverCommissionPercentage: number }`;
+- `AdminPlatformSettingsService` mantinha uma cópia local da interface, com os
+  três campos — foi essa duplicata que permitiu o tipo compartilhado ficar para
+  trás sem ninguém perceber.
+
+### O que mudou
+
+- `packages/types/src/pricing.ts`: `PlatformSettingsItem` ganhou
+  `dispatchOfferTimeoutSeconds` e `returnProximityRadiusMeters`; novo
+  `UpdatePlatformSettingsInput` espelhando o schema Zod (parcial, sem `null` —
+  limpar um valor configurado pararia a operação e não é suportado);
+- `packages/api-client`: `update()` passou a aceitar `UpdatePlatformSettingsInput`;
+- `apps/api`: o service passou a reexportar o tipo de `@motoboycity/types` em
+  vez de manter cópia local, eliminando a origem da divergência;
+- `apps/admin-web`: nova rota `/configuracoes/operacao` com os dois campos, e
+  um card apontando para ela no índice de configurações.
+
+A tela ficou fora de `tabela-de-precos` de propósito: timeout de oferta e raio
+de retorno são operacionais, não de precificação, e o índice de configurações
+já é uma lista de subpáginas.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                              | Resultado                                        |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                                     | aprovado nos 8 workspaces                        |
+| `pnpm lint`                                          | aprovado nos 8 workspaces                        |
+| testes de `platform-settings`                        | 5 testes aprovados                               |
+| `pnpm --filter @motoboycity/admin-web run build`     | aprovado; rota `/configuracoes/operacao` gerada  |
+| smoke no navegador, autenticado                      | tela renderiza os dois estados "não configurado" |
+| validação de faixa no cliente (valor 5, mínimo 10)   | bloqueou com mensagem; nenhum PATCH na rede      |
+| `pnpm exec prettier --check` nos arquivos do recorte | aprovado                                         |
+
+O smoke usou o admin de seed local (credenciais são placeholder público
+versionado em `prisma/seed.ts`) contra a API e o banco de desenvolvimento. O
+token foi descartado depois. **Nenhum valor foi gravado** em
+`PlatformSettings`: os três seguem `null` no banco de dev, porque comissão,
+timeout e raio são decisão do responsável, não do agente.
+
+### Correção de um registro anterior
+
+As atualizações do P0.1 e do P0.4 descrevem os E2E como rodando "contra banco
+isolado". Isso vale para o **PostgreSQL** (`motoboycity_e2e_local`), mas **não
+para o Redis**: nenhum comando sobrescreveu `REDIS_HOST`/`REDIS_PORT`, então os
+E2E usaram o mesmo Redis (db0) do desenvolvimento. Resíduo de presença de
+motoboys de teste ficou visível no widget "Atividade ao Vivo" do admin.
+
+Não é destrutivo — `listActive()` executa `zremrangebyscore` e `get()` remove
+membro cuja chave expirou, então o índice se limpa sozinho na próxima leitura.
+Mas contraria a regra do `AGENTS.md` de rodar E2E só com Redis isolado.
+
+Correção para as próximas execuções: acrescentar um índice de banco separado ao
+comando, agora que `REDIS_URL` existe (P0.4):
+
+```
+DATABASE_URL=<banco isolado> REDIS_URL=redis://localhost:6379/1 pnpm --filter @motoboycity/api run test:e2e
+```
+
+### Limitações
+
+- **O caminho de gravação não foi exercitado pelo navegador**, só a validação
+  que barra antes da rede. A mutação em si está coberta por
+  `admin-platform-settings.e2e-spec.ts` e pelos unitários, incluindo update
+  parcial de cada campo isolado.
+- Os três valores continuam `null`. O piloto não pode criar pedido nem fechar
+  retorno até o responsável decidir e preencher — a tela agora existe, os
+  números não.
+- Nenhum teste automatizado cobre a nova tela; o `admin-web` não tem suíte de
+  componentes, e criar uma está fora deste recorte.
+
+Próximo passo concreto: P0.6 — `AddressSetupForm` no company-web não envia
+`lat/lng`, embora `complete-return` exija coordenadas da coleta.
+
+## Atualização — 2026-08-21: portão P0.6 (coordenadas da coleta)
+
+`AddressSetupForm` no company-web enviava rua, número, cidade, UF e CEP por
+digitação livre, sem `lat`/`lng`. Como `complete-return` mede a distância em
+linha reta entre o motoboy e o ponto de coleta, a empresa terminava o cadastro
+com um endereço aparentemente completo e o retorno só falhava na rua.
+
+### O que mudou
+
+O componente necessário **já existia**: `GoogleAddressAutocomplete`, usado pelo
+`operational-order-form` para o destino. Ele devolve rua, número, cidade, UF,
+CEP e o par de coordenadas, e zera a seleção se a pessoa digitar sem escolher
+uma sugestão. O trabalho foi ligá-lo ao formulário de coleta, seguindo o mesmo
+padrão do formulário de pedido (autocomplete + número editável + complemento).
+
+O botão de salvar fica desabilitado sem uma sugestão selecionada, e cidade/UF/
+CEP/coordenadas aparecem para conferência antes de salvar.
+
+Fechada também uma brecha no `upsertCompanyAddressSchema`: `lat` e `lng` eram
+opcionais **independentes**, então a API aceitava meia coordenada — um valor
+inutilizável que só apareceria como falha no `complete-return`. Um `refine`
+passou a exigir as duas juntas ou nenhuma.
+
+Optei por **não** tornar as coordenadas obrigatórias: `company-address.e2e-spec.ts`
+cobre explicitamente que são opcionais ("aceita e devolve lat/lng opcionais"),
+há endereço já salvo sem elas, e a opção provisória do runbook (gravar o par
+pela API) depende desse comportamento. Tornar obrigatório seria uma mudança de
+contrato que o runbook não pediu.
+
+### Validações executadas (2026-08-21)
+
+| Comando                                                | Resultado                              |
+| ------------------------------------------------------ | -------------------------------------- |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 30 suítes, 274 testes aprovados        |
+| novo `company-address-validation.spec.ts`              | 5 testes cobrindo o par de coordenadas |
+| E2E completo, Postgres **e Redis** isolados            | 18 suítes, 133 testes aprovados        |
+| `pnpm --filter @motoboycity/company-web run build`     | aprovado                               |
+| `pnpm typecheck` e `pnpm lint`                         | aprovados nos 8 workspaces             |
+| `pnpm exec prettier --check` nos arquivos do recorte   | aprovado                               |
+
+Este E2E já usou a isolação corrigida registrada no P0.5
+(`REDIS_URL=redis://localhost:6379/1`). Conferido depois: 30 chaves no db1 e o
+db0 do desenvolvimento intocado — a correção funciona.
+
+### Limitações
+
+- **O caminho feliz do Places não foi exercitado.** Não existe
+  `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` no ambiente de desenvolvimento; sem
+  chave o componente mostra "Mapa indisponível". A tela precisa de uma
+  verificação manual com chave de navegador real antes do piloto. Não
+  provisionei chave por conta própria: envolve conta Google Cloud com
+  faturamento e é decisão do responsável.
+- Endereços já salvos sem coordenadas continuam sem elas. Nada foi migrado —
+  a empresa precisa reabrir a tela e selecionar o endereço de novo, ou usar a
+  opção provisória da seção 12 do runbook.
+- O `admin-web`/`company-web` seguem sem suíte de componentes, então a tela não
+  tem teste automatizado.
+
+Próximo passo concreto: P0.7 — validar a migration mais recente em cópia
+restaurada com dado real. Hoje o Neon está vazio, então na prática ainda não há
+o que restaurar; o portão só se fecha de verdade quando existir um banco com
+dado real para copiar.
+
+## Atualização — 2026-08-22: identidade visual do painel da empresa
+
+Trabalho de design solicitado pelo responsável ("está muito feio, quero deixar
+bonito antes do deploy"). Escopo escolhido por ele: painel da empresa primeiro;
+marca proposta do zero, porque não existia nenhuma no repositório.
+
+### Um bug, não uma escolha de design
+
+Os dois painéis renderizavam **tudo em Times New Roman**. Causa:
+`--font-sans: var(--font-sans)` no `@theme inline` — referência circular, que
+resolve para vazio e derruba no serif padrão do navegador. O `layout.tsx` cria
+a Geist sob `--font-geist-sans`, e a linha vizinha (`--font-mono`) já apontava
+certo, o que mascarava o erro. Corrigido em `company-web` e `admin-web`.
+
+Segundo achado: **todas as cores do tema tinham croma zero**
+(`oklch(0.205 0 0)` e afins, inclusive os cinco `--chart-*`). As 104 variáveis
+eram um sistema de tokens completo e nunca pintado — shadcn neutro de fábrica.
+
+### Direção visual
+
+Paleta nomeada pelo mundo do produto, em `company-web/globals.css`: `asfalto`,
+`concreto`, `papel`, `colete` (#FF9E00), `placa`, `alerta`.
+
+**Regra do âmbar**: significa uma coisa só — motoboy em movimento, ou a ação
+que põe alguém em movimento. Por isso o item ativo da navegação **não** é
+âmbar (seria decoração), e `--primary` é âmbar com `--primary-foreground`
+escuro (branco sobre âmbar daria ~2:1 e reprovaria em contraste).
+
+Tipografia: Archivo (display, eixo `wdth`) + Geist (interface) + Geist Mono
+(números e IDs) — três papéis, duas famílias, uma já carregada.
+
+### `StatusChip` — fonte única de status
+
+Havia **cinco arquivos com mapas de status duplicados e divergentes**: o mesmo
+`DELIVERED` aparecia como "Retorno" na home e "Entregue" na lista;
+`AWAITING_DRIVER` como "Buscando motoboy" num lugar e "Buscando entregador"
+noutro. `components/orders/status-chip.tsx` passou a ser a única fonte de
+rótulo, cor e da marcação `inMotion`. Convertidos: home, lista de pedidos,
+detalhe do pedido, relatórios e o mapa da central.
+
+O mapa merecia atenção própria: os marcadores usavam rosa, ciano e roxo
+(`#db2777`, `#0891b2`, `#7c3aed`) — um esquema sem relação nenhuma com a
+paleta, bem no centro da tela operacional. Como o Google Maps não lê variável
+CSS, `statusHex()` expõe o hex cru da mesma fonte, para marcador e chip nunca
+discordarem sobre a cor do mesmo pedido.
+
+`indicadores` mantém um mapa próprio de propósito: são contagens, e o plural
+lê melhor ali. O vocabulário foi alinhado ao compartilhado.
+
+`OrderRow` saiu da página e virou componente próprio, com o trilho colorido na
+borda — a assinatura da interface: dá para varrer a lista e ver quais pedidos
+têm motoboy na rua sem ler texto.
+
+### Verificação
+
+Login verificado em desktop e mobile. Navegação, chips e linhas de pedido
+verificados com um harness temporário em `app/zz-preview-temp/`, criado para
+renderizar os oito status sem depender de login — **e removido depois**. Optei
+por ele em vez de criar empresa de teste: criar conta e digitar senha é uma
+ação vedada, mesmo com autorização, e o harness cobre mais (os oito estados de
+uma vez, não só o que o banco tem).
+
+| Medida                     | Resultado             |
+| -------------------------- | --------------------- |
+| Texto do botão sobre âmbar | 8.75:1 (AAA)          |
+| Corpo sobre fundo          | 16.31:1               |
+| Os 8 chips de status       | 4.83 a 6.70 (AA)      |
+| Foco de teclado            | visível, cor da marca |
+| `prefers-reduced-motion`   | pulsos desligam       |
+| typecheck / lint / build   | verdes                |
+
+Dois defeitos de responsividade encontrados e corrigidos no processo: a faixa
+de marca do login ocupava 250px vazios no celular, e o botão "Chamar
+entregador" estava `hidden sm:inline-flex` — ou seja, **a ação principal do
+produto sumia no telefone**. A navegação passou a cair para uma segunda linha
+no celular, em vez de espremer contra o botão e desaparecer.
+
+### Limitações
+
+- **Nenhuma tela autenticada foi vista com dados reais.** Central operacional,
+  detalhe do pedido, faturas, indicadores e relatórios estão compilando mas
+  nunca foram renderizados com conteúdo de verdade.
+- Removi do login o link "Esqueceu a senha" (apontava para `href="#"`) e o
+  checkbox "Lembrar-me" (sem estado nem handler). Os dois mentiam para o
+  usuário; recuperação de senha está na lista de Nível B do runbook.
+- `admin-web` recebeu **apenas a correção de fonte**. A paleta não foi
+  aplicada lá, então os dois painéis estão visualmente divergentes.
+- Os PDFs em `imagensderefencia/` não puderam ser lidos (`pdftoppm` ausente);
+  a única referência visual usada foi o PNG da área da empresa, de onde veio o
+  vocabulário ("Chamar entregador", "Coleta", "Pagamento Faturado").
+
+Próximo passo concreto: aplicar a direção nas telas autenticadas restantes e
+converter os três arquivos que ainda duplicam o mapa de status.
+
+## Atualização — 2026-08-22: identidade visual estendida ao painel admin
+
+Continuação do recorte de design. O `admin-web` tinha recebido só a correção de
+fonte, então os dois painéis pareciam produtos diferentes.
+
+### Base compartilhada
+
+O bloco `:root` do `admin-web` é agora **idêntico** ao do `company-web` —
+mesma paleta, mesmos tokens de status, mesmo raio — e Archivo entrou como face
+de display. Os componentes `brand/wordmark`, `brand/route-diagram` e
+`orders/status-chip` foram copiados para o admin.
+
+Vale registrar por que copiados e não compartilhados: os dois apps já
+duplicavam todos os 12 componentes de `components/ui/` antes deste trabalho.
+Criar um pacote de UI compartilhado é uma refatoração de estrutura que não cabia
+neste recorte; a duplicação segue a convenção existente. **Consequência a
+vigiar**: `status-chip.tsx` existe em dois lugares e precisa mudar nos dois.
+
+### Decisões que mantêm a regra do âmbar
+
+- **Sem botão âmbar no admin.** O painel fiscaliza a operação, não põe motoboy
+  na rua. A cor só aparece nos status.
+- **Item ativo da navegação não é âmbar** em nenhum dos dois painéis — seria
+  decoração, e o olho pararia de encontrar a entrega em movimento.
+- Avisos de bloqueio ("nenhuma modalidade atribuída", "GPS parado") usam
+  `alerta`, não âmbar. Nos dois casos o motoboy não pode operar, então é
+  bloqueio, não recado. A paleta segue com seis cores; nenhuma cor de "atenção"
+  foi criada, justamente para não competir com o âmbar.
+- Etiqueta `ADMIN` ao lado da marca: os dois painéis passaram a dividir o mesmo
+  wordmark, e quem estiver com as duas abas abertas precisa saber onde está.
+
+### Defeitos encontrados e corrigidos
+
+- **A navegação do admin não cabia em 1024px.** Sete itens forçavam rolagem
+  horizontal e cortavam "Relatórios". O ponto de quebra do layout de linha
+  única subiu para `xl`; abaixo disso a navegação usa duas linhas. O
+  `company-web` não tinha o problema por ter quatro itens.
+- **`LiveActivityWidget` era `fixed` e permanente**, cobrindo o canto inferior
+  direito de todas as telas sem forma de fechar — justamente sobre as tabelas.
+  Agora recolhe.
+- **Vocabulário divergente**: os filtros do admin diziam "Buscando Entregador"
+  e "Aguardando Pagamento" em Title Case, ao lado de "Aceitos" em caixa de
+  sentença. Alinhados ao `status-chip`.
+- O mapa do admin repetia o esquema rosa/ciano/roxo do company-web; passou a
+  usar `statusHex()`.
+
+### Estado da consistência
+
+| Métrica                                 | company-web | admin-web |
+| --------------------------------------- | ----------- | --------- |
+| Cores fora da paleta                    | 0           | 0         |
+| Mapas de status duplicados (eram 5 e 7) | 1           | 1         |
+
+O que sobra nos dois é intencional: `indicadores` (company) e `relatorios`
+(admin) mantêm rótulos no plural, porque são contagens e não o estado de um
+pedido. O vocabulário deles acompanha a fonte compartilhada.
+
+### Validações
+
+typecheck e lint verdes nos 8 workspaces; build dos dois painéis aprovado.
+Telas do admin verificadas logadas no navegador (visão geral, pedidos,
+configurações) com o admin de seed — placeholder público documentado no README,
+em localhost, só para leitura. Nenhuma conta foi criada e nenhum dado foi
+gravado.
+
+### Limitações
+
+- **Telas do admin não redesenhadas individualmente**: clientes, entregadores,
+  financeiro e faturas herdaram a paleta e a navegação, mas o layout interno
+  delas não foi tocado.
+- As telas autenticadas do **company-web** continuam sem verificação com dados
+  reais — a lacuna registrada na atualização anterior permanece.
+- O banco de dev não tem pedidos ativos, então listas e mapas foram vistos
+  majoritariamente em estado vazio.
+
+## Atualização — 2026-08-22: levantamento da plataforma atual e botão de insucesso
+
+### Levantamento
+
+Navegação **somente leitura** no sistema em produção que este projeto
+substitui, com autorização do responsável. Resultado em
+`docs/gap-analysis-plataforma-atual.md`.
+
+Contexto que muda o enquadramento: `motoboycity.app.br` é o portal de uma
+instância white-label da **Plataforma Entregas Expressas** — o MOTOboyCity
+opera hoje alugando um SaaS de terceiro. Os clientes que precisam migrar já
+usam tudo o que está catalogado ali, então funcionalidade ausente vira motivo
+concreto para a loja não trocar de sistema.
+
+**Dado que resolve uma decisão pendente**: a comissão praticada na operação
+real é de **~9,5%** (entregador fica com ~90,5%), medida pelos agregados do
+painel financeiro. `driverCommissionPercentage` continua sendo decisão do
+responsável, mas agora tem referência. Ticket médio de R$ 5,98 e tempo médio de
+entrega de ~31 min completam a ordem de grandeza.
+
+**Dois estados que faltam na máquina**: `Em preparo` e `Chegou na coleta`. O
+segundo importa para o SLA implementado hoje — sem ele, a etapa "do aceite até
+a coleta" mistura o tempo do motoboy chegando com o tempo da loja preparando, e
+não responde de quem é o atraso.
+
+Nenhum dado pessoal, endereço de cliente, nome de entregador ou valor
+individual foi copiado para o repositório.
+
+### Botão de insucesso no driver-app
+
+Fecha a lacuna registrada na atualização anterior: a rota `/fail` existia e
+estava testada, mas era inalcançável na rua.
+
+`DeliveryOperationScreen` ganhou um botão secundário "Não consegui entregar",
+visível **apenas em COLLECTED** — antes disso não há mercadoria em posse do
+motoboy, então não existe o que devolver. Ele abre um modal com os quatro
+motivos; "Outro" exige descrição, espelhando a validação do servidor.
+
+O GPS é capturado no registro do insucesso: é a única prova de que o motoboy
+chegou ao destino antes de declarar que não conseguiu entregar.
+
+Em `FAILED`, a ação principal vira "Confirmar devolução na loja" — o mesmo
+`completeReturn` — e a rota externa passa a apontar para a coleta, não para o
+destino.
+
+### Validações
+
+| Comando                                           | Resultado           |
+| ------------------------------------------------- | ------------------- |
+| `pnpm --filter @motoboycity/driver-app exec jest` | 2 suítes, 25 testes |
+| typecheck e lint do driver-app                    | aprovados           |
+
+### Limitações
+
+- **A tela não foi vista rodando.** O driver-app é React Native e não há
+  emulador nesta sessão; o modal, o seletor de motivo e o fluxo em `FAILED`
+  foram verificados por typecheck e lint, não visualmente. Precisa de uma
+  passada em aparelho antes do piloto.
+- O app continua com um único smoke test de renderização; não há teste
+  automatizado cobrindo o novo fluxo.
+- As seções Gestão e Suporte da plataforma atual, e os submenus de Financeiro
+  e Relatórios do admin, não foram abertos em profundidade.
+
+## Atualização — 2026-08-22: cronômetro ao vivo na fila de pedidos
+
+Primeiro item da lista de prioridade em `docs/gap-analysis-plataforma-atual.md`.
+Cada pedido na fila passa a mostrar há quanto tempo está no estado atual —
+`20s`, `4m 21s`, `1h 12m` — nos dois painéis.
+
+**Nenhuma mudança de API**: `statusChangedAt` já vinha em `DeliveryListItem`.
+
+### Duas decisões
+
+**Um relógio para a tela inteira.** Uma central com trinta pedidos criaria
+trinta `setInterval` se cada linha cuidasse do próprio tempo. Há um único
+intervalo com assinantes; como todos leem o mesmo instante, os contadores não
+piscam fora de sincronia.
+
+**Sem cor de alerta.** "Demorado" depende de um limite que ninguém decidiu, e
+pintar de vermelho um número arbitrário treina o operador a ignorar a cor. O
+tempo em si é a informação.
+
+### O lint corrigiu a primeira versão
+
+A implementação inicial usava `useEffect` + `setState` para capturar o relógio
+na montagem, e o lint recusou: setState síncrono dentro de efeito provoca
+render em cascata. A regra estava certa — reescrito com
+`useSyncExternalStore`, que é o primitivo do React para assinar fonte externa e
+já resolve o SSR pelo `getServerSnapshot`.
+
+### Verificação
+
+O painel do navegador não estava compondo frames, então a prova veio de leitura
+do DOM em vez de captura de tela — para um cronômetro, é evidência melhor:
+
+```
+antes:  20s · 4m 17s · 1h 00m
+depois: 24s · 4m 21s · 1h 00m
+```
+
+Escalas de segundo avançaram, escalas de hora ficaram paradas. A formatação foi
+conferida nos limites: 59s→"59s", 60s→"1m 00s", 3599s→"59m 59s",
+3600s→"1h 00m", 86399s→"23h 59m".
+
+typecheck, lint e build dos dois painéis aprovados. O harness usado na
+verificação foi removido e confirmado fora do build.
+
+### Limitação
+
+`elapsed-time.tsx` existe em dois lugares, pelo mesmo motivo já registrado para
+`status-chip.tsx`: os apps duplicam componentes por convenção do repositório.
+Precisa mudar nos dois.
+
+## Atualização — 2026-08-22: marca oficial aplicada
+
+O responsável forneceu o logo e o ícone do app. Até aqui a identidade era uma
+proposta minha, feita porque não havia marca nenhuma no repositório.
+
+### A cor inventada estava quase certa
+
+A cor foi **extraída dos arquivos**, não estimada a olho: o gradiente da marca
+vai de `#EA5505` a `#FDA02E`. O `--colete` que eu havia proposto partindo do
+colete de segurança era `#FF9E00` — praticamente o extremo claro do gradiente
+real.
+
+Adotado `#FDA02E` com base em contraste medido contra o asfalto: 8.84:1 (AAA),
+contra 6.54:1 da mediana e 5.00:1 do extremo escuro. Os três passariam em AA,
+mas o claro é o único AAA e é quase idêntico ao que já estava no ar — nada
+regrediu. O gradiente completo ficou reservado ao logo.
+
+### Os arquivos vinham com preto queimado
+
+Ambos eram RGB sem canal alfa. Sobre o painel asfalto apareceria um retângulo
+preto puro, visivelmente mais escuro. O fundo foi removido tratando a
+**luminância como alfa** e dividindo a cor por ela, não por limiar — limiar
+deixaria franja escura nas bordas. Resultado medido: 66,7% transparente, 20,4%
+branco opaco, 12,9% laranja, **0% de franja**.
+
+### O que foi instalado
+
+- `public/brand/motoboycity-logo.png` (507x164) nos dois painéis, consumido
+  pelo componente `Wordmark`, que passou de texto para imagem;
+- `src/app/icon.png` como favicon nos dois painéis, e o `favicon.ico` padrão do
+  `create-next-app` foi **removido** — era o logo do Next;
+- ícones do Android nas cinco densidades, quadrado e redondo, gerados do
+  monograma MC.
+
+O ícone exigiu tratamento próprio: o monograma é 3:1 e ícone de app é quadrado,
+então foi centralizado num quadrado com margem justa e recorte circular suave na
+variante redonda.
+
+### Restrição registrada
+
+O logo tem conteúdo branco, então **só funciona sobre fundo escuro**. Por isso
+aparece no painel asfalto e na navegação, nunca sobre o fundo claro das telas.
+Uma variante para fundo claro ainda não existe; está documentado no componente.
+
+### Validações
+
+Builds dos dois painéis, 25 testes do driver-app, typecheck e lint verdes.
+Confirmado no navegador que o logo carrega (zero imagens quebradas) e que o
+botão renderiza `rgb(253, 160, 46)`.
+
+### Levantamento refinado
+
+`docs/gap-analysis-plataforma-atual.md` ganhou o detalhamento das três
+configurações inspecionadas. O achado que muda prioridade: **tarifa dinâmica é
+um upsell que a operação não contrata** (R$ 199/mês), logo não é paridade nem
+bloqueio de migração — e é a mais cara da lista.
+
+## Atualização — 2026-08-22: horários de pico, e o fuso que apareceu junto
+
+Primeiro item tirado do levantamento da plataforma concorrente. O dado já
+estava em `createdAt`, como o levantamento previa — mas construir o relatório
+expôs dois erros que ele não previa.
+
+### O fuso estava errado em seis serviços
+
+O recorte por data usava `T00:00:00.000Z` e `T23:59:59.999Z`, copiado em
+`deliveries`, `admin-financial`, `driver-wallet`, `financial-payout`,
+`delivery-tracking`, `invoice` e no próprio relatório. Numa operação em UTC-03,
+isso joga **três horas de todo dia no dia errado**: o pedido das 22h de terça
+entrava no recorte de quarta.
+
+Para um total mensal isso passava despercebido. Para horários de pico não
+passaria — o pico do almoço apareceria às 15h.
+
+`apps/api/src/common/sao-paulo-time.ts` passou a ser a fonte única. A regra de
+fuso vem do `Intl`, e não de uma constante `-3`, porque o Brasil teve horário de
+verão até 2019 e uma subtração fixa erraria a meia-noite em todo o histórico
+anterior. O fim do dia é calculado como o começo do dia seguinte menos um
+milissegundo, que é sempre um instante único mesmo em dia de virada.
+
+`finance-release.utils.ts` foi reescrito em cima desse módulo e seus cinco
+testes continuam passando sem alteração.
+
+**Uma exceção deliberada:** `invoice.service.dateOnly` continua em meia-noite
+UTC. Ela não é só filtro — grava `issueDate` e `paymentDate`, que são datas
+civis armazenadas e comparadas com linhas já existentes. Movê-la mudaria dado
+gravado, não o recorte de uma consulta. Só o filtro da listagem virou local.
+
+### O calendário inflava dia da semana
+
+Uma janela de 30 dias quase nunca tem o mesmo número de segundas e de domingos.
+Somar pedidos por dia da semana daria 25% a mais de volume ao dia que caísse
+cinco vezes em vez de quatro — efeito de calendário lido como demanda.
+
+Por isso `byWeekday` reporta **média por ocorrência**, e é dela que sai o dia de
+pico. Na conferência visual isso apareceu bem: sábado com 58 pedidos perde para
+sexta com 56, porque houve cinco sábados e quatro sextas.
+
+### O que ficou
+
+- `apps/api/src/common/sao-paulo-time.ts` + spec (7 testes)
+- `apps/api/src/admin/reports/delivery-peak-hours.ts` + spec (6 testes)
+- `apps/api/src/admin/reports/admin-reports.service.spec.ts` (6 testes) — o
+  serviço não tinha nenhum teste antes
+- `PeakHoursChart` no painel admin, sem biblioteca de gráfico: 24 barras não
+  justificam uma dependência
+- os tipos foram para `@motoboycity/types` e o serviço parou de declarar cópia
+  local — era a mesma armadilha que já deixou o contrato de configurações
+  divergir
+
+O laranja da marca marca só a barra de pico. Gastá-lo nas 24 barras o tornaria
+decoração e o olho pararia de achar o que importa, que aqui é uma barra só.
+
+Os gráficos são `aria-hidden` e os números vivem num `<details>` — barra não é
+legível por leitor de tela, nem serve para quem precisa do valor exato para
+montar escala.
+
+### Um teste que ia ficar instável
+
+`delivery-lifecycle.e2e-spec.ts` montava `today` com `toISOString()`, ou seja em
+UTC. Depois da correção de fuso ele falharia sempre que o CI rodasse entre 21h e
+meia-noite de Brasília — o filtro pediria um dia em que a entrega do teste ainda
+não existe. Passou a usar `dateInSaoPaulo`.
+
+### Armadilha de ambiente: e2e local pode apontar para o banco de dev
+
+Tentando rodar a suíte e2e localmente, descobri um risco que vale registrar
+antes que alguém repita.
+
+O `apps/api/.env` aponta para `motoboycity_dev` na porta **5434** (contêiner
+Docker, não a porta padrão). E **o CLI do Prisma carrega esse `.env` por cima**
+da variável exportada no shell: `prisma migrate deploy` com `DATABASE_URL`
+exportado apontando para `motoboycity_e2e_local` mesmo assim reportou
+`Datasource "db": PostgreSQL database "motoboycity_dev"`.
+
+Para o Jest o comportamento é o oposto — `process.env` vence — mas eu não
+consegui **confirmar** para qual banco a suíte tinha conectado: o
+`pg_stat_activity` mostrava 8 conexões em `motoboycity_dev`, que são o servidor
+de desenvolvimento na porta 3333, e nenhuma em `motoboycity_e2e_local`. Sem
+conseguir distinguir as duas coisas, interrompi a execução em vez de arriscar
+uma suíte que limpa tabelas rodando no banco errado.
+
+Conferido depois que o banco de dev está íntegro: 33 usuários e 12 empresas.
+As entregas estão em zero, mas isso é o estado de repouso dele — o
+`pg_stat_user_tables` mostra 1085 inserções e 1140 remoções acumuladas em
+`deliveries`, ou seja, esse banco já serviu de alvo de e2e em sessões
+anteriores e sempre termina vazio.
+
+**Resolvido em 2026-08-22.** O e2e roda localmente agora, e a causa da falha
+original era outra do que parecia.
+
+**A senha deste ambiente contém a string `motoboycity_dev`.** Qualquer script
+que troque o nome do banco por substituição de texto na URL acerta a senha em
+vez do banco — `replace` troca só a primeira ocorrência, que está na senha, e
+uma troca global corrompe a autenticação. Era essa a causa do "Authentication
+failed" que eu tinha atribuído a outra coisa.
+
+O jeito certo é trocar `pathname` pelo parser de `URL`, nunca por texto:
+
+```js
+const alvo = new URL(process.env.DATABASE_URL);
+alvo.pathname = '/motoboycity_e2e_local';
+```
+
+Vale para qualquer ferramenta que mexa nessa URL, não só para o e2e.
+
+Continua valendo que **o CLI do Prisma carrega o `.env` por cima da variável do
+shell** — `migrate deploy` ignora o `DATABASE_URL` exportado. O Jest não: ele
+respeita `process.env`, então a suíte roda no banco isolado sem problema. Para
+migrar o banco de e2e, aplicar o SQL direto por `psql` e registrar a linha em
+`_prisma_migrations`.
+
+Vale também considerar mudar o `.env` de desenvolvimento para não ser o padrão
+que qualquer ferramenta pega sozinha.
+
+## Atualização — 2026-08-22: clonar entrega
+
+Segundo item do levantamento. O botão vive no card do pedido selecionado da
+central, ao lado de "Abrir detalhes" — que é o único lugar onde ele cabe sem
+aninhar `<button>` dentro de `<button>`, já que a linha da fila inteira é um
+botão de seleção.
+
+### Duas coisas que o clone não copia, de propósito
+
+**O número externo.** Ele identifica UM pedido no sistema da própria loja, e é
+por ele que a conciliação acontece depois. Copiá-lo criaria duas entregas
+alegando ser o mesmo pedido.
+
+**Endereço sem coordenadas.** O formulário exige uma sugestão escolhida no
+Google porque o despacho mede distância pelo par lat/lng. Copiar rua e número
+sem as coordenadas montaria um destino que parece completo e só falha no
+cálculo — a tela avisa e pede que a pessoa reescolha. É a mesma regra que a
+coleta já adotou em `ffa7dbf`.
+
+Há um terceiro aviso, para quando a modalidade do pedido original foi desativada
+desde então: o campo cai no padrão em vez de ficar em branco sem explicação.
+
+### Um bug pré-existente que apareceu junto
+
+Com o clone pronto, a modalidade aparecia como `st-2` em vez de "Expresso".
+Conferido que **não era do clone**: sem clonar nada, o campo já mostrava
+`st-1`. Em produção seria um UUID cru no lugar do nome, no formulário mais usado
+do painel.
+
+A causa é o contrato do Base UI: `<Select.Value>` mostra o **valor** do item
+selecionado, e o valor ali é o id. O próprio componente resolve isso com a prop
+`items` no Root — "When specified, `<Select.Value>` renders the label of the
+selected item instead of the raw value". Corrigido nos três lugares que tinham
+o mesmo padrão: os dois formulários de pedido da empresa e a tabela de preços
+do admin.
+
+### Contrato
+
+`DeliveryListItem` ganhou `serviceTypeId`. O id precisa acompanhar o nome porque
+clonar reseleciona a modalidade, e casar por nome quebraria numa renomeação ou
+com nomes repetidos. O `serviceType` já vinha por `include`, então não houve
+consulta nova.
+
+### Sem teste, e por quê
+
+`buildCloneSeed` é função pura e as decisões acima mereciam teste, mas
+**`apps/company-web` não tem runner de teste nenhum** — o CI roda só os testes
+da API e do driver-app. Introduzir Jest ou Vitest no painel é uma decisão à
+parte, que muda o CI. A lógica ficou isolada em `clone-delivery.ts` justamente
+para ser testável no dia em que houver runner.
+
+A verificação foi por página temporária, exercitando os três casos: clone
+completo, destino sem coordenadas e modalidade desativada.
+
+## Atualização — 2026-08-22: chave do Google Maps no navegador
+
+O painel exibia "Configure NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY". Investigando,
+eram três problemas diferentes, e só um deles é "falta a chave".
+
+### O impacto é maior do que "o mapa não aparece"
+
+Sem a chave, `loadGoogleMaps()` rejeita e o autocomplete nunca devolve endereço.
+Como `OperationalOrderForm` exige uma sugestão escolhida no Google para
+submeter, e `AddressSetupForm` desabilita o botão de salvar sem ela, ficam
+bloqueados **a criação de pedido com destino conhecido e o cadastro do endereço
+de coleta** — ou seja, uma empresa nova não termina o onboarding.
+
+A chave de servidor (`GOOGLE_MAPS_API_KEY`, usada pelo Routes na API) **está**
+configurada em `apps/api/.env`. É outra credencial e não substitui a do
+navegador: `NEXT_PUBLIC_` é embutido no pacote JavaScript e fica visível para
+qualquer visitante, então a chave do navegador precisa ser restrita por
+referrer.
+
+### 1. A variável não estava documentada onde se procura
+
+Nenhum dos dois `.env.example` dos painéis mencionava
+`NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` — só o runbook de go-live. Quem clona o
+repositório e copia o `.env.example` descobria a variável batendo no erro em
+tempo de execução. Ambos ganharam a entrada, com o motivo e a restrição de
+referrer de desenvolvimento.
+
+### 2. Chave recusada vazava um TypeError na tela
+
+Testado de verdade, com uma chave inválida de propósito: o Google devolve um
+script que **executa normalmente** — `onload` dispara — mas não preenche
+`google.maps.places`, e só registra `InvalidKey` como aviso no console. O
+`new maps.maps.places.Autocomplete(...)` então lançava, e o `.catch` mostrava a
+mensagem crua na interface:
+
+> Cannot read properties of undefined (reading 'Autocomplete')
+
+O `onload` passou a verificar se as bibliotecas realmente vieram antes de
+resolver. O mesmo caminho cobre API não habilitada e faturamento desligado, que
+falham igual.
+
+### 3. `gm_authFailure` não estava ligado
+
+O hook oficial do Google para chave recusada não era tratado. Ele **não** cobre
+o caso acima — dispara depois, ao desenhar o mapa com referrer não autorizado —
+então os dois caminhos são necessários. Os quatro mapas e o autocomplete se
+inscrevem nele agora.
+
+### Verificação
+
+Os dois caminhos foram exercitados no navegador contra a resposta real do
+Google: chave ausente e chave inválida. O `.env.local` usado no teste foi
+restaurado a partir de backup, com hash conferido.
+
+### Correção do próprio conserto: `onload` não serve de sinal
+
+Ao configurar a chave real, a tela acusou "O Google recusou a chave" com uma
+chave **válida**. O falso negativo era meu: o guarda que eu tinha acabado de
+escrever rodava no `script.onload`, e ali o Google ainda não terminou de
+inicializar.
+
+Medido no navegador, não deduzido: no `onload` nem `google.maps.importLibrary`
+existe ainda — quanto mais `google.maps.places`. Qualquer verificação de
+presença naquele ponto reprova toda chave boa.
+
+O sinal correto é o parâmetro `callback` da URL, que é o "API inicializada" do
+próprio Google. Só depois dele faz sentido perguntar se `places` chegou. Foi
+acrescentado também um timeout de 15s como rede de segurança: se o callback
+nunca disparar, a promessa ficaria pendente para sempre e a tela mostraria um
+campo inerte sem erro nenhum — pior que a mensagem errada que isso corrigiu.
+
+### O `gm_authFailure` provou seu valor no primeiro uso real
+
+Com o callback certo, o carregamento passou limpo — e então a mensagem
+reapareceu **ao digitar**. Essa é a assinatura da restrição de referrer, e foi
+o `gm_authFailure` que a capturou.
+
+Evidência de rede: os 7 scripts carregaram (`places_impl.js` incluso), houve
+`AuthenticationService.Authenticate` com referrer
+`http://localhost:3000/zz-preview-temp`, nenhum `InvalidKey` no console — e
+`getPlacePredictions` nunca chama de volta.
+
+Ou seja, a chave é válida e o que falta é autorizar `http://localhost:3000/*` e
+`http://localhost:3001/*` nas restrições da credencial. Sem os dois caminhos
+tratados, isso apareceria como um campo que simplesmente não sugere nada.
+
+### Enquadramento dos mapas
+
+O mapa abria em zoom 12 (admin) e 13 (empresa) centrado em `-20.153, -41.622`,
+mostrando mata e municípios vizinhos onde nunca há entrega.
+
+O centro foi confirmado pelo geocoder do próprio Google em vez de estimado:
+`Lajinha, MG, 36980-000, Brasil` responde `-20.15221, -41.62322` — praticamente
+o valor que já estava lá. O problema era só o zoom, que subiu para 15 nos dois.
+Nessa escala aparecem os nomes de rua e os comércios que são origem e destino
+real: Supermercado Juvenil, Padaria Elite, Show de Compras.
+
+**O `fitBounds` era o problema maior.** Ele roda sempre que há marcador, e com
+um único ponto recebe bordas de tamanho zero — o Google responde com o zoom
+máximo. Na prática o mapa da empresa caía nisso **sempre**, porque ele marca o
+ponto de coleta mesmo sem nenhuma entrega: a loja abria o painel na calçada dela
+em vez de ver a cidade.
+
+Agora o enquadramento automático só entra com dois marcadores ou mais. Com um,
+o mapa centraliza e mantém o zoom, o que também respeita quem já tinha ajustado
+a vista. Um teto de 16 cobre o caso de duas entregas quase no mesmo ponto.
+
+O mapa da empresa também passou a abrir centrado na própria loja quando ela tem
+coordenadas, e não no centro genérico da cidade — uma loja na periferia se via
+na borda do mapa.
+
+Verificado no navegador nos três casos: só a loja, duas entregas coladas
+(a ~30 m) e entregas em pontas opostas da cidade.
+
+### Autocomplete: sugerir Lajinha primeiro, e a lista que descolava
+
+Duas correções no mesmo componente — ele é único e serve tanto o formulário de
+pedido quanto o cadastro do endereço de coleta.
+
+**Ordenação.** Digitar "aven" trazia avenidas do Rio, de Recife e de Campo
+Grande antes de qualquer coisa daqui. Só `componentRestrictions: { country: 'br' }`
+não basta: o Google ordena por relevância global e cidade maior ganha sempre.
+
+O raio do viés foi medido contra o Google, não escolhido por intuição:
+
+| configuração     | resultado ao digitar "aven"             |
+| ---------------- | --------------------------------------- |
+| viés de 20 km    | Lajinha em 5º, atrás de Iúna e Ibatiba  |
+| **viés de 5 km** | **as cinco sugestões são de Lajinha**   |
+| restrito a 30 km | Avenida Paulista em 1º, Lajinha ausente |
+
+A última linha é o achado contraintuitivo: `strictBounds` saiu **pior** que o
+viés apertado — filtra a área mas mantém a ordenação global. Além de inferior,
+travaria o pedido para outra cidade, já que o formulário exige uma sugestão do
+Google para submeter. Confirmado que o viés não bloqueia: "Avenida Paulista Sao
+Paulo" e "Rua Sete de Setembro Ibatiba" continuam achando o que se pediu.
+
+`LAJINHA_CENTER` estava duplicado nos dois mapas e agora o autocomplete também
+precisava dele — virou `src/lib/operation-area.ts` em cada painel.
+
+**A lista descolava do campo.** O Google prende o `.pac-container` no `body` e o
+posiciona em coordenadas do documento, calculadas uma vez, quando a lista abre.
+O formulário vive num painel com rolagem própria, então rolar o painel deixava a
+lista para trás — 157px medidos, exatamente a altura rolável.
+
+A saída foi `position: fixed` sincronizado com o retângulo do campo na viewport.
+O detalhe que faz funcionar é a fase de captura no listener de scroll: sem ela,
+a rolagem de um ancestral nunca chega ao componente. Não é preciso associar
+container a input (o Google não permite) porque só uma lista abre por vez, a do
+campo em foco.
+
+Medido depois: desalinhamento 0 tanto na rolagem do painel quanto na da página.
+
+## Atualização — 2026-08-22: bandeirada na tabela de preços
+
+O modelo era `baseFee + perKmFee × distância`, com o por-quilômetro incidindo
+desde o metro zero. Não havia como dizer "até 3 km custa R$ 8".
+
+`PricingTable` ganhou `includedDistanceKm`, e a fórmula virou:
+
+```
+subtotal = max(baseFee + perKmFee × max(0, distância − includedDistanceKm), minimumFee)
+```
+
+**Interpretação assumida:** o enunciado pedia "valor fixo até X km" e "a partir
+de quantos km começa a cobrar por km" — são a mesma fronteira, expressa duas
+vezes, então virou um campo só. Se a intenção for duas fronteiras distintas (uma
+faixa de carência entre o fim do fixo e o início da cobrança), isso muda o
+modelo e ainda não está feito.
+
+O `Math.max(0, …)` não é defensivo por hábito: sem ele, entrega mais curta que a
+bandeirada daria distância negativa e o `perKmFee` viraria desconto, cobrando
+menos que a própria taxa base. Há teste cobrindo isso.
+
+`includedDistanceKm` é **obrigatório** em `PricingCalculatorInput`, não
+opcional. Num cálculo de dinheiro, um campo esquecido que assume zero sozinho
+cobra menos do que devia e ninguém percebe — melhor o compilador exigir a
+decisão de quem chama. O resultado ganhou `chargeableDistanceKm` para a tela
+poder mostrar quanto da distância foi efetivamente cobrado.
+
+Compatibilidade: a coluna entra com `DEFAULT 0`, que reproduz exatamente o
+comportamento anterior. Confirmado no banco de desenvolvimento — a tabela
+existente ficou com `0.00`. E os dez testes originais da calculadora passam sem
+alteração nenhuma, o que é a prova de que a fórmula antiga é um caso particular
+da nova.
+
+`minimumFee` continua sendo piso e não foi tocado. Com bandeirada configurada
+ele fica quase redundante, já que a taxa base é o piso natural de trajeto curto,
+mas remover seria mudança incompatível.
+
+## Atualização — 2026-08-22: modal "Chamar entregador"
+
+O botão do topo era um `<Link href="/">` que só navegava para a central. Virou o
+caminho curto que a plataforma concorrente tem: coleta já salva, destino por
+GPS, uma ou várias entregas de uma vez.
+
+Ele **não substitui** o formulário completo — quem já sabe o endereço continua
+usando "Novo pedido", que exige a sugestão do Google e calcula o preço na hora.
+Aqui o preço fica nulo até a distância existir, que é o comportamento já
+desenhado para `destinationKnownAtCreation: false`.
+
+Uma entrega usa `create`; duas ou mais usam `createBatch`, cujo mínimo no schema
+é dois. O limite de cima é 50, o mesmo da validação.
+
+### Três coisas do original que não foram copiadas
+
+**"Obrigatório anexar comprovante de entrega"** — a pedido. Vale notar que
+`requiresDeliveryProof` já existe no payload e no schema; falta só a tela no app
+do entregador.
+
+**"Salvar local de coleta para o próximo pedido"** — aqui o ponto de coleta é o
+endereço da própria empresa, já salvo e reutilizado sempre. A caixa não teria o
+que controlar, então virou o endereço em leitura com um link para alterar.
+
+**Fotos nos cartões de tipo de serviço** — `ServiceType` não guarda imagem.
+Inventar uma ilustração genérica ocuparia espaço sem ajudar a distinguir as
+modalidades, então os cartões têm ícone e nome.
+
+E o cartão "Pagamento Faturado" virou linha informativa, não escolha: a API
+grava `paymentMethod: 'BILLED'` em toda entrega. Um cartão clicável prometeria
+uma opção que não existe.
+
+### Dialog novo no painel
+
+Não havia primitivo de modal. `components/ui/dialog.tsx` embrulha o Dialog do
+Base UI seguindo o mesmo padrão dos outros wrappers. O corpo rola por dentro com
+`max-h` em `dvh`: o formulário passa da altura da janela em tela baixa, e sem
+isso o botão de enviar ficaria fora de alcance.
+
+### Verificado no navegador
+
+Criação avulsa e lote de duas, confirmados no banco: `destinationKnownAtCreation`
+falso, `paymentMethod` BILLED, status AWAITING_DRIVER, e o `requiresReturn`
+chegando certo em ambos.
+
+### O modal não fecha mais ao chamar — ele vira acompanhamento
+
+Fechar no sucesso jogava a pessoa de volta para a central justamente no momento
+em que ela mais quer olhar a tela: o da espera. Agora o modal troca de papel —
+título vira "Acompanhando" e o corpo passa a listar as entregas criadas.
+
+Enquanto não há entregador, cada linha mostra o chip "Buscando motoboy", o
+cronômetro do estado e um spinner. Quando alguém aceita, o spinner dá lugar ao
+nome e ao telefone clicável, e o chip vira âmbar — a mesma cor que na fila
+significa motoboy na rua.
+
+O texto do topo acompanha: "acompanhe até um entregador aceitar" enquanto todas
+estão pendentes, "N de M ainda procurando" no meio do caminho, e "entregador a
+caminho" quando acabou. Um texto que continuasse dizendo "até aceitar" depois de
+aceito seria a tela mentindo para quem está olhando justamente para saber disso.
+
+**Sondagem, não socket.** A consulta reaproveita a chave `['company',
+'operations']` da central: uma requisição para todas as entregas em vez de uma
+por id, e cache compartilhado. Abrir um segundo socket aqui duplicaria a conexão
+que a central já mantém, e o painel não tem hook compartilhado de tempo real.
+Três segundos é imperceptível para "alguém aceitou?", e o TanStack usa o menor
+intervalo entre observadores ativos — então isso só acelera enquanto o modal
+está aberto.
+
+Fechar encerra o acompanhamento; as entregas seguem na central, que é onde elas
+vivem depois de criadas. "Chamar outro" devolve o formulário limpo.
+
+Verificado no navegador: pedido #1163 criado pelo modal, painel mostrando
+"Procurando um entregador disponível...", e a transição para "Motoboy Aprovado
+E2E · 33999887766" acontecendo **sozinha**, sem recarregar. O aceite foi
+simulado por UPDATE direto no banco de desenvolvimento, já que não há motoboy
+online ali — a linha ficou em ACCEPTED sem registro de oferta correspondente.
+
+### Cancelar e chamar de novo na tela de acompanhamento
+
+Duas ações por pedido, com regras que vieram da API e não de escolha de layout.
+
+**Cancelar** só aparece em `AWAITING_DRIVER`. A API restringe o cancelamento da
+empresa a `SCHEDULED` e `AWAITING_DRIVER` — mostrar o botão depois do aceite
+ofereceria uma ação que volta erro.
+
+E no lote o cancelamento **pega todos os irmãos**, não só a linha clicada. Por
+isso o texto vira "Cancelar os N". Um "Cancelar" seco faria a pessoa acreditar
+que perde um pedido só, e ela descobriria o contrário depois de clicar.
+
+**Chamar de novo** existe porque a varredura automática (`dispatchAvailableDeliveries`)
+roda quando um motoboy fica disponível, **não em temporizador**. Um pedido cuja
+oferta expirou e para o qual nenhum motoboy novo entrou desde então fica parado
+sem oferta pendente, e nada o move. O botão destrava isso sem cancelar e
+recriar, o que perderia o número do pedido e a hora de criação.
+
+Endpoint novo: `PATCH /deliveries/:id/redispatch`. Ele reusa
+`dispatchService.dispatchDelivery`, que já é seguro de repetir — não faz nada se
+já há oferta pendente, se o pedido saiu de `AWAITING_DRIVER`, ou se não há
+motoboy elegível. Apertar duas vezes não duplica oferta.
+
+Oito testes cobrindo: 404, empresa de fora, e a recusa em cada um dos cinco
+estados não elegíveis. O que importa nesse último é que um pedido já aceito não
+seja reofertado, ou dois motoboys apareceriam para a mesma entrega.
+
+**Um bug que a verificação pegou:** o painel usava "tem entregador?" como sinal
+de "ainda procurando". Pedido cancelado também não tem entregador, então ele
+continuava girando o spinner e o cabeçalho seguia dizendo "acompanhe até um
+entregador aceitar". O sinal correto é o status, não a ausência de motorista.
+
+## Atualização — 2026-08-22: taxas adicionais configuráveis
+
+Substitui a "taxa de chuva" fixa que o levantamento tinha listado. A mesma
+mecânica serve para chuva, feriado, madrugada e alta demanda, com o nome que o
+admin escolher — sem depender de uma migração a cada motivo novo.
+
+**Existia um esqueleto.** `Surcharge` estava no schema desde a Fase 0, com
+`regionId`, `type` (enum RAIN/PEAK_HOUR/OTHER), `value` e `active`, sem uma
+única referência em código e sem nenhuma linha gravada. Foi evoluído em vez de
+duplicado: o enum de MOTIVO virou enum de CÁLCULO (PERCENTAGE/FIXED) e o motivo
+passou a ser nome livre.
+
+### Duas formas de valer, e basta uma
+
+O **interruptor manual** é o que o admin liga quando começa a chover. As
+**janelas agendadas** cobrem o previsível: dia da semana com faixa de horário,
+período de datas, ou os dois.
+
+`apps/api/src/pricing/surcharge-window.ts` decide se uma taxa está valendo num
+instante. Módulo puro, 17 testes, com os casos que enganam:
+
+- **atravessa a meia-noite** — fim antes do início significa madrugada;
+- **"sexta à noite" continua sexta à 1h da manhã** — uma janela de sexta 22h–2h
+  pertence à noite de sexta, mesmo já sendo sábado no calendário;
+- **faixa fechada no início e aberta no fim** — sem isso, 18h–23h e 23h–2h se
+  sobreporiam exatamente às 23h;
+- **tudo no relógio da operação** — janela de sexta em UTC cairia parcialmente
+  no sábado, e feriado começaria três horas cedo.
+
+### Uma decisão de risco: no máximo UMA taxa aplica
+
+Somar seria perigoso: numa sexta feriado chovendo, três regras se empilhariam e
+o cliente pagaria um acréscimo que ninguém configurou de propósito. Com uma só,
+o pior caso é a taxa mais recente — um número que o admin escolheu. O critério
+de desempate é a criação mais recente, e a tela mostra qual está valendo.
+
+### O que fica congelado
+
+`Delivery` ganhou `surchargeLabel` e `surchargeValue` — nome e valor, **não**
+chave estrangeira. Renomear ou excluir a taxa depois não pode reescrever o que a
+fatura já emitida dizia. É a mesma regra que congela o preço.
+
+O adicional incide sobre o **subtotal**, não sobre o total: cobrar percentual em
+cima do retorno faria a mesma entrega custar mais só por exigir volta, o que já
+é cobrado à parte.
+
+`platformValue` passou a ser o resíduo de `totalValue - driverValue`. Somar três
+parcelas arredondadas separadamente deixaria centavos sobrando, e a invariante
+`driverValue + platformValue === totalValue` quebraria em alguma combinação —
+há teste cobrindo comissão e repasse fracionados juntos.
+
+### Detalhes do CRUD
+
+Editar **substitui as janelas por inteiro**. Casar janelas antigas com novas
+exigiria que o painel devolvesse ids, e o primeiro id perdido viraria uma janela
+órfã cobrando sozinha.
+
+Desativar **também desliga o interruptor manual**. Sem isso, uma taxa arquivada
+com o manual esquecido em ligado voltaria a cobrar no instante da reativação.
+
+`activeNow` vem resolvido do servidor. Uma segunda cópia da regra no navegador
+divergiria da que cobra de verdade.
+
+### Verificação, e o que não deu para verificar
+
+350 testes unitários, typecheck, lint e os 4 builds. Um e2e novo cobre o CRUD
+inteiro — incluindo a recusa de ligar taxa desativada e a substituição das
+janelas — mas **roda só no CI**, pela armadilha de ambiente já registrada.
+
+A tela foi conferida em página temporária com dados injetados no cache, porque a
+sessão do admin caiu e eu não faço login. Ficou visível o que importa: badge
+"Valendo agora", a anotação "(vira o dia)" nas janelas de madrugada, e a taxa
+desativada sem botão de interruptor.
+
+### Fora de escopo, e vale registrar
+
+A plataforma concorrente tem **lista de clientes isentos** por taxa. Não entrou
+aqui — é outro eixo, e o pedido foi nome, regra, ativar, desativar e editar.
+
+### Nada de inglês na tela
+
+Sobravam valores de enum crus onde deveria haver português. O mais visível
+estava na "Atividade auditável" do admin, imprimindo `Pedido #1163: CANCELLED.`
+para quem opera a loja e não lê código.
+
+Corrigidos cinco pontos:
+
+| Onde                         | Antes                            |
+| ---------------------------- | -------------------------------- |
+| Atividade auditável (API)    | `Pedido #1163: CANCELLED.`       |
+| Ofertas na atividade (API)   | `Oferta do pedido #X: DECLINED.` |
+| Trilha de despacho no pedido | `DECLINED`                       |
+| Linha do tempo da fatura     | `PENDING → OVERDUE`              |
+| Selo de status da fatura     | `OVERDUE`                        |
+
+`apps/api/src/common/status-labels.ts` guarda os rótulos do lado do servidor,
+que é onde as frases de auditoria são montadas — traduzir no painel exigiria
+devolver o enum junto com o texto e remontar a frase do outro lado.
+
+A redação ali é de **evento**, no particípio, e não de estado: a linha do tempo
+diz o que aconteceu naquele instante, enquanto o chip da fila diz onde o pedido
+está agora. "Voltando à loja" é um bom chip e uma péssima entrada de log — no
+histórico ele vira "entregue".
+
+## Fila de implementação
+
+Pedidos do responsável, em ordem de chegada:
+
+1. **Horário de funcionamento** — bloquear envio de pedido fora da faixa.
+2. **Ranking de entregadores** — depende de definir o que é "performance";
+   volume, tempo médio e taxa de conclusão levam a comportamentos diferentes na
+   rua, e a escolha é de negócio.
+3. **Histórico de entregas** — como relatório, não só por pedido.
+4. **Acompanhamento ao vivo mais próximo do concorrente** — ver abaixo.
+
+### O que o concorrente tem no acompanhamento ao vivo
+
+Das telas enviadas, o que dá para aproveitar:
+
+- **agrupamento por empresa** com contadores coloridos por status, e a fila
+  recolhível por grupo;
+- **cronômetro por pedido** ao lado do horário de criação (já temos o
+  cronômetro; falta o horário e o agrupamento);
+- **"chegando..." / "menos de 1 min"** — estimativa de chegada, que exige rota e
+  não só distância em linha reta;
+- **menu de ações por pedido**: clonar, abrir completo, ver mapa, copiar link de
+  rastreio, alterar valores, alterar tipo de serviço, alterar entregador,
+  remover entregador, voltar para aceito, finalizar, cancelar;
+- **filtros** por cliente, entregador e status, com ordenação;
+- **painel de atividade ao vivo** sobreposto ao mapa, com o texto já em
+  português e ligado ao pedido;
+- **rotulagem no mapa** com o número do pedido no marcador.
+
+Vale registrar o que **não** dá para copiar direto: o "Roteirizador" deles é
+otimização de rota multi-parada, um problema de porte próprio, e está marcado
+como BETA na tela deles.
+
+## Atualização — 2026-08-22: horário de funcionamento
+
+Primeiro item da fila. Fora do horário, a loja não consegue enviar pedido.
+
+**Uma faixa por intervalo.** Um dia com pausa de almoço tem duas linhas —
+08:00–12:00 e 13:30–18:00 — e é assim que se fecha o meio do dia sem inventar um
+campo de "intervalo". Dia sem faixa nenhuma é dia fechado.
+
+**Lista vazia significa ABERTA, não fechada.** Quem ainda não configurou não
+pode ter os pedidos recusados por omissão. Quem liga o bloqueio é um interruptor
+próprio em `PlatformSettings`, desligado por padrão, e ele existe justamente
+para essa decisão ser explícita.
+
+### A janela virou módulo compartilhado
+
+A lógica de "esta faixa cobre este minuto?" já existia nas taxas adicionais, com
+a parte difícil — a virada da meia-noite — resolvida e testada. Foi extraída
+para `apps/api/src/common/time-window.ts` antes de escrever a segunda cópia. Os
+17 testes das taxas passam sem alteração, o que é a prova de que a extração
+preservou o comportamento.
+
+### A recusa vira instrução
+
+Uma mensagem que diz só "estamos fechados" deixa a loja adivinhando. O erro
+informa quando abre: _"A operação está fora do horário de funcionamento. Abre
+amanhã às 08:00."_ A varredura anda sete dias a partir de hoje e devolve a
+primeira abertura à frente, dizendo "hoje", "amanhã" ou o nome do dia.
+
+### Pedido agendado é avaliado pelo horário AGENDADO
+
+Não pelo de agora. Uma loja que marca entrega para amanhã às 10h precisa
+conseguir fazer isso hoje à noite — que é justamente quando ela tem tempo de
+programar.
+
+### Um bug que o teste pegou
+
+Ao acrescentar `businessHoursEnabled` ao upsert de configurações, a linha caiu
+no ramo errado: atualizar só o raio de retorno passava a **desligar o horário de
+funcionamento** junto. O teste de atualização parcial acusou na hora.
+
+### Verificação
+
+365 testes unitários (15 novos só do horário), typecheck, lint e os 4 builds. Um
+e2e novo cobre o CRUD e o bloqueio de ponta a ponta — a janela do teste é
+montada a partir do instante atual, com uma faixa de um minuto no dia seguinte,
+para não depender da hora em que o CI roda.
+
+A tela ainda **não foi conferida no navegador**: a sessão do admin caiu e eu não
+faço login.
+
+### O que travava o CI: `app.close()` que nunca rodava
+
+O passo de e2e ficou pendurado por mais de vinte minutos em `ac924e8`, sem
+falhar nem terminar. A causa estava no `afterAll` do teste novo: a limpeza de
+dados lançava — chave estrangeira impedindo apagar uma entrega que ainda tinha
+oferta e histórico apontando para ela — e `app.close()` nunca era alcançado.
+
+Sem o fechamento, o Jest fica esperando para sempre pelo servidor Nest, pelo
+Socket.IO e pelas filas do BullMQ. O sintoma é um passo de CI que não termina,
+não um teste vermelho, e por isso é mais difícil de ler.
+
+A correção tem duas partes:
+
+1. **`app.close()` vai em `finally`.** Qualquer erro na limpeza deixa de
+   sequestrar o encerramento. Vale como regra para todo e2e novo.
+2. **Apagar filhos antes dos pais** — histórico, ofertas e endereços da entrega
+   antes da entrega.
+
+Confirmado localmente: a suíte do horário passa em 3,7s e o Jest encerra
+sozinho, **sem `--forceExit`**. Um `--forceExit` teria escondido o problema em
+vez de resolvê-lo.
+
+## Atualização — 2026-08-22: desempenho do entregador
+
+Segundo item da fila, e a pergunta que eu tinha feito estava errada.
+
+Eu perguntei qual critério de "performance" usar — volume, tempo ou taxa de
+conclusão. **Escolher um número único embute um incentivo**, e essa escolha não
+deveria estar no código: ranquear por volume faz o motoboy correr e recusar
+corrida ruim; por tempo, idem. A resposta certa é mostrar as medidas lado a
+lado, com colunas ordenáveis, e devolver a escolha para quem opera.
+
+### As quatro medidas
+
+| Coluna      | O que mede                                                     |
+| ----------- | -------------------------------------------------------------- |
+| Concluídas  | volume, sem juízo de valor                                     |
+| Conclusão   | das que ele assumiu e encerraram, quantas terminaram entregues |
+| Aceite      | das ofertas recebidas, quantas ele aceitou                     |
+| Tempo médio | do aceite até a conclusão, com o denominador à vista           |
+
+### Três decisões que mudam o número
+
+**Entrega em andamento não conta como falha.** O denominador da taxa de
+conclusão são as corridas que encerraram — concluída, não entregue, cancelada
+depois do aceite. Contar o que está na rua puniria quem está trabalhando no
+instante do relatório.
+
+**Nulo não é zero.** Sem corrida encerrada, a taxa de conclusão é `—`, não 0%.
+Zero por cento diria que ele falhou em tudo; o travessão diz que não houve o que
+medir. A diferença importa para quem vai cobrar alguém por esse número.
+
+**Quem só recusa aparece.** Um entregador sem entrega nenhuma mas com ofertas
+recebidas entra na lista com 0% de aceite — é justamente o caso que o relatório
+existe para revelar.
+
+O tempo médio mostra entre parênteses quantas entregas entraram na conta, para
+ninguém confundir média com cobertura.
+
+Onze testes no módulo puro. Na tela, ordenar por coluna diferente reordena de
+verdade — conferido no navegador, inclusive com o tempo médio invertendo o
+sentido (menor é melhor) e os nulos indo para o fim em qualquer ordenação.
+
+## Atualização — 2026-08-22: histórico de entregas
+
+Último item da fila de relatórios, e o menor deles — porque o backend já
+existia.
+
+`GET /deliveries` já aceitava período, status, empresa e entregador, e o admin
+já tinha acesso. Não entrou endpoint novo: a lacuna era só a tela. Vale como
+lembrete de olhar o que existe antes de construir.
+
+### O que faltava mesmo era exportar
+
+O painel não tinha exportação em lugar nenhum, e é isso que separa um relatório
+de uma tela. `apps/admin-web/src/lib/csv.ts` resolve os três detalhes que
+decidem se o arquivo abre ou vira uma coluna só no Excel brasileiro:
+
+1. **separador ponto e vírgula** — o Excel em português usa a vírgula como
+   separador decimal, então um CSV com vírgula abre tudo numa coluna;
+2. **BOM no início** — sem ele o Excel lê como Latin-1 e "João" vira "JoÃ£o";
+3. **aspas dobradas** — um campo com aspas quebra a linha inteira sem isso.
+
+Os números vão com vírgula decimal e **sem** "R$": com o símbolo na célula, a
+planilha trata como texto e nenhuma soma funciona do outro lado.
+
+Conferido no navegador com campos que quebram um CSV ingênuo: empresa com ponto
+e vírgula no nome, observação com aspas, e texto com quebra de linha.
+
+### Um campo que passou a aparecer
+
+`DeliveryListItem` ganhou `surchargeLabel` e `surchargeValue`. Eles já estavam
+congelados na entrega desde as taxas configuráveis, mas não eram expostos na
+listagem — e são justamente o que explica por que aquele pedido custou mais.
+
+## Atualização — 2026-08-22: acompanhamento ao vivo, primeira leva
+
+Da lista do concorrente, os dois itens de melhor valor por custo.
+
+### Horário de criação ao lado do cronômetro
+
+São duas medidas de tempo que respondem perguntas diferentes: a **hora** diz
+quando o pedido entrou, o **cronômetro** diz há quanto tempo ele está parado
+neste estado. Só o cronômetro não deixa remontar a fila; só a hora não mostra
+pressão. Entrou nos dois painéis.
+
+`src/lib/operation-clock.ts` formata em `America/Sao_Paulo` fixo, e não no fuso
+do navegador: relatórios, janelas de taxa e horário de funcionamento são todos
+avaliados nesse fuso, e um operador acessando de outro lugar veria a fila com
+um horário que não bate com o resto do sistema.
+
+### Fila agrupada por empresa
+
+A fila do admin agrupava só por status. As duas lentes respondem perguntas
+diferentes:
+
+- **por status** — o que está travado agora;
+- **por empresa** — algum cliente está sendo mal atendido.
+
+A segunda é a que faz o telefone tocar, e a lista por status não a mostra porque
+espalha os pedidos de uma mesma loja por várias seções. Virou uma alternância,
+não uma substituição.
+
+Os grupos vêm ordenados por tamanho da fila — a loja com mais pedidos é a que
+corre mais risco de atraso, e precisa estar no alto sem ninguém procurar. Cada
+grupo traz contadores por status, coloridos pelo **mesmo mapa** dos chips: a cor
+ali significa a mesma coisa que na fila, ou vira decoração e o olho para de
+confiar nela.
+
+Dentro do grupo, a linha deixa de repetir o nome da empresa — que já está no
+cabeçalho — e mostra o motoboy no lugar. Numa tela densa, essa largura vale
+mais.
+
+### O menu de ações NÃO é barato, e vale registrar por quê
+
+O concorrente tem onze ações por pedido. Cruzando com os endpoints existentes:
+
+| Ação                                              | Situação                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Abrir completo, Ver mapa                          | já existem como link                                       |
+| Cancelar                                          | endpoint existe                                            |
+| Clonar                                            | existe, mas no painel da empresa — o admin não cria pedido |
+| Copiar link de rastreio                           | **não existe** rastreio público                            |
+| Alterar valores, tipo de serviço, entregador      | **nenhum endpoint**                                        |
+| Remover entregador, Voltar para aceito, Finalizar | **nenhum endpoint**                                        |
+
+Sete das onze precisam de endpoint novo, com regras de transição de estado e
+auditoria — não cabem na fatia "barato e de alto uso". Ficam para uma decisão
+própria sobre quais transições manuais a operação realmente quer permitir: cada
+uma delas é o admin sobrescrevendo o que aconteceu na rua.
+
+## Atualização — 2026-08-22: intervenções manuais do admin
+
+Das sete ações que o concorrente tem e nós não tínhamos, foram feitas as duas
+que cobrem os casos reais: **trocar entregador** e **finalizar manualmente**.
+
+### O limite de ambas é o mesmo: dinheiro já creditado
+
+O repasse nasce em `COMPLETED`, com chave de idempotência por entrega. Isso
+define exatamente o que é permitido:
+
+- **trocar entregador** só em `ACCEPTED`, `COLLECTED`, `DELIVERED` e `FAILED` —
+  estados em que a entrega tem motoboy e o repasse ainda não existe. Em
+  `COMPLETED` o crédito já está na carteira do antigo, e trocar o nome no pedido
+  deixaria o dinheiro com quem não fez a entrega;
+- **finalizar manualmente** só em `DELIVERED` e `FAILED` — os estados que estão
+  esperando uma confirmação que o motoboy não deu.
+
+Desfazer ou transferir um crédito lançado é outra operação, com estorno e trilha
+própria, e não cabe num menu de contexto.
+
+### Os casos que elas resolvem
+
+**Trocar entregador**: o motoboy quebrou a moto, passou mal ou sumiu. Cancelar e
+recriar destruiria o número do pedido e a hora de criação — que é o que a loja
+usa para conversar com o cliente.
+
+**Finalizar manualmente**: ele entregou e não apertou "voltei à loja". O pedido
+fica parado em `DELIVERED` para sempre e **o repasse dele fica preso junto**.
+Faz o mesmo que `completeReturn`, inclusive creditar, mas sem a checagem de
+proximidade — o ponto é justamente que ninguém confirmou no lugar certo.
+
+### Motivo obrigatório
+
+As duas exigem uma justificativa de pelo menos cinco caracteres, gravada no
+histórico com o nome de quem fez. Sem isso a auditoria mostra que alguém mudou o
+pedido e não mostra por quê, que é a pergunta de quem for conferir depois.
+
+Por causa disso elas ficam **na página do pedido**, não num menu de contexto na
+fila: uma ação que pede justificativa escrita não cabe num menu que some quando
+o mouse sai de cima.
+
+### Um detalhe do histórico
+
+A troca de entregador grava `fromStatus` igual a `toStatus` de propósito. Não
+foi uma transição de estado — foi uma intervenção dentro do mesmo estado, e a
+trilha precisa dizer isso.
+
+`publishDeliveryUpdate` deixou de ser privado: as intervenções vivem em outro
+módulo e precisam avisar as telas do mesmo jeito. Duplicar a publicação criaria
+dois caminhos para o mesmo evento, e um deles envelheceria.
+
+### Verificação
+
+Vinte e um testes cobrindo cada estado permitido e recusado nas duas ações, o
+não-crédito na troca, o crédito na finalização, e a chave de idempotência
+virando conflito legível quando dois admins apertam ao mesmo tempo.
+
+## Atualização — 2026-08-22: vitrine de pedidos disponíveis
+
+O responsável explicou como funciona no concorrente: _"um pedido que ninguém
+aceitou fica lá, para alguém entrar e aceitar"_. É o complemento do empurrão,
+não um substituto — e fecha um buraco real do nosso despacho.
+
+### O buraco que existia
+
+`dispatchDelivery` oferta a um motoboy por vez, com prazo. Quando todo elegível
+já recebeu, ele faz `if (!nextDriverId) return;` — **retorna em silêncio**.
+
+Pior: `excludeDriverIds` tira da próxima rodada quem já recebeu. Então o pedido
+só voltava a se mexer se aparecesse um motoboy **novo**; quem deixou a oferta
+expirar às 11h nunca mais o via. O botão "chamar de novo" que eu tinha feito era
+um contorno manual disso.
+
+### Como a vitrine resolve
+
+`GET /delivery-offers/available` lista os pedidos em `AWAITING_DRIVER`, sem
+entregador e **sem oferta pendente** — se alguém está com o pedido na mão agora,
+ele ainda não está livre. Filtra por região e pelas modalidades do motoboy, e
+não aparece para quem já está com uma corrida, que é a mesma regra do despacho
+automático.
+
+`PATCH /delivery-offers/available/:id/claim` assume. A proteção contra dois
+assumindo ao mesmo tempo é a mesma do aceite de oferta: `updateMany` condicional
+e checagem de `count` — quem chega em segundo recebe conflito, em vez de os dois
+acharem que pegaram. Lote é assumido inteiro ou nenhum.
+
+De propósito, a exclusão **não** se aplica aqui: deixar uma oferta passar não é
+recusar aquele pedido para sempre.
+
+### Na tela do motoboy
+
+`AvailableDeliveriesScreen`, no menu logo abaixo da Carteira — é o que ele abre
+quando quer trabalhar e não chegou oferta nenhuma. Puxar para atualizar, e o
+conflito ao assumir vira aviso com recarga da lista, não erro.
+
+Pedido sem destino conhecido mostra "destino definido na entrega" e "valor
+calculado na entrega" em vez de zero: mostrar zero mentiria sobre quanto rende.
+
+### Não verificado no aparelho
+
+A tela **não foi testada num dispositivo**. O app instalado no celular é uma
+compilação antiga, e subir Metro e recompilar seria um desvio longo. O backend
+tem oito testes cobrindo filtro, corrida entre dois motoboys e lote parcial; a
+tela segue os padrões das telas vizinhas, mas isso é argumento, não prova.
+
+## Atualização — 2026-08-23: acabamento premium do painel administrativo
+
+O responsável pediu uma revisão exclusivamente visual do `admin-web`: as telas
+internas ainda pareciam preto e branco mesmo depois da primeira aplicação da
+marca. O recorte preservou consultas, contratos, estado, handlers e regras de
+negócio; foram alterados apenas tokens, classes e composição visual.
+
+### Direção visual
+
+- Azul-petróleo passou a estruturar navegação, foco, links e ações
+  administrativas. O laranja oficial continua reservado para entregas em
+  movimento e seus gráficos, sem perder o significado operacional registrado
+  anteriormente.
+- O fundo ganhou profundidade com gradientes e uma malha muito sutil; cards usam
+  borda clara, sombra em camadas e uma linha de luz, mantendo leitura clara em
+  telas densas.
+- `Card`, `Button`, `Input`, `Select`, `Table`, `Badge`, `Checkbox`, `Tabs` e
+  menus foram refinados na fonte. Isso aplica o mesmo acabamento a clientes,
+  entregadores, pedidos, financeiro, faturas, relatórios e configurações sem
+  duplicar estilos por rota.
+- Métricas receberam uma superfície própria, números tabulares e acento de
+  marca. Fichas de clientes/entregadores, filas, mapas, cards de configuração e
+  o widget de atividade receberam estados de hover, foco e profundidade
+  específicos.
+- Login e topbar usam o mesmo gradiente grafite/azul-petróleo. O layout continua
+  fluido; os breakpoints e a segunda linha de navegação existentes foram
+  preservados.
+
+Arquivos principais: `apps/admin-web/src/app/globals.css`, layout autenticado,
+login, home, listas de clientes/entregadores/pedidos, componentes de layout,
+operações, relatórios, `stat-card` e os primitives em `components/ui/`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                          |
+| --------------------------------------------------------- | ---------------------------------- |
+| `pnpm --filter @motoboycity/admin-web typecheck`          | aprovado                           |
+| `pnpm --filter @motoboycity/admin-web lint`               | aprovado                           |
+| `pnpm --filter @motoboycity/admin-web run build`          | aprovado; 23 rotas geradas         |
+| `pnpm typecheck`                                          | aprovado nos 8 workspaces          |
+| `pnpm lint`                                               | aprovado nos 8 workspaces          |
+| Hot reload e GET das rotas principais em `localhost:3001` | compilação aprovada; respostas 200 |
+| `git diff --check -- apps/admin-web`                      | aprovado                           |
+
+### Limitação e próximo passo
+
+O navegador integrado não estava disponível nesta sessão. As capturas enviadas
+pelo responsável foram a referência de antes; não foi possível produzir uma
+captura automatizada de depois. Próximo passo concreto: conferir visualmente em
+desktop, tablet e celular com uma sessão autenticada e ajustar somente detalhes
+de densidade/contraste apontados pelo responsável, sem misturar alterações de
+lógica neste recorte.
+
+## Atualização — 2026-08-23: acabamento premium do painel da empresa
+
+Depois do `admin-web`, o responsável pediu a mesma evolução exclusivamente
+visual no `company-web`. Consultas, mutations, contratos, estado, handlers,
+rotas e regras de negócio foram preservados; o recorte altera tokens, classes e
+composição visual.
+
+### Direção visual
+
+- Azul-petróleo/verde estrutura navegação, títulos, links, filtros e superfícies.
+  O laranja oficial continua reservado à ação principal que põe o motoboy em
+  movimento e aos estados em que ele está na rua.
+- O workspace ganhou malha discreta, luz ambiente e superfícies em camadas.
+  Cards, métricas, formulários, listas, tabelas, menus, selects e modais usam
+  bordas claras, sombras graduais, foco visível e cantos mais refinados.
+- A topbar recebeu gradiente grafite/petróleo, navegação ativa estrutural e CTA
+  laranja com maior presença. Os breakpoints e a navegação móvel em duas linhas
+  foram mantidos.
+- Login, cadastro e aprovação pendente agora compartilham um painel de marca com
+  gradientes, textura sutil e formulário translúcido, sem alterar validação ou
+  envio.
+- Central operacional, filas, busca, seleção de pedido, formulário rápido,
+  mapas, detalhe, indicadores, relatórios e faturas receberam acabamento
+  específico. Marcadores e rotas dos mapas foram alinhados aos tokens do tema.
+- O autocomplete injetado pelo Google também recebeu o mesmo tratamento visual.
+
+Arquivos principais: `apps/company-web/src/app/globals.css`, layouts e páginas
+públicas/autenticadas, componentes de layout/operação/pedidos, `stat-card` e os
+primitives em `apps/company-web/src/components/ui/`.
+
+### Verificação
+
+| Comando / fluxo                                                                                        | Resultado                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @motoboycity/company-web typecheck`                                                     | aprovado                                                                                                                                                                           |
+| `pnpm --filter @motoboycity/company-web lint`                                                          | aprovado                                                                                                                                                                           |
+| `pnpm --filter @motoboycity/company-web run build`                                                     | aprovado; 11 rotas geradas                                                                                                                                                         |
+| `pnpm lint`                                                                                            | aprovado nos 8 workspaces                                                                                                                                                          |
+| `pnpm typecheck`                                                                                       | falhou apenas em alteração concorrente de `driver-app/src/lib/push.ts`: import de `@react-native-firebase/messaging` sem export default; o `company-web` foi aprovado isoladamente |
+| GET de `/`, login, cadastro, aprovação, pedidos, indicadores, relatórios e faturas em `localhost:3000` | respostas 200                                                                                                                                                                      |
+| API, admin e Metro (`3333`, `3001`, `8081`)                                                            | respostas 200 após reinício                                                                                                                                                        |
+| `git diff --check -- apps/company-web`                                                                 | aprovado                                                                                                                                                                           |
+| Guarda de diff para consultas, mutations, handlers, sessão e fetch                                     | nenhuma alteração lógica detectada                                                                                                                                                 |
+
+### Limitação e próximo passo
+
+O navegador integrado continuou indisponível, então a validação visual
+automatizada não pôde ser feita. Os servidores estão ativos para conferência
+manual. Próximo passo concreto: revisar com sessão autenticada em desktop e
+celular e ajustar somente densidade/contraste a partir do feedback do
+responsável.
+
+## Atualização — 2026-08-23: refinamento da fila operacional do admin
+
+O responsável comparou a fila agrupada por empresa com a interface de um
+concorrente e apontou o problema principal no recorte estreito: cabeçalho
+comprimido, cronômetro quebrando em várias linhas e excesso de cards aninhados.
+O ajuste continuou estritamente na apresentação e usa somente campos que já
+chegavam em `OperationalDeliveryItem`.
+
+### O que mudou
+
+- O cabeçalho da fila ganhou resumo de volume e alternância em largura inteira;
+  a lente ativa agora usa o azul-petróleo estrutural, não o laranja reservado a
+  entregas em movimento.
+- Grupos por empresa ficaram mais legíveis, com ícone, quantidade de pedidos,
+  contadores por status e um único contêiner para as linhas.
+- Cada pedido ganhou trilho lateral na cor do status, horário de criação,
+  cronômetro em pílula sem quebra, status, empresa/motoboy, modalidade, destino,
+  distância, valor e indicação de retorno.
+- A seleção existente do mapa/painel lateral passou a ter destaque visual na
+  própria fila. Nenhuma consulta, mutation, handler ou contrato foi alterado.
+
+Arquivos afetados:
+`apps/admin-web/src/app/(app)/page.tsx` e
+`apps/admin-web/src/components/operations/company-queues.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                  | Resultado                         |
+| ------------------------------------------------ | --------------------------------- |
+| `pnpm --filter @motoboycity/admin-web typecheck` | aprovado                          |
+| `pnpm --filter @motoboycity/admin-web lint`      | aprovado                          |
+| `pnpm --filter @motoboycity/admin-web run build` | aprovado                          |
+| Hot reload e GET de `localhost:3001/`            | compilação aprovada; resposta 200 |
+
+O navegador integrado não estava conectado, então não houve captura
+automatizada na largura de referência. O admin foi reiniciado em
+`localhost:3001` para conferência manual. Próximo passo: validar a densidade
+com dados reais nas duas lentes (`Por status` e `Por empresa`) e ajustar apenas
+espaçamento ou truncamento se o responsável apontar algum caso extremo.
+
+## Atualização — 2026-08-23: retenção terminal da fila operacional do admin
+
+O responsável definiu uma política própria para a fila da página inicial do
+`admin-web`: pedidos concluídos devem sair assim que o status mudar; cancelados
+permanecem visíveis por 15 minutos; os demais estados continuam na fila até se
+tornarem concluídos ou cancelados.
+
+### Implementação
+
+- `AdminOperationsService.overview()` solicita somente `CANCELLED` na janela
+  terminal, com `statusChangedAt >= agora - 15 minutos` e sem teto por
+  quantidade. Assim, um pico com mais de 20 cancelamentos não remove itens antes
+  do prazo.
+- `DeliveriesService.operations()` ganhou uma opção interna de janela terminal.
+  O padrão existente — concluídos/cancelados, limitados aos 20 mais recentes —
+  foi preservado para o endpoint consumido pelo `company-web`.
+- Os contadores do admin agora zeram `COMPLETED` e contam em `CANCELLED` somente
+  os itens ainda dentro da janela, acompanhando exatamente a fila visível.
+- A lente `Por status` deixou de criar uma seção para concluídos e passou a
+  listar todos os estados operacionais, incluindo cancelados ainda dentro dos
+  15 minutos. O filtro também não oferece mais `COMPLETED`, pois esse estado não
+  pertence à fila operacional.
+- Não houve mudança de rota, payload, tipo compartilhado, schema Prisma ou
+  persistência. Os registros continuam disponíveis no histórico; apenas a fila
+  operacional do admin aplica a nova retenção.
+
+Arquivos afetados:
+`apps/api/src/admin/operations/admin-operations.service.ts`,
+`apps/api/src/admin/operations/admin-operations.service.spec.ts`,
+`apps/api/src/deliveries/deliveries.service.ts` e
+`apps/api/src/deliveries/deliveries.service.spec.ts`, além de
+`apps/admin-web/src/app/(app)/page.tsx`.
+
+### Verificação
+
+| Comando                                                                                                                                                | Resultado                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
+| `pnpm --filter @motoboycity/api exec jest --runInBand src/admin/operations/admin-operations.service.spec.ts src/deliveries/deliveries.service.spec.ts` | aprovado; 2 suítes e 57 testes |
+| `pnpm --filter @motoboycity/api typecheck`                                                                                                             | aprovado                       |
+| `pnpm --filter @motoboycity/api lint`                                                                                                                  | aprovado                       |
+| `pnpm --filter @motoboycity/admin-web typecheck`                                                                                                       | aprovado                       |
+| `pnpm --filter @motoboycity/admin-web lint`                                                                                                            | aprovado                       |
+
+Próximo passo concreto: confirmar manualmente, com sessão administrativa, que
+um concluído sai no evento de atualização e que um cancelado desaparece ao
+completar 15 minutos.
+
+## Atualização — 2026-08-23: tabela de preços personalizada por empresa
+
+O responsável pediu que o admin pudesse selecionar uma empresa e configurar
+preços diferentes dos valores gerais. A regra confirmada ficou: uma tabela
+ativa vinculada à empresa e modalidade tem prioridade; sem tabela própria, o
+cálculo cai explicitamente para a tabela geral ativa da região da empresa.
+
+### Persistência e migração
+
+- `PricingTable.companyId` é opcional. Registros existentes permanecem com
+  `null` e, portanto, continuam sendo tabelas gerais sem conversão de dados.
+- A relation usa `ON DELETE RESTRICT`: apagar uma empresa não pode transformar
+  silenciosamente seu preço personalizado em preço geral.
+- Migration aditiva gerada pelo Prisma:
+  `20260823210000_company_specific_pricing`. Ela adiciona a coluna nullable,
+  dois índices e a foreign key; não altera nem remove dados existentes.
+- A migration foi revisada e aplicada somente no Postgres local
+  `motoboycity_dev` em `localhost:5434`. Nenhum ambiente compartilhado foi
+  alterado.
+
+Ordem segura para ambiente compartilhado: backup verificável, restauração em
+cópia isolada de staging, `prisma migrate deploy`, deploy da API e depois do
+admin-web. O schema é retrocompatível porque `companyId` nasce nullable.
+
+Rollback de aplicação pode manter a coluna sem uso. Para rollback de banco,
+primeiro desative/exporte e remova as linhas personalizadas; só então remova FK,
+índices e coluna. Dropar apenas a coluna com linhas personalizadas ativas faria
+esses valores perderem o escopo e não é um rollback seguro.
+
+### Contrato e cálculo
+
+- `CreatePricingTablePayload` aceita `companyId` opcional; o filtro de listagem
+  também aceita empresa.
+- `PricingTableItem` expõe `companyId` e `companyName`, sincronizados entre
+  types, API client, controller e service.
+- `PricingService.quote()` agora exige o `companyId`: consulta primeiro a
+  tabela personalizada ativa da empresa e modalidade; se não encontrar,
+  consulta a tabela geral (`companyId=null`) da mesma região e modalidade.
+- Criação avulsa, lote e precificação tardia por GPS enviam a empresa dona da
+  entrega ao cálculo. `totalValue`, `driverValue`, `platformValue` e retorno
+  continuam passando pelo mesmo calculador e sendo congelados em `Delivery`.
+- Criar uma nova versão desativa somente a tabela ativa do mesmo escopo. Uma
+  tabela personalizada não desativa a geral nem a tabela de outra empresa.
+
+### Admin web
+
+Em `/configuracoes/tabela-de-precos`, o admin escolhe `Tabela geral` ou uma
+empresa. O formulário cria os mesmos campos de preço no escopo escolhido e o
+histórico abaixo mostra somente aquele escopo. A tela explica o fallback geral
+quando a modalidade da empresa ainda não tem valor personalizado.
+
+Arquivos principais: schema e migration Prisma; validações de create/list;
+`packages/types/src/pricing.ts`; API client de pricing tables; controller,
+service e testes administrativos; `PricingService`; três chamadas de cotação em
+`DeliveriesService`; e a página de tabela de preços do admin.
+
+### Verificação
+
+| Comando / fluxo                                                                                                                                                                                    | Resultado                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `pnpm --filter @motoboycity/api exec prisma validate`                                                                                                                                              | aprovado antes e depois da mudança         |
+| `pnpm --filter @motoboycity/validation build`                                                                                                                                                      | aprovado                                   |
+| `pnpm --filter @motoboycity/api exec jest --runInBand src/admin/pricing-tables/admin-pricing-tables.service.spec.ts src/pricing/pricing.service.spec.ts src/deliveries/deliveries.service.spec.ts` | aprovado; 3 suítes e 75 testes             |
+| `pnpm typecheck`                                                                                                                                                                                   | aprovado nos 8 workspaces                  |
+| `pnpm lint`                                                                                                                                                                                        | aprovado nos 8 workspaces                  |
+| `pnpm --filter @motoboycity/api run build`                                                                                                                                                         | aprovado                                   |
+| `pnpm --filter @motoboycity/admin-web run build`                                                                                                                                                   | aprovado; 23 rotas                         |
+| `prisma migrate deploy` no banco local                                                                                                                                                             | migration aplicada com sucesso             |
+| GET de company, página de preços do admin, API e Metro                                                                                                                                             | HTTP 200 nos quatro serviços               |
+| GET de `/admin/pricing-tables` sem token                                                                                                                                                           | HTTP 401, guarda administrativa preservada |
+| `prisma migrate status` após reinício                                                                                                                                                              | 23 migrations; banco local atualizado      |
+
+O navegador integrado não estava disponível (nenhuma instância conectada),
+então ainda falta conferir o seletor com uma sessão administrativa real. Também
+falta validar a migration por backup/restore em uma cópia de staging antes de
+qualquer aplicação compartilhada.
+
+## Atualização — 2026-08-23: fluxo visual progressivo para preços personalizados
+
+A página administrativa de tabela de preços foi reorganizada sem mudanças de
+API, persistência ou regra de cálculo. O primeiro passo agora apresenta duas
+opções visuais: `Tabela geral` e `Criar preços personalizados`. Ao escolher a
+segunda opção, a tela abre o seletor de empresa; os campos de modalidade e
+valores aparecem somente depois que uma empresa é selecionada.
+
+O formulário foi disposto em grade, identifica a empresa selecionada e usa a
+ação explícita `Salvar preços personalizados`. Enquanto nenhuma empresa estiver
+selecionada, o formulário e o histórico ficam ocultos para evitar que uma tabela
+geral seja criada por engano. A tabela geral continua disponível e preserva o
+mesmo comportamento anterior.
+
+Arquivo afetado:
+`apps/admin-web/src/app/(app)/configuracoes/tabela-de-precos/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                                              | Resultado          |
+| ---------------------------------------------------------------------------- | ------------------ |
+| `pnpm --filter @motoboycity/admin-web typecheck`                             | aprovado           |
+| `pnpm --filter @motoboycity/admin-web lint`                                  | aprovado           |
+| compilação incremental do Next.js e GET de `/configuracoes/tabela-de-precos` | aprovado; HTTP 200 |
+
+Próximo passo concreto: conferir visualmente a seleção da empresa e o estado
+responsivo com uma sessão administrativa no navegador.
+
+## Atualização — 2026-08-23: Secretária Virtual administrativa, somente leitura
+
+Foi adicionada ao `admin-web` a rota `/secretaria-virtual`, com chat em linguagem
+natural e atalhos para resumo diário, faturamento, cancelamentos e motoboys
+online. O contrato compartilhado usa `POST /admin/virtual-secretary/chat`, exige
+JWT + `AdminOnlyGuard`, aceita uma mensagem de até 2.000 caracteres e no máximo
+oito mensagens de histórico. Há limite específico de 10 requisições por minuto.
+
+A integração com Gemini roda exclusivamente na API usando `@google/genai`. A
+chave é lida de `GEMINI_API_KEY`; modelo e timeout são configuráveis e os padrões
+são `gemini-3.6-flash` e 12 segundos. Sem chave, somente a rota do chat responde
+`503`; o restante da API continua operacional. A chave fornecida na conversa
+foi tratada como exposta: não foi repetida, testada nem salva e precisa ser
+revogada antes de uma nova ser configurada no secret manager.
+
+Toda resposta factual é obrigada a selecionar uma ferramenta allowlisted antes
+de responder. Há ferramentas de resumo, relatório por período, operação atual,
+busca de pedidos, empresas e motoboys. Elas reutilizam services do domínio e
+devolvem no máximo 5/10 itens reduzidos, sem CPF, telefone, e-mail, endereço,
+coordenadas, destinatário ou observações. Não existe ferramenta de escrita;
+pedidos de alteração usam a resposta institucional de modo somente leitura.
+
+A auditoria append-only usa `virtual_secretary_audits`. Ela registra
+administrador, request id, ferramenta, parâmetros/resultados já reduzidos,
+status e duração. O chat guarda apenas comprimentos e nomes das ferramentas;
+nenhum texto de conversa ou secret é persistido.
+
+### Persistência e migration
+
+`20260823161747_virtual_secretary_audit` cria enum, tabela, índices e FK. Ao
+gerar essa migration no banco local, o Prisma detectou que o default histórico
+de `surcharges.updatedAt` existia no SQL, mas não no schema, e incluiu um `DROP
+DEFAULT` fora do recorte. A migration já aplicada não foi editada. O schema foi
+alinhado ao comportamento histórico e a migration compensatória
+`20260823162007_preserve_surcharge_updated_at_default` restaura imediatamente
+`DEFAULT CURRENT_TIMESTAMP`. Ambas foram aplicadas apenas em
+`motoboycity_dev`; nenhum ambiente compartilhado foi alterado.
+
+Ordem segura de deploy: rotacionar/configurar o secret, backup verificável,
+restore em staging isolado, `prisma migrate deploy`, API e admin-web. Rollback da
+aplicação pode manter a tabela sem uso; rollback do banco deve preservar o
+default de `surcharges.updatedAt`.
+
+Arquivos principais: `apps/api/src/ai/`,
+`apps/api/src/admin/virtual-secretary/`, services administrativos com exports e
+buscas reduzidas, `packages/{types,validation,api-client}`, migration/schema
+Prisma, página/nav do admin e `docs/SECRETARIA_VIRTUAL.md`.
+
+### Verificação executada até este registro
+
+| Comando                                                                    | Resultado                                                                                                                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prisma format`, `prisma validate`, `prisma generate`                      | aprovados; generate exigiu parar temporariamente a API no Windows                                                                                         |
+| `pnpm --filter @motoboycity/validation build`                              | aprovado                                                                                                                                                  |
+| typecheck de types, validation, api-client, API e admin-web                | aprovado                                                                                                                                                  |
+| Jest focado em período, allowlist/PII, guardas, service e Gemini sem chave | 5 suítes, 10 testes aprovados                                                                                                                             |
+| lint de API e admin-web                                                    | aprovado                                                                                                                                                  |
+| build da API e do admin-web                                                | aprovado; rota `/secretaria-virtual` incluída                                                                                                             |
+| HTTP sem token / admin sem chave nova                                      | `401` / `503` controlado                                                                                                                                  |
+| health de admin-web, company-web, API e Metro                              | HTTP 200 nos quatro serviços após reinício do Metro travado                                                                                               |
+| inspeção visual automatizada                                               | pendente; nenhum navegador estava conectado à sessão                                                                                                      |
+| `pnpm typecheck`                                                           | aprovado nos 8 workspaces                                                                                                                                 |
+| `pnpm lint`                                                                | API, webs e pacotes aprovados; falhou apenas no driver-app por configuração preexistente do ESLint 8 (`jest/globals` desconhecido)                        |
+| `pnpm audit --prod --audit-level high`                                     | encontrou 3 altos e 2 moderados em dependências transitivas preexistentes de React Native/Metro, Prisma e Firebase; nenhum caminho vem de `@google/genai` |
+
+Próximo passo concreto: rotacionar a chave exposta, configurar a nova no backend
+e então executar uma consulta real supervisionada. A revisão visual em navegador
+também fica pendente até uma instância estar conectada.
+
+## Atualização — 2026-08-23: modelo Gemini atualizado e diagnóstico de créditos
+
+Após o usuário configurar uma nova chave diretamente em `apps/api/.env`, a API
+foi reiniciada e o provedor foi consultado sem expor o secret. O modelo anterior,
+`gemini-2.5-flash`, respondeu `404` informando que não está mais disponível para
+novos usuários e recomendando `gemini-3.6-flash`.
+
+Com autorização explícita, somente a linha `GEMINI_MODEL` do ambiente local foi
+alterada para `gemini-3.6-flash`; a linha da chave não foi modificada nem exibida.
+O mesmo padrão foi atualizado no fallback do `GeminiService`, nos dois arquivos
+`.env.example` e em `docs/SECRETARIA_VIRTUAL.md`. A API foi reiniciada e o health
+permaneceu em HTTP 200.
+
+A chamada direta com `gemini-3.6-flash` confirmou que a chave chega ao Google,
+mas o projeto respondeu `429 RESOURCE_EXHAUSTED`: os créditos pré-pagos estão
+esgotados. Por isso, o chat administrativo ainda devolve o `502` controlado até
+que créditos sejam adicionados no Google AI Studio ou seja configurada uma chave
+de outro projeto elegível com cota. O arquivo temporário usado no diagnóstico
+seguro foi removido.
+
+### Verificação
+
+| Comando / fluxo                                                                | Resultado                                                                               |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `GET /health` após reinício                                                    | HTTP 200                                                                                |
+| login administrativo + `POST /admin/virtual-secretary/chat`                    | autenticação aprovada; provedor devolveu `429` e a rota converteu para `502` controlado |
+| `pnpm --filter @motoboycity/api run typecheck`                                 | aprovado                                                                                |
+| Jest focado em `src/admin/virtual-secretary` e `src/ai/gemini.service.spec.ts` | 5 suítes e 10 testes aprovados                                                          |
+
+Próximo passo concreto: regularizar os créditos/prepay do projeto Gemini ou
+configurar uma chave de projeto com cota e repetir a consulta real. Nenhuma nova
+alteração de código é necessária para esse reteste.
+
+## Atualização — 2026-08-23: nova chave Gemini validada
+
+O usuário substituiu diretamente `GEMINI_API_KEY` no ambiente local da API. O
+processo NestJS foi reiniciado sem ler, registrar ou exibir o secret. Após o
+reinício, `GET /health` respondeu HTTP 200 e uma consulta administrativa real em
+`POST /admin/virtual-secretary/chat` respondeu HTTP 200, retornou texto e chamou
+a ferramenta allowlisted `gerar_resumo_administrativo`.
+
+O erro anterior de créditos esgotados não se repetiu com a nova chave. Nenhum
+arquivo de código, contrato ou banco foi alterado neste reteste; somente o
+processo da API foi reiniciado e o resultado operacional foi validado.
+
+## Atualização — 2026-08-23: timeout ampliado e cota Gemini novamente esgotada
+
+Uma pergunta real de cancelamentos executou `consultar_relatorio_periodo` em 9
+ms, mas a segunda chamada ao Gemini ultrapassou o limite local anterior de 12
+segundos. Com autorização explícita, somente `GEMINI_TIMEOUT_MS` no
+`apps/api/.env` local foi alterado para 30 segundos; a chave não foi lida,
+modificada nem exibida. A API foi reiniciada e `GET /health` permaneceu em HTTP 200.
+
+No reteste seguinte, o provedor recusou a chamada antes da execução da ferramenta.
+Um diagnóstico direto e sanitizado confirmou `429 RESOURCE_EXHAUSTED` com a
+mensagem de que os créditos pré-pagos do projeto estão esgotados. Portanto, o
+timeout local está corrigido, mas o chat continuará retornando o `502` controlado
+até que o saldo/prepay desse projeto seja regularizado ou uma chave de projeto
+com cota seja configurada. O arquivo temporário de diagnóstico foi removido e
+nenhum secret foi persistido ou impresso.
+
+## Atualização — 2026-08-23: Secretária Virtual migrada de Gemini para Groq
+
+A integração da Secretária Virtual foi migrada integralmente para a Groq após o
+usuário configurar `GROQ_API_KEY` diretamente em `apps/api/.env`. O valor do
+secret não foi exibido, copiado nem alterado pelo agente; foi verificada somente
+a presença de um valor não vazio.
+
+`@google/genai` foi removido e `groq-sdk@1.5.0` foi adicionado. O novo
+`GroqService` usa Chat Completions com `openai/gpt-oss-120b` como modelo padrão,
+timeout padrão de 30 segundos, retries automáticos desabilitados e logs do SDK
+desligados. Logs próprios registram somente etapa, modelo, status, classe do erro
+e duração. `429`, timeout, autenticação/modelo e falhas gerais são convertidos em
+respostas controladas sem incluir pergunta, resultado ou detalhe do provedor.
+
+A política de segurança foi preservada: a primeira rodada exige ferramenta com
+`tool_choice: required`; rodadas adicionais são sequenciais, chamadas paralelas
+ficam desabilitadas e o total continua limitado a três ferramentas. Argumentos
+JSON passam por parsing defensivo e pela validação Zod/allowlist existente. Não
+foi adicionada ferramenta de escrita, e rota, payload, resposta, auditoria,
+contratos compartilhados e persistência não mudaram. Não há migration associada
+a esta troca.
+
+As declarações das ferramentas agora usam o tipo interno e neutro
+`AiToolDeclaration`. Injeção, testes e selo visual foram atualizados para Groq;
+os exemplos usam `GROQ_API_KEY`, `GROQ_MODEL=openai/gpt-oss-120b` e
+`GROQ_TIMEOUT_MS=30000`. A documentação inclui rate limits, tratamento de erros
+e recomendação de avaliar Zero Data Retention em ambientes com exigência maior
+de privacidade.
+
+### Verificação
+
+| Comando / fluxo                                                 | Resultado                                                                                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm --filter @motoboycity/api run typecheck`                  | aprovado                                                                                                                                                           |
+| Jest focado em `src/ai` e `src/admin/virtual-secretary`         | 5 suítes e 14 testes aprovados                                                                                                                                     |
+| ESLint focado na API e página da Secretária                     | aprovado, zero warnings                                                                                                                                            |
+| `pnpm --filter @motoboycity/admin-web run typecheck`            | aprovado                                                                                                                                                           |
+| `pnpm typecheck`                                                | aprovado nos 8 workspaces                                                                                                                                          |
+| `pnpm lint`                                                     | aprovado nos 8 workspaces                                                                                                                                          |
+| builds de API e admin-web                                       | aprovados; 20 rotas no admin, incluindo `/secretaria-virtual`                                                                                                      |
+| `GET /health` após reinício                                     | HTTP 200                                                                                                                                                           |
+| login + saudação neutra em `POST /admin/virtual-secretary/chat` | HTTP 200; Groq chamou `responder_sem_consulta` e devolveu a resposta esperada, sem enviar dados operacionais                                                       |
+| health final dos serviços                                       | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga `react-native start` travada foi identificada por PID/command line, encerrada e substituída |
+| `pnpm audit --prod --audit-level high`                          | continuam 3 altos e 2 moderados transitivos preexistentes em React Native/Metro e Prisma; `groq-sdk@1.5.0` não adiciona dependências transitivas                   |
+| limpeza pós-validação                                           | cache regenerável `.turbo` de aproximadamente 27 GB removido após o disco chegar a zero bytes livres; cerca de 27,2 GB liberados, sem remover código ou dados      |
+
+O navegador integrado continuou indisponível (nenhuma instância conectada), mas
+o build contém o novo selo `Groq` e o admin local responde HTTP 200. A API ficou
+rodando em modo desenvolvimento na porta 3333. Próximo passo concreto: validar
+visualmente a página em uma sessão administrativa e, mediante decisão explícita
+sobre envio de dados operacionais ao provedor, executar uma consulta factual
+supervisionada. Para produção, configurar o secret no gerenciador do ambiente e
+avaliar a política Zero Data Retention da organização Groq.
+
+## Atualização — 2026-08-23: cadastro de entregador pelo painel administrativo
+
+A aba **Entregadores** do admin agora possui o fluxo “Cadastrar entregador”. O
+formulário coleta dados pessoais, PIX, senha inicial, região e modalidades. A
+confirmação da senha existe somente na interface e nunca é enviada; o backend
+recebe o contrato estrito `CreateAdminDriverPayload`.
+
+Foi criada a rota `POST /admin/drivers`, protegida por `JwtAuthGuard` e
+`AdminOnlyGuard`, e a rota auxiliar
+`GET /admin/drivers/registration-options`, que devolve somente regiões ativas.
+O cliente continua buscando as modalidades pelo endpoint administrativo já
+existente. Após sucesso, o painel invalida apenas a query da lista de
+entregadores e mostra a confirmação do cadastro.
+
+O modal usa validação Zod uniforme (`noValidate`), associa cada mensagem ao
+campo correspondente, move o foco para o primeiro erro e traduz `issues` da
+API para erros por campo. Falhas ao carregar regiões ou modalidades oferecem
+“Tentar novamente”. Durante o envio, cancelar e fechar ficam desabilitados para
+evitar estado ambíguo.
+
+`AuthService.registerDriver` passou a aceitar opções internas de região e
+modalidades sem mudar o payload da rota pública do aplicativo. Região ativa,
+modalidades ativas e unicidade são revalidadas no servidor. `User`, `Driver` e
+`DriverServiceType` são gravados numa transação `SERIALIZABLE`; a primeira
+modalidade é principal. Corrida de unicidade `P2002` vira HTTP 409 e conflito de
+serialização `P2034` tem até três tentativas controladas.
+
+O cadastro administrativo não autoaprova: mantém os defaults `PENDING`,
+`ACTIVE` e `UNAVAILABLE`, e a aprovação permanece separada. Não foram incluídos
+veículo ou documentos, pois esses uploads/revisões ainda não fazem parte do
+cadastro atual. Também não foi criada auditoria persistente do administrador que
+originou o cadastro; fazer isso exige decisão de produto e migration aditiva
+própria. Não houve alteração de schema Prisma nem migration neste recorte.
+
+Arquivos principais: `packages/validation/src/admin/create-driver.schema.ts`,
+`packages/types/src/driver.ts`, `packages/api-client/src/admin-drivers.ts`,
+`apps/api/src/auth/auth.service.ts`, `apps/api/src/admin/drivers/`,
+`apps/admin-web/src/components/drivers/create-driver-dialog.tsx`,
+`apps/admin-web/src/components/ui/dialog.tsx` e
+`apps/admin-web/src/app/(app)/entregadores/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                                         | Resultado                                                                                                                                            |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck de types, validation, api-client, API e admin-web             | aprovado                                                                                                                                             |
+| ESLint focado nos arquivos alterados da API e do admin-web              | aprovado                                                                                                                                             |
+| Jest focado em `auth.service.spec.ts` e `admin-drivers.service.spec.ts` | 2 suítes e 40 testes aprovados                                                                                                                       |
+| build da API                                                            | aprovado                                                                                                                                             |
+| build do admin-web                                                      | aprovado; rota `/entregadores` gerada                                                                                                                |
+| E2E de `admin-drivers.e2e-spec.ts`                                      | cobertura ampliada para guardas, criação, hash, configuração inválida e duplicidade; não executado localmente por exigir PostgreSQL e Redis isolados |
+| API/admin após reinício                                                 | `GET /health` 200, `/entregadores` 200 e as duas rotas novas sem token retornaram 401                                                                |
+| inspeção visual automatizada                                            | pendente; nenhuma instância de navegador estava conectada à sessão                                                                                   |
+
+Próximo passo concreto: executar esse E2E no ambiente isolado da CI e validar o
+modal visualmente com sessão administrativa antes do deploy conjunto de
+validation, types, api-client, API e admin-web.
+
+### Correção de compatibilidade — região ausente no cache do admin
+
+Depois da inclusão de `region` em `AdminDriverListItem`, o Fast Refresh podia
+preservar no TanStack Query uma resposta de `GET /admin/drivers` obtida antes da
+mudança. Esses itens antigos não possuíam `region`, e o acesso direto a
+`driver.region.name` derrubava toda a página antes do refetch terminar.
+
+A renderização agora usa `driver.region?.name ?? 'Região não informada'`. O
+contrato compartilhado continua exigindo região porque a relação é obrigatória
+no Prisma e a API atual sempre a devolve; o fallback existe somente para cache,
+rolling deploy ou resposta antiga. Typecheck, ESLint focado e build do admin-web
+passaram. API e `/entregadores` responderam HTTP 200 depois da correção.
+
+## Atualização — 2026-08-23: app do entregador alinhado às referências visuais
+
+As treze referências enviadas foram comparadas com navegação, telas, API,
+Socket.IO, push e rastreamento existentes. O recorte implementado aproxima a
+experiência visual sem transformar produtos ausentes em botões fictícios.
+
+### Fluxos reais refinados
+
+- A Home mantém mapa + folha inferior, abas **Em andamento/Pendentes**, seletor
+  Ativo/Inativo, avisos de conexão, pull-to-refresh, entregas ativas e a vitrine
+  de pedidos livres. A abertura deixou de redirecionar automaticamente para a
+  primeira corrida: entregas em andamento ficam visíveis e o motoboy escolhe
+  qual abrir, enquanto rastreamento e socket continuam sincronizados.
+- O menu passou a usar o painel inferior arredondado da referência, com perfil,
+  saldo real, ajustes no topo, carteira, pedidos disponíveis, histórico, perfil
+  e saída. Agendados, escalas, desafios e suporte não aparecem porque ainda não
+  possuem contrato ou operação real.
+- A vitrine de pedidos disponíveis foi redesenhada sem alterar o endpoint nem a
+  proteção concorrente do `claim`: atualização, dados de empresa/modalidade,
+  distância/valor conhecidos e aceite continuam reais.
+- Carteira e histórico foram migrados para o tema claro único. A carteira usa
+  os saldos, lançamentos, filtros e solicitações reais de `GET /driver/wallet`.
+  **Solicitar saque** agora abre `WithdrawalScreen`, que usa o endpoint existente
+  `POST /driver/wallet/withdrawals`, valida o saldo e espelha na interface a
+  regra de segunda-feira de São Paulo; o servidor continua sendo a autoridade.
+  Nenhum campo bancário foi inventado: o texto informa que o pagamento usa a
+  chave PIX validada no cadastro.
+- O histórico agrupa visualmente por dia de conclusão e soma `driverValue`. O
+  texto deixa explícito que `from/to` do endpoint atual filtram `createdAt`, não
+  `statusChangedAt`, evitando prometer um recorte que a API não faz.
+- Perfil permanece somente leitura (`/auth/me` expõe nome, e-mail e tipo). Ajustes
+  oferece uma ação real para abrir as permissões do sistema, disponibilidade e
+  diagnóstico; controles de overlay, tela ligada, som e nomes do mapa não são
+  simulados.
+
+### Limites deliberados
+
+`MapBackdrop` ganhou acabamento cartográfico para reproduzir a composição das
+referências, mas ainda é uma superfície ilustrativa. GPS, presença e tracking
+funcionam; tiles, câmera e marcador georreferenciado dependem de um SDK de mapas,
+chave mobile restrita e rebuild nativo. Nenhuma dependência nativa ou chave foi
+adicionada neste recorte.
+
+Antecipação, escalas, desafios, aceite antecipado de pedidos agendados, suporte
+integrado e edição de foto/telefone/documentos/senha/PIX continuam fora da UI
+porque exigem regra, persistência e contratos próprios. O modelo Prisma possui
+vestígios de antecipação financeira, mas não existe controller/service/cliente
+para oferecê-la com segurança.
+
+O Manifest Android usava `${usesCleartextTraffic}` sem declarar o placeholder.
+`android/app/build.gradle` agora o define como `true` somente em
+`development` e `false` em piloto/produção. Isso corrige o merge do Manifest sem
+liberar HTTP nos artefatos distribuídos.
+
+Arquivos principais: `apps/driver-app/App.tsx`, `src/theme/colors.ts`,
+`src/components/{MapBackdrop,DrawerMenu,ScreenHeader,Card,EmptyState}.tsx`,
+as telas `Home`, `AvailableDeliveries`, `DriverWallet`, `Withdrawal`,
+`DriverHistory`, `Profile` e `Settings`, `src/lib/withdrawal.ts`,
+`android/app/build.gradle` e `__tests__/withdrawal.test.ts`.
+
+### Verificação
+
+| Comando / fluxo                                                        | Resultado                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck`             | aprovado                                                                                                                                                                 |
+| `corepack pnpm --filter @motoboycity/driver-app lint`                  | aprovado, zero avisos                                                                                                                                                    |
+| `corepack pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 5 suítes e 45 testes aprovados                                                                                                                                           |
+| `gradlew.bat :app:processDebugMainManifest --offline`                  | aprovado; 43 tarefas, Manifest processado                                                                                                                                |
+| `git diff --check -- apps/driver-app`                                  | aprovado; somente avisos de normalização LF/CRLF                                                                                                                         |
+| serviços locais após a validação                                       | company-web 200, admin-web 200, API 200 e Metro 200; uma árvore antiga do Metro que ocupava 8081 sem responder foi confirmada pelo command line, encerrada e substituída |
+| inspeção em aparelho/emulador                                          | não executada: `adb` não está instalado/disponível nesta máquina                                                                                                         |
+
+Os comandos pnpm precisaram rodar fora do sandbox local porque os junctions do
+`node_modules/.pnpm` retornavam `EPERM` dentro dele; a mesma instalação passou
+normalmente fora do isolamento. Nenhum `.env`, secret, migration, schema Prisma,
+rota ou contrato compartilhado foi alterado nesta etapa.
+
+Próximo passo concreto: validar visualmente em aparelho Android e iPhone os
+breakpoints, teclado e permissões; depois decidir/configurar o provedor de mapa
+nativo. Funcionalidades ausentes devem ser priorizadas separadamente, começando
+por uma regra de produto e contrato próprio, não por telas estáticas.
+
+## Atualização — 2026-08-23: notificação nativa de oferta como requisito operacional P0
+
+Foi confirmada a decisão de produto de que a notificação nativa não é um
+fallback opcional: ela precisa permanecer acionável com o app aberto, funcionar
+em segundo plano e solicitar tela cheia com o aparelho bloqueado. O motoboy não
+pode ficar `AVAILABLE` sem Firebase/token registrado, permissão de notificação,
+canal `ofertas` em `IMPORTANCE_HIGH` e, no Android 14+, acesso especial de tela
+cheia. Ao abrir/reconectar, um motoboy que perdeu essa capacidade é retirado da
+fila e recebe o atalho para o ajuste correto.
+
+O conflito entre dois serviços `MESSAGING_EVENT` do aplicativo foi eliminado.
+`OfferMessagingService` agora herda o serviço do React Native Firebase,
+preservando a propagação de renovação do token, e a declaração concorrente da
+biblioteca é removida no merge do Manifest. O Manifest final mantém esse serviço
+do app e somente o fallback interno do Firebase com prioridade `-500`.
+
+A oferta FCM continua data-only e de prioridade alta, mas deixou de usar TTL
+zero: recebe `expiresAtEpochMs` e pode sobreviver a uma troca curta de rede sem
+ultrapassar o prazo real. Aceite, recusa, expiração e cancelamento emitem um
+push data-only `offer-resolved`, que fecha a notificação/Activity em todos os
+aparelhos mesmo sem socket. No primeiro plano, a tela React e a notificação
+nativa acionável coexistem; em segundo plano/tela bloqueada, o
+`fullScreenIntent` abre `OfferActivity`.
+
+Os botões nativos agora só removem o cartão depois de confirmação da API; falha
+de rede preserva a possibilidade de nova tentativa. A chamada cabe na janela
+do `BroadcastReceiver` por `callTimeout` de oito segundos. Um aceite confirmado
+inicia/atualiza `DeliveryLocationTrackingService` com `deliveryId` ou
+`deliveryIds`, inclusive com o React Native suspenso. Loading/erro da Activity
+também obedecem ao prazo absoluto e não mantêm a tela acesa indefinidamente.
+
+Arquivos deste recorte: `apps/api/src/push/push.service.ts` e spec,
+`apps/api/src/dispatch/dispatch.service.ts` e spec,
+`apps/driver-app/src/{lib/push.ts,screens/HomeScreen.tsx}`, `index.js`, teste de
+push, Manifest e os arquivos Kotlin `OfferMessagingService`,
+`OfferActionReceiver`, `OfferNativeClient`, `OfferActivity`,
+`OfferSession{Module,Store}`, `DeliveryLocationTrackingService` e
+`LocationTrackingModule`. A documentação de push e o runbook do piloto também
+foram atualizados. Nenhum `.env`, secret, schema Prisma, migration ou contrato
+compartilhado foi alterado neste recorte.
+
+### Verificação
+
+| Comando / fluxo                           | Resultado                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| typecheck do driver-app                   | aprovado                                                                                         |
+| lint do driver-app                        | aprovado, zero erros                                                                             |
+| Jest `__tests__/push.test.ts --runInBand` | 1 suíte e 12 testes aprovados                                                                    |
+| Jest completo do driver-app               | 5 suítes e 48 testes aprovados                                                                   |
+| typecheck da API                          | aprovado                                                                                         |
+| Jest focado em push + dispatch da API     | 2 suítes e 65 testes aprovados                                                                   |
+| `gradlew.bat :app:assembleDebug`          | aprovado; APK novo gerado                                                                        |
+| inspeção do Manifest mesclado             | serviço RNFB concorrente ausente; serviço do app ativo e fallback Firebase em prioridade `-500`  |
+| instalação `adb install -r`               | aprovada no aparelho conectado, preservando dados                                                |
+| inspeção do aparelho                      | `POST_NOTIFICATIONS` e `USE_FULL_SCREEN_INTENT` concedidas; canal `ofertas` em `IMPORTANCE_HIGH` |
+
+Limitações honestas: uma parada forçada explícita bloqueia mensagens até o
+usuário reabrir o app; o aplicativo recupera a oferta pendente nessa abertura.
+A política do Google Play restringe o uso automático de tela cheia e precisa ser
+avaliada antes da publicação. iOS/APNs ainda não está implementado.
+
+Próximo passo concreto: com o aparelho já atualizado, criar três ofertas reais
+controladas e validar gravação de tela/logs em (1) app aberto, (2) app em segundo
+plano e (3) tela bloqueada, cobrindo aceitar, recusar, expirar e cancelar. Essa
+homologação fim a fim não deve ser declarada concluída apenas pelos testes e
+pela inspeção de permissões.
+
+## Atualização — 2026-08-23: telas operacionais pós-aceite
+
+As quatro referências do fluxo Aceito/Coletado foram aplicadas à tela
+operacional real do driver-app. `DeliveryOperationScreen` agora usa a composição
+mapa + folha branca, cabeçalho do pedido, data/hora do estado atual, status,
+ação principal em destaque, seções de valores, pagamento, endereços e cliente,
+timeline da rota e rodapé fixo. O telefone do destinatário abre `tel:`, as rotas
+continuam abrindo o Google Maps e os botões permanecem ligados aos endpoints
+reais de coleta, entrega, insucesso, retorno e devolução à fila. A seta permite
+voltar para a Home sem abandonar a corrida, que continua listada em andamento.
+
+O sucesso da coleta exibe o banner “O pedido foi marcado como coletado!”. O
+estado `ACCEPTED` mostra **tempo decorrido desde o aceite**, atualizado a cada
+segundo, e não uma contagem regressiva inventada: o produto ainda não possui um
+deadline/SLA de coleta. `driverValue=null` aparece como “A calcular na entrega”,
+nunca como `R$ 0,00`. Endereços passaram a incluir complemento, CEP e referência
+quando presentes.
+
+Para pedido sem destino conhecido, a confirmação de entrega explica e aciona a
+captura GPS já confirmada nas regras de negócio. O modal de rua/número da
+referência não foi copiado porque o contrato atual proíbe endereço estruturado
+nesse modo e usa a coordenada para definir destino, distância e preço. “Falar
+com a loja” também não foi simulado: `DeliveryDetail` não expõe telefone
+operacional canônico da empresa. Esses dois itens exigem decisões e contratos
+novos se forem priorizados.
+
+Foi corrigida uma perda de continuidade existente: `FAILED` agora faz parte de
+`getActiveDeliveries`, pois a mercadoria ainda precisa ser devolvida e fechada
+por `complete-return`. Assim ela não desaparece da Home nem do tracking após
+reiniciar. Ao voltar do segundo plano, a Home também recarrega os ativos; se um
+novo `ACCEPTED` surgiu pelo aceite na notificação/tela cheia Android, abre a
+tela operacional correspondente. Isso preserva a notificação nativa P0 e fecha
+o elo entre o aceite fora do React Native e o pós-aceite.
+
+Arquivos deste recorte:
+`apps/driver-app/src/screens/{DeliveryOperationScreen,HomeScreen}.tsx`,
+`apps/driver-app/src/lib/{deliveryOperation,activeDeliveries}.ts`,
+`apps/driver-app/__tests__/{deliveryOperation,activeDeliveries}.test.ts`.
+Nenhum `.env`, secret, schema Prisma, migration, rota HTTP, contrato
+compartilhado ou arquivo nativo foi alterado.
+
+### Verificação
+
+| Comando / fluxo                                            | Resultado                                                                                                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado                                                                                                                            |
+| `corepack pnpm --filter @motoboycity/driver-app lint`      | aprovado, zero erros                                                                                                                |
+| Jest focado em pós-aceite                                  | 2 suítes e 7 testes aprovados                                                                                                       |
+| Jest completo do driver-app                                | 7 suítes e 55 testes aprovados                                                                                                      |
+| aparelho Android conectado                                 | bundle carregado e Home inspecionada; não havia pedido ativo e nenhum pedido real foi criado/mutado apenas para produzir screenshot |
+
+Lacuna preexistente encontrada na auditoria e mantida fora deste recorte: a
+rota genérica `PATCH /deliveries/:id/cancel` usa `assertCanAccess`, que também
+autoriza o motoboy atribuído, enquanto a restrição de estado no service é
+aplicada apenas a `COMPANY_MEMBER`. O app não oferece esse botão, mas o backend
+deve ganhar teste e guarda explícita para impedir cancelamento direto por
+motoboy; o fluxo permitido para ele continua sendo `return-to-queue` antes da
+coleta ou `fail` depois dela.
+
+Próximo passo concreto: homologar com ofertas controladas os estados
+`ACCEPTED → COLLECTED → COMPLETED` e `COLLECTED → FAILED → COMPLETED` no aparelho
+conectado, incluindo aceite pela notificação com app aberto, em segundo plano e
+tela bloqueada. Em paralelo, decidir separadamente (1) se existe SLA de coleta,
+(2) qual contato da loja é canônico e (3) se a regra GPS-only será substituída
+por endereço estruturado no momento da entrega.
+
+## Atualização — 2026-08-23: referências ampliadas do aplicativo do motoboy
+
+Foram revisadas as quatro páginas de
+`imagensderefencia/appmotoboy/app do motoboy.pdf` e as sete imagens JPEG da
+mesma pasta. A comparação cobriu cadastro, Home, menu, carteira, saque,
+histórico, pedidos disponíveis, oferta recebida, operação pós-aceite,
+configurações e pedidos agendados. Home, menu, carteira, saque, histórico,
+oferta em tela cheia e operação pós-aceite já estavam próximos da composição
+visual de referência; este recorte fechou os desvios compatíveis com os
+contratos atuais.
+
+Os cards de pedidos livres agora mostram a linha do tempo real de coleta,
+entrega e retorno, tanto na Home quanto em `AvailableDeliveriesScreen`. Quando
+o destino é definido somente na entrega, a interface informa isso em vez de
+inventar um endereço. Valor e distância nulos também aparecem como pendentes
+de cálculo, nunca como zero. Os cards de entregas em andamento na Home passaram
+a exibir horário do último estado, pagamento, distância e valor com os mesmos
+tratamentos honestos.
+
+`DriverOrderDetailScreen`, aberto pelo histórico, foi refeito com mapa e folha
+branca, cabeçalho do pedido, data, estado, valores, pagamento, timeline dos
+endereços, cliente, faturamento e histórico operacional. A rota completa abre
+o Google Maps somente quando coleta e entrega estão disponíveis; entregas com
+retorno usam a entrega como parada intermediária e voltam à coleta. O telefone
+real do destinatário abre o discador.
+
+Não foram simulados recursos que ainda não têm regra ou contrato: chat com
+cliente/loja, antecipação de saldo, escalas, pedidos agendados do motoboy e os
+campos/documentos extras do cadastro da referência. Pedidos da vitrine também
+não ganharam contagem regressiva, pois esse contrato não expõe prazo de oferta.
+O fluxo de destino dinâmico continua GPS-only conforme a decisão vigente.
+
+Arquivos deste recorte:
+`apps/driver-app/src/screens/{AvailableDeliveriesScreen,HomeScreen,DriverOrderDetailScreen}.tsx`,
+`apps/driver-app/src/lib/deliveryOperation.ts` e
+`apps/driver-app/__tests__/deliveryOperation.test.ts`. A notificação nativa P0,
+os arquivos Android/iOS, `.env`, secrets, API, schema Prisma, migrations e
+contratos compartilhados não foram alterados.
+
+### Verificação
+
+| Comando / fluxo                                            | Resultado                                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/driver-app typecheck` | aprovado                                                                |
+| `corepack pnpm --filter @motoboycity/driver-app lint`      | aprovado, zero erros                                                    |
+| Jest focado em `deliveryOperation.test.ts`                 | 1 suíte e 6 testes aprovados                                            |
+| Jest completo do driver-app                                | 7 suítes e 56 testes aprovados                                          |
+| `git diff --check` nos arquivos do recorte                 | aprovado; apenas avisos de normalização LF/CRLF do Git                  |
+| aparelho Android conectado em retrato                      | Home inspecionada com mapa, folha, abas e estado vazio sem sobreposição |
+
+Lacuna de validação: não havia pedido livre nem histórico com dados adequados no
+aparelho, e nenhum pedido real foi criado ou alterado apenas para produzir
+screenshot. O próximo passo concreto é homologar com dados controlados um
+pedido livre com destino conhecido, um com destino dinâmico e um concluído com
+retorno, conferindo quebra de texto e rolagem em tela pequena. A homologação P0
+da notificação nativa nos três estados do app continua sendo um fluxo separado
+e prioritário.
+
+## Atualização — 2026-08-23: cards compactos na aba Pendentes
+
+A aba **Pendentes** da Home agora suporta visualmente vários pedidos livres em
+uma lista de cards compactos. Cada card mostra número, horário, empresa,
+modalidade, distância, valor e uma timeline reduzida de coleta/entrega/retorno,
+com somente a ação **Aceitar pedido**. Não há botão Recusar: o pedido continua
+na lista até deixar de ser retornado por `GET /delivery-offers/available`.
+
+Enquanto a Home está focada, a aba Pendentes sincroniza a vitrine a cada dez
+segundos, somente com o app ativo. Assim, um pedido assumido ou oferecido a
+outro motoboy desaparece sem exigir que o usuário tente aceitá-lo. Pull-to-refresh
+continua disponível. O aceite usa o contrato existente
+`PATCH /delivery-offers/available/:id/claim`; conflito recarrega a lista e
+informa que o pedido ficou indisponível.
+
+Há uma trava síncrona além do estado visual dos botões para impedir dois
+aceites concorrentes em toques rápidos sobre cards diferentes. Depois de um
+aceite confirmado, todos os pendentes são retirados da tela, os ativos e o
+rastreamento são sincronizados e a operação aceita é aberta. Isso preserva a
+regra do backend de que um motoboy com corrida em andamento não pode assumir
+outra vitrine. Lotes continuam identificados no card e são aceitos como a
+unidade operacional já definida pelo backend.
+
+Arquivos deste recorte:
+`apps/driver-app/src/screens/HomeScreen.tsx`,
+`apps/driver-app/src/components/{PendingDeliveryCard,RouteTimeline}.tsx` e
+`apps/driver-app/__tests__/PendingDeliveryCard.test.tsx`. Nenhum endpoint,
+contrato compartilhado, schema Prisma, migration, `.env`, secret ou arquivo
+nativo de notificação foi alterado.
+
+### Verificação
+
+| Comando / fluxo               | Resultado                                                                                                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck do driver-app       | aprovado                                                                                                                                                               |
+| lint do driver-app            | aprovado, zero erros                                                                                                                                                   |
+| Jest focado no card pendente  | 1 suíte e 2 testes aprovados                                                                                                                                           |
+| Jest completo do driver-app   | 8 suítes e 58 testes aprovados                                                                                                                                         |
+| `git diff --check` no recorte | aprovado; somente aviso de normalização LF/CRLF já existente                                                                                                           |
+| abertura no Android conectado | aplicativo carregou sem tela de erro, mas a sessão estava expirada e permaneceu no login; não foram reutilizadas credenciais nem criados pedidos reais para a inspeção |
+
+Próximo passo concreto: autenticar uma conta de homologação e disponibilizar
+ao menos dois pedidos controlados ao mesmo tempo para conferir densidade,
+rolagem, desaparecimento automático e aceite do segundo card em aparelho real.
+
+## Atualização — 2026-08-23: UX das configurações de operação do admin
+
+A página `/configuracoes/operacao` foi reorganizada para reduzir a densidade e
+separar claramente leitura, edição e salvamento. O formulário deixou de usar
+uma única linha flexível e agora agrupa os campos em quatro blocos responsivos:
+despacho e retorno, validação de horários, alertas operacionais e capacidade da
+operação. Cada campo exibe unidade, faixa permitida, explicação curta e o valor
+atualmente ativo.
+
+Em telas largas, um resumo fixo lateral reúne os valores vigentes e uma área de
+ação separada concentra **Limpar** e **Salvar**. Em larguras menores, os blocos
+e o resumo voltam ao fluxo vertical. Foram adicionados estados explícitos de
+carregamento, falha de consulta e sucesso ao salvar. O botão Salvar permanece
+desabilitado até haver ao menos uma mudança, e o reset após sucesso agora limpa
+também os campos de capacidade e raio de entrega.
+
+O contrato existente foi preservado: a tela continua usando
+`GET/PATCH /admin/platform-settings`, envia somente campos preenchidos e mantém
+a mesma validação local. Nenhuma rota, payload, autorização, schema Prisma,
+migration, dependência, `.env`, secret, cliente mobile ou notificação nativa foi
+alterado.
+
+Arquivo funcional deste recorte:
+`apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                                   |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                                       |
+| `git diff --check` no arquivo da tela                     | aprovado; somente aviso de normalização LF/CRLF do Git                     |
+| `GET http://localhost:3001/configuracoes/operacao`        | HTTP 200 com o servidor local ativo                                        |
+| inspeção pelo navegador integrado                         | não executada; nenhuma sessão de navegador estava disponível no aplicativo |
+
+Lacuna de validação: o admin web não possui teste automatizado de interface e
+a sessão autenticada não pôde ser inspecionada visualmente nesta execução. O
+próximo passo concreto é abrir a rota com uma conta admin, conferir a composição
+em desktop e mobile e fazer uma alteração controlada para validar as mensagens
+de sucesso e erro sem mudar configurações de produção.
+
+## Atualização — 2026-08-23: filas recolhíveis no painel administrativo
+
+Os cards da visão **Por status** em **Filas operacionais** agora podem ser
+abertos e recolhidos individualmente pelo cabeçalho. A seta comunica o estado,
+o contador permanece visível mesmo com o conteúdo fechado e os controles usam
+`aria-expanded`/`aria-controls` para preservar a navegação assistiva.
+
+Enquanto não houver uma escolha manual do administrador, filas vazias começam
+recolhidas para reduzir a altura da coluna e uma fila abre automaticamente ao
+receber pedido. Depois de aberta ou recolhida manualmente, a escolha permanece
+durante a sessão da página. A visão **Por empresa** já possuía colapso próprio e
+foi preservada.
+
+Arquivo funcional deste recorte: `apps/admin-web/src/app/(app)/page.tsx`.
+Nenhum endpoint, payload, estado do servidor, autorização, schema Prisma,
+migration, `.env`, secret, cliente mobile ou notificação nativa foi alterado.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                           |
+| --------------------------------------------------------- | ----------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                            |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                |
+| `GET http://localhost:3001/`                              | HTTP 200 com o servidor local ativo |
+
+Lacuna de validação: o admin web ainda não possui teste automatizado de
+interface para esse painel. O próximo passo concreto é conferir com uma sessão
+admin a abertura e o recolhimento de filas vazias e cheias em desktop e em uma
+largura estreita.
+
+## Atualização — 2026-08-23: paginação dos pedidos no detalhe do cliente
+
+A seção **Pedidos do cliente** em `/clientes/:id` deixou de renderizar toda a
+lista de uma vez e passou a consumir a paginação real já disponível em
+`GET /deliveries/search`. O padrão é 10 pedidos por página, com opções de 10,
+25 ou 50, total encontrado, intervalo visível e controles **Anterior** e
+**Próxima**. A troca de status ou de tamanho da página retorna à página 1.
+
+O filtro por empresa continua obrigatório na consulta e a autorização segue no
+backend. O contrato existente de busca foi apenas reutilizado; nenhum endpoint,
+payload, validação Zod, tipo compartilhado, schema Prisma ou migration mudou.
+A consulta sem paginação usada pelos indicadores superiores foi preservada para
+não alterar os cálculos já exibidos nesta mesma tela.
+
+Arquivo funcional deste recorte:
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx`. Nenhum `.env`, secret,
+cliente mobile ou notificação nativa foi alterado.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado            |
+| --------------------------------------------------------- | -------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado             |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros |
+
+Lacuna de validação: o admin web não possui teste automatizado de interface
+para essa lista. O próximo passo concreto é conferir com uma sessão admin uma
+empresa com mais de dez pedidos, validando troca de página, tamanho e status.
+
+## Atualização — 2026-08-23: central e detalhamento de relatórios do admin
+
+A rota `/relatorios` foi transformada em uma central inspirada nas referências
+visuais enviadas, com cards amplos, ícones, títulos e descrições agrupados em
+**Visão geral**, **Pedidos e clientes**, **Entregadores** e **Financeiro**.
+Somente análises já suportadas pelo produto foram apresentadas: nenhum card de
+relatório futuro ou sem endpoint foi simulado.
+
+O relatório operacional existente foi movido para
+`/relatorios/operacional` e reorganizado em blocos com mais respiro: filtro de
+período, visão geral, composição financeira, situação dos pedidos, histórico,
+horários de pico, desempenho por cliente, ranking de entregadores e modalidades
+de serviço. Uma navegação interna facilita saltar entre as seções; os atalhos da
+central também aguardam o carregamento dos dados antes de posicionar a seção
+solicitada. O histórico detalhado continua em `/relatorios/historico`.
+
+A consulta real `GET /admin/reports/operations`, filtros, comparações, tabelas,
+gráficos e exportação existentes foram preservados. Nenhum endpoint, payload,
+autorização, validação, tipo compartilhado, schema Prisma, migration, `.env`,
+secret, cliente mobile ou notificação nativa foi alterado.
+
+Arquivos funcionais deste recorte:
+`apps/admin-web/src/app/(app)/relatorios/page.tsx` e
+`apps/admin-web/src/app/(app)/relatorios/operacional/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                                  |
+| --------------------------------------------------------- | ---------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                   |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                       |
+| `GET http://localhost:3001/relatorios`                    | HTTP 200                                                   |
+| `GET http://localhost:3001/relatorios/operacional`        | HTTP 200                                                   |
+| navegador integrado                                       | nenhuma sessão disponível para inspeção visual autenticada |
+
+Lacuna de validação: o admin web não possui testes automatizados de interface e
+as rotas não puderam ser inspecionadas em uma sessão autenticada nesta execução.
+O próximo passo concreto é abrir a central em desktop e largura estreita,
+percorrer cada card e conferir o posicionamento nas seções do relatório.
+
+## Atualização — 2026-08-23: primeiro conjunto de relatórios dedicados
+
+A central `/relatorios` agora abre páginas próprias e completas para o primeiro
+recorte priorizado:
+
+- `/relatorios/geral`: indicadores, comparação com janela anterior, composição
+  financeira e distribuição pelo estado atual;
+- `/relatorios/pedidos`: busca por número/UUID/número externo, filtros por
+  status, cliente, entregador e período, paginação real no servidor, detalhe e
+  exportação explicitamente limitada à página visível;
+- `/relatorios/tempos-sla`: média, mediana, p90 e amostras de aceite, coleta,
+  entrega e ciclo total, comparadas aos alertas operacionais configurados;
+- `/relatorios/clientes`: indicadores, busca, ordenação, paginação local,
+  ranking e CSV do recorte filtrado;
+- `/relatorios/entregadores`: indicadores, busca, ranking ordenável e CSV com
+  volume, conclusão, aceite, tempo e repasse em métricas separadas.
+
+Filtros, cabeçalhos, resumo de período, estados de carregamento/erro e paginação
+foram padronizados em componentes de `apps/admin-web/src/components/reports/`.
+A central deixou de promover o histórico antigo sem paginação e manteve
+`/relatorios/operacional` como visão consolidada para horários de pico,
+modalidades e composição financeira enquanto esses próximos relatórios ainda
+não possuem página dedicada.
+
+O endpoint de tempos já aceitava `excludeRetroactive`; o cliente compartilhado
+agora expõe e serializa o filtro. Nenhuma rota, validação ou tabela de banco foi
+criada. A tela inicia esse relatório em 30 dias para não consultar todo o
+histórico por acidente. Os limites de SLA são apresentados como referência do
+p90: o contrato atual não devolve percentual de pedidos dentro da meta e a UI
+não inventa esse dado.
+
+O ranking operacional foi corrigido no serviço para incluir a união de
+entregadores com corrida encerrada ou oferta recebida, inclusive quem recusou
+todas e não concluiu nenhuma. Antes, a etapa de agregação calculava esses casos,
+mas a resposta só criava linhas no loop de entregas concluídas. O teste unitário
+trava esse cenário. Em clientes, `cancelledCount` foi documentado e rotulado de
+forma precisa: são pedidos criados no recorte cujo estado atual é cancelado,
+não cancelamentos ocorridos necessariamente dentro da janela.
+
+O helper compartilhado de CSV agora neutraliza texto iniciado por caracteres
+de fórmula de planilha, protegendo os relatórios novos e as exportações já
+existentes contra CSV injection. Números negativos legítimos continuam
+calculáveis.
+
+Arquivos principais deste recorte:
+
+- `apps/admin-web/src/app/(app)/relatorios/{page.tsx,geral,pedidos,tempos-sla,clientes,entregadores}`;
+- `apps/admin-web/src/components/reports/{report-filter-card,report-layout,report-pagination,driver-ranking}.tsx`;
+- `apps/admin-web/src/lib/csv.ts`;
+- `apps/api/src/admin/reports/{admin-reports.service.ts,admin-reports.service.spec.ts}`;
+- `packages/api-client/src/deliveries.ts`;
+- `packages/types/src/report.ts`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                               |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                    |
+| `corepack pnpm --filter @motoboycity/api typecheck`       | aprovado                                                |
+| `corepack pnpm --filter @motoboycity/api lint`            | aprovado, zero erros                                    |
+| Jest focado em `admin-reports.service.spec.ts`            | 1 suíte e 11 testes aprovados                           |
+| typecheck/lint de `@motoboycity/api-client`               | aprovados                                               |
+| typecheck/lint de `@motoboycity/types`                    | aprovados                                               |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                                     |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                                     |
+| `git diff --check`                                        | aprovado; somente avisos de normalização LF/CRLF do Git |
+| navegador integrado                                       | indisponível; nenhuma sessão de navegador conectada     |
+| HTTP de `/relatorios` e das cinco rotas dedicadas         | HTTP 200 nas seis rotas com o servidor local ativo      |
+
+Nenhuma migration, alteração de Prisma, `.env`, secret, cliente mobile ou
+notificação nativa foi tocada. A próxima validação concreta é percorrer as cinco
+páginas com uma sessão admin em desktop e largura estreita. O próximo recorte
+funcional recomendado é separar Horários de pico, Modalidades e Financeiro em
+páginas dedicadas, seguido dos relatórios que exigem novas agregações no
+backend.
+
+## Atualização — 2026-08-23: pico, modalidades e financeiro dedicados
+
+O segundo recorte da central de relatórios foi concluído com três páginas
+próprias, todas alimentadas por dados reais já existentes:
+
+- `/relatorios/horarios-pico`: resumo da demanda, pico por hora e dia da
+  semana, gráfico, tabelas completas com médias normalizadas e CSV. A interface
+  explicita que todos os pedidos criados entram na base, inclusive os que foram
+  cancelados depois, pois também ocuparam capacidade operacional;
+- `/relatorios/modalidades`: indicadores, busca, ordenação, participação no
+  volume criado e no valor concluído e CSV por tipo de serviço. Criados e
+  concluídos continuam apresentados como coortes temporais separadas, sem uma
+  taxa de conclusão artificial;
+- `/relatorios/financeiro`: valor concluído no período, comparação com a janela
+  anterior, divisão entre repasse e receita da plataforma, reconciliação da
+  composição, CSV e posição de caixa atual.
+
+No financeiro, a posição de caixa foi deliberadamente isolada do filtro de
+datas. `GET /admin/financial/cash-position` representa o estado do instante:
+trabalho antigo ainda não faturado, faturas abertas e obrigações com
+entregadores não podem desaparecer quando o operador seleciona outro mês. O
+CSV também identifica cada linha como “período filtrado” ou “sem filtro de
+período”.
+
+A central `/relatorios` agora aponta diretamente para as três rotas. A visão
+`/relatorios/operacional` permanece disponível como consolidado legado. Nenhum
+endpoint, payload, validação, pacote compartilhado, schema Prisma, migration,
+`.env`, secret, cliente mobile ou notificação nativa foi alterado neste recorte.
+
+Arquivos funcionais deste recorte:
+
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/horarios-pico/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/modalidades/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/financeiro/page.tsx`.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/admin-web typecheck` | aprovado                                                        |
+| `corepack pnpm --filter @motoboycity/admin-web lint`      | aprovado, zero erros                                            |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; 29 páginas geradas                                    |
+| rotas das três páginas no manifesto do build              | registradas como páginas estáticas                              |
+| `git diff --check`                                        | bloqueado por linha em branco em arquivo financeiro concorrente |
+
+Lacuna de validação: não havia servidor local ativo nem sessão de navegador
+autenticada nesta execução. O próximo passo concreto é percorrer as três rotas
+em desktop e largura estreita com dados reais, validar o download dos CSVs e,
+depois, priorizar novos relatórios que exigem agregações específicas no backend.
+
+## Atualização — 2026-08-23: contas a receber e aging por cliente
+
+O primeiro recorte de controle financeiro avançado foi implementado em
+`/relatorios/contas-a-receber`. A página apresenta a posição atual de contas a
+receber, separando pedidos concluídos ainda sem fatura, faturas a vencer e
+faturas vencidas nas faixas de 1–7, 8–15, 16–30 e mais de 30 dias. Também
+consolida a exposição por cliente, com busca, filtro por tipo, ordenação,
+paginação local, CSV do resultado filtrado e links para cliente e faturas.
+
+O novo `GET /admin/financial/receivables-aging` é somente leitura, protegido
+pelos mesmos `JwtAuthGuard` e `AdminOnlyGuard` do restante da área financeira.
+Não aceita período de propósito: dívida antiga continua existindo hoje. A data
+de referência é calculada no fuso de São Paulo; vencimento no próprio dia ainda
+fica em “a vencer”. Pedidos pagos online não entram como dívida e “sem fatura”
+considera somente entrega `COMPLETED`, cobrança `BILLED` e `invoiceId: null`.
+
+As agregações de pedidos sem fatura, faturas abertas e nomes de empresas são
+lidas numa transação `RepeatableRead`. Isso impede que um fechamento semanal
+concorrente faça o mesmo valor aparecer simultaneamente como sem fatura e já
+faturado. Valores são somados em centavos e cada item entra em exatamente uma
+faixa, permitindo reconciliar total geral, buckets e empresas.
+
+Arquivos funcionais deste recorte:
+
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/contas-a-receber/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+pagamento, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 15 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 30 páginas geradas |
+| typecheck/lint final de `@motoboycity/api`                | aprovados                                    |
+
+Lacuna de validação: não havia sessão administrativa com massa financeira
+controlada para inspeção visual e conferência centavo a centavo. O próximo
+passo concreto é homologar a rota com empresas contendo dívida em cada faixa e,
+depois, criar o relatório de repasses e saques com idade das solicitações.
+
+## Atualização — 2026-08-23: repasses, saques e conciliação por entregador
+
+O segundo recorte de controle financeiro avançado foi concluído em
+`/relatorios/repasses-saques`. A página apresenta a obrigação atual da operação
+com os entregadores, separando saldo disponível, saldo bloqueado e valor já
+reservado para saques. Também mostra solicitações aguardando análise ou já
+aprovadas, idade das solicitações abertas e posição detalhada por entregador,
+com busca, filtros, ordenação, paginação local, CSV e links para o cadastro do
+entregador e a área financeira.
+
+O novo `GET /admin/financial/payouts-aging` é somente leitura e usa os mesmos
+`JwtAuthGuard` e `AdminOnlyGuard` da área financeira. O relatório é uma
+fotografia atual e não aceita período: a obrigação permanece existente até a
+liberação, pagamento ou reversão correspondente. O total é calculado como
+`saldo disponível + saldo bloqueado + valor reservado em saques`. A reserva é
+somada de volta porque o débito pendente já a retirou do disponível, mas ainda
+representa dinheiro devido ao entregador.
+
+Carteiras, grupos do ledger e solicitações `PENDING`/`APPROVED` são lidos em
+uma transação `RepeatableRead`, evitando misturar estados anteriores e
+posteriores a uma aprovação, pagamento ou rejeição concorrente. O relatório
+também confere o saldo em cache contra o ledger e compara o total reservado no
+ledger com o valor solicitado em saques abertos, tanto no consolidado quanto
+por entregador.
+
+As faixas de 0–1, 2–3, 4–7 e 8 dias ou mais são estritamente descritivas. Não
+existe SLA confirmado para pagamento de saques, então a interface usa “aberto
+há” e deixa explícito que idade não significa atraso. Nenhum limite de negócio
+foi inventado.
+
+Arquivos funcionais deste recorte:
+
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/repasses-saques/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, regra de saque, dados
+existentes, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 18 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 31 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: falta abrir a página com uma sessão administrativa e uma
+massa que contenha solicitações nos dois estados e divergências controladas,
+para conferir visualmente os alertas e os valores centavo a centavo. O próximo
+recorte financeiro recomendado é um demonstrativo de resultado por cliente e
+modalidade, separando valor cobrado, repasse, receita da plataforma, ajustes e
+margem operacional sem misturar caixa com competência.
+
+## Atualização — 2026-08-23: resultado por competência e margem de contribuição
+
+O terceiro recorte de controle financeiro avançado foi implementado em
+`/relatorios/resultado-operacional`. A página apresenta o resultado gerencial
+das entregas concluídas, com valor cobrado, repasse direto, receita da
+plataforma, margem de contribuição e ticket médio. Também inclui comparação
+com a janela imediatamente anterior, ponte de reconciliação, ajustes de
+carteira separados, busca/ordenação/paginação por cliente, modalidades, formas
+de cobrança, evolução diária e CSV completo.
+
+O novo `GET /admin/financial/financial-statement` é somente leitura, protegido
+por `JwtAuthGuard` e `AdminOnlyGuard`, e exige `from`/`to`. O contrato limita o
+intervalo a 366 dias porque a API lê as entregas concluídas para montar as
+dimensões e a série diária. As pontas são interpretadas no fuso de São Paulo e
+usam intervalos semiabertos (`gte`/`lt`), evitando que o instante de fronteira
+seja contado simultaneamente no período atual e no anterior.
+
+A competência é a data em que a entrega chegou a `COMPLETED`, representada por
+`statusChangedAt`. Somente entregas com `totalValue`, `driverValue` e
+`platformValue` simultaneamente preenchidos entram nos valores e no ticket
+médio. Entrega concluída com composição incompleta continua na contagem
+operacional e aparece como `unpricedCount`; não é transformada silenciosamente
+em R$ 0,00.
+
+`platformValue` é apresentado como margem de contribuição antes de despesas
+operacionais e impostos, e não como lucro líquido. O relatório reconcilia
+`totalValue - driverValue - platformValue` no total, em clientes,
+modalidades, formas de cobrança e dias. Ajustes `CREDIT_ADJUSTMENT`,
+`DEBIT_ADJUSTMENT` e `CREDIT_REFUND` não cancelados são agrupados por tipo e
+status, mas permanecem fora da margem: o ledger atual informa direção e valor,
+porém não possui classificação contábil suficiente para afirmar que todo
+ajuste é receita ou despesa da plataforma. Saques, liberações e créditos de
+repasse também não são somados novamente, pois representam caixa ou mudança de
+disponibilidade de uma obrigação já reconhecida.
+
+Entregas atuais, comparação e ajustes são lidos numa transação
+`RepeatableRead`. Nenhuma tabela ou coluna nova foi necessária.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/resultado-operacional/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+preço, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 21 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 32 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+financeira controlada para inspeção visual e conferência centavo a centavo. O
+próximo passo de homologação é abrir o demonstrativo com entregas em todas as
+dimensões, uma composição divergente e um ajuste em cada direção. O próximo
+recorte funcional recomendado é um extrato financeiro unificado que relacione
+competência, faturamento, recebimento e movimentação de carteira sem misturar
+as quatro datas contábeis.
+
+## Atualização — 2026-08-24: extrato financeiro unificado por pedido
+
+O quarto recorte de controle financeiro avançado foi implementado em
+`/relatorios/extrato-financeiro`. A página liga cada entrega concluída à
+fatura, ao recebimento e aos lançamentos de repasse correspondentes, com busca,
+filtros por pendência, paginação, links para pedido/cliente/entregador/fatura e
+CSV auditável. Ajustes de carteira aparecem numa seção separada com valor,
+direção, status, motivo e autor.
+
+O novo `GET /admin/financial/financial-cycle` é somente leitura, protegido por
+`JwtAuthGuard` e `AdminOnlyGuard`, e exige `from`/`to`. O intervalo aceita no
+máximo 93 dias porque a resposta lê relações detalhadas de cada entrega, em vez
+de apenas agregados. As datas são interpretadas no fuso de São Paulo e usam
+intervalo semiaberto (`gte`/`lt`).
+
+O filtro seleciona a competência pela data de conclusão (`statusChangedAt`). A
+fatura, o pagamento e o repasse mostram o estado atual daquelas mesmas
+entregas, mesmo quando foram criados depois do fim da competência. Essa escolha
+é deliberada: o objetivo é localizar onde o ciclo de cada pedido parou, e não
+atribuir artificialmente todas as etapas à mesma data.
+
+O relatório distingue sem dupla contagem:
+
+- valor reconhecido na competência;
+- valor das entregas já vinculadas a fatura;
+- valor das entregas em faturas pagas com `paymentDate` confirmado;
+- créditos de repasse ativos no ledger;
+- pedidos online, que não usam fatura e hoje não possuem data de recebimento
+  persistida;
+- ajustes criados dentro do período selecionado, separados das entregas porque
+  não possuem vínculo obrigatório com um pedido.
+
+Cada pedido pode sinalizar preço incompleto, entregador ausente, fatura ausente
+ou cancelada, fatura paga sem data, fatura inesperada em pagamento online,
+repasse ausente, divergente, duplicado ou cancelado. O valor de repasse é
+comparado em centavos com `driverValue`. Pedidos e ajustes são lidos numa
+transação `RepeatableRead`, evitando alertas formados por estados de instantes
+diferentes.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/extrato-financeiro/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+faturamento, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 29 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 33 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+controlada para conferir visualmente um ciclo pago, um não faturado e cada tipo
+de divergência de repasse. O próximo recorte financeiro recomendado é um fluxo
+de caixa projetado, separando recebimentos previstos por vencimento, obrigações
+com entregadores por liberação/saque e movimentos efetivamente realizados.
+
+## Atualização — 2026-08-24: previsão e compromissos de caixa
+
+O quinto recorte de controle financeiro avançado foi implementado em
+`/relatorios/fluxo-caixa`. O relatório abre por padrão em hoje e nos 29 dias
+seguintes, aceita até 93 dias, exporta CSV e organiza uma agenda diária com
+quatro colunas que não se misturam: faturas a vencer, repasses que ficarão
+sacáveis, recebimentos confirmados e saques efetivamente pagos.
+
+O novo `GET /admin/financial/cash-flow-forecast` é protegido por `JwtAuthGuard`
+e `AdminOnlyGuard`, exige `from`/`to` e devolve tanto os totais quanto as linhas
+que os explicam. A leitura usa uma transação `RepeatableRead` depois de atualizar
+o estado das faturas vencidas. Nenhuma migration ou nova coluna foi necessária.
+
+A semântica evita apresentar um saldo futuro fictício:
+
+- fatura `PENDING`/`OVERDUE` com vencimento no período é expectativa de entrada,
+  não recebimento garantido;
+- repasse `CREDIT_REPASSE/PENDING` com `releaseAt` no período é obrigação que se
+  torna disponível ao entregador, não transferência bancária;
+- saques `PENDING`/`APPROVED` ficam numa fila sem data porque o sistema não
+  persiste prazo prometido de pagamento;
+- recebimento realizado exige fatura `PAID` e `paymentDate` no período;
+- saída realizada usa a entrada `PAID` no histórico append-only do saque;
+- pedidos faturáveis ainda sem fatura, faturas vencidas antes do período,
+  repasses atrasados e repasses legados sem `releaseAt` aparecem como pontos de
+  ação separados da agenda.
+
+`Invoice.dueDate` e `Invoice.paymentDate` são `@db.Date` e, portanto, os filtros
+usam os limites civis armazenados em meia-noite UTC. `releaseAt`, `changedAt` e
+demais timestamps continuam usando os limites do dia operacional de São Paulo.
+Essa separação impede excluir o primeiro dia do intervalo ou deslocar eventos
+com horário.
+
+A página não calcula saldo projetado: hoje não existem saldo bancário inicial,
+despesas operacionais classificadas, data prometida para saque nem data de
+recebimento dos pedidos online. O painel explica essas limitações e mantém os
+valores fora de uma conta que pareceria precisa sem ter base persistida.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/fluxo-caixa/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, regra de
+faturamento/saque, `.env`, secret, cliente mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                           | Resultado                                    |
+| --------------------------------------------------------- | -------------------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`    | aprovado                                     |
+| Jest focado em `admin-financial.service.spec.ts`          | 1 suíte e 32 testes aprovados                |
+| `corepack pnpm typecheck`                                 | 8 pacotes aprovados                          |
+| `corepack pnpm lint`                                      | 8 pacotes aprovados                          |
+| `corepack pnpm --filter @motoboycity/api run build`       | aprovado                                     |
+| `corepack pnpm --filter @motoboycity/admin-web run build` | aprovado; nova rota entre 34 páginas geradas |
+| `git diff --check`                                        | aprovado; somente avisos LF/CRLF do Git      |
+
+Lacuna de validação: não havia servidor local ativo nem sessão admin com massa
+financeira controlada para conferir visualmente faturas, repasses e saques
+reais. O próximo passo de homologação é abrir a página com uma fatura a vencer,
+uma vencida anterior, um repasse de cada classificação e um saque pago. Para
+evoluir de agenda conhecida para saldo futuro e DRE completo, o próximo recorte
+exige decisão de produto e persistência de saldo bancário inicial, despesas e
+centros de custo; esses valores não devem ser inferidos do ledger do motoboy.
+
+## Atualização — 2026-08-24: auditoria financeira unificada
+
+Depois do commit `1984fd7` (`feat(admin): add financial cycle and cash forecast
+reports`), o sexto recorte de controle financeiro avançado foi implementado em
+`/relatorios/auditoria-financeira`. A página reúne em uma cronologia única os
+eventos append-only que o produto já persistia separadamente:
+
+- ajustes de carteira (`CREDIT_ADJUSTMENT`, `DEBIT_ADJUSTMENT` e
+  `CREDIT_REFUND`), com entregador, direção, estado atual, valor, motivo e autor;
+- mudanças de status de fatura, com transição, empresa, valor congelado, nota e
+  responsável;
+- mudanças de status de saque, com transição, entregador, valor líquido, nota e
+  responsável.
+
+O novo `GET /admin/financial/audit-trail` é protegido por `JwtAuthGuard` e
+`AdminOnlyGuard`, exige `from`/`to` e limita cada consulta a 31 dias, pois retorna
+eventos individuais. As três trilhas são lidas numa transação `RepeatableRead` e
+ordenadas juntas por instante. Autor nulo continua apresentado como `Sistema`;
+o relatório não atribui uma pessoa quando a origem não registrou usuário.
+
+Os totais de crédito/débito de carteira excluem ajustes atualmente cancelados,
+mas esses eventos permanecem visíveis na linha do tempo. Confirmações de
+pagamento são calculadas pelas transições para `PAID`, tanto em faturas quanto
+em saques. A tela permite filtrar por tipo de evento, origem pessoa/sistema,
+buscar referência/pessoa/motivo, paginar e exportar exatamente o recorte visível
+para CSV.
+
+Arquivos funcionais deste recorte:
+
+- `packages/validation/src/finance/admin-financial-query.schema.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/api-client/src/admin-financial.ts`;
+- `apps/api/src/finance/admin-financial.{controller,service,spec}.ts`;
+- `apps/admin-web/src/app/(app)/relatorios/auditoria-financeira/page.tsx`;
+- `apps/admin-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve alteração de schema Prisma, migration, dados existentes, `.env`,
+secret, regra financeira, cliente mobile ou notificação nativa. As mudanças
+paralelas em `apps/admin-web/src/components/finance/carteiras-tab.tsx`,
+`payouts-aging.tsx` e `demonstrativo-tab.tsx` foram preservadas; as duas primeiras
+não pertencem a este recorte e a última é documentada abaixo.
+
+### Verificação
+
+| Comando / fluxo                                              | Resultado                       |
+| ------------------------------------------------------------ | ------------------------------- |
+| `corepack pnpm --filter @motoboycity/validation build`       | aprovado                        |
+| Jest focado em `admin-financial.service.spec.ts`             | 1 suíte e 35 testes aprovados   |
+| Jest focado em `admin-financial` e `invoice.service.spec.ts` | 2 suítes e 42 testes aprovados  |
+| `corepack pnpm typecheck`                                    | 8 pacotes aprovados             |
+| `corepack pnpm lint`                                         | 8 pacotes aprovados, sem avisos |
+| `corepack pnpm --filter @motoboycity/api run build`          | aprovado                        |
+| `corepack pnpm --filter @motoboycity/admin-web run build`    | aprovado; 35 páginas geradas    |
+| HTTP `/relatorios/auditoria-financeira`                      | `200` no servidor local         |
+| HTTP `/admin/financial/audit-trail` sem autenticação         | `401`; proteção confirmada      |
+
+Lacuna de validação: não havia sessão administrativa com massa controlada para
+inspeção visual dos três tipos de evento. O próximo passo de homologação é gerar
+um ajuste, uma confirmação de fatura e o ciclo completo de um saque, conferir a
+ordem/autores na tela e comparar o CSV. Conciliação bancária real, saldo futuro
+e DRE completo continuam dependendo de contrato novo para saldo bancário,
+despesas e centros de custo; não devem ser simulados com o ledger do entregador.
+
+## Atualização — 2026-08-24: demonstrativo por competência consolidado
+
+O commit `e4384ad` adicionou a quinta aba `Demonstrativo` em
+`/financeiro?aba=demonstrativo`. A interface consome o contrato real já existente
+de `adminFinancialApi.financialStatement`, sem mock e sem criar uma segunda fonte
+de cálculo. O período selecionado apresenta pedidos concluídos por competência,
+receita bruta, repasse de entregadores, resultado da plataforma, ticket/margem,
+pedidos sem preço e ajustes de carteira em bloco separado. Também detalha o
+resultado por empresa e modalidade de serviço.
+
+Arquivos funcionais:
+
+- `apps/admin-web/src/app/(app)/financeiro/page.tsx`;
+- `apps/admin-web/src/components/finance/demonstrativo-tab.tsx`.
+
+A rota `/financeiro?aba=demonstrativo` respondeu `200` no servidor local e foi
+incluída no build aprovado do painel. A inspeção visual autenticada com massa
+financeira ainda depende de um navegador conectado e de uma sessão administrativa
+controlada. O único item do plano financeiro que permanece é antecipação de saldo,
+explicitamente condicionada a decisão/piloto de produto; não deve ser implementada
+por inferência.
+
+Durante a validação combinada, o teste novo de cancelamento de fatura expunha
+`InvoiceService.getDetail`, que é privado, diretamente ao `jest.spyOn` e quebrava o
+typecheck. `apps/api/src/finance/invoice.service.spec.ts` passou a acessar esse seam
+somente por uma tipagem interna do teste. Não houve alteração na implementação nem
+na regra de cancelamento; as 2 suítes financeiras focadas fecharam com 42 testes
+aprovados.
+
+## Atualização — 2026-08-24: limpeza dos marcadores na home da empresa
+
+O mapa da central do Company Web recebia a união de `operations.active` com os
+20 pedidos de `operations.recent`. Por isso, pedidos já `COMPLETED` ou
+`CANCELLED` continuavam desenhando o destino e, quando disponível, também a
+última posição do motoboy. A lista lateral “Recentes” é útil; os mesmos itens no
+mapa operacional apenas acumulavam pontos antigos.
+
+`apps/company-web/src/app/(app)/page.tsx` agora mantém dois recortes explícitos:
+
+- `visibleOrders`, com ativos + recentes, preserva seleção, clonagem e a lista
+  lateral;
+- `mapDeliveries`, somente com `operations.active`, alimenta
+  `CompanyOperationsMap`.
+
+Ao concluir ou cancelar um pedido, `delivery:updated` invalida a query e o ponto
+sai do mapa quando a nova resposta chega. Se o evento em tempo real for perdido,
+o `refetchInterval` de 30 segundos continua como segurança. `FAILED`,
+`DELIVERED` e demais estados não terminais permanecem no mapa porque ainda há
+motoboy/mercadoria em operação. Não houve alteração de API, contrato, banco,
+status, preço, dispatch, GPS ou Socket.IO.
+
+### Verificação
+
+| Comando                                                     | Resultado                    |
+| ----------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 11 páginas geradas |
+| `git diff --check`                                          | aprovado no recorte          |
+
+Lacuna de validação: o Company Web não possui teste automatizado de interface.
+Na homologação autenticada, concluir e cancelar um pedido devem removê-lo do
+mapa sem removê-lo imediatamente da lista “Recentes”; simular perda do socket
+deve confirmar a remoção pelo polling em até 30 segundos.
+
+## Atualização — 2026-08-24: Fase 1 dos relatórios do Company Web
+
+Foi iniciada a execução de `docs/plano-relatorios-company-web.md` pelo recorte
+que não exige contrato novo. A antiga tela única de `/relatorios`, que baixava
+entregas e faturas completas para somar no navegador, foi substituída por uma
+central de cards. A central anuncia somente os dois destinos já concluídos:
+
+- `/relatorios/pedidos`: usa `GET /deliveries/search`, com busca por
+  número/UUID/número externo, status, período padrão de 30 dias, filtros na URL,
+  paginação real de 10/25/50/100 itens e links para o pedido. O resumo deixa
+  explícito que custo e pedidos sem preço pertencem apenas à página visível;
+- `/relatorios/tempos-sla`: usa `GET /deliveries/stage-times` duas vezes, para
+  o período atual e a janela imediatamente anterior com a mesma duração. Exibe
+  média, mediana, p90, amostras e a opção de excluir horários retroativos.
+
+O Company não possui acesso aos limites administrativos de SLA. Por isso a
+tela faz comparação descritiva e não classifica um resultado como aprovado ou
+reprovado sem uma meta contratual exposta à empresa. `/indicadores` foi mantido
+por enquanto; o redirecionamento só entra depois de `/relatorios/geral`.
+
+Foram criados componentes próprios em
+`apps/company-web/src/components/reports/` para cabeçalho, filtros, estados de
+consulta e paginação. Os filtros aplicados são a fonte de verdade na URL e o
+formulário é remontado em Voltar/Avançar, sem sincronizar estado em efeito. Erros
+de servidor preservam a mensagem de `ApiError`.
+
+Arquivos funcionais:
+
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/pedidos/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/tempos-sla/page.tsx`;
+- `apps/company-web/src/components/reports/{report-filter-card,report-layout,report-pagination}.tsx`;
+- `apps/company-web/src/lib/report-period.ts`.
+
+Não houve alteração de endpoint, backend, validação compartilhada, Prisma,
+migration, `.env`, secret, status, dispatch, preço, mobile ou notificação. A API
+já deriva o escopo da empresa pelo token e rejeita `companyId`/`driverId` para
+usuário não administrador.
+
+### Verificação
+
+| Comando / fluxo                                                      | Resultado                    |
+| -------------------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck`          | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`               | aprovado, sem avisos         |
+| `corepack pnpm --filter @motoboycity/company-web run build`          | aprovado; 14 páginas geradas |
+| HTTP `/relatorios`, `/relatorios/pedidos` e `/relatorios/tempos-sla` | `200` nas três rotas         |
+| APIs `deliveries/search` e `deliveries/stage-times` sem token        | `401` nas duas rotas         |
+
+Lacunas conhecidas:
+
+- o Company Web não possui teste automatizado de interface nem havia sessão
+  autenticada disponível para percorrer filtros, paginação e Voltar/Avançar;
+- o DTO genérico de `GET /deliveries/search` ainda transporta `driverValue` e
+  `platformValue` para qualquer consumidor. As novas telas nunca renderizam
+  esses campos, mas o próximo recorte de contrato deve criar/usar uma resposta
+  Company minimizada para que repasse e margem interna nem cheguem ao navegador;
+- CSV operacional permanece para a fase de exportação no servidor; não foi
+  criado download parcial no cliente;
+- a Fase 2 (`GET /company/reports/operations` + `/relatorios/geral`) deve começar
+  somente depois que o recorte financeiro concorrente encerrar as alterações em
+  `packages/types`, `packages/validation`, `packages/api-client` e FinanceModule.
+
+## Atualização — 2026-08-24: Fase 2 dos relatórios do Company Web
+
+O recorte financeiro foi estabilizado no commit `89c9fb6` e a Fase 2 de
+`docs/plano-relatorios-company-web.md` foi implementada. A central agora publica
+o card `Analítico geral`, que abre `/relatorios/geral` com filtros de data na
+URL, comparação com a janela anterior, distribuição por status, série diária,
+valores concluídos, pedidos sem preço, retornos e lotes. A página também liga a
+área operacional ao `/financeiro`, sem duplicar posição em aberto ou faturas.
+
+Foi criado `GET /company/reports/operations?from&to`. O endpoint:
+
+- exige `from` e `to`, com limite de 366 dias;
+- usa `JwtAuthGuard` + `CompanyOnlyGuard` e resolve `companyId` exclusivamente
+  pelo vínculo do usuário autenticado;
+- trata pedidos criados (`createdAt`) e entregas concluídas
+  (`statusChangedAt`) como coortes independentes;
+- soma valores em centavos, separa `unpricedCount` e calcula ticket somente com
+  entregas concluídas que possuem preço;
+- agrupa dias e horários em `America/Sao_Paulo`, incluindo dias zerados na
+  série diária;
+- devolve modalidade, retorno e lote, mas nunca `driverValue`,
+  `platformValue`, carteira, oferta ou dados de outra empresa.
+
+`/indicadores` agora redireciona para `/relatorios/geral` e o item duplicado
+“Indicadores” foi removido da navegação. Links antigos continuam válidos.
+
+Arquivos funcionais deste recorte:
+
+- `packages/types/src/report.ts`;
+- `packages/validation/src/reports/company-operations-report-query.schema.ts`;
+- `packages/api-client/src/company-reports.ts`;
+- `apps/api/src/company/reports/company-reports.{module,controller,service,spec}.ts`;
+- `apps/api/src/app.module.ts`;
+- `apps/company-web/src/lib/api-client.ts`;
+- `apps/company-web/src/app/(app)/relatorios/geral/page.tsx`;
+- `apps/company-web/src/app/(app)/indicadores/page.tsx`;
+- `apps/company-web/src/components/layout/top-nav.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`.
+
+Não houve schema Prisma, migration, alteração de dados, `.env`, secret, preço,
+dispatch, GPS, mobile ou notificação nativa.
+
+### Verificação
+
+| Comando / fluxo                                             | Resultado                       |
+| ----------------------------------------------------------- | ------------------------------- |
+| `corepack pnpm typecheck`                                   | 8 pacotes aprovados             |
+| `corepack pnpm lint`                                        | 8 pacotes aprovados, sem avisos |
+| Jest `company-reports.service.spec.ts`                      | 1 suíte e 8 testes aprovados    |
+| `corepack pnpm --filter @motoboycity/validation build`      | aprovado                        |
+| `corepack pnpm --filter @motoboycity/api run build`         | aprovado                        |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 15 páginas geradas    |
+
+Lacunas conhecidas: ainda falta homologação visual com sessão Company e massa
+controlada; o endpoint genérico `GET /deliveries/search`, usado pelo Histórico,
+ainda transporta campos internos no DTO embora a tela não os renderize; não há
+E2E com duas empresas; e a exportação operacional minimizada continua pendente.
+O próximo passo concreto é a Fase 3: criar as páginas `/relatorios/horarios` e
+`/relatorios/modalidades` consumindo `peakHours` e `serviceTypes` já entregues
+pelo novo contrato, sem novo endpoint.
+
+## Atualização — 2026-08-24: Fase 3 dos relatórios do Company Web
+
+A Fase 3 de `docs/plano-relatorios-company-web.md` foi implementada sem novo
+endpoint, schema ou contrato. As duas páginas consomem o
+`GET /company/reports/operations` já protegido e publicado na Fase 2:
+
+- `/relatorios/horarios`: mostra demanda nas 24 horas, média por dia civil,
+  faixas exclusivas de madrugada/manhã/tarde/noite, três horários de maior
+  movimento e dias da semana normalizados pela quantidade de ocorrências no
+  calendário. Pedidos cancelados continuam na demanda porque foram criados e
+  exigiram operação;
+- `/relatorios/modalidades`: oferece busca e ordenação persistidas na URL,
+  participação em volume criado e custo concluído, ticket médio, preço ausente,
+  retorno, cards comparativos e tabela com denominadores. A tela soma em
+  centavos e sinaliza se o total por modalidade não reconciliar com o total do
+  Analítico geral.
+
+Os cards `Horários e demanda` e `Modalidades e custos` só foram publicados na
+central depois que seus destinos ficaram funcionais. Foi criado o hook local
+`useCompanyOperationsReport` para manter período, limite de 366 dias, URL,
+sessão, TanStack Query e `ApiError` iguais nas páginas desta fase. A comparação
+com a janela anterior é exibida apenas para os totais entregues pelo contrato;
+o cliente não inventa séries anteriores por hora ou modalidade.
+
+Arquivos funcionais deste recorte:
+
+- `apps/company-web/src/app/(app)/relatorios/horarios/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/modalidades/page.tsx`;
+- `apps/company-web/src/app/(app)/relatorios/page.tsx`;
+- `apps/company-web/src/components/reports/report-layout.tsx`;
+- `apps/company-web/src/components/reports/use-company-operations-report.ts`;
+- `docs/plano-relatorios-company-web.md`.
+
+Não houve alteração de API, Prisma, migration, dado, `.env`, secret, preço,
+financeiro, dispatch, GPS, app mobile ou notificação nativa. A migration e os
+contratos de aviso de pagamento presentes em paralelo no worktree foram
+preservados e não fazem parte desta fase.
+
+### Verificação
+
+| Comando / fluxo                                             | Resultado                    |
+| ----------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
+| `corepack pnpm --filter @motoboycity/company-web run build` | aprovado; 17 páginas geradas |
+
+Lacunas conhecidas: falta inspeção visual com uma sessão Company e massa que
+tenha pedidos em vários horários/modalidades; comparação detalhada por bucket
+anterior exigiria extensão aditiva do contrato; CSV permanece reservado à Fase 6. O próximo passo concreto é a Fase 4: ampliar de forma aditiva os filtros da
+busca e implementar `/relatorios/retornos-lotes`, sem tocar no aviso de
+pagamento concorrente.
+
+## Atualização — 2026-08-24: aviso de pagamento da empresa com confirmação administrativa
+
+Foi concluída a etapa 10 de `docs/plano-financeiro-company-web.md`. A empresa
+agora pode usar **Já paguei** em uma fatura aberta para informar valor, data e
+observação. Essa ação cria `InvoicePaymentNotice` e não altera a fatura. O
+admin recebeu a aba **Avisos de pagamento** no Financeiro, com fila de
+pendentes/confirmados/recusados, diferença contra o total, confirmação e recusa
+com motivo. Ao reabrir **Já paguei**, a empresa vê se já existe aviso pendente
+ou o motivo da última recusa; a consulta só roda quando o diálogo abre, evitando
+uma requisição adicional por linha da tabela.
+
+A baixa continua tendo um único núcleo: `InvoiceService.markPaid`. Ele foi
+extraído para `markPaidWithinTransaction`, usado tanto pela rota manual quanto
+pela confirmação do aviso. Na confirmação, reservar o aviso, marcar a fatura
+como paga e escrever `InvoiceStatusHistory` ocorrem na mesma transação. Uma
+falha em qualquer passo mantém o aviso pendente e a fatura no estado anterior.
+Confirmação e recusa usam atualização condicional para impedir duas decisões
+concorrentes.
+
+A migration aditiva `20260824105857_aviso_de_pagamento_da_loja` cria enum,
+tabela, relações e índices. Foi acrescentado um índice único parcial para
+garantir no PostgreSQL no máximo um aviso `PENDING` por fatura; avisos recusados
+ou confirmados permanecem no histórico e não impedem um novo envio. A API
+também traduz a violação concorrente para HTTP 409. Data civil inválida, valor
+com mais de dois centavos e status de fila desconhecido retornam HTTP 400.
+
+Arquivos principais deste recorte:
+
+- `apps/api/prisma/schema.prisma` e
+  `apps/api/prisma/migrations/20260824105857_aviso_de_pagamento_da_loja/migration.sql`;
+- `apps/api/src/finance/{payment-notice.controller,payment-notice.service,payment-notice.service.spec,invoice.service,finance.module}.ts`;
+- `apps/api/test/payment-notice.e2e-spec.ts`;
+- `packages/types/src/finance.ts`;
+- `packages/validation/src/finance/payment-notice.schema.ts` e seu export;
+- `packages/api-client/src/payment-notice.ts` e seu export;
+- `apps/company-web/src/components/finance/{payment-notice-dialog,faturas-tab}.tsx`;
+- `apps/admin-web/src/components/finance/avisos-tab.tsx` e
+  `apps/admin-web/src/app/(app)/financeiro/page.tsx`;
+- clientes locais dos dois painéis;
+- `docs/business-rules.md` e `docs/plano-financeiro-company-web.md`.
+
+### Verificação
+
+| Comando / fluxo                                                        | Resultado                                                   |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `prisma validate`                                                      | schema válido                                               |
+| `prisma generate`                                                      | Client 6.19.3 gerado                                        |
+| build de `@motoboycity/validation`                                     | aprovado                                                    |
+| TypeScript da API                                                      | aprovado                                                    |
+| TypeScript de `company-web` e `admin-web`                              | aprovados                                                   |
+| lint focado nos 6 pacotes afetados                                     | aprovado, sem avisos                                        |
+| Jest `invoice.service.spec.ts` + `payment-notice.service.spec.ts`      | 2 suítes e 27 testes aprovados                              |
+| migration deploy em `motoboycity_e2e_local`                            | 6 migrations pendentes aplicadas; banco de dev não alterado |
+| Jest `payment-notice.e2e-spec.ts` com PostgreSQL isolado e Redis DB 15 | 1 suíte e 13 testes aprovados                               |
+
+O E2E comprova explicitamente: a empresa não quita a própria dívida; empresa B
+não acessa a fatura da A; duas criações simultâneas resultam em 201/409 e uma
+única linha pendente; confirmação concorrente não duplica baixa; falha da baixa
+desfaz a confirmação; recusa exige motivo e permite novo aviso.
+
+Nenhuma migration foi aplicada em banco compartilhado, staging ou produção;
+antes disso continuam obrigatórios backup/restore, validação em cópia de
+staging e plano de rollback. Nenhum `.env` ou secret foi editado ou exibido. A
+árvore local de dependências precisou ser restaurada em modo `node-linker=hoisted`
+porque a instalação isolada do pnpm ficou presa no Windows; isso alterou apenas
+`node_modules`, não o lockfile. O próximo passo concreto é homologar visualmente
+o diálogo da empresa e a fila do admin com sessões reais e, depois, seguir a
+Fase 4 dos relatórios Company Web.
+
+## Atualização — 2026-08-24: avatar no ImageKit e perfil do entregador
+
+Foi implementado o primeiro recorte de foto de perfil com armazenamento no
+ImageKit. A nova rota autenticada `POST /profile/avatar` recebe o campo
+multipart `file`, limita o upload a 5 MB e valida os bytes reais de JPEG, PNG
+ou WebP, a estrutura e dimensões de até 4096 x 4096 antes de chamar o provedor.
+A rota tem limite dedicado de cinco tentativas por minuto. Depois do upload,
+a API ainda exige que o ImageKit devolva tipo `image`, largura e altura válidas;
+caso contrário remove o arquivo e rejeita a requisição. A API nunca persiste o
+binário: atualiza somente `User.avatarExternalFileId` e `User.avatarUrl`, campos que já existiam
+no schema e na migration inicial; portanto não houve mudança Prisma nem nova
+migration.
+
+A substituição preserva consistência entre os dois sistemas. A imagem é
+enviada primeiro, a referência do usuário é trocada em transação
+`Serializable` com retry de `P2034`, e a imagem anterior é removida depois do
+commit em modo best effort. Se a transação falhar, a API tenta remover a
+imagem recém-enviada para evitar arquivo órfão. `GET /auth/me` e o resultado de
+login agora incluem `avatarUrl`, e o contrato `AuthUser` e o cliente HTTP
+compartilhado foram atualizados no mesmo recorte.
+
+No app do entregador, a tela **Perfil** permite escolher uma foto da galeria,
+com redução para no máximo 1024 x 1024, qualidade 0,8, validação local de 5 MB,
+estado de envio e mensagens de erro. A foto também aparece no menu lateral.
+O iOS recebeu a descrição de acesso à biblioteca; o Android usa o seletor de
+fotos fornecido por `react-native-image-picker`, sem permissão ampla de
+armazenamento. Para Android 24–29 foram acrescentados AndroidX Activity 1.9.3
+e o gatilho oficial de instalação do Photo Picker por Google Play Services.
+
+Arquivos principais:
+
+- `apps/api/src/media/{imagekit.module,imagekit.service,imagekit.service.spec}.ts`;
+- `apps/api/src/profile/{profile.module,profile.controller,profile.service,profile.service.spec}.ts`;
+- `apps/api/src/auth/{auth.controller,auth.service,auth.service.spec}.ts`;
+- `packages/types/src/user.ts` e `packages/api-client/src/auth.ts`;
+- `apps/driver-app/src/screens/ProfileScreen.tsx`;
+- `apps/driver-app/src/components/DrawerMenu.tsx`;
+- `apps/driver-app/ios/DriverApp/Info.plist`;
+- `apps/driver-app/android/app/build.gradle` e `android/app/src/main/AndroidManifest.xml`;
+- manifests, `pnpm-lock.yaml` e `apps/api/.env.example`.
+
+Com autorização explícita do usuário, somente as quatro variáveis já
+existentes do ImageKit foram descomentadas em `apps/api/.env`; os valores não
+foram exibidos, copiados para documentação nem versionados. O exemplo mantém
+apenas nomes com valores vazios. As dependências novas são
+`@imagekit/nodejs@7.11.0` e `react-native-image-picker@8.2.1`.
+
+Durante a inclusão filtrada das dependências, o pnpm 11.20.0 reescreveu
+contextos de peer dependencies de Jest sem o snapshot correspondente e deixou
+links antigos inacessíveis no Windows. O lockfile original foi preservado em
+backup temporário, regenerado a partir dos manifests e corrigido para manter os
+contextos já válidos; `node_modules` foi reconstruído com o linker padrão
+`isolated` e com scripts desativados. Nenhum `postinstall`, migration, seed,
+Docker ou build nativo foi executado.
+
+### Verificação
+
+| Comando / fluxo                                    | Resultado                               |
+| -------------------------------------------------- | --------------------------------------- |
+| instalação com lock congelado e `--ignore-scripts` | aprovada; 9 projetos, linker `isolated` |
+| typecheck completo do monorepo                     | aprovado nos 8 projetos                 |
+| lint de API, driver-app, api-client e types        | aprovado nos 4 projetos                 |
+| Jest focado em ImageKit, perfil e autenticação     | 3 suítes e 29 testes aprovados          |
+| Jest unitário completo da API                      | 57 suítes e 652 testes aprovados        |
+| Jest completo do driver-app                        | 8 suítes e 58 testes aprovados          |
+| build da API                                       | aprovado                                |
+| `git diff --check`                                 | aprovado                                |
+
+Não foi feito upload real no ImageKit para não criar mídia externa durante a
+validação automatizada, nem build Android/iOS. O próximo passo concreto é
+homologar em aparelho Android com a API local: selecionar JPEG/PNG/WebP,
+confirmar persistência após novo login, verificar a foto no menu e testar
+arquivo inválido/maior que 5 MB. A página de perfil da empresa com interface
+de foto continua sendo um recorte posterior e poderá reutilizar a mesma rota.
+Se a exclusão best effort de um avatar antigo falhar após o commit, o arquivo
+pode permanecer órfão no ImageKit; uma rotina assíncrona de reconciliação ainda
+é melhoria futura, sem reverter a foto nova já confirmada ao usuário.
+
+## Atualização — 2026-08-24: perfil do usuário da empresa no Company Web
+
+O backend e o app do entregador do recorte anterior foram salvos no commit
+`7da5a23` (`feat(profile): add ImageKit avatar uploads`). Em seguida, o Company
+Web recebeu a rota autenticada `/perfil`, que reutiliza `GET /auth/me` e
+`POST /profile/avatar`. A tela mostra nome e e-mail somente para leitura,
+iniciais quando não existe foto, imagem atual do ImageKit e escolha de JPEG,
+PNG ou WebP com limite local de 5 MB. O arquivo é enviado imediatamente como
+`FormData` no campo `file`; a validação estrutural e de dimensões continua sendo
+responsabilidade definitiva da API.
+
+O avatar do topo passou a mostrar a mesma consulta TanStack Query usada pela
+página, então a nova foto aparece no menu assim que a API confirma o upload.
+O menu da conta agora identifica o usuário e oferece **Meu perfil** e **Sair**.
+Estados de carregamento, erro, excesso de tentativas e sucesso são explícitos;
+o controle de arquivo informa formatos/limite para tecnologia assistiva e a
+imagem decorativa do gatilho não duplica seu nome acessível.
+
+Durante a revisão foi fechado um risco preexistente de troca de empresa no
+mesmo navegador. O `AuthGate` preenche o cache da identidade somente enquanto
+continua montado, e login, logout, token ausente ou autenticação inválida limpam
+todo o `QueryClient`. Assim pedidos, financeiro, relatórios e dados de uma
+empresa não sobrevivem no cache ao entrar com outra. Uma resposta de upload
+atrasada também só atualiza o avatar se o token que iniciou a operação ainda for
+o token da sessão.
+
+Esta é a foto do `User` autenticado da empresa, não um logotipo compartilhado
+entre todos os membros. Um logo corporativo continua exigindo um campo e um
+contrato próprios em `Company`.
+
+Arquivos funcionais:
+
+- `apps/company-web/src/app/(app)/perfil/page.tsx`;
+- `apps/company-web/src/lib/auth-user-query.ts`;
+- `apps/company-web/src/components/layout/top-nav.tsx`;
+- `apps/company-web/src/components/auth/auth-gate.tsx`;
+- `apps/company-web/src/app/login/page.tsx`;
+- `docs/business-rules.md`.
+
+Não houve nova rota de API, contrato compartilhado, Prisma, migration,
+dependência, `.env`, secret, preço, dispatch, GPS ou alteração de notificação.
+
+### Verificação
+
+| Comando / fluxo                                                                                   | Resultado                    |
+| ------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web typecheck` | aprovado                     |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web lint`      | aprovado, sem avisos         |
+| `corepack pnpm --config.verify-deps-before-run=false --filter @motoboycity/company-web run build` | aprovado; 18 páginas geradas |
+| revisão independente de sessão, upload e acessibilidade                                           | sem bloqueador remanescente  |
+
+Não foi realizado upload real para evitar criar mídia externa durante a
+validação automatizada. A inspeção visual também ficou pendente porque não
+havia navegador conectado nem servidor local ativo. O próximo passo concreto é
+homologar `/perfil` com uma sessão Company real: trocar a foto, recarregar,
+sair/entrar, alternar entre duas empresas e testar formato inválido e arquivo
+maior que 5 MB.
+
+## Atualização — 2026-08-24: cadastro de empresa, redefinição de senha e WhatsApp de fatura
+
+Foram adicionados ao Admin Web os três fluxos administrativos solicitados. A
+aba **Empresas** agora abre um diálogo de cadastro com razão social, nome
+fantasia, CPF/CNPJ, região ativa, responsável, e-mail, WhatsApp e senha
+inicial. A API expõe `GET /admin/companies/registration-options` e
+`POST /admin/companies`, ambos protegidos por JWT + `AdminOnlyGuard`. A criação
+reutiliza a transação de autenticação, agora com região explícita, isolamento
+`Serializable`, retry de conflito e tradução de duplicidade. Empresa e
+responsável são gravados juntos e o status inicial permanece
+`PENDING_APPROVAL`.
+
+As páginas de detalhe do entregador e da empresa passaram a oferecer
+**Alterar senha**. As novas rotas são
+`PATCH /admin/drivers/:id/password` e
+`PATCH /admin/companies/:id/team-members/:memberId/password`. No caso da
+empresa, somente um `OWNER` ativo e pertencente ao `companyId` informado pode
+ser alvo. A API recebe apenas `{ password }`, aplica bcrypt e devolve somente o
+`userId`; senha e hash não entram na resposta ou em eventos.
+
+Tokens novos carregam `credentialVersion`, um SHA-256 do hash bcrypt atual.
+`JwtStrategy` e o handshake Socket.IO comparam essa impressão com a credencial
+persistida; a troca do hash revoga os tokens anteriores sem migration e a API
+derruba sockets já conectados ao usuário. Tokens legados sem a claim também
+são rejeitados, produzindo um logout único após a implantação desta versão.
+Não houve alteração na decisão de JWT em `localStorage`, prazo de sete dias ou
+ausência de refresh token.
+
+No reset de motoboy, a API também grava `availability=UNAVAILABLE`, fecha logs
+de presença, remove a presença viva do Redis e devolve ofertas pendentes para o
+dispatch. Hash novo, `UNAVAILABLE` e fechamento do log pertencem à mesma
+transação. Redis e fila são limpos depois do commit, com até três tentativas;
+uma falha externa não transforma um reset já confirmado em resposta enganosa de
+erro. A expiração de oferta é idempotente também quando `EXPIRED` já foi
+persistido: ela retoma o redespacho, e o job de timeout só é removido ao final.
+Ao criar uma oferta, todos os jobs de timeout precisam ser confirmados; se
+qualquer `queue.add` falhar, todas as ofertas recém-criadas são movidas
+condicionalmente de `PENDING` para `EXPIRED`, jobs parciais são removidos em
+best effort e o erro original é relançado. Assim uma falha do Redis não deixa
+pedido bloqueado por uma oferta sem prazo.
+
+O handshake Socket.IO registra o usuário antes da consulta da credencial,
+permitindo que um reset encerre também uma conexão ainda em autenticação.
+`setAvailability` e `heartbeat` usam escrita condicional pelo hash que
+autenticou a requisição, fechando a corrida em que um request antigo poderia
+religar a presença depois da troca.
+
+No detalhe administrativo da fatura, o painel consulta os membros da empresa,
+seleciona somente responsáveis ativos com telefone brasileiro válido e abre
+`wa.me` com mensagem revisável. Havendo mais de um responsável, o admin escolhe
+explicitamente o contato antes de liberar o botão. Falha ao carregar os contatos
+é mostrada como erro recuperável, e não como telefone ausente. A mensagem inclui
+somente empresa, número, valor, vencimento e quantidade de pedidos; inclusive a
+saudação não leva o nome pessoal. Não há token ou link autenticado. O WhatsApp
+exige confirmação manual do envio e não anexa PDF. Refetch em segundo plano
+mantém o botão disponível quando já existem contatos em cache; o estado de
+carregamento bloqueia a ação somente quando ainda não há dados utilizáveis.
+
+Cadastro de empresa e redefinições de senha registram nos logs da API o ID do
+administrador e os IDs dos alvos, sem senha ou hash. O schema ainda não possui
+uma trilha genérica append-only para ações de segurança; criar essa persistência
+exige decisão de retenção e uma migration aditiva separada.
+
+Os dois recortes de avatar pedidos nesta mesma sequência já estavam completos:
+`/perfil` no Company Web e upload/visualização no app do entregador, ambos via
+`POST /profile/avatar` e ImageKit. Não foram duplicados nem alterados aqui.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/admin/{companies,drivers}/`;
+- `apps/api/src/auth/{auth.service,credential-fingerprint,jwt.strategy}.ts`;
+- `apps/api/src/realtime/realtime.gateway.ts`;
+- `apps/api/src/driver-presence/driver-presence.service.ts`;
+- `packages/validation/src/admin/{create-company,change-password}.schema.ts`;
+- `packages/types/src/{company,user}.ts` e clientes HTTP administrativos;
+- `apps/admin-web/src/components/companies/create-company-dialog.tsx`;
+- `apps/admin-web/src/components/users/change-password-dialog.tsx`;
+- `apps/admin-web/src/components/finance/invoice-whatsapp-dialog.tsx`;
+- `apps/admin-web/src/lib/whatsapp.ts`.
+
+### Verificação
+
+| Comando / fluxo                               | Resultado                        |
+| --------------------------------------------- | -------------------------------- |
+| typecheck completo do monorepo                | 8 projetos aprovados             |
+| lint completo do monorepo                     | 8 projetos aprovados             |
+| Jest unitário completo da API                 | 58 suítes e 677 testes aprovados |
+| testes de normalização/mensagem WhatsApp      | 3 testes aprovados               |
+| build da API e build de produção do Admin Web | aprovado                         |
+| `git diff --check`                            | aprovado                         |
+
+Foram acrescentados E2E para guards, criação administrativa, região inválida
+sem resíduo, troca de senha, rejeição da senha anterior e revogação do token.
+Eles não foram executados nesta sessão porque PostgreSQL e Redis isolados não
+foram provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi
+alterado. A API local foi reiniciada e voltou a escutar na porta 3333; os dois
+painéis permaneceram nas portas 3000 e 3001. O próximo passo concreto é
+homologar os três diálogos com uma sessão administrativa real e executar os
+dois E2E em banco/Redis isolados.
+
+## Atualização — 2026-08-24: Blueprint de infraestrutura para o Render
+
+O arquivo raiz `render.yaml`, criado em sessão concorrente e incluído no mesmo
+push a pedido do usuário, descreve PostgreSQL 15, Redis com política
+`noeviction` e a API NestJS no plano gratuito do Render. O build parte da raiz
+do monorepo, instala com lockfile congelado, gera o Prisma Client, executa
+`prisma migrate deploy` e compila a API; o processo de execução reutiliza o
+script `start:prod` do pacote. Os dois painéis web continuam fora do Blueprint
+e estão destinados à Vercel.
+
+`DATABASE_URL` e `REDIS_URL` são ligados pelos serviços do próprio Blueprint,
+e `JWT_SECRET` é gerado pelo Render. CORS, Google Maps, Groq, Firebase,
+ImageKit e credenciais do administrador inicial aparecem apenas como
+`sync: false`: os valores precisam ser preenchidos manualmente no painel e não
+foram adicionados ao repositório público. Os únicos valores persistidos no YAML
+são configurações não secretas, como `NODE_ENV`, throttling, modelo e timeout
+do Groq.
+
+O Blueprint não foi aplicado nesta sessão e nenhum recurso externo, banco,
+migration ou seed foi criado. Se ele já estiver conectado ao repositório, um
+push em `main` pode iniciar o fluxo automático configurado no Render; antes de
+usar dados compartilhados continuam obrigatórios backup/restore e validação da
+migration em cópia de staging. Após o primeiro provisionamento ainda será
+necessário informar `CORS_ORIGINS`, preencher os segredos no painel e executar
+o seed administrativo uma única vez.
+
+## Atualização — 2026-08-24: isolamento do E2E de cadastro de entregador
+
+O primeiro CI após o recorte administrativo chegou aos E2E com migrations e
+seed aprovados, mas `admin-drivers.e2e-spec.ts` assumia que existia uma
+modalidade ativa criada pelo seed. O seed mínimo cria somente a região padrão e
+o administrador; por isso cinco casos da mesma suíte falharam em cascata,
+enquanto as outras 21 suítes passaram.
+
+A suíte agora cria uma modalidade exclusiva no próprio `beforeAll`, usa seu ID
+nos casos de cadastro e configuração inválida e a remove no `afterAll`, depois
+de apagar os vínculos dos entregadores de teste. A mudança é somente de fixture
+E2E: não altera schema, rota, regra de negócio ou dado de produção. A validação
+definitiva continua no workflow com PostgreSQL e Redis isolados; nenhum banco
+local ou compartilhado foi usado para reproduzir o teste.
+
+O segundo CI confirmou a correção da modalidade (os cinco casos anteriores
+avançaram), mas o último login da suíte recebeu `429`: os dois logins usados
+apenas para montar os tokens de admin e entregador já consumiam parte do limite
+dedicado de cinco chamadas por minuto do `AuthController`. O setup passou a
+obter esses dois tokens diretamente pelo `AuthService`; as verificações HTTP de
+senha anterior, senha nova e login bloqueado por rejeição continuam passando
+pela rota real. Os testes próprios de login permanecem em suítes separadas.
+
+## Atualização — 2026-08-24: vínculo ativo e criação idempotente de pedidos
+
+O acesso de `COMPANY_MEMBER` agora exige um `CompanyTeamMember` ativo. A
+checagem ocorre no login, na validação de todo JWT e nos resolvedores de empresa
+usados por pedidos, endereço, relatórios, financeiro, faturas e avisos de
+pagamento. Assim, desativar o vínculo invalida também sessões já emitidas e não
+deixa rotas antigas dependerem apenas do guard de tipo de usuário. Nenhum
+status, papel ou regra de aprovação da empresa foi alterado.
+
+As criações `POST /deliveries` e `POST /deliveries/batch` aceitam agora o campo
+opcional `idempotencyKey`, validado como UUID. Os dois formulários do Company
+Web geram uma chave por tentativa lógica, reutilizam a mesma chave quando o
+usuário repete o mesmo formulário após erro e geram outra quando o conteúdo
+muda. A API deriva IDs UUID v8 determinísticos, com escopo por empresa e por
+tipo de criação. Portanto, o banco resolve cliques simultâneos pela chave
+primária existente, sem migration, e o retry devolve o pedido ou lote vencedor
+sem criar novos endereços ou entradas de histórico.
+
+Quando o commit ocorreu mas a resposta, o dispatch ou o agendamento falhou, o
+retry retoma somente o efeito externo. `dispatchDelivery` já é idempotente e o
+job de ativação já usa `jobId` baseado no pedido. Uma repetição não republica
+`DELIVERY_CREATED`; a tela invalida suas consultas ao receber a resposta e lê o
+estado persistido atual. O campo permanece opcional para preservar clientes
+existentes, mas os fluxos atuais do Company Web sempre o enviam.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/auth/{auth.service,jwt.strategy}.ts`;
+- resolvedores de empresa em `apps/api/src/{company,deliveries,finance}/`;
+- `apps/api/src/deliveries/deliveries.service.ts`;
+- `packages/validation/src/deliveries/create-delivery.schema.ts`;
+- `packages/types/src/delivery.ts`;
+- formulários de operação e `apps/company-web/src/lib/idempotency.ts`.
+
+### Verificação
+
+| Comando / fluxo                                 | Resultado                                   |
+| ----------------------------------------------- | ------------------------------------------- |
+| build de `@motoboycity/validation`              | aprovado                                    |
+| typecheck completo do monorepo                  | 8 projetos aprovados                        |
+| lint completo do monorepo                       | 8 projetos aprovados                        |
+| Jest unitário completo da API                   | 58 suítes e 687 testes aprovados            |
+| build da API e build de produção do Company Web | aprovado                                    |
+| `git diff --check`                              | aprovado antes da atualização deste handoff |
+
+Os testes cobrem vínculo inativo no login e em token existente, retry após
+resposta perdida, reativação de pedido agendado e colisão concorrente `P2002`
+para pedido avulso e lote. E2E não foi executado porque PostgreSQL e Redis
+isolados não foram provisionados. Nenhuma migration, seed, Docker, `.env` ou
+secret foi alterado. Próximo passo concreto: executar os E2E em serviços
+isolados e então seguir pelos achados médios registrados em
+`docs/auditoria-company-web.md`.
+
+## Atualização — 2026-08-24: conclusão da auditoria do Company Web
+
+Os achados médios e baixos de `docs/auditoria-company-web.md` foram corrigidos
+sem alterar migrations ou regras de cobrança. A resposta de faturas da empresa
+agora usa contratos públicos próprios e não contém repasse do entregador nem
+margem da plataforma, inclusive no JSON. As rotas administrativas continuam
+recebendo o contrato financeiro completo. Emissão, vencimento e pagamento são
+tratados como datas civis; o filtro da API compara diretamente os dias
+`@db.Date`, sem deslocamento pelo fuso de São Paulo. Horários operacionais, como
+conclusão e histórico, continuam formatados como instante.
+
+Os estados de erro do endereço, modalidades, central, rastreamento, pedidos e
+faturas não caem mais em mensagens positivas de vazio. Uma falha transitória em
+`/auth/me` preserva a credencial e oferece nova tentativa; o token só é removido
+em `401` ou `403`. Os três cancelamentos do painel pedem confirmação, e o modal
+explicita quando a ação alcança todo o lote.
+
+O acompanhamento logo após criar um pedido consulta somente o `batchId` ou o
+`deliveryId` gerado. Esses filtros são UUIDs validados na rota de operações e
+sempre se combinam com o escopo da empresa. Nesse recorte a API devolve todos os
+terminais recentes, sem o limite global de vinte; por isso um lote de até
+cinquenta itens não pode declarar aceite enquanto faltarem pedidos. O modal
+também distingue erro, carregamento incompleto, cancelamento e aceite parcial.
+O detalhe de pedido atualiza o status principal a cada dez segundos até chegar
+a `COMPLETED` ou `CANCELLED`, permitindo que uma tela aberta antes do aceite
+ative o rastreamento assim que o motoboy assumir a entrega.
+
+A lista `/pedidos` passou a usar busca paginada no servidor, com 25 itens por
+página e filtros de texto/status aplicados na API. A central operacional obtém
+contagens por `groupBy`, em vez de carregar todos os status históricos. O
+endpoint legado `GET /deliveries` permanece sem paginação para compatibilidade,
+mas a tela atual não o usa para o histórico. Relatórios operacionais e a série
+financeira percorrem lotes de quinhentas linhas mantendo somente agregados; o
+SLA também percorre históricos em páginas, guarda apenas amostras necessárias
+ao cálculo exato e limita o intervalo a 366 dias.
+
+As duas somas monetárias apontadas na auditoria passaram a operar em centavos
+inteiros: custo conhecido no relatório e fechamento da fatura. Há testes para
+o caso `0,1 + 0,2`, isolamento do DTO público da fatura, data civil, paginação,
+agregação, limite de SLA, estados operacionais e lote terminal sem truncamento.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/{deliveries,finance,company/reports}/`;
+- `apps/company-web/src/app/(app)/{pedidos,faturas,relatorios}/`;
+- `apps/company-web/src/components/{auth,finance,operations}/`;
+- `packages/{types,validation,api-client}/`.
+
+### Verificação
+
+| Comando / fluxo                    | Resultado                        |
+| ---------------------------------- | -------------------------------- |
+| build de `@motoboycity/validation` | aprovado                         |
+| typecheck completo do monorepo     | 8 projetos aprovados             |
+| lint completo do monorepo          | 8 projetos aprovados, sem avisos |
+| Jest unitário completo da API      | 58 suítes e 699 testes aprovados |
+| build da API                       | aprovado                         |
+| build de produção do Company Web   | aprovado, 18 rotas               |
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
+O próximo passo concreto é executar os E2E nos serviços isolados e fazer um
+smoke test das rotas de pedidos, faturas e relatórios com uma sessão real de
+empresa e lotes de tamanhos 1, 20 e 50.
+
+## Atualização — 2026-08-24: acabamento do widget e da fatura administrativa
+
+O widget “Atividade ao vivo” do Admin Web recolhido ocupa agora somente um
+botão circular de 44 px, com estado de conexão visível e rótulo acessível. O
+conteúdo principal reserva espaço inferior para o botão, evitando que paginação
+e ações de rodapé fiquem cobertas. Aberto, o painel conserva a largura e o feed
+anteriores. A alteração é somente visual e não muda conexão Socket.IO nem a
+lógica do feed.
+
+O detalhe administrativo da fatura marca pedidos que possuem retorno e exibe o
+valor desse componente ao lado do número do pedido. O campo permanece exclusivo
+do contrato administrativo; o contrato público da empresa continua sem repasse
+ou margem interna.
+
+Validação final deste recorte: typecheck, lint e build de produção do Admin Web
+aprovados; o build gerou 35 páginas. Nenhum `.env`, secret ou arquivo de sessão
+Kotlin faz parte do conjunto preparado para commit.
+
+## Atualização — 2026-08-24: auditoria do aplicativo do motoboy
+
+A auditoria de `apps/driver-app` foi concluída e registrada em
+`docs/auditoria-driver-app.md`. O escopo incluiu as 12 telas React Native, os 13
+arquivos Kotlin, os clientes compartilhados e os serviços de API diretamente
+ligados a sessão, presença, dispatch, transições e saque. Nenhum código da
+aplicação, contrato, schema, migration ou configuração foi alterado; esta rodada
+produziu somente documentação.
+
+Foram confirmados cinco achados altos: uma corrida entre dois dispatches pode
+criar ofertas simultâneas do mesmo motoboy, que se substituem nos três
+apresentadores do app; falha
+transitória em `/auth/me` limpa somente a sessão JavaScript e pode deixar push,
+tracking e sessão nativa ativos; aceite confirmado com resposta perdida não é
+reconciliado; o serviço pode confirmar início do tracking apesar de usar somente
+`GPS_PROVIDER` e não receber posições; saque não possui identidade idempotente e
+pode ser solicitado duas vezes após perda de resposta.
+
+Os achados médios cobrem ambiguidade e concorrência nas transições de coleta e
+entrega, acúmulo serial de envios de GPS em lotes sob rede ruim, ações principais
+irreversíveis no primeiro toque e cronômetro React Native relativo que envelhece
+durante suspensão. A lacuna baixa é específica de cobertura: as oito suítes não
+exercitam os lifecycles e falhas acima, apesar de estarem verdes.
+
+### Verificação
+
+| Comando / fluxo                        | Resultado                        |
+| -------------------------------------- | -------------------------------- |
+| typecheck de `@motoboycity/driver-app` | aprovado                         |
+| lint de `@motoboycity/driver-app`      | aprovado                         |
+| Jest do Driver App                     | 8 suítes e 58 testes aprovados   |
+| build Android                          | não executado, conforme o escopo |
+
+As primeiras execuções dentro do sandbox não conseguiram atravessar os junctions
+do PNPM (`EPERM`/módulos ausentes); os mesmos três comandos foram repetidos fora
+do isolamento e passaram. Alterações paralelas já existentes em Admin Web,
+pricing da API e API client não foram tocadas nem avaliadas como parte desta
+auditoria. Próximo passo concreto: corrigir primeiro a exclusividade/apresentação
+de ofertas por motoboy e a reconciliação idempotente do aceite; em seguida alinhar
+sessão JavaScript/nativa e validar o tracking em aparelho com GPS e rede
+controladamente indisponíveis.
+
+## Atualização — 2026-08-24: correção dos achados do aplicativo do motoboy
+
+Os dez achados registrados em `docs/auditoria-driver-app.md` foram tratados no
+app Android e nos serviços de API que sustentam o fluxo. O documento de
+auditoria agora mantém o diagnóstico original e uma tabela de estado pós-correção.
+
+### Dispatch e aceite
+
+- A criação de oferta passou a bloquear o registro do motoboy dentro da
+  transação serializável e revalidar a ausência de outra oferta pendente. O
+  lock das entregas continua protegendo o outro eixo da concorrência. Se o
+  candidato ficou ocupado entre seleção e commit, o mesmo dispatch tenta o
+  próximo elegível em vez de deixar o pedido parado.
+- Aceitar oferta ou assumir pedido livre agora devolve o resultado persistido
+  quando a mesma atribuição já pertence ao motoboy. Em corrida entre requests,
+  o serviço relê a oferta/entrega depois da operação condicional falhar.
+- Home, vitrine e tela de oferta consultam entregas ativas quando uma resposta
+  de aceite/claim se perde. O cliente Android nativo repete somente `ACCEPT` uma
+  vez; `DECLINE` permanece sem repetição automática.
+
+### Sessão, oferta e tracking
+
+- O bootstrap preserva a credencial em indisponibilidade da API. Apenas
+  `401`/`403` executam a limpeza coordenada de tracking, registro/token FCM,
+  sessão nativa e AsyncStorage, nesta ordem para permitir o desregistro.
+- O cronômetro da oferta React Native usa deadline absoluto. A retomada da Home
+  sempre consulta a oferta pendente e atualiza ou remove o estado local, sem
+  trocar de tela quando a mesma oferta apenas recebeu um prazo atualizado.
+- O foreground service Android valida se GPS ou rede está ativo antes de
+  iniciar, registra ambos os provedores disponíveis e para ao falhar o registro.
+  O envio coalesce fixes, mantendo somente o mais recente, usa timeout de oito
+  segundos e interrompe o lote em erro de rede, `5xx` ou `429`.
+- Quando o TTL de presença expira, a API emite também
+  `driver:presence-expired`. A Home sincroniza o seletor para indisponível, para
+  o tracking e orienta o motoboy a verificar a localização. O update de
+  expiração volta a validar `lastSeenAt`, portanto um heartbeat recebido entre
+  a busca e a gravação vence a corrida e permanece online.
+
+### Dinheiro e operação
+
+- `POST /driver/wallet/withdrawals` aceita `idempotencyKey` UUID opcional. O app
+  sempre cria uma chave por tentativa lógica e a conserva ao repetir o mesmo
+  valor. A API prefixa a chave com o usuário, grava no
+  `WalletTransaction.idempotencyKey` já existente e recupera a solicitação em
+  retry ou colisão `P2002`. Não houve alteração de schema nem migration.
+- Coleta, insucesso, entrega e conclusão de retorno mudam o estado com
+  `updateMany` condicionado ao estado anterior e ao motoboy. Resposta perdida e
+  request concorrente retornam o detalhe/grupo já aplicado sem duplicar
+  histórico, endereço de destino ou repasse.
+- A tela operacional usa trava síncrona contra toque duplo, permanece aberta em
+  erro transitório, relê o estado antes de declarar resultado ambíguo e pede
+  confirmação para coleta, entrega e retorno. A segunda ação principal foi
+  removida.
+
+Arquivos principais deste recorte:
+
+- `apps/api/src/{dispatch,deliveries,finance,live-presence}/`;
+- `apps/driver-app/{App.tsx,src/lib,src/screens,__tests__,android/app/src/main/java}/`;
+- `packages/{validation,api-client}/`;
+- `docs/{auditoria-driver-app.md,agent-handoff.md}`.
+
+### Verificação
+
+| Comando / fluxo                    | Resultado                                                            |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| build de `@motoboycity/validation` | aprovado                                                             |
+| typecheck completo do monorepo     | 8 projetos aprovados                                                 |
+| lint completo do monorepo          | 8 projetos aprovados, sem avisos                                     |
+| Jest completo do Driver App        | 12 suítes e 67 testes aprovados                                      |
+| Jest unitário completo da API      | 59 suítes e 718 testes aprovados                                     |
+| build da API                       | aprovado                                                             |
+| `:app:compileDebugKotlin`          | aprovado; um aviso preexistente de `Notification.Builder` depreciado |
+| `git diff --check`                 | aprovado antes da atualização final deste handoff                    |
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhum seed, Docker, `.env`, secret ou arquivo de sessão Kotlin
+foi alterado. O passo concreto seguinte é instalar o build em aparelho Android
+e validar: aceite com resposta cortada; notificação com tela bloqueada,
+desbloqueada e app aberto; sessão expirada; GPS desligado/trocando para rede; e
+lote grande sob rede degradada. Depois, executar os E2E com banco e Redis
+isolados antes de promover o recorte.
+
+## Atualização — 2026-08-24: nome de instalação do app do motoboy
+
+O nome visível do aplicativo instalado passou a ser `motoboycity`. A alteração
+foi aplicada ao `displayName` do React Native, ao rótulo do launcher Android e
+ao nome e tela inicial do iOS.
+
+O nome interno `DriverApp`, o `applicationId`/bundle identifier, o componente
+React Native e a configuração Firebase foram preservados. Portanto, a mudança
+não cria um aplicativo separado e não altera sessão, dados ou lógica.
+
+Arquivos afetados:
+
+- `apps/driver-app/app.json`;
+- `apps/driver-app/android/app/src/main/res/values/strings.xml`;
+- `apps/driver-app/ios/DriverApp/{Info.plist,LaunchScreen.storyboard}`.
+
+Verificação executada:
+
+- typecheck e lint de `@motoboycity/driver-app`: aprovados;
+- Jest do Driver App: 12 suítes e 67 testes aprovados;
+- Gradle `:app:processDebugResources`: aprovado;
+- `git diff --check`: aprovado.
+
+Próximo passo concreto: gerar/instalar uma nova versão nativa para que o novo
+rótulo apareça no launcher; a instalação anterior não muda sem recompilação.
+
+## Atualização — 2026-08-24: Render com PostgreSQL no Neon
+
+A infraestrutura de produção foi consolidada como Vercel para os dois painéis,
+Render para API e Redis/BullMQ, e Neon para PostgreSQL. O `render.yaml` não
+provisiona mais um Postgres no Render: `DATABASE_URL` e `DIRECT_URL` passaram a
+ser segredos `sync: false`, preenchidos com as URLs pooled e direta do mesmo
+banco Neon. `REDIS_URL` continua ligado automaticamente ao Key Value do Render.
+Como o Neon configurado está em `sa-east-1` e o Render não oferece região no
+Brasil, API e Redis foram alinhados em `virginia`, evitando ainda uma conexão
+privada entre serviços Render de regiões diferentes.
+
+O datasource Prisma 6 agora usa `DATABASE_URL` para o runtime e `DIRECT_URL`
+para migrations e ferramentas administrativas. Os exemplos de ambiente e o CI
+foram atualizados; em desenvolvimento e CI, ambas podem apontar para o mesmo
+PostgreSQL isolado/local. Nenhuma migration nova é necessária porque essa
+mudança altera somente a forma de conexão, não o schema persistido.
+
+Nenhuma conexão, migration, seed, limpeza ou escrita foi executada no Neon. O
+banco local continua sendo `motoboycity_dev` no Docker. Antes do primeiro
+deploy, preencher as duas URLs no Render, aplicar `prisma migrate deploy` pelo
+build e executar o seed uma única vez depois de configurar credenciais fortes
+para o administrador inicial.
+
+Arquivos afetados: `render.yaml`, `.env.example`, `apps/api/.env.example`,
+`apps/api/prisma/schema.prisma`, `.github/workflows/ci.yml` e este handoff.
+
+Verificação executada:
+
+- parse estrutural do `render.yaml`: aprovado, sem Postgres Render, com API e
+  Redis em `virginia` e as duas URLs do Neon como `sync: false`;
+- `prisma validate` e `prisma generate`: aprovados;
+- `prisma migrate status`: 31 migrations, banco local `motoboycity_dev` em
+  `localhost:5434` atualizado; nenhuma conexão ao Neon;
+- typecheck e lint completos: 8/8 workspaces aprovados;
+- build da API: aprovado;
+- `git diff --check`: aprovado.
+
+## Atualização — 2026-08-24: contexto do menu da conta no Company Web
+
+O menu da conta no topo do painel da empresa usava `DropdownMenuLabel`
+diretamente dentro do popup. No Base UI, esse componente representa
+`Menu.GroupLabel` e exige o contexto de um `Menu.Group`; abrir o menu causava o
+erro de runtime `MenuGroupContext is missing`.
+
+O label e a ação **Meu perfil** foram agrupados com `DropdownMenuGroup`, sem
+alterar consulta de usuário, navegação, logout ou estilo. A busca global
+confirmou que este era o único uso de `DropdownMenuLabel` nos dois painéis.
+
+No reteste manual do responsável, **Meu perfil** ainda não navegava. A causa
+era outro resíduo da API Radix: os itens usavam `onSelect`, mas o `Menu.Item` do
+Base UI executa a ação por `onClick`. Perfil e logout do Company Web e logout
+do Admin Web foram alinhados ao evento correto.
+
+Arquivos funcionais afetados:
+`apps/{company-web,admin-web}/src/components/layout/top-nav.tsx`.
+
+Validação: typecheck e lint completos aprovados em 8/8 workspaces; builds de
+produção do Company Web (18 rotas) e Admin Web (35 rotas) aprovados. A
+validação manual por clique não foi executada porque nenhum navegador
+integrado estava disponível nesta sessão. Próximo passo concreto: recarregar o
+painel da empresa, abrir o avatar da conta e testar **Meu perfil** e **Sair**.
+
+## Atualização — 2026-08-24: edição dos dados da empresa no perfil
+
+A rota `/perfil` do Company Web agora permite ao responsável ativo editar nome
+fantasia, razão social, nome completo e WhatsApp. E-mail e CPF/CNPJ permanecem
+visíveis somente para conferência, e senha/foto continuam em seus fluxos já
+existentes. A atualização bem-sucedida também troca imediatamente o nome do
+usuário no cache compartilhado do topo do painel.
+
+A API passou a expor `GET /company/profile` para qualquer membro ativo e
+`PUT /company/profile` para membros ativos com papel `OWNER`. Operadores podem
+consultar os dados, mas recebem os campos bloqueados na interface e também são
+impedidos no backend de alterá-los. O `PUT` atualiza `Company.legalName`,
+`Company.tradeName`, `User.name` e `User.phone` na mesma transação. Assim, o
+WhatsApp novo também passa a ser o contato usado pelo fluxo administrativo de
+envio de fatura.
+
+Os quatro campos já existiam no schema e na migration inicial; não houve
+alteração Prisma nem migration, e os dados existentes não precisam de
+backfill. O novo schema Zod normaliza o WhatsApp para 10 ou 11 dígitos e limita
+os tamanhos dos nomes. Contrato compartilhado, API client, controller, service
+e consumidor web foram atualizados juntos.
+
+Arquivos principais:
+
+- `apps/api/src/company/profile/` e `apps/api/src/app.module.ts`;
+- `packages/validation/src/company/update-company-profile.schema.ts`;
+- `packages/types/src/company.ts`;
+- `packages/api-client/src/company-profile.ts`;
+- `apps/company-web/src/components/profile/company-data-form.tsx`;
+- `apps/company-web/src/app/(app)/perfil/page.tsx`.
+
+Verificação executada:
+
+- build de `@motoboycity/validation`: aprovado;
+- testes focados de serviço/autorização e validação: 2 suítes e 6 testes
+  aprovados;
+- suíte unitária completa da API antes do último teste de validação: 60 suítes
+  e 722 testes aprovados;
+- typecheck e lint completos: 8/8 workspaces aprovados;
+- builds da API e do Company Web: aprovados; o painel gerou 18 rotas;
+- `git diff --check`: aprovado antes desta atualização do handoff.
+
+E2E não foi executado porque PostgreSQL e Redis isolados não foram
+provisionados. Nenhuma migration, seed, Docker, `.env` ou secret foi alterado.
+Próximo passo concreto: homologar com uma sessão real de `OWNER`, salvar os
+quatro campos e confirmar o novo telefone no diálogo de WhatsApp da fatura;
+depois entrar como `OPERATOR` e confirmar visualização sem permissão de edição.
+
+## Atualização — 2026-08-24: bootstrap do primeiro deploy no Render
+
+O Blueprint da API passou a usar `initialDeployHook` para executar o seed
+mínimo depois do primeiro deploy bem-sucedido. Isso resolve a incompatibilidade
+do procedimento anterior com o plano gratuito do Render, que não oferece Shell:
+a região padrão e o primeiro administrador são criados uma única vez pelo hook,
+com `ADMIN_SEED_EMAIL` e `ADMIN_SEED_PASSWORD` fornecidos como segredos no
+painel. O seed continua idempotente e não sobrescreve região ou administrador
+existentes.
+
+Nenhum deploy, migration, seed ou conexão com o Neon foi executado nesta
+alteração. O `prisma migrate deploy` permanece no build porque o comando de
+pré-deploy não está disponível no plano gratuito. Antes de criar o Blueprint,
+é obrigatório confirmar o alvo Neon e preencher `DATABASE_URL`, `DIRECT_URL`,
+`CORS_ORIGINS` e as credenciais fortes do administrador.
+
+Verificação deste recorte: schema Prisma válido e build da API aprovado fora
+do sandbox do Windows. A execução atual do GitHub Actions continua vermelha em
+quatro expectativas E2E após as mudanças de idempotência; isso precisa ser
+alinhado antes de considerar o backend pronto para produção. Próximo passo
+concreto: validar o Blueprint, confirmar autorização para aplicar as 31
+migrations no Neon limpo e acompanhar o primeiro deploy/health check.
+
+## Atualização — 2026-08-24: correção do primeiro build no Render
+
+O primeiro sync do Blueprint criou `motoboycity-redis`, mas o build da API
+parou antes da instalação de dependências: `corepack enable` tentou substituir
+`/usr/bin/pnpm` no filesystem somente leitura do runtime (`EROFS`). Nenhuma
+migration ou seed chegou a executar.
+
+O Blueprint passou a invocar `corepack pnpm` diretamente no build, start e
+hook inicial, sem criar ou sobrescrever links globais. `NODE_VERSION` foi
+fixado em `22.18.0`, a mesma versão usada no CI; a faixa aberta `>=20` do
+`package.json` havia feito o Render selecionar Node 26.7.0 automaticamente.
+
+Próximo passo concreto: validar a formatação, commitar/pushar a correção e
+acompanhar o sync automático do Blueprint até migrations, build, seed e
+`GET /health` concluírem.
+
+## Atualização — 2026-08-24: build dos contratos antes da API no Render
+
+O segundo build do Render avançou além da instalação e falhou no `nest build`
+porque um clone limpo ainda não possui `packages/validation/dist`. O pacote
+`@motoboycity/validation` publica JavaScript e declarações por esse diretório,
+portanto os imports da API não podiam ser resolvidos mesmo com as dependências
+do workspace instaladas.
+
+O `buildCommand` do Blueprint agora compila `@motoboycity/validation` antes de
+gerar o Prisma Client, aplicar migrations e compilar a API. A migration fica
+antes do build final no comando; por isso o deploy que apresentou o erro pode
+ter alcançado o Neon antes de falhar. A próxima execução de `prisma migrate
+deploy` é idempotente e deve apenas confirmar migrations que já tenham sido
+aplicadas. O `initialDeployHook` ainda não executou, pois depende do primeiro
+deploy bem-sucedido.
+
+Próximo passo concreto: validar os builds de `validation` e da API, commitar e
+pushar a correção quando autorizado e acompanhar o novo sync até o health check
+e o seed inicial concluírem.
+
+## Atualização — 2026-08-24: saída compilada da API no diretório correto
+
+O build seguinte do Render terminou, mas o processo não iniciou porque
+`apps/api/dist/main.js` não existia. O `outDir` vinha apenas do preset
+compartilhado `packages/config/typescript/nestjs.json`; como caminhos de
+`tsconfig` são resolvidos a partir do arquivo que os declara, o TypeScript
+estava emitindo a API indevidamente em `packages/config/typescript/dist`.
+
+`apps/api/tsconfig.json` agora define explicitamente `outDir: "./dist"`. Isso
+mantém toda a saída dentro de `apps/api/dist` e deixa o script existente
+`start:prod` (`node dist/main`) coerente, sem acoplar o Render a um caminho
+incorreto do pacote compartilhado.
+
+Próximo passo concreto: confirmar que um novo build gera
+`apps/api/dist/main.js`, testar o processo de produção localmente e, quando
+autorizado, commitar e enviar a correção para um novo deploy.
+
+## Atualização — 2026-08-24: recuperação do administrador inicial no Neon
+
+Depois do primeiro deploy saudável, `GET /health` respondeu `200` e o CORS
+aceitou os dois domínios da Vercel, mas o login administrativo retornou `401`.
+Uma consulta somente leitura no Neon confirmou que não existia nenhuma linha
+`ADMIN` em `users`; portanto o `initialDeployHook` não havia criado o bootstrap.
+
+Como o plano gratuito não oferece Shell e o hook inicial não se repete em
+deploys comuns, o `buildCommand` executa temporariamente o seed idempotente logo
+após `prisma migrate deploy`. As credenciais continuam vindo exclusivamente de
+`ADMIN_SEED_EMAIL` e `ADMIN_SEED_PASSWORD` no Render; nenhum segredo foi
+adicionado ao repositório. O seed cria a região e o administrador apenas quando
+eles não existem e não redefine contas existentes.
+
+Próximo passo concreto: acompanhar o deploy, confirmar no log a criação do
+administrador, testar o login e então remover `prisma db seed` do build para que
+o bootstrap volte a ser exclusivamente uma operação de inicialização.
+
+## Atualização — 2026-08-24: bootstrap de produção concluído
+
+O deploy de recuperação executou o seed com as credenciais armazenadas no
+Render, criou o administrador ausente no Neon e o login no Admin Web foi
+confirmado manualmente pelo responsável. O comando temporário `prisma db seed`
+foi removido do `buildCommand`; os próximos deploys continuam aplicando apenas
+migrations pendentes e compilando a API, sem repetir o bootstrap.
+
+O usuário administrador e a região criados permanecem no Neon. O
+`initialDeployHook` continua documentando a intenção para novas instâncias do
+Blueprint, mas não é necessário para a instância atual já inicializada.
+
+Próximo passo concreto: acompanhar o deploy de limpeza, confirmar novamente
+`GET /health` e então validar login e navegação essenciais nos dois painéis da
+Vercel contra a API de produção.
+
+## Atualização — 2026-08-24: primeiro APK Android de produção assinado
+
+Foi gerado o APK `release` do `apps/driver-app` para o piloto de produção com
+`applicationId` `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.1`, `versionCode` `1`, `minSdk` 24 e `targetSdk` 36. O bundle
+embarcado aponta para `https://motoboycity-api.onrender.com`, não contém a URL
+local `localhost:3333`, desabilita cleartext e inclui a configuração do
+Firebase Messaging.
+
+O PNPM não expunha o compilador transitivo do Hermes no caminho esperado pelo
+React Native Gradle Plugin. `hermes-compiler@250829098.0.16`, exatamente a
+versão usada por `react-native@0.86.2`, foi adicionado como dependência direta
+de desenvolvimento do app. Em Windows, o build também excedia o limite de
+caminhos no diretório original; a compilação foi executada em uma cópia física
+temporária curta (`C:\mbc`) sem alterar o código-fonte usado pelo artefato.
+
+A chave de release foi criada fora do repositório no pendrive removível em
+`I:\MOTOboyCity\signing\motoboycity-release.jks`, alias `motoboycity`. As
+senhas permanecem somente no arquivo local ignorado e não foram registradas
+neste documento. Certificado SHA-256:
+`BD:42:D6:1D:35:81:9B:86:CB:9D:1F:F7:84:D3:E6:43:40:C0:CE:15:3E:21:B0:33:2A:E9:7B:4C:F5:1D:50:B9`.
+
+O APK final foi copiado para
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.1-vc1.apk`, tem 71,49 MiB e
+SHA-256
+`2BDED57889B02FBE758E218F3E8D6C9FA595A5F2EA4A25AAC4BBDAB3C1D8369F`.
+`apksigner` confirmou um assinante RSA 4096 e APK Signature Scheme v2; `aapt`
+confirmou pacote, versão, label `motoboycity` e SDKs. Antes do build nativo,
+typecheck, lint e 67 testes Jest em 12 suítes do driver-app passaram, e a API
+de produção respondeu saudável.
+
+Como redundância local, a mesma chave protegida por senha também foi copiada
+para três discos físicos distintos em
+`C:\MOTOboyCity-Backup\signing\motoboycity-release.jks`,
+`D:\MOTOboyCity-Backup\signing\motoboycity-release.jks` e
+`F:\MOTOboyCity-Backup\signing\motoboycity-release.jks`. Todas as cópias foram
+conferidas com o SHA-256 do arquivo original:
+`51083392535AB3B59CAF2872112E25DD90FAAEB316A27773C75455614ABA3D61`.
+Nenhuma senha foi copiada junto com os arquivos.
+
+Um aparelho Android conectado já possuía o mesmo pacote assinado por um
+certificado antigo/diferente. O release novo não foi instalado para evitar uma
+desinstalação que apagaria dados locais. Próximo passo concreto: guardar as
+senhas em um cofre independente e manter ao menos uma cópia da chave fora deste
+computador, autorizar uma instalação limpa no aparelho de teste e executar o
+smoke test real de login, permissões, mapa/GPS, presença, ofertas,
+aceite/recusa e push em foreground, background e tela bloqueada.
+
+## Atualização — 2026-08-24: copiar acesso do painel da empresa no Admin
+
+A página `/clientes` do Admin Web ganhou a ação `Copiar link do painel` ao
+lado de `Cadastrar empresa`. A ação copia
+`https://motoboycity-company-web.vercel.app/login` para a área de transferência,
+troca o rótulo para `Link copiado` quando conclui e mostra um erro acessível se
+o navegador bloquear a cópia. O botão não navega, não altera contratos e não
+modifica dados das empresas.
+
+Validação deste recorte: typecheck e lint de `@motoboycity/admin-web`
+concluíram com sucesso. Próximo passo concreto: revisar visualmente em desktop
+e mobile e publicar o Admin Web quando o commit for autorizado.
+
+## Atualização — 2026-08-24: mapa Android bloqueado pela autorização do Google
+
+No aparelho real, o APK `0.1.0-pilot.1`/versionCode 1 abre o `MapView` e mostra
+a marca Google, mas não recebe os blocos do mapa. O `logcat` confirmou
+`Authorization failure` e `Error requesting API token. StatusCode=INVALID_ARGUMENT`.
+A chave está presente no APK e a configuração local/Firebase existe; portanto
+o defeito não está no layout nem na injeção da chave pelo Gradle.
+Uma comparação sem expor valores confirmou que a chave Android local não é a
+mesma chave configurada localmente para API, Admin Web, Company Web ou raiz do
+monorepo, então ela pode receber restrições específicas de aplicativo Android
+sem afetar esses consumidores locais.
+
+O próprio SDK informou a identidade Android que precisa ser autorizada no
+Google Cloud: pacote `com.motoboycity.driverapp` e SHA-1 de release
+`F5:92:B4:10:39:95:42:CC:AA:36:AD:A8:91:62:74:35:49:17:FF:DC`. O certificado
+instalado foi conferido diretamente com `apksigner` e corresponde à chave de
+release criada para o piloto.
+
+Nenhuma configuração externa foi alterada nesta sessão porque não havia uma
+sessão autenticada do Google Cloud disponível. Próximo passo concreto: no
+projeto que possui a chave usada pelo app, confirmar faturamento, habilitar
+`Maps SDK for Android` e restringir a chave para aplicativo Android usando o
+pacote e SHA-1 acima; em `Restrições de API`, permitir `Maps SDK for Android`.
+Depois de salvar e aguardar a propagação, forçar o encerramento e reabrir o app
+para repetir o teste no aparelho.
+
+A configuração foi salva pelo responsável no Google Cloud e retestada no mesmo
+aparelho. Após reiniciar apenas o processo do app, o `logcat` não apresentou
+mais `Authorization failure`/`INVALID_ARGUMENT`, e a captura de tela confirmou
+o carregamento dos blocos, nomes de ruas, pontos de interesse e posição atual.
+O mapa Android do APK piloto está operacional; não foi necessário recompilar o
+APK porque a chave embutida permaneceu a mesma.
+
+## Atualizacao — 2026-08-24: Admin lanca pedido para empresa selecionada
+
+O Admin Web ganhou a acao `Lancar pedido` em `/clientes`. O modal lista todas
+as empresas cadastradas, deixa pendentes e suspensas visiveis mas indisponiveis
+e, depois da escolha de uma empresa ativa, carrega seu endereco principal de
+coleta e as modalidades ativas. O formulario cria um pedido avulso imediato ou
+agendado, com destino informado ou capturado pelo GPS, dados opcionais do
+destinatario/pagamento e as exigencias de retorno, confirmacao de coleta e
+comprovante.
+
+A API expoe `POST /admin/deliveries/company/:companyId`, protegida por
+`JwtAuthGuard` e `AdminOnlyGuard` e validada pelo mesmo `createDeliverySchema`
+da empresa. `DeliveriesService.createForCompany` resolve a empresa diretamente,
+recusa alvos inexistentes ou nao ativos e reutiliza o nucleo de criacao. Assim,
+o pedido usa o endereco, a regiao e a tabela personalizada da empresa escolhida,
+mas `DeliveryStatusHistory.changedByUserId` registra o administrador. A chave
+idempotente continua isolada por empresa e o mesmo despacho/agendamento e
+realtime sao executados.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/admin/deliveries/*`,
+`packages/api-client/src/admin-deliveries.ts`,
+`apps/admin-web/src/components/deliveries/create-company-delivery-dialog.tsx`
+e `apps/admin-web/src/app/(app)/clientes/page.tsx`. Nao houve alteracao Prisma
+nem migration.
+
+Validacao executada: 105 testes unitarios focados da API passaram; typecheck de
+API, API Client e Admin Web passou; lint de API e Admin Web passou; os builds de
+producao da API e do Admin Web tambem passaram. Proximo passo concreto: revisar
+visualmente o modal com uma empresa ativa que tenha endereco e fazer um smoke
+test real de criacao contra um ambiente controlado antes de publicar.
+
+## Atualizacao — 2026-08-24: oferta nativa sobre outros apps e presenca estacionaria
+
+O teste no Xiaomi `24095PCADG`, Android 16/API 36, confirmou que a faixa com
+`Recusar`/`Aceitar` era a notificacao nativa criada pelo app, nao um push
+generico. `USE_FULL_SCREEN_INTENT` estava concedida, mas o Android 13+ prefere
+heads-up quando o aparelho esta desbloqueado. Para reproduzir de forma opt-in o
+cartao completo da referencia nesse estado, o app passou a declarar
+`SYSTEM_ALERT_WINDOW`, consultar `Settings.canDrawOverlays`, abrir a tela
+oficial de autorizacao e tentar trazer a `OfferActivity` quando uma oferta FCM
+chega com o app minimizado. A notificacao acionavel e publicada primeiro e
+permanece como fallback se a autorizacao estiver negada ou o fabricante
+bloquear a abertura. No Android 14+, o `PendingIntent` tambem declara o opt-in
+do criador para background activity launch exigido por apps target 35+.
+
+A Home impede ficar disponivel somente quando detecta que a permissao basica de
+notificacao do Android esta desativada. Falha temporaria ao registrar o token
+FCM, sobreposicao negada e tela cheia negada nao retiram mais o motoboy da fila:
+o socket e a notificacao comum continuam como degradacao segura. A tela Ajustes
+mostra separadamente o estado de sobreposicao e o de tela cheia/bloqueada. O uso
+de `SYSTEM_ALERT_WINDOW` e sensivel para revisao da Play Store e precisa ser
+homologado por fabricante; ele foi adotado aqui para o APK piloto solicitado.
+
+A segunda captura revelou um defeito independente de presenca: a API expira o
+motoboy depois de 150 segundos sem heartbeat, enquanto o servico Android so
+enviava heartbeat dentro de `onLocationChanged` e exigia deslocamento minimo de
+100 m sem corrida ou 50 m em corrida. Um motoboy parado podia, portanto, ser
+marcado offline com GPS, internet e servico ativos. O servico nativo agora
+mantem a ultima coordenada valida e envia somente o heartbeat de presenca a
+cada 60 segundos. Pontos de rota continuam ligados a uma nova localizacao, sem
+duplicar historico quando o aparelho esta parado. Falta homologar esse fluxo
+por mais de 3 minutos com o aparelho estacionario.
+
+Arquivos principais alterados:
+
+- `apps/driver-app/android/app/src/main/AndroidManifest.xml`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferMessagingService.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferSessionModule.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/DeliveryLocationTrackingService.kt`;
+- `apps/driver-app/src/lib/offerSession.ts`;
+- `apps/driver-app/src/screens/HomeScreen.tsx` e `SettingsScreen.tsx`;
+- mocks/testes de push do driver-app e `apps/driver-app/package.json`.
+
+O release foi promovido para `0.1.0-pilot.2`, `versionCode` 2, targetSdk 36.
+Como o caminho original excede 260 caracteres no CMake do Windows, o build de
+producao foi concluido numa copia fisica temporaria curta `C:\m2`, com
+`@motoboycity/validation` compilado antes do Metro. `assembleRelease`, lint
+vital, assinatura e empacotamento passaram. `apksigner` confirmou APK Signature
+Scheme v2 e o mesmo certificado SHA-256 do piloto anterior. O APK tem
+74.967.361 bytes e SHA-256
+`2F1ADE3EE1097465141FD2CE9CC0526AA91B2301ED94BB1F1BDAFC57DA4542E4`.
+Ele foi instalado com `adb install -r` sem apagar dados e copiado para
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.2-vc2.apk`.
+
+No reteste, o FCM retornou `FCM Registration failed` e a regra anterior impediu
+o toggle apesar de todas as permissoes Android estarem concedidas. O registro
+de push passou a ser best-effort e deixou de bloquear presenca. Um novo release
+assinado foi compilado e reinstalado; a Home confirmou `Ativo` e o Android
+confirmou `DeliveryLocationTrackingService` em foreground com
+`startRequested=true`. O hotfix foi preservado em
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.2-vc2-online-hotfix.apk`,
+SHA-256
+`74790177140CA48D859F8F4BAABCA8E4ADD75FA14062A49EDCED2726B3AC33A0`.
+
+Proximo passo concreto: conceder manualmente `Exibir sobre outros apps`, ficar
+online parado por mais de 3 minutos e gerar uma oferta controlada com o app
+minimizado; confirmar o cartao completo, aceitar/recusar, repetir com a tela
+bloqueada e guardar logcat se o HyperOS aplicar uma restricao adicional.
+
+## Atualizacao — 2026-08-24: Render no workspace Hobby com servicos Starter
+
+Depois de o proprietario cancelar o plano Pro do workspace, o Blueprint foi
+ajustado para manter o workspace no plano Hobby e cobrar somente os recursos da
+aplicacao. Em `render.yaml`, `motoboycity-api` e `motoboycity-redis` passaram de
+`free` para `starter`. A politica Redis `noeviction`, exigida pelo BullMQ para
+nao descartar jobs de despacho e financeiro, foi preservada.
+
+O custo-base esperado no Render passa a ser USD 17 por mes: USD 7 da API
+Starter e USD 10 do Key Value Starter, sem os USD 25 do workspace Pro. Trafego,
+overages ou outros recursos externos nao estao incluidos nessa soma. A promocao
+do Key Value gratuito pode recriar a instancia e perder os dados temporarios
+existentes, com uma breve indisponibilidade; neste momento esses dados sao filas
+e estados efemeros de teste. PostgreSQL continua no Neon e nao e alterado por
+essa promocao.
+
+Validacao executada: revisao do diff, `git diff --check` e confirmacao de que os
+dois servicos continuam na mesma regiao, com a ligacao automatica de
+`REDIS_URL`, health check `/health` e sem qualquer segredo versionado. Proximo
+passo concreto: acompanhar o sync do Blueprint, confirmar API e Key Value como
+`Live`, habilitar a persistencia oferecida pelo plano pago no painel do Redis e
+fazer smoke test de login, presenca e criacao/despacho de pedido.
+
+## Atualizacao — 2026-08-24: camera estavel no mapa da Home do Admin
+
+O mapa da operacao global executava `fitBounds` toda vez que os dados de
+`admin/operations` mudavam. Como os eventos Socket.IO `driver:location`,
+`driver:presence` e `delivery:updated` invalidam essa consulta, cada nova
+posicao recriava os marcadores e reenquadrava a camera. A combinacao entre
+`fitBounds` e o teto de zoom no evento `idle` causava o ciclo visual de
+aproximar e voltar relatado em producao.
+
+`AdminOperationsMap` agora separa atualizacao dos marcadores de controle da
+camera: pedidos e motoboys continuam se movendo em tempo real, mas o
+enquadramento automatico ocorre somente na primeira carga ou quando o operador
+altera modo, busca, empresa, motoboy ou status. Se a primeira resposta estiver
+vazia, o primeiro marcador que aparecer ainda recebe enquadramento. O listener
+de `idle` anterior tambem e cancelado antes de um novo enquadramento para evitar
+ajustes atrasados concorrentes.
+
+Arquivos alterados: `apps/admin-web/src/components/operations/admin-operations-map.tsx`
+e `apps/admin-web/src/app/(app)/page.tsx`. Nao houve mudanca de endpoint,
+contrato ou regra operacional. Typecheck, lint e build de producao do Admin Web
+passaram. Proximo passo concreto: manter um motoboy online e parado/movendo por
+alguns minutos, ajustar o zoom manualmente e confirmar que os marcadores
+atualizam sem a camera mudar; depois alternar filtros e confirmar um unico
+reenquadramento intencional.
+
+## Atualizacao — 2026-08-24: pedidos do Admin em grid de cards
+
+A listagem paginada de `/pedidos` deixou de usar linhas horizontais largas e
+passou a usar cards compactos. Cada card preserva os dados e acoes existentes:
+numero, empresa, status, modalidade, distancia, retorno, valor, detalhe e
+cancelamento com confirmacao. Uma faixa lateral usa a mesma semantica de cor do
+status aplicada no restante do painel.
+
+O grid responde de uma coluna no celular ate sete colunas em telas com pelo
+menos 1800 px; os pontos intermediarios usam duas, tres, quatro e cinco colunas
+para manter leitura e toque confortaveis. Rastreamento ao vivo, filtro lateral,
+paginacao de 25 itens e consultas reais da API nao foram alterados. Arquivo
+alterado: `apps/admin-web/src/app/(app)/pedidos/page.tsx`. Typecheck, lint e
+build de producao do Admin Web passaram junto da correcao da camera do mapa.
+Proximo passo concreto: conferir `/pedidos` em 1920 px e em largura mobile com
+pedidos cancelaveis e concluidos, garantindo que status e botoes nao estourem o
+card.
+
+## Atualizacao — 2026-08-24: detalhe do pedido mais compacto no Admin
+
+A rota `/pedidos/[id]` foi reorganizada para eliminar os grandes vazios sem
+alterar consultas, contratos ou acoes. Destinatario, operacao e faturamento
+agora ocupam tres paineis na mesma linha em desktop, com campos internos em
+grade e hierarquia visual consistente. O mapa divide a linha com os cards de
+coleta e entrega, incluindo atalhos das coordenadas para o Google Maps.
+
+Rastreamento GPS e auditoria de despacho passaram a usar duas colunas. O
+historico deixou de renderizar um card de largura total por evento e virou uma
+grade cronologica compacta de ate cinco etapas por linha, preservando transicao,
+horario, duracao, autor e observacao. Em telas menores todas as secoes continuam
+empilhando de forma responsiva. Arquivo alterado:
+`apps/admin-web/src/app/(app)/pedidos/[id]/page.tsx`. Typecheck, lint e build de
+producao do Admin Web passaram. Proximo passo concreto: abrir pedidos com e sem
+destino, entregador, fatura, lote e historico longo para uma verificacao visual
+final nas larguras desktop e mobile.
+
+## Atualizacao — 2026-08-25: autonomia operacional do motoboy
+
+O fluxo da entrega no aplicativo foi simplificado para que confirmacoes de
+operacao nao dependam de horario retroativo, justificativa digitada ou GPS de
+proximidade. O seletor "Ha quanto tempo aconteceu?" e os links de marcacao
+retroativa foram removidos. "Devolver a fila" agora pede apenas confirmacao e
+grava uma nota padrao no historico.
+
+O botao amarelo do rodape passou a abrir "Opcoes da entrega". O motoboy pode
+cancelar o proprio pedido em qualquer etapa operacional exibida pelo app
+(`ACCEPTED`, `COLLECTED`, `DELIVERED` ou `FAILED`). Antes da coleta, "Problema
+na entrega" devolve o pedido para a fila; depois da coleta, registra `FAILED` e
+mantem o fluxo de devolucao da mercadoria. As acoes continuam auditadas e as
+transicoes condicionais/idempotentes existentes foram preservadas.
+
+No contrato, coordenadas de `fail` e `complete-return` passaram a ser
+opcionais. A API nao confere mais raio ou precisao para entrega com destino ja
+conhecido nem para concluir retorno. GPS permanece obrigatorio somente na
+entrega com `destinationKnownAtCreation=false`, porque nesse caso a coordenada
+e o proprio destino usado para calcular distancia e preco. Nao houve alteracao
+de schema Prisma nem migration.
+
+Arquivos principais alterados:
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/lib/activeDeliveries.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/deliveries/deliveries.service.spec.ts`,
+`packages/validation/src/deliveries/mark-failed.schema.ts`,
+`packages/validation/src/deliveries/complete-return.schema.ts`,
+`packages/validation/src/deliveries/cancel-delivery.schema.ts`,
+`packages/api-client/src/deliveries.ts`, `packages/types/src/delivery.ts` e
+`docs/business-rules.md`.
+
+Validacoes executadas: build e typecheck de `@motoboycity/validation`;
+typecheck de API, driver-app, types e api-client; lint de API e driver-app;
+`deliveries.service.spec.ts` com 88 testes; suite do driver-app com 67 testes.
+Tudo passou. Proximo passo concreto: instalar um novo APK e validar em aparelho
+os quatro cenarios: devolver a fila antes da coleta, cancelar antes e depois da
+coleta, informar problema depois da coleta e concluir retorno com GPS ruim ou
+desligado.
+
+## Atualizacao — 2026-08-25: voltar protegido durante entrega no Android
+
+O botao fisico de voltar agora respeita a pilha operacional do aplicativo. Na
+tela de uma entrega, cada toque fecha primeiro a confirmacao ou o menu que
+estiver aberto e somente depois retorna a tela anterior. Se a tela da entrega
+tiver sido aberta como raiz, por notificacao ou substituicao de rota, a pilha e
+recriada na Home em vez de permitir que o Android encerre o aplicativo.
+
+Na Home, enquanto `activeDeliveries` contiver ao menos uma entrega em andamento,
+o botao fisico e consumido e o aplicativo permanece aberto. Se o menu lateral
+estiver visivel, o primeiro toque apenas o fecha. Sem entrega ativa e sem menu
+aberto, o comportamento normal do Android foi preservado.
+
+Arquivos alterados: `apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/driver-app/src/screens/HomeScreen.tsx`. Nao houve mudanca de status,
+contrato de API, persistencia ou configuracao nativa. Validacoes executadas:
+typecheck e lint de `@motoboycity/driver-app`, alem da suite Jest do app com 12
+suites e 67 testes; tudo passou. Proximo passo concreto: instalar o APK e testar
+o botao fisico com o menu amarelo, cada confirmacao, a tela da entrega e a Home,
+confirmando que a entrega continua ativa e o aplicativo nao fecha.
+
+## Atualizacao — 2026-08-25: acoes administrativas nas filas operacionais
+
+Cada card das filas da Home do Admin ganhou um botao de tres pontos. O balao
+exibe as cinco intervencoes solicitadas e habilita cada uma conforme o status:
+alterar entregador, marcar como coletado, marcar como entregue, finalizar e
+cancelar. A acao abre um dialogo compacto com consequencia, motivo obrigatorio
+e, na troca, selecao entre entregadores aprovados e ativos. O clique no menu nao
+interfere com o clique existente que seleciona o pedido no mapa.
+
+As rotas `PATCH /admin/deliveries/:id/collect` e
+`PATCH /admin/deliveries/:id/deliver` foram acrescentadas com guarda de Admin e
+payload Zod compartilhado. A coleta manual preserva a atomicidade do lote e usa
+updates condicionais dentro de transacao. A entrega manual aceita somente
+`COLLECTED` com destino e preco ja conhecidos; sem retorno ela cria as duas
+etapas de historico, conclui e credita o repasse, enquanto com retorno permanece
+em `DELIVERED`. Repeticoes concorrentes sao tratadas de forma idempotente. Nao
+houve mudanca Prisma nem migration.
+
+Pedidos com `destinationKnownAtCreation=false` nao podem ser marcados como
+entregues pelo Admin: a opcao fica desabilitada com explicacao, pois a
+coordenada do app e o dado que gera distancia, preco e repasse. Inventar ou usar
+uma posicao aproximada alteraria dinheiro. Cancelamento reutiliza a rota
+existente; troca de entregador e finalizacao reutilizam as intervencoes ja
+auditadas do Admin.
+
+Arquivos principais: `apps/admin-web/src/app/(app)/page.tsx`,
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`,
+`apps/api/src/admin/deliveries/admin-deliveries.controller.ts`,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts`, seu spec,
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`packages/api-client/src/admin-deliveries.ts` e `docs/business-rules.md`.
+
+Validacoes executadas: build de `@motoboycity/validation`; spec focado do
+AdminDeliveriesService com 30 testes; typecheck e lint dos oito workspaces;
+builds de producao da API e do Admin Web. Tudo passou. Proximo passo concreto:
+publicar API e Admin juntos e fazer smoke test com pedidos em `ACCEPTED`,
+`COLLECTED`, `DELIVERED` e `FAILED`, incluindo lote e entrega com destino por
+GPS.
+
+## Atualizacao — 2026-08-25: atividade auditavel com empresa e motoboy
+
+As mensagens da atividade auditavel do Admin passaram a identificar o pedido,
+a empresa e, nos eventos operacionais pertinentes, o motoboy. Coleta e entrega,
+por exemplo, agora aparecem como `Pedido #12 da empresa Drogaria Nova Farma foi
+coletado por Maicon Douglas.` e `... foi entregue por Maicon Douglas.`. Aceites,
+conclusoes, insucessos e respostas de oferta seguem a mesma redacao clara.
+
+A formatacao ficou centralizada na API e e usada tanto pelos eventos Socket.IO
+quanto pela reconstrução do feed a partir de `DeliveryStatusHistory` e
+`DeliveryOffer`; assim a frase nao volta a ficar generica depois de atualizar a
+pagina. No historico, o motoboy que gravou a transicao tem prioridade sobre o
+entregador atualmente atribuido, evitando trocar o autor de uma coleta ou
+entrega antiga depois de uma reatribuicao. Quando a transicao foi registrada por
+outro perfil, o entregador atribuido e usado como contexto operacional.
+
+Cancelamentos exibem empresa e pedido, mas deliberadamente nao dizem que foram
+feitos "por" um motoboy: empresa, administrador e motoboy podem executar essa
+acao. O nome continua no payload/link quando havia entregador atribuido. Nao
+houve mudanca de schema Prisma, rota ou contrato compartilhado.
+
+Arquivos principais alterados:
+`apps/api/src/common/status-labels.ts` e seu novo spec,
+`apps/api/src/admin/operations/admin-operations.service.ts` e seu spec,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/dispatch/dispatch.service.ts` e o spec de dispatch.
+
+Validacoes executadas: 163 testes focados em quatro suites; typecheck e lint dos
+oito workspaces; build de producao da API; `git diff --check`. Tudo passou.
+Proximo passo concreto: publicar a API e observar no Admin um pedido passando
+por aceite, coleta e entrega, confirmando que eventos novos e o feed recarregado
+mostram a mesma frase com empresa e motoboy.
+
+## Atualizacao — 2026-08-25: rua do destino capturado por GPS
+
+O detalhe de pedido do Admin agora tenta converter a coordenada final de uma
+entrega com destino definido por GPS em endereco legivel. Quando o `DROPOFF`
+possui latitude/longitude e ainda nao tem rua, a API usa geocodificacao reversa
+do Google em portugues do Brasil, separa rua, numero, cidade, UF e CEP e grava
+esses campos no `DeliveryAddress`. Assim, registros antigos tambem sao
+enriquecidos na primeira abertura do detalhe e a interface existente passa a
+mostrar o endereco sem precisar alterar seu contrato.
+
+A consulta e deliberadamente de melhor esforco e acontece somente no detalhe
+acessado por Admin. Falta de chave, timeout, negativa do Google, coordenada sem
+resultado ou falha ao salvar nao impedem a abertura do pedido: a tela continua
+mostrando as coordenadas originais. O endereco resolvido e somente descritivo;
+nao participa de distancia, preco, repasse ou transicao de status. Nao houve
+mudanca de schema Prisma, migration, rota ou contrato compartilhado.
+
+Arquivos alterados neste recorte:
+`apps/api/src/maps/google-maps.service.ts`, seu spec,
+`apps/api/src/deliveries/deliveries.service.ts` e seu spec. Validacoes
+executadas: 107 testes focados em Maps e Deliveries, typecheck e lint da API e
+build de producao da API; tudo passou. Proximo passo concreto: publicar a API,
+abrir no Admin um pedido concluido com destino por GPS e confirmar rua e
+coordenadas no card de entrega. A chave de producao precisa permitir a
+Geocoding API do Google Maps Platform.
+
+## Atualizacao — 2026-08-25: grids nos pedidos de cliente e entregador
+
+As secoes `Pedidos do cliente` em `/clientes/[id]` e `Pedidos do entregador`
+em `/entregadores/[id]` deixaram de usar linhas horizontais largas e passaram
+a usar o mesmo padrao compacto de cards da listagem geral de pedidos. Os cards
+possuem faixa lateral com a cor do status, cabecalho com numero e status,
+informacoes operacionais agrupadas, valor ou repasse destacado e botao de
+detalhe em largura total.
+
+O grid e responsivo: uma coluna no celular e crescimento progressivo ate sete
+colunas a partir de 1800 px. Na empresa foram preservados modalidade, data,
+distancia, valor, filtros e paginacao no servidor. No entregador foram
+preservados empresa, modalidade, distancia, retorno, repasse e filtro de
+status. Consultas TanStack Query, endpoints, contratos e regras financeiras
+nao foram alterados.
+
+Arquivos alterados neste recorte:
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx` e
+`apps/admin-web/src/app/(app)/entregadores/[id]/page.tsx`. Validacoes
+executadas: typecheck, lint e build de producao do Admin Web; tudo passou.
+Proximo passo concreto: abrir um cliente e um entregador com pedidos em varios
+status nas larguras mobile, desktop e 1920 px para conferir truncamento de
+nomes longos e a densidade de sete cards.
+
+## Atualizacao — 2026-08-25: fila de despacho editavel na Home do Admin
+
+A Home do Admin passou a expor a fila real usada pelo despacho. O card `Fila de
+despacho` identifica o primeiro como `Na vez`, o segundo como `Proximo` e mostra
+as demais posicoes, foto/iniciais, quantidade de pedidos ativos, tempo online e
+saude do GPS. Setas permitem subir ou descer cada motoboy; `Salvar ordem` grava
+a nova sequencia e `Desfazer` restaura o estado recebido da API. Outros paineis
+Admin abertos invalidam a consulta pelo evento Socket.IO
+`dispatch:queue-updated`.
+
+A prioridade foi implementada como sorted set operacional no Redis. Na ausencia
+de ordem persistida, o fallback continua sendo `wentOnlineAt ASC`; motoboys que
+entram depois sao anexados ao fim e sair do online remove a posicao. O
+`DispatchService` aplica essa prioridade somente depois de filtrar regiao,
+modalidade, conta, heartbeat, oferta pendente e capacidade, preservando os
+locks, a transacao serializable e a idempotencia ja existentes. Reordenar nao
+toca em oferta ja enviada nem em pedido aceito: vale para os proximos despachos.
+Depois que uma oferta nasce com timeout valido, a vez e consumida e o motoboy e
+movido para o fim da fila circular; falha isolada nessa atualizacao de prioridade
+nao cancela a oferta ja protegida pelo timeout.
+
+Foi adicionada a rota Admin protegida
+`PATCH /admin/operations/dispatch-queue`, o schema Zod
+`reorderDispatchQueueSchema`, o campo `queuePosition` em
+`AdminOnlineDriverItem` e o metodo correspondente no api-client. Se um motoboy
+da tela ficar offline antes do salvamento, a API devolve conflito para impedir
+uma decisao sobre fila antiga; quem ficar online durante a edicao e preservado
+no fim. A alteracao tambem gera atividade em tempo real com o nome do Admin.
+Nao houve schema Prisma nem migration.
+
+Arquivos principais deste recorte:
+`apps/api/src/live-presence/live-driver-presence.service.ts`,
+`apps/api/src/dispatch/dispatch.service.ts`,
+`apps/api/src/admin/operations/`,
+`apps/api/src/realtime/realtime.gateway.ts`,
+`packages/validation/src/admin/reorder-dispatch-queue.schema.ts`,
+`packages/types/src/operations.ts`,
+`packages/api-client/src/admin-operations.ts`,
+`apps/admin-web/src/components/operations/dispatch-queue.tsx` e
+`apps/admin-web/src/app/(app)/page.tsx`.
+
+Validacoes executadas: build de `@motoboycity/validation`; 80 testes focados de
+dispatch, operacoes Admin e presenca Redis; typecheck dos oito workspaces;
+lint de API e Admin; builds de producao da API e do Admin Web. Tudo passou.
+Proximo passo concreto: homologar com tres motoboys online, alterar a ordem e
+criar um pedido compativel, confirmando que a oferta vai ao primeiro elegivel e
+que uma oferta que ja estava pendente nao muda de destinatario.
+
+## Atualizacao — 2026-08-25: release Android pilot.3 e publicacao do controle operacional
+
+O conjunto de alteracoes de autonomia do motoboy, acoes administrativas sobre
+pedidos, fila operacional editavel, mensagens de atividade mais completas,
+geocodificacao reversa do destino final e grids de pedidos nos detalhes de
+clientes e entregadores foi consolidado para publicacao. O driver-app foi
+promovido para `0.1.0-pilot.3`; o APK usa `versionCode` `3` para atualizar os
+pilotos anteriores.
+
+Antes do build passaram `pnpm typecheck`, `pnpm lint`, os 62 suites/757 testes
+unitarios da API, os 12 suites/67 testes do driver-app e os builds de producao
+da API e do Admin Web. O release Android foi compilado em uma worktree fisica
+curta fora do repositorio para evitar o limite de caminhos do CMake no Windows,
+com a chave de assinatura copiada temporariamente para um caminho curto; chave,
+senhas, `local.properties` e `google-services.json` continuaram fora do Git.
+
+O `assembleRelease` concluiu com lint vital e Firebase Messaging incluído. O
+artefato verificado tem pacote `com.motoboycity.driverapp`, label `motoboycity`,
+`versionName` `0.1.0-pilot.3`, `versionCode` `3`, 74.968.521 bytes e SHA-256
+`C8F20CF6C97335E1793DAC2071CBA8CBC8DBAA3E0F0D0A1A22AE5343BFB5152F`.
+`apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial do
+piloto anterior. A inspecao do bundle confirmou
+`https://motoboycity-api.onrender.com`, ausencia de `localhost` e metadado do
+Google Maps. O APK foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.3-vc3.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.3-vc3.apk`.
+
+O artefato ainda nao foi instalado nem submetido a smoke test em aparelho nesta
+sessao. Proximo passo concreto: instalar com atualizacao sobre o piloto 2 e
+validar login, mapa/GPS, presenca parada por mais de 3 minutos, push/oferta em
+foreground/background/tela bloqueada e o fluxo completo de aceitar, devolver,
+cancelar, registrar problema, coletar e concluir.
+
+## Atualizacao — 2026-08-25: manutencao administrativa de empresas
+
+O responsavel pelo produto confirmou que o sistema nao tera funcionarios no
+painel: existe somente o administrador com acesso total. Por isso, gestao de
+administradores, cargos e permissoes saiu do roadmap deste recorte.
+
+O detalhe de cliente no Admin ganhou `Editar empresa`, com duas gravacoes
+independentes. O Admin pode alterar nome fantasia, razao social, nome e WhatsApp
+do responsavel ativo; tambem pode cadastrar ou atualizar o endereco principal.
+Alterar o texto do endereco remove coordenadas antigas para impedir que uma
+coleta continue apontando para o local anterior. CNPJ, e-mail de login, regiao
+e equipe nao sao editados neste lote.
+
+Empresas ativas podem ser suspensas e empresas suspensas podem ser reativadas,
+sempre com confirmacao que explica o efeito e informa que nenhum dado sera
+excluido. A troca usa update condicional para recusar concorrencia. Suspender
+desconecta os membros ativos do Socket.IO; alem disso, a estrategia JWT passou
+a consultar o status da empresa em toda requisicao, invalidando tambem uma
+sessao que ja estava aberta. Pedidos, faturas, enderecos e historico ficam
+preservados; nao existe hard delete.
+
+Foram adicionadas as rotas Admin protegidas `PUT /admin/companies/:id/profile`,
+`PUT /admin/companies/:id/address`, `PATCH /admin/companies/:id/suspend` e
+`PATCH /admin/companies/:id/reactivate`. Elas reutilizam os schemas Zod ja
+existentes do perfil e endereco da empresa; nao houve alteracao Prisma nem
+migration.
+
+Arquivos principais: `apps/api/src/admin/companies/`,
+`apps/api/src/auth/jwt.strategy.ts`, `packages/api-client/src/admin-companies.ts`,
+`apps/admin-web/src/components/companies/edit-company-dialog.tsx`,
+`apps/admin-web/src/components/companies/company-status-dialog.tsx` e
+`apps/admin-web/src/app/(app)/clientes/[id]/page.tsx`.
+
+Validacoes executadas: 20 testes focados de empresas e JWT; typecheck e lint
+dos oito workspaces; builds de producao da API e do Admin Web; tudo passou. O
+navegador integrado nao estava disponivel, portanto ainda falta smoke test
+manual do dialogo contra uma API segura. Proximo passo concreto: implementar a
+geracao manual e seletiva de faturas por empresa, mantendo cancelamento e
+estorno em vez de exclusao financeira.
+
+## Atualizacao - 2026-08-25: fatura personalizada e seletiva por empresa
+
+A aba `Financeiro > Faturas` ganhou a acao `Criar fatura personalizada`. O
+Admin seleciona uma empresa, escolhe um ou mais pedidos, informa data de emissao
+e vencimento, solicita uma previa calculada pela API e so depois confirma a
+emissao. A previa mostra total da empresa, repasse aos entregadores e receita da
+plataforma usando os valores monetarios ja congelados em cada pedido.
+
+Somente pedidos `COMPLETED`, com cobranca `BILLED`, valores completos e
+`invoiceId` nulo aparecem na selecao. A API recusa IDs repetidos, selecao vazia,
+vencimento anterior a emissao e emissao futura. Na confirmacao, ela rele todos
+os pedidos dentro de transacao `Serializable`, cria uma unica fatura para a
+empresa, vincula os pedidos com `updateMany` condicional e grava o autor na
+trilha `InvoiceStatusHistory`. Se qualquer pedido for faturado por outra tela
+entre a previa e a confirmacao, toda a operacao falha sem deixar fatura parcial
+ou dupla cobranca.
+
+O fechamento automatico semanal e o botao de recuperacao de segunda-feira nao
+foram alterados. Pedidos nao selecionados continuam abertos para o proximo
+fechamento. Tambem nao existe hard delete: a fatura continua usando o fluxo de
+cancelamento auditavel, que devolve seus pedidos para cobranca. Nao houve
+alteracao de schema Prisma nem migration.
+
+Foram adicionadas as rotas Admin protegidas
+`GET /admin/financial/invoices/manual/candidates`,
+`POST /admin/financial/invoices/manual/preview` e
+`POST /admin/financial/invoices/manual`, com contratos sincronizados em
+`packages/validation`, `packages/types` e `packages/api-client`.
+
+Arquivos principais: `apps/api/src/finance/invoice.controller.ts`,
+`apps/api/src/finance/invoice.service.ts`, seus specs,
+`packages/validation/src/finance/invoice.schema.ts`,
+`packages/types/src/finance.ts`, `packages/api-client/src/invoices.ts`,
+`apps/admin-web/src/components/finance/manual-invoice-dialog.tsx` e
+`apps/admin-web/src/components/finance/faturas-tab.tsx`.
+
+Validacoes executadas: 20 testes focados de fatura e validacao e, depois, os 62
+suites/767 testes unitarios completos da API; typecheck e lint dos oito
+workspaces; builds de producao da API e do Admin Web; tudo passou. O smoke test
+autenticado ainda nao foi executado. Proximo passo concreto: publicar
+primeiro a API no Render e depois o Admin Web na Vercel; em seguida emitir uma
+fatura de homologacao com um pedido e confirmar detalhe, cancelamento e retorno
+do pedido para a lista de disponiveis.
+
+## Atualizacao - 2026-08-25: alteracao auditavel do vencimento de fatura
+
+O detalhe de fatura no Admin ganhou a acao `Alterar vencimento`. Ela fica
+disponivel somente para faturas `PENDING` ou `OVERDUE` e exige nova data e um
+motivo de 10 a 300 caracteres. Faturas pagas ou canceladas sao imutaveis por
+essa rota; o vencimento nao pode anteceder a emissao nem repetir a data atual.
+
+Ao salvar, a API recalcula o status armazenado pela data civil de Sao Paulo:
+vencimento anterior a hoje resulta em `OVERDUE`; hoje ou futuro resulta em
+`PENDING`. Assim, prorrogar uma fatura vencida tambem a reabre corretamente.
+O update usa `updateMany` condicionado ao status e vencimento lidos para
+recusar duas alteracoes concorrentes. A trilha `InvoiceStatusHistory` registra
+data anterior, nova data, motivo e Admin autor, inclusive quando o status nao
+muda. Nesses casos, os detalhes de fatura dos paineis Admin e Empresa e o
+relatorio de auditoria exibem `Vencimento alterado`, em vez de uma transicao
+como `Pendente -> Pendente`.
+
+Foi adicionada a rota Admin protegida
+`PATCH /admin/financial/invoices/:id/due-date` e o contrato
+`updateInvoiceDueDateSchema`, sincronizado com o api-client. Nao houve alteracao
+de schema Prisma nem migration.
+
+Arquivos principais: `apps/api/src/finance/invoice.controller.ts`,
+`apps/api/src/finance/invoice.service.ts` e seus specs,
+`packages/validation/src/finance/invoice.schema.ts`,
+`packages/api-client/src/invoices.ts`,
+`apps/admin-web/src/components/finance/update-invoice-due-date-dialog.tsx`,
+`apps/admin-web/src/app/(app)/faturas/[id]/page.tsx`,
+`apps/admin-web/src/app/(app)/relatorios/auditoria-financeira/page.tsx` e
+`apps/company-web/src/app/(app)/faturas/[id]/page.tsx`.
+
+Validacoes executadas: 62 suites/775 testes unitarios completos da API;
+typecheck e lint dos oito workspaces; builds de producao da API, Admin Web e
+Company Web. Tudo passou. O smoke test autenticado ainda nao foi executado.
+Proximo passo concreto: publicar primeiro a API, depois Admin Web e Company Web;
+em homologacao, prorrogar uma fatura vencida e antecipar outra para uma data
+passada, conferindo status, motivo e autor nos detalhes e na auditoria.
+
+## Atualizacao - 2026-08-25: cancelamento no detalhe da fatura
+
+O detalhe da fatura no Admin passou a oferecer `Cancelar` para faturas
+`PENDING` e `OVERDUE`, ao lado da alteracao de vencimento. A acao reutiliza o
+mesmo dialogo auditavel da listagem: exige motivo, preserva numero e historico
+e explica que os pedidos vinculados voltam para o proximo fechamento. Faturas
+pagas ou ja canceladas continuam sem a opcao.
+
+O dialogo tambem passou a invalidar a consulta especifica
+`['admin', 'invoice', invoiceId]` depois do sucesso. Assim, quando usado no
+detalhe, status, historico e acoes mudam imediatamente sem recarregar a pagina.
+Nao houve rota, contrato, logica financeira, schema Prisma ou migration novos.
+
+Arquivos alterados:
+`apps/admin-web/src/components/finance/cancel-invoice-dialog.tsx` e
+`apps/admin-web/src/app/(app)/faturas/[id]/page.tsx`. Validacoes executadas:
+typecheck, lint e build de producao do Admin Web; tudo passou. O smoke test
+autenticado ainda nao foi executado. Proximo passo concreto: abrir uma fatura
+pendente no Admin, cancelar pelo detalhe e confirmar a troca imediata de status,
+o motivo na auditoria e o retorno dos pedidos ao fechamento seguinte.
+
+## Atualizacao - 2026-08-25: E2E alinhado a autonomia e idempotencia do motoboy
+
+O primeiro pipeline do deploy do cancelamento no detalhe da fatura revelou
+expectativas E2E antigas no ciclo de entrega. A logica de producao ja havia sido
+alterada para dar autonomia ao motoboy: repetir aceite, coleta, entrega ou
+confirmacao de retorno devolve o resultado ja aplicado sem duplicar transicao
+ou repasse; a confirmacao de retorno tambem nao e bloqueada por distancia ou
+precisao do GPS, que permanecem apenas como informacao de auditoria.
+
+Foram atualizados somente os testes ponta a ponta para afirmar essas regras e
+continuar provando que existe uma unica transicao e um unico credito financeiro.
+O teste de motoboy sem posicao nao foi afrouxado: ele falhava por contaminacao
+do proprio conjunto, pois o teste anterior parava antes da limpeza ao esperar
+um `409` obsoleto na segunda coleta. Com o aceite idempotente esperado como
+`200`, a entrega de teste volta a ser encerrada no `cleanup` e o detector segue
+validado com a regra original.
+
+Arquivos alterados: `apps/api/test/delivery-lifecycle.e2e-spec.ts` e
+`apps/api/test/delivery-offers.e2e-spec.ts`. Nao houve alteracao de API,
+contrato, banco, migration ou logica de producao. Proximo passo concreto:
+publicar o ajuste e confirmar o E2E completo no PostgreSQL e Redis isolados da
+CI. Antes da publicacao passaram o typecheck e o lint dos oito workspaces; a
+descoberta das 22 suites E2E pelo Jest tambem passou sem abrir conexao com banco.
+
+## Atualizacao - 2026-08-25: primeiro lote de autonomia administrativa concluido
+
+Foi concluido o primeiro lote de autonomia do unico administrador do sistema.
+O detalhe da empresa agora permite editar nome fantasia, razao social, CNPJ e
+regiao; manter varios enderecos com escolha do principal; e criar, editar,
+desativar, reativar e redefinir a senha de responsaveis. A regra de pelo menos
+um proprietario ativo impede deixar a empresa sem acesso. A geracao manual e
+seletiva de faturas, com previa e datas personalizadas, ja estava concluida no
+lote anterior e foi preservada.
+
+O detalhe do entregador passou a editar dados pessoais, contato, CPF,
+nascimento, regiao, PIX e CNPJ, alem de enviar, revisar, rejeitar ou remover
+documentos. Os arquivos aceitos sao imagem ou PDF, com limite de 8 MB, enviados
+ao ImageKit e removidos do provedor quando o registro e excluido. Acoes antigas
+de aprovacao, conta, senha e modalidades continuam disponiveis.
+
+O Admin ganhou CRUD de regioes em `Configuracoes > Regioes`, incluindo limite
+maximo de distancia. Uma regiao so pode ser desativada depois que empresas e
+motoboys ativos forem movidos ou suspensos; nao existe hard delete.
+
+Pedidos avulsos `SCHEDULED` ou `AWAITING_DRIVER` podem ser editados no detalhe
+antes do aceite. Modalidade, agendamento, destino, destinatario, pagamento,
+instrucoes e exigencias operacionais podem mudar; distancia e valores sao
+recalculados e congelados novamente. A API bloqueia lote, pedido aceito e
+pedido com oferta pendente para que o motoboy nunca decida sobre dados que
+foram alterados enquanto a oferta estava na tela. A gravacao tambem e
+condicional ao status e a ausencia de oferta no instante da transacao, evitando
+que uma oferta concorrente passe entre a leitura e a edicao. O job de
+agendamento antigo e removido somente depois da gravacao bem-sucedida e o
+pedido e reagendado ou despachado conforme o novo horario.
+
+Foi criada a pagina `Relatorios > Historico administrativo`, com filtros,
+links para os registros e exportacao CSV. Ela combina a nova trilha generica
+com os historicos existentes de pedidos e faturas. Criacao, edicao, aprovacao,
+suspensao/bloqueio, reativacao, senha, modalidades, documentos e regioes
+registram autor e resumo; senhas e conteudo de arquivos nunca sao gravados na
+auditoria.
+
+Foi adicionada a tabela append-only `administrative_audits` e a migration
+aditiva `20260825103000_administrative_audits`. A migration foi validada pelo
+Prisma, mas **nao foi aplicada ao Neon nem a qualquer banco compartilhado**.
+Antes do deploy da API, ela precisa passar pelo fluxo normal de backup/staging
+e `prisma migrate deploy`; publicar o Admin antes da API/migration deixaria as
+novas telas sem suporte.
+
+Arquivos principais: `apps/api/src/admin/{audit,companies,drivers,regions}`,
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/prisma/schema.prisma`, os contratos em
+`packages/{validation,types,api-client}` e as telas relacionadas de clientes,
+entregadores, pedidos, configuracoes e relatorios em `apps/admin-web`.
+
+Validacoes executadas: `prisma generate`, `prisma validate`, typecheck e lint
+dos oito workspaces; 62 suites/778 testes unitarios completos da API; builds de
+producao da API, Admin Web e Company Web. O upload administrativo de documentos
+agora tambem confere a assinatura real de JPG, PNG, WEBP e PDF, alem do MIME e
+do limite de tamanho. O smoke test autenticado e a aplicacao da migration
+continuam pendentes. Proximo passo concreto: validar a migration em copia de
+staging, publicar API e depois Admin Web; em homologacao, percorrer cada CRUD,
+editar um pedido agendado e confirmar a trilha administrativa gerada.
+
+## Atualizacao - 2026-08-25: configuracoes administrativas auditaveis e confirmacoes
+
+O segundo lote de autonomia administrativa fechou a lacuna de auditoria das
+configuracoes operacionais. Criacao e alteracao de modalidades, criacao,
+desativacao e reativacao de tabelas de preco, todas as mutacoes de taxas
+adicionais, substituicao dos horarios de funcionamento e alteracao dos
+parametros globais agora gravam autor, entidade e resumo em
+`administrative_audits`. A mutacao e a auditoria ficam na mesma transacao para
+que uma falha nunca deixe configuracao sem historico ou historico de uma
+configuracao que nao foi salva.
+
+O `AdminPlatformSettingsService` tambem foi corrigido no primeiro cadastro dos
+parametros: `maxConcurrentDeliveriesPerDriver`, `maxDeliveriesPerBatch` e
+`deliveryProximityRadiusMeters` eram aceitos pelo contrato, mas eram omitidos
+no ramo `create` do upsert. O update agora monta uma unica carga parcial usada
+nos dois ramos, preservando todos os campos nao enviados e registrando no
+historico somente os nomes dos campos alterados.
+
+No Admin Web, aprovar empresa; aprovar, rejeitar, suspender, bloquear e reativar
+entregador; ativar ou desativar modalidade e tabela de preco; e ativar,
+desativar ou excluir taxa adicional exigem confirmacao explicando o efeito
+operacional. O interruptor manual `Ligar agora/Desligar agora` da taxa permanece
+deliberadamente em um clique, pois e um comando operacional reversivel e de
+resposta imediata. O historico administrativo ganhou filtros e links para
+modalidades, tabelas, taxas, horarios e parametros operacionais.
+
+Nao houve alteracao de schema Prisma nem nova migration neste lote. O enum do
+filtro de auditoria foi ampliado em `packages/validation`; rotas e formatos de
+resposta existentes foram preservados. Arquivos principais:
+`apps/api/src/admin/{service-types,pricing-tables,surcharges,business-hours,platform-settings}`,
+`packages/validation/src/admin/administrative-audit.schema.ts`,
+`apps/admin-web/src/components/admin/confirm-action-dialog.tsx` e as paginas de
+clientes, entregadores, configuracoes e historico administrativo.
+
+Validacoes executadas: 64 suites/783 testes unitarios completos da API;
+typecheck e lint dos oito workspaces; builds de producao da API, Admin Web e
+Company Web. Tudo passou. O smoke test autenticado dos novos dialogos ainda nao
+foi executado. Proximo passo concreto: em homologacao, confirmar cada acao
+critica e verificar o evento correspondente no historico; depois revisar a
+autonomia financeira restante, especialmente conferencia e processamento de
+saques, sem criar exclusao destrutiva de lancamentos.
+
+## Atualizacao - 2026-08-25: decisoes administrativas de saque protegidas
+
+A conferencia e o processamento de saques no Admin foram reforcados sem
+alterar o ledger, o schema Prisma ou criar migration. Aprovar, marcar como pago
+e rejeitar agora exigem motivo auditavel com no minimo 10 caracteres tanto no
+contrato compartilhado quanto na API. Os fallbacks que geravam justificativas
+genericas no servidor foram removidos; toda decisao financeira passa a guardar
+o contexto escrito pelo administrador e o autor autenticado ja registrado no
+historico de status.
+
+A tela de detalhe do saque passou a bloquear as acoes enquanto o motivo nao e
+valido e a pedir confirmacao explicita. A aprovacao explica que ainda nao houve
+transferencia; o pagamento orienta confirmar somente depois do PIX; a rejeicao
+avisa que o lancamento pendente sera cancelado e o valor retornara ao saldo
+disponivel. A referencia ou comprovante continua opcional. Depois de qualquer
+acao, todo o namespace financeiro do cache e invalidado para atualizar fila,
+carteiras, indicadores, aging e relatorios. Datas do detalhe e do historico
+agora sao exibidas explicitamente no fuso `America/Sao_Paulo`.
+
+Foram adicionados testes de contrato para motivo ausente, curto e valido, alem
+de cenarios E2E que comprovam que entradas invalidas retornam `400` sem mudar o
+status nem o saldo. Arquivos principais:
+`packages/validation/src/finance/withdrawal.schema.ts`,
+`packages/api-client/src/admin-financial.ts`,
+`apps/api/src/finance/financial-payout.service.ts`,
+`apps/api/src/finance/withdrawal-validation.spec.ts`,
+`apps/api/test/withdrawal-payout.e2e-spec.ts` e
+`apps/admin-web/src/app/(app)/financeiro/saques/[id]/page.tsx`.
+
+Validacoes executadas: build do pacote de validacao; 2 suites/9 testes
+direcionados da API; typecheck e lint dos oito workspaces; builds de producao
+da API e do Admin Web. Tudo passou. O E2E alterado nao foi executado localmente
+porque depende de PostgreSQL e Redis isolados; deve rodar na CI preparada para
+esse fim. Proximo passo concreto: em homologacao, aprovar, pagar e rejeitar
+saques de teste, conferindo carteira, aging e trilha auditavel; a antecipacao
+de saldo permanece fora do escopo ate existir demanda confirmada no piloto.
+
+## Atualizacao - 2026-08-25: pedidos da empresa em grid de cards
+
+A listagem de `Company Web > Pedidos` foi convertida de linhas horizontais
+para um grid responsivo de cards, com uma coluna no celular e ate cinco em
+telas grandes. Cada card preserva o trilho de cor do status e mostra numero,
+modalidade, referencia externa, criacao ou agendamento, distancia, retorno,
+forma de cobranca e valor. As acoes existentes de abrir detalhes e cancelar
+continuam usando os mesmos endpoints e regras; busca, filtro, rastreamento ao
+vivo e paginacao tambem foram preservados.
+
+Nao houve mudanca de contrato, API, autorizacao, banco ou logica operacional.
+O horario exibido na listagem e no rastreamento passou a declarar
+`America/Sao_Paulo` explicitamente. Arquivo alterado:
+`apps/company-web/src/app/(app)/pedidos/page.tsx`.
+
+Validacoes executadas: formatacao do arquivo alterado, typecheck, lint e build
+de producao do Company Web. Tudo passou. O smoke visual autenticado nao foi
+executado nesta sessao. Proximo passo concreto: abrir `/pedidos` com uma conta
+de empresa em desktop e celular, conferir cards com e sem retorno, pedidos
+agendados e o cancelamento dos estados permitidos.
+
+## Atualizacao - 2026-08-25: atalho flutuante do app do motoboy
+
+O aplicativo Android ganhou um atalho flutuante opcional para o motoboy voltar
+ao MOTOboyCity com um toque enquanto trabalha em outro aplicativo. A opcao fica
+em `Ajustes > Operacao > Botao flutuante` e depende da autorizacao explicita
+`Exibir sobre outros apps`, que ja era usada pela apresentacao nativa de
+ofertas. Ao retornar dos ajustes do Android, a tela atualiza o estado da
+permissao automaticamente.
+
+A bolha usa o icone redondo existente, pode ser arrastada e encaixa na lateral;
+a posicao e a preferencia de ativacao ficam somente no aparelho. Ela aparece
+apenas quando o motoboy esta online e o aplicativo esta minimizado. Ao abrir a
+Activity principal ou o cartao nativo de oferta, ficar offline, sair da conta,
+perder o rastreamento ou encerrar o servico, a bolha e removida. O toque traz a
+`MainActivity` `singleTask` existente para frente e preserva a navegacao atual.
+
+A implementacao reaproveita o `DeliveryLocationTrackingService`, que ja e um
+foreground service de localizacao enquanto o motoboy esta online. Assim nao
+foi criado um segundo servico persistente, uma segunda notificacao nem o tipo
+`specialUse`. A permissao continua opcional: nega-la nao altera localizacao,
+push, ofertas ou o ciclo de entregas. Nao houve mudanca de API, contrato,
+banco, schema Prisma, migration ou dependencia.
+
+Arquivos principais:
+`apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/{FloatingLauncherOverlay,FloatingShortcutStore,FloatingShortcutModule,FloatingShortcutPackage,DriverAppVisibility}.kt`,
+`DeliveryLocationTrackingService.kt`, `MainApplication.kt`,
+`apps/driver-app/src/lib/floatingShortcut.ts` e
+`apps/driver-app/src/screens/SettingsScreen.tsx`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; `:app:compileDebugKotlin` com target SDK 36. Tudo passou. Ainda falta o
+smoke test em aparelho real, principalmente no Xiaomi/HyperOS: autorizar a
+sobreposicao, ativar o atalho, ficar online, minimizar, arrastar para ambos os
+lados, tocar para reabrir, exibir uma oferta e ficar offline. Proximo passo
+concreto: executar esse roteiro antes de gerar o proximo APK de piloto e
+documentar o uso ampliado de `SYSTEM_ALERT_WINDOW` na publicacao da Play Store.
+
+## Atualizacao - 2026-08-25: release Android pilot.4 com atalho flutuante
+
+O Driver App foi promovido para `0.1.0-pilot.4`, com `versionCode` `4`, e o
+APK release foi gerado para atualizar os pilotos anteriores. O artefato inclui
+o atalho flutuante opcional documentado acima, usa `applicationId`
+`com.motoboycity.driverapp`, `minSdk` 24, `targetSdk` 36 e label
+`motoboycity`.
+
+O build foi executado em uma copia fisica temporaria curta em
+`C:\Users\Pichau\m4`, porque o caminho normal ultrapassa o limite de 260
+caracteres do CMake/Ninja no Windows. A chave oficial foi copiada somente para
+`C:\Users\Pichau\m4\k.jks` durante a compilacao; a copia temporaria e suas
+credenciais foram removidas ao final. O pacote `@motoboycity/validation` foi
+compilado antes da segunda passagem do Metro, conforme a regra do monorepo.
+
+O APK final tem 75.017.145 bytes e SHA-256
+`8D542F4EAC7AB487BA3A3D06515A7F5E4F5B37E848CB518E9502D88454B0C00E`.
+O `apksigner` confirmou o mesmo certificado oficial dos releases anteriores,
+com SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O bundle contem `https://motoboycity-api.onrender.com`, nao contem
+`localhost:3333` e inclui o metadado do Google Maps. O artefato foi preservado
+em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.4-vc4.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.4-vc4.apk`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; build de `@motoboycity/validation`; `:app:compileDebugKotlin` e
+`assembleRelease`; verificacao de assinatura, certificado, versao, SDKs, URL
+de producao e ausencia de localhost. Tudo passou. Nenhum aparelho estava
+conectado ao ADB, portanto a instalacao e o smoke test Xiaomi/HyperOS continuam
+pendentes. Proximo passo concreto: instalar o pilot.4 sobre o pilot.3 e testar
+permissao, ativacao, arraste, reabertura, oferta nativa e remocao da bolha ao
+ficar offline.
+
+## Atualizacao - 2026-08-25: detalhe do pedido da empresa em grid compacto
+
+A pagina `Company Web > Pedidos > Detalhes` foi reorganizada para aproveitar
+melhor telas largas sem alterar os dados ou as acoes do pedido. Destinatario,
+operacao e faturamento agora formam um grid de tres cards compactos, com os
+campos internos em duas colunas quando houver espaco. Coleta e entrega foram
+posicionadas ao lado do mapa, mantendo endereco, referencia e link das
+coordenadas. No celular, todos esses blocos continuam empilhados.
+
+O historico do pedido tambem passou de uma lista de cards em largura total para
+um grid responsivo de ate cinco colunas. Cada etapa mostra sequencia, transicao
+de status, horario, duracao, observacao e autor, preservando a mesma ordem e os
+mesmos valores recebidos da API. Rastreamento GPS, cancelamento, atualizacao em
+tempo real e consultas existentes nao foram modificados.
+
+Nao houve mudanca de contrato, API, autorizacao, banco ou logica operacional.
+Arquivo funcional alterado:
+`apps/company-web/src/app/(app)/pedidos/[id]/page.tsx`.
+
+Validacoes executadas: formatacao do arquivo alterado, typecheck e lint do
+Company Web e build de producao do Company Web. Tudo passou. A conferencia
+visual autenticada nao foi executada porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: abrir um pedido com historico,
+coordenadas, fatura e instrucao ao entregador em desktop e celular para conferir
+quebras de texto e o empilhamento responsivo.
+
+## Atualizacao - 2026-08-25: divisao personalizada por empresa e modalidade
+
+As tabelas de preco personalizadas agora versionam tambem a divisao do subtotal
+base + distancia entre motoboy e plataforma. Ao criar uma tabela para uma
+empresa, o admin informa o percentual do motoboy entre 0% e 100%; a plataforma
+recebe automaticamente o complemento. Preco e divisao entram na mesma nova
+versao e a anterior do mesmo escopo empresa + modalidade continua sendo
+desativada atomicamente.
+
+A tabela geral continua usando
+`PlatformSettings.driverCommissionPercentage`. Tabelas personalizadas antigas
+ficam com `PricingTable.driverCommissionPercentage = null` e tambem continuam
+herdando o global, sem backfill e sem mudar pedidos existentes. Quando a tabela
+personalizada tem override, a cotacao nao depende da configuracao global. O
+retorno permanece 100% do motoboy e cada taxa adicional preserva seu proprio
+`driverSharePercentage`. Os valores calculados continuam congelados em
+`Delivery`.
+
+O contrato de criacao exige o percentual quando `companyId` existe e o recusa
+em uma tabela geral, mantendo uma unica fonte de verdade para cada escopo. O
+valor aceita no maximo duas casas decimais, coerente com `DECIMAL(5,2)`, e o
+service repete a guarda de escopo/presenca mesmo quando chamado sem o
+controller. A listagem passou a expor o campo nullable. No Admin Web, a selecao
+de empresa abre os campos `Motoboy (%)` e `Plataforma (%)`; o segundo e
+calculado e somente leitura. Trocar de empresa limpa a divisao digitada para
+nao copiar um acordo por engano. A tabela historica mostra a divisao propria ou
+informa que a versao herda o global.
+
+Schema e migration aditiva:
+`apps/api/prisma/migrations/20260825162135_company_pricing_commission_override/migration.sql`.
+A migration adiciona somente `DECIMAL(5,2) NULL`, sem default nem backfill. O
+`prisma migrate dev` nao pode concluir porque o PostgreSQL local em
+`localhost:5434` estava indisponivel; o SQL foi entao gerado pelo Prisma com
+`migrate diff`, comparando o schema do `HEAD` com o schema novo, e revisado. Ela
+nao foi aplicada em Neon nem em outro banco compartilhado.
+
+Arquivos principais: `apps/api/prisma/schema.prisma`, a migration acima,
+`packages/validation/src/admin/create-pricing-table.schema.ts`,
+`packages/types/src/pricing.ts`,
+`packages/api-client/src/admin-pricing-tables.ts`,
+`apps/api/src/{admin/pricing-tables,pricing}` e
+`apps/admin-web/src/app/(app)/configuracoes/tabela-de-precos/page.tsx`.
+`docs/business-rules.md` foi atualizado para registrar a nova decisao de
+produto.
+
+Validacoes executadas: `prisma generate` e `prisma validate`; 65 suites/795
+testes unitarios completos da API; typecheck e lint dos oito workspaces; builds
+de producao da API e do Admin Web. Tudo passou. O E2E alterado nao foi
+executado, pois PostgreSQL e Redis isolados nao estavam disponiveis. Deploy seguro:
+validar backup/restauracao em staging, aplicar a migration, publicar a API e
+logo depois o Admin Web; testar uma cotacao geral, uma personalizada nova e
+uma personalizada antiga. Em rollback, manter a coluna. Depois que overrides
+forem usados, voltar para uma API antiga faria novas cotacoes ignorarem a
+divisao; prefira correcao para frente ou pause temporariamente as empresas
+afetadas.
+
+## Atualizacao - 2026-08-25: problema na entrega preserva o valor normal
+
+O fluxo de insucesso depois da coleta foi corrigido para manter o pedido com o
+mesmo motoboy, exigir a devolucao da mercadoria a empresa e contabilizar o
+valor normal da corrida. Antes da coleta, a acao continua sendo apenas
+`Devolver a fila`; o menu `Problema na entrega` deixou de aparecer nessa etapa
+para nao sugerir que uma mercadoria ainda nao coletada precisa ser devolvida.
+
+Em pedidos cujo destino ja era conhecido, o valor congelado na criacao
+continua intacto. Em pedidos cujo destino seria definido pelo GPS, o app agora
+captura a posicao no momento em que o motoboy informa o problema. A API calcula
+a rota desde a coleta, aplica a tabela e a divisao vigentes, grava o DROPOFF e
+congela `distanceKm`, `totalValue`, `driverValue`, `platformValue`, retorno e
+taxa adicional na mesma transicao condicional `COLLECTED -> FAILED`. Sem GPS
+valido, a transicao e recusada e o pedido permanece coletado; assim nao nasce
+outra devolucao sem valor.
+
+O repasse nao e criado no registro do problema. Ele continua saindo uma unica
+vez pelo fluxo idempotente `complete-return`, quando o mesmo motoboy confirma a
+devolucao na loja. O insucesso nao desconta nem acrescenta valor; a taxa de
+retorno so permanece quando o pedido ja tinha `requiresReturn=true`. O GPS da
+devolucao nao altera o preco nem bloqueia o fechamento.
+
+Arquivos funcionais principais:
+`apps/api/src/deliveries/deliveries.service.ts` e
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`. Cobertura adicionada
+em `apps/api/src/deliveries/deliveries.service.spec.ts` e
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`; a validacao compartilhada de
+`mark-failed` ja aceitava `lat`, `lng` e `accuracy`, portanto nao houve mudanca
+de rota, contrato, banco ou migration para este ajuste.
+
+Validacoes executadas: 96 testes unitarios focados de `DeliveriesService`;
+typecheck, lint e build de producao da API; typecheck, lint e 13 suites/71
+testes do Driver App. Tudo passou. O E2E alterado nao foi executado nesta
+sessao porque PostgreSQL e Redis isolados nao foram disponibilizados. Como o
+ambiente ainda e de testes, pedidos `FAILED` antigos que ja ficaram sem valor
+nao serao recuperados automaticamente: podem ser cancelados e recriados. Essa
+decisao evita precificar uma tentativa antiga usando a posicao posterior na
+loja ou um ponto de rastreamento inferido. Proximo passo concreto: publicar API
+e novo APK em conjunto e testar em aparelho real um pedido com destino
+conhecido e outro por GPS, do problema ate a confirmacao da devolucao e o
+credito na carteira.
+
+## Atualizacao - 2026-08-25: release Android pilot.5 para problema na entrega
+
+O Driver App foi promovido para `0.1.0-pilot.5`, com `versionCode` `5`, para
+distribuir o fluxo corrigido de problema na entrega descrito acima. O APK usa
+`applicationId` `com.motoboycity.driverapp`, `minSdk` 24, `targetSdk` 36 e
+label `motoboycity`.
+
+Para evitar o limite de caminho do CMake/Ninja no Windows, o build foi feito
+em uma copia fisica curta em `C:\m5`; a chave oficial foi copiada apenas para
+`C:\m5\k.jks` durante a compilacao. Depois da preservacao e conferencia do
+artefato, a copia temporaria e a chave foram removidas; `C:\m5` nao existe
+mais. O pacote
+`@motoboycity/validation` foi compilado antes do `assembleRelease`.
+
+O APK final tem 75.018.469 bytes e SHA-256
+`FFF8A42C64D343945787716A02EF60BA06FA32575F5081577219A9BC22129010`.
+O `apksigner` confirmou APK Signature Scheme v2 e o certificado oficial com
+SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O bundle contem `https://motoboycity-api.onrender.com` e nao contem endpoint
+de desenvolvimento (`localhost:3333`, `127.0.0.1` ou `10.0.2.2`); existe uma
+unica palavra generica `localhost` trazida pelo codigo empacotado, sem URL ou
+porta. O manifesto inclui o metadado do Google Maps. O artefato foi preservado
+em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.5-vc5.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.5-vc5.apk`.
+
+Validacoes executadas: typecheck e lint do Driver App; 13 suites/71 testes
+Jest; build de `@motoboycity/validation`; `clean assembleRelease`; verificacao
+de assinatura, certificado, package, versao, SDKs, label, URL de producao,
+endpoints locais e metadado do Google Maps. Tudo passou. O primeiro disparo
+paralelo do Jest encontrou uma contencao `EPERM` na DLL do Prisma durante
+instalacoes PNPM simultaneas; a repeticao isolada passou integralmente e nao
+indicou regressao do aplicativo. O APK ainda nao foi instalado nesta sessao.
+Proximo passo concreto: instalar o pilot.5 sobre o pilot.4 e testar em aparelho
+real um pedido com destino conhecido e outro definido por GPS, desde
+`Problema na entrega` ate a devolucao na loja e o credito correto na carteira.
+
+## Atualizacao - 2026-08-25: ferramenta protegida para limpar dados de teste
+
+Foi preparada uma rotina administrativa de pre-producao para remover o
+movimento operacional e financeiro de teste antes da entrada das empresas
+reais. A rotina preserva usuarios, administradores, empresas, membros,
+motoboys, documentos, veiculos, tokens do app, regioes, modalidades, tabelas
+de preco, taxas e configuracoes. Ela remove pedidos e filhos, faturas e
+filhos, saques, antecipacoes, lancamentos de carteira, notificacoes/auditorias
+diretamente relacionadas e logs de presenca; as carteiras ficam zeradas e os
+motoboys offline. No Redis, somente a fila `dispatch` e as chaves efemeras de
+presenca sao limpas.
+
+O comando `data:reset:preproduction` e dry-run por padrao. A escrita exige
+confirmacao textual, declaracao de backup, API/workers parados, confirmacao do
+reset financeiro, alvo exato do PostgreSQL e do Redis (protocolo TLS, host,
+porta, banco/schema ou indice) e fingerprints separados dos dois snapshots. A fila e pausada,
+revalidada, obliterada sem `force` e sempre reativada em `finally`; qualquer
+corrida interrompe a operacao. Existe `--redis-only` para recuperacao seletiva
+se o PostgreSQL tiver sido efetivado e a etapa Redis falhar. O reinicio da
+numeracao visual para `#1` continua opcional e ocorre dentro da transacao do
+banco.
+
+Arquivos: `apps/api/scripts/reset-preproduction-data.cjs`, seu teste Node,
+scripts em `apps/api/package.json`, o runbook
+`docs/runbooks/preproduction-data-reset.md` e uma etapa dedicada em
+`.github/workflows/ci.yml`. Validacoes executadas: `node --check` nos dois
+scripts; 11/11 testes de seguranca (incluindo corrida, limpeza seletiva,
+ausencia de `force` e retomada da fila); comando pelo PNPM; Prettier; `git diff
+--check`; typecheck da API; e verificacao local dos metodos usados pela versao
+instalada do BullMQ. Tudo passou. Nao houve conexao, dry-run nem exclusao no
+Neon/Redis de producao nesta sessao. O dry-run foi tentado com a configuracao
+local, mas parou antes de qualquer leitura/escrita porque ela aponta para
+`localhost:6379`, que estava indisponivel. O tratamento de erro do ioredis e
+BullMQ foi endurecido para essa falha terminar de forma controlada, sem uma
+segunda excecao nao tratada. Tambem nao houve teste integrado destrutivo, pois ele
+exige PostgreSQL e Redis descartaveis. Proximo passo concreto: criar e validar
+um restore point/branch no Neon, parar API, workers e apps de teste, executar o
+dry-run contra producao e revisar alvos, contagens e hashes antes de solicitar
+separadamente a execucao destrutiva.
+
+## Atualizacao - 2026-08-25: filtro por empresa nos pedidos do Admin
+
+A pagina `Admin Web > Pedidos` agora permite selecionar uma empresa ou voltar
+para `Todas as empresas`. O filtro usa a listagem administrativa real de
+empresas e envia `companyId` para a busca paginada existente no servidor. Ao
+trocar a empresa, a navegacao retorna para a primeira pagina para evitar uma
+pagina vazia fora do novo universo filtrado.
+
+O mesmo recorte tambem e aplicado ao bloco de rastreamento ao vivo exibido no
+topo da pagina, para que os cards e o contador nao misturem entregas de outra
+empresa enquanto o filtro estiver ativo. Empresas suspensas ou pendentes
+continuam disponiveis no seletor, pois seus pedidos historicos ainda precisam
+ser consultados. Falhas ao carregar o seletor sao mostradas ao administrador.
+
+Nao houve mudanca de API, contrato, autorizacao, banco ou schema: o endpoint
+`GET /deliveries/search` e o cliente compartilhado ja aceitavam `companyId`
+para usuarios `ADMIN`. Arquivo funcional alterado:
+`apps/admin-web/src/app/(app)/pedidos/page.tsx`.
+
+Validacoes executadas: Prettier no arquivo alterado; typecheck, lint e build de
+producao do Admin Web. Tudo passou. O smoke visual autenticado nao foi
+executado nesta sessao. Proximo passo concreto: abrir `/pedidos`, alternar
+entre duas empresas com pedidos e combinar o seletor com os filtros de status,
+conferindo cards, contador de rastreamento e paginacao.
+
+## Atualizacao - 2026-08-25: primeiro lote da auditoria de UX do Admin
+
+O primeiro lote da auditoria de UX foi aplicado nas telas mais operacionais do
+Admin Web. Em `Pedidos`, os filtros de empresa, status e pagina agora vivem na
+URL (`empresa`, `status` e `pagina`). Isso corrige o atalho da home que ja abria
+`/pedidos?status=...`, mas antes era ignorado pela listagem, e preserva o
+contexto ao atualizar, voltar pelo navegador ou compartilhar o link. O status
+`FAILED` tambem passou a existir no filtro. Os controles foram movidos para o
+topo da pagina, antes da grade, para permanecerem acessiveis no celular.
+
+A pagina de Pedidos ganhou hierarquia visual e cores semanticas: cabecalho
+operacional em azul-petroleo, status em cinza/ambar/verde/vermelho/azul conforme
+o ciclo real, rastreamento em verde e valores em azul informativo. O grid de ate
+sete cards foi preservado. Textos funcionais de 10 px foram elevados para 12 px
+nos cards alterados. Carregamento, erro e vazio agora usam um componente comum
+com rotulo explicito, icone, cor e acao de nova tentativa; falha no rastreamento
+deixou de parecer simplesmente uma operacao sem entregas ativas.
+
+O mesmo componente foi aplicado a `Clientes` e `Entregadores`. Seus indicadores
+deixaram de mostrar zero quando a consulta falha e os cards receberam fundos
+suaves conforme situacao ativa, pendente/suspensa ou bloqueada. A central de
+Configuracoes agora avisa quando uma ou mais consultas falham, permite tentar
+novamente e usa um trilho colorido por area sem bloquear os atalhos restantes.
+
+Arquivos funcionais:
+`apps/admin-web/src/app/(app)/{pedidos,clientes,entregadores,configuracoes}/page.tsx`
+e `apps/admin-web/src/components/ui/query-state.tsx`. Nao houve mudanca de API,
+contrato, autorizacao, banco, schema Prisma ou regra de negocio.
+
+Validacoes executadas: Prettier nos cinco arquivos; typecheck e lint do Admin
+Web; build de producao do Admin Web com 37 paginas geradas. Tudo passou. As
+primeiras tentativas de typecheck/lint no sandbox foram bloqueadas pelo Windows
+ao ler `node_modules`; a repeticao autorizada fora do sandbox passou. O smoke
+visual autenticado continua pendente porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: conferir `/pedidos` em desktop
+e celular, inclusive um link vindo da fila da home, e depois seguir para o lote
+de navegacao mobile e padronizacao dos cabecalhos.
+
+## Atualizacao - 2026-08-25: segundo lote da auditoria de UX do Admin
+
+A navegacao principal do Admin Web deixou de ser uma faixa horizontal rolavel
+em telas pequenas. No desktop, os oito destinos continuam visiveis na barra
+superior. Abaixo de `xl`, um menu compacto mostra a area atual e organiza os
+destinos em quatro grupos: Operacao, Comercial, Analise e Sistema. Cada grupo
+usa uma cor semantica e a pagina ativa permanece identificada visualmente e por
+`aria-current`. Os rotulos do componente Base UI foram mantidos dentro de
+`DropdownMenuGroup`, evitando a regressao conhecida de contexto ausente.
+
+Tambem foi criado um cabecalho administrativo comum com icone, contexto,
+titulo, descricao, acao opcional e cinco tons por dominio. Ele foi aplicado a
+Operacao global, Empresas, Entregadores, Financeiro, Central de relatorios e
+Configuracoes. As cores agora ajudam a reconhecer a area sem mudar logica:
+ambar para operacao, verde para clientes, azul para financeiro, teal para
+analise e azul-petroleo/teal para configuracoes. Botoes e indicadores que ja
+existiam foram preservados como acoes do cabecalho.
+
+Arquivos funcionais: `apps/admin-web/src/components/layout/top-nav.tsx`,
+`apps/admin-web/src/components/layout/admin-page-header.tsx` e as paginas
+principais em `apps/admin-web/src/app/(app)/{page.tsx,clientes,entregadores,
+financeiro,relatorios,configuracoes}`. Nao houve mudanca de API, contrato,
+autorizacao, banco, schema Prisma ou regra de negocio.
+
+Validacoes executadas: Prettier nos arquivos alterados; typecheck, lint e build
+de producao do Admin Web com 37 paginas geradas. A primeira execucao do
+typecheck encontrou somente uma inferencia heterogenea no `flatMap` do menu; os
+tipos `NavItem` e `NavGroup` foram explicitados e a repeticao passou. O smoke
+visual autenticado continua pendente porque nenhum navegador controlavel estava
+disponivel nesta sessao. Proximo passo concreto: validar o menu em larguras de
+celular e tablet e seguir para o terceiro lote, padronizando feedback de acoes,
+confirmacoes e formularios nas telas administrativas mais densas.
+
+## Atualizacao - 2026-08-25: terceiro lote da auditoria de UX do Admin
+
+O Admin Web agora possui dois componentes comuns para a resposta visual de
+acoes. `ActionFeedback` apresenta sucesso, erro, aviso e informacao com icone,
+cor semantica, titulo opcional, regiao `aria-live` adequada e fechamento
+opcional. `PendingButtonLabel` mantem um indicador animado e texto consistente
+enquanto uma mutacao esta em andamento. Erros continuam exibindo a mensagem
+real de `ApiError` quando o fluxo ja a fornecia; nenhuma falha foi ocultada ou
+transformada em sucesso local.
+
+O padrao foi aplicado primeiro aos fluxos administrativos mais sensiveis:
+cadastro e aprovacao de empresas, cadastro e gestao de entregadores, criacao de
+pedido em nome da empresa, edicao de empresa/endereco, troca de senha e dialogo
+generico de confirmacao. No financeiro, passou a cobrir fechamento e
+cancelamento de fatura, baixa de pagamento, alteracao de vencimento e ajuste
+manual de carteira. Consequencias antes exibidas em caixas isoladas agora usam
+aviso/informacao; falhas possuem titulo contextual; sucessos usam regiao de
+status; botoes assincronos mostram spinner alem do texto. A ancora de foco do
+erro no cadastro de entregador foi preservada por `id` e `tabIndex`.
+
+Arquivos comuns:
+`apps/admin-web/src/components/ui/{action-feedback,pending-button-label}.tsx`.
+Consumidores principais em `components/{admin,companies,drivers,deliveries,
+users,finance}` e nas paginas `clientes` e `entregadores`. Nao houve mudanca de
+API, contrato, autorizacao, banco, schema Prisma, invalidacao de query ou regra
+de negocio.
+
+Validacoes executadas: Prettier nos arquivos alterados; typecheck, lint e build
+de producao do Admin Web com 37 paginas geradas. Tudo passou. O navegador
+controlavel foi consultado para smoke visual, mas nenhuma instancia estava
+disponivel nesta sessao; portanto a verificacao autenticada de abertura,
+submissao com erro e sucesso dos dialogos continua manual. Proximo passo
+concreto: testar em `/clientes`, `/entregadores`, detalhe de fatura e carteiras
+um erro real e uma acao bem-sucedida, conferindo foco, spinner e fechamento; o
+quarto lote pode compactar formularios longos e padronizar estados de consulta
+restantes no financeiro.
+
+## Atualizacao - 2026-08-25: quarto lote da auditoria de UX do Admin
+
+As consultas principais do Financeiro agora diferenciam explicitamente
+carregamento, falha e ausencia real de dados. O componente comum `QueryState`
+foi aplicado ao painel financeiro, movimento por periodo, faturas, avisos de
+pagamento, carteiras, historico de saques, demonstrativo, recebimentos e aos
+quadros de idade de contas a receber e repasses. Cada falha oferece `Tentar
+novamente` usando o `refetch` da consulta existente.
+
+Foi corrigida uma ambiguidade operacional importante: falhas em avisos de
+pagamento e no historico de saques podiam cair tambem no estado vazio, fazendo
+uma consulta indisponivel parecer uma fila sem trabalho. Indicadores financeiros
+continuam aparecendo somente quando os dados foram retornados; em caso de erro,
+uma mensagem informa que os numeros foram ocultados para nao parecerem `R$ 0,00`
+por engano. Nenhuma query key, endpoint, permissao, mutacao ou regra financeira
+foi alterada.
+
+Arquivos funcionais: `apps/admin-web/src/components/finance/{painel-tab,
+carteiras-tab,faturas-tab,avisos-tab,demonstrativo-tab,recebimentos-tab,
+payouts-aging,receivables-aging}.tsx`. Validacoes executadas: Prettier nos oito
+componentes; typecheck, lint e build de producao do Admin Web, com 37 paginas
+geradas; `git diff --check` sem erro de whitespace. O smoke visual autenticado
+continua manual porque nao ha navegador controlavel nesta sessao. Proximo passo
+concreto: simular uma falha de rede em cada aba de `/financeiro`, acionar
+`Tentar novamente` e conferir que nenhum total ou fila aparece como zero/vazio
+durante a falha; o proximo lote pode compactar os formularios financeiros mais
+longos e levar o mesmo estado de consulta aos dialogos auxiliares.
+
+## Atualizacao - 2026-08-25: quinto lote da auditoria de UX do Admin
+
+O fluxo `Criar fatura personalizada` foi compactado para aproveitar melhor a
+largura do desktop sem perder a disposicao vertical no celular. O dialogo agora
+usa largura ampliada, agrupa empresa, emissao e vencimento na mesma grade
+responsiva e mantem a lista de pedidos com rolagem propria. Textos operacionais
+foram revisados e os botoes de previa/emissao exibem progresso com spinner.
+
+As duas consultas internas do dialogo agora diferenciam carregamento, falha e
+resultado vazio. Falha ao buscar empresas bloqueia somente o seletor e oferece
+nova tentativa; falha ao buscar pedidos faturaveis nao aparece mais como empresa
+sem entregas. A selecao de pedidos usa feedback informativo e erros de previa ou
+emissao preservam a mensagem real de `ApiError` em um alerta dispensavel.
+
+Os detalhes administrativos de fatura e saque tambem receberam `QueryState`
+para carregamento e falha, com `refetch` e caminho de volta para a lista. No
+saque, falhas de aprovar, pagar ou rejeitar passaram a usar `ActionFeedback`,
+sem alterar confirmacoes, motivos obrigatorios, invalidacao de queries ou
+mutacoes. O fallback de `Suspense` da area Financeiro segue o mesmo padrao
+visual. Nao houve mudanca de API, contrato, autorizacao, banco, schema ou regra
+financeira.
+
+Arquivos funcionais: `apps/admin-web/src/components/finance/
+manual-invoice-dialog.tsx`, `apps/admin-web/src/app/(app)/faturas/[id]/
+page.tsx`, `apps/admin-web/src/app/(app)/financeiro/saques/[id]/page.tsx` e
+`apps/admin-web/src/app/(app)/financeiro/page.tsx`. Validacoes executadas:
+Prettier nos quatro arquivos; typecheck, lint e build de producao do Admin Web,
+com 37 paginas geradas; `git diff --check` sem erro de whitespace. O smoke
+visual autenticado continua manual porque nao ha navegador controlavel nesta
+sessao. Proximo passo concreto: abrir uma fatura personalizada em desktop e
+celular, testar empresa sem pedidos e falha de rede; depois seguir para os
+detalhes de empresa/entregador, onde ainda existem listas financeiras com
+estados de texto simples.
+
+## Atualizacao - 2026-08-25: filas e indicadores mais legiveis na Home do Admin
+
+A visao `Por status` das Filas operacionais recebeu uma apresentacao mais
+compacta para facilitar a leitura em uma coluna estreita. Cada etapa agora tem
+icone e cor de reconhecimento proprios, contador em formato de pilula e a seta
+de expansao alinhada a direita. As oito filas, as abas `Por status` e `Por
+empresa`, a abertura automatica de filas com pedidos, a selecao do pedido e os
+links para itens excedentes foram preservados.
+
+Abaixo do mapa foi adicionada uma faixa responsiva com cinco indicadores reais:
+pedidos ativos, motoboys online, pedidos criados hoje, taxa de conclusao e tempo
+medio de entrega. Os dois primeiros usam o panorama operacional ja carregado;
+os tres seguintes reutilizam `GET /admin/reports/operations` com o dia civil de
+Sao Paulo. A taxa considera somente corridas encerradas com entregador
+(concluidas, insucessos e cancelamentos depois do aceite), e o tempo medio e
+ponderado pela quantidade real de amostras de cada motoboy. Sem amostra o texto
+explica a ausencia; falha ou carregamento mostram traco, nunca zero falso.
+
+O relatorio do dia atualiza a cada minuto e tambem quando chega
+`delivery:updated`. Eventos frequentes de localizacao continuam invalidando
+somente o panorama operacional, evitando consultar o relatorio a cada ponto de
+GPS. A mudanca esta concentrada em
+`apps/admin-web/src/app/(app)/page.tsx`; nao houve novo endpoint, contrato,
+permissao, banco ou regra operacional. Validacoes executadas: Prettier,
+typecheck e lint do Admin Web, todos aprovados. O lint detectou inicialmente o
+uso impuro de `Date.now()` no render; a data passou a ser derivada de
+`generatedAt` devolvido pela API e a repeticao passou. As primeiras validacoes
+da etapa visual no sandbox tambem haviam sido bloqueadas pelo Windows ao ler
+`node_modules`; a repeticao autorizada fora do sandbox passou. O smoke visual
+autenticado permanece manual. Proximo passo concreto: conferir na Home a
+expansao de filas e a faixa abaixo do mapa em desktop e celular, validando
+contraste, quebra responsiva e numeros contra o relatorio do dia.
+
+## Atualizacao - 2026-08-25: realtime e atividade da Home sem consultas duplicadas
+
+O evento frequente `driver:location` da Home deixou de invalidar e buscar todo o
+panorama operacional. A posicao, precisao e horario do motoboy agora sao
+aplicados diretamente ao cache das consultas `admin/operations`; o refetch de
+30 segundos continua como reconciliacao de seguranca. Entrada/saida de
+motoboys, mudanca de pedido e reordenacao da fila continuam invalidando a
+consulta, pois alteram mais dados que uma coordenada.
+
+O feed de atividade passou a ser provido uma unica vez pelo layout autenticado.
+A Home e o botao flutuante antes abriam dois sockets e repetiam a consulta
+inicial; agora compartilham os mesmos 100 eventos e uma unica conexao. Na Home,
+o admin pode alternar entre `Operacao`, `Presenca` e `Tudo`; o padrao evita que
+eventos de online/offline escondam alteracoes de pedidos. O widget flutuante
+tambem abre em `Operacao` e permite incluir tudo quando necessario. Eventos de
+perda de localizacao continuam na operacao por serem alertas relevantes, nao
+simples mudancas de presenca.
+
+Arquivos funcionais: `apps/admin-web/src/app/(app)/page.tsx`,
+`apps/admin-web/src/app/(app)/layout.tsx`,
+`apps/admin-web/src/components/layout/live-activity-widget.tsx` e
+`apps/admin-web/src/lib/use-admin-activity-feed.tsx` (substitui o arquivo
+`.ts`). Nao houve alteracao de endpoint, contrato, permissao, banco ou regra de
+negocio. Validacoes executadas: Prettier, typecheck e lint do Admin Web, todos
+aprovados. O typecheck dentro do sandbox nao conseguiu seguir as junctions de
+`node_modules` no Windows; a repeticao autorizada fora do sandbox passou. O
+smoke autenticado continua manual. Proximo passo concreto: validar na Home um
+motoboy se deslocando sem requisicoes repetidas de `GET /admin/operations` e,
+depois, seguir para paginacao/resumos nos detalhes de empresa e entregador.
+
+## Atualizacao - 2026-08-25: detalhes de empresa e entregador sem historico ilimitado
+
+Os detalhes administrativos de empresa e entregador deixaram de baixar todo o
+historico de pedidos para calcular contagens e valores. Foi criado
+`GET /deliveries/summary`, com filtros opcionais de empresa, entregador e
+periodo, que agrega no PostgreSQL as contagens por status, o valor total e os
+valores concluidos da entrega, do motoboy e da plataforma. O endpoint reutiliza
+o mesmo escopo de `list/search`: filtros explicitos por empresa ou entregador
+continuam restritos ao administrador; empresa e motoboy sem filtro permanecem
+limitados ao proprio cadastro. Nao houve alteracao de schema, migration,
+persistencia ou regra financeira.
+
+O contrato foi adicionado em `packages/validation/src/deliveries/
+delivery-summary-query.schema.ts`, `packages/types/src/delivery.ts` e
+`packages/api-client/src/deliveries.ts`. Controller, service e testes foram
+atualizados em `apps/api/src/deliveries`. O detalhe da empresa usa o resumo para
+os indicadores e mantem a grade paginada existente. O detalhe do entregador
+passou de duas chamadas ilimitadas para um resumo e uma busca paginada, com 10,
+25 ou 50 pedidos por pagina. Indicadores de pedido e carteira mostram traco
+enquanto nao existe resposta e exibem erro recuperavel no resumo, evitando que
+falha de rede pareca zero real. O mesmo cuidado foi aplicado aos indicadores de
+fatura da empresa.
+
+Validacoes executadas: build de `@motoboycity/validation`; teste unitario focado
+de `DeliveriesService` com 99 testes aprovados; `pnpm typecheck` e `pnpm lint`
+na raiz, cobrindo os oito workspaces; `git diff --check` sem erro. As primeiras
+tentativas dentro do sandbox falharam somente porque o Windows bloqueou as
+junctions de `node_modules`; as repeticoes autorizadas fora do sandbox passaram.
+O smoke autenticado continua manual. Proximo passo concreto: paginar tambem a
+lista de faturas da empresa e o extrato de carteira do entregador, que ainda
+podem crescer sem limite, e validar visualmente os detalhes em desktop e celular.
+
+## Atualizacao - 2026-08-26: primeiro lote de reducao de carga sem perder realtime
+
+Foi adotado cache seletivo somente no navegador para cadastros pouco volateis.
+No Admin Web, regioes ficam frescas por 5 minutos e modalidades, tabelas de
+preco e configuracoes da plataforma por 1 minuto. No Company Web, modalidades
+ficam frescas por 1 minuto e o perfil por 5 minutos. Pedidos, filas, GPS,
+operacao, financeiro, relatorios, endereco de coleta, dispatch e ofertas nao
+receberam `staleTime` novo. Os tempos de descarte sao limitados a 15 ou 30
+minutos, e o Admin agora limpa integralmente o cache ao trocar de sessao,
+deslogar ou detectar uma sessao invalida, evitando dados entre administradores.
+
+Na Home da empresa, cada evento `delivery:location` passou a atualizar apenas
+o ponto do pedido correspondente no cache local. Ele nao dispara mais duas
+consultas completas a cada coordenada. `delivery:updated` continua invalidando
+operacao e busca de pedidos, e a reconciliacao por polling de 30 segundos foi
+preservada. Assim, o ponto recebido pelo socket aparece imediatamente e uma
+eventual perda de evento ainda e corrigida automaticamente.
+
+A API recebeu observabilidade global de baixa cardinalidade. O interceptor
+registra somente respostas 5xx e operacoes acima de
+`SLOW_REQUEST_THRESHOLD_MS` (750 ms por padrao), identificadas por metodo e
+`Controller.handler`. URL, parametros, query string, corpo, token e mensagem de
+erro nao entram no log, e uma falha do proprio logger nunca altera a resposta.
+A variavel foi documentada nos exemplos e no Blueprint do Render. Nao foi
+adicionado cache de resposta na API nem uso adicional do Redis: a instancia
+atual de 256 MB com politica `noeviction` continua reservada para BullMQ,
+presenca e dispatch, evitando que cache concorra com operacoes criticas.
+
+Arquivos principais: providers do TanStack Query e fluxo de sessao dos dois
+paineis, Home da empresa, `apps/api/src/common/request-performance.interceptor.*`,
+`apps/api/src/app.module.ts`, exemplos de ambiente e `render.yaml`. Nao houve
+schema, migration, endpoint, payload, calculo financeiro ou transicao de status
+alterados. Validacoes aprovadas: teste unitario focado do interceptor (4/4),
+typecheck, lint e build de producao de API, Admin Web e Company Web. E2E nao foi
+executado porque esta mudanca nao toca banco/Redis e a suite exige servicos
+isolados. Proximo passo concreto: observar por pelo menos 7 dias os logs lentos,
+metricas do Render e uso/latencia do Neon antes de decidir por indices ou cache
+de relatorios historicos; nenhum cache adicional deve usar o Redis operacional.
+
+## Atualizacao - 2026-08-26: cache de catalogos administrativos e perfil mobile
+
+O segundo lote reduziu apenas consultas de baixa volatilidade. No Admin Web,
+as opcoes de regiao usadas nos cadastros de empresa e entregador agora ficam
+frescas por 5 minutos e sao descartadas em 30 minutos. Criar, editar, ativar ou
+desativar uma regiao invalida imediatamente a lista de regioes e os dois
+catalogos combinados. A lista de modalidades ativas da pagina de entregadores
+passou a usar a mesma chave estruturada dos demais consumidores, eliminando um
+cache paralelo. Login administrativo bem-sucedido com uma conta nao-admin
+tambem limpa token e cache anteriores antes de mostrar a recusa.
+
+No app do entregador, `GET /auth/me` recebeu cache somente em memoria, por token
+e com TTL de 5 minutos. Chamadas concorrentes sao deduplicadas; login, cold
+start validado e upload de avatar semeiam ou atualizam o perfil, enquanto troca
+de token, logout e sessao invalida limpam o dado. Nada e persistido no aparelho.
+O cold start continua usando `force: true`, portanto sempre valida a credencial
+na API antes de abrir a Home. O retry manual da tela de perfil tambem ignora o
+cache. Carteira, ofertas, presenca, GPS, pedidos, historico e realtime nao usam
+esse cache e mantiveram o comportamento anterior.
+
+Foi avaliada instrumentacao por evento de consulta do Prisma, mas ela ficou
+deliberadamente fora deste lote: o Prisma precisaria materializar SQL e
+parametros em JavaScript para toda consulta antes do filtro, adicionando
+overhead justamente no caminho que se deseja baratear. Primeiro devem ser
+observados os logs de endpoint lento ja adicionados, junto das metricas do Neon;
+instrumentacao de query ou indices so entram com um gargalo comprovado.
+
+Arquivos principais: provider e paginas cadastrais do Admin Web,
+`apps/driver-app/src/lib/driverProfileCache.ts`, sessao/bootstrap mobile, menu,
+login e perfil do entregador, mais o teste unitario do cache. Nao houve endpoint,
+contrato, schema, migration, Redis, dispatch ou regra financeira alterados.
+Validacoes aprovadas ate este ponto: testes focados de cache/bootstrap (9/9),
+suite completa do Driver App (76/76), typecheck e lint do Driver App e Admin
+Web, build de producao do Admin Web, alem de typecheck e lint na raiz cobrindo
+os oito workspaces. Proximo passo concreto: observar no painel de rede que abrir
+repetidamente os formularios cadastrais e o menu mobile nao repete as consultas
+dentro do TTL; depois coletar sete dias de metricas reais.
+
+## Atualizacao - 2026-08-26: encerramento offline no aplicativo do motoboy
+
+O Driver App passou a persistir uma outbox operacional em `AsyncStorage` para
+as duas acoes que encerram uma corrida: marcar a entrega (`DELIVER`) e concluir
+o retorno (`COMPLETE_RETURN`). A acao e gravada antes da primeira tentativa de
+rede e fica vinculada ao ID do usuario, nunca ao token. Logout ou 401 removem a
+sessao, mas preservam a outbox; ela so reaparece e sincroniza quando o mesmo
+motoboy autentica novamente. O login e o bootstrap validado agora espelham esse
+ID na sessao local.
+
+Para entregas cujo destino nasce no local da entrega, latitude, longitude e
+precisao sao capturadas e congeladas antes de enfileirar. A sincronizacao e
+FIFO, deduplicada por entrega (ou lote no retorno), serial por conta e
+idempotente com os endpoints existentes. Uma segunda acao criada enquanto a
+primeira esta em voo provoca nova leitura da fila ao final; isso permite salvar
+`DELIVER` e depois `COMPLETE_RETURN` durante a mesma queda de conexao. Em lote,
+somente itens `DELIVERED` com retorno ou `FAILED` saem da lista local; irmaos
+`ACCEPTED`/`COLLECTED` continuam ativos e rastreados.
+
+A tela espera no maximo 2,5 segundos pela confirmacao imediata e depois libera
+o motoboy com aviso explicito de sincronizacao pendente. Cada request da outbox
+tem limite de 15 segundos para uma conexao degradada nao prender o mutex; uma
+resposta tardia continua segura pela idempotencia do backend. Rede/5xx mantem a
+acao pendente, 401 conduz ao login sem apagar a outbox e recusas de negocio que
+nao puderem ser reconciliadas ficam em `NEEDS_REVIEW`, identificadas por pedido
+e empresa. Tentativas acontecem no bootstrap, reconexao do socket, retorno ao
+primeiro plano, pull-to-refresh e toque manual.
+
+Nenhum endpoint, schema Prisma, migration, payload compartilhado ou dependencia
+nativa foi alterado. Status, historico, horario oficial, calculo financeiro e
+repasse continuam existindo somente depois da confirmacao da API; o horario
+oficial e o da sincronizacao no servidor. Arquivos principais:
+`apps/driver-app/src/lib/{session,bootstrapSession,clearExpiredDriverSession,
+deliveryCompletionOutbox}.ts`, `apps/driver-app/src/screens/{LoginScreen,
+HomeScreen,DeliveryOperationScreen}.tsx` e os testes de bootstrap/outbox.
+
+Validacoes executadas: Prettier nos arquivos alterados; suite completa do
+Driver App com 15 suites e 90 testes aprovados; typecheck e lint do Driver App
+aprovados; `git diff --check` sem erro de whitespace. Build Android nativo nao
+foi executado porque esta mudanca nao adiciona dependencia nativa e a geracao
+de APK nao foi solicitada neste recorte.
+
+Limitacao conhecida: uma acao ja enfileirada sobrevive ao encerramento do app,
+mas um cold start inteiramente offline ainda nao consegue reconstruir e abrir
+uma corrida ativa que nunca foi salva como snapshot. Dentro da tela ja aberta,
+entrega e retorno podem ser registrados em sequencia offline. Proximo passo
+concreto: validar em aparelho real destino conhecido, destino por GPS, retorno
+em lote misto, kill/reabertura, troca de conta e cancelamento administrativo
+concorrente antes de gerar o APK de producao.
+
+## Atualizacao - 2026-08-26: release Android pilot.6 com encerramento offline
+
+O encerramento offline foi publicado na `main` no commit `036f80c` e o Driver
+App foi promovido para `0.1.0-pilot.6`, com `versionCode` `6`. Antes do release
+passaram typecheck, lint e a suite completa do aplicativo, com 15 suites e 90
+testes aprovados.
+
+Para evitar o limite de caminho do CMake/Ninja no Windows, o build foi feito em
+uma copia fisica curta em `C:\m6`, com a chave oficial copiada temporariamente
+para `C:\m6\k.jks`. O pacote `@motoboycity/validation` foi compilado antes de
+`clean assembleRelease`. A compilacao terminou com lint vital e assinatura de
+release; a copia temporaria, incluindo a chave, foi removida depois da
+preservacao e verificacao do artefato.
+
+O APK final tem 75.062.045 bytes e SHA-256
+`30513E45D1D186AA6C0EF80627D02CC6087B5B83DFD98BF3BB1497EC24612349`.
+O `apksigner` confirmou APK Signature Scheme v2 e o certificado oficial com
+SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, label `motoboycity`,
+`minSdk` 24, `targetSdk` 36, `versionName` `0.1.0-pilot.6` e `versionCode` 6.
+O bundle contem `https://motoboycity-api.onrender.com`, nao contem
+`localhost:3333`, `127.0.0.1` ou `10.0.2.2`, e o manifesto inclui o metadado
+do Google Maps.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.6-vc6.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.6-vc6.apk`; os dois
+arquivos foram conferidos pelo mesmo hash. O APK ainda nao foi instalado nesta
+sessao. Proximo passo concreto: instalar sobre o pilot.5 e testar, em aparelho
+real, encerramento offline com destino conhecido, destino por GPS, retorno,
+kill/reabertura e sincronizacao depois de recuperar a internet.
+
+## Atualizacao - 2026-08-26: politicas de faturamento por empresa
+
+O faturamento deixou de usar um unico fechamento global. Cada empresa agora
+possui `invoiceClosingMode` manual ou automatico. No automatico, a frequencia
+pode ser semanal, com dia da semana de 0 a 6, ou mensal, com dia de 1 a 31; nos
+meses curtos, os dias 29, 30 e 31 sao ajustados para o ultimo dia civil. O job
+`daily-company-billing` roda diariamente as 00:05 de `America/Sao_Paulo`,
+calcula o ultimo ciclo devido por empresa e reserva
+`lastAutomaticInvoiceClosingDate` dentro de transacao serializavel. A reserva e
+feita mesmo quando nao existem pedidos, impedindo repeticao do mesmo ciclo em
+boot, retry ou depois do cancelamento de uma fatura.
+
+Empresas existentes recebem os defaults `AUTOMATIC`, `WEEKLY` e segunda-feira,
+preservando o comportamento anterior. O modo manual limpa frequencia e dias; o
+admin pode fechar a empresa em qualquer dia pelo detalhe de Clientes, e a API
+confirma novamente que ela continua em modo manual. O endpoint existente de
+fechamento passou a receber `companyId` e retorna uma unica fatura. A emissao e
+o vencimento continuam na mesma data civil. A criacao de fatura personalizada,
+com selecao de pedidos e datas, foi preservada como fluxo separado.
+
+O admin ganhou `PUT /admin/companies/:id/billing-settings`, validacao Zod,
+contratos compartilhados e um formulario para modo, frequencia, dia e prazo de
+bloqueio. O detalhe da empresa mostra a politica e oferece `Fechar fatura
+agora` somente em modo manual. O Company Web passou a exibir a proxima data da
+politica automatica ou informar que o fechamento e manual. O dialogo global de
+fechamento semanal foi removido para nao atingir empresas com politicas
+diferentes.
+
+`invoiceOverdueBlockAfterDays` aceita de 1 a 365 dias; nulo mantem o bloqueio
+desativado, inclusive para todas as empresas existentes. A rotina diaria marca
+faturas vencidas por data civil de Sao Paulo e suspende uma empresa `ACTIVE`
+quando alguma fatura atinge o limite. A transicao grava
+`CompanyStatusHistory` com autor de sistema nulo, preenche
+`invoiceOverdueBlockedAt` e desconecta os membros ativos. Pagamento nao reativa
+automaticamente: o admin precisa reativar, e transicoes manuais tambem ficam no
+historico. Enquanto a divida permanecer no limite, uma empresa reativada sera
+suspensa novamente no proximo processamento diario.
+
+O schema e a migration aditiva estao em `apps/api/prisma/schema.prisma` e
+`apps/api/prisma/migrations/20260826100000_company_billing_policies/`. A
+migration foi gerada com `prisma migrate diff`, sem conexao nem aplicacao em
+banco. Foram atualizados os modulos financeiros e administrativos da API, os
+contratos em `packages/{validation,types,api-client}`, o detalhe de Clientes e
+Faturas do Admin Web, as telas financeiras do Company Web, as regras de negocio
+e o runbook do piloto.
+
+Validacoes aprovadas: `prisma validate`; build de
+`@motoboycity/validation`; `pnpm typecheck` e `pnpm lint` nos oito workspaces;
+suite unitaria completa da API com 67 suites e 817 testes; builds de producao
+da API, Admin Web e Company Web; `git diff --check`. Os testes novos cobrem
+payloads condicionais, fechamento manual por empresa em qualquer dia,
+idempotencia do ciclo, dias semanais arbitrarios, meses curtos e ano bissexto,
+empresa manual sem proxima data e bloqueio exatamente no limite com historico
+e desconexao.
+
+E2E e aplicacao da migration nao foram executados porque exigem PostgreSQL e
+Redis isolados. Tambem nao houve smoke autenticado no navegador. Proximo passo
+concreto: validar backup/restore e a migration em copia restaurada de staging,
+testar rollback operacional e executar um smoke autenticado configurando duas
+empresas com politicas diferentes, emitindo manualmente apenas uma delas e
+confirmando bloqueio, sessao recusada e reativacao administrativa.
+
+## Atualizacao - 2026-08-26: controles do botao flutuante e da tela no Android
+
+A tela `Ajustes` do Driver App passou a oferecer quatro preferencias Android:
+mostrar o botao flutuante com o app minimizado, mostra-lo com o app aberto,
+ajustar seu tamanho entre 48 e 96 dp em passos de 4 dp e manter a tela ligada
+enquanto a `MainActivity` estiver aberta. O tamanho padrao continua 64 dp. A
+chave local antiga `enabled` agora representa o modo minimizado, preservando a
+escolha dos pilotos que ja tinham ativado o atalho; as opcoes novas nascem
+desligadas.
+
+O atalho continua existindo somente enquanto o motoboy esta online e o
+`DeliveryLocationTrackingService` esta ativo. Os dois modos de visibilidade
+sao independentes. Mesmo com `app aberto` habilitado, a bolha e removida sobre
+a `OfferActivity`, evitando cobrir o cartao nativo e seus botoes. A alteracao de
+tamanho e aplicada ao vivo, mantem o encaixe lateral e limita novamente a
+posicao aos limites uteis da tela. `Manter tela ligada` usa somente
+`FLAG_KEEP_SCREEN_ON`, e reaplica a preferencia local em cada `onResume`; ela
+nao acende a tela em segundo plano nem modifica a tela de bloqueio.
+
+Preferencias e posicao continuam somente em `SharedPreferences`, sem token ou
+dado operacional. Nao foi criada permissao, dependencia, API, schema,
+migration, servico ou notificacao: a implementacao reutiliza
+`SYSTEM_ALERT_WINDOW`, a ponte `FloatingShortcut` e o foreground service ja
+existentes. No iOS as secoes permanecem ocultas, pois o sistema nao oferece uma
+sobreposicao equivalente sobre outros aplicativos.
+
+Arquivos principais:
+`apps/driver-app/src/screens/SettingsScreen.tsx`,
+`apps/driver-app/src/lib/floatingShortcut.ts`,
+`apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/{FloatingShortcutStore,FloatingShortcutModule,FloatingLauncherOverlay,DriverAppVisibility,DeliveryLocationTrackingService,MainActivity}.kt`,
+o mock Jest e `__tests__/floatingShortcut.test.ts`.
+
+Validacoes aprovadas: teste focado da ponte com 6 casos; suite completa do
+Driver App com 15 suites e 92 testes; typecheck e lint na raiz cobrindo os oito
+workspaces; `:app:compileDebugKotlin` com target SDK 36; `git diff --check`.
+Nao houve instalacao nem smoke visual em aparelho real. Proximo passo concreto:
+em um Android fisico, testar as quatro combinacoes de app aberto/minimizado,
+arrastar e redimensionar a bolha nos dois lados, receber uma oferta com a bolha
+ativa, alternar online/offline, reiniciar o app e conferir o consumo de bateria
+com `Manter tela ligada`, incluindo ao menos um Xiaomi/HyperOS.
+
+## Atualizacao - 2026-08-26: release Android oficial pilot.7
+
+O Driver App foi promovido para `0.1.0-pilot.7`, com `versionCode` 7. O release
+foi compilado em uma copia fisica curta temporaria em `C:\m7`, contornando o
+limite de caminho do CMake/Ninja no Windows. A chave oficial foi copiada apenas
+para esse ambiente durante o build; a copia temporaria completa foi removida
+depois da verificacao e preservacao do artefato.
+
+O APK oficial tem 75.075.309 bytes e SHA-256
+`AECDB701BF08B373D72766F1025AAE7721CA5DB27B5F06E5EF4F0BE48BA81513`.
+`apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial do
+`pilot.6`, com SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+`aapt` confirmou pacote `com.motoboycity.driverapp`, `minSdk` 24, `targetSdk`
+36, `versionName` `0.1.0-pilot.7` e `versionCode` 7. O bundle contem
+`https://motoboycity-api.onrender.com` e nao contem `localhost:3333`,
+`127.0.0.1` ou `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.7-vc7.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.7-vc7.apk`; as duas
+copias possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo
+passo concreto: instalar sobre o `pilot.6` em um aparelho real e validar login,
+online/offline, ofertas e as novas opcoes de botao flutuante e tela antes da
+distribuicao ampla.
+
+## Atualizacao - 2026-08-26: protocolo operacional para agentes de IA
+
+Foi adicionado `AI_INSTRUCTIONS.md` como complemento operacional, sem substituir
+`AGENTS.md`, as regras de negocio ou o handoff. O protocolo define precedencia
+das fontes, investigacao baseada em evidencias, profundidade proporcional ao
+risco, roteamento das cinco skills do projeto, limites para subagentes somente
+leitura, validacao proporcional e criterio objetivo de conclusao. Referencias a
+ferramentas exclusivas de um agente especifico foram removidas para o documento
+funcionar com diferentes assistentes.
+
+`AGENTS.md` passou a exigir a leitura desse protocolo antes de alteracoes. Nao
+houve mudanca de aplicacao, contrato, schema, migration, dependencia ou
+configuracao de runtime. Validacao prevista: revisao do diff e
+`git diff --check`. Proximo passo concreto: observar o protocolo na proxima
+tarefa real e ajustar somente regras que produzirem ambiguidade comprovada.
+
+## Atualizacao - 2026-08-26: testes iniciais automatizados do Company Web
+
+O Company Web passou a ter uma base de testes com Vitest, jsdom e React
+Testing Library. Os comandos locais sao `pnpm --filter
+@motoboycity/company-web test` para uma execucao unica e `test:watch` durante
+o desenvolvimento. A configuracao usa o alias `@` existente, limpeza de DOM e
+`localStorage` entre casos e matchers acessiveis do Testing Library.
+
+A primeira suite cobre o `AuthGate`: ausencia de token, validacao bem-sucedida
+com preenchimento do cache do TanStack Query, respostas 401/403 com limpeza da
+sessao e redirecionamento, e falha temporaria com nova tentativa sem desconectar
+o usuario. Tambem cobre persistencia/limpeza do token em `session` e a aplicacao
+de eventos `delivery:location` ao cache operacional, incluindo entregas ativas,
+recentes, coordenada invalida e entrega ausente.
+
+A regra de atualizacao de localizacao foi extraida de
+`apps/company-web/src/app/(app)/page.tsx` para
+`apps/company-web/src/lib/delivery-location-cache.ts`. O socket continua
+atualizando diretamente `['company', 'operations']`, sem requisicao HTTP; a
+funcao agora preserva a referencia do cache quando o evento e invalido ou nao
+encontra uma entrega carregada. Nao houve mudanca de API, contrato persistido,
+schema, migration, autenticacao ou ambiente de runtime.
+
+Validacoes aprovadas: 3 arquivos e 11 testes; typecheck e lint do Company Web;
+build de producao do Company Web com 18 paginas geradas; `git diff --check`. O
+primeiro build isolado falhou somente porque o sandbox nao podia baixar as
+fontes Google ja usadas pela aplicacao; com acesso de rede, o mesmo build
+passou. `pnpm audit` nao apontou alerta alto ou moderado pelos pacotes novos;
+ele continua falhando por 5 avisos transitivos preexistentes no React Native,
+Prisma e dependencias opcionais do Google Cloud (2 moderados e 3 altos). Nao
+houve smoke autenticado no navegador. Proximo passo concreto:
+expandir a cobertura para os formularios de login/cadastro, criacao de pedido
+em lote, faturamento e estados de erro/carregamento das paginas operacionais.
+
+## Atualizacao - 2026-08-26: contencao de largura da Home administrativa no mobile
+
+A Home do Admin Web podia nascer com a largura correta e ultrapassar a lateral
+da tela depois que empresas, motoboys e a operacao eram carregados. A grade
+principal usava uma coluna implicita `auto` abaixo de `2xl`, enquanto selects e
+os tres blocos operacionais ainda conservavam largura minima intrinseca. Uma
+opcao ou conteudo assincrono mais longo podia aumentar a faixa da grade e, por
+consequencia, alargar todos os cards da coluna de filtros.
+
+`apps/admin-web/src/app/(app)/page.tsx` agora usa uma faixa mobile explicita
+`minmax(0,1fr)`, aplica `min-w-0` ao contêiner e aos tres blocos da operacao e
+limita os selects a largura disponivel. As duas colunas de status tambem usam
+faixas que podem encolher e seus rotulos quebram linha dentro da propria
+celula. `AdminOperationsMap` recebeu a mesma contencao de largura para o Google
+Maps nao voltar a impor tamanho intrinseco depois de inicializar.
+
+Nao houve alteracao de API, contrato, autenticacao, consulta, realtime, regra
+operacional, dependencia ou desktop `2xl`. Typecheck e lint do Admin Web
+passaram. O build de producao passou com 37 rotas; a primeira tentativa isolada
+falhou somente porque o sandbox nao podia baixar as fontes Google ja usadas e
+passou ao repetir com rede. O navegador de teste integrado nao estava
+disponivel nesta sessao, portanto o smoke visual autenticado permanece manual.
+Proximo passo concreto: depois do deploy, abrir a Home em 360-430 px, aguardar
+empresas, motoboys, mapa e filas carregarem e confirmar que `scrollWidth`
+permanece igual a largura visivel e que o botao de atividade continua no canto.
+
+## Atualizacao - 2026-08-26: cadastro de clientes da empresa
+
+O Company Web ganhou uma agenda privada de destinatarios em `/clientes`. Cada
+registro pertence a uma empresa e guarda nome, CPF, telefone e endereco
+estruturado com coordenadas opcionais. CPF e telefone sao normalizados sem
+mascara; o telefone tambem aceita entrada brasileira em E.164. O CPF passa pelo
+algoritmo dos digitos verificadores. Indices unicos por `(companyId, cpf)` e
+`(companyId, phone)` evitam duplicidade inclusive em criacoes concorrentes,
+sem impedir que duas empresas diferentes cadastrem a mesma pessoa.
+
+A API nova vive em `company/customers` e oferece listagem/pesquisa paginada,
+detalhe, correspondencia exata, criacao, atualizacao e exclusao. Todas as rotas
+usam `JwtAuthGuard` e `CompanyOnlyGuard`; o service resolve `companyId` somente
+pelo membro ativo da sessao. Detalhe e atualizacao primeiro consultam
+simultaneamente `id` e `companyId`, e exclusao usa `deleteMany` com os dois no
+mesmo filtro atomico. Um ID de outra empresa retorna 404 e nao revela se o
+registro existe. A busca usa nome normalizado sem acentos ou digitos do
+telefone.
+
+Selecionar um cliente no `OperationalOrderForm` preenche destinatario,
+telefone e o snapshot do destino, inclusive em lote. Nao foi adicionada FK na
+entrega: editar ou excluir o cadastro nunca reescreve pedidos historicos. O
+pedido manual continua permitido e com o mesmo payload. Somente depois de uma
+criacao bem-sucedida o painel verifica o telefone dos rascunhos manuais; se nao
+encontrar correspondencia, oferece `Cadastrar cliente` ou `Agora nao`. O
+formulario abre com nome, telefone e endereco preenchidos e exige completar o
+CPF. Em lote, telefones repetidos sao deduplicados e revisados em sequencia.
+Ignorar ou fechar o convite nao faz nova chamada de criacao da entrega.
+
+A pagina permite pesquisar com debounce de 300 ms, cadastrar, visualizar,
+editar e excluir com confirmacao. A exclusao remove apenas a entrada da agenda;
+os snapshots das entregas permanecem. O novo cliente compartilhado esta em
+`packages/{validation,types,api-client}`, o modulo Nest em
+`apps/api/src/company/customers`, a UI em
+`apps/company-web/src/{app/(app)/clientes,components/customers}` e a integracao
+da Home em `app/(app)/page.tsx` e `operational-order-form.tsx`.
+
+O schema Prisma recebeu somente `CompanyCustomer`; a migration aditiva
+`20260826210000_company_customers` foi gerada pelo `prisma migrate diff` entre
+o schema anterior e o novo, sem conexao ou aplicacao em banco. O SQL contem
+somente criacao da tabela, quatro indices e a FK com cascade na remocao da
+empresa. Nao houve backfill nem alteracao de tabela existente.
+
+Validacoes aprovadas: `prisma validate`; build de `@motoboycity/validation`;
+suite unitaria completa da API com 69 suites e 831 testes; Company Web com 7
+arquivos e 20 testes; typecheck e lint na raiz cobrindo os oito workspaces;
+builds de producao da API e do Company Web, que gerou 19 paginas incluindo
+`/clientes`. O E2E novo `company-customers.e2e-spec.ts` cobre dados invalidos,
+duplicidade, busca, match, CRUD e isolamento por ID entre duas empresas, mas nao
+foi executado porque PostgreSQL e Redis isolados nao foram provisionados.
+Tambem nao houve smoke autenticado: a migration nao foi aplicada em ambiente
+seguro nesta sessao.
+
+Proximo passo concreto: validar backup/restore e a migration em copia isolada
+de staging, executar o E2E novo, aplicar pelo deploy controlado e homologar com
+duas empresas: cadastrar o mesmo CPF nas duas, pesquisar, selecionar na Home,
+criar pedido avulso e lote, salvar um destinatario manual depois do sucesso e
+confirmar que `Agora nao` nao altera nem repete a entrega.
+
+## Atualizacao - 2026-08-26: CPF opcional no cadastro de clientes
+
+Por decisao do responsavel do produto, o CPF deixou de ser obrigatorio na agenda
+privada de clientes da empresa. Nome, telefone e endereco continuam obrigatorios.
+Quando informado, o CPF ainda e normalizado, validado pelos digitos verificadores
+e unico dentro da empresa; registros sem CPF armazenam `null`, e o telefone
+permanece sempre normalizado e unico por empresa. Clientes existentes nao sao
+alterados.
+
+Como a migration de criacao da agenda ja havia sido publicada, ela foi preservada
+imutavel. A migration nova
+`20260826223500_company_customer_optional_cpf` foi gerada por `prisma migrate
+diff` entre o schema commitado e o schema novo e contem somente `ALTER COLUMN
+"cpf" DROP NOT NULL`. O rollback exige preencher todos os valores nulos antes de
+restaurar `NOT NULL`; nenhuma migration foi aplicada em banco nesta sessao.
+
+O contrato de entrada aceita CPF ausente ou string vazia e transforma ambos em
+ausencia. A resposta compartilhada usa `string | null`. O service ignora CPF na
+consulta de duplicidade quando ele nao foi informado e grava `null` em criacao e
+edicao. No Company Web, o campo aparece como `CPF (opcional)`, o card informa
+`CPF: Nao informado`, e o convite pos-entrega nao pede mais que a empresa complete
+o documento antes de salvar.
+
+Arquivos principais: `apps/api/prisma/schema.prisma`, a migration nova,
+`packages/{validation,types}`, `apps/api/src/company/customers`,
+`apps/company-web/src/{components/customers,lib/company-customer.ts}`, as telas de
+Clientes e Home, testes e `docs/business-rules.md`.
+
+Validacoes aprovadas: `prisma validate`; build de `@motoboycity/validation`;
+geracao local do Prisma Client; 2 suites focadas da API com 16 testes; suite
+unitaria completa da API com 69 suites e 833 testes; Company Web com 7 arquivos e
+22 testes; typecheck e lint da raiz nos oito workspaces; builds de producao da API
+e do Company Web com 19 rotas; formatacao Prettier dos arquivos alterados. O E2E
+foi atualizado para criar um cliente sem CPF, mas nao foi executado porque requer
+PostgreSQL e Redis isolados. Nao houve smoke autenticado no navegador.
+
+Proximo passo concreto: revisar o diff, commitar e enviar quando autorizado; o
+deploy normal do Render aplicara a migration antes da nova API. Depois, cadastrar
+dois clientes sem CPF e telefones diferentes, editar um deles adicionando CPF e
+confirmar que CPF invalido ou repetido continua recusado.
+
+## Atualizacao - 2026-08-27: multiplos enderecos e estatisticas por cliente
+
+A agenda privada de clientes passou a aceitar varios enderecos nomeados, como
+Casa, Trabalho e Loja. O endereco criado com o cliente continua espelhado nos
+campos antigos de `CompanyCustomer` para compatibilidade e passa a existir tambem
+como endereco principal. Ele pode ser editado, mas nao excluido; enderecos
+adicionais possuem CRUD proprio. O nome normalizado e unico dentro de cada
+cliente.
+
+Ao pesquisar um cliente durante a criacao do pedido, o Company Web abre a escolha
+de endereco quando existe mais de um. A selecao preenche somente o rascunho do
+pedido. A entrega continua guardando o snapshot imutavel de destinatario e
+destino, portanto editar ou excluir dados da agenda nao altera pedidos antigos.
+
+Foi adicionada uma referencia analitica opcional `Delivery.companyCustomerId`.
+Pedidos novos e atualizacoes administrativas resolvem o cliente pelo telefone
+normalizado dentro da mesma empresa; criacao em lote resolve todos os telefones
+em uma unica consulta. A exclusao do cliente usa `ON DELETE SET NULL`. O detalhe
+`/clientes/[id]` mostra total, ultima entrega, contagens em andamento, concluidas
+e canceladas, os cinco destinos mais usados e todos os enderecos salvos. As
+consultas sempre filtram a empresa da sessao. `COMPLETED` conta como concluida,
+`CANCELLED` como cancelada e os demais status contam como andamento.
+
+O schema recebeu `CompanyCustomerSavedAddress` e a FK opcional da entrega. A
+migration aditiva `20260827103000_company_customer_addresses_statistics` foi
+gerada por diff entre o schema commitado e o atual. Alem das estruturas geradas,
+ela cria um endereco `Principal` para cada cliente existente e vincula entregas
+anteriores por empresa e telefone normalizado, sem alterar os snapshots. Ela foi
+aplicada apenas em PostgreSQL 17 isolado: primeiro em banco vazio e depois sobre
+uma copia do schema anterior com cliente, entrega e destino preexistentes. O
+backfill preservou o endereco embutido, criou um principal com UUID valido e
+vinculou corretamente um telefone brasileiro com prefixo `+55`. Nenhum banco
+compartilhado foi alterado durante essa validacao.
+
+Arquivos principais: `apps/api/prisma/{schema.prisma,migrations}`, os modulos de
+clientes e entregas da API, `packages/{validation,types,api-client}`, a pagina
+`apps/company-web/src/app/(app)/clientes/[id]`, os componentes de clientes e o
+formulario operacional. `docs/business-rules.md` registra as regras confirmadas.
+
+Validacoes aprovadas: `prisma format`, `prisma validate` e geracao local do
+Prisma Client; suite completa da API com 69 suites e 839 testes; Company Web com
+8 arquivos e 25 testes; typecheck dos oito workspaces; lint da raiz e lint final
+do Company Web; builds de producao da API e do Company Web, incluindo a rota
+dinamica `/clientes/[id]`. O E2E `company-customers.e2e-spec.ts` passou com 7
+cenarios contra PostgreSQL 17 e Redis 7 isolados, cobrindo enderecos, estatisticas
+vazias, isolamento entre empresas e protecao do principal. Os containers e o
+worktree temporario foram removidos depois da prova. Nao houve smoke autenticado
+no navegador.
+
+Proximo passo concreto: confirmar a janela de restore do Neon, aplicar pelo
+deploy controlado e homologar com um cliente com Casa e Trabalho, confirmando a
+escolha do destino no pedido e as estatisticas depois de entregas concluidas,
+canceladas e em andamento.
+
+## Release - 2026-08-27: clientes com multiplos enderecos em producao
+
+O commit funcional `a6dbd72` foi enviado para `main`. Os deployments oficiais do
+GitHub registraram sucesso para `main - motoboycity-api` no Render e para
+`Production - motoboycity-company-web` e `Production - motoboycity-admin-web` na
+Vercel. O build do Render executa `prisma migrate deploy` antes do build da API;
+como o deployment concluiu, a migration
+`20260827103000_company_customer_addresses_statistics` foi aceita pelo ambiente
+de producao.
+
+Smoke publico aprovado depois da troca: `GET /health` retornou 200 com
+`{"status":"ok"}`; a nova rota protegida de cliente retornou 401 sem token; o
+preflight do novo endpoint de enderecos retornou 204 com a origem oficial do
+Company Web; e `/clientes/[id]` respondeu 200 no dominio oficial da Vercel. O
+SHA local, `origin/main` e o commit implantado eram
+`a6dbd72df0a099d748888957306571c8c455827b`.
+
+A configuracao especifica da janela de restore do projeto Neon nao pode ser
+inspecionada nesta sessao porque nao havia navegador autenticado nem chave de API
+do Neon/Render. A migration e aditiva, foi validada sobre dados preexistentes e
+o codigo anterior permanece compativel com as novas estruturas. Nenhum segredo
+ou `.env` de producao foi lido ou alterado.
+
+Proximo passo concreto: fazer o smoke autenticado no Company Web com um cliente
+real de teste, cadastrar Casa e Trabalho, criar pedidos para os dois enderecos e
+confirmar as contagens no detalhe. No Neon, confirmar visualmente a janela de
+restore em Settings > Restore window.
+
+## Atualizacao - 2026-08-27: rastreamento publico por WhatsApp
+
+O detalhe do pedido da empresa agora oferece `Enviar pelo WhatsApp` enquanto a
+entrega estiver em `SCHEDULED`, `AWAITING_DRIVER`, `ACCEPTED` ou `COLLECTED`. A
+acao cria ou reutiliza um link publico estavel, monta a URL usando a origem atual
+do Company Web e abre o WhatsApp diretamente no telefone do destinatario quando
+ele for valido; sem telefone valido, abre o compartilhamento generico. Nenhum
+envio automatico ou integracao com a API do WhatsApp foi adicionado.
+
+A rota publica `/rastrear/[token]` fica fora do `AuthGate`, e marcada como
+`noindex` e `no-referrer`. Ela exibe apenas o status publico, a ultima posicao
+permitida e o horario da captura. O contrato nao inclui nome, telefone, CPF,
+enderecos, valores, dados do motoboy, ID da entrega ou historico da rota. O mapa
+usa um unico marcador e nao reutiliza o mapa operacional, que contem dados
+privados de coleta e destino.
+
+O aplicativo do motoboy nao foi alterado. A funcionalidade reutiliza os pontos
+enviados pelo `DeliveryLocationTrackingService` Android e armazenados em
+`DeliveryLocationPoint`. Em `ACCEPTED` e `COLLECTED`, a API publica os pontos em
+tempo real numa sala Socket.IO exclusiva da entrega depois de reler status e
+token no banco. A pagina mantem polling de seguranca a cada 30 segundos e usa a
+reconexao padrao do Socket.IO. Atualizacoes tardias de GPS sao ignoradas depois
+do encerramento.
+
+O token possui nonce aleatorio de 256 bits e assinatura HMAC-SHA256 com contexto
+proprio; apenas o identificador aleatorio fica no banco. A API valida a
+assinatura em tempo constante, limita a rota publica a 20 requisicoes por minuto
+e responde com `Cache-Control: no-store`. Os endpoints autenticados de emissao e
+revogacao usam `JwtAuthGuard`, `CompanyOnlyGuard` e filtram a entrega pelas
+empresas ativas da sessao. A criacao usa escrita condicional e reaproveita o
+token vencedor em concorrencia.
+
+Ao entrar em `DELIVERED`, `FAILED`, `COMPLETED` ou `CANCELLED`, o acesso REST
+passa imediatamente a responder 410. Uma pagina ja conectada pode receber apenas
+o estado terminal sanitizado, apaga a posicao e encerra o socket. A emissao de
+status tambem limpa `publicTrackingIssuedAt`; uma revogacao manual limpa tanto o
+identificador quanto a data, de modo que gerar novamente produz outro link.
+
+O schema ganhou somente `Delivery.publicTrackingTokenId` unico e
+`Delivery.publicTrackingIssuedAt`. A migration aditiva
+`20260827150000_public_delivery_tracking`, gerada por `prisma migrate diff`,
+adiciona as duas colunas e o indice unico, sem backfill ou reescrita dos dados.
+Ela passou em banco PostgreSQL 17 vazio com todas as 38 migrations. Os containers
+isolados de PostgreSQL e Redis foram removidos depois dos testes.
+
+Durante a primeira tentativa de validacao isolada, apenas `DATABASE_URL` foi
+sobrescrita e o Prisma priorizou o `DIRECT_URL` ja configurado localmente. Com
+isso, somente esta migration aditiva foi aplicada ao banco de desenvolvimento
+local `motoboycity_dev` em `localhost:5434`. Nenhum banco de producao ou
+compartilhado foi alterado e nenhum dado foi removido. A validacao foi repetida
+com `DATABASE_URL` e `DIRECT_URL` apontando explicitamente para o banco isolado,
+onde passou desde o zero. Nao deve ser feito rollback destrutivo no banco local;
+o schema local apenas ficou antecipadamente compativel com o codigo novo.
+
+Arquivos principais: o schema e a migration Prisma; os servicos de token e
+status em `apps/api/src/common`; controller, service e testes em
+`apps/api/src/tracking`; autenticacao e salas publicas em
+`apps/api/src/realtime`; contratos em `packages/{types,validation,api-client}`;
+botao de WhatsApp, pagina, mapa e estado realtime em `apps/company-web`; e as
+regras confirmadas em `docs/business-rules.md`.
+
+Validacoes aprovadas: `prisma validate`; aplicacao das 38 migrations em banco
+isolado; E2E publico com 4 cenarios cobrindo propriedade da empresa, token
+estavel, contrato minimo sem dados privados, cache, adulteracao e expiracao 410;
+suite completa da API com 70 suites e 858 testes; Company Web com 10 arquivos e
+32 testes; `pnpm typecheck` nos oito workspaces; `pnpm lint`; builds de producao
+da API e do Company Web, incluindo `/rastrear/[token]`; e testes especificos do
+cache realtime que limpam a posicao terminal e rejeitam GPS tardio.
+
+Limitacoes: nao houve smoke em aparelho ou navegador autenticado, abertura real
+do WhatsApp nem deploy nesta sessao. A chave do Google Maps usada pelo Company
+Web precisa aceitar o dominio oficial da pagina publica.
+
+Proximo passo concreto: revisar o diff, commitar e publicar quando autorizado;
+depois homologar com uma entrega de teste nos quatro status permitidos, confirmar
+o movimento do marcador no celular e verificar que concluir ou cancelar faz uma
+nova abertura do mesmo link responder como expirado.
+
+## Release - 2026-08-27: rastreamento publico por WhatsApp
+
+O commit funcional `4a63b8a` foi enviado para `main`. O deployment oficial
+`main - motoboycity-api` concluiu com sucesso no Render, confirmando que o
+`prisma migrate deploy` aceitou a migration
+`20260827150000_public_delivery_tracking` antes de iniciar a nova API.
+
+O smoke da API em producao foi aprovado: `GET /health` respondeu 200; um token
+publico malformado respondeu 400; a emissao protegida respondeu 401 sem sessao;
+e o preflight do endpoint publico respondeu 204 com a origem oficial do Company
+Web. Nenhum token real de entrega foi criado durante o smoke.
+
+A integracao GitHub -> Vercel nao criou deployment no primeiro push. O commit de
+handoff `8890a84` serviu como uma segunda tentativa e disparou corretamente os
+deployments `Production - motoboycity-company-web` e
+`Production - motoboycity-admin-web`; ambos concluiram com sucesso. O Render
+tambem concluiu novamente para o mesmo estado de `main`. No smoke final,
+`/rastrear/token-curto` respondeu 200 no alias oficial do Company Web e o HTML
+incluiu `noindex` e `no-referrer`; a API permaneceu saudavel e respondeu 400 ao
+token deliberadamente malformado. A CLI Vercel disponivel nesta maquina esta
+autenticada em outra conta, sem acesso ao projeto `movecity`; nenhum projeto ou
+configuracao oficial foi alterado por ela. O metadado local criado durante a
+verificacao foi removido imediatamente e o worktree permaneceu limpo.
+
+O CI aprovou migration isolada, seed, typecheck, lint, 858 testes unitarios da
+API, testes de seguranca do reset e testes do Driver App. A etapa E2E ficou presa
+porque seis suites antigas falham durante a limpeza de empresas por FK de
+`company_status_history` e deixam handles abertos; uma reproducao completa em
+PostgreSQL e Redis isolados confirmou 18 suites e 225 testes aprovados, dois
+cenarios antigos falhando e seis suites com falha de cleanup. O E2E novo de
+rastreamento passou com seus quatro cenarios. A execucao remota travada foi
+cancelada depois da reproducao; os containers locais isolados foram removidos.
+Os builds de producao da API e do Company Web ja haviam passado localmente no
+mesmo commit.
+
+Proximo passo concreto: fazer o smoke autenticado de emissao e compartilhamento
+de um link real, acompanhar o marcador no celular e confirmar a expiracao ao
+entregar ou cancelar. Em recorte separado, corrigir o cleanup e os dois testes
+E2E antigos para o CI voltar a encerrar com sucesso.
+
+## Atualizacao - 2026-08-27: compartilhamento do rastreamento na Home
+
+O card do pedido selecionado na Home do Company Web agora mostra uma chamada
+explicita para compartilhar a localizacao quando o status estiver em `ACCEPTED`
+ou `COLLECTED`. O texto exibido e `Enviar localizacao do pedido em tempo real
+para o cliente`, seguido do botao `Enviar localizacao pelo WhatsApp`. O bloco
+fica junto do numero, status, cliente e motoboy que a empresa ja consulta na
+coluna `Na rua`; nao aparece em pedidos agendados, aguardando motoboy ou depois
+do encerramento.
+
+A acao reutiliza integralmente o fluxo publico ja implantado: solicita o mesmo
+token estavel e protegido da entrega, usa o telefone do destinatario presente no
+contrato operacional e abre o WhatsApp. O detalhe do pedido preserva seu texto
+anterior. Nao houve mudanca de API, banco, migration, contrato compartilhado,
+GPS, Socket.IO ou Driver App.
+
+Arquivos: `apps/company-web/src/app/(app)/page.tsx`, o novo componente e teste
+`components/orders/home-delivery-tracking-share{.tsx,.test.tsx}` e o suporte a
+rotulo contextual em `share-delivery-tracking-button.tsx`.
+
+Validacoes aprovadas: teste focado com 9 cenarios; suite completa do Company Web
+com 11 arquivos e 41 testes; typecheck e lint do workspace; build de producao
+com as 19 rotas; e `git diff --check`. Nao houve smoke autenticado no navegador,
+commit, push ou deploy nesta alteracao.
+
+Proximo passo concreto: revisar visualmente a Home com um pedido em `ACCEPTED` e
+outro em `COLLECTED`; depois commitar e publicar quando autorizado.
+
+## Release - 2026-08-27: compartilhamento do rastreamento na Home
+
+O commit funcional `7c1fd8e` foi enviado para `main`. Os deployments oficiais
+`Production - motoboycity-company-web`, `Production - motoboycity-admin-web` e
+`main - motoboycity-api` concluiram com sucesso. A API nao teve alteracao neste
+recorte, mas o Render repetiu seu deploy automatico pelo push do monorepo.
+
+O smoke publico respondeu 200 tanto no alias oficial do Company Web quanto em
+`GET /health` da API. A validacao anterior ao commit aprovou 11 arquivos e 41
+testes do Company Web, typecheck, lint e build de producao com 19 rotas. O SHA
+local e `origin/main` estavam sincronizados depois do push, sem arquivos
+pendentes ou secrets incluidos.
+
+Nao houve smoke autenticado com pedido real nesta sessao. Proximo passo
+concreto: selecionar na Home uma entrega em `ACCEPTED` e outra em `COLLECTED`,
+abrir o WhatsApp pelo novo botao e confirmar que o cliente recebe e abre o link
+da entrega correta.
+
+## Atualizacao - 2026-08-27: cadastrar cliente pelo destino final do pedido
+
+O detalhe do pedido no Company Web agora oferece `Cadastrar este cliente` junto
+ao destino quando o pedido for avulso (`batchId=null`), tiver sido criado sem
+destino conhecido e ja estiver em `DELIVERED` ou `COMPLETED`. A acao reutiliza o
+nome e o telefone do snapshot da entrega e o endereco final capturado pelo
+motoboy. O formulario abre preenchido com o rotulo `Destino da entrega`; quando
+o Google nao identifica o numero, a empresa precisa completa-lo antes de salvar.
+
+Antes de oferecer o cadastro, o painel consulta a agenda privada pelo telefone.
+Se o cliente ja existir, mostra um link para o cadastro existente em vez de
+permitir duplicidade. A acao nao aparece para lotes, destino informado na
+criacao, entrega ainda ativa, insucesso/cancelamento, telefone invalido ou
+endereco final ainda sem rua, cidade, UF e CEP resolvidos.
+
+Para tornar o endereco utilizavel pela empresa, `DeliveriesService.detail()`
+passou a executar a geocodificacao reversa tambem para o membro da empresa dona,
+depois da verificacao de acesso. O admin preserva o mesmo comportamento e o
+motoboy continua fora desse enriquecimento, portanto o Google nao entrou no
+caminho critico da conclusao. O resultado legivel e salvo no snapshot
+`DeliveryAddress`; falha do Maps apenas mantem as coordenadas e nao altera
+status, distancia, preco ou historico. Nao houve mudanca de schema, migration,
+rota ou contrato compartilhado.
+
+Arquivos principais: `apps/api/src/deliveries/deliveries.service{.ts,.spec.ts}`;
+`apps/company-web/src/app/(app)/pedidos/[id]/page.tsx`; o novo componente e teste
+`components/customers/completed-delivery-customer-registration{.tsx,.test.tsx}`;
+e `apps/company-web/src/lib/company-customer{.ts,.test.ts}`.
+
+Validacoes aprovadas: teste focado da API com 101 testes; testes focados do
+Company Web com 15 testes; suite completa do Company Web com 12 arquivos e 50
+testes; typecheck e lint dos workspaces API e Company Web; builds de producao da
+API e do Company Web, este com 19 rotas. Nao houve smoke autenticado, commit,
+push ou deploy nesta alteracao.
+
+Proximo passo concreto: homologar com um pedido avulso sem destino, abrir o
+detalhe depois da entrega, confirmar o endereco resolvido, cadastrar o cliente e
+criar outro pedido selecionando `Destino da entrega`. Repetir com o mesmo
+telefone deve mostrar apenas o link para o cliente existente.
+
+## Atualizacao - 2026-08-27: leitura visual do pedido ativo no Driver App
+
+O card da aba `Em andamento` agora comunica a etapa sem aumentar a quantidade de
+informacao na tela: pedido aceito recebe seta verde e `A caminho da coleta`; apos
+a coleta, check verde, `A caminho da entrega` e a tag `Coletado`. Os estados que
+ainda exigem retorno usam icone e tag em ambar. Para comportar as 3 a 4 entregas
+que um motoboy costuma manter ao mesmo tempo, numero e empresa ficam na mesma
+linha; fontes, icones, tags e espacamento vertical foram compactados sem remover
+distancia, valor ou forma de pagamento. O card clicavel ganhou rotulo de
+acessibilidade.
+
+A apresentacao deriva exclusivamente do `DeliveryStatus` que a Home ja recebe do
+store e da API. Nao houve mudanca de rota, contrato, Socket.IO, GPS, permissao ou
+codigo nativo.
+
+Arquivos: `apps/driver-app/src/components/DeliveryCard.tsx`,
+`apps/driver-app/src/components/Icon.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` e o novo teste
+`apps/driver-app/__tests__/DeliveryCard.test.tsx`.
+
+Validacoes aprovadas: suite completa do Driver App com 16 suites e 94 testes,
+typecheck e lint do workspace. A primeira execucao do teste focado detectou que o
+numero era renderizado em dois nos de texto; o componente foi ajustado e a
+repeticao passou. Nao houve teste em aparelho nem build Android neste recorte.
+
+Proximo passo concreto: conferir visualmente no aparelho um pedido `ACCEPTED` e
+outro `COLLECTED`; gerar APK e publicar somente quando solicitado.
+
+## Atualizacao - 2026-08-27: release Android oficial pilot.8
+
+O card compacto de pedidos em andamento foi publicado no commit funcional
+`f18578a` e o Driver App foi promovido para `0.1.0-pilot.8`, com `versionCode` 8. Antes do build passaram as 16 suites e 94 testes do aplicativo, typecheck,
+lint e `git diff --check`.
+
+O release foi compilado em uma worktree temporaria curta em `C:\m8`, com a
+chave oficial copiada somente durante a montagem. A primeira tentativa parou no
+portao de ambiente antes de gerar APK porque a URL de producao nao havia sido
+declarada explicitamente; a repeticao definiu
+`https://motoboycity-api.onrender.com` e concluiu `assembleRelease`, assinatura
+e lint vital. Nenhum artefato incorreto foi preservado.
+
+O APK oficial tem 75.089.401 bytes e SHA-256
+`EDDFCAC60D02A82AC4E55F035E0F7E8104F52EF8F5F991F52148B78ADC4F17FA`.
+O `apksigner` confirmou APK Signature Scheme v2 e o mesmo certificado oficial
+dos pilotos anteriores, SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.8`, `versionCode` 8 e compile SDK 36. O bundle contem somente a
+URL oficial entre os endpoints verificados e nao contem `localhost:3333`,
+`127.0.0.1` nem `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.8-vc8.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.8-vc8.apk`; as duas copias
+possuem o mesmo hash. O APK nao foi instalado nesta sessao. Proximo passo
+concreto: instalar sobre o `pilot.7` e conferir na Home tres a quatro pedidos
+simultaneos, incluindo um `ACCEPTED` e outro `COLLECTED`.
+
+## Atualizacao - 2026-08-27: backup local automatico do PostgreSQL
+
+Foi ativada uma rotina Windows de backup logico do PostgreSQL do Neon para
+`F:\MOTOboyCity\database-backups`. A tarefa
+`MOTOboyCity PostgreSQL Backup` roda diariamente as 02:30, usa
+`StartWhenAvailable`, impede execucoes simultaneas e mantem 30 dias. Ela roda
+como o usuario Windows `Pichau`, inclusive com a tela bloqueada; se a sessao
+estiver encerrada, aguarda o proximo logon. O disco F foi confirmado como
+unidade local fixa, NTFS,
+saudavel, com 242,79 GB totais e 195,25 GB livres antes da primeira execucao.
+
+O script usa exclusivamente a `DIRECT_URL` do arquivo dedicado e local
+`F:\MOTOboyCity\config\backup.env`, transfere a credencial ao `libpq` por
+variaveis do processo e nao a registra na tarefa, nos logs ou no manifesto. Os
+`.env` do repositorio apontam para `localhost:5434` e, por seguranca, nao sao
+fallback para o backup de producao. O
+dump customizado nasce com sufixo `.partial`; somente depois de `pg_dump`
+concluir, `pg_restore --list` reconhecer o archive e o arquivo ter tamanho
+valido ele recebe o nome final. Cada backup ganha SHA-256 e manifesto sem
+secrets. A limpeza usa caminhos literais e padroes restritos ao diretorio de
+backup.
+
+Arquivos: `apps/api/scripts/backup-postgres.ps1`,
+`apps/api/scripts/configure-postgres-backup-secret.ps1`,
+`apps/api/scripts/register-postgres-backup-task.ps1` e
+`docs/runbooks/postgres-backup-local-windows.md`. O checklist do piloto agora
+registra o backup local, mas preserva como pendencias o ensaio de restore e uma
+segunda copia criptografada fora da maquina.
+
+O secret dedicado foi criado pelo helper de prompt oculto e ficou restrito a
+`SYSTEM`, administradores e ao usuario atual. A validacao sanitizada confirmou
+o host Neon de Sao Paulo, banco `neondb`, TLS `require`, URL direta sem
+`-pooler` e sem `localhost`; usuario e senha nao foram exibidos.
+
+O cliente portatil oficial 17.11 detectou corretamente incompatibilidade com o
+servidor PostgreSQL 18 e abortou sem deixar dump parcial. O cliente oficial
+PostgreSQL 18.6 foi entao instalado em
+`F:\MOTOboyCity\tools\postgresql-18.6`, a tarefa foi atualizada e a repeticao
+concluiu com codigo 0. O primeiro archive,
+`motoboycity-postgres-20260827-153942.dump`, tem 307.301 bytes; o SHA-256
+recalculado confere com o sidecar, e `pg_restore --list` retornou 0 com 300
+entradas. A proxima execucao ficou agendada para 2026-08-28 02:30.
+
+Comandos/validacoes: parser de sintaxe dos tres scripts, dry-run sanitizado,
+`pg_dump --version`, registro/execucao pelo Agendador, `Get-FileHash` e
+`pg_restore --list`. Proximo passo concreto: restaurar esse archive em um
+banco/branch Neon isolado e comparar contagens; depois adicionar uma segunda
+copia criptografada fora da maquina. O backup local nao inclui Redis e nao
+substitui uma estrategia 3-2-1.
+
+## Atualizacao - 2026-08-27: filtro do historico e privacidade financeira mobile
+
+O filtro do Historico do Driver App agora aceita a data brasileira mostrada na
+tela (`DD/MM/AAAA`) e a converte para `AAAA-MM-DD` antes de chamar
+`GET /deliveries`. O erro fotografado acontecia porque `27/08/2026` era enviado
+sem conversao para a API, cujo schema exige ISO. A normalizacao tambem aceita o
+formato ISO anterior, rejeita datas civis inexistentes, impede periodo invertido
+e mantem uma das pontas vazia. O periodo aplicado continua aparecendo no formato
+brasileiro.
+
+No detalhe do pedido do motoboy, a comissao/participacao da plataforma deixou de
+ser renderizada. O `platformValue` persistido, o contrato compartilhado e os
+calculos de preco nao foram alterados; valor do entregador, total, distancia e
+retorno continuam disponiveis. Nao houve mudanca de API, banco, migration ou
+codigo nativo.
+
+Arquivos: `apps/driver-app/src/screens/DriverHistoryScreen.tsx`,
+`apps/driver-app/src/screens/DriverOrderDetailScreen.tsx`, o novo helper
+`apps/driver-app/src/lib/historyPeriod.ts` e seu teste
+`apps/driver-app/__tests__/historyPeriod.test.ts`.
+
+Validacoes aprovadas: teste focado com 4 casos; suite completa do Driver App com
+17 suites e 98 testes; typecheck e lint do workspace; busca confirmou que
+`platformValue`, `Comissao`, `porcentagem` e `percentual` nao sao renderizados em
+`apps/driver-app/src`. Proximo passo concreto: conferir no aparelho o filtro com
+`27/08/2026` nas duas pontas e abrir os detalhes de uma entrega concluida. APK,
+commit e push nao foram executados neste recorte.
+
+## Atualizacao - 2026-08-27: rota compacta na Home do motorista
+
+Os pedidos em andamento da Home agora seguem a leitura visual da referencia:
+numero e tag da etapa no topo; horario, empresa, distancia e ganho em uma linha;
+e abaixo uma rota vertical compacta com coleta, destino e `Todos os detalhes`.
+`ACCEPTED` mostra `Aceito`, `COLLECTED` mostra `Coletado`, `DELIVERED` mostra
+`Retorno` e `FAILED` mostra `Devolucao`. Fontes e espacamentos permanecem
+reduzidos para o uso simultaneo de tres a quatro pedidos.
+
+A ultima etapa usa o icone circular de retorno e so entra quando
+`requiresReturn=true`. Uma entrega `FAILED` tambem mostra essa etapa porque a
+regra operacional exige devolver a mercadoria mesmo sem retorno comercial no
+pedido original. Destino nao conhecido na criacao aparece como `Endereco de
+entrega definido no momento da entrega`.
+
+`GET /deliveries` continua sendo uma listagem resumida sem enderecos. Para nao
+mudar o contrato nem depender de deploy da API, o Driver App enriquece somente
+os poucos pedidos ativos com `GET /deliveries/:id`. Se um detalhe falhar por
+rede, o resumo permanece na store e o card nao desaparece. Banco, precificacao,
+status, Socket.IO e codigo nativo nao mudaram.
+
+Arquivos principais: `components/DeliveryCard.tsx`, `screens/HomeScreen.tsx`,
+`lib/activeDeliveries.ts`, o novo `lib/activeDeliveryPresentation.ts`,
+`store/dispatchStore.ts`, `lib/acceptanceReconciliation.ts` e testes de card,
+enriquecimento e rota condicional.
+
+Validacoes aprovadas: 3 suites focadas com 9 testes; suite completa do Driver
+App com 18 suites e 103 testes; typecheck e lint do workspace. Nao houve teste
+visual em aparelho, APK, commit ou push. Proximo passo concreto: abrir a Home no
+aparelho com um pedido comum e outro com retorno, confirmar a terceira etapa
+circular e revisar a densidade com tres a quatro cards.
+
+## Atualizacao - 2026-08-27: fila real de entregadores no Driver App
+
+A Home do motorista online agora mostra um botao circular compacto abaixo do
+menu com sua posicao (`#1`, `#2`, etc.). O toque abre o painel `Fila de
+Entregadores`, inicialmente recolhido, com total, fila `Geral` e o texto `Voce
+esta em X de Y`; ao expandir, aparecem os nomes na ordem e o proprio motoboy e
+destacado. A lista possui rolagem para nao aumentar a Home nem disputar espaco
+com os tres a quatro cards de pedidos em andamento.
+
+Foi adicionada a rota autenticada de motoboy `GET /driver/presence/queue`. Ela
+usa a mesma sequencia global do Redis consultada pela Home Admin e pelo
+despacho, com fallback por entrada online mais antiga. A rota so entrega a fila
+quando o solicitante continua `AVAILABLE` e com heartbeat vivo. O payload e
+sanitizado: contem somente posicao, nome e indicador do proprio motorista; nao
+exponhe telefone, GPS, appVersion ou IDs dos colegas. Nao houve schema Prisma,
+migration nem mudanca na elegibilidade e na rotacao do dispatch.
+
+Os sockets de motorista tambem entram na sala comum `drivers`. Entrada/saida da
+presenca e mudanca da prioridade emitem apenas `driver-queue:updated` com
+timestamp; o app entao recarrega o endpoint autenticado. A fila tambem e
+atualizada no bootstrap, reconexao, retorno ao primeiro plano, pull-to-refresh e
+mudanca do toggle. Ao ficar offline, expirar presenca ou perder acesso da conta,
+o numero e o painel sao limpos imediatamente.
+
+Arquivos principais: `apps/api/src/driver-presence/`,
+`apps/api/src/realtime/realtime.gateway.ts`, `packages/types/src/driver.ts`,
+`packages/api-client/src/driver-presence.ts`,
+`apps/driver-app/src/components/DriverQueueSheet.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` e
+`apps/driver-app/src/lib/socket.ts`. A decisao de visibilidade sanitizada foi
+registrada em `docs/business-rules.md`.
+
+Validacoes aprovadas: 2 suites focadas da API com 36 testes; suite completa do
+Driver App com 19 suites e 104 testes; typecheck e lint dos oito workspaces;
+build de producao da API; `git diff --check`. Nao houve E2E com Redis real,
+teste visual em aparelho, APK, commit, push ou deploy. Proximo passo concreto:
+homologar com tres motoboys online, observar a mesma ordem no Admin e nos tres
+aparelhos, criar uma oferta e confirmar que o contemplado vai ao fim e todos os
+numeros se atualizam.
+
+## Atualizacao - 2026-08-27: ordem fixa dos pedidos aceitos na Home mobile
+
+Os pedidos em andamento agora aparecem de cima para baixo pelo horario em que a
+atribuicao atual foi aceita: o primeiro aceite fica no topo, o segundo abaixo e
+assim por diante. Mudar de `ACCEPTED` para `COLLECTED`, `DELIVERED` ou `FAILED`
+nao reordena os cards. Se um pedido voltar para a fila e for aceito novamente,
+vale o ultimo `ACCEPTED`, pois ele representa a nova atribuicao.
+
+O Driver App deriva `acceptedAt` do `statusHistory` que ja vem em
+`GET /deliveries/:id`; nao houve rota, contrato compartilhado, banco, migration
+ou mudanca no despacho. O helper mantem em memoria o horario conhecido enquanto
+o pedido esta ativo, preservando a ordem se uma atualizacao individual do
+detalhe falhar. Sem historico disponivel na primeira carga, o fallback continua
+sendo `createdAt`, sem remover o pedido da Home.
+
+Arquivos: `apps/driver-app/src/lib/activeDeliveries.ts`, seu teste
+`apps/driver-app/__tests__/activeDeliveries.test.ts`, `docs/business-rules.md`
+e este handoff. Validacoes aprovadas: teste focado com 6 casos; suite completa
+do Driver App com 19 suites e 106 testes; typecheck, lint e `git diff --check`.
+Proximo passo concreto: validar no aparelho dois pedidos aceitos em sequencia,
+coletar o primeiro e confirmar que ele continua acima do segundo. Nao houve
+APK, commit, push ou deploy neste recorte.
+
+## Atualizacao - 2026-08-27: prazo de coleta com redespacho automatico
+
+Foi adicionada uma configuracao operacional global
+`pickupAssignmentTimeoutMinutes` no Admin Web. Ela define de 1 a 480 minutos
+entre o aceite e a coleta e e independente de `slaAlertMinutesToCollect`, que
+continua sendo apenas um alerta visual da operacao. Campo vazio preserva o valor
+atual; configuracao nula mantem a regra desligada para compatibilidade.
+
+No aceite por oferta, lote ou vitrine de pedidos disponiveis, a API congela
+`Delivery.pickupDeadlineAt` e agenda `pickup-expire` no BullMQ antes de confirmar
+a atribuicao. O job carrega pedido, motoboy e prazo esperados. Ao vencer, uma
+atualizacao condicional muda `ACCEPTED -> AWAITING_DRIVER`, solta o motoboy,
+limpa o prazo, grava historico e redespacha excluindo o motorista anterior da
+tentativa imediata. Lotes voltam inteiros. Se coleta e job concorrerem, contagem
+divergente lanca e reverte a transacao, preservando quem coletou. O job tem
+retentativas e consegue retomar apenas o redespacho se a transicao ja tiver sido
+gravada.
+
+O Driver App recebe `pickupDeadlineAt` no contrato resumido, atualiza um unico
+relogio por segundo e mostra `MM:SS` (ou `H:MM:SS`) na pilula vermelha do card
+somente em `ACCEPTED`. O socket `delivery:pickup-expired` remove o pedido ativo,
+reconfigura o rastreamento e leva a navegacao de volta a Home; push geral cobre
+o aplicativo em segundo plano.
+
+Schema/migration: `apps/api/prisma/schema.prisma` e a migration aditiva
+`20260827170000_add_pickup_assignment_deadline`. Ela adiciona duas colunas
+nulas e um indice, sem backfill: atribuicoes aceitas antes do deploy permanecem
+sem prazo. O schema foi formatado e validado pelo Prisma; a migration foi
+criada, mas NAO foi executada nem aplicada a banco compartilhado. Ordem de rollout: backup/restore validado,
+migration, API, Admin Web e novo APK. Rollback de codigo pode ignorar as colunas
+nulas; nao remover as colunas durante o rollback.
+
+Arquivos principais: contratos em `packages/types`, validacao Admin em
+`packages/validation`, `admin-platform-settings.service.ts`,
+`dispatch.service.ts`/`dispatch.processor.ts`, mapeamento de entregas,
+configuracao operacional do Admin Web, socket/Home/helper de apresentacao do
+Driver App e testes focados correspondentes.
+
+Validacoes aprovadas: Prisma format/validate/generate; suite completa da API
+com 70 suites e 867 testes; suite completa do Driver App com 19 suites e 108
+testes; typecheck e lint dos oito workspaces; builds de producao da API e do
+Admin Web; `git diff --check`. Proximo passo concreto: depois de aplicar a
+migration em ambiente isolado, homologar com dois motoboys:
+aceitar, observar o contador, deixar zerar e confirmar que o segundo recebe a
+nova oferta. Nao houve aplicacao de migration, APK, commit, push ou deploy.
+
+## Atualizacao - 2026-08-27: marcas verdes nas etapas da rota mobile
+
+Na rota compacta da Home, o primeiro icone agora vira um check verde assim que
+o pedido entra em `ACCEPTED` e permanece concluido nos estados seguintes. O
+icone do destino vira check verde somente em `DELIVERED`; uma entrega `FAILED`
+nao recebe essa confirmacao. A etapa de retorno continua com o icone circular
+ate ser concluida e o pedido sair da lista ativa.
+
+A mudanca reutiliza `RouteStop.done` e o check verde que ja existiam em
+`RouteTimeline`, sem alterar API, contrato, status, espacamento ou codigo
+nativo. Arquivos: `apps/driver-app/src/lib/activeDeliveryPresentation.ts`, seu
+teste e este handoff. Validacoes aprovadas: teste focado com 7 casos, typecheck
+e lint do Driver App e `git diff --check`. Proximo passo concreto: validar
+visualmente no aparelho um card aceito e outro entregue. APK, commit e push nao
+foram executados.
+
+## Atualizacao - 2026-08-27: release Android oficial pilot.9
+
+O conjunto funcional foi publicado no `main` no commit `7c94a58`, incluindo
+fila real do motoboy, ordenacao estavel dos pedidos aceitos, prazo de coleta e
+redispatch, card compacto, correcoes do historico e as marcas verdes da rota.
+O Driver App foi promovido para `0.1.0-pilot.9`, com `versionCode` 9. O build
+do Render continua executando `prisma migrate deploy` antes de iniciar a API,
+de modo que a migration aditiva acompanha o rollout do codigo.
+
+O release foi compilado em uma worktree temporaria curta em `C:\m9`, usando
+`production`, a URL `https://motoboycity-api.onrender.com` e a chave oficial.
+A primeira tentativa parou antes de gerar o APK porque a worktree limpa ainda
+nao tinha o `dist` de `@motoboycity/validation`; depois de compilar esse pacote,
+o `assembleRelease` concluiu com sucesso. A worktree temporaria, inclusive a
+copia da configuracao local ignorada, foi removida ao final.
+
+O APK oficial tem 75.104.781 bytes e SHA-256
+`5E8FBE9712A11239852D1308C28EBD81768C8AE8C6D566B17DEB65A455211B75`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o mesmo certificado
+dos pilotos anteriores, SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.9`, `versionCode` 9, minSdk 24 e targetSdk 36. O bundle contem a
+URL oficial e nao contem `localhost:3333`, `127.0.0.1` nem `10.0.2.2`.
+
+O artefato foi preservado em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.9-vc9.apk`
+e em `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.9-vc9.apk`; tamanho e
+hash coincidem nas duas copias. As 19 suites e os 110 testes do Driver App
+passaram depois do build. O APK nao foi instalado nesta sessao. Proximo passo
+concreto: instalar sobre o `pilot.8` em um aparelho e validar fila, ordenacao de
+tres ou quatro pedidos, contador de coleta, redispatch e checks da rota.
+
+## Atualizacao - 2026-08-27: compartilhamento imediato e rastreamento com moto
+
+Na Home da empresa, cada pedido em `ACCEPTED` ou `COLLECTED` agora mostra a
+acao de rastreamento diretamente abaixo do card na lista `Na rua`; nao e mais
+necessario selecionar o pedido para descobrir a funcionalidade. A chamada
+permanece compacta e ganhou um botao verde de largura total para o WhatsApp. O
+painel do pedido selecionado preserva clone e detalhes, sem duplicar a mesma
+acao.
+
+A mensagem do WhatsApp agora usa nome do destinatario, nome fantasia da empresa
+e status real. Em `ACCEPTED`, informa que um motoboy aceitou a entrega; somente
+em `COLLECTED` diz que ela saiu para entrega. Nomes sao normalizados para nao
+injetar quebras de linha nem marcacao do WhatsApp. O detalhe do pedido tambem
+passa o mesmo contexto, inclusive nos estados anteriores em que o link apenas
+mostra as atualizacoes da preparacao.
+
+No rastreamento publico, o marcador padrao do Google foi substituido por um
+marcador circular da marca com icone de motocicleta e ponta ancorada na
+coordenada atual. O marcador continua sendo movido pela mesma instancia e nao
+altera GPS, polling, Socket.IO nem o contrato publico minimo.
+
+Arquivos principais: Home e detalhe de pedido do Company Web; componentes
+`home-delivery-tracking-share` e `share-delivery-tracking-button`; helper
+`delivery-whatsapp`; `public-tracking-map`; e testes correspondentes. Nao houve
+mudanca de API, banco, migration, contrato compartilhado ou Driver App.
+
+Validacoes aprovadas: 3 arquivos e 16 testes focados; suite completa do Company
+Web com 13 arquivos e 53 testes; typecheck, lint, build de producao com 19
+paginas geradas e `git diff --check`. Nao houve smoke autenticado nem abertura
+real do WhatsApp. Proximo passo concreto: conferir na Home um pedido aceito e
+outro coletado, abrir as duas mensagens no WhatsApp e observar o marcador de
+moto em um celular. Commit, push e deploy nao foram executados neste recorte.
+
+## Release - 2026-08-27: compartilhamento imediato e rastreamento com moto
+
+O commit funcional `66bdb89` foi enviado para o `main`. A integracao oficial do
+GitHub com a Vercel concluiu com sucesso os deployments do Company Web e do
+Admin Web; o segundo foi reconstruido pelo escopo do monorepo, embora nao tenha
+mudanca funcional neste recorte. Nao houve alteracao de API ou banco.
+
+O alias `https://motoboycity-company-web.vercel.app` foi consultado sem cache
+depois da conclusao. A Home respondeu normalmente e seus 18 bundles carregados
+contem a chamada imediata e a nova mensagem `saiu para entrega`/`Acompanhe o
+motoboy em tempo real`. A rota publica de rastreamento tambem respondeu e seus
+9 bundles contem o marcador SVG com a motocicleta. Isso confirma que o alias
+oficial ja serve o codigo novo, nao apenas que o build remoto terminou.
+
+Antes do commit, a verificacao local aprovou 13 arquivos e 53 testes do Company
+Web, typecheck, lint, build de producao com 19 paginas e `git diff --check`; a
+revisao do staged nao encontrou secrets nem dependencias novas. O CI do commit
+funcional foi iniciado no GitHub e ainda estava em andamento no momento deste
+registro. Nao houve smoke autenticado com pedido real nem envio efetivo pelo
+WhatsApp. Proximo passo concreto: abrir a Home oficial com uma entrega coletada,
+enviar a mensagem para um numero de teste e conferir a moto movendo no mapa.
+
+## Atualizacao - 2026-08-27: acompanhamento imediato ao chamar entregador
+
+O modal `Chamar entregador` da Company Web agora entra no estado
+`Acompanhando` no mesmo clique que envia o pedido. Antes, essa transicao
+dependia da resposta completa de criacao da API e, em conexoes lentas, o
+formulario permanecia visivel com `Chamando...` por varios segundos. Durante a
+requisicao, a tela informa que esta enviando o pedido e iniciando a busca; assim
+que a API devolve os IDs, o acompanhamento real por polling continua como ja
+funcionava. Se a criacao falhar, o modal retorna ao formulario e conserva a
+mensagem de erro e a tentativa idempotente.
+
+O botao `Chamar outro` fica desabilitado enquanto a criacao esta em andamento,
+evitando iniciar um segundo fluxo antes de existir um resultado. Nao houve
+mudanca de API, contrato, banco, dispatch ou regra de negocio. Arquivos:
+`apps/company-web/src/components/operations/call-driver-dialog.tsx`, seu novo
+teste de regressao e este handoff.
+
+Validacoes aprovadas: teste focado; suite completa da Company Web com 14
+arquivos e 54 testes; typecheck, lint, build de producao com 19 paginas e
+`git diff --check`. Nao houve smoke autenticado nem deploy. Proximo passo
+concreto: homologar no navegador com rede limitada e confirmar que
+`Acompanhando` aparece imediatamente depois do clique.
+
+## Atualizacao - 2026-08-27: Termos de Uso e Politica de Privacidade publicos
+
+A Company Web agora possui as rotas publicas e estaticas `/termos-de-uso` e
+`/politica-de-privacidade`, fora do grupo protegido por `AuthGate`. As duas usam
+um layout juridico compartilhado, responsivo, com marca, sumario por ancora,
+navegacao entre documentos e retorno ao login. Login e cadastro passaram a
+exibir links reais; no cadastro, os documentos abrem em nova aba sem interromper
+o preenchimento.
+
+Os Termos cobrem escopo tecnologico, contas, responsabilidades de empresas e
+entregadores, integracao aiqfome, precificacao/faturamento, localizacao,
+rastreamento publico, usos proibidos, indisponibilidade, suspensao e
+responsabilidade. A Politica descreve categorias, fontes, finalidades, bases
+legais, localizacao em segundo plano, retencao real de 30 dias dos pontos,
+rastreamento temporario, integracao aiqfome, compartilhamentos, transferencia
+internacional, seguranca, armazenamento local e direitos da LGPD. O texto foi
+alinhado ao codigo atual e a orientacoes oficiais da LGPD/ANPD; nao inventa uso
+de cookies publicitarios nem acesso a cardapio/catalogo.
+
+Arquivos principais: `apps/company-web/src/components/legal/legal-page.tsx`,
+as duas novas rotas, teste `legal-pages.test.tsx`, login, cadastro e este
+handoff. Nao houve mudanca de API, banco, contrato, dependencia ou autenticacao.
+
+Validacoes aprovadas: suite completa da Company Web com 15 arquivos e 56
+testes; typecheck, lint, Prettier, build de producao com 21 paginas;
+`GET /termos-de-uso` e `GET /politica-de-privacidade` responderam HTTP 200 sem
+redirecionamento. A revisao visual automatizada nao foi executada porque nenhum
+navegador estava conectado a sessao. O contato publico confirmado pelo usuario,
+`maicondouglas93@gmail.com`, aparece como link de e-mail nos dois documentos.
+Nao houve revisao por advogado nem deploy. Proximo passo concreto: obter revisao
+juridica e entao publicar as URLs para o cadastro no aiqfome.
+
+## Atualizacao - 2026-08-27: base OAuth da integracao aiqfome
+
+Foi implementado o primeiro recorte real da integracao aiqfome, ainda sem
+webhook, importacao de pedido ou dispatch. A Company Web ganhou a rota protegida
+`/integracoes` e o item correspondente na navegacao. A tela consulta o estado
+real da API, mostra as regras do piloto e permite ao `OWNER` conectar ou
+desconectar a loja; operadores podem visualizar, mas nao gerenciar o vinculo.
+
+A API agora expoe `GET /company/integrations/aiqfome`,
+`POST /company/integrations/aiqfome/connect`,
+`POST /company/integrations/aiqfome/disconnect` e o callback publico
+`GET /integrations/aiqfome/callback`. O connect gera `state` opaco de 256 bits,
+com TTL de dez minutos e consumo atomico no Redis, e monta a autorizacao por
+loja no ID Magalu. O callback troca o code somente no backend, valida os escopos
+de loja/pedidos, consulta `/api/v2/store` e `/store/:id/info`, exige que o CNPJ
+autorizado corresponda ao da empresa e nunca devolve tokens ao navegador.
+
+Access token e refresh token sao cifrados com AES-256-GCM em
+`IntegrationCredential`; o ID da integracao entra como contexto autenticado,
+impedindo mover o blob para outra loja. A chave mestra de 32 bytes em Base64
+fica em `AIQFOME_TOKEN_ENCRYPTION_KEY`. `client_id`, `client_secret`, redirect e
+chave de cifra permanecem exclusivamente no ambiente da API. O `.env` real nao
+foi lido, exibido nem alterado; apenas os `.env.example` receberam os nomes.
+
+A migration aditiva gerada pelo Prisma e
+`20260828011000_add_aiqfome_oauth_credentials`. `publicId` e opcional para linhas
+legadas e recebe UUID nas novas criacoes; `updatedAt` ganhou default seguro. A
+migration foi aplicada em PostgreSQL 17 descartavel depois de todas as 39
+migrations anteriores, com uma linha ficticia preexistente em `integrations`.
+Ela preservou a linha e criou a tabela cifrada. O container temporario foi
+encerrado e removido. Nenhuma migration foi executada no banco do `.env` ou em
+ambiente compartilhado.
+
+Decisoes registradas em `docs/business-rules.md`: `ready-order`, piloto somente
+`PREPAID`, gestao apenas por `OWNER`, cancelamento pos-aceite/coleta em revisao
+sem cancelamento automatico e tokens cifrados. O plano detalhado foi atualizado
+com o callback real e o estado das fases.
+
+Validacoes aprovadas: Prisma format/validate/generate; migration em banco vazio
+com dado legado; 3 suites focadas da API com 7 testes; suite completa da API com
+73 suites e 874 testes; suite completa do Company Web com 16 arquivos e 59
+testes; typecheck e lint dos oito workspaces; builds de producao da API e do
+Company Web com 22 paginas. O primeiro build web ficou sem rede para Google
+Fonts e foi repetido com acesso permitido, quando passou. `git diff --check`
+tambem foi aprovado.
+
+Limitacoes: refresh token atomico, cadastro/rotacao de webhooks, ingestao em
+modo sombra, monitor Admin, criacao de `Delivery`, dispatch e sincronizacao de
+status ainda nao existem. Antes de deploy compartilhado, gerar/configurar a
+chave de cifra no Render, consultar duplicidades reais em `integrations`,
+validar backup/restore e aplicar a migration em copia de staging. Depois,
+conectar somente a loja de teste e homologar OAuth/CNPJ. Nao houve commit, push
+ou deploy neste recorte.
+
+## Atualizacao - 2026-08-27: preflight final do OAuth aiqfome
+
+Antes do rollout, a revisao independente encontrou e o coordenador corrigiu
+tres riscos. A chave de cifra agora precisa ser Base64 canonica de exatamente
+32 bytes antes de a API permitir iniciar OAuth. Cada tentativa ganhou
+`Integration.oauthAttemptId`: desconectar ou iniciar outro vinculo invalida o
+callback anterior, e o callback usa update condicional na mesma transacao que
+grava a credencial. Cancelar uma reautorizacao de loja ja conectada preserva a
+conexao anterior em vez de muda-la para `ERROR`.
+
+A Company Web deixou de prometer uma importacao ainda inexistente. A tela
+informa que esta fase conecta somente a loja de teste, que nenhum pedido e
+importado e que nenhum motoboy e chamado automaticamente. O aviso de callback
+conectado so aparece quando o GET autenticado confirma `CONNECTED`. O callback
+aceita parametros adicionais do provedor sem deixar de validar code/state.
+
+A migration final e
+`20260828011000_add_aiqfome_oauth_credentials`, gerada pelo Prisma a partir de
+uma restauracao do banco. Ela adiciona `oauthAttemptId`, `publicId`, `updatedAt`,
+a tabela cifrada e os indices/constraints; nao toca em `Delivery`, precos ou
+dispatch. `render.yaml` agora declara os tres segredos aiqfome como `sync:
+false` e fixa apenas as URLs publicas de callback e Company Web.
+
+Preflight de dados concluido antes do push: backup logico de producao
+`motoboycity-postgres-20260827-220338.dump`, 0,38 MB, SHA-256
+`36180D4818D6B92137E14E5D0A78688E805DEFAEBEFC2C42C5B0E7537D00B878`. O dump
+foi restaurado em PostgreSQL 17 descartavel, continha 33 usuarios, 94 entregas
+e zero integracoes, portanto zero grupos duplicados em `(companyId, provider)`.
+A migration final foi aplicada nessa copia: tabela e coluna novas confirmadas,
+33 usuarios e 94 entregas preservados. O container foi encerrado e removido;
+nenhuma migration foi executada diretamente em producao nesta verificacao.
+
+Validacoes finais aprovadas ate este registro: Prisma validate/generate; 4
+suites focadas da API com 15 testes; suite completa da API com 74 suites e 882
+testes; suite completa da Company Web com 16 arquivos e 60 testes; typecheck e
+lint dos oito workspaces; builds de producao da API e Company Web com 22
+paginas. A disputa callback/desconexao tambem foi coberta e aprovada. A chave
+foi configurada manualmente pelo responsavel no Render com `Save only`; nenhum
+valor foi lido ou registrado. Neste ponto ainda nao houve commit, push, deploy
+ou OAuth real com a loja de teste.
+
+## Atualizacao - 2026-08-28: refresh atomico do OAuth aiqfome
+
+A base OAuth foi commitada e enviada anteriormente em `2646a6d`; o recorte
+descrito aqui continua apenas no worktree e nao foi commitado, enviado nem
+publicado. Ele nao leu nem alterou `.env` e nenhum valor de credencial foi
+registrado em teste, log ou documentacao.
+
+Foi adicionado `AiqfomeTokenService`. Tokens com menos de 60 segundos de
+validade sao renovados no endpoint oficial do ID Magalu; uma resposta 401
+tambem provoca exatamente um refresh e uma unica repeticao da operacao. Access
+e refresh token rotacionados sao cifrados e gravados juntos. Falha de escopo,
+perda do lock, rejeicao do token novo, falha de cifra ou falha de banco deixam a
+integracao em estado seguro e nunca voltam a usar conscientemente o refresh
+token antigo.
+
+A concorrencia usa lock Redis com owner, TTL de 60 segundos, renovacao e
+verificacao de posse antes/depois da chamada externa. O banco ganhou
+`IntegrationCredential.tokenVersion` para compare-and-swap. Conectar,
+desconectar e renovar compartilham o mesmo lock; `oauthAttemptId` impede refresh
+durante reautorizacao; o callback incrementa `tokenVersion`; e a transicao para
+`ERROR` tambem verifica a versao, impedindo uma requisicao antiga de derrubar
+credenciais recem-autorizadas.
+
+A migration aditiva gerada pelo Prisma e
+`20260828120000_aiqfome_token_refresh_fencing`; ela executa somente `ADD COLUMN
+"tokenVersion" INTEGER NOT NULL DEFAULT 1`, preservando linhas existentes. O
+impacto de dados previsto e uma coluna inteira com valor inicial `1`, sem
+exclusao ou reescrita de tokens. Rollback operacional: voltar o codigo antes de
+remover a coluna; a coluna pode permanecer inerte. A migration nova nao foi
+executada em producao nem em banco compartilhado.
+
+Validacoes aprovadas neste recorte: Prisma validate; diff da migration gerado
+entre datamodels pelo Prisma; 6 suites focadas aiqfome com 31 testes; suite
+unitaria completa da API com 76 suites e 898 testes; typecheck e lint dos oito
+workspaces; build da API; e `git diff --check`.
+
+O Docker Desktop estava ativo fora do `PATH`. Em PostgreSQL 17 e Redis 7
+descartaveis, com portas dinamicas e sem reutilizar os containers persistentes
+do projeto, as 40 migrations anteriores foram aplicadas. Uma
+`IntegrationCredential` ficticia foi inserida antes da migration nova; depois
+do deploy ela permaneceu intacta e recebeu `tokenVersion = 1`, com coluna `NOT
+NULL DEFAULT 1`. O E2E novo
+`test/aiqfome-token-refresh.e2e-spec.ts` usou dois clientes Prisma e duas
+conexoes Redis reais: dois workers concorrentes causaram exatamente uma chamada
+de refresh, e a remocao intencional da chave de lock durante a chamada externa
+falhou de forma fechada sem persistir o par rotacionado. O teste reutiliza
+`buildRedisConnectionOptions`, portanto aceita tanto `REDIS_URL` quanto o
+`REDIS_HOST`/`REDIS_PORT` do CI, e recusa iniciar se `NODE_ENV` nao for `test`
+ou se o PostgreSQL nao estiver em loopback e com nome contendo `ci`, `e2e`,
+`test` ou `isolated`. Os 3 testes passaram tambem com a mesma forma de
+configuracao Redis usada pelo CI.
+
+O backup local de 2026-08-28 tambem foi restaurado em outro banco descartavel.
+Antes e depois da migration permaneceram 33 usuarios, 26 empresas, 94 entregas
+e 1 integracao; o backup continha zero `IntegrationCredential`. A coluna passou
+de ausente para `NOT NULL DEFAULT 1` e a migration ficou registrada como
+concluida. Nenhum registro pessoal foi consultado; somente contagens agregadas.
+Os containers, bancos restaurados, volumes anonimos e arquivos temporarios
+foram removidos ao final.
+
+Desvio operacional registrado: a primeira tentativa de `migrate deploy`, feita
+em pasta temporaria ainda dentro do repositorio, carregou automaticamente o
+`.env` da raiz apesar de `DATABASE_URL` ter sido exportada. Ela alcançou apenas
+o PostgreSQL local de desenvolvimento em `localhost:5434` e aplicou as duas
+migrations commitadas que estavam pendentes:
+`20260827170000_add_pickup_assignment_deadline` e
+`20260828011000_add_aiqfome_oauth_credentials`. Ambas sao aditivas; a migration
+nova nao estava nessa copia, nenhum dado foi removido e nenhum ambiente remoto
+foi acessado. Nao houve rollback destrutivo. As validacoes seguintes foram
+executadas de uma pasta fora do repositorio, com `.env` ficticio e alvo
+confirmado antes de cada deploy.
+
+Incidente de segredo: uma captura de tela enviada na conversa exibiu o
+`AIQFOME_CLIENT_SECRET` e `AIQFOME_TOKEN_ENCRYPTION_KEY`. Os valores nao foram
+copiados para codigo, teste, log ou documentacao, mas devem ser considerados
+comprometidos e rotacionados antes de OAuth/deploy real. Se existir credencial
+cifrada com a chave antiga, a loja precisara ser reconectada depois da troca.
+
+Decisao operacional posterior, em 2026-08-28: o responsavel optou por adiar a
+rotacao enquanto aguarda a aprovacao do cadastro pelo aiqfome e autorizou seguir
+com a entrega do codigo. Isso nao libera o OAuth para uso: nenhuma loja real deve
+ser conectada e os valores expostos nao devem ser usados para homologacao. Antes
+do primeiro teste OAuth ou ativacao para empresa, rotacionar os dois segredos no
+provedor e no Render; depois da troca da chave de cifra, reconectar qualquer loja
+de teste que eventualmente tenha credencial cifrada com a chave anterior.
+
+Webhooks, inbox em modo sombra, importacao, `Delivery`, precificacao, dispatch e
+sincronizacao de status continuam ausentes/desligados. A documentacao publica
+confirma cadastro e listagem de webhooks, mas nao define de forma suficiente o
+payload inbound, identificador estavel e redelivery. Proximo passo concreto:
+concluir o release tecnico do refresh sem iniciar OAuth; depois, rotacionar os
+dois segredos expostos e obter fixture/contrato oficial do webhook antes de
+modelar a inbox append-only.
+
+## Atualizacao - 2026-08-28: destravamento da suite E2E apos o release aiqfome
+
+O refresh atomico foi commitado e enviado em `b5940b4`. O CI desse commit
+aplicou as migrations, passou typecheck, lint, testes unitarios e Driver App,
+mas ficou preso na etapa E2E. O mesmo sintoma ja havia ocorrido no CI anterior
+da base OAuth: o job permaneceu nessa etapa ate o timeout.
+
+A reproducao usou PostgreSQL 17 e Redis 7 descartaveis, em portas de loopback
+separadas dos servicos locais persistentes. O E2E novo do aiqfome passou. A
+causa do travamento era anterior: seis teardowns tentavam apagar `Company`
+antes de `CompanyStatusHistory`; a restricao de chave estrangeira interrompia
+o `afterAll` antes de `app.close()`, deixando Nest, Redis e filas abertos. Os
+teardowns agora apagam somente o historico das empresas ficticias da propria
+suite e cinco deles usam `try/finally` para sempre fechar o app, sem suprimir
+erros de limpeza.
+
+Tambem foram atualizados dois contratos de teste que estavam atrasados: o
+fechamento automatico de fatura agora prova idempotencia chamando o scheduler
+pela segunda vez, em vez de enviar o antigo payload `issueDate` para a rota
+manual por empresa; e as respostas de configuracao esperam
+`pickupAssignmentTimeoutMinutes`. Nenhuma regra, rota, schema ou codigo de
+producao foi alterado nesse reparo.
+
+Validacao final no ambiente descartavel: 25 suites E2E e 230 testes passaram em
+37,555 segundos, e o processo encerrou normalmente. Proximo passo concreto:
+commit/push do reparo de testes, acompanhar o novo CI e confirmar o deploy da
+API no painel do Render. O OAuth continua proibido para loja real ate a rotacao
+dos dois segredos expostos e a aprovacao do cadastro pelo aiqfome.
+
+## Atualizacao - 2026-08-28: importacao e ciclo logistico aiqfome
+
+O recorte atual conclui o nucleo tecnico da integracao de pedidos, ainda apenas
+no worktree. Nao houve commit, push, deploy, migration em ambiente compartilhado
+ou chamada usando uma loja real. Nenhum valor de `.env` ou segredo foi lido,
+alterado ou registrado; todos os testes de infraestrutura usaram credenciais
+ficticias e servicos descartaveis em loopback.
+
+O OAuth passa a solicitar tambem `aqf:store:create`, necessario para registrar
+webhooks na API V2. A loja conectada recebe cinco webhooks oficiais
+(`new-order`, `read-order`, `ready-order`, `cancel-order` e `order-refund`) em
+uma URL publica por integracao. O segredo enviado ao provedor e aleatorio; o
+banco guarda apenas seu SHA-256 e a validacao usa comparacao em tempo constante.
+Antes de trocar de loja e obrigatorio desconectar a anterior. Reautorizar a
+mesma loja preserva o webhook ativo e nao cria uma janela silenciosa.
+
+Cada notificacao autenticada e gravada primeiro em
+`IntegrationInboundEvent`, com deduplicacao por hash e somente o envelope
+operacional normalizado. Dados do consumidor nao sao copiados para a inbox; o
+pedido completo e consultado no endpoint oficial com o token da loja. BullMQ
+processa o evento depois da persistencia. Um scanner a cada 30 segundos recupera
+eventos que ficaram entre PostgreSQL e Redis, `PROCESSING` abandonado e falhas
+transitorias. Reentregas e workers concorrentes convergem para uma unica
+`Delivery` por `(integrationId, externalOrderId)`.
+
+O evento `new-order` cria um pedido local pela mesma rota interna de endereco,
+Google Maps, precificacao e agendamento dos pedidos manuais. Todo importado
+nasce `SCHEDULED`, com `scheduledAt = receivedAt + atraso efetivo`. A empresa
+pode definir de 1 a 480 minutos no Company Web; `null` herda o padrao do ADM,
+configurado no Admin Web. Sem modalidade ativa, tabela de preco ou algum tempo
+efetivo, o webhook nao e ativado. Alterar o padrao nao muda pedidos ja
+agendados.
+
+As regras de pagamento confirmadas ficaram congeladas assim: `pre_paid=true`
+vira `PREPAID` e `requiresReturn=false`; `pre_paid=false` vira
+`requiresReturn=true`, preserva dinheiro, Pix ou cartao quando reconhecidos e
+leva pagamento/troco para a observacao do motoboy. Um meio desconhecido nao e
+inventado. Retirada, AiqEntrega, pedido originalmente agendado, identidade
+inconsistente ou endereco ausente ficam em `REVIEW`, sem chamar motoboy.
+Cancelamento externo antes do aceite cancela condicionalmente a entrega local;
+depois do aceite fica em `REVIEW`, sem interromper uma corrida em andamento.
+
+Aceite, coleta, entrega e cancelamento/falha locais gravam
+`IntegrationOutboundEvent` na mesma transacao da mudanca de status. O worker
+chama os marcos logisticos oficiais, faz retry exponencial para falha
+transitoria, falha fechado em 4xx permanente e nao permite que um marco posterior
+ultrapasse outro anterior do mesmo pedido. A dependencia da outbox e obrigatoria
+nos modulos de entrega, dispatch e intervencao Admin; uma montagem incorreta nao
+desativa a sincronizacao silenciosamente.
+
+O schema ganhou `Delivery.integrationId`, `Delivery.externalOrderId`, o atraso
+global e as tabelas/enums de inbox e outbox. A migration aditiva e
+`20260828132617_aiqfome_order_import`; nao altera migrations anteriores nem
+remove dados. Em PostgreSQL 17 descartavel, as migrations anteriores foram
+aplicadas, a nova migration foi aplicada, seu rollback estrutural exato foi
+executado e a mesma migration foi reaplicada. Tabelas centrais permaneceram
+presentes. A restricao unica nova e segura para as linhas antigas porque as duas
+colunas adicionadas iniciam `NULL`. Isso nao substitui backup/restore e ensaio em
+copia de staging antes do deploy compartilhado.
+
+Durante a verificacao, o E2E revelou uma disputa antiga entre aceite e
+cancelamento manual: ambos podiam responder sucesso depois de ler o mesmo status.
+O cancelamento agora usa update condicional dentro da transacao; se o status
+mudar, ele aborta sem historico ou efeito colateral. O E2E concorrente e a suite
+completa passaram depois da correcao. Tambem foram atualizados o contrato de
+escopos do refresh e os retornos E2E da nova configuracao global.
+
+Arquivos principais: `apps/api/prisma/schema.prisma` e a migration nova;
+`apps/api/src/integrations/aiqfome/*`;
+`apps/api/src/integrations/integration-events.module.ts` e
+`integration-outbox-recorder.service.ts`; `DeliveriesService`, `DispatchService`
+e `AdminDeliveriesService`; contratos em `packages/types`, `validation` e
+`api-client`; painel aiqfome da Company Web; configuracao operacional do Admin
+Web; testes unitarios/E2E e `docs/business-rules.md`.
+
+Validacoes aprovadas antes deste registro: Prisma format/validate/generate;
+migration, rollback e reaplicacao em PostgreSQL isolado; teste E2E concorrente
+com 10 casos; suite E2E completa com 25 suites e 231 testes; suite unitaria da
+API com 79 suites e 909 testes antes dos ultimos testes de reautorizacao/outbox;
+suite completa da Company Web com 16 arquivos e 60 testes; typecheck e lint dos
+oito workspaces; builds da API, Company Web (22 paginas) e Admin Web (37
+paginas); e `git diff --check`. Os contadores finais apos os ultimos testes
+serao registrados abaixo ao concluir o recorte.
+
+Limitacoes operacionais: ainda nao houve fixture/webhook real nem smoke test na
+loja de homologacao, porque o cadastro depende da aprovacao do provedor. Eventos
+`REVIEW` e falhas finais ficam duraveis no banco, mas ainda nao existe uma tela
+Admin dedicada para essa fila. O cadastro exposto anteriormente tambem continua
+proibido para uso real ate a rotacao de `AIQFOME_CLIENT_SECRET` e
+`AIQFOME_TOKEN_ENCRYPTION_KEY`; depois disso, qualquer loja cifrada com a chave
+antiga precisa ser reconectada.
+
+Proximo passo concreto: concluir a validacao final e revisar o diff; depois,
+somente com autorizacao expressa, fazer commit/push. Antes de producao: rotacionar
+os dois segredos, atualizar o Render, gerar backup, validar a migration em copia
+de staging, publicar API e paineis, reconectar apenas a loja de teste com o novo
+escopo, escolher modalidade/tempo e homologar quatro cenarios: online, pagamento
+na entrega com retorno, cancelamento pre-aceite e ciclo logistico completo.
+
+Fechamento da validacao local: depois das ultimas correcoes, a API passou 80
+suites unitarias e 915 testes; o Company Web passou 16 arquivos e 60 testes;
+typecheck e lint passaram nos oito workspaces; os builds finais passaram para
+API, Company Web (22 paginas) e Admin Web (37 paginas); e o E2E foi recriado do
+zero e repetido com o codigo final, aprovando 25 suites e 231 testes em 40,136
+segundos. Os testes focados novos cobrem reautorizacao da mesma loja, bloqueio
+de troca sem desconectar, retry da outbox, falha permanente e preservacao da
+ordem dos marcos.
+Os dois containers isolados desta verificacao estavam com `autoRemove=true` e
+foram encerrados/removidos ao final; nenhum servico persistente do projeto foi
+parado.
+
+## Atualizacao - 2026-08-28: taxa no retorno por insucesso pos-coleta
+
+O responsavel confirmou uma mudanca na regra financeira: toda entrega que der
+problema depois da coleta e exigir devolucao da mercadoria deve cobrar retorno,
+mesmo quando nasceu com `requiresReturn=false`. A empresa paga a taxa e 100%
+dela vai para o motoboy; a plataforma preserva sua parcela original. Pedido que
+ja nasceu com retorno nao recebe a taxa novamente.
+
+`DeliveriesService.markFailed` agora consulta `PricingService.quote` com
+retorno obrigatorio e o instante do insucesso. Para destino conhecido, somente
+o `returnValue` vigente e somado ao `totalValue` e ao `driverValue` ja
+congelados; `platformValue` permanece igual e a invariante
+`driverValue + platformValue = totalValue` e validada em centavos antes da
+escrita. Para destino definido por GPS, a cotacao completa feita no local da
+tentativa ja inclui o retorno. `requiresReturn`, valores, motivo, horario e a
+transicao `COLLECTED -> FAILED` sao gravados na mesma escrita condicional e
+transacao. O repasse continua ocorrendo uma unica vez apenas em
+`FAILED -> COMPLETED`, depois da confirmacao na loja.
+
+Se a modalidade nao possuir `returnFee`, o insucesso falha com conflito
+explicito antes de alterar o pedido, evitando registrar uma devolucao gratuita.
+Retries depois de `FAILED` devolvem o resultado existente sem nova cotacao;
+duas chamadas concorrentes disputam a mesma atualizacao condicional. Nao houve
+migration, backfill ou recalculo de pedidos antigos: a regra vale somente para
+novos insucessos registrados depois do deploy. Rollback de codigo nao remove
+taxas que ja tenham sido corretamente congeladas.
+
+Arquivos deste recorte: `DeliveriesService`, controller e testes unitarios;
+`delivery-lifecycle.e2e-spec.ts`; comentarios de contrato em
+`mark-failed.schema.ts` e `schema.prisma`; e `docs/business-rules.md`. A tela do
+motoboy e os paineis ja consumiam `requiresReturn`/`returnValue`, portanto nao
+precisaram de mudanca de contrato ou UI.
+
+Validacoes aprovadas: teste focado de `DeliveriesService` com 105 casos; suite
+unitaria completa da API com 80 suites e 918 testes; build da validation; build
+da API; typecheck e lint dos oito workspaces; e `git diff --check`. O E2E de
+ciclo de vida foi atualizado para disparar dois insucessos concorrentes, provar
+uma unica taxa, total da empresa, repasse e idempotencia do ledger. Sua execucao
+isolada nao ocorreu nesta sessao: o runner bloqueou a orquestracao local antes
+de criar containers. A checagem posterior confirmou zero containers de teste;
+a pasta temporaria vazia foi removida. Nenhum banco local, compartilhado ou de
+producao foi acessado.
+
+Nao houve commit, push ou deploy deste recorte. Proximo passo concreto: executar
+`delivery-lifecycle.e2e-spec.ts` no ambiente E2E isolado/CI e, com autorizacao
+expressa, incluir esta correcao no mesmo commit do worktree atual ou separa-la
+cuidadosamente antes do release da API.
+
+## 2026-08-28 - Divulgacao da FM Software na home da empresa
+
+A home operacional do `company-web` recebeu uma faixa promocional compacta e
+responsiva, posicionada depois do painel de operacoes para nao disputar espaco
+com pedidos, filtros ou acoes principais. A faixa informa que o sistema foi
+desenvolvido por Franklim Melo, da FM Software, divulga servicos de software e
+exibe o telefone `(19) 99705-0303`.
+
+O botao de contato abre o WhatsApp em uma nova aba usando o numero internacional
+`5519997050303` e uma mensagem inicial sobre os servicos da FM Software. O link
+usa `noopener noreferrer`. Nao houve alteracao de API, autenticacao, contratos,
+variaveis de ambiente ou backend.
+
+Arquivos deste recorte: `apps/company-web/src/app/(app)/page.tsx`,
+`apps/company-web/src/components/layout/fm-software-promo.tsx` e o teste
+`fm-software-promo.test.tsx`.
+
+Validacoes aprovadas: teste focado do novo componente (1 teste), suite completa
+do `company-web` (17 arquivos e 61 testes), typecheck, lint e build de producao
+do `company-web` (22 paginas geradas), formatacao dos novos arquivos e
+`git diff --check`. Nao houve commit, push ou deploy deste recorte.
+
+## 2026-08-28 - Guia de conexao aiqfome para empresas
+
+A pagina `company-web/integracoes` recebeu um guia responsivo de seis etapas
+para o responsavel da empresa conectar uma loja aiqfome. O conteudo segue o
+fluxo real do codigo e a documentacao oficial vigente: conferir CNPJ e
+endereco de coleta; abrir `Integracoes` no Geraldo; selecionar a unidade;
+vincular o ID Magalu usando a conta do dono; voltar ao MOTOboyCity; autorizar
+somente uma loja; e concluir modalidade e tempo de preparo.
+
+O guia informa que tokens, codigos e URLs de webhook nao precisam ser copiados
+manualmente. Seu aviso final acompanha o estado real retornado pela API:
+preparar a loja quando desconectada, concluir a configuracao quando conectada
+sem webhook operacional ou confirmar `Conectado` e `Importacao ativa` quando
+pronta. O link tecnico anterior foi substituido pelo guia oficial de vinculo do
+aiqfome. O callback `STORE_COUNT_INVALID` agora orienta explicitamente a
+autorizar apenas uma loja por vez.
+
+Arquivos deste recorte:
+`apps/company-web/src/components/integrations/aiqfome-connection-guide.tsx`,
+`aiqfome-integration-panel.tsx` e `aiqfome-integration-panel.test.tsx`. Nao
+houve alteracao de API, contrato, autenticacao, banco, `.env` ou segredo.
+
+Validacoes aprovadas: teste focado do painel (6 testes), suite completa do
+`company-web` (17 arquivos e 63 testes), typecheck, lint, build de producao (22
+paginas) e Prettier nos tres arquivos do recorte. O OAuth real e a aparencia
+externa das telas do Geraldo/ID Magalu nao foram testados nesta sessao porque o
+aplicativo ainda depende da liberacao do provedor e do release seguro; por isso,
+o texto admite que o nome do botao de vinculo pode variar no painel externo.
+`git diff --check` tambem passou. Nao houve commit, push ou deploy deste recorte.
+
+## 2026-08-28 - Raios de coleta, entrega e retorno ativos
+
+O responsavel pediu para colocar em funcionamento as tres validacoes de
+proximidade configuradas pelo ADM. Os raios agora sao independentes e opcionais:
+`collectionProximityRadiusMeters`, `deliveryProximityRadiusMeters` e
+`returnProximityRadiusMeters`. Valor `null` mantem apenas aquela regra desligada;
+quando preenchido, a API exige `lat`, `lng` e `accuracy`, recusa precisao maior
+que o raio e recusa distancia Haversine acima do limite.
+
+Coleta e retorno usam as coordenadas do endereco principal da empresa. Entrega
+com destino conhecido usa o `DROPOFF`. Se o endereco de referencia nao tiver
+coordenadas, a API devolve conflito orientando a corrigir o cadastro, sem
+aprovacao silenciosa. A regra vale tambem para marcacao retroativa. Retries de
+uma transicao ja aplicada continuam idempotentes e retornam o estado confirmado
+sem exigir outro fix.
+
+O app do motoboy captura posicao nova e precisa antes dos botoes de coletar,
+entregar e concluir retorno. Entrega e retorno preservam o fix original na
+outbox offline. O Admin Web recebeu o terceiro campo, resumo e validacao de 50 a
+5000 metros para coleta. Contratos Zod, tipos compartilhados e API client foram
+atualizados no mesmo recorte.
+
+A migration `20260828180838_collection_proximity_radius` foi gerada pelo
+`prisma migrate dev` contra PostgreSQL temporario isolado, depois de aplicar as
+42 migrations anteriores. O SQL foi conferido: somente `ADD COLUMN` nullable em
+`platform_settings`; linhas existentes ficam `NULL`, sem backfill e sem bloqueio
+novo por causa da coluna de coleta. O container temporario foi encerrado e
+removido. Rollback de banco, se indispensavel antes de usar o campo, e remover a
+coluna nova; depois de valores reais serem gravados, prefira rollback apenas de
+codigo para nao perder configuracao.
+
+Arquivos principais: `apps/api/prisma/schema.prisma` e a migration nova;
+`DeliveriesService` e testes; `AdminPlatformSettingsService`; contratos em
+`packages/validation`, `packages/types` e `packages/api-client`; configuracao do
+`admin-web`; operacao/localizacao e teste da outbox no `driver-app`;
+`delivery-lifecycle.e2e-spec.ts`, `admin-platform-settings.e2e-spec.ts` e
+`docs/business-rules.md`.
+
+Validacoes aprovadas: Prisma validate/format; build da validation; 80 suites e
+921 testes unitarios da API; 19 suites e 110 testes do driver-app; typecheck e
+lint dos oito workspaces; build da API; build do Admin Web com 37 paginas; E2E
+de configuracao do ADM com 12 testes; ciclo de vida E2E completo com 38 testes;
+e o novo caso E2E focado que prova coleta e entrega fora/dentro dos respectivos
+raios. Os E2E usaram PostgreSQL e Redis efemeros isolados, com throttle elevado
+apenas no processo de teste; todos os containers foram removidos.
+
+Nao houve commit, push, deploy nem APK. Ordem segura de release: validar
+backup/restore e migration em copia de staging; distribuir o APK novo; conferir
+se os enderecos principais e destinos possuem coordenadas; aplicar a migration;
+publicar API e Admin Web; somente entao preencher/confirmar os raios. Antes de
+publicar a API, verificar especialmente os valores antigos de raio de entrega e
+retorno: se ja estiverem preenchidos, a nova API passara a aplica-los
+imediatamente, enquanto APKs antigos nao enviam GPS nessas tres acoes.
+
+## 2026-08-28 - Persistencia online apos queda de sinal no Driver App
+
+Foi confirmado que o heartbeat nativo sobrevivia a uma falha curta de rede, mas
+uma ausencia superior ao TTL de 150 segundos fazia o reconciliador marcar o
+motoboy `UNAVAILABLE`. Quando a internet voltava, o heartbeat recebia 403 e o
+servico nativo se encerrava; a Home apenas copiava o estado offline, exigindo que
+o motoboy ligasse o botao novamente.
+
+O aplicativo agora separa a presenca confirmada pelo servidor da intencao local
+do botao **Ativo**. Essa intencao fica no AsyncStorage enquanto a sessao existe e
+e reconciliada no bootstrap, reconexao Socket.IO, retorno ao primeiro plano,
+refresh e evento de expiracao. Em falha transitoria, o toggle permanece ligado,
+o rastreamento continua tentando e a tela informa que a recuperacao e
+automatica. Saida manual, logout/sessao removida, notificacao obrigatoria
+desativada, GPS/permissao invalida ou recusa definitiva da conta limpam a
+intencao e param o servico. A saida manual para primeiro o servico local; se o
+PUT offline falhar, a proxima reconexao repete a conciliacao e o TTL continua
+sendo a protecao no servidor.
+
+No Android, o foreground service passou de heartbeat a cada 60 para 45 segundos
+e, ao receber 403/409 depois de uma queda, tenta um `PUT /driver/presence` com a
+ultima coordenada valida antes de desistir. 401 ou nova recusa 403 encerram o
+servico, evitando repeticao com sessao ou conta invalida. O iOS recebeu o mesmo
+fluxo de reativacao e um timer de 45 segundos enquanto o Core Location mantiver
+o processo executavel. A presenca Redis/TTL e a elegibilidade do backend nao
+foram relaxadas: durante a ausencia o motoboy permanece fora do mapa e do
+dispatch, e a reentrada segue a ordem normal da fila sem restaurar a prioridade
+Redis expirada.
+
+Arquivos principais: `apps/driver-app/src/lib/{session,presencePersistence}.ts`,
+`store/dispatchStore.ts`, `screens/{HomeScreen,DeliveryOperationScreen}.tsx`,
+`android/.../DeliveryLocationTrackingService.kt`,
+`ios/DriverApp/LocationTrackingModule.m`, os testes novos de sessao/presenca e
+`docs/business-rules.md`. Nao houve endpoint, contrato compartilhado, schema,
+migration, dependencia ou permissao nova.
+
+Validacoes aprovadas: 2 suites focadas/8 testes; suite completa do Driver App
+com 21 suites/118 testes; typecheck e lint do workspace; e
+`gradlew.bat :app:compileDebugKotlin` com `BUILD SUCCESSFUL` (somente avisos de
+depreciacao pre-existentes nas dependencias/codigo Android). O codigo iOS nao
+pode ser compilado no host Windows. Nao houve teste controlado em aparelho,
+commit, push, deploy nem APK.
+
+Proximo passo concreto: em um aparelho Android, ficar online, cortar dados e
+Wi-Fi por mais de tres minutos, religar a rede e confirmar sem tocar no toggle:
+notificacao de foreground continua, Home volta a mostrar posicao na fila, Admin
+volta a mostrar o motoboy e uma oferta controlada chega. Repetir com app aberto,
+minimizado e tela bloqueada; no iOS, validar o mesmo fluxo em aparelho/Mac antes
+de publicar.
+
+## 2026-08-28 - Preflight do release integrado pilot.10
+
+O Driver App foi promovido no worktree para `0.1.0-pilot.10`; o `versionCode`
+reservado para o APK e `10`. O release reune a importacao/ciclo logistico
+aiqfome, a taxa de retorno por insucesso pos-coleta, os tres raios de
+proximidade, as melhorias da Company Web e a persistencia online do motoboy.
+
+Antes de qualquer publicacao foi criado um backup novo de producao em
+`F:\MOTOboyCity\database-backups\motoboycity-postgres-20260828-155153.dump`,
+com 0,56 MB e SHA-256
+`0AFDD5CF103F23AA36EDD3801C75B71EFADA5E43FE26702A7ACF53EF70247E92`.
+O dump foi restaurado em PostgreSQL 17 descartavel. As duas migrations
+pendentes foram aplicadas nessa copia sem erro; 34 usuarios, 146 entregas e 1
+integracao foram preservados, e nao restou migration incompleta. PostgreSQL,
+Redis e containers usados nessa auditoria/E2E foram removidos ao final.
+
+A validacao final aprovou Prisma validate; 80 suites/921 testes unitarios da
+API; 21 suites/118 testes do Driver App; 17 arquivos/63 testes da Company Web;
+25 suites/233 testes E2E em PostgreSQL e Redis isolados; typecheck e lint dos
+oito workspaces; builds de producao da API, Company Web (22 paginas) e Admin
+Web (37 paginas); e `git diff --check`.
+
+O preflight da copia de producao encontrou
+`deliveryProximityRadiusMeters=50`, `returnProximityRadiusMeters=50` e uma
+entrega em `ACCEPTED`. Portanto a API nova nao deve ser publicada antes do APK
+novo estar instalado no aparelho que conclui essa entrega: a versao anterior
+nao envia o fix exigido pelas regras novas.
+
+O APK oficial foi compilado em `C:\m10`, com a chave oficial e a configuracao
+Firebase local ignorada pelo Git. A primeira compilacao de preflight detectou a
+ausencia dessa configuracao na worktree curta e nao foi distribuida; depois de
+copiar o arquivo correto, o Gradle executou `processReleaseGoogleServices` e o
+`assembleRelease` final terminou com sucesso. As senhas foram lidas somente de
+arquivos DPAPI criados pelo responsavel fora do repositorio, usadas no processo
+e removidas da memoria/ambiente ao final; nenhum valor foi exibido ou
+registrado.
+
+O artefato final tem 75.119.337 bytes e SHA-256
+`859875705CA25DF266A6CE83212C70EE76F61F756BA73E8D18F904C298C0D13B`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.10`, `versionCode` 10, minSdk 24 e targetSdk 36. O APK contem os
+recursos Firebase, a URL oficial e nenhuma referencia a `localhost:3333`,
+`127.0.0.1` ou `10.0.2.2`.
+
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.10-vc10.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.10-vc10.apk`. Nenhum aparelho
+ADB estava conectado, portanto o APK nao foi instalado. O commit funcional
+local e `ecb6d22`.
+
+Depois de o responsavel liberar o rollout, `ecb6d22` e o registro do artefato
+`5894b41` foram enviados ao `main`. O CI `33207212547` concluiu em 3m24s: 43
+migrations em PostgreSQL isolado, seed, typecheck, lint, testes unitarios da
+API, seguranca do reset de pre-producao, testes do Driver App, 25 suites/233
+testes E2E e builds de API, Company Web e Admin Web passaram.
+
+O deploy Render `dep-da8un7bncjis738sttp0` terminou com sucesso e o endpoint
+publico `https://motoboycity-api.onrender.com/health` respondeu HTTP 200 com
+`{"status":"ok"}`. Os deploys Vercel do Company Web e Admin Web tambem
+terminaram com sucesso; as duas URLs publicas responderam HTTP 200. O `main`
+local e `origin/main` ficaram sincronizados. Nao foi realizado smoke test
+autenticado nem ciclo real aiqfome nesta sessao; a integracao permanece sujeita
+a aprovacao do provedor e a rotacao dos segredos expostos registrada acima.
+
+## 2026-08-28 - Compatibilidade do callback OAuth aiqfome
+
+O primeiro smoke real do OAuth mostrou que o aplicativo bloqueado para edicao
+no portal do provedor esta registrado com o redirect
+`/integrations/aiqfome/oauth/callback`, enquanto a API expunha somente
+`/integrations/aiqfome/callback`. O ID Magalu concluiu a autorizacao, mas o
+codigo temporario chegou a uma rota inexistente e recebeu HTTP 404.
+
+O `PublicAiqfomeController` agora aceita as duas rotas no mesmo handler. A rota
+com `/oauth/callback` passa a ser a canonica em `render.yaml`,
+`apps/api/.env.example` e no plano da integracao; o caminho anterior permanece
+como alias compativel. Nao houve alteracao de schema, persistencia, payload,
+credencial ou regra de seguranca. Em especial, `state` continua obrigatorio e
+de uso unico. O retorno observado no navegador mostrava apenas `code`; depois
+do deploy deve ser repetido um OAuth completo para confirmar se o provedor
+tambem devolve `state`, como exige o contrato documentado. A protecao nao deve
+ser removida caso o provedor omita esse parametro; nesse caso sera necessario
+obter evidencias do request/response e acionar o suporte do provedor.
+
+Arquivos afetados: `apps/api/src/integrations/aiqfome/aiqfome.controller.ts`,
+novo teste `aiqfome.controller.spec.ts`, `apps/api/.env.example`, `render.yaml`,
+`docs/aiqfome-integration-plan.md` e este handoff.
+
+Validacoes aprovadas: teste focado do controller (1 teste), build da API,
+`git diff --check` e Prettier nos arquivos com parser suportado. A primeira verificacao Prettier
+incluiu `.env.example` e nao executou porque esse formato nao possui parser
+inferido; a nova execucao sem esse arquivo passou. Nao houve commit, push ou
+deploy. Proximo passo: revisar o diff, publicar a API quando autorizado e
+repetir a conexao com um novo codigo OAuth.
+
+O recorte foi publicado no commit `4ee0300`. O CI `33208861702` terminou com
+sucesso em 3m44s, incluindo migrations e seed isolados, typecheck, lint, testes
+unitarios da API, seguranca do reset, testes do Driver App, E2E e builds da API,
+Company Web e Admin Web. O Render publicou a nova API: `/health` respondeu HTTP
+200 com `{"status":"ok"}` e o callback `/integrations/aiqfome/oauth/callback`
+sem parametros respondeu HTTP 400 com a validacao esperada de `code` e `state`,
+provando que a rota nova esta ativa em vez do antigo 404. `main` local e remoto
+ficaram sincronizados. Resta repetir o OAuth real no navegador e confirmar que
+o ID Magalu devolve `state` junto com um novo `code`.
+
+## 2026-08-28 - Correcao de coordenadas da empresa pelo ADM
+
+O detalhe administrativo da empresa agora permite corrigir o endereco
+principal pela busca do Google. Tanto `Editar empresa` quanto o gerenciador de
+enderecos exigem selecionar uma sugestao valida, mostram rua, cidade, CEP e as
+coordenadas antes de salvar e enviam `lat`/`lng` pelo contrato administrativo
+ja existente. Enderecos antigos sem ponto geografico aparecem com o aviso
+`Sem coordenadas - corrija antes da coleta`; enderecos validos mostram
+`Coordenadas confirmadas`.
+
+O recorte reutiliza as rotas, schemas e auditoria ja existentes. Nao houve
+endpoint, schema Prisma, migration, segredo ou permissao nova. O objetivo e
+permitir que o ADM desbloqueie com seguranca coleta e retorno quando um cadastro
+legado possui somente o texto do endereco, sem desligar globalmente os raios de
+proximidade.
+
+Arquivos: novo
+`apps/admin-web/src/components/companies/google-address-autocomplete.tsx` e
+ajustes em `edit-company-dialog.tsx` e `company-related-records.tsx`.
+Validacoes aprovadas: typecheck, lint e build de producao do Admin Web, com 37
+paginas geradas; `git diff --check` tambem passou. Nao houve commit, push ou
+deploy. Proximo passo: publicar o Admin Web e, no detalhe da empresa afetada,
+selecionar o endereco no Google e salvar antes de o motoboy repetir a coleta.
+
+O recorte foi publicado no commit `ae1ca7b`. O CI `33211864511` concluiu com
+sucesso e o deployment Vercel de producao do Admin Web `6148687452` terminou
+com estado `success`; a URL oficial `https://motoboycity-admin-web.vercel.app`
+respondeu HTTP 200. Como os dois projetos Vercel estao conectados ao mesmo
+monorepo, a Company Web tambem gerou um deployment automatico do mesmo commit,
+sem mudanca em seus arquivos. A API/Render e o banco nao foram reiniciados nem
+alterados neste recorte. Resta somente o smoke autenticado: abrir a empresa no
+ADM, escolher a sugestao do Google, salvar e repetir a coleta no pedido ativo.
+
+## 2026-08-28 - Teto ampliado de entregas simultaneas
+
+O limite configuravel de entregas simultaneas por motoboy passou a aceitar de
+1 a 200. A mudanca evita que uma operacao que prefira usar um teto alto seja
+bloqueada pelo maximo anterior de 50. O valor atualmente salvo nao e alterado
+automaticamente: o administrador ainda precisa informar o novo limite em
+`Configuracoes > Operacao`.
+
+O teto de pedidos por lote continua em 50, conforme o contrato de lotes. Para
+impedir que a ampliacao de capacidade mudasse esse contrato por acidente, o
+Admin Web passou a usar constantes separadas para entregas simultaneas e lote.
+Nao houve alteracao de schema Prisma, migration, endpoint ou formato de
+payload.
+
+Arquivos afetados: `packages/validation/src/admin/update-platform-settings.schema.ts`,
+`apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx` e este handoff.
+Validacoes aprovadas: build e lint de `@motoboycity/validation`, typecheck e
+lint do Admin Web, `git diff --check` e verificacao direta do schema: 200 foi
+aceito, 201 recusado, enquanto o lote manteve 50 aceito e 51 recusado. A
+primeira tentativa dos comandos nao executou porque `pnpm` nao estava no PATH;
+a repeticao equivalente com `corepack pnpm` passou. Proximo passo: publicar API
+e Admin Web e entao configurar o valor desejado no ADM.
+
+## 2026-08-28 - Punicao automatica de entregadores
+
+O administrador passa a poder tirar do despacho, por um tempo configurado, o
+motoboy que recusa ou deixa expirar ofertas seguidas. A regra nasce
+DESLIGADA e cada campo so tem efeito com a chave ligada. O motoboy punido
+continua online e continua tocando o que ja aceitou; o que para e a chegada de
+oferta nova.
+
+Esta decisao contraria dois registros anteriores: `docs/gap-analysis-plataforma-atual.md`
+e `docs/plano-implementacao-2026-08.md` classificaram "punicao de entregadores"
+como gestao de frota fora de escopo. O responsavel pediu a implementacao nesta
+sessao; o registro fica aqui para a divergencia nao parecer descuido.
+
+### Decisoes de produto confirmadas nesta sessao
+
+- **Contagem por sequencia**, nao por janela de tempo: qualquer pedido aceito
+  zera o contador, e aplicar a punicao tambem zera. Quem cumpre o castigo volta
+  com a ficha limpa em vez de ficar a uma recusa da proxima punicao. A tela de
+  referencia nao tem campo de janela, o que sustentou essa leitura.
+- **Aviso no aplicativo** e obrigatorio. Sem ele, o motoboy fica com o botao
+  Ativo ligado, nenhuma corrida entrando, e conclui que o aplicativo quebrou.
+- **Liberacao manual pelo ADM** com motivo obrigatorio e auditoria.
+
+### O que conta como recusa, e o que nao conta
+
+Foi o ponto mais delicado do recorte. Tres caminhos diferentes gravam
+`DeliveryOffer.response = 'EXPIRED'`, e so um deles e culpa do motoboy:
+
+1. a oferta expirou sem resposta — conta (se o gatilho incluir EXPIRED);
+2. o pedido foi cancelado pela loja/admin (`cancelPendingOfferForDelivery`) —
+   nao conta, e nunca passou pelo caminho da punicao;
+3. o admin bloqueou/suspendeu o motoboy e as ofertas dele voltaram para a fila
+   (`releasePendingOffersForDriver`) — **nao conta**. Esse fluxo reaproveita
+   `handleOfferExpired`, entao a funcao ganhou `options.punish`, e o bloqueio
+   passa `false`. Sem isso o sistema puniria o motoboy pela decisao do admin.
+
+Por essa razao a contagem vive em `Driver.consecutiveOfferRefusals`, um contador
+explicito, e nao numa consulta em `DeliveryOffer`: contar as linhas `EXPIRED`
+misturaria os tres casos. Em lote, a recusa conta UMA vez — o lote e ofertado e
+respondido como unidade, e contar por item transformaria um "nao" em cinco.
+
+### Efeito no despacho
+
+`findNextEligibleDriverId` exclui os punidos junto com quem ja tem oferta
+pendente. `eligibleDriverWhere` nao foi tocado: suas condicoes descrevem quem
+PODE atender, e o punido continua podendo. A punicao e reconferida DENTRO da
+transacao de `createPendingOffers`, pelo mesmo motivo do teto de entregas
+simultaneas — entre escolher o motoboy e criar a oferta ele pode ter recusado
+outra corrida.
+
+A vitrine de pedidos disponiveis (`listAvailableForDriver`) tambem some, e
+`claimDelivery` recusa com 403. Sem isso a regra nao teria efeito nenhum:
+bastaria recusar a oferta e pegar o mesmo pedido na lista um segundo depois.
+
+Uma lacuna encontrada e fechada durante a implementacao: nada acordava o
+despacho no fim do castigo. Hoje a unica varredura de pedidos parados acontece
+quando um motoboy fica online; se todos os elegiveis estivessem punidos, o
+pedido ficaria na fila sem oferta nenhuma ate alguem entrar. Foi criado o job
+BullMQ `punishment-expire`, agendado para o fim do prazo, e a liberacao manual
+pelo ADM tambem dispara a varredura (`AdminDriversService.revokePunishment`).
+
+### Persistencia
+
+`DriverPunishment` e append-only e a punicao ativa e DERIVADA (`expiresAt >
+agora AND revokedAt IS NULL`), nao um campo `blockedUntil` sobrescrito. Assim
+nao existe estado a expirar por job: se o job falhar, ninguem fica punido para
+sempre — ele so serve para acordar o despacho. O registro guarda quantas
+recusas somaram, qual pedido fechou a conta, o prazo congelado e quem liberou
+antes da hora.
+
+Duas migrations aditivas, nenhuma destrutiva:
+`20260828193000_driver_punishment` (enums `DriverPunishmentTrigger` e
+`DriverPunishmentReason`, tabela `driver_punishments`, seis colunas em
+`platform_settings`) e `20260828194500_driver_refusal_counter`
+(`drivers.consecutiveOfferRefusals`, default 0).
+
+### Armadilha de ambiente encontrada
+
+O `prisma migrate dev` nao roda neste worktree: a migration
+`20260824105857_aviso_de_pagamento_da_loja` foi editada depois de aplicada no
+banco de desenvolvimento, e o Prisma exige `migrate reset` — que apagaria o
+banco. A migration foi gerada com `prisma migrate diff` contra um PostgreSQL
+temporario (`motoboycity_migtmp`, criado e descartado no mesmo container), lida
+antes de aplicar, e conferida com `--exit-code`: "No difference detected" prova
+que as 45 migrations somadas produzem exatamente o `schema.prisma`. Depois
+`prisma migrate deploy` aplicou as pendentes no dev local. **O drift continua
+la** e vai reaparecer no proximo `migrate dev`.
+
+Segunda armadilha, relacionada: o Prisma CLI deste projeto le `apps/api/.env` e
+esse valor VENCE um `DATABASE_URL` passado na linha de comando. Override
+inline nao funciona para o CLI (funciona para o Jest/Nest, que usa
+`ConfigModule` sem override). Comandos que precisam de outro banco tem de usar
+`--url` / `--shadow-database-url` explicitos.
+
+### Arquivos
+
+API: novo `apps/api/src/driver-punishment/` (service, spec, module);
+`dispatch.service.ts`, `dispatch.processor.ts`, `dispatch.module.ts`;
+`driver-presence.service.ts` e module; `admin-drivers.controller.ts`,
+`admin-drivers.service.ts` e module; `admin-platform-settings.service.ts`;
+duas migrations e `schema.prisma`.
+
+Contratos: `packages/validation/src/admin/update-platform-settings.schema.ts`,
+novo `revoke-driver-punishment.schema.ts`, `packages/types/src/driver.ts` e
+`pricing.ts`, `packages/api-client/src/admin-drivers.ts`.
+
+Admin Web: nova pagina `configuracoes/punicao/page.tsx`, novo
+`components/drivers/driver-punishments.tsx`, cartao no indice
+`configuracoes/page.tsx` e montagem no detalhe do entregador.
+
+Driver App: `store/dispatchStore.ts`, `lib/socket.ts`, `screens/HomeScreen.tsx`
+e `screens/AvailableDeliveriesScreen.tsx`.
+
+Um ajuste adjacente: o `.refine` de `updatePlatformSettingsSchema` era uma lista
+de dezesseis comparacoes, uma por campo. Esquecer de acrescentar uma linha ali
+nao quebra compilacao nem teste — apenas aceita um payload vazio em silencio.
+Passou a ser `Object.values(data).some((v) => v !== undefined)`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` antes e depois do schema | aprovado |
+| `prisma migrate diff --exit-code` (45 migrations vs. schema) | "No difference detected" |
+| `prisma migrate deploy` no PostgreSQL local | 4 migrations pendentes aplicadas |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 952 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 21 suites, 118 testes aprovados |
+| `pnpm --filter @motoboycity/company-web test` | 17 arquivos, 63 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 235 testes aprovados |
+| builds de producao API, Company Web e Admin Web | aprovados (Admin Web com 38 paginas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: 21 testes unitarios em `driver-punishment.service.spec.ts`
+(cada ramo da regra, incluindo as duas excecoes configuraveis, a nao-empilhagem
+e as corridas de liberacao), 9 em `dispatch.service.spec.ts` (chamada nos
+lugares certos, ausencia no bloqueio administrativo, agendamento do job,
+exclusao da selecao, vitrine e claim) e 2 E2E em `delivery-offers.e2e-spec.ts`
+que provam no banco real que o pedido seguinte nao chega ao punido e que a
+liberacao pelo ADM o devolve ao despacho.
+
+O banco isolado `motoboycity_e2e_local` estava 14 migrations atras e foi
+atualizado com `migrate diff` + `db execute --url`, com as linhas
+correspondentes registradas em `_prisma_migrations` para continuar aceitando
+`migrate deploy`. O primeiro run local falhou em `delivery-lifecycle` por
+`THROTTLE_LIMIT` ausente (o CI usa 100000) e por raios de 100 m deixados em
+`platform_settings` por um run abortado — nenhum dos dois relacionado a este
+recorte.
+
+### Limitacoes e proximo passo
+
+- **Sem push.** A punicao chega por Socket.IO e pela resposta de
+  `GET /driver/presence`. Quem estiver com o aplicativo FECHADO so descobre ao
+  abrir. Um push proprio ficaria natural aqui e nao foi implementado.
+- **Sem tela de lista dos punidos no ADM.** A punicao aparece no detalhe do
+  entregador, onde tambem fica o botao de liberar. Nao ha uma visao "quem esta
+  punido agora" na Home.
+- **iOS nao verificado.** O aviso no aplicativo foi implementado em JavaScript
+  compartilhado; nao houve compilacao nativa nesta sessao.
+- Nao houve commit, push, deploy nem build Android.
+
+Proximo passo concreto: revisar o diff, publicar API e Admin Web e, no ADM,
+abrir `Configuracoes > Punicao de entregadores` para ligar a regra com os
+numeros desejados — ela nasce desligada e nao muda nada ate isso. O Driver App
+so precisa de release novo para o aviso na tela; a regra ja vale no servidor
+para qualquer versao instalada.
+
+## 2026-08-28 - Correcao: endereco sem coordenada travava a finalizacao
+
+Relato de producao: os motoboys pararam de conseguir finalizar pedidos, "nem
+mesmo perto da loja", e aumentar os raios nao resolveu. O administrador
+continuava finalizando pelo painel. Alguns pedidos "voltavam" depois de ja
+terem sido dados como finalizados.
+
+### A causa
+
+Criar e concluir tinham exigencias diferentes sobre o mesmo dado.
+
+`resolverCoordenadaDoDestino` falha em SILENCIO: se o Google nao encontra o
+endereco ou a chamada falha, o pedido e criado com `lat`/`lng` nulos e fica
+apenas um aviso no log. Na conclusao, `assertNearDeliveryAddress` e
+`assertNearCompanyAddress` falhavam ALTO, com 409, quando o endereco de
+referencia nao tinha coordenada.
+
+Essa recusa acontecia ANTES de qualquer conta de distancia. Por isso 500 m,
+5000 m ou 50000 m davam no mesmo: o codigo nunca chegava a comparar posicao com
+raio. O motoboy podia estar em cima da loja.
+
+O defeito ficou latente ate os raios serem configurados — com `null` a regra
+fica desligada e nada quebra. Quando os tres raios foram ligados, todo pedido
+cujo destino nao geocodificou virou impossivel de finalizar pelo aplicativo.
+
+O administrador continuava conseguindo porque a rota administrativa pula a
+checagem de proximidade de proposito.
+
+O segundo sintoma tem a mesma origem: o motoboy toca finalizar, a acao e salva
+no aparelho e o app mostra "Finalizacao salva no aparelho", tirando o pedido da
+lista de ativos; a sincronizacao em segundo plano leva o 409, o item vira
+`NEEDS_REVIEW` e o pedido nunca foi concluido no servidor. Ele viu "salvo", e o
+pedido reapareceu.
+
+### A correcao
+
+A validacao passou a DEGRADAR com auditoria em vez de recusar. Onde ha
+coordenada, a trava continua inteira — inclusive a recusa por distancia e por
+precisao de GPS. Onde nao ha, a etapa passa MARCADA:
+
+- o historico registra `SEM validação de proximidade`, qual endereco esta sem
+  ponto, o raio configurado e a posicao que o aplicativo enviou — sem ela, uma
+  etapa nao validada nao deixaria evidencia nenhuma de onde o motoboy estava;
+- o painel recebe um aviso em tempo real, para alguem corrigir o cadastro. Sem
+  isso, um endereco incompleto continuaria furando a trava silenciosamente e a
+  regra que o admin acredita ter ligado nao valeria para ninguem;
+- na CRIACAO, a falha de geocodificacao tambem passou a avisar o painel, e nao
+  so o log. O silencio ali era metade do defeito: o problema so aparecia horas
+  depois, na mao do motoboy.
+
+A decisao de fundo foi essa: entre recusar o trabalho de quem esta na rua e
+aceitar com marca de auditoria um pedido cujo cadastro esta incompleto, a
+segunda opcao e a que nao pune a pessoa errada. Quem pode corrigir o cadastro
+nao e o motoboy.
+
+`assertNearCompanyAddress` e `assertNearDeliveryAddress` passaram a devolver um
+`ProximityOutcome` (`DESLIGADA` / `VALIDADA` / `SEM_COORDENADAS`) em vez de
+`number | null`, e os tres pontos de chamada montam a nota pelo mesmo helper.
+
+### Alcance
+
+Nenhuma alteracao de schema, migration, contrato de API, payload ou permissao.
+O aplicativo NAO precisa de release: os pedidos hoje presos em `NEEDS_REVIEW`
+na fila offline destravam sozinhos ao sincronizar, assim que a API subir.
+
+Arquivos: `apps/api/src/deliveries/deliveries.service.ts`, mais os testes em
+`deliveries.service.spec.ts` e `test/delivery-lifecycle.e2e-spec.ts`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 956 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Dois testes unitarios que fixavam a recusa foram reescritos para o contrato
+novo, e um E2E novo reproduz o estado exato dos pedidos de producao: destino
+com `lat`/`lng` nulos, motoboy longe, finalizacao aceita e nota de auditoria
+gravada. A trava com coordenada presente continua coberta pelos testes que ja
+existiam.
+
+### Limitacoes e proximo passo
+
+- **A causa raiz da falta de coordenada nao foi investigada em producao.** Se o
+  volume de `Endereco de entrega sem coordenada` no log for alto, a suspeita e
+  a **Geocoding API** nao estar habilitada na chave do servidor — e uma API
+  separada da Routes, que o calculo de distancia usa e que funciona. Conferir
+  antes de considerar o assunto encerrado.
+- Enderecos de empresa sem coordenada continuam existindo; a correcao pelo ADM
+  publicada em `ae1ca7b` resolve caso a caso e ainda nao foi aplicada.
+- Nao houve push, deploy nem build Android.
+
+Proximo passo concreto: publicar a API, pedir aos motoboys que toquem
+sincronizar na Home para as finalizacoes presas subirem, e entao conferir no
+log quantos enderecos estao sem coordenada para decidir se o problema e a chave
+do Google ou cadastro pontual.
+
+## 2026-08-28 - Reoferta manual para motoboy escolhido pelo ADM
+
+### Estado implementado
+
+- Nos tres pontos do card em `Buscando motoboy`, o ADM ganhou a acao
+  `Reenviar oferta`.
+- O dialogo permite escolher um motoboy ativo/disponivel, exige um motivo e
+  envia a oferta pelo mesmo Socket.IO e push do despacho automatico.
+- A reoferta nao exclui historico: o motoboy escolhido pode ja ter recusado ou
+  deixado expirar esse mesmo pedido em uma rodada anterior.
+- A API nao rouba uma oferta em andamento. Pedido/lote precisa continuar em
+  `AWAITING_DRIVER` e sem `DeliveryOffer` pendente.
+- Regiao, modalidade, conta aprovada/ativa, disponibilidade, heartbeat ao vivo,
+  capacidade simultanea, punicao e outra oferta pendente do motoboy sao
+  revalidados; a criacao final continua sob lock/transacao serializavel.
+- Para lote, todos os itens recebem novas ofertas vinculadas ao mesmo motoboy.
+- A intervencao grava uma linha de historico sem mudar o status, com ADM e
+  motivo. Falha isolada dessa auditoria nao faz a tela repetir uma oferta que
+  ja esta tocando.
+- Nenhuma alteracao no Driver App/APK: versoes instaladas recebem a nova oferta
+  pelo protocolo existente.
+
+### Contratos e arquivos
+
+- Novo `POST /admin/operations/deliveries/:id/reoffer`, payload
+  `{ driverId, reason }` e retorno `AdminTargetedDispatchResult`.
+- Contratos: `packages/validation/src/admin/reoffer-delivery.schema.ts`,
+  `packages/types/src/operations.ts` e
+  `packages/api-client/src/admin-operations.ts`.
+- API: `apps/api/src/dispatch/dispatch.service.ts` e
+  `apps/api/src/admin/operations/*`.
+- UI: `apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+### Validacao executada
+
+- `pnpm --filter @motoboycity/validation build`: aprovado.
+- Typecheck de types, api-client, API e Admin Web: aprovado.
+- Jest focado em dispatch e operacoes administrativas: 2 suites e 93 testes
+  aprovados. A cobertura nova prova repeticao apos recusa historica, bloqueio
+  com oferta pendente e bloqueio quando o escolhido perdeu o heartbeat.
+
+### Proximo passo
+
+Lint dos cinco workspaces afetados e builds de producao da API e do Admin Web
+foram aprovados. Proximo passo: publicar API e Admin Web e fazer um teste real
+com pedido em `Buscando motoboy`. Nao e necessario novo APK para esta acao.
+
+## 2026-08-28 - GPS tolerante na coleta, entrega e retorno
+
+Levantamento pedido pelo responsavel depois do incidente da finalizacao: quais
+regras podem travar o motoboy, e quais delas ele consegue desligar sozinho no
+ADM numa emergencia.
+
+O resultado util foi a lista do que NAO tem interruptor. A mais grave era o
+proprio aplicativo: `captureCurrentLocation` exige um fix de alta precisao em
+ate 20 segundos, sem cache, e era chamada incondicionalmente antes de coleta,
+entrega e retorno — inclusive com todos os raios desligados no painel. Se o GPS
+nao fechasse (garagem, predio, economia de bateria, permissao negada), a acao
+nem saia do celular, e nenhuma configuracao do ADM alcancava isso.
+
+O projeto ja tinha resolvido esse mesmo problema no botao de ficar online: o
+comentario de `capturePresenceLocation` registra que "com a regra estrita o
+motoboy simplesmente nao consegue comecar a trabalhar, que foi o que travou o
+teste no aparelho". A finalizacao tinha ficado para tras.
+
+### O que mudou
+
+Nova `captureCompletionLocation`, usada nas tres etapas: tenta o fix fino
+(20 s, sem cache) e, se ele nao vier, cai para a posicao aproximada; se nem
+essa vier, ou se a permissao estiver negada, devolve `null` e a etapa segue sem
+posicao.
+
+A posicao deixou de ser pre-requisito local e virou informacao enviada ao
+servidor. Quem decide se ela basta e a regra de proximidade:
+
+- raio desligado — a etapa passa, ninguem trava;
+- raio ligado e precisao pior que o raio — o servidor recusa com o numero
+  exato ("a precisao agora e 800m, maior que o raio de 500m");
+- entrega com destino definido por GPS — continua protegida pelo teto proprio
+  de 100 m em `MAX_LOCATION_ACCURACY_METERS`, que independe do raio, porque ali
+  a coordenada vira destino e preco.
+
+Nao ha teto de precisao no cliente, ao contrario da captura de presenca. O teto
+e o raio configurado, e quem escolhe o raio e o administrador. Um teto local
+seria mais uma trava fora do alcance de quem opera — exatamente o defeito que
+este recorte remove.
+
+A decisao sai do aparelho do motoboy e volta para a tela de configuracoes.
+
+### Correcoes incluidas
+
+A nota de auditoria do retorno saia com concordancia errada — "Retorno
+validada" — desde o recorte anterior, que unificou os tres textos num helper
+com o adjetivo fixo no feminino. O genero agora vem de quem chama: "Coleta
+validada", "Entrega validada", "Retorno validado".
+
+As mensagens da fila offline culpavam a conexao por um estado que o aplicativo
+nao tem como diagnosticar. O aviso que o motoboy mais ve dizia "assim que a
+internet voltar", mas ele aparece sempre que o servidor demora mais que os
+2,5 s de `IMMEDIATE_COMPLETION_SYNC_WAIT_MS` — e depois de um deploy, com a
+instancia fria, passar disso e banal. O motoboy lia aquilo, via o sinal cheio e
+concluia que o aplicativo estava perdido.
+
+Os quatro textos passaram a descrever o que de fato acontece — "assim que o
+servidor responder", "aguardando confirmacao" — e o alerta principal agora
+aponta onde o problema aparece se houver: a tela inicial. A frase sobre a conta
+("abra o aplicativo uma vez com internet") ficou como estava, porque ali a
+conexao e mesmo o requisito.
+
+### O defeito que o levantamento desenterrou
+
+Com a tela ainda mostrando `Pedido #201 precisa de atencao — e necessario obter
+sua localizacao atual para concluir o retorno`, ficou claro que o retorno tinha
+uma causa PROPRIA, diferente da falta de coordenada no cadastro.
+
+A tela capturava o fix do retorno e o DESCARTAVA ao enfileirar: em
+`queueAndSynchronizeCompletion`, o ramo de `COMPLETE_RETURN` montava o item sem
+`payload`, e `enqueueDeliveryCompletion` transformava a ausencia em `{}` por
+causa do `input.payload ?? {}`. O tipo permitia, porque o campo era opcional
+so nesse ramo — nenhum erro de compilacao, nenhum teste quebrado.
+
+Consequencia: com `returnProximityRadiusMeters` configurado, NENHUMA conclusao
+de retorno funcionava pelo aplicativo, para nenhum motoboy, em lugar nenhum. A
+posicao existia no aparelho e nunca chegava ao servidor. Isso explica "nem
+mesmo perto da loja" melhor do que a hipotese do cadastro, e explica por que
+aumentar o raio nao mudava nada.
+
+O `payload` do retorno passou a ser OBRIGATORIO no tipo e o `?? {}` saiu. A
+mudanca de tipo imediatamente acusou quatro chamadas nos proprios testes que
+faziam a mesma omissao — a prova de que o opcional era o buraco. A regra de
+negocio ja dizia o comportamento esperado ("entrega e retorno mantem o fix
+original na fila offline ate a API confirmar"); era a implementacao que
+divergia.
+
+### Nao alterado, e por que
+
+`fail` (problema na entrega) continua com a captura estrita. Ali a posicao so e
+capturada quando o destino nao foi informado na criacao, e nesse caso ela
+define o preco do insucesso — e o mesmo caminho de dinheiro protegido pelo teto
+de 100 m. Vale revisar em outro recorte se a mesma tolerancia se aplica.
+
+### Arquivos
+
+`apps/driver-app/src/lib/location.ts`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/screens/HomeScreen.tsx` (textos),
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste, novo
+`apps/driver-app/__tests__/completionLocation.test.ts` e
+`apps/api/src/deliveries/deliveries.service.ts` (concordancia).
+
+### Validacoes executadas
+
+| Comando                                                           | Resultado                       |
+| ----------------------------------------------------------------- | ------------------------------- |
+| `pnpm typecheck` (raiz, 8 workspaces)                             | aprovado                        |
+| `pnpm lint` (raiz, 8 workspaces)                                  | aprovado                        |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand`     | 22 suites, 124 testes aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand deliveries` | 6 suites, 189 testes aprovados  |
+| Prettier nos arquivos alterados e `git diff --check`              | aprovados                       |
+
+Cobertura nova: 5 testes em `completionLocation.test.ts` — GPS fino quando
+responde, queda para a aproximada, ausencia de teto local, `null` quando
+nenhuma tentativa responde e `null` quando a permissao foi negada — mais um em
+`deliveryCompletionOutbox.test.ts` que prova que a posicao capturada chega ao
+`completeReturn`.
+
+### Limitacoes e proximo passo
+
+- **Precisa de APK.** A mudanca e toda do lado do aplicativo; a API nao muda.
+  Enquanto o `pilot.11` nao for instalado, a trava do GPS continua valendo nos
+  aparelhos.
+- Nao houve compilacao nativa, teste em aparelho, commit, push nem deploy.
+- Continua sem interruptor: modalidade nao atribuida ao motoboy (ele nunca
+  recebe oferta, sem aviso nenhum) e `dispatchOfferTimeoutSeconds` vazio, que
+  congela o despacho inteiro sem representar um estado "desligado".
+
+Proximo passo concreto: revisar o diff e decidir o conteudo do `pilot.11`, que
+hoje reuniria a punicao, este GPS tolerante e tudo do `pilot.10` que nunca
+chegou aos aparelhos.
+
+## 2026-08-28 - Interruptores para regras operacionais opcionais
+
+### Estado implementado
+
+- O PATCH de configuracoes agora distingue campo ausente (`manter`) de `null`
+  (`desligar`) em cinco campos: raios de coleta, entrega e retorno; prazo de
+  coleta; limite de entregas simultaneas por motoboy.
+- `dispatchOfferTimeoutSeconds` e `driverCommissionPercentage` continuam
+  recusando `null`, pois sao requisitos para despacho e precificacao.
+- A tela `Configuracoes > Operacao` ganhou `Desligar esta regra` somente quando
+  a regra esta ligada. A intencao fica destacada e so e aplicada ao salvar.
+- Um numero digitado e depois marcado para desligar nao bloqueia o salvamento;
+  o `null` explicito vence. Campo vazio sem o interruptor continua sem alterar.
+- Nao houve migration: as cinco colunas ja eram opcionais no Prisma.
+- Nenhuma alteracao nem execucao direta foi feita em banco de producao.
+
+### Arquivos do recorte
+
+- `packages/validation/src/admin/update-platform-settings.schema.ts`
+- `packages/types/src/pricing.ts`
+- `apps/api/src/admin/platform-settings/admin-platform-settings.service.spec.ts`
+- `apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`
+- `docs/business-rules.md`
+
+### Validacoes
+
+- Build de validation, typecheck de types/API/Admin Web: aprovados.
+- Teste focado de platform settings: 18 testes aprovados, incluindo os cinco
+  `null` permitidos, os dois proibidos e payload vazio.
+- Lint dos workspaces afetados: aprovado sem avisos.
+- Builds de producao da API e do Admin Web: aprovados.
+
+### Proximo passo
+
+Fazer teste visual seguro no ADM e, quando autorizado, publicar API e Admin Web.
+O interruptor funciona no painel web e nao exige APK.
+
+## 2026-08-28 - Fechamento das lacunas de GPS, retorno legado e resumo do ADM
+
+### Correcoes aplicadas
+
+- A captura para coleta, entrega e retorno nao espera mais ate 35 segundos. O
+  GPS fino tem 8 segundos e a alternativa aproximada 4 segundos, total maximo
+  de 12 segundos depois da permissao.
+- As duas tentativas usam `maximumAge: 0`. A alternativa nao aceita mais um
+  ponto de ate dois minutos atras, pois ele nao comprova a etapa e poderia virar
+  destino e preco em pedidos sem destino conhecido.
+- O toque manual no aviso de sincronizacao identifica retornos gravados pelo APK
+  antigo com `payload: {}` e captura uma posicao nova antes de tentar outra vez.
+  Essa recaptura nunca ocorre silenciosamente no bootstrap/reconnect.
+- A reparacao e atomica na outbox, vale para itens `PENDING` e `NEEDS_REVIEW`,
+  preserva conta/item e nunca substitui um fix valido ja congelado. Tambem cobre
+  a corrida em que a tentativa antiga ainda esta no ar: a recusa do payload
+  vazio nao rebaixa o item reparado para `NEEDS_REVIEW`, e o sync encadeado envia
+  a nova posicao.
+- O resumo lateral do ADM agora apresenta `Desligado` para prazo/raios e
+  `Sem limite` para simultaneas, mostra o desligamento ainda pendente e separa
+  simultaneas de tamanho do lote. Textos de ajuda e salvamento foram alinhados
+  ao payload real.
+- A explicacao dos raios agora corresponde ao servidor: quando o endereco de
+  referencia nao possui coordenadas, a etapa passa com registro de auditoria e
+  aviso ao ADM; nao afirma mais que o motoboy sera bloqueado.
+
+### Arquivos diretamente afetados neste fechamento
+
+- `apps/driver-app/src/lib/location.ts`
+- `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`
+- `apps/driver-app/src/screens/HomeScreen.tsx`
+- `apps/driver-app/__tests__/completionLocation.test.ts`
+- `apps/driver-app/__tests__/deliveryCompletionOutbox.test.ts`
+- `apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`
+- `docs/business-rules.md`
+
+Nao houve alteracao de rota, schema Prisma, migration, banco ou `.env`.
+
+### Validacoes executadas
+
+| Comando                                                 | Resultado                       |
+| ------------------------------------------------------- | ------------------------------- |
+| Jest completo do Driver App                             | 22 suites, 129 testes aprovados |
+| testes focados de localizacao + outbox                  | 2 suites, 24 testes aprovados   |
+| typecheck e lint do Driver App                          | aprovados                       |
+| typecheck, lint e build do Admin Web                    | aprovados; 38 rotas geradas     |
+| testes focados de deliveries + platform settings da API | 7 suites, 207 testes aprovados  |
+| build de validation, typecheck de types e build da API  | aprovados                       |
+| Prettier dos arquivos tocados e `git diff --check`      | aprovados                       |
+
+### Limitacoes e proximo passo
+
+- GPS historico perdido nao pode ser reconstruido. O toque registra a posicao
+  atual; se o motoboy ja saiu da loja e o raio estiver ligado, o servidor deve
+  continuar recusando corretamente.
+- Nao houve smoke em aparelho, build nativo, APK, teste visual autenticado no
+  ADM, commit, push ou deploy.
+- A correcao de GPS/outbox exige novo APK. Os interruptores/resumo exigem API e
+  Admin Web publicados juntos.
+
+Proximo passo concreto: smoke seguro no ADM e em um aparelho; depois, somente
+quando solicitado, separar os commits, publicar API/Admin Web e gerar o APK com
+versionCode novo e assinatura oficial.
+
+## 2026-08-28 - Inicio do release pilot.11
+
+O responsavel autorizou iniciar a publicacao. O Driver App foi promovido para
+`0.1.0-pilot.11`; o proximo `versionCode` reservado e `11`. O release deve usar
+a mesma chave oficial do `pilot.10` e apontar para a API HTTPS de producao.
+
+O preflight nao encontrou, no processo nem nos escopos User/Machine do Windows,
+as variaveis `MOTOBOYCITY_APP_ENV`, `MOTOBOYCITY_API_URL`, as quatro variaveis
+da chave oficial e `MOTOBOYCITY_VERSION_CODE`. Nenhum valor foi lido ou exibido.
+Por isso o APK assinado ainda nao foi gerado; o gate do Gradle impediria um
+release com assinatura debug ou sem versionCode explicito.
+
+Ordem preservada: validar o codigo com a versao nova, carregar as credenciais de
+release na sessao, gerar e verificar o APK oficial, criar os commits, fazer push,
+acompanhar CI/deploys e so entao distribuir o mesmo artefato conferido. Ate este
+ponto nao houve commit, push, deploy nem APK novo.
+
+## 2026-08-28 - Release pilot.11 concluido
+
+O release foi concluido no commit `e6c10bf` e enviado para `origin/main`. O CI
+`33228301883` aprovou typecheck, lint, testes unitarios e E2E e os builds da API,
+Company Web e Admin Web. Os deploys Vercel de Company Web e Admin Web ficaram
+com status `success`; a API publica e o Admin Web responderam HTTP 200 no smoke
+sem cache. Nao houve migration nem operacao direta no banco.
+
+O APK oficial foi gerado em worktree curta, com Firebase, chave do mapa, ambiente
+`production` e API `https://motoboycity-api.onrender.com`. O bundle contem essa
+URL e nao contem `localhost:3333`, `127.0.0.1` ou `10.0.2.2`. O `apksigner`
+confirmou assinatura v2 e o certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, versionName
+`0.1.0-pilot.11`, versionCode 11, minSdk 24 e targetSdk 36.
+
+O artefato tem 75.128.597 bytes e SHA-256
+`2CB2E85E89A29415008A28DDE39FD2F8ED94D888B5317A0BA0E1D599F00B57DD`.
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.11-vc11.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.11-vc11.apk`.
+
+As senhas foram lidas apenas de arquivos DPAPI temporarios, nao foram exibidas e
+foram removidas depois da assinatura. A worktree curta tambem foi removida.
+Resta instalar o APK em aparelho real e executar o smoke autenticado de retorno
+com GPS indisponivel e de ligacao/desligamento das regras opcionais no ADM.
+
+## 2026-08-28 - Diagnostico de finalizacao pendente no pilot.11
+
+### Incidente observado
+
+- O pedido `#206`, sem destino conhecido na criacao e com retorno, permaneceu
+  oficialmente em `COLLECTED` depois do toque em entregar. O pilot.11 preservou
+  a acao e o GPS na outbox, exibiu o estado projetado na Home e manteve o aviso
+  amarelo de confirmacao pendente; nao houve gravacao parcial de preco/status.
+- O mesmo fluxo havia funcionado em varios pedidos durante o dia. Uma chamada
+  de diagnostico feita depois, usando a chave local sem a exibir, obteve rota
+  valida da Routes API. Isso afasta bloqueio permanente da chave, mas nao prova
+  qual falha transitoria ocorreu no processo de producao naquele instante.
+
+### Correcoes preparadas
+
+- Falhas de rede, timeout e HTTP 5xx continuam `PENDING`, preservando o GPS,
+  mas agora gravam uma mensagem curta em `lastError`. A Home prioriza e exibe
+  essa causa no aviso; o toque manual limpa o erro anterior e reenvia o item.
+- O reenvio automatico ja ocorre no bootstrap, reconexao do socket, retorno do
+  segundo plano e atualizacao manual. Nao se recaptura GPS silenciosamente.
+- Se a entrega calculada no destino exigir retorno sem valor configurado, a API
+  converte `ReturnNotSupportedError` em conflito explicativo, em vez de deixar
+  o erro escapar como HTTP 500 e parecer indisponibilidade indefinida.
+- A falha da Routes API na conclusao agora gera log seguro com numero do pedido,
+  classe e mensagem do erro. Nao registra chave, coordenadas nem endereco.
+
+### Arquivos afetados
+
+- `apps/api/src/deliveries/deliveries.service.ts`
+- `apps/api/src/deliveries/deliveries.service.spec.ts`
+- `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`
+- `apps/driver-app/src/screens/HomeScreen.tsx`
+- `apps/driver-app/__tests__/deliveryCompletionOutbox.test.ts`
+
+### Recuperacao e proximo passo
+
+O item existente do `#206` continua recuperavel no aparelho: tocar no aviso
+amarelo reaproveita o GPS congelado e tenta a confirmacao novamente. Se falhar,
+a mensagem nova so aparecera em um APK contendo este recorte; o log detalhado so
+aparecera depois de publicar a API. Nao houve operacao direta no banco, commit,
+push, deploy nem APK neste recorte.
+
+Validacoes aprovadas: 138 testes focados de deliveries da API; 20 testes
+focados e 130 testes completos do Driver App; build e lint da API; typecheck e
+lint do Driver App; Prettier e `git diff --check`.
+
+## 2026-08-29 - Inicio do release pilot.12
+
+O responsavel autorizou publicar o recorte acima. O Driver App foi promovido
+para `0.1.0-pilot.12` e o `versionCode` reservado e `12`. A API pode ser
+publicada sem migration: a mudanca apenas melhora o erro de precificacao do
+retorno e adiciona diagnostico seguro da Routes API.
+
+A chave JKS oficial, `google-services.json` e `local.properties` existem fora
+do Git. As quatro credenciais de assinatura nao permanecem no ambiente nem em
+arquivo reutilizavel; precisam ser carregadas novamente na sessao de build sem
+ser exibidas. Nenhum APK `pilot.12` foi gerado ate este registro.
+
+### Conclusao do pilot.12 e hotfix de rota do destino capturado
+
+O CI `33230377250` aprovou todas as etapas. O APK oficial foi gerado em `C:\m12`,
+assinado pelo certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` e
+instalado via ADB como atualizacao, preservando os dados. O aparelho confirmou
+`versionName 0.1.0-pilot.12`, `versionCode 12`, processo ativo e nenhum erro
+fatal no smoke de abertura.
+
+O artefato tem 75.130.089 bytes e SHA-256
+`BE79C4964F93A6CD5422824AB264461481DB5A3E91921EA47C2B78DDDE0BCDCC`.
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.12-vc12.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.12-vc12.apk`.
+
+O primeiro retry real do pedido `#206` revelou nos logs da API a causa precisa:
+`GoogleMapsApiError: Resposta da API do Google Maps sem rota valida`. Portanto
+nao era quota, chave ausente nem falha de rede. A coordenada capturada nao
+produziu rota viaria direta. A API agora, somente nesse erro, faz reverse
+geocode da mesma coordenada pelo Google e tenta novamente usando o endereco
+normalizado. A distancia continua vindo da Routes API; nao existe fallback por
+linha reta nem preco inventado. O mesmo helper cobre entrega e insucesso
+pos-coleta com destino definido no local.
+
+Validacoes do hotfix: 139 testes focados de deliveries e build da API
+aprovados. O hotfix e somente de servidor e nao exige outro APK.
+
+Um retry real depois desse deploy mostrou que normalizar apenas o destino ainda
+era insuficiente. A Routes API agora tenta tambem a origem da empresa
+geocodificada como coordenada antes do fallback pelo endereco do destino. A
+distancia continua obrigatoriamente vindo da Routes API. Validacoes: 110 testes
+do `DeliveriesService` e build da API aprovados; nenhum novo APK e necessario.
+
+O teste externo seguinte (`#208`) tambem falhou, mas o diagnostico ADB comprovou
+que o GPS fino respondeu rapidamente; a alternativa aproximada do pilot.11 nao
+foi usada. A auditoria encontrou que o retry acima re-geocodificava o texto da
+origem mesmo quando a empresa ja tinha coordenadas persistidas. Como o geocode
+do projeto rejeita resultados `GEOMETRIC_CENTER`/`APPROXIMATE`, o retry
+coordenada-a-coordenada podia nunca acontecer. O servico agora prioriza as
+coordenadas cadastradas da origem e so geocodifica o texto quando elas faltam.
+Validacoes locais: 111 testes do `DeliveriesService`, build da API e
+`git diff --check` aprovados. Mudanca ainda nao publicada neste registro.
+
+Depois da publicacao, tocar no aviso continuou mostrando seis itens porque a
+outbox sempre comecava pelo `#206`: a API classificava "sem rota" como 503, e
+qualquer 5xx interrompe a fila por representar indisponibilidade geral. Assim o
+teste externo `#208` nunca era enviado. O erro persistente de rota agora e 422
+(`NEEDS_REVIEW`) e bloqueia somente o grupo afetado; a sincronizacao continua
+nos pedidos seguintes. Rede, timeout e outros 5xx continuam `PENDING` e
+interrompem corretamente. Validacoes locais: 112 testes do
+`DeliveriesService`, 21 testes da outbox, build da API e `git diff --check`
+aprovados. Mudanca ainda nao publicada neste registro.
+
+## 2026-08-29 - Fechamento do incidente de conclusao: saidas que faltavam e ruido de aviso
+
+Depois da auditoria do incidente do #206, tres defeitos ficaram provados e sem
+correcao. Este recorte fecha os dois primeiros e reduz o terceiro.
+
+### 1. O reparo do retorno consertava o item e o deixava parado
+
+`enqueueDeliveryCompletion` repara um retorno legado acrescentando a posicao que
+faltava. O reparo era `{ ...existing, payload }`, e o spread carregava junto o
+`state: 'NEEDS_REVIEW'` e o `lastError` da tentativa anterior. Como
+`synchronizeQueue` ignora tudo que nao esta `PENDING`, o item consertado nao
+subia.
+
+Na pratica: o motoboy tocava "concluir retorno", o aplicativo capturava o GPS,
+e nada acontecia — ele ainda precisava tocar no aviso amarelo, um gesto sem
+relacao aparente. E a tela repetia o erro ANTIGO, falando da localizacao que
+acabara de ser obtida.
+
+O reparo agora devolve `state: 'PENDING'` e limpa `lastError`. O teste que
+existia partia de um item ja `PENDING`, entao nunca exercitou o caso real; o
+teste novo parte de `NEEDS_REVIEW` e confirma que a sincronizacao seguinte
+envia.
+
+### 2. Pedido de preco diferido nao tinha NENHUMA saida
+
+Um pedido com destino definido na entrega, que o aplicativo nao conseguisse
+concluir, ficava preso em `COLLECTED` para sempre:
+
+- o motoboy nao fechava, porque a conclusao dependia do calculo que falhava;
+- `forceComplete` so aceita `DELIVERED` e `FAILED`;
+- `markDelivered` do painel recusava explicitamente esses pedidos — "Confirme
+  pelo aplicativo do motoboy" — que era justamente o que nao funcionava.
+
+Sem distancia nao ha preco, e inventar um seria cobrar a empresa e pagar o
+motoboy por um numero que ninguem mediu. Entao `manualDeliveryStageSchema`
+ganhou `distanceKm` OPCIONAL, exigido somente nesse caso: o administrador
+informa a distancia, ela fica no historico junto com o motivo, e o preco sai da
+`PricingService.quote` normal — mesma tabela, mesma taxa vigente.
+
+Um `distanceKm` enviado para um pedido que JA tem valor e recusado em vez de
+ignorado: descartar em silencio faria o admin acreditar que mudou o preco.
+
+### 3. Ruido de aviso no aplicativo
+
+Ate cinco avisos podiam se empilhar na Home — sincronizacao, punicao, presenca,
+rastreamento e falha da aba — empurrando a lista de pedidos para fora da tela.
+Foi o que apareceu durante as rodadas de diagnostico.
+
+Agora e UM aviso por vez, por prioridade, na ordem do custo de ignorar:
+finalizacao pendente (dinheiro), rastreamento, presenca, falha da aba e, por
+ultimo, punicao — que informa mas nao tem acao possivel. Os demais nao somem
+calados: um contador diz quantos esperam.
+
+Na tela de operacao, o mesmo fato gerava tres avisos: uma mensagem de sucesso
+que a tela descartava ao sair, um modal pedindo um toque, e o banner da Home
+para onde o motoboy ia em seguida. Ficou so o banner — o unico que persiste,
+diz quantas acoes esperam e sincroniza no toque. O modal permanece apenas
+quando o servidor RECUSOU a operacao, que e interrupcao legitima.
+
+### 4. A causa raiz: rota de zero metro lida como "sem rota"
+
+O JSON do proto3 omite inteiro de valor padrao. Uma rota de 0 m chega do Google
+com `duration: "0s"` e SEM `distanceMeters` — e `google-maps.service.ts` tratava
+essa ausencia como resposta invalida. Nenhum raio adiantava, porque a recusa
+acontecia antes de qualquer conta de distancia; e os tres fallbacks nao ajudavam,
+porque todos terminam no mesmo `getDistance` e trocar endereco por coordenada
+nao muda o comprimento da rota.
+
+`distanceMeters` ausente passou a valer ZERO. Lista de rotas vazia continua
+sendo ausencia de rota, com a frase preservada ao pe da letra porque
+`deliveries.service` decide por ela se vale tentar outra forma de endereco;
+rota presente sem `duration` virou uma terceira mensagem, porque e defeito de
+contrato e nao falta de caminho.
+
+**Decisao de negocio confirmada pelo responsavel: entrega de 0 km cobra a taxa
+base.** E o que a tabela ja produz — `Math.max(0, 0 - includedDistanceKm)` zera
+o valor por quilometro e sobra a bandeirada. Nada e inventado.
+
+Como zero tambem e o sintoma de um toque errado na porta da loja, a conclusao
+grava no historico: "Entrega concluída no mesmo ponto da coleta — distância
+calculada: 0 km. Cobrada pela taxa base da tabela." Sem isso, a cobranca
+apareceria na fatura sem explicacao.
+
+O diagnostico do Google deixou de ser mudo: origem e destino sao registrados
+como `endereco` ou `coord(lat,lng)` com 4 casas — cerca de 11 metros, suficiente
+para conferir a regiao e insuficiente para apontar uma porta. O texto do
+endereco nunca entra no log.
+
+### Arquivos
+
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts` e seu module e spec,
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste,
+`apps/driver-app/src/screens/HomeScreen.tsx`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+Sem migration, sem mudanca de schema Prisma e sem alteracao no contrato de
+conclusao usado pelo aplicativo.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 974 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 22 suites, 132 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: um teste do reparo que parte de `NEEDS_REVIEW` e confirma o
+envio, e quatro do fechamento pelo painel — preco vindo da tabela, distancia no
+historico, recusa sem distancia e recusa de distancia em pedido ja precificado.
+
+### Limitacoes e proximo passo
+
+- O campo de distancia aparece em TODA entrega manual do painel, porque a lista
+  operacional nao carrega `destinationKnownAtCreation`. Quem decide e a API: ela
+  exige o numero nos pedidos de preco diferido e o recusa nos que ja tem valor.
+  Levar o campo ao contrato da lista deixaria a tela mais precisa, e e um
+  recorte proprio.
+- As mudancas do aplicativo so valem depois de um APK novo. As da API valem no
+  proximo deploy.
+- Nao houve commit, push nem deploy.
+
+Proximo passo concreto: decidir a causa do #206 com o log (rota zero vs.
+coordenada sem rota), corrigir `google-maps.service.ts` de acordo, e so entao
+montar o APK com estas mudancas de UX.
+
+## 2026-08-29 - Release pilot.13 e fechamento do incidente de conclusao
+
+### Deploy de servidor
+
+Os commits `0646418` (rota de zero metro), `a1088ef` (saida administrativa por
+distancia informada) e `b0ec9a8` (fila e ruido de aviso no app) foram enviados
+ao `main`. O CI `33234881517` aprovou migrations e seed isolados, typecheck,
+lint, testes unitarios da API, seguranca do reset, testes do Driver App, E2E e
+os builds de API, Company Web e Admin Web. A API publica e o Admin Web
+responderam HTTP 200 apos o deploy. Nao houve migration nem operacao no banco.
+
+As duas correcoes de servidor valem para o `pilot.12` que ja estava instalado:
+nenhuma delas mudou contrato.
+
+### APK oficial
+
+Versao promovida em `9262852` para `0.1.0-pilot.13`, `versionCode` 13.
+
+O artefato tem 75.130.081 bytes e SHA-256
+`82EF84F1B1CD44DB3CF17A01E456E702B0202005547B972B0DA88C85E2CC688C`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.13`, `versionCode` 13, minSdk 24 e targetSdk 36. O bundle contem
+`motoboycity-api.onrender.com` e nao contem `localhost:3333`, `127.0.0.1` nem
+`10.0.2.2`.
+
+Copias verificadas, com o mesmo hash, em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.13-vc13.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.13-vc13.apk`. Nenhum aparelho
+ADB estava conectado; o APK nao foi instalado.
+
+### Tres armadilhas do build, para a proxima vez
+
+**Caminho longo.** O build na pasta do projeto falha em `ninja` com "Filename
+longer than 260 characters", no `RNCSafeAreaViewShadowNode.cpp.o` do
+`react-native-safe-area-context`. E por isso que os releases anteriores usaram
+worktree curta. Repetido aqui com `git worktree add C:\m13`.
+
+**A worktree precisa de tres coisas que o Git nao leva.** Alem de
+`pnpm install`, e obrigatorio copiar `android/app/google-services.json` e
+`android/local.properties`, e rodar
+`pnpm --filter @motoboycity/validation build` — sem o `dist/`, o
+`createBundleReleaseJsAndAssets` falha resolvendo `@motoboycity/validation`,
+porque so esse pacote aponta o `main` para `dist/`; `types` e `api-client`
+apontam para `src/`.
+
+**Remover a worktree tambem esbarra no caminho longo.** `git worktree remove`
+falha com "Filename too long"; o registro sai, os arquivos ficam. Foi preciso
+`cmd /c rmdir /s /q C:\m13` depois.
+
+**JDK.** O pin em `~/.gradle/gradle.properties` nao existe mais nesta maquina; o
+build usa o `JAVA_HOME`, hoje em `C:\Program Files\java\jdk-21.0.5`. O `keytool`
+do PATH vem do JDK 25 da Microsoft e serve para inspecionar o keystore, mas nao
+e o que compila.
+
+### Credenciais
+
+O alias da chave e `motoboycity` — unica entrada do keystore, `PrivateKeyEntry`
+de 24/08/2026. O keystore oficial esta em
+`I:\MOTOboyCity\signing\motoboycity-release.jks`, com copia identica em
+`D:\MOTOboyCity-Backup\signing\`. Nenhum desses caminhos e segredo; as senhas
+foram lidas apenas de arquivos DPAPI criados pelo responsavel em `%TEMP%`,
+usadas no processo, nunca exibidas nem registradas, e os arquivos foram
+removidos ao final.
+
+### Correcao de um registro anterior
+
+Uma sessao anterior registrou que `I:\MOTOboyCity\releases` parava no pilot.9.
+Nao para: os pilot.10, 11 e 12 estao la. A leitura foi enganada pela ordenacao
+alfabetica, em que `pilot.1x` vem antes de `pilot.7`.
+
+### Proximo passo
+
+Instalar o `pilot.13` nos aparelhos e repetir o ciclo completo com destino
+definido na entrega e retorno: aceitar, coletar na loja, marcar entregue no
+destino, voltar e concluir o retorno. Conferir tambem que apenas UM aviso
+aparece na Home quando houver mais de uma pendencia.
+
+## 2026-08-29 - Insucesso pelo painel: o ultimo estado sem saida do ciclo
+
+A auditoria do ciclo de uma entrega encontrou UM estado do qual nem o motoboy
+nem o administrador conseguiam sair.
+
+### O estado
+
+Pedido de preco diferido — destino definido no momento da entrega — parado em
+`COLLECTED`, com a mercadoria na mao do motoboy.
+
+Registrar insucesso, em `markFailed`, passa por
+`calculateDeferredDestinationPricing`, que exige lat/lng, precisao de no maximo
+100 m e uma rota do Google. Falhando qualquer um dos tres, o motoboy nao
+registra. E o painel nao tinha equivalente: `markDelivered` ganhou `distanceKm`
+no recorte anterior, `markFailed` nao tinha nada, e `forceComplete` so aceita
+`DELIVERED` e `FAILED`.
+
+O pedido ficava preso indefinidamente, com o repasse do motoboy travado junto.
+
+### A correcao
+
+`DeliveriesService.markFailedByAdmin` espelha `markFailed`, inclusive na
+idempotencia e no `requiresReturn` que o insucesso liga. Duas diferencas
+deliberadas: a distancia vem do administrador em vez do GPS, e nao se cria
+endereco de destino, porque nao houve coordenada capturada para registrar.
+
+O preco sai das MESMAS rotinas do fluxo do motoboy — `quoteRequiredReturn` para
+o diferido, `calculateFailureReturnPricing` para o pedido ja precificado. O
+administrador informa a distancia; quanto a empresa paga e quanto o motoboy
+recebe continua vindo da tabela vigente. Distancia enviada num pedido que ja tem
+valor e recusada, nao ignorada.
+
+A regra vive em `DeliveriesService`, junto com o insucesso do motoboy;
+`AdminDeliveriesService.markFailed` so delega. Duas copias do mesmo calculo de
+retorno divergiriam, e a que envelheceria seria a rara.
+
+### Um defeito que so apareceu ao ligar a tela
+
+A saida administrativa da ENTREGA, publicada no recorte anterior, estava
+inalcancavel pelo painel: `canDeliver` exigia `destinationKnownAtCreation`, ou
+seja, o menu desabilitava "Marcar como entregue" exatamente nos pedidos de preco
+diferido — os unicos que travam. O rotulo ainda dizia "este pedido precisa do
+GPS do aplicativo para calcular o valor", que deixou de ser verdade quando a API
+passou a aceitar a distancia informada.
+
+Corrigido junto: `canDeliver` agora e so `status === 'COLLECTED'`, e o campo de
+distancia aparece somente quando o pedido realmente precisa dele — a lista
+operacional carrega `destinationKnownAtCreation`, ao contrario do que um
+registro anterior afirmou.
+
+### Arquivos
+
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`packages/api-client/src/admin-deliveries.ts`,
+`apps/api/src/deliveries/deliveries.service.ts` e seu spec,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts` e controller,
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+Sem migration, sem mudanca no contrato usado pelo aplicativo: vale no proximo
+deploy, sem APK.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 984 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: seis testes do insucesso administrativo — preco pela tabela com
+a distancia informada, recusa sem distancia, recusa de distancia em pedido ja
+precificado, exigencia de coleta previa, idempotencia e restricao a
+administrador.
+
+### O que a auditoria deixou em aberto
+
+- ~~Nenhum E2E cobre falha do Google na conclusao.~~ Fechado no mesmo dia: o
+  stub do `GoogleMapsService` em `delivery-lifecycle.e2e-spec.ts` virou
+  controlavel por teste, e tres casos passaram a rodar contra PostgreSQL e Redis
+  reais — rota de zero metro concluindo pela taxa base com a nota no historico;
+  ausencia de rota devolvendo 422, deixando o pedido intacto em COLLECTED e
+  sendo fechado pelo painel com a distancia informada; e falha transitoria
+  devolvendo 503 e concluindo sozinha quando o Google volta. Nao da para chamar
+  a API real no CI, mas da para reproduzir cada FORMA de resposta dela — e era
+  ai que o sistema quebrava.
+- A criacao com destino conhecido nao tem os fallbacks da conclusao, e responde
+  "tente novamente em instantes" mesmo quando o endereco e irroteavel — afirma
+  uma causa temporaria que nao sabe ser temporaria.
+- `MAX_LOCATION_ACCURACY_METERS = 100` e constante de codigo. Com raio de
+  entrega em 5000 m, um fix de 800 m passa na proximidade e e recusado no
+  diferido; os dois limites nao conversam, e o operador nao alcanca nenhum dos
+  dois.
+
+## 2026-08-29 - Precisao do destino por GPS: configuravel e explicada
+
+Ultimo item aberto da auditoria do ciclo. `MAX_LOCATION_ACCURACY_METERS = 100`
+era constante de codigo: o administrador nao via, nao ajustava, e a mensagem de
+recusa nao explicava por que o limite era mais rigido que o raio que ele mesmo
+tinha configurado na mesma tela.
+
+### A "incoerencia" que nao era
+
+Com raio de entrega em 5000 m, um fix de 800 m passa na proximidade e e recusado
+no destino por GPS. Auditando de perto, os dois limites respondem perguntas
+diferentes:
+
+- o RAIO pergunta "ele esta perto do endereco que ja conhecemos?";
+- este limite existe porque NAO ha endereco conhecido — a coordenada vira o
+  endereco E o preco.
+
+Ser mais rigido esta certo. O defeito era o silencio: nada dizia isso a quem
+opera. A mensagem agora diz, com todas as letras, que o limite e mais rigido
+"porque a sua posição vira o endereço e o valor da corrida".
+
+### O que mudou
+
+`PlatformSettings.deferredDestinationMaxAccuracyMeters`, entre 10 m e 1000 m.
+Piso porque abaixo disso o GPS urbano quase nunca fecha e a etapa ficaria
+impossivel; teto porque acima disso a "coordenada" descreve um bairro, e ela vai
+virar o endereco.
+
+**NULO = o padrao de 100 m, e nao "sem limite".** Este campo NAO aceita `null`
+no contrato, ao contrario dos cinco desligaveis: aqui o nulo nao desligaria uma
+regra, deixaria o preco sair de uma triangulacao de antena a quilometros do
+cliente. A tela mostra `100m (padrão)` em vez de campo vazio, que pareceria
+"sem regra".
+
+A verificacao virou uma funcao unica, usada nos dois pontos que dependiam da
+constante — a conclusao e o insucesso do pedido de preco diferido.
+
+### Arquivos
+
+`apps/api/prisma/schema.prisma` e a migration aditiva
+`20260829030000_deferred_destination_accuracy`,
+`packages/validation/src/admin/update-platform-settings.schema.ts`,
+`packages/types/src/pricing.ts`,
+`apps/api/src/admin/platform-settings/admin-platform-settings.service.ts`,
+`apps/api/src/deliveries/deliveries.service.ts` e os specs,
+`apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` e `migrate diff --exit-code` | aprovados, "No difference detected" |
+| `prisma migrate deploy` no PostgreSQL local | 1 migration aplicada |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 988 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 239 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: padrao de 100 m quando nao configurado, limite ampliado do admin
+sendo respeitado, mensagem explicando a diferenca para o raio, e a recusa de
+`null` no contrato.
+
+### Nota de ambiente
+
+O banco isolado de E2E precisou da coluna nova. Como o CLI do Prisma ignora o
+`DATABASE_URL` da linha de comando neste projeto, foi aplicada com
+`migrate diff --from-url` + `db execute --url`, e a linha correspondente foi
+registrada em `_prisma_migrations` para o banco continuar aceitando
+`migrate deploy`.
+
+### Estado da auditoria do ciclo
+
+Fechados: o estado sem saida do insucesso, a saida da entrega inalcancavel pela
+tela, a lacuna de E2E do Google e este limite.
+
+Aberto: a criacao com destino conhecido responde "tente novamente em instantes"
+mesmo quando o endereco e irroteavel — afirma uma causa temporaria que nao sabe
+ser temporaria — e nao tem os tres fallbacks que a conclusao tem.
+
+## 2026-08-29 - O aviso de sincronizacao parou de aparecer em toda entrega
+
+Relato do responsavel, com a tela do pedido #211 aberta: o alerta amarelo
+"Aguardando sincronizacao" surgia no instante do toque, em TODA finalizacao
+bem-sucedida. A sincronizacao normal responde em um ou dois segundos, entao o
+motoboy via um aviso, o botao girando, e concluia que algo tinha dado errado
+numa operacao que estava indo bem.
+
+Um aviso que aparece sempre deixa de ser aviso — e o custo real e o oposto do
+pretendido: quando um problema de verdade aparecer, ele nao vai chamar atencao.
+
+### A regra
+
+`completionDeservesAttention`, na propria fila, usada pelas duas telas:
+
+- recusa do servidor (`NEEDS_REVIEW`) aparece NA HORA — e problema, nao demora;
+- espera dentro de `COMPLETION_QUIET_WINDOW_MS` (6 s) fica calada; o botao ja
+  mostra que a acao esta em curso;
+- item retomado de outra sessao aparece de imediato, porque seu `queuedAt` ja e
+  antigo.
+
+Seis segundos ficam confortavelmente acima do tempo normal de resposta e bem
+abaixo do limite de 15 s da sincronizacao: quando o aviso aparecer, a espera e
+real.
+
+### Duas armadilhas de implementacao
+
+O efeito que revela o aviso depende de PRIMITIVOS (`id`, `state`, `queuedAt`), e
+nao do objeto: a fila reemite `pendingCompletion` a cada notificacao, e observar
+a referencia reiniciaria o relogio para sempre — o aviso nunca apareceria, nem
+quando a espera fosse real. O lint pediu o objeto na lista de dependencias; a
+saida foi extrair os primitivos para constantes, e nao suprimir a regra.
+
+Na Home, o relogio de um segundo corre SOMENTE enquanto existe finalizacao
+esperando dentro da janela. Fila vazia ou item que ja merece aviso nao mantem
+timer ligado numa tela que fica aberta o dia inteiro.
+
+### Arquivos
+
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/driver-app/src/screens/HomeScreen.tsx`.
+
+Precisa de APK: entra no proximo release depois do pilot.13.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 22 suites, 136 testes aprovados |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: quatro testes da janela — silencio na espera normal, aviso ao
+passar da janela, aviso imediato na recusa do servidor e aviso imediato num item
+retomado de outra sessao.
+
+## 2026-08-29 - Release pilot.14
+
+O `pilot.13` foi compilado e verificado, mas nunca chegou a nenhum aparelho.
+Como a unica mudanca de aplicativo desde ele era a janela de silencio do aviso
+de sincronizacao, foi descartado em favor do `pilot.14`: uma instalacao so, ja
+com tudo.
+
+Versao promovida para `0.1.0-pilot.14`, `versionCode` 14. Das cinco alteracoes
+desde o APK anterior, apenas `3515aaf` tocou o aplicativo; as outras tres
+funcionais — insucesso pelo painel, precisao configurável do destino por GPS e
+cobertura E2E do Google — sao de servidor e ja valiam para o `pilot.12`
+instalado.
+
+O artefato tem 75.132.233 bytes e SHA-256
+`61F98979389D2CB4F6F7E24078653AEFC1E86851A824970AD418E42FC08E0BED`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.14`, `versionCode` 14, minSdk 24 e targetSdk 36. O bundle contem
+`motoboycity-api.onrender.com` e nao contem `localhost:3333`, `127.0.0.1` nem
+`10.0.2.2`.
+
+Copias com o mesmo hash em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.14-vc14.apk`
+e `I:\MOTOboyCity
+eleases\motoboycity-0.1.0-pilot.14-vc14.apk`. Nenhum
+aparelho ADB conectado; o APK nao foi instalado.
+
+O procedimento registrado no release anterior funcionou sem tropeco: worktree
+curta em `C:\m14`, copia de `google-services.json` e `local.properties`,
+`pnpm install`, build do `@motoboycity/validation`, `assembleRelease` com
+`-Pmotoboycity.versionCode=14`. A remocao da worktree voltou a falhar com
+"Filename too long" e precisou de `rmdir /s /q`, como previsto. Senhas lidas
+apenas dos arquivos DPAPI, nunca exibidas, removidas ao final.
+
+### Proximo passo
+
+Instalar o `pilot.14` nos aparelhos e repetir o ciclo completo com destino
+definido na entrega e retorno. Conferir que o aviso de sincronizacao NAO aparece
+numa finalizacao normal, e que aparece quando a espera passa de seis segundos ou
+quando o servidor recusa.

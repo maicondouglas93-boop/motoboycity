@@ -75,7 +75,7 @@ raiz do monorepo**, não só no workspace que você editou (ver Armadilha #4).
    pnpm typecheck   # na raiz — roda os 8 workspaces via Turborepo
    pnpm lint        # idem
    ```
-6. **Atualize `docs/agent-handoff.md`** — sempre, mesmo em mudança pequena
+6. **Registre em `docs/changelog.md` e revise `docs/agent-handoff.md`** — sempre, mesmo em mudança pequena
    (regra 10 do `AGENTS.md`). Registre: decisão tomada, arquivos afetados,
    comandos executados e resultado, limitações conhecidas, próximo passo
    concreto.
@@ -285,7 +285,9 @@ Os arquivos mais completos como referência:
 | Preciso saber... | Leia |
 |---|---|
 | O que nunca fazer | `AGENTS.md` |
-| O que já está implementado, o que falta, decisões recentes | `docs/agent-handoff.md` |
+| O que já está implementado, o que falta | `docs/agent-handoff.md` |
+| Como o sistema é organizado, contratos e invariantes | `docs/architecture.md` |
+| O histórico e o porquê de uma decisão passada | `docs/changelog.md` |
 | Regras de negócio confirmadas (comissão, cancelamento, lote, retorno...) | `docs/business-rules.md` |
 | Como escrever um teste E2E novo | `apps/api/test/delivery-lifecycle.e2e-spec.ts` como modelo |
 | Padrão de transição atômica de status em lote | `DeliveriesService.collect()`/`.cancel()` em `apps/api/src/deliveries/deliveries.service.ts` |

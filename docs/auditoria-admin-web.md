@@ -1,5 +1,10 @@
 # Auditoria — painel do administrador (`apps/admin-web`)
 
+> **Documento de época — leia com data.** Registra o auditoria de 2026-08-24. O
+> sistema andou bastante desde então: itens aqui podem já estar prontos,
+> descartados ou superados. Para o estado atual use `agent-handoff.md` e
+> `architecture.md`, e **confirme no código** antes de agir.
+
 Executada em 24/08/2026 sobre 37 páginas e ~21 mil linhas, seguindo
 `docs/prompt-auditoria-admin-web.md`. Nenhum código foi alterado nesta rodada.
 
