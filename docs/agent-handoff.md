@@ -10169,9 +10169,15 @@ administrador.
 
 ### O que a auditoria deixou em aberto
 
-- **Nenhum E2E cobre falha do Google na conclusao.** Todo o comportamento de
-  422/503 e dos tres fallbacks e coberto so por unitario com mock. E a maior
-  lacuna de teste do ciclo.
+- ~~Nenhum E2E cobre falha do Google na conclusao.~~ Fechado no mesmo dia: o
+  stub do `GoogleMapsService` em `delivery-lifecycle.e2e-spec.ts` virou
+  controlavel por teste, e tres casos passaram a rodar contra PostgreSQL e Redis
+  reais — rota de zero metro concluindo pela taxa base com a nota no historico;
+  ausencia de rota devolvendo 422, deixando o pedido intacto em COLLECTED e
+  sendo fechado pelo painel com a distancia informada; e falha transitoria
+  devolvendo 503 e concluindo sozinha quando o Google volta. Nao da para chamar
+  a API real no CI, mas da para reproduzir cada FORMA de resposta dela — e era
+  ai que o sistema quebrava.
 - A criacao com destino conhecido nao tem os fallbacks da conclusao, e responde
   "tente novamente em instantes" mesmo quando o endereco e irroteavel — afirma
   uma causa temporaria que nao sabe ser temporaria.

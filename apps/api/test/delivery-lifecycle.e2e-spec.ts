@@ -6,7 +6,7 @@ import { AppModule } from './../src/app.module';
 import { FinancialClock } from './../src/finance/financial-clock.service';
 import { FinancialPayoutService } from './../src/finance/financial-payout.service';
 import { InvoiceService } from './../src/finance/invoice.service';
-import { GoogleMapsService } from './../src/maps/google-maps.service';
+import { GoogleMapsApiError, GoogleMapsService } from './../src/maps/google-maps.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { desligarTaxasAdicionais } from './isolar-taxas';
 import { RealtimeGateway } from './../src/realtime/realtime.gateway';
@@ -49,6 +49,26 @@ type RealtimeGatewayMock = {
   emitDriverLocation: jest.Mock;
   emitDeliveryLocation: jest.Mock;
 };
+
+/**
+ * Stub do Google, controlavel por teste.
+ *
+ * Nao da para chamar a API real no CI, mas da para reproduzir cada FORMA de
+ * resposta dela — e e justamente ai que o sistema quebrou em producao. O padrao
+ * devolve 5 km; os testes que precisam de falha reconfiguram e restauram.
+ */
+const DISTANCIA_PADRAO = { distanceKm: 5, durationMinutes: 20 };
+const mapsStub = {
+  getDistance: jest.fn(async () => DISTANCIA_PADRAO),
+  geocode: jest.fn(async () => null),
+  reverseGeocode: jest.fn(async () => null),
+};
+
+function restaurarMaps(): void {
+  mapsStub.getDistance.mockReset().mockResolvedValue(DISTANCIA_PADRAO);
+  mapsStub.geocode.mockReset().mockResolvedValue(null);
+  mapsStub.reverseGeocode.mockReset().mockResolvedValue(null);
+}
 
 describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', () => {
   let app: INestApplication<App>;
@@ -147,7 +167,7 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       imports: [AppModule],
     })
       .overrideProvider(GoogleMapsService)
-      .useValue({ getDistance: async () => ({ distanceKm: 5, durationMinutes: 20 }) })
+      .useValue(mapsStub)
       .overrideProvider(RealtimeGateway)
       .useValue({
         emitToDriver: jest.fn(),
@@ -2011,6 +2031,139 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
       expect(historico?.note).toContain('SEM validação de proximidade');
       expect(historico?.note).toContain('endereço de entrega');
       expect(historico?.note).toContain('posição registrada');
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
+
+  /**
+   * A lacuna que a auditoria apontou: toda a reacao a falha do Google era
+   * coberta so por unitario com mock. Aqui o servidor e o banco sao reais — o
+   * que muda e a FORMA da resposta do Google, que e onde o sistema quebrou em
+   * producao na madrugada de 29/08.
+   */
+  describe('falha do Google no cálculo da entrega', () => {
+    afterEach(restaurarMaps);
+
+    async function pedidoDiferidoColetado(): Promise<string> {
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, destinationKnownAtCreation: false })
+        .expect(201);
+      const deliveryId = criado.body.id as string;
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        // Manda a posicao sempre: os testes de raio rodam antes e deixam o raio
+        // de coleta configurado, entao coletar sem fix seria recusado.
+        .send(nearPickup)
+        .expect(200);
+      return deliveryId;
+    }
+
+    /**
+     * A regressao de producao. O Google devolve rota de 0 m quando a entrega e
+     * marcada em cima do ponto de coleta, e o wrapper lia isso como "sem rota".
+     * Zero e um numero: a corrida fecha pela taxa base da tabela.
+     */
+    it('conclui pela taxa base quando a rota tem zero metro', async () => {
+      mapsStub.getDistance.mockResolvedValue({ distanceKm: 0, durationMinutes: 0 });
+      const deliveryId = await pedidoDiferidoColetado();
+
+      const entregue = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 10 })
+        .expect(200);
+
+      expect(entregue.body.status).toBe('COMPLETED');
+      expect(entregue.body.distanceKm).toBe(0);
+      expect(entregue.body.totalValue).toBeGreaterThan(0);
+
+      const historico = await prisma.deliveryStatusHistory.findFirst({
+        where: { deliveryId, toStatus: 'DELIVERED' },
+        orderBy: { changedAt: 'desc' },
+      });
+      expect(historico?.note).toContain('mesmo ponto da coleta');
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    /**
+     * 422 e o que faz a fila do aplicativo PARAR de retentar, em vez de bater
+     * na API para sempre. E o pedido nao pode ficar meio gravado.
+     */
+    it('devolve 422 sem rota, mantém o pedido em COLLECTED e o admin fecha com a distância', async () => {
+      mapsStub.getDistance.mockRejectedValue(
+        new GoogleMapsApiError('Resposta da API do Google Maps sem rota válida.'),
+      );
+      const deliveryId = await pedidoDiferidoColetado();
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 10 })
+        .expect(422);
+
+      // Nada parcial: o pedido continua exatamente onde estava.
+      const preso = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      expect(preso.status).toBe('COLLECTED');
+      expect(preso.driverValue).toBeNull();
+      expect(preso.distanceKm).toBeNull();
+
+      // A saida: o admin informa a distancia e o preco sai da tabela.
+      const fechado = await request(app.getHttpServer())
+        .patch(`/admin/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Google sem rota; distância conferida com o motoboy', distanceKm: 4 })
+        .expect(200);
+
+      expect(['DELIVERED', 'COMPLETED']).toContain(fechado.body.status);
+      const fechadoNoBanco = await prisma.delivery.findUniqueOrThrow({
+        where: { id: deliveryId },
+      });
+      expect(Number(fechadoNoBanco.distanceKm)).toBe(4);
+      expect(fechadoNoBanco.driverValue).not.toBeNull();
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    /**
+     * Falha transitoria e outra coisa: 503 mantem o item PENDING na fila do
+     * aplicativo, que retenta sozinho. Confundir os dois foi o que deixou o
+     * motoboy retentando para sempre uma operacao que nunca ia passar.
+     */
+    it('devolve 503 numa falha transitória, deixando o pedido retentável', async () => {
+      mapsStub.getDistance.mockRejectedValue(
+        new GoogleMapsApiError('Falha de rede ao consultar a API do Google Maps.'),
+      );
+      const deliveryId = await pedidoDiferidoColetado();
+
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 10 })
+        .expect(503);
+
+      const preso = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+      expect(preso.status).toBe('COLLECTED');
+
+      // Restabelecido o Google, a MESMA chamada conclui — sem intervencao.
+      mapsStub.getDistance.mockResolvedValue(DISTANCIA_PADRAO);
+      const entregue = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send({ lat: -20.16, lng: -41.75, accuracy: 10 })
+        .expect(200);
+      expect(entregue.body.status).toBe('COMPLETED');
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
