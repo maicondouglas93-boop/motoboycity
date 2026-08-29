@@ -31,7 +31,14 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 47 migrations |
-| APK nos aparelhos | **`pilot.12`** — o `pilot.15` está pronto e **não instalado** |
+| APK nos aparelhos | **`pilot.15`** — confirmado no painel, não nesta linha (veja abaixo) |
+
+**Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
+escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
+`pilot.15`. A fonte confiável é o próprio aparelho — ele manda a versão em todo
+heartbeat, a API grava em `Driver.appVersion`, e o painel mostra em **Home →
+Fila de despacho → clique no motoboy**, na linha `App <versão>`. Só aparece para
+quem está online.
 
 **Atenção ao publicar:** o Render publica no push, **sem esperar o CI**. As duas
 coisas correm em paralelo.
@@ -95,13 +102,12 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Instalar o `pilot.15`.** Ele traz as cinco correções da auditoria do
-   aplicativo. Além do ciclo completo com destino definido na entrega e retorno,
-   dois testes que só existem em aparelho: **negar "Permitir o tempo todo"** num
-   Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
-   e que o atalho abre a tela certa; e **matar a rede no meio de uma
-   finalização**, conferindo que a espera termina em 15 s com mensagem em vez de
-   ficar girando.
+1. **Testes de aparelho que o `pilot.15` ainda não teve.** Ele já está
+   instalado, mas dois cenários só existem em aparelho e continuam sem
+   confirmação: **negar "Permitir o tempo todo"** num Android 11+ e num
+   Android 10, conferindo que o alerta oferece "Abrir ajustes" e que o atalho
+   abre a tela certa; e **matar a rede no meio de uma finalização**, conferindo
+   que a espera termina em 15 s com mensagem em vez de ficar girando.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
