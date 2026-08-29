@@ -10689,3 +10689,115 @@ realtime só faz refresh do painel, e ninguém avisa "seu pedido está há 25 mi
 sem motoboy" ou "a entrega deu problema"; **observação permanente do cliente**,
 hoje redigitada em todo pedido; e importação por CSV, descartada por decisão do
 responsável.
+
+## 2026-08-29 — Central de avisos nos dois painéis
+
+Sino na barra superior do Company Web e do Admin Web, com os avisos que pedem
+ação e o caminho para resolver cada um. Era o item de maior valor que sobrou da
+análise do painel da empresa: o realtime só fazia refresh da Home, e ninguém
+avisava "seu pedido está há 25 minutos sem motoboy" — a empresa descobria
+olhando, e só quem estava olhando descobria.
+
+### A decisão que molda o resto: derivado, não gravado
+
+O aviso é **calculado a partir do estado atual**, não escrito quando algo
+acontece. Fatura vencida, empresa esperando aprovação e despacho sem tempo de
+oferta configurado são CONDIÇÕES, não acontecimentos: continuam verdadeiras até
+alguém resolver, e param de existir no instante em que a pessoa age.
+
+Isso dispensa tabela, escrita a cada evento, estado de lido por usuário e job de
+limpeza. E evita o pior defeito de uma caixa de entrada: continuar mostrando como
+pendente algo que já foi resolvido.
+
+**O preço está registrado no contrato**: não há histórico nem "marcar como lido".
+Se a operação um dia precisar de evento com hora e leitura por pessoa, isso é
+outra funcionalidade — com tabela própria — e não uma evolução desta.
+
+### O que cada painel avisa
+
+**Empresa** (`GET /company/notifications`) — fatura vencida (crítico), fatura
+vencendo em até 3 dias, aviso de pagamento recusado pela administração, pedido
+esperando entregador há mais de 15 minutos, e endereço de coleta sem coordenada.
+
+O aviso de pagamento recusado existe porque a loja fez a parte dela e o dinheiro
+continua em aberto: sem ele, ela acha que avisou e espera, enquanto a fatura corre
+para o vencimento.
+
+**Admin** (`GET /admin/notifications`) — as duas configurações que param a
+plataforma inteira vêm primeiro e são as únicas críticas por si só: **tempo de
+resposta da oferta** e **comissão do entregador**. Sem elas nada estoura; pedidos
+simplesmente param de andar, e a falha aparece longe da causa — motoboy online
+sem receber nada, loja sem entender. `agent-handoff.md` já registrava essas duas
+como "a falha aparece longe da causa"; o sino é a resposta direta a isso.
+
+Depois: faturas vencidas, avisos de pagamento esperando confirmação, empresas e
+entregadores aguardando aprovação, e pedidos parados sem entregador.
+
+### Detalhes que valem registro
+
+`critical` é reservado para o que impede a operação ou custa dinheiro agora. Se
+tudo for crítico, nada é.
+
+O contador do sino é o **total**; a cor é que separa crítico de aviso. Mostrar só
+os críticos esconderia o resto, e mostrar dois números transformaria um sino em
+painel.
+
+Os links do admin apontam direto para `/financeiro?aba=faturas` e `?aba=avisos`,
+e não para `/faturas` — aquele endereço só redireciona para lá, e um salto a mais
+é um salto que pode se perder. Confirmado no navegador: `/faturas` no admin é um
+`redirect()`.
+
+O sino **falha em silêncio**: se a consulta não responder, ele fica quieto em vez
+de transformar um erro secundário em alarme na barra superior. `retry: false` e
+sem estado de erro na interface.
+
+Atualização a cada minuto. Nada aqui é tempo real, e nenhum desses avisos muda de
+segundo em segundo.
+
+`DropdownMenuLabel` não serve para o cabeçalho: no Base UI ele exige contexto de
+grupo, e a lista não é um grupo de itens de menu — são cartões com ação própria.
+Um `<p>` simples resolve, como o próprio top-nav do admin já fazia.
+
+### Verificação no navegador, com dado real
+
+Não ficou só no teste. Com API e Admin Web locais, autenticado:
+
+- `GET /admin/notifications` respondeu com uma fatura vencida real
+  (R$ 113,50), 12 empresas e 14 entregadores aguardando aprovação;
+- o sino apareceu na barra com o rótulo acessível
+  `Avisos: 3 pendente(s), 1 crítico(s)` e o contador vermelho;
+- a lista abriu com o crítico em vermelho no topo e os avisos em âmbar;
+- o singular/plural funcionou nos dois lados ("1 fatura vencida" ao lado de
+  "12 empresas");
+- nenhum erro no console.
+
+### Arquivos
+
+`packages/types/src/notifications.ts` (novo) e `index.ts`;
+`packages/api-client/src/notifications.ts` (novo) e `index.ts`;
+`apps/api/src/notifications/` (módulo novo: dois serviços, um controller com dois
+escopos, spec); `finance.module.ts` passou a exportar `InvoiceService`;
+`app.module.ts`; e nos dois painéis o `notification-bell.tsx`, o `top-nav.tsx` e
+o `api-client.ts`.
+
+**Nenhuma migration.** Nenhuma tabela nova, por desenho.
+
+### Validações executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 83 suítes, **1020** testes |
+| `pnpm --filter @motoboycity/company-web test` | 19 arquivos, **72** testes |
+| builds de produção do Company Web e do Admin Web | aprovados |
+| smoke autenticado no Admin Web local | descrito acima |
+
+### Continua aberto
+
+O escopo do admin é global: ele conta faturas vencidas e pedidos parados da
+plataforma inteira, sem recorte por região. Quando houver mais de uma praça
+ativa, isso vira ruído e precisa de filtro.
+
+Não há como dispensar um aviso. É proposital enquanto todos forem acionáveis; se
+algum passar a ser informativo e recorrente, aí sim vale um estado de dispensa —
+provavelmente local ao navegador, não no servidor.

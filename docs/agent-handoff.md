@@ -65,7 +65,7 @@ ou agendado; despacho por fila com oferta, aceite, recusa, expiração e reofert
 manual; ciclo completo de coleta, entrega, insucesso e retorno, com destino
 conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
-aiqfome (importação e ciclo logístico).
+aiqfome (importação e ciclo logístico); central de avisos nos dois painéis.
 
 Também está publicado o bloqueio seletivo motoboy × empresa pelo detalhe do
 entregador no ADM (commit `8c3edfd`). O vínculo é persistente e auditado; filtra
@@ -150,8 +150,8 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **82 suítes / 1009** testes unitários da API, **25 / 152** do
-Driver App, **18 arquivos / 66** da Company Web, **25 / 247** E2E.
+Cobertura atual: **83 suítes / 1020** testes unitários da API, **25 / 152** do
+Driver App, **19 arquivos / 72** da Company Web, **25 / 247** E2E.
 
 ### E2E
 

@@ -311,7 +311,28 @@ porque nada foi.
 O aviso de espera só aparece depois de seis segundos, ou de imediato se o
 servidor recusou. Um aviso que aparece sempre deixa de ser aviso.
 
-## 10. Auditoria
+## 10. Central de avisos
+
+O sino dos dois painéis é **derivado do estado atual**, não gravado quando algo
+acontece. Não há tabela, escrita por evento, estado de lido nem job de limpeza:
+`GET /company/notifications` e `GET /admin/notifications` calculam a lista na
+hora, e um aviso deixa de existir no instante em que a condição é resolvida.
+
+Isso é possível porque tudo que a operação precisa saber é **condição**, não
+acontecimento: fatura vencida, empresa esperando aprovação, despacho sem tempo de
+oferta configurado. Uma caixa de entrada com estado de lido mostraria como
+pendente o que já foi resolvido — o defeito exato que se quis evitar.
+
+`critical` é reservado para o que impede a operação ou custa dinheiro agora. No
+admin, os dois únicos críticos por si só são as configurações de §8 que congelam
+a plataforma: elas não estouram em lugar nenhum, e o sino é a única coisa que as
+mostra antes de a operação parar.
+
+**O custo está aceito e registrado:** sem histórico e sem "marcar como lido". Se
+um dia for preciso evento com hora e leitura por pessoa, isso é outra
+funcionalidade, com tabela própria — não uma evolução desta.
+
+## 11. Auditoria
 
 Três trilhas, com propósitos distintos:
 
@@ -329,7 +350,7 @@ entregador ao mesmo tempo gravavam duas linhas, cada uma nomeando um "anterior"
 já obsoleto: a auditoria deixava de permitir reconstruir a ordem. É outro motivo,
 além da corrida em si, para a condição viver no `where`.
 
-## 11. Dívidas estruturais conhecidas
+## 12. Dívidas estruturais conhecidas
 
 Registradas para não serem redescobertas:
 
