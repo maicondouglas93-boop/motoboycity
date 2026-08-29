@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-29**, no commit `9a04e4c`.
+> Última revisão: **2026-08-29**, depois da auditoria de concorrência.
 
 ## Como atualizar
 
@@ -35,6 +35,11 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 **Atenção ao publicar:** o Render publica no push, **sem esperar o CI**. As duas
 coisas correm em paralelo.
+
+**Job novo na fila de despacho:** `dispatch-sweep-every-minute`, registrado com
+`upsertJobScheduler` no boot. Ele reativa agendado vencido, reagenda job perdido e
+varre a fila. Não duplica entre reinícios nem entre instâncias; se sumir do Redis,
+volta no próximo boot da API.
 
 ### APK atual
 
@@ -89,16 +94,21 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Dívida técnica priorizada
 
-1. **Auditoria de lote, aiqfome e concorrência** — o prompt está pronto; a
-   auditoria do ciclo de uma entrega já foi feita e seus achados, corrigidos.
-2. **Criação sem os fallbacks da conclusão**: responde "tente novamente em
+1. **Criação sem os fallbacks da conclusão**: responde "tente novamente em
    instantes" mesmo quando o endereço é irroteável. Não trava ninguém — a empresa
    vê o erro na hora.
-3. **`deliveries.service.ts` com ~3.400 linhas** — candidato a fatiamento por
+2. **`deliveries.service.ts` com ~3.400 linhas** — candidato a fatiamento por
    ciclo de vida, sem mudar comportamento.
-4. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
+3. **Lacunas que a auditoria de concorrência deixou abertas**: webhook aiqfome
+   entregue duas vezes (a idempotência tem só teste unitário), dois admins na
+   mesma intervenção, e o resgate de `PROCESSING` travado do outbound — que
+   existe e funciona, mas nunca foi exercitado em teste.
+4. **`reassignDriver` não confere punição.** Defensável como intervenção
+   deliberada do admin, mas não está escrito em lugar nenhum — decidir e
+   registrar.
+5. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
    continuam pendentes.
-5. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
+6. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
 
 ## Ambiente de desenvolvimento
 
@@ -120,8 +130,8 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **82 suítes / 988** testes unitários da API, **22 / 136** do
-Driver App, **17 arquivos / 63** da Company Web, **25 / 239** E2E.
+Cobertura atual: **82 suítes / 1001** testes unitários da API, **22 / 136** do
+Driver App, **17 arquivos / 63** da Company Web, **25 / 243** E2E.
 
 ### E2E
 

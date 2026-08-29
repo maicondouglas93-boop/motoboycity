@@ -156,14 +156,39 @@ A oferta pendente única por pedido é a garantia central, e tem três camadas:
 erro. **Esse padrão não pode ser enfraquecido para "simplificar"**: é a única
 proteção real contra duas ofertas para o mesmo pedido.
 
+**A guarda vai na escrita, nunca só na leitura.** Toda transição confere o
+estado esperado no `where` do `updateMany` e olha o `count`. Entre uma leitura e
+a escrita cabe outro ator — e coube: a expiração de oferta e a ativação do
+agendado checavam numa leitura anterior e escreviam direto, o que sobrescrevia a
+recusa do motoboy (contando-a duas vezes) e ressuscitava pedido cancelado.
+Remover um job da fila **não interrompe** um job que já começou; ele continua
+com o retrato que leu antes, e só o `where` o detém.
+
 Elegibilidade do motoboy: região, `approvalStatus`, `accountStatus`,
 `availability`, modalidade atribuída, presença viva no Redis, teto de entregas
 simultâneas e punição ativa. Quem já tem oferta pendente e quem está punido
 entram pela mesma porta de exclusão — `eligibleDriverWhere` descreve quem *pode*
 atender, e o punido continua podendo.
 
+A vitrine (`claimDelivery`) é o único caminho de atribuição que não passa por
+oferta, então **repete as checagens por conta própria**: região, modalidade,
+punição e teto, este último dentro da transação e sob o mesmo `FOR UPDATE` no
+motoboy. A listagem filtra, mas a listagem pode estar velha na tela.
+
+O teto de entregas simultâneas pergunta "cabe o que estou prestes a entregar?",
+recebendo a **quantidade** — não "cabe mais uma?". Com a pergunta antiga, um lote
+de dez passava para quem tinha duas de teto três.
+
 A ordem da fila vive no Redis; uma oferta válida consome a vez do motoboy e o
 move para o fim, tornando a fila circular.
+
+**A varredura de minuto em minuto é a rede de segurança** (`DispatchScheduler`).
+O despacho já foi 100% orientado a evento, e o pedido agendado tinha um gatilho
+só: o job no Redis, criado depois do commit. Um `queue.add` que falhasse deixava
+o pedido esperando para sempre, porque nada olhava para `SCHEDULED`. A varredura
+ativa o agendado vencido, reagenda o job que sumiu **antes de o pedido atrasar**,
+e varre a fila. Cada passo reusa um caminho que já confere o estado, então rodar
+duas vezes junto não duplica nada.
 
 ## 7. Contrato de lote
 
@@ -175,10 +200,23 @@ em `Delivery.batchId`, e `null` é o pedido individual.
   aceite, recusa, expiração e cancelamento valem para o grupo.
 - **A auditoria continua granular**: uma `DeliveryOffer` e um histórico por
   entrega. O realtime manda um evento agregado com `batchId`.
-- **Atômico para o lote**: coleta e cancelamento. **Por item**: entrega.
+- **Atômico para o lote**: coleta, cancelamento, devolução à fila e **troca de
+  entregador**. **Por item**: entrega e insucesso.
 - **Filtrado**: o retorno afeta só os itens que o exigem.
 - A recusa de um lote conta como **uma** recusa, não N — o lote é ofertado e
   respondido como unidade.
+
+**Um lote nunca pode ter dois donos.** A coleta exige `driverId` em todos os
+irmãos, então um lote dividido trava dos dois lados: cada motoboy esbarra no item
+do outro, e a mensagem que ele recebe fala de outra coisa. A única porta que
+dividia era a troca de entregador pelo painel, que operava sobre um item só;
+hoje ela move o lote inteiro ou recusa.
+
+Divergir de status é legítimo **a partir da entrega** — é quando o motoboy passa
+a fechar um endereço de cada vez. Antes disso, os itens andam juntos. Por isso o
+cancelamento **não arrasta** um irmão já `DELIVERED`/`FAILED`: aquela corrida
+aconteceu, tem repasse a pagar, e fecha pelo retorno. Cancelar diretamente um
+pedido nesse estado continua permitido — é regra de negócio, não descuido.
 
 O teto de 50 é do formato. `maxDeliveriesPerBatch = 1` desliga o lote.
 
@@ -240,6 +278,11 @@ Três trilhas, com propósitos distintos:
 Intervenção manual do administrador sempre exige motivo. Sem ele, a trilha mostra
 que alguém mudou o pedido e não mostra por quê — que é exatamente a pergunta de
 quem for conferir depois.
+
+**Escrita sem guarda estraga a trilha, não só o dado.** Dois admins trocando o
+entregador ao mesmo tempo gravavam duas linhas, cada uma nomeando um "anterior"
+já obsoleto: a auditoria deixava de permitir reconstruir a ordem. É outro motivo,
+além da corrida em si, para a condição viver no `where`.
 
 ## 11. Dívidas estruturais conhecidas
 

@@ -10066,3 +10066,193 @@ Instalar o `pilot.14` nos aparelhos e repetir o ciclo completo com destino
 definido na entrega e retorno. Conferir que o aviso de sincronizacao NAO aparece
 numa finalizacao normal, e que aparece quando a espera passa de seis segundos ou
 quando o servidor recusa.
+
+## 2026-08-29 — Auditoria de concorrência: as corridas sem defesa, corrigidas
+
+Segunda auditoria somente-leitura do projeto, com foco no que só aparece com
+volume, integração ou mais de um ator agindo junto: lote, aiqfome, agendamento e
+concorrência. O ciclo de uma entrega individual ficou fora — ele foi auditado e
+corrigido antes.
+
+O diagnóstico encontrou vinte e um pontos de concorrência. Dezesseis já tinham
+defesa real e continuam intactos, incluindo os três que mais importam: a oferta
+pendente única (índice parcial + `FOR UPDATE` + `Serializable`), a idempotência
+da importação aiqfome (três camadas independentes) e o refresh de token OAuth
+(lock Redis com *fencing* e `tokenVersion` otimista). **Nenhuma corrida termina
+com dois motoboys achando que pegaram o mesmo pedido**, e um pedido importado não
+é criado nem cobrado duas vezes.
+
+O que estava aberto eram cinco defeitos, quatro deles com a mesma causa raiz:
+**a guarda estava na leitura, não na escrita**.
+
+### O padrão que faltava
+
+Todo o resto do sistema escreve condicionalmente — `updateMany` com o estado
+esperado no `where`, e `count` conferido. Quatro lugares faziam a checagem numa
+leitura anterior e escreviam direto. Entre a leitura e a escrita cabe outro ator,
+e coube:
+
+**Expiração de oferta avulsa** (`dispatch.service.ts`). O caminho de lote já
+fazia certo; o avulso, dez linhas acima, não. Duas consequências reais: o motoboy
+recusando no último segundo tinha a resposta sobrescrita por `EXPIRED` **e a
+recusa contada duas vezes** — punido antes do número configurado; e a loja
+cancelando no último segundo fazia o job punir o motoboy por uma desistência que
+não foi dele.
+
+**Ativação do pedido agendado**. Único ponto da máquina de estados sem escrita
+condicional. `cancelScheduledActivation` tira o job da fila, mas remover não
+interrompe um job que já começou: ele seguia com o retrato `SCHEDULED` que leu
+antes e gravava `AWAITING_DRIVER` por cima do cancelamento. A loja via ressuscitar
+o pedido que tinha acabado de cancelar.
+
+**Troca de entregador pelo painel**. Sem `where` condicional, dois admins
+simultâneos recebiam sucesso os dois e o histórico nomeava um "anterior" já
+obsoleto. Pior: a exclusão de `COMPLETED` — que existe porque o repasse já está
+na carteira de quem entregou — era só uma leitura prévia, então uma finalização
+concorrente passava por ela.
+
+**Cancelamento de oferta pendente** tinha a mesma forma, com exposição menor
+(sempre roda depois de um commit que já derrubaria o concorrente). Corrigido
+junto, por consistência do padrão.
+
+### O lote dividido
+
+`reassignDriver` operava sobre **uma** entrega, sem expandir para os irmãos.
+Trocar o entregador de um item de lote deixava duas pessoas donas do mesmo lote —
+e aí a coleta fechava dos dois lados, porque ela exige `driverId` em todos os
+irmãos. Cada motoboy batia no item do outro e recebia *"A coleta já foi registrada
+por outra solicitação"*, que descreve outra coisa. A única mensagem verdadeira
+aparecia no `markCollected` do painel, depois de três tentativas frustradas na rua.
+
+Agora o lote troca de dono inteiro, como já é aceito, recusado e devolvido
+inteiro, e recusa a troca se os itens estiverem em estados diferentes.
+
+Junto veio o **prazo de coleta órfão**: o job pendente carrega o entregador
+antigo e vira no-op depois da troca, então justamente o pedido que precisou de
+intervenção ficava sem ninguém cobrando a coleta, com um `pickupDeadlineAt`
+decorativo no banco e nas telas. A troca agora renova o prazo — janela inteira
+para quem acabou de receber, não o resto da janela de outra pessoa.
+
+### O teto que contava errado
+
+`cabeMaisUmaEntrega` respondia "cabe mais uma?". A pergunta certa nunca foi essa:
+um lote de dez ofertado a quem tem duas de teto três passava na conta (2 < 3) e o
+aceite atribuía doze. Agora a função recebe a **quantidade** e responde "cabe o
+que estou prestes a entregar?".
+
+E o `claimDelivery` — a vitrine — não conferia o teto nem a elegibilidade de
+região e modalidade. Só a punição tinha essa segunda porta; uma tela
+desatualizada ou uma chamada direta à API entrava por cima do limite. Agora
+confere as duas coisas, e dentro da transação, sob o mesmo `FOR UPDATE` no
+motoboy que `createPendingOffers` usa.
+
+### O cancelamento que arrastava o irmão entregue
+
+Cancelar em `DELIVERED`/`FAILED` continua permitido quando é **este** o pedido
+que a pessoa mandou cancelar — é regra de negócio registrada em
+`business-rules.md`, e não foi tocada. O que não pode é o efeito colateral:
+cancelar o item 2 de um lote arrastava junto o item 1, já entregue, apagando do
+histórico uma corrida que aconteceu e o repasse que ela ia gerar. Irmão que já foi
+para a rua agora fica de fora do arrasto e fecha pelo retorno.
+
+### A varredura que o despacho não tinha
+
+O achado estrutural. O despacho era 100% orientado a evento: o pedido agendado
+tinha **um** gatilho, o job no Redis, criado depois do commit. Se aquele
+`queue.add` falhasse, nada mais no sistema olhava para `SCHEDULED` — a
+reconciliação de presença só põe motoboy offline, e a varredura de fila só enxerga
+`AWAITING_DRIVER`. O pedido esperava para sempre por uma hora que nunca chegava.
+Isso atinge **todo pedido importado do aiqfome**, que nasce agendado por
+construção.
+
+A própria integração já tinha essa rede desde sempre — varredura a cada 30 s e
+resgate de `PROCESSING` travado. O despacho era o único lado do sistema sem ela.
+
+`DispatchScheduler` liga uma varredura de minuto em minuto que: ativa o agendado
+cuja hora passou; **reagenda o job que sumiu antes de o pedido atrasar**,
+consultando o `jobId` no Redis; e varre a fila de `AWAITING_DRIVER`. Idempotente
+por desenho — cada passo reusa um caminho que já confere o estado antes de agir —
+e registrada com `upsertJobScheduler`, que não duplica entre reinícios nem entre
+instâncias.
+
+### O que a auditoria confirmou como já correto
+
+Registrado para não ser reinvestigado: a recusa de um lote conta como **uma**
+recusa, não N; a punição cobre as quatro portas de entrada de trabalho e o job de
+fim de castigo existe e é idempotente; a devolução de ofertas por bloqueio do
+admin não pune ninguém; o lote é atômico para aceite, recusa, expiração, coleta,
+cancelamento e devolução, e por item só a partir da entrega; a compensação de
+falha do Redis na criação de oferta funciona; e `updateBeforeAcceptance` já era o
+melhor exemplo de escrita condicional do repositório, incluindo
+`offers: { none: { response: 'PENDING' } }` no `where`.
+
+Uma correção proposta foi **descartada durante a implementação**: bloquear o
+cancelamento direto em `DELIVERED`/`FAILED`. A regra documentada permite, e a
+suíte tinha teste explícito para ela. O recorte foi reduzido ao efeito colateral.
+
+### Testes — e a prova de que eles pegam o defeito
+
+Um teste que passa com e sem a correção não prova nada. Cada teste novo de corrida
+foi rodado contra o código antigo antes de ser aceito:
+
+| Teste | Sem a correção |
+| --- | --- |
+| expiração com leitura velha | oferta vira `EXPIRED` em vez de continuar `DECLINED` |
+| ativação com leitura velha | pedido cancelado volta para `AWAITING_DRIVER` |
+| lote acima do teto | três ofertas pendentes com teto de duas |
+
+Os dois primeiros **não** usam `Promise.all`. Foi tentado: com o job rodando
+dentro do processo e a recusa atravessando o pipeline HTTP inteiro, a expiração
+termina antes de a recusa começar a escrever, e a janela ruim nunca abre — o teste
+passava nos dois lados. O que a corrida **produz**, e o que os testes reproduzem,
+é a leitura velha: o job leu `PENDING` e o mundo mudou embaixo dele. Contra o banco
+real, com pedido, oferta e contagem de verdade, o único que sobra para defender é
+a guarda na escrita.
+
+Também entrou o E2E de disputa real que faltava na vitrine: dois motoboys
+assumindo o mesmo pedido, exatamente um 200 e um 409.
+
+**Um teste unitário com `$transaction` mockado não prova concorrência** —
+`dispatch.service.spec.ts:117` substitui a transação por um *pass-through* que
+executa o callback sem isolamento, sem lock e sem rollback. Os unitários novos
+provam que a guarda está no `where`; a prova de comportamento é o E2E.
+
+### Arquivos
+
+`apps/api/src/dispatch/dispatch.service.ts`, `dispatch.processor.ts`,
+`dispatch.module.ts` e o novo `dispatch.scheduler.ts`;
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts` e
+`admin-deliveries.module.ts`; `apps/api/src/deliveries/deliveries.service.ts`;
+os specs correspondentes e `apps/api/test/delivery-batch-dispatch.e2e-spec.ts`.
+
+**Nenhuma migration.** Todas as correções são `where` de escrita, contagem ou job
+— nenhuma coluna nova. **Nenhuma mudança de contrato**, então nenhum APK: o app
+já renderiza a mensagem que vem do servidor (`AvailableDeliveriesScreen.tsx:132`),
+e não há cópia fixa de frase do backend dentro dele.
+
+### Validações executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 workspaces) | aprovado |
+| `pnpm lint` (8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suítes, **1001** testes (eram 988) |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suítes, **243** testes (eram 239) |
+| E2E com cada correção revertida, uma a uma | os 3 testes novos **falharam**, como esperado |
+| `pnpm --filter @motoboycity/driver-app exec jest` | 22 suítes, 136 testes aprovados |
+| build de produção da API | aprovado |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+### Continua aberto
+
+Da matriz auditada, sem correção nesta rodada: `reassignDriver` não confere
+punição (defensável como intervenção deliberada do admin, mas não está escrito em
+lugar nenhum); a **importação aiqfome não tem E2E de webhook duplicado** — a
+idempotência tem só teste unitário; e não há E2E de dois admins na mesma
+intervenção. O `PROCESSING` do outbound depende do resgate por tempo, que existe e
+funciona, mas nunca foi exercitado em teste.
+
+Não verificável sem tocar em infraestrutura: se o Redis de produção tem
+persistência configurada — o que decide se um reinício perde os `SCHEDULED`. A
+varredura nova cobre esse caso independentemente da resposta, que é justamente o
+motivo de ela existir.
