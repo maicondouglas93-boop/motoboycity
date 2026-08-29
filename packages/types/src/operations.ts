@@ -64,6 +64,13 @@ export interface AdminDispatchQueueResult {
   updatedAt: string;
 }
 
+export interface AdminTargetedDispatchResult {
+  deliveryIds: string[];
+  driverId: string;
+  driverName: string;
+  offerIds: string[];
+}
+
 export interface AdminDeliveryDispatchAudit {
   deliveryId: string;
   offers: DeliveryDispatchAuditItem[];

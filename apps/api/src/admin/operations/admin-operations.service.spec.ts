@@ -6,11 +6,12 @@ import { LiveDriverPresenceService } from '../../live-presence/live-driver-prese
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocationSilenceService } from '../../tracking/location-silence.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { DispatchService } from '../../dispatch/dispatch.service';
 import { AdminOperationsService } from './admin-operations.service';
 
 describe('AdminOperationsService', () => {
   let service: AdminOperationsService;
-  const admin = { id: 'admin-1', type: 'ADMIN' } as User;
+  const admin = { id: 'admin-1', name: 'Administrador', type: 'ADMIN' } as User;
   const prisma = {
     driver: { findMany: jest.fn() },
     deliveryStatusHistory: { findMany: jest.fn() },
@@ -28,6 +29,7 @@ describe('AdminOperationsService', () => {
     emitAdminActivity: jest.fn(),
     emitDispatchQueueUpdated: jest.fn(),
   };
+  const dispatchService = { reofferDeliveryToDriver: jest.fn() };
 
   beforeEach(async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-23T16:00:00.000Z'));
@@ -55,10 +57,35 @@ describe('AdminOperationsService', () => {
         { provide: LiveDriverPresenceService, useValue: livePresenceService },
         { provide: LocationSilenceService, useValue: locationSilenceService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
+        { provide: DispatchService, useValue: dispatchService },
       ],
     }).compile();
 
     service = module.get(AdminOperationsService);
+  });
+
+  it('reoferta manualmente para o motoboy escolhido com auditoria do admin', async () => {
+    dispatchService.reofferDeliveryToDriver.mockResolvedValue({
+      deliveryIds: ['delivery-1'],
+      driverId: 'driver-1',
+      driverName: 'Motoboy',
+      offerIds: ['offer-2'],
+    });
+
+    await service.reofferDelivery(admin, 'delivery-1', {
+      driverId: 'driver-1',
+      reason: 'Todos recusaram a primeira rodada.',
+    });
+
+    expect(dispatchService.reofferDeliveryToDriver).toHaveBeenCalledWith(
+      'delivery-1',
+      'driver-1',
+      {
+        adminId: 'admin-1',
+        adminName: 'Administrador',
+        reason: 'Todos recusaram a primeira rodada.',
+      },
+    );
   });
 
   afterEach(() => {

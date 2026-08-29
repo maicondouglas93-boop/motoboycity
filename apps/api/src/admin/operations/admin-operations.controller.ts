@@ -1,16 +1,19 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   adminActivityQuerySchema,
   deliveryOperationsQuerySchema,
   reorderDispatchQueueSchema,
+  reofferDeliverySchema,
   type AdminActivityQuery,
   type DeliveryOperationsQuery,
   type ReorderDispatchQueuePayload,
+  type ReofferDeliveryPayload,
 } from '@motoboycity/validation';
 import type {
   AdminDeliveryDispatchAudit,
   AdminDispatchQueueResult,
   AdminOperationsResult,
+  AdminTargetedDispatchResult,
   OperationalActivityEvent,
   SilentDriverItem,
 } from '@motoboycity/types';
@@ -64,5 +67,14 @@ export class AdminOperationsController {
   @Get('deliveries/:id/dispatch-audit')
   dispatchAudit(@Param('id') id: string): Promise<AdminDeliveryDispatchAudit> {
     return this.service.dispatchAudit(id);
+  }
+
+  @Post('deliveries/:id/reoffer')
+  reofferDelivery(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(reofferDeliverySchema)) payload: ReofferDeliveryPayload,
+    @CurrentUser() user: User,
+  ): Promise<AdminTargetedDispatchResult> {
+    return this.service.reofferDelivery(user, id, payload);
   }
 }

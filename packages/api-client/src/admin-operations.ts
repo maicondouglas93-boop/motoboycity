@@ -2,6 +2,7 @@ import type {
   AdminDeliveryDispatchAudit,
   AdminDispatchQueueResult,
   AdminOperationsResult,
+  AdminTargetedDispatchResult,
   DeliveryStatus,
   OperationalActivityEvent,
   SilentDriverItem,
@@ -76,6 +77,22 @@ export function createAdminOperationsApi({ baseUrl }: { baseUrl: string }) {
         body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<AdminDispatchQueueResult>(response);
+    },
+
+    async reofferDelivery(
+      accessToken: string,
+      deliveryId: string,
+      payload: { driverId: string; reason: string },
+    ): Promise<AdminTargetedDispatchResult> {
+      const response = await fetch(
+        `${baseUrl}/admin/operations/deliveries/${deliveryId}/reoffer`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminTargetedDispatchResult>(response);
     },
   };
 }

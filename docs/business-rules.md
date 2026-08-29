@@ -137,6 +137,16 @@ O painel não marca como entregue um pedido cujo destino e preço ainda dependem
 do GPS do motoboy. Sem a coordenada real, não existe distância segura para
 calcular cobrança e repasse; esse caso precisa ser confirmado pelo aplicativo.
 
+Quando um pedido continua em `AWAITING_DRIVER` depois que a rodada automatica
+termina, o menu do card permite ao administrador reenviar a oferta para um
+motoboy especifico. A escolha manual pode repetir um motoboy que ja recusou ou
+deixou expirar aquele pedido, mas nao ignora as regras operacionais: o pedido
+precisa estar sem oferta pendente e o motoboy precisa estar online, ativo,
+habilitado na regiao/modalidade, dentro da capacidade, sem outra oferta
+pendente e fora de punicao. Em lote, a nova oferta abrange o lote inteiro.
+O reenvio usa o mesmo prazo, Socket.IO e push do despacho normal, exige motivo
+e registra o administrador no historico.
+
 ## Timeout de despacho
 
 Fila via Redis. Oferta vai pro primeiro motoboy da fila; duração da janela

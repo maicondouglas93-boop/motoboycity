@@ -9443,3 +9443,50 @@ Proximo passo concreto: publicar a API, pedir aos motoboys que toquem
 sincronizar na Home para as finalizacoes presas subirem, e entao conferir no
 log quantos enderecos estao sem coordenada para decidir se o problema e a chave
 do Google ou cadastro pontual.
+
+## 2026-08-28 - Reoferta manual para motoboy escolhido pelo ADM
+
+### Estado implementado
+
+- Nos tres pontos do card em `Buscando motoboy`, o ADM ganhou a acao
+  `Reenviar oferta`.
+- O dialogo permite escolher um motoboy ativo/disponivel, exige um motivo e
+  envia a oferta pelo mesmo Socket.IO e push do despacho automatico.
+- A reoferta nao exclui historico: o motoboy escolhido pode ja ter recusado ou
+  deixado expirar esse mesmo pedido em uma rodada anterior.
+- A API nao rouba uma oferta em andamento. Pedido/lote precisa continuar em
+  `AWAITING_DRIVER` e sem `DeliveryOffer` pendente.
+- Regiao, modalidade, conta aprovada/ativa, disponibilidade, heartbeat ao vivo,
+  capacidade simultanea, punicao e outra oferta pendente do motoboy sao
+  revalidados; a criacao final continua sob lock/transacao serializavel.
+- Para lote, todos os itens recebem novas ofertas vinculadas ao mesmo motoboy.
+- A intervencao grava uma linha de historico sem mudar o status, com ADM e
+  motivo. Falha isolada dessa auditoria nao faz a tela repetir uma oferta que
+  ja esta tocando.
+- Nenhuma alteracao no Driver App/APK: versoes instaladas recebem a nova oferta
+  pelo protocolo existente.
+
+### Contratos e arquivos
+
+- Novo `POST /admin/operations/deliveries/:id/reoffer`, payload
+  `{ driverId, reason }` e retorno `AdminTargetedDispatchResult`.
+- Contratos: `packages/validation/src/admin/reoffer-delivery.schema.ts`,
+  `packages/types/src/operations.ts` e
+  `packages/api-client/src/admin-operations.ts`.
+- API: `apps/api/src/dispatch/dispatch.service.ts` e
+  `apps/api/src/admin/operations/*`.
+- UI: `apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+### Validacao executada
+
+- `pnpm --filter @motoboycity/validation build`: aprovado.
+- Typecheck de types, api-client, API e Admin Web: aprovado.
+- Jest focado em dispatch e operacoes administrativas: 2 suites e 93 testes
+  aprovados. A cobertura nova prova repeticao apos recusa historica, bloqueio
+  com oferta pendente e bloqueio quando o escolhido perdeu o heartbeat.
+
+### Proximo passo
+
+Lint dos cinco workspaces afetados e builds de producao da API e do Admin Web
+foram aprovados. Proximo passo: publicar API e Admin Web e fazer um teste real
+com pedido em `Buscando motoboy`. Nao e necessario novo APK para esta acao.

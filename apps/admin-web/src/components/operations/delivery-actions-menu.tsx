@@ -4,7 +4,15 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
-import { Ban, CheckCircle2, EllipsisVertical, PackageCheck, Truck, UserCog } from 'lucide-react';
+import {
+  Ban,
+  BellRing,
+  CheckCircle2,
+  EllipsisVertical,
+  PackageCheck,
+  Truck,
+  UserCog,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,11 +31,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
-import { adminDeliveriesApi, adminDriversApi, deliveriesApi } from '@/lib/api-client';
+import {
+  adminDeliveriesApi,
+  adminDriversApi,
+  adminOperationsApi,
+  deliveriesApi,
+} from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { statusLabel } from '@/components/orders/status-chip';
 
-type DeliveryAction = 'reassign' | 'collect' | 'deliver' | 'cancel' | 'complete';
+type DeliveryAction = 'reoffer' | 'reassign' | 'collect' | 'deliver' | 'cancel' | 'complete';
 
 const REASSIGNABLE: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'];
 const CANCELLABLE: DeliveryStatus[] = [
@@ -43,6 +56,14 @@ const FORCE_COMPLETABLE: DeliveryStatus[] = ['DELIVERED', 'FAILED'];
 
 function actionCopy(action: DeliveryAction, order: OperationalDeliveryItem) {
   switch (action) {
+    case 'reoffer':
+      return {
+        title: `Reenviar pedido #${order.displayNumber} para um motoboy`,
+        description:
+          'A oferta voltara a tocar somente para o motoboy escolhido, usando o prazo normal de resposta.',
+        confirm: 'Fazer pedido tocar',
+        pending: 'Enviando oferta...',
+      };
     case 'reassign':
       return {
         title: `Alterar entregador do pedido #${order.displayNumber}`,
@@ -96,6 +117,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   const [error, setError] = useState<string | null>(null);
 
   const canReassign = REASSIGNABLE.includes(order.status);
+  const canReoffer = order.status === 'AWAITING_DRIVER';
   const canCollect = order.status === 'ACCEPTED';
   const canDeliver = order.status === 'COLLECTED' && order.destinationKnownAtCreation;
   const canCancel = CANCELLABLE.includes(order.status);
@@ -104,19 +126,20 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   const driversQuery = useQuery({
     queryKey: ['admin', 'drivers', 'delivery-actions'],
     queryFn: () => adminDriversApi.list(token as string),
-    enabled: Boolean(token) && action === 'reassign',
+    enabled: Boolean(token) && (action === 'reassign' || action === 'reoffer'),
     staleTime: 30_000,
   });
 
   const availableDrivers = useMemo(
     () =>
-      (driversQuery.data ?? []).filter(
-        (driver) =>
+      (driversQuery.data ?? []).filter((driver) => {
+        const active =
           driver.approvalStatus === 'APPROVED' &&
           driver.accountStatus === 'ACTIVE' &&
-          driver.id !== order.driver?.id,
-      ),
-    [driversQuery.data, order.driver?.id],
+          driver.id !== order.driver?.id;
+        return active && (action !== 'reoffer' || driver.availability === 'AVAILABLE');
+      }),
+    [action, driversQuery.data, order.driver?.id],
   );
 
   const closeDialog = () => {
@@ -145,6 +168,11 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
       if (!token || !action) throw new Error('Sessão administrativa indisponível.');
       const payload = { reason: reason.trim() };
       switch (action) {
+        case 'reoffer':
+          return adminOperationsApi.reofferDelivery(token, order.id, {
+            driverId,
+            reason: payload.reason,
+          });
         case 'reassign':
           return adminDeliveriesApi.reassignDriver(token, order.id, { ...payload, driverId });
         case 'collect':
@@ -173,8 +201,9 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   });
 
   const copy = action ? actionCopy(action, order) : null;
+  const needsDriver = action === 'reassign' || action === 'reoffer';
   const canSubmit =
-    Boolean(action) && reason.trim().length >= 5 && (action !== 'reassign' || Boolean(driverId));
+    Boolean(action) && reason.trim().length >= 5 && (!needsDriver || Boolean(driverId));
 
   return (
     <>
@@ -186,6 +215,13 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
           <EllipsisVertical className="size-4" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuItem
+            disabled={!canReoffer}
+            onClick={() => openAction('reoffer')}
+            title={canReoffer ? undefined : 'Disponivel enquanto busca motoboy'}
+          >
+            <BellRing /> Reenviar oferta
+          </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!canReassign}
             onClick={() => openAction('reassign')}
@@ -249,9 +285,11 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
                 {copy.description}
               </p>
 
-              {action === 'reassign' ? (
+              {action === 'reassign' || action === 'reoffer' ? (
                 <div className="space-y-1.5">
-                  <Label htmlFor={`delivery-${order.id}-driver`}>Novo entregador</Label>
+                  <Label htmlFor={`delivery-${order.id}-driver`}>
+                    {action === 'reoffer' ? 'Motoboy que recebera a oferta' : 'Novo entregador'}
+                  </Label>
                   <select
                     id={`delivery-${order.id}-driver`}
                     className="h-10 w-full rounded-lg border bg-background px-3 text-sm"

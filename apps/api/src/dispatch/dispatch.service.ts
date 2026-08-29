@@ -8,7 +8,11 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { Prisma, type DeliveryOffer, type DeliveryStatus } from '@prisma/client';
-import type { AcceptOfferResult, DeliveryOfferPayload } from '@motoboycity/types';
+import type {
+  AcceptOfferResult,
+  AdminTargetedDispatchResult,
+  DeliveryOfferPayload,
+} from '@motoboycity/types';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -445,6 +449,198 @@ export class DispatchService {
     } catch (error: unknown) {
       this.logger.warn(`Falha ao enviar push da oferta ${offers[0]!.id}: ${String(error)}`);
     }
+  }
+
+  /**
+   * Reoferta manual do painel administrativo.
+   *
+   * Diferente do despacho automatico, nao exclui quem ja recusou ou deixou a
+   * oferta expirar: o administrador esta escolhendo conscientemente aquela
+   * pessoa. Todas as demais protecoes continuam valendo sob lock.
+   */
+  async reofferDeliveryToDriver(
+    deliveryId: string,
+    driverId: string,
+    audit: { adminId: string; adminName: string; reason: string },
+  ): Promise<AdminTargetedDispatchResult> {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      include: {
+        company: { select: { regionId: true, tradeName: true } },
+        serviceType: { select: { name: true } },
+        addresses: true,
+      },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido nao encontrado.');
+    }
+    if (delivery.status !== 'AWAITING_DRIVER' || delivery.driverId !== null) {
+      throw new ConflictException('Somente pedidos buscando motoboy podem ser reenviados.');
+    }
+
+    const deliveries = delivery.batchId
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: delivery.batchId },
+          orderBy: { createdAt: 'asc' },
+          include: { serviceType: { select: { name: true } }, addresses: true },
+        })
+      : [delivery];
+    if (
+      deliveries.some(
+        (item) => item.status !== 'AWAITING_DRIVER' || item.driverId !== null,
+      )
+    ) {
+      throw new ConflictException('O lote mudou de estado. Atualize o painel e tente novamente.');
+    }
+
+    const deliveryIds = deliveries.map((item) => item.id);
+    const pendingOffer = await this.prisma.deliveryOffer.findFirst({
+      where: { deliveryId: { in: deliveryIds }, response: 'PENDING' },
+      select: { id: true },
+    });
+    if (pendingOffer) {
+      throw new ConflictException('Este pedido ja esta tocando para um motoboy.');
+    }
+
+    const settings = await this.platformSettingsService.get();
+    const timeoutSeconds = settings.dispatchOfferTimeoutSeconds;
+    if (timeoutSeconds === null) {
+      throw new ConflictException('Configure o tempo de resposta das ofertas antes de reenviar.');
+    }
+
+    const serviceTypeIds = [...new Set(deliveries.map((item) => item.serviceTypeId))];
+    const selectedDriver = await this.prisma.driver.findFirst({
+      where: {
+        id: driverId,
+        ...this.eligibleDriverWhere(delivery.company.regionId, serviceTypeIds),
+      },
+      select: { id: true, user: { select: { name: true } } },
+    });
+    if (!selectedDriver) {
+      throw new ConflictException(
+        'O motoboy nao esta ativo ou nao atende a regiao e a modalidade deste pedido.',
+      );
+    }
+    if (!(await this.livePresence.isLive(driverId))) {
+      throw new ConflictException('O motoboy esta sem localizacao online neste momento.');
+    }
+    if (await this.punishmentService.activeFor(driverId)) {
+      throw new ConflictException('O motoboy esta temporariamente fora do despacho.');
+    }
+    const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
+    if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) {
+      throw new ConflictException('O motoboy atingiu o limite de entregas simultaneas.');
+    }
+    const driverPendingOffer = await this.prisma.deliveryOffer.findFirst({
+      where: { driverId, response: 'PENDING' },
+      select: { id: true },
+    });
+    if (driverPendingOffer) {
+      throw new ConflictException('O motoboy ja esta respondendo outra oferta.');
+    }
+
+    const creation = await this.createPendingOffers({
+      deliveryIds,
+      driverId,
+      regionId: delivery.company.regionId,
+      serviceTypeIds,
+    });
+    if (!('offers' in creation)) {
+      throw new ConflictException(
+        'O pedido ou o motoboy mudou de estado. Atualize o painel e tente novamente.',
+      );
+    }
+    const offers = creation.offers;
+
+    const scheduledTimeouts = await Promise.allSettled(
+      offers.map((offer) =>
+        this.dispatchQueue.add(
+          OFFER_EXPIRE_JOB,
+          { offerId: offer.id },
+          { delay: timeoutSeconds * 1000, jobId: expireJobId(offer.id) },
+        ),
+      ),
+    );
+    const schedulingFailure = scheduledTimeouts.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (schedulingFailure) {
+      const offerIds = offers.map((offer) => offer.id);
+      await this.prisma.deliveryOffer.updateMany({
+        where: { id: { in: offerIds }, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: new Date() },
+      });
+      await Promise.allSettled(offerIds.map((offerId) => this.cancelOfferTimeout(offerId)));
+      throw schedulingFailure.reason;
+    }
+
+    try {
+      await this.livePresence.moveToDispatchTail(driverId);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Nao foi possivel mover o motoboy ${driverId} para o fim da fila: ${String(error)}`,
+      );
+    }
+
+    this.realtimeGateway.emitToDriver(
+      driverId,
+      'delivery:offer',
+      buildOfferPayload({
+        offerId: offers[0]!.id,
+        principal: delivery,
+        entregas: deliveries,
+        expiresInSeconds: timeoutSeconds,
+      }),
+    );
+    this.realtimeGateway.emitAdminActivity(
+      `${audit.adminName} reenviou o pedido #${delivery.displayNumber} para ${selectedDriver.user.name}.`,
+    );
+
+    const quantidade = deliveries.length;
+    const expiresAtEpochMs = Date.now() + timeoutSeconds * 1000;
+    const body =
+      quantidade > 1
+        ? `O lote com ${quantidade} entregas esta disponivel.`
+        : `O pedido #${delivery.displayNumber} esta disponivel.`;
+    try {
+      await this.pushService.sendToDriver(driverId, {
+        kind: 'offer',
+        title: 'Pedido disponivel',
+        body,
+        data: {
+          type: 'offer',
+          offerId: offers[0]!.id,
+          deliveryId: delivery.id,
+          expiresInSeconds: String(timeoutSeconds),
+          expiresAtEpochMs: String(expiresAtEpochMs),
+        },
+      });
+    } catch (error: unknown) {
+      this.logger.warn(`Falha ao enviar push da oferta ${offers[0]!.id}: ${String(error)}`);
+    }
+
+    try {
+      await this.prisma.deliveryStatusHistory.createMany({
+        data: deliveryIds.map((id) => ({
+          deliveryId: id,
+          fromStatus: 'AWAITING_DRIVER' as const,
+          toStatus: 'AWAITING_DRIVER' as const,
+          changedByUserId: audit.adminId,
+          note:
+            `Oferta reenviada manualmente para ${selectedDriver.user.name}. ` +
+            `Motivo: ${audit.reason}`,
+        })),
+      });
+    } catch (error: unknown) {
+      this.logger.warn(`Falha ao auditar reoferta manual do pedido ${deliveryId}: ${String(error)}`);
+    }
+
+    return {
+      deliveryIds,
+      driverId,
+      driverName: selectedDriver.user.name,
+      offerIds: offers.map((offer) => offer.id),
+    };
   }
 
   /** Varre pedidos AWAITING_DRIVER sem oferta pendente e tenta despachar

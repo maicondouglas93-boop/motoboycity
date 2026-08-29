@@ -9,6 +9,7 @@ export * from './admin/change-password.schema';
 export * from './admin/operations-report-query.schema';
 export * from './admin/admin-operations-query.schema';
 export * from './admin/reorder-dispatch-queue.schema';
+export * from './admin/reoffer-delivery.schema';
 export * from './admin/list-service-types-query.schema';
 export * from './admin/create-service-type.schema';
 export * from './admin/update-service-type.schema';

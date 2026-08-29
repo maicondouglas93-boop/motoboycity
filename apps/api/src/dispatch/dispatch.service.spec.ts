@@ -51,7 +51,8 @@ describe('DispatchService', () => {
       findUnique: jest.Mock;
     };
     driverPresenceLog: { findMany: jest.Mock };
-    driver: { findUnique: jest.Mock };
+    driver: { findUnique: jest.Mock; findFirst: jest.Mock };
+    deliveryStatusHistory: { createMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
@@ -111,7 +112,8 @@ describe('DispatchService', () => {
         findUnique: jest.fn(),
       },
       driverPresenceLog: { findMany: jest.fn() },
-      driver: { findUnique: jest.fn() },
+      driver: { findUnique: jest.fn(), findFirst: jest.fn() },
+      deliveryStatusHistory: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     /**
@@ -238,6 +240,122 @@ describe('DispatchService', () => {
 
       const call = queue.add.mock.calls[0][2];
       expect(call.delay).toBe(0);
+    });
+  });
+
+  describe('reofferDeliveryToDriver', () => {
+    const awaitingDelivery = () => ({
+      id: 'delivery-1',
+      displayNumber: 25049,
+      status: 'AWAITING_DRIVER',
+      driverId: null,
+      batchId: null,
+      companyId: 'company-1',
+      serviceTypeId: 'service-1',
+      destinationKnownAtCreation: true,
+      totalValue: new Prisma.Decimal(12),
+      driverValue: new Prisma.Decimal(10),
+      platformValue: new Prisma.Decimal(2),
+      distanceKm: new Prisma.Decimal(3),
+      requiresReturn: false,
+      paymentMethod: 'BILLED',
+      createdAt: new Date('2026-08-28T20:00:00.000Z'),
+      company: { regionId: 'region-1', tradeName: 'Loja teste' },
+      serviceType: { name: 'Motoboy' },
+      addresses: [offerPickupAddress, offerDropoffAddress],
+    });
+
+    it('cria nova oferta para quem ja recebeu antes e faz socket e push tocarem', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(awaitingDelivery());
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([
+        { driverId: 'driver-1', response: 'DECLINED' },
+      ]);
+      prisma.driver.findFirst.mockResolvedValue({
+        id: 'driver-1',
+        user: { name: 'Motoboy escolhido' },
+      });
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-new',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-1',
+        response: 'PENDING',
+        offeredAt: new Date(),
+        respondedAt: null,
+      });
+
+      const result = await service.reofferDeliveryToDriver('delivery-1', 'driver-1', {
+        adminId: 'admin-1',
+        adminName: 'Administrador',
+        reason: 'Todos recusaram a primeira rodada.',
+      });
+
+      expect(result).toEqual({
+        deliveryIds: ['delivery-1'],
+        driverId: 'driver-1',
+        driverName: 'Motoboy escolhido',
+        offerIds: ['offer-new'],
+      });
+      expect(prisma.deliveryOffer.findMany).not.toHaveBeenCalled();
+      expect(queue.add).toHaveBeenCalledWith(
+        'offer-expire',
+        { offerId: 'offer-new' },
+        expect.objectContaining({ jobId: 'expire-offer-new' }),
+      );
+      expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:offer',
+        expect.objectContaining({ offerId: 'offer-new', deliveryId: 'delivery-1' }),
+      );
+      expect(push.sendToDriver).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({ kind: 'offer' }),
+      );
+      expect(prisma.deliveryStatusHistory.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            deliveryId: 'delivery-1',
+            changedByUserId: 'admin-1',
+            note: expect.stringContaining('Todos recusaram a primeira rodada.'),
+          }),
+        ],
+      });
+    });
+
+    it('nao disputa um pedido que ja esta tocando para outro motoboy', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(awaitingDelivery());
+      prisma.deliveryOffer.findFirst.mockResolvedValue({ id: 'offer-pending' });
+
+      await expect(
+        service.reofferDeliveryToDriver('delivery-1', 'driver-1', {
+          adminId: 'admin-1',
+          adminName: 'Administrador',
+          reason: 'Reenvio solicitado pela operacao.',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
+    });
+
+    it('recusa o reenvio quando o motoboy perdeu a presenca online', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(awaitingDelivery());
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.driver.findFirst.mockResolvedValue({
+        id: 'driver-1',
+        user: { name: 'Motoboy offline' },
+      });
+      livePresence.isLive.mockResolvedValue(false);
+
+      await expect(
+        service.reofferDeliveryToDriver('delivery-1', 'driver-1', {
+          adminId: 'admin-1',
+          adminName: 'Administrador',
+          reason: 'Reenvio solicitado pela operacao.',
+        }),
+      ).rejects.toThrow('O motoboy esta sem localizacao online neste momento.');
+
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
     });
   });
 

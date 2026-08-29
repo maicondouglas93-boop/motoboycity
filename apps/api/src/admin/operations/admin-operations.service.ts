@@ -3,11 +3,13 @@ import type {
   AdminActivityQuery,
   DeliveryOperationsQuery,
   ReorderDispatchQueuePayload,
+  ReofferDeliveryPayload,
 } from '@motoboycity/validation';
 import type {
   AdminDeliveryDispatchAudit,
   AdminDispatchQueueResult,
   AdminOperationsResult,
+  AdminTargetedDispatchResult,
   OperationalActivityEvent,
   OperationalActivityType,
   SilentDriverItem,
@@ -19,6 +21,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { LocationSilenceService } from '../../tracking/location-silence.service';
 import { deliveryActivityMessage, offerActivityMessage } from '../../common/status-labels';
+import { DispatchService } from '../../dispatch/dispatch.service';
 
 const ACTIVE_DRIVER_DELIVERY_STATUSES = ['ACCEPTED', 'COLLECTED', 'DELIVERED'] as const;
 const ADMIN_CANCELLED_RETENTION_MS = 15 * 60 * 1000;
@@ -31,7 +34,20 @@ export class AdminOperationsService {
     private readonly livePresence: LiveDriverPresenceService,
     private readonly locationSilenceService: LocationSilenceService,
     private readonly realtimeGateway: RealtimeGateway,
+    private readonly dispatchService: DispatchService,
   ) {}
+
+  reofferDelivery(
+    user: User,
+    deliveryId: string,
+    payload: ReofferDeliveryPayload,
+  ): Promise<AdminTargetedDispatchResult> {
+    return this.dispatchService.reofferDeliveryToDriver(deliveryId, payload.driverId, {
+      adminId: user.id,
+      adminName: user.name,
+      reason: payload.reason,
+    });
+  }
 
   /** Delega: a regra de silencio vive junto do rastreamento, que e o dono do dado. */
   silentDrivers(): Promise<SilentDriverItem[]> {
