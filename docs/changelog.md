@@ -10290,3 +10290,8 @@ entre todo o histórico de migrations e o schema em PostgreSQL temporário (**No
 difference detected**); `pnpm typecheck` e `pnpm lint` nos 8 workspaces; 82
 suítes unitárias da API, **1006 testes aprovados**; builds de produção da API e
 do Admin Web aprovados (38 páginas); `git diff --check` aprovado.
+
+## 2026-08-29 — Melhoria visual na tela de configurações do Admin Web
+
+Atualizada a página de configurações (pps/admin-web/src/app/(app)/configuracoes/page.tsx) para usar um layout de 3 colunas em telas grandes (lg:grid-cols-3) ao invés de 2. Além disso, os cartões de configuração receberam um visual mais premium: adição de sombras suaves, efeito de flutuação no hover, fundo com gradiente sutil, bordas e aumento da largura da barra colorida lateral indicadora de status.
+

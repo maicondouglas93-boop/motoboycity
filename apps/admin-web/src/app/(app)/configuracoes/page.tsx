@@ -273,13 +273,13 @@ export default function SettingsPage() {
           }}
         />
       )}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {areas.map((area) => (
           <Link key={area.href} href={area.href}>
-            <Card className="interactive-card h-full hover:bg-card">
+            <Card className="interactive-card relative overflow-hidden h-full border-border/50 bg-gradient-to-br from-card to-admin-soft/10 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md hover:border-admin-soft/40">
               <span
                 aria-hidden="true"
-                className={`absolute inset-y-0 left-0 w-1 ${TONS[area.tom].trilho}`}
+                className={`absolute inset-y-0 left-0 w-1.5 ${TONS[area.tom].trilho}`}
               />
               <CardContent className="flex gap-4 py-6">
                 <IconeDaArea icon={area.icon} tom={area.tom} />
