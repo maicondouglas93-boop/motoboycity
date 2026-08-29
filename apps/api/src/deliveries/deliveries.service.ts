@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import type {
@@ -1799,6 +1800,11 @@ export class DeliveriesService {
           'Cálculo de distância não está configurado. Contate o suporte.',
         );
       }
+      if (this.isNoRouteError(error)) {
+        throw new UnprocessableEntityException(
+          'O Google não encontrou uma rota viária para este destino. O pedido precisa de revisão.',
+        );
+      }
       throw new ServiceUnavailableException(
         'Não foi possível calcular a distância desta entrega agora. Tente novamente em instantes.',
       );
@@ -2083,6 +2089,11 @@ export class DeliveriesService {
         if (error instanceof GoogleMapsNotConfiguredError) {
           throw new InternalServerErrorException(
             'Cálculo de distância não está configurado. Contate o suporte.',
+          );
+        }
+        if (this.isNoRouteError(error)) {
+          throw new UnprocessableEntityException(
+            'O Google não encontrou uma rota viária para este destino. O pedido precisa de revisão.',
           );
         }
         throw new ServiceUnavailableException(
@@ -2940,6 +2951,10 @@ export class DeliveriesService {
         },
       });
     }
+  }
+
+  private isNoRouteError(error: unknown): boolean {
+    return error instanceof GoogleMapsApiError && error.message.includes('sem rota válida');
   }
 
   private toListItem(delivery: {

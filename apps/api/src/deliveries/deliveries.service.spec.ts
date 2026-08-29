@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
@@ -2495,6 +2496,26 @@ describe('DeliveriesService', () => {
           data: expect.objectContaining({ distanceKm: 8, totalValue: 17 }),
         }),
       );
+    });
+
+    it('classifica destino sem rota como revisao do pedido, nao indisponibilidade geral', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockRejectedValue(
+        new GoogleMapsApiError('Resposta da API sem rota válida.'),
+      );
+
+      await expect(
+        service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
 
     it('explica quando o retorno nao tem valor configurado no preco calculado na entrega', async () => {

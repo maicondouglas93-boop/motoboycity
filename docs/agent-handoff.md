@@ -9869,3 +9869,13 @@ coordenada-a-coordenada podia nunca acontecer. O servico agora prioriza as
 coordenadas cadastradas da origem e so geocodifica o texto quando elas faltam.
 Validacoes locais: 111 testes do `DeliveriesService`, build da API e
 `git diff --check` aprovados. Mudanca ainda nao publicada neste registro.
+
+Depois da publicacao, tocar no aviso continuou mostrando seis itens porque a
+outbox sempre comecava pelo `#206`: a API classificava "sem rota" como 503, e
+qualquer 5xx interrompe a fila por representar indisponibilidade geral. Assim o
+teste externo `#208` nunca era enviado. O erro persistente de rota agora e 422
+(`NEEDS_REVIEW`) e bloqueia somente o grupo afetado; a sincronizacao continua
+nos pedidos seguintes. Rede, timeout e outros 5xx continuam `PENDING` e
+interrompem corretamente. Validacoes locais: 112 testes do
+`DeliveriesService`, 21 testes da outbox, build da API e `git diff --check`
+aprovados. Mudanca ainda nao publicada neste registro.

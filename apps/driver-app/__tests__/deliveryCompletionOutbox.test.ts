@@ -151,6 +151,34 @@ describe('delivery completion outbox', () => {
     });
   });
 
+  it('continua outros pedidos quando apenas um destino precisa de revisao', async () => {
+    await enqueueDeliveryCompletion(deliveryInput);
+    await enqueueDeliveryCompletion({
+      ...deliveryInput,
+      deliveryId: 'delivery-2',
+      displayNumber: 16,
+    });
+    const api = executor({
+      deliver: jest.fn(async (_token, deliveryId) => {
+        if (deliveryId === 'delivery-1') {
+          throw new ApiError(422, { message: 'Destino sem rota viaria.' });
+        }
+      }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    const queue = await getPendingDeliveryCompletions('user-1');
+
+    expect(result.syncedIds).toHaveLength(1);
+    expect(queue).toEqual([
+      expect.objectContaining({
+        deliveryId: 'delivery-1',
+        state: 'NEEDS_REVIEW',
+        lastError: 'Destino sem rota viaria.',
+      }),
+    ]);
+  });
+
   it('libera a sincronizacao quando uma requisicao de rede fica pendurada', async () => {
     jest.useFakeTimers();
     try {
