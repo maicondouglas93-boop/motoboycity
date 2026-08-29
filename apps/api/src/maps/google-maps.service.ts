@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -108,6 +108,22 @@ interface RoutesApiResponse {
   error?: { code: number; message: string; status: string };
 }
 
+/**
+ * Descreve a consulta para o log sem vazar dado de cliente.
+ *
+ * O texto do endereco NAO entra: ele identifica a casa de alguem. Coordenada
+ * entra com 4 casas — cerca de 11 metros, suficiente para conferir a regiao no
+ * mapa e insuficiente para apontar uma porta.
+ */
+function describeWaypoint(point: MapsWaypoint): string {
+  if ('address' in point) return 'endereco';
+  return `coord(${point.lat.toFixed(4)},${point.lng.toFixed(4)})`;
+}
+
+function describeRouteRequest(request: DistanceRequest): string {
+  return `origem ${describeWaypoint(request.origin)} -> destino ${describeWaypoint(request.destination)}`;
+}
+
 function toWaypointPayload(point: MapsWaypoint): Record<string, unknown> {
   if ('address' in point) {
     return { address: point.address };
@@ -125,6 +141,8 @@ function toWaypointPayload(point: MapsWaypoint): Record<string, unknown> {
  */
 @Injectable()
 export class GoogleMapsService {
+  private readonly logger = new Logger(GoogleMapsService.name);
+
   constructor(private readonly config: ConfigService) {}
 
   /**
@@ -314,14 +332,42 @@ export class GoogleMapsService {
     }
 
     const route = body.routes?.[0];
-    if (typeof route?.distanceMeters !== 'number' || typeof route?.duration !== 'string') {
+    if (route === undefined) {
+      // Lista vazia: o Google entendeu os dois pontos e nao ligou um ao outro.
+      // A frase e preservada ao pe da letra porque `deliveries.service` decide
+      // por ela se vale a pena tentar outra forma de endereco.
+      this.logger.warn(
+        `Routes API sem rota: ${describeRouteRequest(request)}, HTTP ${response.status}, 0 rotas.`,
+      );
       throw new GoogleMapsApiError('Resposta da API do Google Maps sem rota válida.');
     }
+    if (typeof route.duration !== 'string') {
+      // Rota veio, mas sem o campo que a field mask pediu. E defeito de
+      // contrato, nao ausencia de caminho — e nao adianta tentar outro endereco.
+      this.logger.warn(
+        `Routes API com resposta incompleta: ${describeRouteRequest(request)}, ` +
+          `HTTP ${response.status}, campos ${Object.keys(route).join(',') || 'nenhum'}.`,
+      );
+      throw new GoogleMapsApiError('Resposta da API do Google Maps veio incompleta.');
+    }
 
+    /**
+     * `distanceMeters` AUSENTE vale ZERO, e nao "sem rota".
+     *
+     * O JSON do proto3 omite inteiro de valor padrao, entao uma rota de 0 m
+     * chega com `duration: "0s"` e sem `distanceMeters`. Tratar essa ausencia
+     * como resposta invalida foi o que travou a conclusao de pedidos marcados
+     * praticamente em cima do ponto de coleta: nenhum raio adiantava, porque a
+     * recusa acontecia antes de qualquer conta de distancia.
+     *
+     * Zero e um numero legitimo. Quem decide o preco de uma corrida de 0 km e a
+     * tabela — que cobra a taxa base — e nao este wrapper.
+     */
+    const distanceMeters = route.distanceMeters ?? 0;
     const durationSeconds = Number(route.duration.replace('s', ''));
 
     return {
-      distanceKm: Math.round((route.distanceMeters / 1000) * 100) / 100,
+      distanceKm: Math.round((distanceMeters / 1000) * 100) / 100,
       durationMinutes: Math.round(durationSeconds / 60),
     };
   }

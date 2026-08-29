@@ -135,15 +135,15 @@ describe('GoogleMapsService', () => {
         }),
       );
 
-      await expect(
-        service.reverseGeocode({ lat: -20.1509698, lng: -41.6146408 }),
-      ).resolves.toEqual({
-        street: 'Avenida Antonio Florencio Alvim',
-        number: '205',
-        city: 'Lajinha',
-        state: 'MG',
-        zip: '36980-000',
-      });
+      await expect(service.reverseGeocode({ lat: -20.1509698, lng: -41.6146408 })).resolves.toEqual(
+        {
+          street: 'Avenida Antonio Florencio Alvim',
+          number: '205',
+          city: 'Lajinha',
+          state: 'MG',
+          zip: '36980-000',
+        },
+      );
 
       const [requestUrl] = fetchSpy.mock.calls[0] as [URL, RequestInit];
       expect(requestUrl.searchParams.get('latlng')).toBe('-20.1509698,-41.6146408');
@@ -159,9 +159,7 @@ describe('GoogleMapsService', () => {
         }),
       );
 
-      await expect(
-        service.reverseGeocode({ lat: -20.15, lng: -41.61 }),
-      ).resolves.toEqual({
+      await expect(service.reverseGeocode({ lat: -20.15, lng: -41.61 })).resolves.toEqual({
         street: 'Estrada sem nome, Lajinha - MG, Brasil',
         number: null,
         city: null,
@@ -174,9 +172,7 @@ describe('GoogleMapsService', () => {
       config.get.mockReturnValue('fake-api-key');
       fetchSpy.mockResolvedValue(jsonResponse({ status: 'ZERO_RESULTS' }));
 
-      await expect(
-        service.reverseGeocode({ lat: -20.15, lng: -41.61 }),
-      ).resolves.toBeNull();
+      await expect(service.reverseGeocode({ lat: -20.15, lng: -41.61 })).resolves.toBeNull();
     });
   });
 
@@ -189,16 +185,55 @@ describe('GoogleMapsService', () => {
 
   it('retorna distância em km e duração em minutos numa resposta válida', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 5200, duration: '630s' }] }));
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ routes: [{ distanceMeters: 5200, duration: '630s' }] }),
+    );
 
     const result = await service.getDistance(request);
 
     expect(result).toEqual({ distanceKm: 5.2, durationMinutes: 11 });
   });
 
+  /**
+   * O JSON do proto3 omite inteiro de valor padrao: uma rota de 0 m chega com
+   * `duration: "0s"` e SEM `distanceMeters`. Tratar essa ausencia como resposta
+   * invalida travou a conclusao de pedidos marcados em cima do ponto de coleta
+   * — e nenhum raio adiantava, porque a recusa vinha antes de qualquer conta.
+   */
+  it('lê rota de zero metro, que o Google devolve sem o campo distanceMeters', async () => {
+    config.get.mockReturnValue('fake-api-key');
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ duration: '0s' }] }));
+
+    await expect(service.getDistance(request)).resolves.toEqual({
+      distanceKm: 0,
+      durationMinutes: 0,
+    });
+  });
+
+  it('trata lista de rotas vazia como ausência de rota', async () => {
+    config.get.mockReturnValue('fake-api-key');
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [] }));
+
+    await expect(service.getDistance(request)).rejects.toThrow('sem rota válida');
+  });
+
+  /**
+   * Rota presente e sem `duration` e defeito de contrato, nao ausencia de
+   * caminho — e a mensagem precisa ser outra, porque quem chama decide pela
+   * frase se vale tentar o mesmo trajeto de outra forma.
+   */
+  it('separa resposta incompleta de ausência de rota', async () => {
+    config.get.mockReturnValue('fake-api-key');
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 1200 }] }));
+
+    await expect(service.getDistance(request)).rejects.toThrow('veio incompleta');
+  });
+
   it('envia a chave no header X-Goog-Api-Key e as coordenadas no corpo da requisição', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 1000, duration: '60s' }] }));
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ routes: [{ distanceMeters: 1000, duration: '60s' }] }),
+    );
 
     await service.getDistance(request);
 
@@ -218,7 +253,9 @@ describe('GoogleMapsService', () => {
 
   it('aceita endereço em texto em vez de coordenadas (origem e destino independentes)', async () => {
     config.get.mockReturnValue('fake-api-key');
-    fetchSpy.mockResolvedValue(jsonResponse({ routes: [{ distanceMeters: 3000, duration: '300s' }] }));
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ routes: [{ distanceMeters: 3000, duration: '300s' }] }),
+    );
 
     await service.getDistance({
       origin: { address: 'Av. Paulista, 1000, São Paulo - SP' },
@@ -234,7 +271,11 @@ describe('GoogleMapsService', () => {
   it('lança GoogleMapsApiError com a mensagem do Google quando o HTTP não é ok', async () => {
     config.get.mockReturnValue('fake-api-key');
     fetchSpy.mockResolvedValue(
-      jsonResponse({ error: { code: 403, message: 'API key not valid.', status: 'PERMISSION_DENIED' } }, false, 403),
+      jsonResponse(
+        { error: { code: 403, message: 'API key not valid.', status: 'PERMISSION_DENIED' } },
+        false,
+        403,
+      ),
     );
 
     await expect(service.getDistance(request)).rejects.toThrow('API key not valid.');

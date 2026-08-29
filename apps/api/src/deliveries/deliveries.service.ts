@@ -2020,6 +2020,7 @@ export class DeliveriesService {
           payload,
         )
       : { kind: 'DESLIGADA' };
+    let notaDeDistanciaZero: string | null = null;
     const deliveryHistoryNote = [
       occurredAt
         ? `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
@@ -2111,6 +2112,21 @@ export class DeliveriesService {
         ? await this.quoteRequiredReturn(quoteInput)
         : await this.pricingService.quote({ ...quoteInput, requiresReturn: false });
 
+      /**
+       * Entrega concluida a ZERO quilometro.
+       *
+       * E cobranca legitima — a tabela paga a taxa base — mas tambem e o
+       * sintoma de um toque errado na porta da loja. Registrar aqui e o que
+       * separa as duas: quem for conferir a fatura ve, escrito, que a corrida
+       * fechou no mesmo ponto da coleta, em vez de descobrir um valor sem
+       * explicacao.
+       */
+      if (distance.distanceKm === 0) {
+        notaDeDistanciaZero =
+          'Entrega concluída no mesmo ponto da coleta — distância calculada: 0 km. ' +
+          'Cobrada pela taxa base da tabela.';
+      }
+
       distanceKm = distance.distanceKm;
       totalValue = quote.totalValue;
       driverValue = quote.driverValue;
@@ -2168,7 +2184,12 @@ export class DeliveriesService {
             toStatus: 'DELIVERED',
             changedByUserId: user.id,
             ...(occurredAt && { occurredAt }),
-            ...(deliveryHistoryNote && { note: deliveryHistoryNote }),
+            ...(() => {
+              const nota = [deliveryHistoryNote, notaDeDistanciaZero]
+                .filter((parte): parte is string => Boolean(parte))
+                .join(' ');
+              return nota ? { note: nota } : {};
+            })(),
           },
         });
         await this.integrationOutbox.record(tx, delivery.id, 'DELIVERED');

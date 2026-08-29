@@ -2133,6 +2133,56 @@ describe('DeliveriesService', () => {
       );
     });
 
+    /**
+     * Regressao de producao: a entrega marcada em cima do ponto de coleta.
+     *
+     * A rota de 0 m chega do Google sem `distanceMeters`, e isso derrubava a
+     * conclusao com "sem rota válida" — nenhum raio adiantava, porque a recusa
+     * vinha antes de qualquer conta de distancia. Agora zero e um numero, o
+     * preco sai da taxa base da tabela, e o historico diz o que aconteceu para
+     * a cobranca nao aparecer sem explicacao na fatura.
+     */
+    it('conclui a entrega de 0 km pela taxa base e registra o motivo', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          distanceKm: null,
+          driverValue: null,
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 0, durationMinutes: 0 });
+      pricingService.quote.mockResolvedValue({
+        totalValue: 8,
+        driverValue: 6.4,
+        platformValue: 1.6,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
+
+      await expect(
+        service.markDelivered(driverUser, 'delivery-1', {
+          lat: -20.1501,
+          lng: -41.7401,
+          accuracy: 10,
+        }),
+      ).resolves.toBeDefined();
+
+      expect(pricingService.quote).toHaveBeenCalledWith(expect.objectContaining({ distanceKm: 0 }));
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            note: expect.stringContaining('mesmo ponto da coleta'),
+          }),
+        }),
+      );
+    });
+
     describe('autonomia com endereço informado', () => {
       // Lajinha, centro. O segundo ponto fica ~1,5 km ao norte.
       const DESTINO = { lat: -20.1389, lng: -41.6069 };
