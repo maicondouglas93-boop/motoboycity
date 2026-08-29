@@ -2067,6 +2067,10 @@ export class DeliveriesService {
           destination: { lat: payload.lat, lng: payload.lng },
         });
       } catch (error) {
+        const failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        this.logger.warn(
+          `Pedido #${delivery.displayNumber}: falha ao calcular a distancia na conclusao (${failure}).`,
+        );
         if (error instanceof GoogleMapsNotConfiguredError) {
           throw new InternalServerErrorException(
             'Cálculo de distância não está configurado. Contate o suporte.',
@@ -2077,13 +2081,15 @@ export class DeliveriesService {
         );
       }
 
-      const quote = await this.pricingService.quote({
+      const quoteInput = {
         companyId: delivery.companyId,
         regionId: delivery.company.regionId,
         serviceTypeId: delivery.serviceTypeId,
         distanceKm: distance.distanceKm,
-        requiresReturn: delivery.requiresReturn,
-      });
+      };
+      const quote = delivery.requiresReturn
+        ? await this.quoteRequiredReturn(quoteInput)
+        : await this.pricingService.quote({ ...quoteInput, requiresReturn: false });
 
       distanceKm = distance.distanceKm;
       totalValue = quote.totalValue;

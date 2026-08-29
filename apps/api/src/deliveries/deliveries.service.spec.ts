@@ -2370,6 +2370,28 @@ describe('DeliveriesService', () => {
         }),
       });
     });
+
+    it('explica quando o retorno nao tem valor configurado no preco calculado na entrega', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: true,
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 8, durationMinutes: 25 });
+      pricingService.quote.mockRejectedValue(new ReturnNotSupportedError());
+
+      await expect(
+        service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 }),
+      ).rejects.toThrow(
+        'O valor de retorno não está configurado para esta empresa e modalidade. Contate o suporte.',
+      );
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('completeReturn', () => {

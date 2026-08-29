@@ -9768,3 +9768,61 @@ As senhas foram lidas apenas de arquivos DPAPI temporarios, nao foram exibidas e
 foram removidas depois da assinatura. A worktree curta tambem foi removida.
 Resta instalar o APK em aparelho real e executar o smoke autenticado de retorno
 com GPS indisponivel e de ligacao/desligamento das regras opcionais no ADM.
+
+## 2026-08-28 - Diagnostico de finalizacao pendente no pilot.11
+
+### Incidente observado
+
+- O pedido `#206`, sem destino conhecido na criacao e com retorno, permaneceu
+  oficialmente em `COLLECTED` depois do toque em entregar. O pilot.11 preservou
+  a acao e o GPS na outbox, exibiu o estado projetado na Home e manteve o aviso
+  amarelo de confirmacao pendente; nao houve gravacao parcial de preco/status.
+- O mesmo fluxo havia funcionado em varios pedidos durante o dia. Uma chamada
+  de diagnostico feita depois, usando a chave local sem a exibir, obteve rota
+  valida da Routes API. Isso afasta bloqueio permanente da chave, mas nao prova
+  qual falha transitoria ocorreu no processo de producao naquele instante.
+
+### Correcoes preparadas
+
+- Falhas de rede, timeout e HTTP 5xx continuam `PENDING`, preservando o GPS,
+  mas agora gravam uma mensagem curta em `lastError`. A Home prioriza e exibe
+  essa causa no aviso; o toque manual limpa o erro anterior e reenvia o item.
+- O reenvio automatico ja ocorre no bootstrap, reconexao do socket, retorno do
+  segundo plano e atualizacao manual. Nao se recaptura GPS silenciosamente.
+- Se a entrega calculada no destino exigir retorno sem valor configurado, a API
+  converte `ReturnNotSupportedError` em conflito explicativo, em vez de deixar
+  o erro escapar como HTTP 500 e parecer indisponibilidade indefinida.
+- A falha da Routes API na conclusao agora gera log seguro com numero do pedido,
+  classe e mensagem do erro. Nao registra chave, coordenadas nem endereco.
+
+### Arquivos afetados
+
+- `apps/api/src/deliveries/deliveries.service.ts`
+- `apps/api/src/deliveries/deliveries.service.spec.ts`
+- `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`
+- `apps/driver-app/src/screens/HomeScreen.tsx`
+- `apps/driver-app/__tests__/deliveryCompletionOutbox.test.ts`
+
+### Recuperacao e proximo passo
+
+O item existente do `#206` continua recuperavel no aparelho: tocar no aviso
+amarelo reaproveita o GPS congelado e tenta a confirmacao novamente. Se falhar,
+a mensagem nova so aparecera em um APK contendo este recorte; o log detalhado so
+aparecera depois de publicar a API. Nao houve operacao direta no banco, commit,
+push, deploy nem APK neste recorte.
+
+Validacoes aprovadas: 138 testes focados de deliveries da API; 20 testes
+focados e 130 testes completos do Driver App; build e lint da API; typecheck e
+lint do Driver App; Prettier e `git diff --check`.
+
+## 2026-08-29 - Inicio do release pilot.12
+
+O responsavel autorizou publicar o recorte acima. O Driver App foi promovido
+para `0.1.0-pilot.12` e o `versionCode` reservado e `12`. A API pode ser
+publicada sem migration: a mudanca apenas melhora o erro de precificacao do
+retorno e adiciona diagnostico seguro da Routes API.
+
+A chave JKS oficial, `google-services.json` e `local.properties` existem fora
+do Git. As quatro credenciais de assinatura nao permanecem no ambiente nem em
+arquivo reutilizavel; precisam ser carregadas novamente na sessao de build sem
+ser exibidas. Nenhum APK `pilot.12` foi gerado ate este registro.

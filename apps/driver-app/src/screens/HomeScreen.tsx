@@ -214,7 +214,10 @@ export function HomeScreen({ navigation }: Props) {
 
   const isAvailable = availability === 'AVAILABLE';
   const queuedCompletionForBanner =
-    completionQueue.find((item) => item.state === 'NEEDS_REVIEW') ?? completionQueue[0] ?? null;
+    completionQueue.find((item) => item.state === 'NEEDS_REVIEW') ??
+    completionQueue.find((item) => item.lastError) ??
+    completionQueue[0] ??
+    null;
 
   useEffect(() => {
     const hasPickupCountdown = activeDeliveries.some(
@@ -1140,7 +1143,9 @@ export function HomeScreen({ navigation }: Props) {
                   ? 'Sincronizando com o servidor...'
                   : queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
                     ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError ?? 'toque para revisar a sincronizacao.'}`
-                    : 'A acao esta salva neste celular. Toque para tentar sincronizar agora.'}
+                    : queuedCompletionForBanner?.lastError
+                      ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError}`
+                      : 'A acao esta salva neste celular. Toque para tentar sincronizar agora.'}
               </Text>
             </Pressable>
           ) : null}

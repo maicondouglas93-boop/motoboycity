@@ -322,6 +322,19 @@ async function markNeedsReview(
   );
 }
 
+async function markPendingError(
+  attempted: PendingDeliveryCompletion,
+  message: string,
+): Promise<void> {
+  await replaceQueue((current) =>
+    current.map((item) =>
+      item.id === attempted.id && item.state === 'PENDING'
+        ? { ...item, lastError: message.slice(0, 240) }
+        : item,
+    ),
+  );
+}
+
 async function reconcileAppliedOperation(
   accessToken: string,
   item: PendingDeliveryCompletion,
@@ -356,6 +369,12 @@ async function synchronizeQueue(
       syncedIds.push(item.id);
     } catch (error) {
       if (!(error instanceof ApiError)) {
+        await markPendingError(
+          item,
+          error instanceof Error && error.message === 'Tempo limite de sincronizacao excedido.'
+            ? 'O servidor demorou demais para confirmar. Toque para tentar novamente.'
+            : 'Nao foi possivel falar com o servidor. Confira o sinal e tente novamente.',
+        );
         serverUnavailable = true;
         break;
       }
@@ -364,6 +383,7 @@ async function synchronizeQueue(
         break;
       }
       if (error.status >= 500) {
+        await markPendingError(item, error.message);
         serverUnavailable = true;
         break;
       }
@@ -433,11 +453,12 @@ export async function retryDeliveryCompletionQueue(
           ? freshReturnLocation
           : item.payload;
 
-      if (item.state === 'NEEDS_REVIEW') {
-        return { ...item, payload: repairedPayload, state: 'PENDING' as const, lastError: null };
-      }
-
-      return repairedPayload === item.payload ? item : { ...item, payload: repairedPayload };
+      return {
+        ...item,
+        payload: repairedPayload,
+        state: 'PENDING' as const,
+        lastError: null,
+      };
     }),
   );
 }

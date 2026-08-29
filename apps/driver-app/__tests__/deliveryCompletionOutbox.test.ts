@@ -120,7 +120,35 @@ describe('delivery completion outbox', () => {
 
     expect(result.serverUnavailable).toBe(true);
     expect(queue).toHaveLength(1);
-    expect(queue[0]).toMatchObject({ state: 'PENDING', payload: deliveryInput.payload });
+    expect(queue[0]).toMatchObject({
+      state: 'PENDING',
+      payload: deliveryInput.payload,
+      lastError: 'Nao foi possivel falar com o servidor. Confira o sinal e tente novamente.',
+    });
+  });
+
+  it('mostra a mensagem da API sem transformar erro temporario em recusa definitiva', async () => {
+    await enqueueDeliveryCompletion(deliveryInput);
+    const api = executor({
+      deliver: jest
+        .fn()
+        .mockRejectedValue(
+          new ApiError(503, { message: 'Nao foi possivel calcular a distancia agora.' }),
+        ),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    expect(result.serverUnavailable).toBe(true);
+    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
+      state: 'PENDING',
+      lastError: 'Nao foi possivel calcular a distancia agora.',
+    });
+
+    await retryDeliveryCompletionQueue('user-1');
+    expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
+      state: 'PENDING',
+      lastError: null,
+    });
   });
 
   it('libera a sincronizacao quando uma requisicao de rede fica pendurada', async () => {
