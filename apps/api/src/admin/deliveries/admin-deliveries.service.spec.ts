@@ -5,6 +5,7 @@ import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
 import { PricingService } from '../../pricing/pricing.service';
+import { DispatchService } from '../../dispatch/dispatch.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminDeliveriesService } from './admin-deliveries.service';
 
@@ -41,7 +42,7 @@ describe('AdminDeliveriesService', () => {
   };
   let tx: {
     delivery: { update: jest.Mock; updateMany: jest.Mock };
-    deliveryStatusHistory: { create: jest.Mock };
+    deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
   };
   let deliveriesService: {
     createForCompany: jest.Mock;
@@ -50,11 +51,12 @@ describe('AdminDeliveriesService', () => {
   };
   let financeLedgerService: { creditDriverRepasse: jest.Mock };
   let pricingService: { quote: jest.Mock };
+  let dispatchService: { novoPrazoDeColeta: jest.Mock; agendarPrazoDeColeta: jest.Mock };
 
   beforeEach(async () => {
     tx = {
       delivery: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      deliveryStatusHistory: { create: jest.fn() },
+      deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
     };
     prisma = {
       delivery: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -68,6 +70,10 @@ describe('AdminDeliveriesService', () => {
       publishDeliveryUpdate: jest.fn(),
     };
     financeLedgerService = { creditDriverRepasse: jest.fn() };
+    dispatchService = {
+      novoPrazoDeColeta: jest.fn().mockResolvedValue(null),
+      agendarPrazoDeColeta: jest.fn().mockResolvedValue(undefined),
+    };
     pricingService = {
       quote: jest.fn().mockResolvedValue({
         totalValue: 12,
@@ -87,6 +93,7 @@ describe('AdminDeliveriesService', () => {
         { provide: FinanceLedgerService, useValue: financeLedgerService },
         { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
         { provide: PricingService, useValue: pricingService },
+        { provide: DispatchService, useValue: dispatchService },
       ],
     }).compile();
 
@@ -191,17 +198,121 @@ describe('AdminDeliveriesService', () => {
         reason: 'moto quebrou na estrada',
       });
 
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      // Condicional: sem o status e o entregador atual no `where`, uma
+      // finalizacao concorrente trocaria o dono de um pedido ja COMPLETED.
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['delivery-1'] }, status: 'COLLECTED', driverId: 'driver-1' },
         data: { driverId: 'driver-2' },
       });
-      const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
+      const historico = tx.deliveryStatusHistory.createMany.mock.calls[0]?.[0]?.data[0];
       expect(historico.changedByUserId).toBe('admin-1');
       expect(historico.note).toContain('moto quebrou na estrada');
       expect(historico.note).toContain('Novo Motoboy');
       // Intervencao dentro do mesmo estado, e nao transicao: o status nao muda.
       expect(historico.fromStatus).toBe('COLLECTED');
       expect(historico.toStatus).toBe('COLLECTED');
+    });
+
+    /**
+     * Trocar so um item deixava duas pessoas donas do mesmo lote, e a coleta
+     * fechava dos dois lados: cada motoboy batia no item do outro. O unico
+     * jeito de sair era reatribuir de volta — e nada dizia isso a ninguem.
+     */
+    it('o lote troca de dono inteiro', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ batchId: 'batch-1' }));
+      prisma.delivery.findMany.mockResolvedValue([
+        entrega({ id: 'delivery-1', batchId: 'batch-1' }),
+        entrega({ id: 'delivery-2', batchId: 'batch-1' }),
+      ]);
+      prisma.driver.findUnique
+        .mockResolvedValueOnce(motoboyApto)
+        .mockResolvedValueOnce({ id: 'driver-1', user: { name: 'Antigo' } });
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.reassignDriver(admin, 'delivery-1', {
+        driverId: 'driver-2',
+        reason: 'moto quebrou',
+      });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['delivery-1', 'delivery-2'] },
+          status: 'COLLECTED',
+          driverId: 'driver-1',
+        },
+        data: { driverId: 'driver-2' },
+      });
+      expect(tx.deliveryStatusHistory.createMany.mock.calls[0]?.[0]?.data).toHaveLength(2);
+    });
+
+    it('recusa quando os itens do lote estão em estados diferentes', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ batchId: 'batch-1' }));
+      prisma.delivery.findMany.mockResolvedValue([
+        entrega({ id: 'delivery-1', batchId: 'batch-1', status: 'COLLECTED' }),
+        entrega({ id: 'delivery-2', batchId: 'batch-1', status: 'DELIVERED' }),
+      ]);
+      prisma.driver.findUnique.mockResolvedValue(motoboyApto);
+
+      await expect(
+        service.reassignDriver(admin, 'delivery-1', { driverId: 'driver-2', reason: 'sumiu' }),
+      ).rejects.toThrow('estados diferentes');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    /**
+     * O job pendente carrega o entregador antigo e vira no-op depois da troca.
+     * Sem renovar, justamente o pedido que precisou de intervencao ficava sem
+     * ninguem cobrando a coleta, com um prazo decorativo no banco.
+     */
+    it('renova o prazo de coleta para o novo entregador em ACCEPTED', async () => {
+      const novoPrazo = new Date(Date.now() + 900_000);
+      dispatchService.novoPrazoDeColeta.mockResolvedValue(novoPrazo);
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ status: 'ACCEPTED' }));
+      prisma.driver.findUnique
+        .mockResolvedValueOnce(motoboyApto)
+        .mockResolvedValueOnce({ id: 'driver-1', user: { name: 'Antigo' } });
+
+      await service.reassignDriver(admin, 'delivery-1', {
+        driverId: 'driver-2',
+        reason: 'moto quebrou',
+      });
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { driverId: 'driver-2', pickupDeadlineAt: novoPrazo },
+        }),
+      );
+      expect(dispatchService.agendarPrazoDeColeta).toHaveBeenCalledWith(
+        'delivery-1',
+        'driver-2',
+        novoPrazo,
+      );
+    });
+
+    it('não mexe no prazo de coleta depois da coleta', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ status: 'COLLECTED' }));
+      prisma.driver.findUnique
+        .mockResolvedValueOnce(motoboyApto)
+        .mockResolvedValueOnce({ id: 'driver-1', user: { name: 'Antigo' } });
+
+      await service.reassignDriver(admin, 'delivery-1', {
+        driverId: 'driver-2',
+        reason: 'moto quebrou',
+      });
+
+      expect(dispatchService.agendarPrazoDeColeta).not.toHaveBeenCalled();
+    });
+
+    it('não troca o entregador se o pedido mudou durante a operação', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega());
+      prisma.driver.findUnique
+        .mockResolvedValueOnce(motoboyApto)
+        .mockResolvedValueOnce({ id: 'driver-1', user: { name: 'Antigo' } });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.reassignDriver(admin, 'delivery-1', { driverId: 'driver-2', reason: 'sumiu' }),
+      ).rejects.toThrow('mudou enquanto o entregador era trocado');
     });
 
     it('não credita repasse ao trocar de entregador', async () => {

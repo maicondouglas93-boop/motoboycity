@@ -13,6 +13,7 @@ import type {
   ReassignDriverPayload,
 } from '@motoboycity/validation';
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
+import { DispatchService } from '../../dispatch/dispatch.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
@@ -53,6 +54,7 @@ export class AdminDeliveriesService {
     private readonly financeLedgerService: FinanceLedgerService,
     private readonly integrationOutbox: IntegrationOutboxRecorder,
     private readonly pricingService: PricingService,
+    private readonly dispatchService: DispatchService,
   ) {}
 
   /**
@@ -159,32 +161,97 @@ export class AdminDeliveriesService {
         })
       : null;
 
+    /**
+     * O lote troca de dono inteiro, como e aceito e devolvido inteiro.
+     *
+     * Trocar so um item deixava duas pessoas donas do mesmo lote, e ai a coleta
+     * fechava dos dois lados: cada motoboy batia no item do outro e recebia
+     * "a coleta ja foi registrada por outra solicitacao", que descreve outra
+     * coisa. A unica mensagem verdadeira aparecia no `markCollected` do painel,
+     * depois de tres tentativas frustradas na rua.
+     */
+    const irmaos = delivery.batchId
+      ? await this.prisma.delivery.findMany({
+          where: { batchId: delivery.batchId },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [delivery];
+    if (
+      irmaos.some((item) => item.status !== delivery.status || item.driverId !== delivery.driverId)
+    ) {
+      throw new ConflictException(
+        'Os itens deste lote estão em estados diferentes. Atualize a tela e tente novamente.',
+      );
+    }
+    const ids = irmaos.map((item) => item.id);
+
+    /**
+     * Prazo novo, e nao o que sobrou do anterior.
+     *
+     * O job pendente carrega o entregador antigo e vira no-op assim que a troca
+     * grava; sem renovar, o `pickupDeadlineAt` continuava no banco e nas telas
+     * sem ninguem para cobra-lo. Quem acabou de receber o pedido tambem merece
+     * a janela inteira, e nao o resto da janela de outra pessoa.
+     */
+    const renovaPrazo = delivery.status === 'ACCEPTED';
+    const pickupDeadlineAt = renovaPrazo ? await this.dispatchService.novoPrazoDeColeta() : null;
+
     await this.prisma.$transaction(async (tx) => {
-      await tx.delivery.update({
-        where: { id: deliveryId },
-        data: { driverId: payload.driverId },
+      /**
+       * Condicional: a guarda de status acima e uma LEITURA. Sem ela no `where`,
+       * uma finalizacao concorrente entre a leitura e esta linha trocava o
+       * entregador de um pedido ja `COMPLETED` — exatamente o caso que
+       * `REASSIGNABLE_STATUSES` existe para impedir, com o repasse ja na
+       * carteira de quem fez a entrega. Dois admins juntos tambem caiam aqui: os
+       * dois recebiam sucesso e o historico nomeava um "anterior" ja obsoleto.
+       */
+      const atualizadas = await tx.delivery.updateMany({
+        where: { id: { in: ids }, status: delivery.status, driverId: delivery.driverId },
+        data: {
+          driverId: payload.driverId,
+          ...(renovaPrazo && { pickupDeadlineAt }),
+        },
       });
+      if (atualizadas.count !== ids.length) {
+        throw new ConflictException(
+          'O pedido mudou enquanto o entregador era trocado. Atualize a tela e tente novamente.',
+        );
+      }
+
       /**
        * O status não muda — só o entregador. A linha de histórico registra a
        * troca com `fromStatus` igual a `toStatus` de propósito: não foi uma
        * transição de estado, foi uma intervenção dentro do mesmo estado.
        */
-      await tx.deliveryStatusHistory.create({
-        data: {
-          deliveryId,
+      await tx.deliveryStatusHistory.createMany({
+        data: ids.map((id) => ({
+          deliveryId: id,
           fromStatus: delivery.status,
           toStatus: delivery.status,
           changedByUserId: admin.id,
           note:
             `Entregador alterado de ${anterior?.user.name ?? 'nenhum'} para ${novo.user.name} ` +
             `pelo administrador. Motivo: ${payload.reason}`,
-        },
+        })),
       });
     });
 
-    const detail = await this.deliveriesService.detail(admin, deliveryId);
-    this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
-    return detail;
+    if (renovaPrazo) {
+      await this.dispatchService.agendarPrazoDeColeta(
+        deliveryId,
+        payload.driverId,
+        pickupDeadlineAt,
+      );
+    }
+
+    // Um evento por item: o lote inteiro mudou de dono, e uma tela que so
+    // recebesse o principal continuaria mostrando o entregador antigo nos
+    // outros.
+    const detalhes = await Promise.all(ids.map((id) => this.deliveriesService.detail(admin, id)));
+    detalhes.forEach((item) =>
+      this.deliveriesService.publishDeliveryUpdate(item, 'DELIVERY_STATUS_CHANGED'),
+    );
+    return detalhes.find((item) => item.id === deliveryId) ?? detalhes[0]!;
   }
 
   /**
