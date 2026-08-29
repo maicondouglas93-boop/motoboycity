@@ -96,7 +96,7 @@ export const updatePlatformSettingsSchema = z
       .number()
       .int('O limite de entregas simultaneas deve ser um numero inteiro.')
       .min(1, 'O limite de entregas simultaneas deve ser de pelo menos 1.')
-      .max(50, 'O limite de entregas simultaneas deve ser de no maximo 50.')
+      .max(200, 'O limite de entregas simultaneas deve ser de no maximo 200.')
       .optional(),
     /**
      * Tamanho maximo do lote que a empresa pode lancar de uma vez.

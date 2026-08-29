@@ -54,9 +54,11 @@ const SILENCE_MAX_MINUTES = 120;
 const SLA_MIN_MINUTES = 1;
 const SLA_MAX_MINUTES = 480;
 // Piso de 1 nos dois: zero desligaria o despacho inteiro, e um erro de digitação
-// não pode ter esse poder. O teto de 50 é o do próprio formato de lote.
+// não pode ter esse poder. O lote mantém o teto do próprio formato; o limite
+// simultâneo é mais alto para não bloquear operações sem teto prático.
 const CONCURRENT_MIN = 1;
-const CONCURRENT_MAX = 50;
+const CONCURRENT_MAX = 200;
+const BATCH_MAX = 50;
 // Piso de 50 m: abaixo disso o erro do próprio GPS urbano já passa do raio, e a
 // regra recusaria entrega que realmente aconteceu.
 const DELIVERY_RADIUS_MIN = 50;
@@ -393,7 +395,7 @@ export default function OperationSettingsPage() {
       batchSizeInput,
       'O tamanho máximo do lote',
       CONCURRENT_MIN,
-      CONCURRENT_MAX,
+      BATCH_MAX,
     );
     const deliveryRadius = parseField(
       deliveryRadiusInput,
@@ -770,7 +772,7 @@ export default function OperationSettingsPage() {
                 <SettingField
                   id="max-batch"
                   label="Pedidos por lote"
-                  placeholder={`${CONCURRENT_MIN} a ${CONCURRENT_MAX}`}
+                  placeholder={`${CONCURRENT_MIN} a ${BATCH_MAX}`}
                   unit="pedidos"
                   value={batchSizeInput}
                   onValueChange={setBatchSizeInput}

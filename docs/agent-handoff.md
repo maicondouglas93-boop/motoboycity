@@ -9151,3 +9151,26 @@ monorepo, a Company Web tambem gerou um deployment automatico do mesmo commit,
 sem mudanca em seus arquivos. A API/Render e o banco nao foram reiniciados nem
 alterados neste recorte. Resta somente o smoke autenticado: abrir a empresa no
 ADM, escolher a sugestao do Google, salvar e repetir a coleta no pedido ativo.
+
+## 2026-08-28 - Teto ampliado de entregas simultaneas
+
+O limite configuravel de entregas simultaneas por motoboy passou a aceitar de
+1 a 200. A mudanca evita que uma operacao que prefira usar um teto alto seja
+bloqueada pelo maximo anterior de 50. O valor atualmente salvo nao e alterado
+automaticamente: o administrador ainda precisa informar o novo limite em
+`Configuracoes > Operacao`.
+
+O teto de pedidos por lote continua em 50, conforme o contrato de lotes. Para
+impedir que a ampliacao de capacidade mudasse esse contrato por acidente, o
+Admin Web passou a usar constantes separadas para entregas simultaneas e lote.
+Nao houve alteracao de schema Prisma, migration, endpoint ou formato de
+payload.
+
+Arquivos afetados: `packages/validation/src/admin/update-platform-settings.schema.ts`,
+`apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx` e este handoff.
+Validacoes aprovadas: build e lint de `@motoboycity/validation`, typecheck e
+lint do Admin Web, `git diff --check` e verificacao direta do schema: 200 foi
+aceito, 201 recusado, enquanto o lote manteve 50 aceito e 51 recusado. A
+primeira tentativa dos comandos nao executou porque `pnpm` nao estava no PATH;
+a repeticao equivalente com `corepack pnpm` passou. Proximo passo: publicar API
+e Admin Web e entao configurar o valor desejado no ADM.
