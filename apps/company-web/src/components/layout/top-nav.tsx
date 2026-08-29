@@ -24,7 +24,9 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Wordmark } from '@/components/brand/wordmark';
 import { CallDriverDialog } from '@/components/operations/call-driver-dialog';
+import { NotificationBell } from '@/components/layout/notification-bell';
 import { authUserQueryOptions } from '@/lib/auth-user-query';
+import { notificationsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 /**
@@ -101,6 +103,8 @@ export function TopNav() {
           navegar para o formulario completo. Quem ja sabe o endereco continua
           usando "Novo pedido" na central.
         */}
+        <NotificationBell token={session.getToken()} fetchNotifications={notificationsApi.forCompany} />
+
         <CallDriverDialog>
           <button
             type="button"

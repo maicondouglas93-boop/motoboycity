@@ -29,6 +29,8 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useMoneyVisibility } from '@/lib/money';
 import { Wordmark } from '@/components/brand/wordmark';
+import { NotificationBell } from '@/components/layout/notification-bell';
+import { notificationsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
 type NavItem = {
@@ -139,8 +141,12 @@ export function TopNav() {
           })}
         </nav>
 
+        <div className="ml-auto flex items-center gap-2">
+          <NotificationBell token={session.getToken()} fetchNotifications={notificationsApi.forAdmin} />
+        </div>
+
         <DropdownMenu>
-          <DropdownMenuTrigger className="ml-auto inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:hidden">
+          <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:hidden">
             <Menu className="size-4 text-[#aee8e4]" aria-hidden="true" />
             <span className="hidden sm:inline">{currentItem?.label ?? 'Menu'}</span>
             <span className="sr-only sm:hidden">Abrir navegação</span>
