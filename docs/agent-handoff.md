@@ -9826,3 +9826,30 @@ A chave JKS oficial, `google-services.json` e `local.properties` existem fora
 do Git. As quatro credenciais de assinatura nao permanecem no ambiente nem em
 arquivo reutilizavel; precisam ser carregadas novamente na sessao de build sem
 ser exibidas. Nenhum APK `pilot.12` foi gerado ate este registro.
+
+### Conclusao do pilot.12 e hotfix de rota do destino capturado
+
+O CI `33230377250` aprovou todas as etapas. O APK oficial foi gerado em `C:\m12`,
+assinado pelo certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` e
+instalado via ADB como atualizacao, preservando os dados. O aparelho confirmou
+`versionName 0.1.0-pilot.12`, `versionCode 12`, processo ativo e nenhum erro
+fatal no smoke de abertura.
+
+O artefato tem 75.130.089 bytes e SHA-256
+`BE79C4964F93A6CD5422824AB264461481DB5A3E91921EA47C2B78DDDE0BCDCC`.
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.12-vc12.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.12-vc12.apk`.
+
+O primeiro retry real do pedido `#206` revelou nos logs da API a causa precisa:
+`GoogleMapsApiError: Resposta da API do Google Maps sem rota valida`. Portanto
+nao era quota, chave ausente nem falha de rede. A coordenada capturada nao
+produziu rota viaria direta. A API agora, somente nesse erro, faz reverse
+geocode da mesma coordenada pelo Google e tenta novamente usando o endereco
+normalizado. A distancia continua vindo da Routes API; nao existe fallback por
+linha reta nem preco inventado. O mesmo helper cobre entrega e insucesso
+pos-coleta com destino definido no local.
+
+Validacoes do hotfix: 139 testes focados de deliveries e build da API
+aprovados. O hotfix e somente de servidor e nao exige outro APK.

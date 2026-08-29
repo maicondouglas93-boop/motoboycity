@@ -2371,6 +2371,54 @@ describe('DeliveriesService', () => {
       });
     });
 
+    it('repete a rota pelo endereco identificado pelo Google quando o GPS nao gera rota', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          serviceType: { name: 'Moto' },
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance
+        .mockRejectedValueOnce(new GoogleMapsApiError('Resposta da API sem rota válida.'))
+        .mockResolvedValueOnce({ distanceKm: 8, durationMinutes: 25 });
+      googleMapsService.reverseGeocode.mockResolvedValue({
+        street: 'Rua do Destino',
+        number: '55',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 12,
+        subtotal: 17,
+        returnValue: 0,
+        totalValue: 17,
+        driverValue: 14,
+        platformValue: 3,
+      });
+
+      await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+      expect(googleMapsService.reverseGeocode).toHaveBeenCalledWith({
+        lat: -20.15,
+        lng: -41.74,
+      });
+      expect(googleMapsService.getDistance).toHaveBeenNthCalledWith(2, {
+        origin: { address: expect.stringContaining('Rua da Loja') },
+        destination: { address: expect.stringContaining('Rua do Destino, 55') },
+      });
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ distanceKm: 8, totalValue: 17 }),
+        }),
+      );
+    });
+
     it('explica quando o retorno nao tem valor configurado no preco calculado na entrega', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(

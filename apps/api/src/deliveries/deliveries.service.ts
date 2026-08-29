@@ -39,6 +39,7 @@ import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { ReturnNotSupportedError } from '../pricing/pricing-calculator';
 import { PricingService, type PricingQuoteInput } from '../pricing/pricing.service';
 import {
+  GoogleMapsApiError,
   GoogleMapsNotConfiguredError,
   type ReverseGeocodedAddress,
 } from '../maps/google-maps.service';
@@ -1784,10 +1785,11 @@ export class DeliveriesService {
 
     let distance: { distanceKm: number };
     try {
-      distance = await this.googleMapsService.getDistance({
-        origin: { address: this.formatAddress(pickupAddress) },
-        destination: { lat: payload.lat, lng: payload.lng },
-      });
+      distance = await this.getDistanceToCapturedDestination(
+        this.formatAddress(pickupAddress),
+        payload.lat,
+        payload.lng,
+      );
     } catch (error) {
       if (error instanceof GoogleMapsNotConfiguredError) {
         throw new InternalServerErrorException(
@@ -2062,10 +2064,11 @@ export class DeliveriesService {
 
       let distance: { distanceKm: number };
       try {
-        distance = await this.googleMapsService.getDistance({
-          origin: { address: this.formatAddress(pickupAddress) },
-          destination: { lat: payload.lat, lng: payload.lng },
-        });
+        distance = await this.getDistanceToCapturedDestination(
+          this.formatAddress(pickupAddress),
+          payload.lat,
+          payload.lng,
+        );
       } catch (error) {
         const failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         this.logger.warn(
@@ -2876,6 +2879,45 @@ export class DeliveriesService {
   }): string {
     const complementPart = address.complement ? ` - ${address.complement}` : '';
     return `${address.street}, ${address.number}${complementPart}, ${address.city} - ${address.state}, ${address.zip}`;
+  }
+
+  /**
+   * Coordenadas capturadas fora da malha viaria podem fazer a Routes API
+   * responder sem rota. Nesse caso, usa o proprio Google para identificar o
+   * endereco daquela coordenada e repete a rota pelo endereco normalizado.
+   * Nunca substitui a distancia por linha reta nem inventa preco.
+   */
+  private async getDistanceToCapturedDestination(
+    originAddress: string,
+    lat: number,
+    lng: number,
+  ): Promise<{ distanceKm: number }> {
+    try {
+      return await this.googleMapsService.getDistance({
+        origin: { address: originAddress },
+        destination: { lat, lng },
+      });
+    } catch (error) {
+      const noRoute =
+        error instanceof GoogleMapsApiError && error.message.includes('sem rota válida');
+      if (!noRoute) throw error;
+
+      const destination = await this.googleMapsService.reverseGeocode({ lat, lng });
+      if (!destination?.street || !destination.city || !destination.state) throw error;
+
+      return this.googleMapsService.getDistance({
+        origin: { address: originAddress },
+        destination: {
+          address: this.formatAddress({
+            street: destination.street,
+            number: destination.number ?? 's/n',
+            city: destination.city,
+            state: destination.state,
+            zip: destination.zip ?? '',
+          }),
+        },
+      });
+    }
   }
 
   private toListItem(delivery: {
