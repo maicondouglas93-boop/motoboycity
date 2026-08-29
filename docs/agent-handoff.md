@@ -9342,3 +9342,104 @@ abrir `Configuracoes > Punicao de entregadores` para ligar a regra com os
 numeros desejados — ela nasce desligada e nao muda nada ate isso. O Driver App
 so precisa de release novo para o aviso na tela; a regra ja vale no servidor
 para qualquer versao instalada.
+
+## 2026-08-28 - Correcao: endereco sem coordenada travava a finalizacao
+
+Relato de producao: os motoboys pararam de conseguir finalizar pedidos, "nem
+mesmo perto da loja", e aumentar os raios nao resolveu. O administrador
+continuava finalizando pelo painel. Alguns pedidos "voltavam" depois de ja
+terem sido dados como finalizados.
+
+### A causa
+
+Criar e concluir tinham exigencias diferentes sobre o mesmo dado.
+
+`resolverCoordenadaDoDestino` falha em SILENCIO: se o Google nao encontra o
+endereco ou a chamada falha, o pedido e criado com `lat`/`lng` nulos e fica
+apenas um aviso no log. Na conclusao, `assertNearDeliveryAddress` e
+`assertNearCompanyAddress` falhavam ALTO, com 409, quando o endereco de
+referencia nao tinha coordenada.
+
+Essa recusa acontecia ANTES de qualquer conta de distancia. Por isso 500 m,
+5000 m ou 50000 m davam no mesmo: o codigo nunca chegava a comparar posicao com
+raio. O motoboy podia estar em cima da loja.
+
+O defeito ficou latente ate os raios serem configurados — com `null` a regra
+fica desligada e nada quebra. Quando os tres raios foram ligados, todo pedido
+cujo destino nao geocodificou virou impossivel de finalizar pelo aplicativo.
+
+O administrador continuava conseguindo porque a rota administrativa pula a
+checagem de proximidade de proposito.
+
+O segundo sintoma tem a mesma origem: o motoboy toca finalizar, a acao e salva
+no aparelho e o app mostra "Finalizacao salva no aparelho", tirando o pedido da
+lista de ativos; a sincronizacao em segundo plano leva o 409, o item vira
+`NEEDS_REVIEW` e o pedido nunca foi concluido no servidor. Ele viu "salvo", e o
+pedido reapareceu.
+
+### A correcao
+
+A validacao passou a DEGRADAR com auditoria em vez de recusar. Onde ha
+coordenada, a trava continua inteira — inclusive a recusa por distancia e por
+precisao de GPS. Onde nao ha, a etapa passa MARCADA:
+
+- o historico registra `SEM validação de proximidade`, qual endereco esta sem
+  ponto, o raio configurado e a posicao que o aplicativo enviou — sem ela, uma
+  etapa nao validada nao deixaria evidencia nenhuma de onde o motoboy estava;
+- o painel recebe um aviso em tempo real, para alguem corrigir o cadastro. Sem
+  isso, um endereco incompleto continuaria furando a trava silenciosamente e a
+  regra que o admin acredita ter ligado nao valeria para ninguem;
+- na CRIACAO, a falha de geocodificacao tambem passou a avisar o painel, e nao
+  so o log. O silencio ali era metade do defeito: o problema so aparecia horas
+  depois, na mao do motoboy.
+
+A decisao de fundo foi essa: entre recusar o trabalho de quem esta na rua e
+aceitar com marca de auditoria um pedido cujo cadastro esta incompleto, a
+segunda opcao e a que nao pune a pessoa errada. Quem pode corrigir o cadastro
+nao e o motoboy.
+
+`assertNearCompanyAddress` e `assertNearDeliveryAddress` passaram a devolver um
+`ProximityOutcome` (`DESLIGADA` / `VALIDADA` / `SEM_COORDENADAS`) em vez de
+`number | null`, e os tres pontos de chamada montam a nota pelo mesmo helper.
+
+### Alcance
+
+Nenhuma alteracao de schema, migration, contrato de API, payload ou permissao.
+O aplicativo NAO precisa de release: os pedidos hoje presos em `NEEDS_REVIEW`
+na fila offline destravam sozinhos ao sincronizar, assim que a API subir.
+
+Arquivos: `apps/api/src/deliveries/deliveries.service.ts`, mais os testes em
+`deliveries.service.spec.ts` e `test/delivery-lifecycle.e2e-spec.ts`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 956 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| `pnpm --filter @motoboycity/api run build` | aprovado |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Dois testes unitarios que fixavam a recusa foram reescritos para o contrato
+novo, e um E2E novo reproduz o estado exato dos pedidos de producao: destino
+com `lat`/`lng` nulos, motoboy longe, finalizacao aceita e nota de auditoria
+gravada. A trava com coordenada presente continua coberta pelos testes que ja
+existiam.
+
+### Limitacoes e proximo passo
+
+- **A causa raiz da falta de coordenada nao foi investigada em producao.** Se o
+  volume de `Endereco de entrega sem coordenada` no log for alto, a suspeita e
+  a **Geocoding API** nao estar habilitada na chave do servidor — e uma API
+  separada da Routes, que o calculo de distancia usa e que funciona. Conferir
+  antes de considerar o assunto encerrado.
+- Enderecos de empresa sem coordenada continuam existindo; a correcao pelo ADM
+  publicada em `ae1ca7b` resolve caso a caso e ainda nao foi aplicada.
+- Nao houve push, deploy nem build Android.
+
+Proximo passo concreto: publicar a API, pedir aos motoboys que toquem
+sincronizar na Home para as finalizacoes presas subirem, e entao conferir no
+log quantos enderecos estao sem coordenada para decidir se o problema e a chave
+do Google ou cadastro pontual.

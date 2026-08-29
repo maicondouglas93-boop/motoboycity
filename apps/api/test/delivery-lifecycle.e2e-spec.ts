@@ -1948,5 +1948,71 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
 
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
+
+    /**
+     * Regressão de produção: o endereço que o Google não encontrou na criação
+     * virava um pedido impossível de finalizar pelo aplicativo.
+     *
+     * A recusa acontecia ANTES de qualquer conta de distância, então aumentar
+     * o raio não mudava nada e o motoboy ficava preso na porta do cliente. A
+     * etapa agora passa marcada, com o motivo e a posição no histórico.
+     */
+    it('deixa finalizar, e registra a falta de validação, quando o destino não tem coordenada', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          collectionProximityRadiusMeters: 100,
+          deliveryProximityRadiusMeters: 100,
+        })
+        .expect(200);
+
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const created = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(98) })
+        .expect(201);
+      const deliveryId = created.body.id as string;
+
+      // Reproduz a geocodificação que falhou: o pedido existe, o endereço é só
+      // texto. É exatamente o estado em que os pedidos de produção estavam.
+      await prisma.deliveryAddress.updateMany({
+        where: { deliveryId, type: 'DROPOFF' },
+        data: { lat: null, lng: null },
+      });
+
+      const offer = await pendingOfferFor(deliveryId);
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offer.id}/accept`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/collect`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(nearPickup)
+        .expect(200);
+
+      // Longe do destino e ainda assim aceito: não há destino contra o que
+      // comparar, e a culpa disso não é do motoboy.
+      const delivered = await request(app.getHttpServer())
+        .patch(`/deliveries/${deliveryId}/deliver`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .send(farFromPickup)
+        .expect(200);
+      expect(delivered.body.status).toBe('COMPLETED');
+
+      // A nota fica na transição DELIVERED, que é onde a conferência acontece;
+      // o COMPLETED automático apenas fecha o pedido no mesmo instante.
+      const historico = await prisma.deliveryStatusHistory.findFirst({
+        where: { deliveryId, toStatus: 'DELIVERED' },
+        orderBy: { changedAt: 'desc' },
+      });
+      expect(historico?.note).toContain('SEM validação de proximidade');
+      expect(historico?.note).toContain('endereço de entrega');
+      expect(historico?.note).toContain('posição registrada');
+
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
   });
 });

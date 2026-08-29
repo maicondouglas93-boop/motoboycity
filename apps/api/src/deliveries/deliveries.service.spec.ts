@@ -2195,7 +2195,12 @@ describe('DeliveriesService', () => {
         ).rejects.toBeInstanceOf(ConflictException);
       });
 
-      it('rejeita quando o endereço não tem coordenada', async () => {
+      /**
+       * O endereco que o Google nao encontrou na criacao nao pode virar um
+       * pedido impossivel de fechar. Ele fecha marcado, e quem tem como
+       * corrigir o cadastro fica sabendo.
+       */
+      it('entrega sem validar, e registra o motivo, quando o destino não tem coordenada', async () => {
         pedidoComDestinoConhecido();
         prisma.deliveryAddress.findFirst.mockResolvedValue({
           lat: null,
@@ -2206,7 +2211,18 @@ describe('DeliveriesService', () => {
 
         await expect(
           service.markDelivered(driverUser, 'delivery-1', { ...LONGE, accuracy: 10 }),
-        ).rejects.toBeInstanceOf(ConflictException);
+        ).resolves.toBeDefined();
+
+        expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              note: expect.stringContaining('SEM validação de proximidade'),
+            }),
+          }),
+        );
+        expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+          expect.stringContaining('SEM validar proximidade'),
+        );
       });
 
       it('rejeita quando o app não envia posição', async () => {
@@ -2398,7 +2414,16 @@ describe('DeliveriesService', () => {
       expect(prisma.companyAddress.findFirst).not.toHaveBeenCalled();
     });
 
-    it('rejeita quando o raio está ativo e a empresa não tem coordenadas cadastradas', async () => {
+    /**
+     * O motoboy nao paga por um cadastro incompleto.
+     *
+     * Antes isto era uma recusa, e a recusa acontecia ANTES de qualquer conta
+     * de distancia — entao aumentar o raio nao adiantava e o pedido ficava
+     * impossivel de fechar pelo aplicativo, mesmo com o motoboy na porta da
+     * loja. Agora a etapa passa marcada: o historico diz que nao houve
+     * validacao, guarda a posicao enviada, e o painel recebe o aviso.
+     */
+    it('conclui sem validar, e registra o motivo, quando a empresa não tem coordenadas', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
         fullDeliveryRow({
@@ -2415,7 +2440,25 @@ describe('DeliveriesService', () => {
 
       await expect(
         service.completeReturn(driverUser, 'delivery-1', nearPickup),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).resolves.toBeDefined();
+
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            note: expect.stringContaining('SEM validação de proximidade'),
+          }),
+        }),
+      );
+      // A posicao entra na nota: sem ela a etapa nao validada nao deixaria
+      // evidencia nenhuma de onde o motoboy estava.
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ note: expect.stringContaining('posição registrada') }),
+        }),
+      );
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        expect.stringContaining('SEM validar proximidade'),
+      );
     });
 
     it('rejeita quando a posição informada está longe', async () => {

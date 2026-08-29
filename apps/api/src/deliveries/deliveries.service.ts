@@ -217,6 +217,25 @@ interface ProximityPayload {
   accuracy?: number;
 }
 
+/**
+ * Resultado da conferencia de proximidade de uma etapa.
+ *
+ * `SEM_COORDENADAS` existe porque criar e concluir tinham exigencias
+ * diferentes sobre o mesmo dado: a criacao aceita um endereco que o Google nao
+ * encontrou e segue com o texto, e a conclusao recusava esse mesmo pedido para
+ * sempre. Quem pagava por isso era o motoboy parado na porta do cliente, sem
+ * nada que ele pudesse fazer — aumentar o raio nao resolvia, porque a recusa
+ * acontecia antes de qualquer conta de distancia.
+ *
+ * Agora a etapa passa, mas passa MARCADA: o historico registra que nao houve
+ * validacao e por que, e o painel recebe o aviso para alguem corrigir o
+ * cadastro. A trava continua valendo inteira onde ha coordenada.
+ */
+type ProximityOutcome =
+  | { kind: 'DESLIGADA' }
+  | { kind: 'VALIDADA'; distanceMeters: number; targetLabel: string }
+  | { kind: 'SEM_COORDENADAS'; targetLabel: string };
+
 export interface AdminDeliverySearchSummary {
   total: number;
   items: Array<{
@@ -1549,7 +1568,7 @@ export class DeliveriesService {
     }
 
     const settings = await this.platformSettingsService.get();
-    const collectionDistanceMeters = await this.assertNearCompanyAddress(
+    const collectionProximity = await this.assertNearCompanyAddress(
       delivery.companyId,
       settings.collectionProximityRadiusMeters,
       payload ?? {},
@@ -1567,13 +1586,16 @@ export class DeliveriesService {
       occurredAt
         ? `Coleta marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
         : null,
-      collectionDistanceMeters === null
-        ? null
-        : `Coleta validada a ${Math.round(collectionDistanceMeters)}m do endereço da empresa ` +
-          `(raio configurado: ${settings.collectionProximityRadiusMeters}m).`,
+      this.proximityHistoryNote(
+        collectionProximity,
+        settings.collectionProximityRadiusMeters,
+        payload ?? {},
+        'Coleta',
+      ),
     ]
       .filter((note): note is string => note !== null)
       .join(' ');
+    this.avisarProximidadeNaoValidada(collectionProximity, delivery.displayNumber, 'coleta');
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -1979,24 +2001,27 @@ export class DeliveriesService {
       delivery.statusChangedAt,
       settings.minMinutesBeforeDeliver,
     );
-    const deliveryDistanceMeters = delivery.destinationKnownAtCreation
+    const deliveryProximity: ProximityOutcome = delivery.destinationKnownAtCreation
       ? await this.assertNearDeliveryAddress(
           delivery.id,
           settings.deliveryProximityRadiusMeters,
           payload,
         )
-      : null;
+      : { kind: 'DESLIGADA' };
     const deliveryHistoryNote = [
       occurredAt
         ? `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
         : null,
-      deliveryDistanceMeters === null
-        ? null
-        : `Entrega validada a ${Math.round(deliveryDistanceMeters)}m do destino ` +
-          `(raio configurado: ${settings.deliveryProximityRadiusMeters}m).`,
+      this.proximityHistoryNote(
+        deliveryProximity,
+        settings.deliveryProximityRadiusMeters,
+        payload,
+        'Entrega',
+      ),
     ]
       .filter((note): note is string => note !== null)
       .join(' ');
+    this.avisarProximidadeNaoValidada(deliveryProximity, delivery.displayNumber, 'entrega');
 
     let distanceKm = delivery.distanceKm === null ? null : Number(delivery.distanceKm);
     let totalValue = delivery.totalValue === null ? null : Number(delivery.totalValue);
@@ -2196,12 +2221,20 @@ export class DeliveriesService {
     }
 
     const settings = await this.platformSettingsService.get();
-    const returnDistanceMeters = await this.assertNearCompanyAddress(
+    const returnProximity = await this.assertNearCompanyAddress(
       delivery.companyId,
       settings.returnProximityRadiusMeters,
       payload,
       'concluir o retorno',
     );
+    this.avisarProximidadeNaoValidada(returnProximity, delivery.displayNumber, 'retorno');
+    const returnHistoryNote =
+      this.proximityHistoryNote(
+        returnProximity,
+        settings.returnProximityRadiusMeters,
+        payload,
+        'Retorno',
+      ) ?? 'Retorno confirmado pelo motoboy.';
 
     if (candidates.some((item) => !item.driverId || item.driverValue === null)) {
       throw new InternalServerErrorException(
@@ -2225,11 +2258,7 @@ export class DeliveriesService {
               fromStatus: item.status,
               toStatus: 'COMPLETED',
               changedByUserId: user.id,
-              note:
-                returnDistanceMeters === null
-                  ? 'Retorno confirmado pelo motoboy.'
-                  : `Retorno validado a ${Math.round(returnDistanceMeters)}m do endereço da empresa ` +
-                    `(raio configurado: ${settings.returnProximityRadiusMeters}m).`,
+              note: returnHistoryNote,
             },
           });
           await this.financeLedgerService.creditDriverRepasse(tx, {
@@ -2569,54 +2598,113 @@ export class DeliveriesService {
     radiusMeters: number | null,
     payload: ProximityPayload,
     actionLabel: string,
-  ): Promise<number | null> {
-    if (radiusMeters == null) return null;
+  ): Promise<ProximityOutcome> {
+    if (radiusMeters == null) return { kind: 'DESLIGADA' };
 
     const pickupAddress = await this.prisma.companyAddress.findFirst({
       where: { companyId, isPrimary: true },
       select: { lat: true, lng: true },
     });
     if (!pickupAddress || pickupAddress.lat === null || pickupAddress.lng === null) {
-      throw new ConflictException(
-        'O endereço principal da empresa não tem coordenadas para validar a proximidade. ' +
-          'Peça à empresa ou ao administrador para atualizar o endereço.',
-      );
+      return { kind: 'SEM_COORDENADAS', targetLabel: 'endereço da empresa' };
     }
 
-    return this.assertWithinConfiguredRadius({
-      payload,
-      radiusMeters,
-      target: { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) },
-      actionLabel,
+    return {
+      kind: 'VALIDADA',
       targetLabel: 'endereço da empresa',
-    });
+      distanceMeters: this.assertWithinConfiguredRadius({
+        payload,
+        radiusMeters,
+        target: { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) },
+        actionLabel,
+        targetLabel: 'endereço da empresa',
+      }),
+    };
   }
 
   private async assertNearDeliveryAddress(
     deliveryId: string,
     radiusMeters: number | null,
     payload: ProximityPayload,
-  ): Promise<number | null> {
-    if (radiusMeters == null) return null;
+  ): Promise<ProximityOutcome> {
+    if (radiusMeters == null) return { kind: 'DESLIGADA' };
 
     const dropoff = await this.prisma.deliveryAddress.findFirst({
       where: { deliveryId, type: 'DROPOFF' },
       select: { lat: true, lng: true },
     });
     if (!dropoff || dropoff.lat === null || dropoff.lng === null) {
-      throw new ConflictException(
-        'O endereço de entrega não tem coordenadas para validar a proximidade. ' +
-          'Peça à empresa ou ao administrador para corrigir o destino.',
-      );
+      return { kind: 'SEM_COORDENADAS', targetLabel: 'endereço de entrega' };
     }
 
-    return this.assertWithinConfiguredRadius({
-      payload,
-      radiusMeters,
-      target: { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
-      actionLabel: 'concluir a entrega',
+    return {
+      kind: 'VALIDADA',
       targetLabel: 'endereço de entrega',
-    });
+      distanceMeters: this.assertWithinConfiguredRadius({
+        payload,
+        radiusMeters,
+        target: { lat: Number(dropoff.lat), lng: Number(dropoff.lng) },
+        actionLabel: 'concluir a entrega',
+        targetLabel: 'endereço de entrega',
+      }),
+    };
+  }
+
+  /**
+   * Avisa o painel quando uma etapa passou sem conferencia de proximidade.
+   *
+   * A nota no historico prova o que aconteceu, mas so para quem for procurar.
+   * Sem este aviso, um cadastro sem coordenada continuaria furando a trava
+   * silenciosamente em todo pedido daquela empresa, e a regra que o admin
+   * acredita ter ligado nao estaria valendo para ninguem.
+   */
+  private avisarProximidadeNaoValidada(
+    outcome: ProximityOutcome,
+    displayNumber: number,
+    etapa: string,
+  ): void {
+    if (outcome.kind !== 'SEM_COORDENADAS') return;
+
+    this.logger.warn(
+      `Pedido #${displayNumber}: ${etapa} concluida sem validacao de proximidade — ` +
+        `${outcome.targetLabel} sem coordenadas.`,
+    );
+    this.realtimeGateway.emitAdminActivity(
+      `Pedido #${displayNumber}: ${etapa} aceita SEM validar proximidade — o ` +
+        `${outcome.targetLabel} está sem coordenadas. Corrija o cadastro para a regra voltar a valer.`,
+    );
+  }
+
+  /**
+   * A linha do historico que descreve a conferencia de proximidade.
+   *
+   * Quando nao houve conferencia, o texto diz isso com todas as letras e
+   * carrega a posicao que o aplicativo enviou. Sem essa posicao registrada, a
+   * etapa nao validada nao deixaria evidencia nenhuma de onde o motoboy estava
+   * — e e justamente ela que sustenta a auditoria depois.
+   */
+  private proximityHistoryNote(
+    outcome: ProximityOutcome,
+    radiusMeters: number | null,
+    payload: ProximityPayload,
+    stageLabel: string,
+  ): string | null {
+    if (outcome.kind === 'DESLIGADA') return null;
+    if (outcome.kind === 'VALIDADA') {
+      return (
+        `${stageLabel} validada a ${Math.round(outcome.distanceMeters)}m do ` +
+        `${outcome.targetLabel} (raio configurado: ${radiusMeters}m).`
+      );
+    }
+    const posicao =
+      payload.lat === undefined || payload.lng === undefined
+        ? 'sem posição enviada pelo aplicativo'
+        : `posição registrada: ${payload.lat.toFixed(6)}, ${payload.lng.toFixed(6)}` +
+          (payload.accuracy === undefined ? '' : ` (precisão de ${Math.round(payload.accuracy)}m)`);
+    return (
+      `${stageLabel} SEM validação de proximidade: o ${outcome.targetLabel} não tem ` +
+      `coordenadas cadastradas (raio configurado: ${radiusMeters}m). ${posicao}.`
+    );
   }
 
   private assertWithinConfiguredRadius(input: {
@@ -2958,20 +3046,37 @@ export class DeliveriesService {
     try {
       const ponto = await this.googleMapsService.geocode(this.formatAddress(endereco));
       if (!ponto) {
-        this.logger.warn(
-          `Endereco de entrega sem coordenada: "${this.formatAddress(endereco)}" nao foi ` +
-            'encontrado. O pedido seguira com o endereco em texto.',
+        this.avisarDestinoSemCoordenada(
+          this.formatAddress(endereco),
+          'o Google não encontrou o endereço',
         );
         return { lat: null, lng: null };
       }
       return ponto;
     } catch (erro) {
-      this.logger.warn(
-        `Falha ao geocodificar "${this.formatAddress(endereco)}": ${String(erro)}. ` +
-          'O pedido segue com o endereco em texto.',
-      );
+      this.avisarDestinoSemCoordenada(this.formatAddress(endereco), String(erro));
       return { lat: null, lng: null };
     }
+  }
+
+  /**
+   * O pedido segue com o endereco em texto, mas ninguem mais fica sabendo
+   * disso tarde demais.
+   *
+   * Este aviso existe porque o silencio aqui era metade do defeito: a criacao
+   * aceitava o endereco sem ponto geografico e so a conclusao, horas depois e
+   * na mao do motoboy, revelava o problema. Agora o operador ve na hora, com o
+   * pedido ainda fresco e o cliente ainda ao telefone.
+   */
+  private avisarDestinoSemCoordenada(enderecoFormatado: string, motivo: string): void {
+    this.logger.warn(
+      `Endereco de entrega sem coordenada: "${enderecoFormatado}" — ${motivo}. ` +
+        'O pedido seguira com o endereco em texto e a entrega nao tera validacao de proximidade.',
+    );
+    this.realtimeGateway.emitAdminActivity(
+      `Endereço sem coordenadas: "${enderecoFormatado}". O pedido foi criado, mas a entrega ` +
+        'não terá validação de proximidade até o endereço ser corrigido.',
+    );
   }
 
   private async assertBatchSizeAllowed(quantidade: number): Promise<void> {
