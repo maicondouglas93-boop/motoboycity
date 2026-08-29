@@ -10478,3 +10478,79 @@ requisições por evento; token em AsyncStorage sem criptografia, com
 teste nenhum.
 
 **Exige APK novo.** Toda a correção é do lado do aplicativo; o servidor não muda.
+
+## 2026-08-29 — Release `pilot.15`: as correções da auditoria chegam ao aparelho
+
+APK de produção assinado com as cinco correções da auditoria do aplicativo.
+Nenhuma delas viaja pelo servidor — todas são do lado do aplicativo, e o
+`pilot.14` ficou obsoleto sem chegar a nenhum aparelho.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.15-vc15.apk`
+SHA-256 `550F7C8AF13007FAD089C255259340E407740479FC94E33CC72F574B34E2E775`,
+75.144.657 bytes.
+
+`aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.15`, `versionCode` 15, minSdk 24 e targetSdk 36. `apksigner`
+confirmou APK Signature Scheme v2, RSA 4096 e o certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
+anteriores, então ele atualiza por cima do `pilot.12` instalado hoje.
+
+Cópia idêntica em
+`apps/driver-app/android/app/build/outputs/apk/release/` (worktree já removida).
+Nenhum aparelho ADB conectado; o APK **não foi instalado**.
+
+### Verificação do bundle
+
+Além dos hashes, o bundle JavaScript (2.508.380 caracteres) foi extraído e
+inspecionado por texto:
+
+| Procurado | Resultado |
+| --- | --- |
+| `motoboycity-api.onrender.com` | presente |
+| `localhost:3333`, `127.0.0.1`, `10.0.2.2` | ausentes |
+| mensagem de sessão encerrada | presente |
+| `"Permitir o tempo todo"` do atalho de localização | presente |
+| aviso de pedido cancelado na fila | presente |
+| mensagem de prazo de requisição estourado | presente |
+
+Conferir as quatro mensagens dentro do bundle prova que as correções **chegaram
+ao artefato**, e não só ao commit — o build passa por Metro, Babel e um plugin
+local que substitui a URL, e qualquer um deles poderia deixar algo para trás sem
+falhar.
+
+### Procedimento
+
+O registrado no release anterior funcionou sem tropeço: worktree curta em
+`C:\m15` (o `ninja` falha na pasta do projeto com "Filename longer than 260
+characters"), cópia de `google-services.json` e `local.properties` que o Git não
+leva, `pnpm install --frozen-lockfile`, build do `@motoboycity/validation` — sem
+o `dist/`, o bundle JS falha —, e `assembleRelease` com `MOTOBOYCITY_APP_ENV=production`
+e a URL da Render.
+
+Duas anotações novas para a próxima vez:
+
+- **`-Pmotoboycity.versionCode=15` não funciona pelo PowerShell**: ele quebra o
+  argumento no ponto e o Gradle tenta rodar uma tarefa chamada `.versionCode=15`.
+  Use a variável de ambiente `MOTOBOYCITY_VERSION_CODE`, que o `build.gradle`
+  aceita no mesmo lugar e satisfaz o portão de release.
+- **O comando das senhas não pode vir embrulhado em `powershell -Command "..."`**
+  quando o responsável já está num prompt PowerShell: o shell externo expande as
+  variáveis antes de passar adiante e o `Read-Host` recebe uma linha quebrada.
+  As quatro linhas soltas, coladas direto, funcionam.
+
+A remoção da worktree voltou a falhar com "Filename too long" e precisou de
+`rmdir /s /q`, como previsto.
+
+Senhas lidas apenas dos arquivos DPAPI criados pelo responsável em `%TEMP%`,
+usadas no processo, nunca exibidas nem registradas, e os arquivos removidos ao
+final junto com o bundle extraído. O daemon do Gradle foi encerrado.
+
+### Próximo passo
+
+Instalar o `pilot.15` e, além do ciclo completo, os dois testes que só existem em
+aparelho: negar "Permitir o tempo todo" num Android 11+ e num Android 10,
+conferindo que o alerta oferece "Abrir ajustes" e que o atalho abre a tela certa;
+e matar a rede no meio de uma finalização, conferindo que a espera termina em
+15 s com mensagem em vez de ficar girando.

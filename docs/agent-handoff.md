@@ -27,11 +27,11 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `96ccc78` — `main` sincronizado com `origin/main` |
+| Commit publicado | `a4fb9aa` — `main` sincronizado com `origin/main` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 47 migrations |
-| APK nos aparelhos | **`pilot.12`** — o `pilot.14` ficou **obsoleto** antes de ser instalado |
+| APK nos aparelhos | **`pilot.12`** — o `pilot.15` está pronto e **não instalado** |
 
 **Atenção ao publicar:** o Render publica no push, **sem esperar o CI**. As duas
 coisas correm em paralelo.
@@ -43,14 +43,19 @@ volta no próximo boot da API.
 
 ### APK atual
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.14-vc14.apk`
-SHA-256 `61F98979389D2CB4F6F7E24078653AEFC1E86851A824970AD418E42FC08E0BED`,
-75.132.233 bytes, assinatura v2 / RSA 4096, certificado oficial
-`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.15-vc15.apk`
+SHA-256 `550F7C8AF13007FAD089C255259340E407740479FC94E33CC72F574B34E2E775`,
+75.144.657 bytes, `versionCode` 15, minSdk 24, targetSdk 36, assinatura v2 /
+RSA 4096, certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
+anteriores, então ele atualiza por cima do `pilot.12` já instalado.
 
-O `pilot.13` foi compilado, verificado e **descartado** sem chegar a nenhum
-aparelho — a única mudança de aplicativo entre os dois era o aviso silencioso de
-sincronização.
+O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
+`localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As cinco correções da auditoria
+foram conferidas por texto dentro do bundle, e não só pelo commit.
+
+Os `pilot.13` e `pilot.14` foram compilados, verificados e **descartados** sem
+chegar a nenhum aparelho.
 
 ## Fluxos implementados
 
@@ -90,12 +95,13 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Compilar e instalar um APK novo.** O `pilot.14` ficou obsoleto: as
-   correções da auditoria do aplicativo (sessão expirada, timeout de requisição,
-   oferta em segundo plano, fila offline sem saída, permissão de localização no
-   Android 11+) são todas do lado do aplicativo. Repetir o ciclo completo com destino definido na entrega e
-   retorno, e conferir que o aviso de sincronização não aparece numa finalização
-   normal e aparece quando a espera passa de seis segundos.
+1. **Instalar o `pilot.15`.** Ele traz as cinco correções da auditoria do
+   aplicativo. Além do ciclo completo com destino definido na entrega e retorno,
+   dois testes que só existem em aparelho: **negar "Permitir o tempo todo"** num
+   Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
+   e que o atalho abre a tela certa; e **matar a rede no meio de uma
+   finalização**, conferindo que a espera termina em 15 s com mensagem em vez de
+   ficar girando.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
