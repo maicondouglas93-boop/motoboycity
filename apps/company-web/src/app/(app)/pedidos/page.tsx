@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useDeferredValue, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useDeferredValue, useState } from 'react';
 import { CalendarClock, Package, ReceiptText, Route, RotateCcw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus } from '@motoboycity/types';
@@ -43,7 +44,24 @@ function mapsUrl(lat: number, lng: number): string {
 }
 
 export default function CompanyOrdersPage() {
-  const [search, setSearch] = useState('');
+  return (
+    // `useSearchParams` exige limite de Suspense no App Router: sem ele a
+    // pagina inteira vira renderizacao dinamica no cliente.
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Carregando pedidos...</p>}>
+      <ConteudoPedidos />
+    </Suspense>
+  );
+}
+
+function ConteudoPedidos() {
+  /**
+   * A busca pode chegar pronta pela URL — e o que faz o detalhe do cliente
+   * conseguir dizer "ver as entregas deste cliente" sem duplicar tela nenhuma.
+   * Depois disso o campo e do usuario: o estado inicial nao volta a ser
+   * sobrescrito pela URL.
+   */
+  const buscaInicial = useSearchParams().get('q') ?? '';
+  const [search, setSearch] = useState(buscaInicial);
   const deferredSearch = useDeferredValue(search.trim());
   const [statusFilter, setStatusFilter] = useState<DeliveryStatus | 'ALL'>('ALL');
   const [page, setPage] = useState(1);

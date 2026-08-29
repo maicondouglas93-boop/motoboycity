@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   Clock3,
   MapPin,
+  PackageSearch,
   Pencil,
   Phone,
   Plus,
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 import { CustomerAddressForm } from '@/components/customers/customer-address-form';
 import { StatCard } from '@/components/stat-card';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
@@ -124,9 +125,28 @@ export default function CompanyCustomerDetailPage({ params }: { params: Promise<
             <span>CPF: {formatCustomerCpf(customer.cpf)}</span>
           </p>
         </div>
-        <Button type="button" onClick={() => openAddressEditor()}>
-          <Plus className="size-4" /> Novo endereço
-        </Button>
+        {/*
+          O cadastro deixa de ser so uma agenda.
+          Ate aqui esta tela mostrava "12 entregas concluidas" sem deixar ver
+          quais, e criar um pedido para o cliente aberto na tela exigia sair,
+          ir em Pedidos e digitar o nome de novo no autocomplete. Os dois
+          caminhos reusam telas que ja existem — a busca por destinatario e a
+          semente do formulario — em vez de duplicar operacao.
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            className={buttonVariants({ variant: 'outline' })}
+            href={`/pedidos?q=${encodeURIComponent(customer.phone)}`}
+          >
+            <PackageSearch className="size-4" /> Ver entregas
+          </Link>
+          <Link className={buttonVariants()} href={`/?cliente=${customer.id}`}>
+            <Plus className="size-4" /> Novo pedido
+          </Link>
+          <Button type="button" variant="outline" onClick={() => openAddressEditor()}>
+            <Plus className="size-4" /> Novo endereço
+          </Button>
+        </div>
       </header>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">

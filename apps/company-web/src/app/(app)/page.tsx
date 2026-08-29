@@ -1,9 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DeliveryOperationsResult } from '@motoboycity/types';
+import type {
+  CompanyCustomer,
+  DeliveryOperationsResult,
+  ServiceTypeItem,
+} from '@motoboycity/types';
 
 import { io } from 'socket.io-client';
 import { CircleDot, Copy, MapPin, Search, Wifi, WifiOff } from 'lucide-react';
@@ -29,13 +34,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
+import {
+  companyAddressApi,
+  companyCustomersApi,
+  deliveriesApi,
+  serviceTypesApi,
+} from '@/lib/api-client';
 import {
   updateDeliveryLocationInOperations,
   type DeliveryLocationRealtimeEvent,
 } from '@/lib/delivery-location-cache';
 import { session } from '@/lib/session';
 import {
+  customerToDeliveryFields,
   formatCustomerAddress,
   formatCustomerPhone,
   type CustomerRegistrationPrefill,
@@ -43,7 +54,46 @@ import {
 
 const baseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
 
+/**
+ * Semente vinda do detalhe do cliente (`/?cliente=<id>`).
+ *
+ * Reusa o mesmo mecanismo do clone de pedido em vez de criar um segundo
+ * caminho de pre-preenchimento: o formulario ja sabe receber uma semente, e o
+ * vinculo do pedido ao cliente acontece no servidor pelo telefone, entao nao e
+ * preciso carregar o id ate la.
+ */
+function sementeDoCliente(customer: CompanyCustomer, serviceTypes: ServiceTypeItem[]): CloneSeed {
+  const campos = customerToDeliveryFields(customer);
+  return {
+    serviceTypeId: serviceTypes[0]?.id ?? '',
+    destinationKnown: true,
+    requiresReturn: false,
+    recipientName: campos.recipientName,
+    recipientPhone: campos.recipientPhone,
+    customerPaymentMethod: '',
+    driverNote: '',
+    addressSearch: campos.addressSearch,
+    address: campos.address,
+    number: campos.number,
+    complement: campos.complement,
+    referenceNote: campos.referenceNote,
+    warnings: campos.address
+      ? []
+      : ['O endereço salvo deste cliente está sem localização. Selecione-o no Google abaixo.'],
+  };
+}
+
 export default function CompanyHomePage() {
+  return (
+    // `useSearchParams` exige limite de Suspense no App Router.
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Carregando operação...</p>}>
+      <ConteudoHome />
+    </Suspense>
+  );
+}
+
+function ConteudoHome() {
+  const clienteDaUrl = useSearchParams().get('cliente');
   const token = session.getToken();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
@@ -132,6 +182,32 @@ export default function CompanyHomePage() {
   const selected = visibleOrders.find((order) => order.id === selectedId) ?? null;
   const selectOrder = useCallback((id: string) => setSelectedId(id), []);
   const serviceTypes = useMemo(() => serviceTypesQuery.data ?? [], [serviceTypesQuery.data]);
+
+  /**
+   * Cliente escolhido no cadastro: `/?cliente=<id>`.
+   *
+   * A consulta so roda quando o parametro existe, e o formulario e semeado uma
+   * unica vez — a partir dai o rascunho e do usuario, e uma revalidacao do
+   * TanStack Query nao pode reescrever o que ele acabou de digitar.
+   */
+  const clienteSemente = useQuery({
+    queryKey: ['company', 'customers', 'semente', clienteDaUrl],
+    queryFn: () => companyCustomersApi.detail(token as string, clienteDaUrl as string),
+    enabled: Boolean(token) && Boolean(clienteDaUrl),
+    staleTime: Infinity,
+  });
+  const semeado = useRef<string | null>(null);
+  useEffect(() => {
+    const customer = clienteSemente.data;
+    if (!customer || serviceTypes.length === 0) return;
+    if (semeado.current === customer.id) return;
+    semeado.current = customer.id;
+    setClone({
+      seed: sementeDoCliente(customer, serviceTypes),
+      displayNumber: 0,
+      nonce: Date.now(),
+    });
+  }, [clienteSemente.data, serviceTypes]);
 
   if (!token) return <p className="text-sm text-muted-foreground">Faça login para continuar.</p>;
   if (addressQuery.isLoading)
