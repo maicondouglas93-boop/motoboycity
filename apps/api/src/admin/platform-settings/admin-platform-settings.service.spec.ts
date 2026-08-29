@@ -45,6 +45,9 @@ describe('AdminPlatformSettingsService', () => {
     it.each([
       { dispatchOfferTimeoutSeconds: null },
       { driverCommissionPercentage: null },
+      // Aqui o nulo nao desligaria uma regra: deixaria o preco sair de uma
+      // triangulacao de antena a quilometros do cliente.
+      { deferredDestinationMaxAccuracyMeters: null },
     ])('continua recusando null em configuracao obrigatoria: %o', (payload) => {
       expect(updatePlatformSettingsSchema.safeParse(payload).success).toBe(false);
     });
@@ -77,6 +80,7 @@ describe('AdminPlatformSettingsService', () => {
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
+        deferredDestinationMaxAccuracyMeters: null,
         driverPunishmentEnabled: false,
         driverPunishmentTrigger: 'DECLINED',
         driverPunishmentOfferCount: null,

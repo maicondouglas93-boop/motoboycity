@@ -10185,3 +10185,83 @@ administrador.
   entrega em 5000 m, um fix de 800 m passa na proximidade e e recusado no
   diferido; os dois limites nao conversam, e o operador nao alcanca nenhum dos
   dois.
+
+## 2026-08-29 - Precisao do destino por GPS: configuravel e explicada
+
+Ultimo item aberto da auditoria do ciclo. `MAX_LOCATION_ACCURACY_METERS = 100`
+era constante de codigo: o administrador nao via, nao ajustava, e a mensagem de
+recusa nao explicava por que o limite era mais rigido que o raio que ele mesmo
+tinha configurado na mesma tela.
+
+### A "incoerencia" que nao era
+
+Com raio de entrega em 5000 m, um fix de 800 m passa na proximidade e e recusado
+no destino por GPS. Auditando de perto, os dois limites respondem perguntas
+diferentes:
+
+- o RAIO pergunta "ele esta perto do endereco que ja conhecemos?";
+- este limite existe porque NAO ha endereco conhecido — a coordenada vira o
+  endereco E o preco.
+
+Ser mais rigido esta certo. O defeito era o silencio: nada dizia isso a quem
+opera. A mensagem agora diz, com todas as letras, que o limite e mais rigido
+"porque a sua posição vira o endereço e o valor da corrida".
+
+### O que mudou
+
+`PlatformSettings.deferredDestinationMaxAccuracyMeters`, entre 10 m e 1000 m.
+Piso porque abaixo disso o GPS urbano quase nunca fecha e a etapa ficaria
+impossivel; teto porque acima disso a "coordenada" descreve um bairro, e ela vai
+virar o endereco.
+
+**NULO = o padrao de 100 m, e nao "sem limite".** Este campo NAO aceita `null`
+no contrato, ao contrario dos cinco desligaveis: aqui o nulo nao desligaria uma
+regra, deixaria o preco sair de uma triangulacao de antena a quilometros do
+cliente. A tela mostra `100m (padrão)` em vez de campo vazio, que pareceria
+"sem regra".
+
+A verificacao virou uma funcao unica, usada nos dois pontos que dependiam da
+constante — a conclusao e o insucesso do pedido de preco diferido.
+
+### Arquivos
+
+`apps/api/prisma/schema.prisma` e a migration aditiva
+`20260829030000_deferred_destination_accuracy`,
+`packages/validation/src/admin/update-platform-settings.schema.ts`,
+`packages/types/src/pricing.ts`,
+`apps/api/src/admin/platform-settings/admin-platform-settings.service.ts`,
+`apps/api/src/deliveries/deliveries.service.ts` e os specs,
+`apps/admin-web/src/app/(app)/configuracoes/operacao/page.tsx`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` e `migrate diff --exit-code` | aprovados, "No difference detected" |
+| `prisma migrate deploy` no PostgreSQL local | 1 migration aplicada |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 988 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 239 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: padrao de 100 m quando nao configurado, limite ampliado do admin
+sendo respeitado, mensagem explicando a diferenca para o raio, e a recusa de
+`null` no contrato.
+
+### Nota de ambiente
+
+O banco isolado de E2E precisou da coluna nova. Como o CLI do Prisma ignora o
+`DATABASE_URL` da linha de comando neste projeto, foi aplicada com
+`migrate diff --from-url` + `db execute --url`, e a linha correspondente foi
+registrada em `_prisma_migrations` para o banco continuar aceitando
+`migrate deploy`.
+
+### Estado da auditoria do ciclo
+
+Fechados: o estado sem saida do insucesso, a saida da entrega inalcancavel pela
+tela, a lacuna de E2E do Google e este limite.
+
+Aberto: a criacao com destino conhecido responde "tente novamente em instantes"
+mesmo quando o endereco e irroteavel — afirma uma causa temporaria que nao sabe
+ser temporaria — e nao tem os tres fallbacks que a conclusao tem.

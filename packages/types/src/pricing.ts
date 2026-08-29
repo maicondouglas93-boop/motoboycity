@@ -72,6 +72,11 @@ export interface PlatformSettingsItem {
   /** Raio para marcar entrega com destino informado. `null` desliga a regra. */
   deliveryProximityRadiusMeters: number | null;
   /**
+   * Precisão mínima do GPS quando a posição do motoboy define o destino.
+   * `null` = o padrão de 100 m — nunca "sem limite".
+   */
+  deferredDestinationMaxAccuracyMeters: number | null;
+  /**
    * Punição automática por recusa/expiração de oferta. Desligada por padrão;
    * com a chave ligada e `offerCount`/`minutes` nulos, nada é aplicado.
    */
@@ -112,6 +117,8 @@ export interface UpdatePlatformSettingsInput {
   maxConcurrentDeliveriesPerDriver?: number | null;
   maxDeliveriesPerBatch?: number;
   deliveryProximityRadiusMeters?: number | null;
+  /** Não aceita `null`: zerar a exigência deixaria o preço sair de um fix ruim. */
+  deferredDestinationMaxAccuracyMeters?: number;
   driverPunishmentEnabled?: boolean;
   driverPunishmentTrigger?: DriverPunishmentTrigger;
   driverPunishmentOfferCount?: number;

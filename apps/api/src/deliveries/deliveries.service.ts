@@ -122,6 +122,28 @@ type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
  */
 const MAX_LOCATION_ACCURACY_METERS = 100;
 
+/**
+ * Recusa o fix impreciso demais para VIRAR o destino.
+ *
+ * O limite e mais rigido que os raios de proximidade de proposito, e a mensagem
+ * diz isso: os raios respondem "ele esta perto do endereco que ja conhecemos?",
+ * e aqui nao ha endereco conhecido para comparar — a posicao vira o endereco e o
+ * preco. Sem essa frase, o motoboy le "800m e demais" com um raio de 5000m
+ * configurado na tela e conclui, com razao, que o sistema se contradiz.
+ */
+function assertAccuracyForCapturedDestination(
+  accuracy: number | undefined,
+  limitMeters: number,
+): void {
+  if (accuracy === undefined || accuracy <= limitMeters) return;
+  throw new ConflictException(
+    `A precisão do GPS agora (${Math.round(accuracy)}m) é baixa demais para definir o destino ` +
+      `desta entrega, que exige ${limitMeters}m ou melhor. O limite é mais rígido que o raio ` +
+      `porque a sua posição vira o endereço e o valor da corrida. Aguarde o sinal melhorar e ` +
+      `tente de novo.`,
+  );
+}
+
 export interface DeliveryAddressItem {
   type: string;
   street: string | null;
@@ -1771,12 +1793,11 @@ export class DeliveriesService {
         'É necessário informar a localização atual para registrar o destino e calcular o valor desta entrega.',
       );
     }
-    if (payload.accuracy !== undefined && payload.accuracy > MAX_LOCATION_ACCURACY_METERS) {
-      throw new ConflictException(
-        `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é baixa demais para definir ` +
-          `o destino desta entrega. Aguarde o sinal melhorar e tente de novo.`,
-      );
-    }
+    const settings = await this.platformSettingsService.get();
+    assertAccuracyForCapturedDestination(
+      payload.accuracy,
+      settings.deferredDestinationMaxAccuracyMeters ?? MAX_LOCATION_ACCURACY_METERS,
+    );
 
     const pickupAddress = await this.prisma.companyAddress.findFirst({
       where: { companyId: delivery.companyId, isPrimary: true },
@@ -2197,12 +2218,10 @@ export class DeliveriesService {
       // pago ao motoboy. Um fix impreciso nao "erra um pouco": ele grava um destino que
       // nunca existiu e um valor que ninguem consegue contestar depois, porque o pedido
       // fecha COMPLETED com esse numero.
-      if (payload.accuracy !== undefined && payload.accuracy > MAX_LOCATION_ACCURACY_METERS) {
-        throw new ConflictException(
-          `A precisão do GPS agora (${Math.round(payload.accuracy)}m) é baixa demais para definir ` +
-            `o destino desta entrega. Aguarde o sinal melhorar e tente de novo.`,
-        );
-      }
+      assertAccuracyForCapturedDestination(
+        payload.accuracy,
+        settings.deferredDestinationMaxAccuracyMeters ?? MAX_LOCATION_ACCURACY_METERS,
+      );
       const pickupAddress = await this.prisma.companyAddress.findFirst({
         where: { companyId: delivery.companyId, isPrimary: true },
       });

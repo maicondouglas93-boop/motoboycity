@@ -62,6 +62,15 @@ const CONCURRENT_MAX = 200;
 const BATCH_MAX = 50;
 // Piso de 50 m: abaixo disso o erro do próprio GPS urbano já passa do raio, e a
 // regra recusaria entrega que realmente aconteceu.
+/**
+ * Precisao exigida quando a posicao do motoboy VIRA o destino.
+ *
+ * Sem valor salvo, o servidor usa 100 m — e a tela diz isso, em vez de mostrar
+ * um campo vazio que pareceria "sem regra".
+ */
+const DEFERRED_ACCURACY_MIN = 10;
+const DEFERRED_ACCURACY_MAX = 1000;
+const DEFERRED_ACCURACY_PADRAO = 100;
 const DELIVERY_RADIUS_MIN = 50;
 const DELIVERY_RADIUS_MAX = 5000;
 
@@ -289,6 +298,7 @@ export default function OperationSettingsPage() {
   const [concurrentInput, setConcurrentInput] = useState('');
   const [batchSizeInput, setBatchSizeInput] = useState('');
   const [deliveryRadiusInput, setDeliveryRadiusInput] = useState('');
+  const [deferredAccuracyInput, setDeferredAccuracyInput] = useState('');
   /**
    * Regras marcadas para DESLIGAR neste salvamento.
    *
@@ -344,6 +354,7 @@ export default function OperationSettingsPage() {
     setConcurrentInput('');
     setBatchSizeInput('');
     setDeliveryRadiusInput('');
+    setDeferredAccuracyInput('');
   }
 
   const updateMutation = useMutation({
@@ -483,6 +494,12 @@ export default function OperationSettingsPage() {
       CONCURRENT_MIN,
       BATCH_MAX,
     );
+    const deferredAccuracy = parseField(
+      deferredAccuracyInput,
+      'A precisão exigida no destino por GPS',
+      DEFERRED_ACCURACY_MIN,
+      DEFERRED_ACCURACY_MAX,
+    );
     const deliveryRadius = parseField(
       valorParaValidar('deliveryProximityRadiusMeters', deliveryRadiusInput),
       'O raio para concluir a entrega',
@@ -504,7 +521,8 @@ export default function OperationSettingsPage() {
       slaDeliver.error ??
       concurrent.error ??
       batchSize.error ??
-      deliveryRadius.error;
+      deliveryRadius.error ??
+      deferredAccuracy.error;
     if (error) {
       setFormError(error);
       return;
@@ -565,6 +583,9 @@ export default function OperationSettingsPage() {
       ...(batchSize.value !== undefined && { maxDeliveriesPerBatch: batchSize.value }),
       ...(deliveryRadius.value !== undefined && {
         deliveryProximityRadiusMeters: deliveryRadius.value,
+      }),
+      ...(deferredAccuracy.value !== undefined && {
+        deferredDestinationMaxAccuracyMeters: deferredAccuracy.value,
       }),
       ...desligamentos,
     });
@@ -762,6 +783,21 @@ export default function OperationSettingsPage() {
                     settings.deliveryProximityRadiusMeters === null ? 'desligado' : 'definido'
                   }
                   description="Em pedidos com destino conhecido e coordenadas cadastradas, exige GPS válido e proximidade. Sem coordenadas, a conclusão é aceita sem essa validação e o ADM é avisado."
+                />
+                <SettingField
+                  id="deferred-accuracy"
+                  label="Precisão exigida quando a posição vira o destino"
+                  placeholder={`${DEFERRED_ACCURACY_MIN} a ${DEFERRED_ACCURACY_MAX}`}
+                  unit="metros"
+                  value={deferredAccuracyInput}
+                  onValueChange={setDeferredAccuracyInput}
+                  currentValue={
+                    settings.deferredDestinationMaxAccuracyMeters === null
+                      ? `${DEFERRED_ACCURACY_PADRAO}m (padrão)`
+                      : `${settings.deferredDestinationMaxAccuracyMeters}m`
+                  }
+                  estado="definido"
+                  description="Vale só no pedido criado sem destino: ali a posição do motoboy vira o endereço E o valor da corrida, então o limite é mais rígido que os raios acima. Não pode ser desligado — sem ele, o preço poderia sair de uma posição a quilômetros do cliente."
                 />
               </SettingsSection>
 

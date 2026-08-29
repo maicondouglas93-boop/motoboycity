@@ -1474,6 +1474,22 @@ model PlatformSettings {
   /// coordenadas e o aplicativo precisa enviar um fix com precisao valida.
   deliveryProximityRadiusMeters Int?
 
+  /// Precisao MINIMA do GPS quando a posicao do motoboy define o destino.
+  ///
+  /// Vale somente para o pedido criado sem destino: ali a coordenada vira o
+  /// endereco E o preco, entao um fix ruim nao "erra um pouco" — grava um
+  /// destino que nunca existiu e um valor que ninguem consegue contestar
+  /// depois, porque o pedido fecha COMPLETED com esse numero.
+  ///
+  /// E deliberadamente MAIS RIGIDO que os raios de proximidade, que respondem
+  /// outra pergunta: "ele esta perto do endereco que ja conhecemos?". Aqui nao
+  /// ha endereco conhecido para comparar.
+  ///
+  /// NULO = o padrao de 100 m, e nao "sem limite". Este campo nao tem estado
+  /// desligado de proposito: zerar a exigencia deixaria o preco sair de uma
+  /// triangulacao de antena a quilometros do cliente.
+  deferredDestinationMaxAccuracyMeters Int?
+
   /// Liga a punicao automatica por recusa/expiracao de oferta.
   ///
   /// DESLIGADA por padrao, e o padrao aqui e uma decisao, nao inercia: ligada

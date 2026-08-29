@@ -2230,6 +2230,87 @@ describe('DeliveriesService', () => {
       expect(financeLedgerService.creditDriverRepasse).not.toHaveBeenCalled();
     });
 
+    /**
+     * O limite que separa "GPS travado" de "triangulacao de antena" quando a
+     * posicao VIRA o destino. Era constante de codigo; o administrador nao
+     * conseguia nem ver, nem ajustar — e a mensagem nao explicava por que ele e
+     * mais rigido que o raio configurado na mesma tela.
+     */
+    describe('precisão exigida quando a posição define o destino', () => {
+      function pedidoDiferidoColetado() {
+        prisma.driver.findUnique.mockResolvedValue(driverRow);
+        prisma.delivery.findUnique.mockResolvedValue(
+          fullDeliveryRow({
+            driverId: 'driver-1',
+            status: 'COLLECTED',
+            destinationKnownAtCreation: false,
+            requiresReturn: false,
+            distanceKm: null,
+            driverValue: null,
+          }),
+        );
+        prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+        googleMapsService.getDistance.mockResolvedValue({ distanceKm: 3, durationMinutes: 12 });
+        pricingService.quote.mockResolvedValue({
+          totalValue: 10,
+          driverValue: 8,
+          platformValue: 2,
+          returnValue: 0,
+          surchargeLabel: null,
+          surchargeValue: 0,
+        });
+      }
+
+      it('usa o padrão de 100 m quando o admin não configurou nada', async () => {
+        pedidoDiferidoColetado();
+        platformSettingsService.get.mockResolvedValue({
+          businessHoursEnabled: false,
+          deferredDestinationMaxAccuracyMeters: null,
+        });
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', {
+            lat: -20.15,
+            lng: -41.74,
+            accuracy: 150,
+          }),
+        ).rejects.toThrow('exige 100m ou melhor');
+      });
+
+      it('respeita o limite configurado pelo admin', async () => {
+        pedidoDiferidoColetado();
+        platformSettingsService.get.mockResolvedValue({
+          businessHoursEnabled: false,
+          deferredDestinationMaxAccuracyMeters: 300,
+        });
+
+        // 150 m seria recusado pelo padrao e passa com o limite ampliado.
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', {
+            lat: -20.15,
+            lng: -41.74,
+            accuracy: 150,
+          }),
+        ).resolves.toBeDefined();
+      });
+
+      it('explica por que o limite é mais rígido que o raio', async () => {
+        pedidoDiferidoColetado();
+        platformSettingsService.get.mockResolvedValue({
+          businessHoursEnabled: false,
+          deferredDestinationMaxAccuracyMeters: 100,
+        });
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', {
+            lat: -20.15,
+            lng: -41.74,
+            accuracy: 800,
+          }),
+        ).rejects.toThrow('vira o endereço e o valor');
+      });
+    });
+
     it('rejeita se o pedido não está COLLECTED', async () => {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(

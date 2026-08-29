@@ -142,6 +142,23 @@ export const updatePlatformSettingsSchema = z
       .nullable()
       .optional(),
     /**
+     * Precisao minima do GPS quando a posicao do motoboy define o destino.
+     *
+     * NAO aceita `null`, ao contrario dos raios: aqui o nulo nao desligaria uma
+     * regra, deixaria o preco sair de uma triangulacao de antena a quilometros
+     * do cliente. Omitir mantem o padrao de 100 m.
+     *
+     * Piso de 10 m porque abaixo disso o proprio GPS urbano quase nunca fecha e
+     * a etapa ficaria impossivel; teto de 1000 m porque acima disso a
+     * "coordenada" descreve um bairro, nao um endereco — e ela vira o endereco.
+     */
+    deferredDestinationMaxAccuracyMeters: z
+      .number()
+      .int('A precisao minima deve ser um numero inteiro de metros.')
+      .min(10, 'A precisao minima deve ser de pelo menos 10 metros.')
+      .max(1000, 'A precisao minima deve ser de no maximo 1000 metros.')
+      .optional(),
+    /**
      * Punicao automatica por recusa/expiracao de oferta.
      *
      * O interruptor e independente dos numeros: ligar sem contagem e sem prazo

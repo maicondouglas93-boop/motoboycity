@@ -42,6 +42,7 @@ export class AdminPlatformSettingsService {
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
+        deferredDestinationMaxAccuracyMeters: null,
         driverPunishmentEnabled: false,
         driverPunishmentTrigger: 'DECLINED',
         driverPunishmentOfferCount: null,
@@ -109,6 +110,9 @@ export class AdminPlatformSettingsService {
       ...(payload.deliveryProximityRadiusMeters !== undefined && {
         deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
       }),
+      ...(payload.deferredDestinationMaxAccuracyMeters !== undefined && {
+        deferredDestinationMaxAccuracyMeters: payload.deferredDestinationMaxAccuracyMeters,
+      }),
       ...(payload.driverPunishmentEnabled !== undefined && {
         driverPunishmentEnabled: payload.driverPunishmentEnabled,
       }),
@@ -172,6 +176,7 @@ export class AdminPlatformSettingsService {
     maxConcurrentDeliveriesPerDriver: number | null;
     maxDeliveriesPerBatch: number | null;
     deliveryProximityRadiusMeters: number | null;
+    deferredDestinationMaxAccuracyMeters: number | null;
     driverPunishmentEnabled: boolean;
     driverPunishmentTrigger: DriverPunishmentTrigger;
     driverPunishmentOfferCount: number | null;
@@ -201,6 +206,7 @@ export class AdminPlatformSettingsService {
       maxConcurrentDeliveriesPerDriver: settings.maxConcurrentDeliveriesPerDriver,
       maxDeliveriesPerBatch: settings.maxDeliveriesPerBatch,
       deliveryProximityRadiusMeters: settings.deliveryProximityRadiusMeters,
+      deferredDestinationMaxAccuracyMeters: settings.deferredDestinationMaxAccuracyMeters,
       driverPunishmentEnabled: settings.driverPunishmentEnabled,
       driverPunishmentTrigger: settings.driverPunishmentTrigger,
       driverPunishmentOfferCount: settings.driverPunishmentOfferCount,
