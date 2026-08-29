@@ -3002,7 +3002,19 @@ export class DeliveriesService {
     },
   ): Prisma.DeliveryWhereInput {
     const query = filters.q?.trim();
-    const parsedDisplayNumber = query && /^\d+$/.test(query) ? Number(query) : null;
+    /**
+     * `displayNumber` e `Int` de 32 bits no Postgres. Um telefone tem 11
+     * digitos e estoura esse limite com folga — mandar isso no `where` faz o
+     * banco recusar a consulta inteira, e a busca responde 500 em vez de "nada
+     * encontrado".
+     *
+     * O defeito ja existia; passou a ser alcancavel quando a busca por
+     * destinatario deu ao operador o motivo de digitar um telefone aqui.
+     */
+    const MAIOR_DISPLAY_NUMBER = 2_147_483_647;
+    const numeroDigitado = query && /^\d+$/.test(query) ? Number(query) : null;
+    const parsedDisplayNumber =
+      numeroDigitado !== null && numeroDigitado <= MAIOR_DISPLAY_NUMBER ? numeroDigitado : null;
     const isUuid = Boolean(
       query &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query),

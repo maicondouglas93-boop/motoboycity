@@ -291,6 +291,19 @@ describe('DeliveriesController (e2e)', () => {
     });
 
     /**
+     * `displayNumber` e `Int` de 32 bits. Um telefone digitado sem mascara tem
+     * 11 digitos e estoura o limite: mandar isso no `where` fazia o banco
+     * recusar a consulta inteira e a busca responder 500 — a tela de pedidos
+     * ficava em "Carregando pedidos..." para sempre. Quebrou em producao assim
+     * que a busca por destinatario deu ao operador o motivo de digitar um
+     * telefone ali.
+     */
+    it('telefone sem máscara não é confundido com número de pedido', async () => {
+      expect(await buscar('19997050303')).not.toContain(buscaDeliveryId);
+      expect(await buscar('33988887777')).toContain(buscaDeliveryId);
+    });
+
+    /**
      * O escopo por empresa continua valendo: buscar pelo nome certo na conta
      * errada nao pode revelar o pedido de outra loja.
      */
