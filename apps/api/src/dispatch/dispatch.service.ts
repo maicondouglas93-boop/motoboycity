@@ -31,6 +31,7 @@ export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
 export const PICKUP_EXPIRE_JOB = 'pickup-expire';
 export const PUNISHMENT_EXPIRE_JOB = 'punishment-expire';
+export const SWEEP_DISPATCH_JOB = 'sweep-dispatch';
 
 type PendingOfferCreationResult = { offers: DeliveryOffer[] } | { retryNextDriver: boolean };
 
@@ -127,6 +128,28 @@ export class DispatchService {
         backoff: { type: 'exponential', delay: 5_000 },
       },
     );
+  }
+
+  /**
+   * Prazo de coleta para uma atribuicao que comeca agora.
+   *
+   * Publico porque a troca de entregador pelo painel precisa do mesmo relogio:
+   * o job pendente carrega o motoboy antigo e vira no-op depois da troca, e sem
+   * um prazo novo o pedido justamente reatribuido — o que ja deu problema — era
+   * o unico que ficava sem ninguem cobrando a coleta. `null` quando a operacao
+   * nao configurou prazo, e ai nao ha nada a cobrar.
+   */
+  async novoPrazoDeColeta(): Promise<Date | null> {
+    return this.pickupDeadlineFrom(new Date());
+  }
+
+  /** Agenda a cobranca do prazo devolvido por `novoPrazoDeColeta`. */
+  async agendarPrazoDeColeta(
+    deliveryId: string,
+    driverId: string,
+    deadlineAt: Date | null,
+  ): Promise<void> {
+    await this.schedulePickupExpiry(deliveryId, driverId, deadlineAt);
   }
 
   private async ensurePickupExpiry(deliveryId: string, driverId: string): Promise<void> {
@@ -341,6 +364,7 @@ export class DispatchService {
         excludeDriverIds: [...excludedDriverIds],
         regionId: delivery.company.regionId,
         serviceTypeIds,
+        quantidade: deliveryIds.length,
       });
       if (!candidateDriverId) return;
 
@@ -485,11 +509,7 @@ export class DispatchService {
           include: { serviceType: { select: { name: true } }, addresses: true },
         })
       : [delivery];
-    if (
-      deliveries.some(
-        (item) => item.status !== 'AWAITING_DRIVER' || item.driverId !== null,
-      )
-    ) {
+    if (deliveries.some((item) => item.status !== 'AWAITING_DRIVER' || item.driverId !== null)) {
       throw new ConflictException('O lote mudou de estado. Atualize o painel e tente novamente.');
     }
 
@@ -528,8 +548,12 @@ export class DispatchService {
       throw new ConflictException('O motoboy esta temporariamente fora do despacho.');
     }
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
-    if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) {
-      throw new ConflictException('O motoboy atingiu o limite de entregas simultaneas.');
+    if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, deliveries.length))) {
+      throw new ConflictException(
+        deliveries.length > 1
+          ? 'O lote nao cabe no limite de entregas simultaneas deste motoboy.'
+          : 'O motoboy atingiu o limite de entregas simultaneas.',
+      );
     }
     const driverPendingOffer = await this.prisma.deliveryOffer.findFirst({
       where: { driverId, response: 'PENDING' },
@@ -632,7 +656,9 @@ export class DispatchService {
         })),
       });
     } catch (error: unknown) {
-      this.logger.warn(`Falha ao auditar reoferta manual do pedido ${deliveryId}: ${String(error)}`);
+      this.logger.warn(
+        `Falha ao auditar reoferta manual do pedido ${deliveryId}: ${String(error)}`,
+      );
     }
 
     return {
@@ -656,6 +682,61 @@ export class DispatchService {
     for (const candidate of candidates) {
       await this.dispatchDelivery(candidate.id);
     }
+  }
+
+  /**
+   * A rede de seguranca do despacho: roda sozinha, de minuto em minuto.
+   *
+   * Ate aqui o despacho era 100% orientado a evento. Um pedido agendado tinha
+   * UM gatilho — o job no Redis — e se aquele `queue.add` falhasse (ele roda
+   * depois do commit, entao o pedido ja estava gravado), nada mais no sistema
+   * olhava para `SCHEDULED`: a reconciliacao de presenca so poe motoboy
+   * offline, e a varredura de fila so enxerga `AWAITING_DRIVER`. O pedido
+   * esperava para sempre por uma hora que nunca chegava. Isso atinge TODO
+   * pedido importado do aiqfome, que nasce agendado por construcao.
+   *
+   * A propria integracao ja tinha essa rede — varredura a cada 30s e resgate de
+   * `PROCESSING` travado. O despacho era o unico lado do sistema sem ela.
+   *
+   * Idempotente por desenho: cada passo reusa um caminho que ja checa o estado
+   * antes de agir, entao rodar duas vezes junto nao duplica nada.
+   */
+  async sweepStuckDeliveries(): Promise<void> {
+    const agora = new Date();
+    const agendados = await this.prisma.delivery.findMany({
+      where: { status: 'SCHEDULED' },
+      orderBy: { scheduledAt: 'asc' },
+      take: 200,
+      select: { id: true, scheduledAt: true },
+    });
+
+    for (const agendado of agendados) {
+      // Sem data e um registro quebrado: nunca teria hora para ativar. Entra na
+      // fila agora, que e melhor do que ficar invisivel para sempre.
+      if (!agendado.scheduledAt) {
+        this.logger.warn(`Pedido ${agendado.id} esta SCHEDULED sem data; ativando pela varredura.`);
+        await this.handleScheduledActivation(agendado.id);
+        continue;
+      }
+      if (agendado.scheduledAt <= agora) {
+        await this.handleScheduledActivation(agendado.id);
+        continue;
+      }
+
+      /**
+       * Ainda no futuro: conserta o job ANTES de ele fazer falta, em vez de
+       * esperar o pedido atrasar para descobrir que ninguem ia acorda-lo.
+       */
+      const job = await this.dispatchQueue.getJob(activateJobId(agendado.id));
+      if (!job) {
+        this.logger.warn(
+          `Ativacao do pedido agendado ${agendado.id} estava sem job; reagendada pela varredura.`,
+        );
+        await this.scheduleActivation(agendado.id, agendado.scheduledAt);
+      }
+    }
+
+    await this.dispatchAvailableDeliveries();
   }
 
   /**
@@ -767,10 +848,27 @@ export class DispatchService {
       return;
     }
 
-    await this.prisma.deliveryOffer.update({
-      where: { id: offerId },
+    /**
+     * Condicional, e nao um `update` direto: a leitura acima pode estar velha.
+     *
+     * O motoboy recusando no ultimo segundo e a loja cancelando no ultimo
+     * segundo caem os dois aqui. Sem o `where` de `PENDING`, esta escrita
+     * sobrepunha a resposta dele — o historico passava a dizer "expirou" para
+     * quem apertou recusar — e o `registrarRecusa` abaixo rodava de novo:
+     * contava duas vezes a mesma recusa, ou punia o motoboy por um pedido que
+     * a loja retirou. Perder a corrida aqui significa que outro caminho ja
+     * resolveu a oferta e ja cuidou do redespacho.
+     */
+    const expiracao = await this.prisma.deliveryOffer.updateMany({
+      where: { id: offerId, response: 'PENDING' },
       data: { response: 'EXPIRED', respondedAt: new Date() },
     });
+    if (expiracao.count === 0) {
+      this.logger.debug(
+        `Oferta ${offerId} deixou de estar pendente antes da expiracao; nada foi contabilizado.`,
+      );
+      return;
+    }
 
     this.realtimeGateway.emitToDriver(offer.driverId, 'delivery:offer-expired', { offerId });
     await this.notifyOfferResolved(offer.driverId, [offerId], 'expired');
@@ -833,15 +931,35 @@ export class DispatchService {
       return;
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.delivery.update({
-        where: { id: deliveryId },
+    /**
+     * A guarda de status precisa estar na ESCRITA, e nao so na leitura acima.
+     *
+     * `cancelScheduledActivation` remove o job da fila, mas remover nao
+     * interrompe um job que ja esta rodando: a loja pode cancelar entre a
+     * leitura e esta transacao. Sem o `where`, o pedido cancelado voltava para
+     * a fila e era ofertado — a loja via ressuscitar o que tinha acabado de
+     * cancelar, e o historico registrava uma transicao que partiu de outro
+     * estado.
+     */
+    const ativado = await this.prisma.$transaction(async (tx) => {
+      const atualizada = await tx.delivery.updateMany({
+        where: { id: deliveryId, status: 'SCHEDULED' },
         data: { status: 'AWAITING_DRIVER', statusChangedAt: new Date() },
       });
+      if (atualizada.count === 0) {
+        return false;
+      }
       await tx.deliveryStatusHistory.create({
         data: { deliveryId, fromStatus: 'SCHEDULED', toStatus: 'AWAITING_DRIVER' },
       });
+      return true;
     });
+    if (!ativado) {
+      this.logger.debug(
+        `Pedido ${deliveryId} saiu de SCHEDULED antes da ativacao; nada foi enfileirado.`,
+      );
+      return;
+    }
 
     this.realtimeGateway.emitAdminActivity(
       `Pedido #${delivery.displayNumber} agendado entrou na fila.`,
@@ -876,10 +994,16 @@ export class DispatchService {
       return;
     }
 
-    await this.prisma.deliveryOffer.update({
-      where: { id: pendingOffer.id },
+    // Condicional pelo mesmo motivo de `handleOfferExpired`: entre a leitura e
+    // esta linha a oferta pode ter sido respondida, e sobrescrever a resposta
+    // apagaria o aceite do motoboy do historico.
+    const cancelada = await this.prisma.deliveryOffer.updateMany({
+      where: { id: pendingOffer.id, response: 'PENDING' },
       data: { response: 'EXPIRED', respondedAt: new Date() },
     });
+    if (cancelada.count === 0) {
+      return;
+    }
     await this.cancelOfferTimeout(pendingOffer.id);
     this.realtimeGateway.emitToDriver(pendingOffer.driverId, 'delivery:offer-cancelled', {
       offerId: pendingOffer.id,
@@ -1369,7 +1493,9 @@ export class DispatchService {
            * motoboy: entre escolher e ofertar, ele pode ter aceitado outra
            * corrida e estourado o limite.
            */
-          if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, tx))) {
+          if (
+            !(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, deliveryIds.length, tx))
+          ) {
             return { retryNextDriver: true };
           }
 
@@ -1439,6 +1565,10 @@ export class DispatchService {
      * A vitrine some quando o motoboy atinge o teto de entregas simultaneas —
      * a mesma regra do despacho automatico. Sem teto configurado ela continua
      * disponivel, porque ele pode juntar varias entregas na mesma saida.
+     *
+     * Aqui a conta e por uma entrega so, de proposito: a pergunta desta tela e
+     * "ele cabe alguma coisa?". Um item de lote que nao couber inteiro e
+     * barrado no `claimDelivery`, que conhece o tamanho do lote.
      */
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) return [];
@@ -1517,7 +1647,10 @@ export class DispatchService {
     driverId: string,
     claimingUserId: string,
   ): Promise<AcceptOfferResult> {
-    const alvo = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
+    const alvo = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      include: { company: { select: { regionId: true } } },
+    });
     if (!alvo) {
       throw new NotFoundException('Pedido não encontrado.');
     }
@@ -1555,6 +1688,30 @@ export class DispatchService {
       throw new ConflictException('Este lote já não está mais disponível por inteiro.');
     }
     const ids = irmaos.map((item) => item.id);
+
+    /**
+     * A vitrine ja filtra regiao, modalidade e teto — mas ela e uma LISTA, e a
+     * lista pode estar velha na tela do motoboy. Estas duas checagens fecham a
+     * porta que a punicao ja tinha fechado acima: uma tela desatualizada, ou
+     * uma chamada direta a API, entrava sem passar por nenhuma delas.
+     */
+    const serviceTypeIds = [...new Set(irmaos.map((item) => item.serviceTypeId))];
+    const elegivel = await this.prisma.driver.findFirst({
+      where: { id: driverId, ...this.eligibleDriverWhere(alvo.company.regionId, serviceTypeIds) },
+      select: { id: true },
+    });
+    if (!elegivel) {
+      throw new ConflictException('Você não atende à região ou à modalidade deste pedido.');
+    }
+    const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
+    if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, ids.length))) {
+      throw new ConflictException(
+        ids.length > 1
+          ? 'Este lote não cabe no seu limite de entregas simultâneas.'
+          : 'Você atingiu o limite de entregas simultâneas.',
+      );
+    }
+
     const acceptedAt = new Date();
     const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
     await this.schedulePickupExpiry(deliveryId, driverId, pickupDeadlineAt);
@@ -1568,6 +1725,23 @@ export class DispatchService {
     };
     try {
       delivery = await this.prisma.$transaction(async (tx) => {
+        /**
+         * Mesmo eixo de serializacao de `createPendingOffers`: o lock da
+         * entrega impede dois motoboys no mesmo pedido, e este lock do motoboy
+         * impede que dois claims simultaneos DELE passem juntos pelo mesmo
+         * teto. Sem ele, a contagem la de cima e so uma leitura otimista.
+         */
+        await tx.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
+        );
+        if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, ids.length, tx))) {
+          throw new ConflictException(
+            ids.length > 1
+              ? 'Este lote não cabe no seu limite de entregas simultâneas.'
+              : 'Você atingiu o limite de entregas simultâneas.',
+          );
+        }
+
         const atualizadas = await tx.delivery.updateMany({
           where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
           data: {
@@ -1813,10 +1987,13 @@ export class DispatchService {
     excludeDriverIds,
     regionId,
     serviceTypeIds,
+    quantidade = 1,
   }: {
     excludeDriverIds: string[];
     regionId: string;
     serviceTypeIds: string[];
+    /** Quantas entregas serao ofertadas juntas — o lote inteiro precisa caber. */
+    quantidade?: number;
   }): Promise<string | null> {
     const busyOffers = await this.prisma.deliveryOffer.findMany({
       where: { response: 'PENDING' },
@@ -1847,7 +2024,7 @@ export class DispatchService {
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     for (const driverId of orderedDriverIds) {
       if (!(await this.livePresence.isLive(driverId))) continue;
-      if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) continue;
+      if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, quantidade))) continue;
       return driverId;
     }
     return null;
@@ -1867,11 +2044,16 @@ export class DispatchService {
   }
 
   /**
-   * O motoboy ainda cabe mais uma entrega?
+   * O motoboy ainda cabe mais `quantidade` entregas?
    *
    * Fica FORA do `where` porque o Prisma nao filtra por contagem de relacao:
    * `none` responde "tem alguma?", e o que precisamos e "tem menos que N?".
    * Entao a contagem e feita aqui, no cliente que vier fazer a pergunta.
+   *
+   * `quantidade` existe por causa do lote. A pergunta certa nunca foi "cabe
+   * mais uma?" e sim "cabe o que estou prestes a entregar?": um lote de dez
+   * ofertado a quem tem duas de teto tres passava na conta (2 < 3) e o aceite
+   * atribuia doze. O teto e do operador, e ele o configurou achando que valia.
    *
    * Recebe o `tx` para poder rodar dentro da transacao que emite a oferta —
    * contar fora dela abriria janela para duas ofertas passarem juntas pelo
@@ -1880,6 +2062,7 @@ export class DispatchService {
   private async cabeMaisUmaEntrega(
     driverId: string,
     limiteSimultaneo: number | null,
+    quantidade = 1,
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<boolean> {
     if (limiteSimultaneo === null) return true;
@@ -1887,7 +2070,7 @@ export class DispatchService {
     const emAndamento = await tx.delivery.count({
       where: { driverId, status: { in: ASSIGNMENT_BLOCKING_STATUSES } },
     });
-    return emAndamento < limiteSimultaneo;
+    return emAndamento + quantidade <= limiteSimultaneo;
   }
 
   /**

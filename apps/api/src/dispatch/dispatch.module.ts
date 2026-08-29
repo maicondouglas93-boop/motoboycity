@@ -6,6 +6,7 @@ import { LivePresenceModule } from '../live-presence/live-presence.module';
 import { PushModule } from '../push/push.module';
 import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 import { DispatchProcessor } from './dispatch.processor';
+import { DispatchScheduler } from './dispatch.scheduler';
 import { IntegrationEventsModule } from '../integrations/integration-events.module';
 import { DriverPunishmentModule } from '../driver-punishment/driver-punishment.module';
 
@@ -19,7 +20,7 @@ import { DriverPunishmentModule } from '../driver-punishment/driver-punishment.m
     IntegrationEventsModule,
     DriverPunishmentModule,
   ],
-  providers: [DispatchService, DispatchProcessor],
+  providers: [DispatchService, DispatchProcessor, DispatchScheduler],
   exports: [DispatchService],
 })
 export class DispatchModule {}

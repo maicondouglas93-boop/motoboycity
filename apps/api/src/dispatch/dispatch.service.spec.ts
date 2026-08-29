@@ -67,7 +67,7 @@ describe('DispatchService', () => {
     moveToDispatchTail: jest.Mock;
   };
   let push: { sendToDriver: jest.Mock };
-  let queue: { add: jest.Mock; remove: jest.Mock };
+  let queue: { add: jest.Mock; remove: jest.Mock; getJob: jest.Mock };
   let punishment: {
     punishedDriverIds: jest.Mock;
     activeFor: jest.Mock;
@@ -77,7 +77,12 @@ describe('DispatchService', () => {
   let tx: {
     $queryRaw: jest.Mock;
     driver: { findFirst: jest.Mock };
-    delivery: { update: jest.Mock; updateMany: jest.Mock; findUniqueOrThrow: jest.Mock };
+    delivery: {
+      update: jest.Mock;
+      updateMany: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
+      count: jest.Mock;
+    };
     deliveryOffer: { create: jest.Mock; findFirst: jest.Mock; updateMany: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
     driverPunishment: { findFirst: jest.Mock };
@@ -87,7 +92,12 @@ describe('DispatchService', () => {
     tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'delivery-1' }]),
       driver: { findFirst: jest.fn().mockResolvedValue({ id: 'driver-1' }) },
-      delivery: { update: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+      delivery: {
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
+      },
       deliveryOffer: {
         create: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -108,11 +118,17 @@ describe('DispatchService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
-        updateMany: jest.fn(),
+        // Padrao: a escrita condicional encontra a oferta ainda pendente. Os
+        // testes de corrida sobrescrevem com `{ count: 0 }`.
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn(),
       },
       driverPresenceLog: { findMany: jest.fn() },
-      driver: { findUnique: jest.fn(), findFirst: jest.fn() },
+      driver: {
+        findUnique: jest.fn(),
+        // Padrao: o motoboy atende a regiao e a modalidade do pedido.
+        findFirst: jest.fn().mockResolvedValue({ id: 'driver-1' }),
+      },
       deliveryStatusHistory: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
@@ -139,7 +155,7 @@ describe('DispatchService', () => {
       moveToDispatchTail: jest.fn().mockResolvedValue(undefined),
     };
     push = { sendToDriver: jest.fn().mockResolvedValue(1) };
-    queue = { add: jest.fn(), remove: jest.fn() };
+    queue = { add: jest.fn(), remove: jest.fn(), getJob: jest.fn().mockResolvedValue(null) };
     /** Padrao de producao: punicao desligada, ninguem cumprindo castigo. */
     punishment = {
       punishedDriverIds: jest.fn().mockResolvedValue([]),
@@ -949,6 +965,62 @@ describe('DispatchService', () => {
     });
   });
 
+  /**
+   * A varredura existe porque o despacho era 100% orientado a evento: o pedido
+   * agendado tinha UM gatilho, o job no Redis, e um `queue.add` que falhasse
+   * deixava o pedido esperando uma hora que nunca chegava. Nada olhava para
+   * `SCHEDULED` — nem a reconciliacao de presenca, nem a varredura de fila.
+   */
+  describe('sweepStuckDeliveries', () => {
+    it('reagenda o agendado futuro cujo job sumiu, antes de ele atrasar', async () => {
+      const daquiUmaHora = new Date(Date.now() + 3_600_000);
+      prisma.delivery.findMany
+        .mockResolvedValueOnce([{ id: 'delivery-1', scheduledAt: daquiUmaHora }])
+        .mockResolvedValueOnce([]);
+      queue.getJob.mockResolvedValue(null);
+
+      await service.sweepStuckDeliveries();
+
+      expect(queue.getJob).toHaveBeenCalledWith('activate-delivery-1');
+      expect(queue.add).toHaveBeenCalledWith(
+        'activate-scheduled',
+        { deliveryId: 'delivery-1' },
+        expect.objectContaining({ jobId: 'activate-delivery-1' }),
+      );
+    });
+
+    it('não mexe no agendado que ainda tem job', async () => {
+      const daquiUmaHora = new Date(Date.now() + 3_600_000);
+      prisma.delivery.findMany
+        .mockResolvedValueOnce([{ id: 'delivery-1', scheduledAt: daquiUmaHora }])
+        .mockResolvedValueOnce([]);
+      queue.getJob.mockResolvedValue({ id: 'activate-delivery-1' });
+
+      await service.sweepStuckDeliveries();
+
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('ativa direto o agendado cuja hora já passou', async () => {
+      prisma.delivery.findMany
+        .mockResolvedValueOnce([{ id: 'delivery-1', scheduledAt: new Date(Date.now() - 60_000) }])
+        .mockResolvedValueOnce([]);
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'SCHEDULED',
+        displayNumber: 7,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.sweepStuckDeliveries();
+
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'SCHEDULED' },
+        data: { status: 'AWAITING_DRIVER', statusChangedAt: expect.any(Date) },
+      });
+    });
+  });
+
   describe('dispatchAvailableDeliveries', () => {
     it('tenta despachar cada pedido AWAITING_DRIVER em ordem de criação', async () => {
       prisma.delivery.findMany.mockResolvedValue([{ id: 'd1' }, { id: 'd2' }]);
@@ -977,6 +1049,36 @@ describe('DispatchService', () => {
       expect(prisma.deliveryOffer.update).not.toHaveBeenCalled();
     });
 
+    /**
+     * A leitura acima diz PENDING; a escrita descobre que nao esta mais.
+     *
+     * E o empate real: o motoboy apertando recusar no segundo em que o job
+     * dispara, ou a loja cancelando nesse instante. Antes da escrita
+     * condicional, este caminho sobrepunha a resposta e ainda contabilizava a
+     * recusa — dobrando a contagem de quem recusou, e punindo quem nao fez
+     * nada quando quem desistiu foi a loja.
+     */
+    it('perde a corrida para a resposta do motoboy: não sobrescreve nem contabiliza', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        response: 'PENDING',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.handleOfferExpired('offer-1');
+
+      expect(punishment.registerRefusal).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitToDriver).not.toHaveBeenCalledWith(
+        'driver-1',
+        'delivery:offer-expired',
+        expect.anything(),
+      );
+      expect(push.sendToDriver).not.toHaveBeenCalled();
+    });
+
     it('marca EXPIRED, notifica e tenta despachar o próximo motoboy', async () => {
       prisma.deliveryOffer.findUnique.mockResolvedValue({
         id: 'offer-1',
@@ -988,8 +1090,8 @@ describe('DispatchService', () => {
 
       await service.handleOfferExpired('offer-1');
 
-      expect(prisma.deliveryOffer.update).toHaveBeenCalledWith({
-        where: { id: 'offer-1' },
+      expect(prisma.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: 'offer-1', response: 'PENDING' },
         data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
       });
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
@@ -1148,16 +1250,36 @@ describe('DispatchService', () => {
       prisma.delivery.findUnique
         .mockResolvedValueOnce({ id: 'delivery-1', status: 'SCHEDULED', displayNumber: 3 })
         .mockResolvedValueOnce(null); // pro dispatchDelivery interno
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
 
       await service.handleScheduledActivation('delivery-1');
 
-      expect(tx.delivery.update).toHaveBeenCalledWith({
-        where: { id: 'delivery-1' },
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'SCHEDULED' },
         data: { status: 'AWAITING_DRIVER', statusChangedAt: expect.any(Date) },
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
         data: { deliveryId: 'delivery-1', fromStatus: 'SCHEDULED', toStatus: 'AWAITING_DRIVER' },
       });
+    });
+
+    /**
+     * `cancelScheduledActivation` remove o job da fila, mas remover nao
+     * interrompe um job que ja comecou. A loja cancelando entre a leitura e a
+     * escrita fazia o pedido cancelado voltar para a fila e ser ofertado.
+     */
+    it('não ativa o pedido que foi cancelado depois da leitura', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'SCHEDULED',
+        displayNumber: 3,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.handleScheduledActivation('delivery-1');
+
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
     });
   });
 
@@ -1512,8 +1634,8 @@ describe('DispatchService', () => {
 
       await service.cancelPendingOfferForDelivery('delivery-1');
 
-      expect(prisma.deliveryOffer.update).toHaveBeenCalledWith({
-        where: { id: 'offer-1' },
+      expect(prisma.deliveryOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: 'offer-1', response: 'PENDING' },
         data: { response: 'EXPIRED', respondedAt: expect.any(Date) },
       });
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
@@ -1627,6 +1749,8 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         driverId: null,
         batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue({ id: 'offer-1' });
 
@@ -1644,6 +1768,8 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         driverId: null,
         batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       prisma.delivery.findMany.mockResolvedValue([
@@ -1662,6 +1788,8 @@ describe('DispatchService', () => {
         status: 'AWAITING_DRIVER',
         driverId: null,
         batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       tx.delivery.updateMany.mockResolvedValue({ count: 1 });
@@ -1687,6 +1815,84 @@ describe('DispatchService', () => {
       const historico = tx.deliveryStatusHistory.create.mock.calls[0]?.[0]?.data;
       expect(historico.note).toContain('pedidos disponíveis');
       expect(historico.changedByUserId).toBe('user-1');
+    });
+
+    /**
+     * A vitrine filtra o teto na LISTAGEM, e a listagem pode estar velha na
+     * tela. Sem esta checagem, uma tela desatualizada ou uma chamada direta a
+     * API entrava por cima do limite que o operador configurou.
+     */
+    it('recusa quando o motoboy já está no teto de entregas simultâneas', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        maxConcurrentDeliveriesPerDriver: 3,
+        maxDeliveriesPerBatch: null,
+      });
+      prisma.delivery.count.mockResolvedValue(3);
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'limite de entregas simultâneas',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A conta certa nunca foi "cabe mais uma?" e sim "cabe o que estou prestes
+     * a assumir?". Com duas em andamento e teto de tres, um lote de tres
+     * passava pela pergunta antiga e deixava o motoboy com cinco.
+     */
+    it('recusa o lote que não cabe inteiro no teto, mesmo cabendo mais uma', async () => {
+      platformSettingsService.get.mockResolvedValue({
+        dispatchOfferTimeoutSeconds: 60,
+        maxConcurrentDeliveriesPerDriver: 3,
+        maxDeliveriesPerBatch: null,
+      });
+      prisma.delivery.count.mockResolvedValue(2);
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: 'batch-1',
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', status: 'AWAITING_DRIVER', driverId: null, serviceTypeId: 'service-1' },
+        { id: 'delivery-2', status: 'AWAITING_DRIVER', driverId: null, serviceTypeId: 'service-1' },
+      ]);
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'lote não cabe',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa quem não atende a região ou a modalidade do pedido', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1' },
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.driver.findFirst.mockResolvedValue(null);
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'região ou à modalidade',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('devolve o mesmo claim quando a primeira resposta se perdeu', async () => {
