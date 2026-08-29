@@ -5,6 +5,15 @@ export type DriverAvailability = 'AVAILABLE' | 'UNAVAILABLE';
 export interface DriverPresenceItem {
   availability: DriverAvailability;
   since: string | null;
+  /**
+   * Punicao em vigor, ou `null`.
+   *
+   * Viaja junto com a presenca porque e a mesma pergunta do ponto de vista do
+   * motoboy: "estou recebendo pedido agora?". Sem isso, quem foi punido ve o
+   * botao Ativo ligado e nenhuma oferta chegando, e conclui que o aplicativo
+   * quebrou — a chamada de suporte que a punicao silenciosa sempre gera.
+   */
+  punishment: DriverPunishmentStatus | null;
 }
 
 export interface DriverDispatchQueueEntry {
@@ -130,4 +139,46 @@ export interface DriverReviewResult {
 export interface DriverAccountStatusResult {
   driverId: string;
   accountStatus: DriverAccountStatus;
+}
+
+/**
+ * Punicao automatica por recusa/expiracao de oferta.
+ *
+ * O motoboy punido continua online e continua tocando o que ja aceitou; o que
+ * para e a chegada de oferta nova ate `expiresAt`.
+ */
+export type DriverPunishmentTrigger = 'DECLINED' | 'EXPIRED' | 'DECLINED_OR_EXPIRED';
+export type DriverPunishmentReason = 'DECLINED_OFFER' | 'EXPIRED_OFFER';
+
+/**
+ * O que o proprio motoboy ve no aplicativo. Deliberadamente curto: prazo,
+ * motivo e quantas recusas somaram. Nao expoe qual pedido fechou a conta, para
+ * o aviso nao virar um convite a discutir um pedido especifico com a loja.
+ */
+export interface DriverPunishmentStatus {
+  reason: DriverPunishmentReason;
+  offerCount: number;
+  minutes: number;
+  appliedAt: string;
+  expiresAt: string;
+}
+
+/** A mesma punicao, com o contexto que o administrador precisa para julgar. */
+export interface AdminDriverPunishmentItem {
+  id: string;
+  reason: DriverPunishmentReason;
+  offerCount: number;
+  minutes: number;
+  appliedAt: string;
+  expiresAt: string;
+  /** True somente enquanto `expiresAt` esta no futuro e ninguem liberou antes. */
+  active: boolean;
+  delivery: { id: string; displayNumber: number } | null;
+  revokedAt: string | null;
+  revokedBy: { id: string; name: string } | null;
+  revokedReason: string | null;
+}
+
+export interface RevokeDriverPunishmentInput {
+  reason: string;
 }

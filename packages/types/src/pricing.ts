@@ -1,3 +1,5 @@
+import type { DriverPunishmentTrigger } from './driver.js';
+
 export interface ServiceTypeItem {
   id: string;
   code: string;
@@ -69,6 +71,16 @@ export interface PlatformSettingsItem {
   maxDeliveriesPerBatch: number | null;
   /** Raio para marcar entrega com destino informado. `null` desliga a regra. */
   deliveryProximityRadiusMeters: number | null;
+  /**
+   * Punição automática por recusa/expiração de oferta. Desligada por padrão;
+   * com a chave ligada e `offerCount`/`minutes` nulos, nada é aplicado.
+   */
+  driverPunishmentEnabled: boolean;
+  driverPunishmentTrigger: DriverPunishmentTrigger;
+  driverPunishmentOfferCount: number | null;
+  driverPunishmentMinutes: number | null;
+  driverPunishmentIgnoreWithActiveDelivery: boolean;
+  driverPunishmentOncePerDelivery: boolean;
   updatedBy: { id: string; name: string } | null;
   updatedAt: string | null;
 }
@@ -95,6 +107,12 @@ export interface UpdatePlatformSettingsInput {
   maxConcurrentDeliveriesPerDriver?: number;
   maxDeliveriesPerBatch?: number;
   deliveryProximityRadiusMeters?: number;
+  driverPunishmentEnabled?: boolean;
+  driverPunishmentTrigger?: DriverPunishmentTrigger;
+  driverPunishmentOfferCount?: number;
+  driverPunishmentMinutes?: number;
+  driverPunishmentIgnoreWithActiveDelivery?: boolean;
+  driverPunishmentOncePerDelivery?: boolean;
 }
 
 export type SurchargeType = 'PERCENTAGE' | 'FIXED';

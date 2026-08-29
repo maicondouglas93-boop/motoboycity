@@ -1,5 +1,9 @@
 import { io, type Socket } from 'socket.io-client';
-import type { DeliveryOfferPayload, DriverAccountStatus } from '@motoboycity/types';
+import type {
+  DeliveryOfferPayload,
+  DriverAccountStatus,
+  DriverPunishmentStatus,
+} from '@motoboycity/types';
 import { API_BASE_URL } from './config';
 import { useDispatchStore } from '../store/dispatchStore';
 
@@ -11,6 +15,13 @@ export interface DriverSocketHandlers {
   onDeliveryCancelled: (deliveryIds: string[]) => void;
   onPickupExpired: (deliveryIds: string[]) => void;
   onAccountStatusChanged: (accountStatus: DriverAccountStatus) => void;
+  /**
+   * Ele saiu do despacho por ter recusado ofertas seguidas. Continua online e
+   * continua tocando o que ja aceitou; o que para e a chegada de oferta nova.
+   */
+  onPunishmentApplied: (punishment: DriverPunishmentStatus) => void;
+  /** O administrador liberou antes do prazo. */
+  onPunishmentLifted: () => void;
   onPresenceExpired: () => void;
   onQueueUpdated: () => void;
   /**
@@ -62,6 +73,10 @@ export function connectDriverSocket(token: string, handlers: DriverSocketHandler
   socket.on('driver:account-status-changed', (payload: { accountStatus: DriverAccountStatus }) =>
     handlers.onAccountStatusChanged(payload.accountStatus),
   );
+  socket.on('driver:punishment-applied', (payload: DriverPunishmentStatus) =>
+    handlers.onPunishmentApplied(payload),
+  );
+  socket.on('driver:punishment-lifted', () => handlers.onPunishmentLifted());
   socket.on('driver:presence-expired', () => handlers.onPresenceExpired());
   socket.on('driver-queue:updated', () => handlers.onQueueUpdated());
   socket.on(

@@ -14,6 +14,7 @@ import type {
 import type {
   AdminDriverListItem,
   AdminDriverDetail,
+  AdminDriverPunishmentItem,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
   DriverServiceTypeItem,
@@ -25,6 +26,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { ImageKitService } from '../../media/imagekit.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
+import { DriverPunishmentService } from '../../driver-punishment/driver-punishment.service';
 
 export interface UploadedDriverDocumentFile {
   buffer: Buffer;
@@ -99,7 +101,35 @@ export class AdminDriversService {
     private readonly livePresence: LiveDriverPresenceService,
     private readonly imageKit: ImageKitService,
     private readonly audit: AdminAuditService,
+    private readonly punishmentService: DriverPunishmentService,
   ) {}
+
+  /**
+   * Libera o motoboy da punicao antes do prazo e VARRE a fila em seguida.
+   *
+   * A varredura e a metade que faz a liberacao valer alguma coisa. Enquanto ele
+   * estava punido, pedidos podem ter ficado em AWAITING_DRIVER sem oferta
+   * nenhuma; sem este empurrao eles so voltariam a andar quando algum motoboy
+   * ficasse online — que e justamente o que ja aconteceu, so que antes da
+   * liberacao.
+   */
+  async revokePunishment(
+    driverId: string,
+    punishmentId: string,
+    reason: string,
+    actorUserId: string,
+  ): Promise<AdminDriverPunishmentItem> {
+    const liberada = await this.punishmentService.revoke(
+      driverId,
+      punishmentId,
+      reason,
+      actorUserId,
+    );
+    // A punicao ja foi desfeita e registrada. Uma falha na varredura nao pode
+    // reverter isso nem devolver erro para quem clicou.
+    await this.dispatchService.dispatchAvailableDeliveries().catch(() => undefined);
+    return liberada;
+  }
 
   async registrationOptions(): Promise<AdminDriverRegistrationOptions> {
     const regions = await this.prisma.region.findMany({

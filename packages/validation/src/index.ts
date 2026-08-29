@@ -23,6 +23,7 @@ export * from './admin/virtual-secretary.schema';
 export * from './admin/administrative-audit.schema';
 export * from './admin/company-maintenance.schema';
 export * from './admin/driver-maintenance.schema';
+export * from './admin/revoke-driver-punishment.schema';
 export * from './admin/region.schema';
 export * from './company/upsert-company-address.schema';
 export * from './company/update-company-profile.schema';

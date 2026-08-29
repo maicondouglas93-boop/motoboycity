@@ -3,17 +3,17 @@ import type {
   DriverPresenceHeartbeatPayload,
   SetDriverPresencePayload,
 } from '@motoboycity/validation';
-import type { DriverDispatchQueueResult } from '@motoboycity/types';
+import type { DriverDispatchQueueResult, DriverPresenceItem } from '@motoboycity/types';
 import type { DriverAvailability, User } from '@prisma/client';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
 
-export interface DriverPresenceItem {
-  availability: DriverAvailability;
-  since: string | null;
-}
+// O tipo vem de `@motoboycity/types`: a copia local que existia aqui foi o que
+// deixou o contrato compartilhado ficar para tras em outras telas.
+export type { DriverPresenceItem };
 
 @Injectable()
 export class DriverPresenceService {
@@ -22,6 +22,7 @@ export class DriverPresenceService {
     private readonly dispatchService: DispatchService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly livePresence: LiveDriverPresenceService,
+    private readonly punishmentService: DriverPunishmentService,
   ) {}
 
   async get(user: User): Promise<DriverPresenceItem> {
@@ -46,10 +47,7 @@ export class DriverPresenceService {
     const snapshots = await this.livePresence.listActive();
     const activeDriverIds = snapshots.map((snapshot) => snapshot.driverId);
 
-    if (
-      currentDriver.availability !== 'AVAILABLE' ||
-      !activeDriverIds.includes(currentDriver.id)
-    ) {
+    if (currentDriver.availability !== 'AVAILABLE' || !activeDriverIds.includes(currentDriver.id)) {
       return {
         queueName: 'Geral',
         currentPosition: null,
@@ -210,7 +208,9 @@ export class DriverPresenceService {
     ]);
     await this.livePresence.remove(driver.id);
     this.emitPresence(driver.id, 'UNAVAILABLE', now);
-    return { availability: 'UNAVAILABLE', since: null };
+    // Ficar offline nao encerra a punicao: o prazo continua correndo, e ele
+    // precisa ver isso ao voltar.
+    return this.buildItem(driver.id, 'UNAVAILABLE');
   }
 
   async heartbeat(
@@ -288,11 +288,23 @@ export class DriverPresenceService {
     driverId: string,
     availability: DriverAvailability,
   ): Promise<DriverPresenceItem> {
-    if (availability !== 'AVAILABLE') return { availability, since: null };
+    /**
+     * A punicao viaja mesmo com o motoboy offline.
+     *
+     * Ele fica sabendo do castigo ao abrir o aplicativo, e nao so depois de
+     * ficar ativo e estranhar o silencio — que e exatamente a sequencia que
+     * gera a ligacao para o suporte.
+     */
+    const punishment = await this.punishmentService.activeFor(driverId);
+    if (availability !== 'AVAILABLE') return { availability, since: null, punishment };
     const openLog = await this.prisma.driverPresenceLog.findFirst({
       where: { driverId, wentOfflineAt: null },
       orderBy: { wentOnlineAt: 'desc' },
     });
-    return { availability, since: openLog?.wentOnlineAt.toISOString() ?? null };
+    return {
+      availability,
+      since: openLog?.wentOnlineAt.toISOString() ?? null,
+      punishment,
+    };
   }
 }

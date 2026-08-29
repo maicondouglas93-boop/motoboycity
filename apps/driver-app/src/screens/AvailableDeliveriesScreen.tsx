@@ -22,8 +22,9 @@ import { deliveryOffersApi } from '../lib/apiClient';
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { formatDeliveryAddress } from '../lib/deliveryOperation';
-import { formatarDinheiro, formatarDistancia } from '../lib/format';
+import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
 import { session } from '../lib/session';
+import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
 
@@ -66,6 +67,7 @@ function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
 
 /** Pedidos livres que o entregador autenticado pode assumir agora. */
 export function AvailableDeliveriesScreen({ navigation }: Props) {
+  const punishment = useDispatchStore((state) => state.punishment);
   const [deliveries, setDeliveries] = useState<AvailableDeliveryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -183,10 +185,23 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
           ) : null}
 
           {deliveries.length === 0 && !error ? (
-            <EmptyState
-              message="Nenhum pedido disponível agora"
-              description="Quando um pedido ficar livre na sua região e modalidade, ele aparecerá aqui. Puxe a tela para atualizar."
-            />
+            /*
+              Durante a punicao a API devolve lista vazia de proposito. Sem
+              dizer isso aqui, a tela repete "quando um pedido ficar livre ele
+              aparece" — uma explicacao errada que manda o motoboy esperar por
+              algo que nao vem.
+            */
+            punishment ? (
+              <EmptyState
+                message={`Você está fora do despacho até ${formatarHora(punishment.expiresAt)}`}
+                description="Nesse período você não recebe oferta nem consegue pegar pedido nesta lista. Os pedidos que você já aceitou continuam valendo."
+              />
+            ) : (
+              <EmptyState
+                message="Nenhum pedido disponível agora"
+                description="Quando um pedido ficar livre na sua região e modalidade, ele aparecerá aqui. Puxe a tela para atualizar."
+              />
+            )
           ) : (
             deliveries.map((delivery) => {
               const destination = delivery.destinationKnownAtCreation

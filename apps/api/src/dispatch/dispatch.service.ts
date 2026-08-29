@@ -17,11 +17,16 @@ import { PushService, type PushMessage } from '../push/push.service';
 import { deliveryActivityMessage } from '../common/status-labels';
 import { buildOfferPayload, remainingSeconds } from './offer-payload';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
+import {
+  DriverPunishmentService,
+  type RefusalKind,
+} from '../driver-punishment/driver-punishment.service';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
 export const ACTIVATE_SCHEDULED_JOB = 'activate-scheduled';
 export const PICKUP_EXPIRE_JOB = 'pickup-expire';
+export const PUNISHMENT_EXPIRE_JOB = 'punishment-expire';
 
 type PendingOfferCreationResult = { offers: DeliveryOffer[] } | { retryNextDriver: boolean };
 
@@ -51,6 +56,10 @@ function pickupExpireJobId(deliveryId: string, deadlineAt: Date): string {
   return `pickup-expire-${deliveryId}-${deadlineAt.getTime()}`;
 }
 
+function punishmentExpireJobId(punishmentId: string): string {
+  return `punishment-expire-${punishmentId}`;
+}
+
 @Injectable()
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
@@ -63,6 +72,7 @@ export class DispatchService {
     private readonly pushService: PushService,
     @InjectQueue(DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
     private readonly integrationOutbox: IntegrationOutboxRecorder,
+    private readonly punishmentService: DriverPunishmentService,
   ) {}
 
   /** Chamado antes de criar um pedido AWAITING_DRIVER — falha alto e claro
@@ -452,7 +462,86 @@ export class DispatchService {
     }
   }
 
-  async handleOfferExpired(offerId: string): Promise<void> {
+  /**
+   * Contabiliza a recusa/expiracao e, se ela fechar a conta, tira o motoboy do
+   * despacho pelo tempo configurado.
+   *
+   * Roda ANTES do redespacho de proposito: sem isso o mesmo motoboy que acabou
+   * de recusar continuaria elegivel para o proximo pedido da varredura, e a
+   * punicao so valeria a partir da oferta seguinte.
+   *
+   * Nunca interrompe o fluxo do pedido. A entrega precisa continuar procurando
+   * motoboy mesmo que a punicao falhe — o pedido e do cliente, a punicao e uma
+   * regra de gestao de frota.
+   */
+  private async registrarRecusa(
+    driverId: string,
+    deliveryId: string,
+    kind: RefusalKind,
+  ): Promise<void> {
+    try {
+      const punicao = await this.punishmentService.registerRefusal({
+        driverId,
+        deliveryId,
+        kind,
+      });
+      if (!punicao) return;
+
+      /**
+       * O fim do castigo precisa de um gatilho proprio.
+       *
+       * Hoje a unica coisa que varre pedidos parados e um motoboy ficando
+       * online. Se todos os elegiveis estiverem punidos, o pedido fica na fila
+       * sem oferta nenhuma e ninguem acorda o despacho quando o prazo vence.
+       */
+      await this.dispatchQueue.add(
+        PUNISHMENT_EXPIRE_JOB,
+        { punishmentId: punicao.id },
+        {
+          delay: Math.max(0, punicao.expiresAt.getTime() - Date.now()),
+          jobId: punishmentExpireJobId(punicao.id),
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5_000 },
+        },
+      );
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Falha ao registrar recusa do motoboy ${driverId} no pedido ${deliveryId}: ${String(error)}`,
+      );
+    }
+  }
+
+  /** Fim de uma punicao: varre a fila, que pode ter ficado parada por falta de
+   * motoboy elegivel enquanto ele estava fora. */
+  async handlePunishmentExpired(): Promise<void> {
+    await this.dispatchAvailableDeliveries();
+  }
+
+  /**
+   * Aceitar trabalho zera a sequencia de recusas.
+   *
+   * Nao pode derrubar um aceite que ja foi persistido: o pedido esta na mao do
+   * motoboy, e falhar aqui devolveria um erro que o aplicativo leria como
+   * "nao consegui aceitar" — o pior desfecho possivel para um contador.
+   */
+  private async zerarSequenciaDeRecusas(driverId: string): Promise<void> {
+    try {
+      await this.punishmentService.registerAcceptance(driverId);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Falha ao zerar a sequencia de recusas do motoboy ${driverId}: ${String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * @param options.punish quando `false`, a oferta deixa de valer sem
+   * contabilizar recusa. E o caso de quem foi bloqueado pelo admin: as ofertas
+   * dele voltam para a fila por esta mesma funcao, e cobrar isso como recusa
+   * puniria o motoboy por uma decisao que nao foi dele.
+   */
+  async handleOfferExpired(offerId: string, options?: { punish?: boolean }): Promise<void> {
+    const punish = options?.punish ?? true;
     const offer = await this.prisma.deliveryOffer.findUnique({ where: { id: offerId } });
     if (!offer) {
       return;
@@ -477,6 +566,7 @@ export class DispatchService {
         offer.driverId,
         offer.deliveryId,
         offeredDelivery.batchId,
+        punish,
       );
       return;
     }
@@ -492,6 +582,9 @@ export class DispatchService {
       'Oferta expirou sem resposta, buscando o próximo motoboy.',
     );
 
+    if (punish) {
+      await this.registrarRecusa(offer.driverId, offer.deliveryId, 'EXPIRED');
+    }
     await this.dispatchDelivery(offer.deliveryId);
   }
 
@@ -518,7 +611,8 @@ export class DispatchService {
       // Expira antes de remover o timeout: se a operacao falhar, o job segue
       // ativo como compensacao e tenta novamente no prazo normal da oferta.
       try {
-        await this.handleOfferExpired(offer.id);
+        // `punish: false` — quem tirou a oferta da mao dele foi o admin.
+        await this.handleOfferExpired(offer.id, { punish: false });
       } catch (error) {
         const current = await this.prisma.deliveryOffer.findUnique({
           where: { id: offer.id },
@@ -529,7 +623,7 @@ export class DispatchService {
         }
         // Se apenas o redespacho falhou depois do EXPIRED, a segunda chamada
         // entra no ramo idempotente acima e conclui sem esperar o timeout.
-        await this.handleOfferExpired(offer.id);
+        await this.handleOfferExpired(offer.id, { punish: false });
       }
       await this.cancelOfferTimeout(offer.id);
     }
@@ -690,6 +784,7 @@ export class DispatchService {
 
     await this.cancelOfferTimeout(offerId);
     await this.notifyOfferResolved(driverId, [offerId], 'accepted');
+    await this.zerarSequenciaDeRecusas(driverId);
     await this.emitAcceptedActivities([delivery], driverId);
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId: delivery.id,
@@ -736,6 +831,7 @@ export class DispatchService {
     this.realtimeGateway.emitAdminActivity(
       'Motoboy recusou uma oferta, buscando o próximo da fila.',
     );
+    await this.registrarRecusa(driverId, offer.deliveryId, 'DECLINED');
     await this.dispatchDelivery(offer.deliveryId);
   }
 
@@ -825,6 +921,7 @@ export class DispatchService {
 
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
+    await this.zerarSequenciaDeRecusas(driverId);
     const accepted = deliveries.find((delivery) => delivery.id === deliveryId)!;
     await this.emitAcceptedActivities(deliveries, driverId);
     for (const item of deliveries) {
@@ -903,6 +1000,7 @@ export class DispatchService {
     driverId: string,
     deliveryId: string,
     batchId: string,
+    punish = true,
   ): Promise<void> {
     const deliveries = await this.prisma.delivery.findMany({ where: { batchId } });
     const deliveryIds = deliveries.map((delivery) => delivery.id);
@@ -925,6 +1023,11 @@ export class DispatchService {
     await this.notifyOfferResolved(driverId, offerIds, 'expired');
     this.realtimeGateway.emitToDriver(driverId, 'delivery:offer-expired', { offerId });
     this.realtimeGateway.emitAdminActivity('Oferta de lote expirou, buscando o próximo motoboy.');
+    // Uma recusa, nao uma por pedido: o lote e ofertado e respondido como uma
+    // unidade, e contar cada item transformaria um unico "nao" em cinco.
+    if (punish) {
+      await this.registrarRecusa(driverId, deliveryId, 'EXPIRED');
+    }
     await this.dispatchDelivery(deliveryId);
   }
 
@@ -954,6 +1057,7 @@ export class DispatchService {
     await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
     await this.notifyOfferResolved(driverId, offerIds, 'declined');
     this.realtimeGateway.emitAdminActivity('Motoboy recusou um lote, buscando o próximo motoboy.');
+    await this.registrarRecusa(driverId, deliveryId, 'DECLINED');
     await this.dispatchDelivery(deliveryId);
   }
 
@@ -1051,6 +1155,20 @@ export class DispatchService {
           }
 
           /**
+           * A punicao tambem e reconferida aqui, pelo mesmo motivo do teto de
+           * entregas: entre escolher o motoboy e criar a oferta, ele pode ter
+           * recusado outra corrida e sido punido. Sem esta checagem, a oferta
+           * nasceria para quem acabou de sair do despacho.
+           */
+          const punicaoAtiva = await tx.driverPunishment.findFirst({
+            where: { driverId, expiresAt: { gt: new Date() }, revokedAt: null },
+            select: { id: true },
+          });
+          if (punicaoAtiva) {
+            return { retryNextDriver: true };
+          }
+
+          /**
            * O teto e conferido DENTRO da transacao, e nao so na escolha do
            * motoboy: entre escolher e ofertar, ele pode ter aceitado outra
            * corrida e estourado o limite.
@@ -1128,6 +1246,15 @@ export class DispatchService {
      */
     const limiteSimultaneo = await this.limiteDeEntregasSimultaneas();
     if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo))) return [];
+
+    /**
+     * A vitrine tambem some durante a punicao.
+     *
+     * Sem isto a regra nao teria efeito nenhum: bastaria recusar a oferta e
+     * pegar o mesmo pedido na lista de disponiveis um segundo depois. Nao e
+     * "minutos sem receber pedidos" — e minutos fora do despacho.
+     */
+    if (await this.punishmentService.activeFor(driverId)) return [];
 
     const deliveries = await this.prisma.delivery.findMany({
       where: {
@@ -1207,6 +1334,15 @@ export class DispatchService {
       throw new ConflictException('Este pedido já não está mais disponível.');
     }
 
+    // A vitrine ja esconde os pedidos de quem esta punido; esta checagem fecha
+    // a porta para uma tela desatualizada ou uma chamada direta a API.
+    const punicao = await this.punishmentService.activeFor(driverId);
+    if (punicao) {
+      throw new ForbiddenException(
+        'Você está fora do despacho por ter recusado ofertas. Aguarde o fim do período.',
+      );
+    }
+
     const pendente = await this.prisma.deliveryOffer.findFirst({
       where: { deliveryId, response: 'PENDING' },
     });
@@ -1275,6 +1411,7 @@ export class DispatchService {
       throw error;
     }
 
+    await this.zerarSequenciaDeRecusas(driverId);
     await this.emitAcceptedActivities(irmaos, driverId);
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId: delivery.id,
@@ -1490,7 +1627,12 @@ export class DispatchService {
       select: { driverId: true },
     });
     const busyDriverIds = busyOffers.map((o) => o.driverId);
-    const excluded = [...new Set([...excludeDriverIds, ...busyDriverIds])];
+    // Punido nao recebe oferta nova. Entra pela mesma porta de quem ja tem
+    // oferta pendente porque o efeito e o mesmo — ele nao e candidato agora —
+    // e porque a punicao nao pode tocar `eligibleDriverWhere`, cujas condicoes
+    // descrevem quem PODE atender, e ele continua podendo.
+    const punishedDriverIds = await this.punishmentService.punishedDriverIds();
+    const excluded = [...new Set([...excludeDriverIds, ...busyDriverIds, ...punishedDriverIds])];
 
     const presences = await this.prisma.driverPresenceLog.findMany({
       where: {

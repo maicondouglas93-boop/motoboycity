@@ -7,6 +7,7 @@ import { PushModule } from '../push/push.module';
 import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 import { DispatchProcessor } from './dispatch.processor';
 import { IntegrationEventsModule } from '../integrations/integration-events.module';
+import { DriverPunishmentModule } from '../driver-punishment/driver-punishment.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { IntegrationEventsModule } from '../integrations/integration-events.modu
     LivePresenceModule,
     PushModule,
     IntegrationEventsModule,
+    DriverPunishmentModule,
   ],
   providers: [DispatchService, DispatchProcessor],
   exports: [DispatchService],

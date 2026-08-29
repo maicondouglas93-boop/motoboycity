@@ -20,7 +20,11 @@ function dependencies(
 describe('persistencia da presenca do motoboy', () => {
   it('mantem o rastreamento quando a presenca ja continua valida', async () => {
     const deps = dependencies();
-    const current = { availability: 'AVAILABLE' as const, since: '2026-08-28' };
+    const current = {
+      availability: 'AVAILABLE' as const,
+      since: '2026-08-28',
+      punishment: null,
+    };
 
     await expect(restoreDesiredPresence(current, deps)).resolves.toEqual(current);
     expect(deps.startTracking).toHaveBeenCalledTimes(1);
@@ -32,7 +36,7 @@ describe('persistencia da presenca do motoboy', () => {
     const deps = dependencies();
 
     await expect(
-      restoreDesiredPresence({ availability: 'UNAVAILABLE', since: null }, deps),
+      restoreDesiredPresence({ availability: 'UNAVAILABLE', since: null, punishment: null }, deps),
     ).resolves.toEqual({ availability: 'AVAILABLE', since: '2026-08-28' });
     expect(deps.startTracking).toHaveBeenCalledTimes(1);
     expect(deps.activate).toHaveBeenCalledWith({ lat: -20.15, lng: -41.62, accuracy: 10 });

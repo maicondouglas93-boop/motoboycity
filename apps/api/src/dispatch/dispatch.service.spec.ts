@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { PushService } from '../push/push.service';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
+import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
 
 const offerPickupAddress = {
   type: 'PICKUP',
@@ -66,12 +67,19 @@ describe('DispatchService', () => {
   };
   let push: { sendToDriver: jest.Mock };
   let queue: { add: jest.Mock; remove: jest.Mock };
+  let punishment: {
+    punishedDriverIds: jest.Mock;
+    activeFor: jest.Mock;
+    registerRefusal: jest.Mock;
+    registerAcceptance: jest.Mock;
+  };
   let tx: {
     $queryRaw: jest.Mock;
     driver: { findFirst: jest.Mock };
     delivery: { update: jest.Mock; updateMany: jest.Mock; findUniqueOrThrow: jest.Mock };
     deliveryOffer: { create: jest.Mock; findFirst: jest.Mock; updateMany: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
+    driverPunishment: { findFirst: jest.Mock };
   };
 
   beforeEach(async () => {
@@ -85,6 +93,7 @@ describe('DispatchService', () => {
         updateMany: jest.fn(),
       },
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
+      driverPunishment: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     prisma = {
       delivery: {
@@ -129,6 +138,13 @@ describe('DispatchService', () => {
     };
     push = { sendToDriver: jest.fn().mockResolvedValue(1) };
     queue = { add: jest.fn(), remove: jest.fn() };
+    /** Padrao de producao: punicao desligada, ninguem cumprindo castigo. */
+    punishment = {
+      punishedDriverIds: jest.fn().mockResolvedValue([]),
+      activeFor: jest.fn().mockResolvedValue(null),
+      registerRefusal: jest.fn().mockResolvedValue(null),
+      registerAcceptance: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -140,6 +156,7 @@ describe('DispatchService', () => {
         { provide: PushService, useValue: push },
         { provide: getQueueToken(DISPATCH_QUEUE), useValue: queue },
         { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
+        { provide: DriverPunishmentService, useValue: punishment },
       ],
     }).compile();
 
@@ -894,11 +911,7 @@ describe('DispatchService', () => {
       tx.delivery.updateMany.mockResolvedValue({ count: 1 });
       const redespacho = jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
 
-      await service.handlePickupExpired(
-        'delivery-1',
-        'driver-1',
-        deadlineAt.toISOString(),
-      );
+      await service.handlePickupExpired('delivery-1', 'driver-1', deadlineAt.toISOString());
 
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
         where: {
@@ -961,11 +974,7 @@ describe('DispatchService', () => {
       tx.delivery.updateMany.mockResolvedValue({ count: 2 });
       jest.spyOn(service, 'dispatchDelivery').mockResolvedValue(undefined);
 
-      await service.handlePickupExpired(
-        'delivery-1',
-        'driver-1',
-        deadlineAt.toISOString(),
-      );
+      await service.handlePickupExpired('delivery-1', 'driver-1', deadlineAt.toISOString());
 
       expect(tx.delivery.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -993,11 +1002,7 @@ describe('DispatchService', () => {
       });
       tx.delivery.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.handlePickupExpired(
-        'delivery-1',
-        'driver-1',
-        deadlineAt.toISOString(),
-      );
+      await service.handlePickupExpired('delivery-1', 'driver-1', deadlineAt.toISOString());
 
       expect(tx.deliveryStatusHistory.createMany).not.toHaveBeenCalled();
       expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
@@ -1819,6 +1824,184 @@ describe('DispatchService', () => {
       expect(oferta?.offerId).toBe('offer-1');
       expect(oferta?.expiresInSeconds).toBeLessThanOrEqual(81);
       expect(oferta?.expiresInSeconds).toBeGreaterThanOrEqual(78);
+    });
+  });
+
+  /**
+   * A punicao propriamente dita e testada em
+   * `driver-punishment.service.spec.ts`. Aqui interessa outra coisa: se o
+   * despacho chama a regra nos lugares certos, deixa de chamar onde nao deve, e
+   * se ela realmente tira o motoboy da selecao.
+   */
+  describe('punição por recusa', () => {
+    it('contabiliza a recusa explícita antes de procurar o próximo motoboy', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await service.declineOffer('offer-1', 'driver-1');
+
+      expect(punishment.registerRefusal).toHaveBeenCalledWith({
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        kind: 'DECLINED',
+      });
+    });
+
+    it('contabiliza a expiração do prazo como resposta não dada', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'PENDING',
+      });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await service.handleOfferExpired('offer-1');
+
+      expect(punishment.registerRefusal).toHaveBeenCalledWith({
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        kind: 'EXPIRED',
+      });
+    });
+
+    it('NÃO pune o motoboy cujas ofertas foram devolvidas por bloqueio do admin', async () => {
+      // O motoboy nao respondeu nada: quem tirou a oferta da mao dele foi o
+      // administrador. Cobrar isso como recusa puniria a vitima da decisao.
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'PENDING',
+      });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await service.releasePendingOffersForDriver('driver-1');
+
+      expect(punishment.registerRefusal).not.toHaveBeenCalled();
+    });
+
+    it('agenda o job que acorda o despacho quando o prazo da punição vencer', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+      punishment.registerRefusal.mockResolvedValue({
+        id: 'punicao-1',
+        expiresAt: new Date(Date.now() + 40 * 60_000),
+      });
+
+      await service.declineOffer('offer-1', 'driver-1');
+
+      expect(queue.add).toHaveBeenCalledWith(
+        'punishment-expire',
+        { punishmentId: 'punicao-1' },
+        expect.objectContaining({ jobId: 'punishment-expire-punicao-1' }),
+      );
+    });
+
+    it('não deixa uma falha da punição interromper o redespacho do pedido', async () => {
+      // O pedido e do cliente; a punicao e gestao de frota. Se a segunda falhar,
+      // o primeiro precisa continuar procurando motoboy.
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      prisma.delivery.findUnique.mockResolvedValue(null);
+      punishment.registerRefusal.mockRejectedValue(new Error('banco fora do ar'));
+
+      await expect(service.declineOffer('offer-1', 'driver-1')).resolves.toBeUndefined();
+      expect(prisma.delivery.findUnique).toHaveBeenCalledWith({ where: { id: 'delivery-1' } });
+    });
+
+    it('zera a sequência de recusas quando o motoboy aceita', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'PENDING',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', batchId: null });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 7,
+        companyId: 'company-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([]);
+      prisma.driver.findUnique.mockResolvedValue(null);
+
+      await service.acceptOffer('offer-1', 'driver-1', 'user-1');
+
+      expect(punishment.registerAcceptance).toHaveBeenCalledWith('driver-1');
+    });
+
+    it('exclui da seleção o motoboy que está cumprindo punição', async () => {
+      punishment.punishedDriverIds.mockResolvedValue(['driver-punido']);
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        batchId: null,
+        serviceTypeId: 'service-1',
+        displayNumber: 5,
+        company: { regionId: 'region-1', tradeName: 'Loja' },
+        serviceType: { name: 'Padrão' },
+        addresses: [],
+      });
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([]);
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            driverId: { notIn: expect.arrayContaining(['driver-punido']) },
+          }),
+        }),
+      );
+    });
+
+    it('esconde a vitrine de pedidos disponíveis durante a punição', async () => {
+      // Sem isto a regra nao teria efeito: bastaria recusar e pegar o mesmo
+      // pedido na lista de disponiveis um segundo depois.
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        regionId: 'region-1',
+        serviceTypes: [{ serviceTypeId: 'service-1' }],
+      });
+      punishment.activeFor.mockResolvedValue({ expiresAt: '2026-08-28T12:40:00.000Z' });
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+    });
+
+    it('recusa assumir um pedido direto da vitrine durante a punição', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        displayNumber: 5,
+        batchId: null,
+      });
+      punishment.activeFor.mockResolvedValue({ expiresAt: '2026-08-28T12:40:00.000Z' });
+
+      await expect(
+        service.claimDelivery('delivery-1', 'driver-1', 'user-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 });

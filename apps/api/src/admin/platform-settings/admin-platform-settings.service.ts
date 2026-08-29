@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { PlatformSettingsItem } from '@motoboycity/types';
+import type { DriverPunishmentTrigger, PlatformSettingsItem } from '@motoboycity/types';
 import type { UpdatePlatformSettingsPayload } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
@@ -42,6 +42,12 @@ export class AdminPlatformSettingsService {
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
+        driverPunishmentEnabled: false,
+        driverPunishmentTrigger: 'DECLINED',
+        driverPunishmentOfferCount: null,
+        driverPunishmentMinutes: null,
+        driverPunishmentIgnoreWithActiveDelivery: false,
+        driverPunishmentOncePerDelivery: true,
         updatedBy: null,
         updatedAt: null,
       };
@@ -103,6 +109,24 @@ export class AdminPlatformSettingsService {
       ...(payload.deliveryProximityRadiusMeters !== undefined && {
         deliveryProximityRadiusMeters: payload.deliveryProximityRadiusMeters,
       }),
+      ...(payload.driverPunishmentEnabled !== undefined && {
+        driverPunishmentEnabled: payload.driverPunishmentEnabled,
+      }),
+      ...(payload.driverPunishmentTrigger !== undefined && {
+        driverPunishmentTrigger: payload.driverPunishmentTrigger,
+      }),
+      ...(payload.driverPunishmentOfferCount !== undefined && {
+        driverPunishmentOfferCount: payload.driverPunishmentOfferCount,
+      }),
+      ...(payload.driverPunishmentMinutes !== undefined && {
+        driverPunishmentMinutes: payload.driverPunishmentMinutes,
+      }),
+      ...(payload.driverPunishmentIgnoreWithActiveDelivery !== undefined && {
+        driverPunishmentIgnoreWithActiveDelivery: payload.driverPunishmentIgnoreWithActiveDelivery,
+      }),
+      ...(payload.driverPunishmentOncePerDelivery !== undefined && {
+        driverPunishmentOncePerDelivery: payload.driverPunishmentOncePerDelivery,
+      }),
       updatedByUserId,
     };
 
@@ -148,6 +172,12 @@ export class AdminPlatformSettingsService {
     maxConcurrentDeliveriesPerDriver: number | null;
     maxDeliveriesPerBatch: number | null;
     deliveryProximityRadiusMeters: number | null;
+    driverPunishmentEnabled: boolean;
+    driverPunishmentTrigger: DriverPunishmentTrigger;
+    driverPunishmentOfferCount: number | null;
+    driverPunishmentMinutes: number | null;
+    driverPunishmentIgnoreWithActiveDelivery: boolean;
+    driverPunishmentOncePerDelivery: boolean;
     updatedBy: { id: string; name: string } | null;
     updatedAt: Date;
   }): PlatformSettingsItem {
@@ -171,6 +201,12 @@ export class AdminPlatformSettingsService {
       maxConcurrentDeliveriesPerDriver: settings.maxConcurrentDeliveriesPerDriver,
       maxDeliveriesPerBatch: settings.maxDeliveriesPerBatch,
       deliveryProximityRadiusMeters: settings.deliveryProximityRadiusMeters,
+      driverPunishmentEnabled: settings.driverPunishmentEnabled,
+      driverPunishmentTrigger: settings.driverPunishmentTrigger,
+      driverPunishmentOfferCount: settings.driverPunishmentOfferCount,
+      driverPunishmentMinutes: settings.driverPunishmentMinutes,
+      driverPunishmentIgnoreWithActiveDelivery: settings.driverPunishmentIgnoreWithActiveDelivery,
+      driverPunishmentOncePerDelivery: settings.driverPunishmentOncePerDelivery,
       updatedBy: settings.updatedBy
         ? { id: settings.updatedBy.id, name: settings.updatedBy.name }
         : null,

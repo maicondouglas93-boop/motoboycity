@@ -122,26 +122,51 @@ export const updatePlatformSettingsSchema = z
       .min(50, 'O raio de entrega deve ser de pelo menos 50 metros.')
       .max(5000, 'O raio de entrega deve ser de no maximo 5000 metros.')
       .optional(),
+    /**
+     * Punicao automatica por recusa/expiracao de oferta.
+     *
+     * O interruptor e independente dos numeros: ligar sem contagem e sem prazo
+     * nao pune ninguem, e a tela avisa o que falta. O contrario tambem vale —
+     * ajustar os numeros com a regra desligada nao muda o despacho.
+     */
+    driverPunishmentEnabled: z.boolean().optional(),
+    driverPunishmentTrigger: z
+      .enum(['DECLINED', 'EXPIRED', 'DECLINED_OR_EXPIRED'], {
+        message: 'Selecione quando a punicao deve ser aplicada.',
+      })
+      .optional(),
+    /**
+     * Piso de 1: punir na primeira recusa e uma operacao possivel, ainda que
+     * severa. Teto de 20 porque acima disso a regra nunca dispara na pratica e
+     * so daria a impressao de estar protegendo a fila.
+     */
+    driverPunishmentOfferCount: z
+      .number()
+      .int('A quantidade de recusas deve ser um numero inteiro.')
+      .min(1, 'A quantidade de recusas deve ser de pelo menos 1.')
+      .max(20, 'A quantidade de recusas deve ser de no maximo 20.')
+      .optional(),
+    /**
+     * Piso de 1 minuto e teto de 1440 (um dia). Acima de um dia a punicao
+     * automatica vira bloqueio de conta, que ja existe e e decisao do admin.
+     */
+    driverPunishmentMinutes: z
+      .number()
+      .int('O tempo de punicao deve ser um numero inteiro de minutos.')
+      .min(1, 'O tempo de punicao deve ser de pelo menos 1 minuto.')
+      .max(1440, 'O tempo de punicao deve ser de no maximo 1440 minutos.')
+      .optional(),
+    driverPunishmentIgnoreWithActiveDelivery: z.boolean().optional(),
+    driverPunishmentOncePerDelivery: z.boolean().optional(),
   })
-  .refine(
-    (data) =>
-      data.driverCommissionPercentage !== undefined ||
-      data.dispatchOfferTimeoutSeconds !== undefined ||
-      data.aiqfomeDispatchDelayMinutes !== undefined ||
-      data.pickupAssignmentTimeoutMinutes !== undefined ||
-      data.collectionProximityRadiusMeters !== undefined ||
-      data.returnProximityRadiusMeters !== undefined ||
-      data.businessHoursEnabled !== undefined ||
-      data.minMinutesBeforeCollect !== undefined ||
-      data.minMinutesBeforeDeliver !== undefined ||
-      data.locationSilenceAlertMinutes !== undefined ||
-      data.slaAlertMinutesToAccept !== undefined ||
-      data.slaAlertMinutesToCollect !== undefined ||
-      data.slaAlertMinutesToDeliver !== undefined ||
-      data.maxConcurrentDeliveriesPerDriver !== undefined ||
-      data.maxDeliveriesPerBatch !== undefined ||
-      data.deliveryProximityRadiusMeters !== undefined,
-    { message: 'Informe ao menos um campo para atualizar.' },
-  );
+  /**
+   * Era uma lista de dezesseis comparacoes, uma por campo, e cada campo novo
+   * exigia lembrar de acrescentar mais uma linha aqui. Esquecer disso nao
+   * quebra compilacao nem teste: apenas aceita silenciosamente um payload
+   * vazio. A checagem por valor cobre qualquer campo, inclusive os proximos.
+   */
+  .refine((data) => Object.values(data).some((value) => value !== undefined), {
+    message: 'Informe ao menos um campo para atualizar.',
+  });
 
 export type UpdatePlatformSettingsPayload = z.infer<typeof updatePlatformSettingsSchema>;

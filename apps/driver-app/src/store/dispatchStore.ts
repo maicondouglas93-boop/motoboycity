@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import type { DeliveryOfferPayload, DriverAvailability } from '@motoboycity/types';
+import type {
+  DeliveryOfferPayload,
+  DriverAvailability,
+  DriverPunishmentStatus,
+} from '@motoboycity/types';
 import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
 
 interface DispatchState {
@@ -9,7 +13,16 @@ interface DispatchState {
   incomingOffer: DeliveryOfferPayload | null;
   activeDeliveries: ActiveDeliveryItem[];
   socketConnected: boolean;
+  /**
+   * Punicao em vigor: ele continua online, mas nenhuma oferta chega.
+   *
+   * Sem este estado o aplicativo fica mudo no pior momento possivel — botao
+   * Ativo ligado, nenhuma corrida entrando — e a conclusao natural do motoboy
+   * e que o aplicativo quebrou.
+   */
+  punishment: DriverPunishmentStatus | null;
   setPresence: (availability: DriverAvailability, since: string | null) => void;
+  setPunishment: (punishment: DriverPunishmentStatus | null) => void;
   setWantsToBeAvailable: (available: boolean) => void;
   setIncomingOffer: (offer: DeliveryOfferPayload | null) => void;
   setActiveDeliveries: (deliveries: ActiveDeliveryItem[]) => void;
@@ -29,7 +42,9 @@ export const useDispatchStore = create<DispatchState>((set) => ({
   incomingOffer: null,
   activeDeliveries: [],
   socketConnected: false,
+  punishment: null,
   setPresence: (availability, since) => set({ availability, since }),
+  setPunishment: (punishment) => set({ punishment }),
   setWantsToBeAvailable: (wantsToBeAvailable) => set({ wantsToBeAvailable }),
   setIncomingOffer: (incomingOffer) => set({ incomingOffer }),
   setActiveDeliveries: (activeDeliveries) => set({ activeDeliveries }),

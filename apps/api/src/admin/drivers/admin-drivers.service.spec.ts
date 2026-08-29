@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { ImageKitService } from '../../media/imagekit.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
+import { DriverPunishmentService } from '../../driver-punishment/driver-punishment.service';
 import { AdminDriversService } from './admin-drivers.service';
 
 describe('AdminDriversService', () => {
@@ -87,6 +88,10 @@ describe('AdminDriversService', () => {
           },
         },
         { provide: AdminAuditService, useValue: { record: jest.fn() } },
+        {
+          provide: DriverPunishmentService,
+          useValue: { revoke: jest.fn(), listForDriver: jest.fn() },
+        },
       ],
     }).compile();
 

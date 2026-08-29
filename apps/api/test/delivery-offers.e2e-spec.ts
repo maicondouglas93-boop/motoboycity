@@ -344,4 +344,132 @@ describe('DeliveryOffersController (e2e)', () => {
       .set('Authorization', `Bearer ${driverToken}`)
       .expect(409);
   });
+
+  /**
+   * Prova de ponta a ponta do efeito que importa: depois de punido, o pedido
+   * seguinte NAO chega nele. Os testes unitarios cobrem cada ramo da regra;
+   * o que so o E2E prova e que a exclusao acontece no despacho real, com o
+   * banco e a transacao de verdade.
+   */
+  describe('punição por recusa', () => {
+    /** Devolve a configuração ao estado desligado para não vazar entre testes. */
+    async function desligarPunicao(): Promise<void> {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ driverPunishmentEnabled: false })
+        .expect(200);
+    }
+
+    afterEach(async () => {
+      await desligarPunicao();
+      /**
+       * Solta a oferta que o teste deixou na mão dele.
+       *
+       * Um motoboy com oferta PENDENTE não é candidato a nenhuma outra, então
+       * sem esta limpeza o teste seguinte cria um pedido que não é ofertado e
+       * falha por um motivo que não tem nada a ver com punição.
+       */
+      await prisma.deliveryOffer.updateMany({
+        where: { driverId, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: new Date() },
+      });
+      await prisma.driverPunishment.deleteMany({ where: { driverId } });
+      await prisma.driver.update({
+        where: { id: driverId },
+        data: { consecutiveOfferRefusals: 0 },
+      });
+    });
+
+    it('uma recusa tira o motoboy do despacho, e o admin devolve antes do prazo', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          driverPunishmentEnabled: true,
+          driverPunishmentTrigger: 'DECLINED',
+          driverPunishmentOfferCount: 1,
+          driverPunishmentMinutes: 30,
+          driverPunishmentOncePerDelivery: true,
+        })
+        .expect(200);
+
+      const { offerId } = await createAwaitingDeliveryAndGetOffer();
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offerId}/decline`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+
+      const punicao = await prisma.driverPunishment.findFirstOrThrow({ where: { driverId } });
+      expect(punicao.reason).toBe('DECLINED_OFFER');
+      expect(punicao.offerCount).toBe(1);
+      expect(punicao.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      // A contagem volta a zero: quem cumpriu o castigo nao pode voltar a uma
+      // recusa de distancia da proxima punicao.
+      const depoisDaPunicao = await prisma.driver.findUniqueOrThrow({ where: { id: driverId } });
+      expect(depoisDaPunicao.consecutiveOfferRefusals).toBe(0);
+
+      // O proximo pedido nasce e NAO encontra motoboy: ele e o unico elegivel.
+      const bloqueado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: validDropoff })
+        .expect(201);
+      const semOferta = await prisma.deliveryOffer.findFirst({
+        where: { deliveryId: bloqueado.body.id as string },
+      });
+      expect(semOferta).toBeNull();
+
+      // A vitrine tambem some — sem isso bastaria recusar e pegar na lista.
+      const vitrine = await request(app.getHttpServer())
+        .get('/delivery-offers/available')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+      expect(vitrine.body).toEqual([]);
+
+      // O admin libera antes do prazo, e o pedido parado volta a andar.
+      const liberada = await request(app.getHttpServer())
+        .post(`/admin/drivers/${driverId}/punishments/${punicao.id}/revoke`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Estava sem sinal na zona rural' })
+        .expect(201);
+      expect(liberada.body.active).toBe(false);
+      expect(liberada.body.revokedReason).toBe('Estava sem sinal na zona rural');
+
+      const ofertaDepoisDaLiberacao = await prisma.deliveryOffer.findFirst({
+        where: { deliveryId: bloqueado.body.id as string, driverId, response: 'PENDING' },
+      });
+      expect(ofertaDepoisDaLiberacao).not.toBeNull();
+
+      await request(app.getHttpServer())
+        .post(`/admin/drivers/${driverId}/punishments/${punicao.id}/revoke`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ reason: 'Tentativa repetida' })
+        .expect(409);
+    });
+
+    it('com o gatilho em EXPIRED, a recusa explícita não pune ninguém', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          driverPunishmentEnabled: true,
+          driverPunishmentTrigger: 'EXPIRED',
+          driverPunishmentOfferCount: 1,
+          driverPunishmentMinutes: 30,
+        })
+        .expect(200);
+
+      const { offerId } = await createAwaitingDeliveryAndGetOffer();
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${offerId}/decline`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+
+      await expect(prisma.driverPunishment.findFirst({ where: { driverId } })).resolves.toBeNull();
+      const driver = await prisma.driver.findUniqueOrThrow({ where: { id: driverId } });
+      expect(driver.consecutiveOfferRefusals).toBe(0);
+    });
+  });
 });

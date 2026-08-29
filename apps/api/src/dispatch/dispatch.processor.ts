@@ -7,6 +7,7 @@ import {
   DispatchService,
   OFFER_EXPIRE_JOB,
   PICKUP_EXPIRE_JOB,
+  PUNISHMENT_EXPIRE_JOB,
 } from './dispatch.service';
 
 @Processor(DISPATCH_QUEUE)
@@ -31,6 +32,9 @@ export class DispatchProcessor extends WorkerHost {
           job.data.expectedDriverId as string,
           job.data.expectedDeadlineAt as string,
         );
+        return;
+      case PUNISHMENT_EXPIRE_JOB:
+        await this.dispatchService.handlePunishmentExpired();
         return;
       default:
         this.logger.warn(`Job desconhecido na fila de despacho: ${job.name}`);

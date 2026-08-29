@@ -1,6 +1,7 @@
 import type {
   AdminDriverListItem,
   AdminDriverDetail,
+  AdminDriverPunishmentItem,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
   DriverAccountStatus,
@@ -16,6 +17,7 @@ import type {
   AdminUpdateDriverPayload,
   ChangeAdminPasswordPayload,
   CreateAdminDriverPayload,
+  RevokeDriverPunishmentPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 
@@ -189,6 +191,30 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
         body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<DriverServiceTypesResult>(response);
+    },
+
+    async punishments(accessToken: string, driverId: string): Promise<AdminDriverPunishmentItem[]> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/punishments`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverPunishmentItem[]>(response);
+    },
+
+    async revokePunishment(
+      accessToken: string,
+      driverId: string,
+      punishmentId: string,
+      payload: RevokeDriverPunishmentPayload,
+    ): Promise<AdminDriverPunishmentItem> {
+      const response = await fetch(
+        `${baseUrl}/admin/drivers/${driverId}/punishments/${punishmentId}/revoke`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<AdminDriverPunishmentItem>(response);
     },
   };
 }

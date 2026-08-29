@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Bike, CalendarClock, CloudRain, MapPinned, SlidersHorizontal, Tag } from 'lucide-react';
+import {
+  Bike,
+  CalendarClock,
+  CloudRain,
+  Gavel,
+  MapPinned,
+  SlidersHorizontal,
+  Tag,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { QueryState } from '@/components/ui/query-state';
@@ -216,6 +224,25 @@ export default function SettingsPage() {
                 estado: 'faltando',
                 texto: `${contar(operacaoFaltando, 'limite', 'limites')} sem configurar`,
               },
+    },
+    {
+      href: '/configuracoes/punicao',
+      title: 'Punição de entregadores',
+      description: 'Tire do despacho, por um tempo, quem recusa ofertas seguidas.',
+      icon: Gavel,
+      tom: 'capacidade',
+      situacao:
+        operacao === undefined
+          ? null
+          : !operacao.driverPunishmentEnabled
+            ? { estado: 'desligado', texto: 'Nenhuma punição automática' }
+            : operacao.driverPunishmentOfferCount === null ||
+                operacao.driverPunishmentMinutes === null
+              ? { estado: 'faltando', texto: 'Ativa, sem quantidade ou tempo' }
+              : {
+                  estado: 'definido',
+                  texto: `${contar(operacao.driverPunishmentOfferCount, 'recusa', 'recusas')} · ${operacao.driverPunishmentMinutes} min fora`,
+                },
     },
   ];
 

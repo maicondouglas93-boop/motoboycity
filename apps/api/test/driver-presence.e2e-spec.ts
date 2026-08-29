@@ -60,7 +60,9 @@ describe('DriverPresenceController (e2e)', () => {
     await request(server)
       .patch(`/admin/drivers/${approvedRegister.body.driverId}/approve`)
       .set('Authorization', `Bearer ${adminToken}`);
-    const approvedLogin = await request(server).post('/auth/login').send({ email: approvedEmail, password });
+    const approvedLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: approvedEmail, password });
     approvedToken = approvedLogin.body.accessToken;
 
     await request(server).post('/auth/register/driver').send({
@@ -74,7 +76,9 @@ describe('DriverPresenceController (e2e)', () => {
       hasCnpj: false,
       password,
     });
-    const pendingLogin = await request(server).post('/auth/login').send({ email: pendingEmail, password });
+    const pendingLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: pendingEmail, password });
     pendingToken = pendingLogin.body.accessToken;
 
     await request(server).post('/auth/register/company').send({
@@ -86,14 +90,22 @@ describe('DriverPresenceController (e2e)', () => {
       tradeName: 'Presence E2E',
       password,
     });
-    const companyLogin = await request(server).post('/auth/login').send({ email: companyEmail, password });
+    const companyLogin = await request(server)
+      .post('/auth/login')
+      .send({ email: companyEmail, password });
     companyToken = companyLogin.body.accessToken;
   });
 
   afterAll(async () => {
-    await prisma.deliveryOffer.deleteMany({ where: { driver: { user: { email: approvedEmail } } } });
-    await prisma.driverPresenceLog.deleteMany({ where: { driver: { user: { email: approvedEmail } } } });
-    await prisma.driver.deleteMany({ where: { user: { email: { in: [approvedEmail, pendingEmail] } } } });
+    await prisma.deliveryOffer.deleteMany({
+      where: { driver: { user: { email: approvedEmail } } },
+    });
+    await prisma.driverPresenceLog.deleteMany({
+      where: { driver: { user: { email: approvedEmail } } },
+    });
+    await prisma.driver.deleteMany({
+      where: { user: { email: { in: [approvedEmail, pendingEmail] } } },
+    });
     await prisma.user.deleteMany({ where: { email: { in: [approvedEmail, pendingEmail] } } });
     await prisma.companyTeamMember.deleteMany({ where: { user: { email: companyEmail } } });
     await prisma.company.deleteMany({ where: { document: companyDocument } });
@@ -118,7 +130,7 @@ describe('DriverPresenceController (e2e)', () => {
       .set('Authorization', `Bearer ${approvedToken}`)
       .expect(200);
 
-    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null });
+    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
   });
 
   it('rejeita motoboy PENDING tentando ficar disponível (403)', async () => {
@@ -165,6 +177,6 @@ describe('DriverPresenceController (e2e)', () => {
       .send({ availability: 'UNAVAILABLE' })
       .expect(200);
 
-    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null });
+    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
   });
 });

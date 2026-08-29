@@ -138,6 +138,25 @@ enum DeliveryOfferResponse {
   EXPIRED
 }
 
+/// Qual resposta do motoboy conta para a punicao automatica.
+///
+/// Recusar e deixar expirar tem o mesmo efeito no pedido — ele volta para a
+/// fila — mas nao a mesma intencao. Quem recusa esta na tela; quem deixa
+/// expirar pode estar sem sinal, com o aparelho no bolso ou dirigindo. Por
+/// isso a operacao escolhe o que conta, em vez de o sistema decidir.
+enum DriverPunishmentTrigger {
+  DECLINED
+  EXPIRED
+  DECLINED_OR_EXPIRED
+}
+
+/// O que motivou a punicao ja aplicada. Congelado no registro: mudar a
+/// configuracao depois nao pode reescrever o motivo de uma punicao passada.
+enum DriverPunishmentReason {
+  DECLINED_OFFER
+  EXPIRED_OFFER
+}
+
 enum WalletTransactionType {
   CREDIT_REPASSE
   DEBIT_WITHDRAWAL
@@ -304,6 +323,7 @@ model User {
   paymentNoticesSent      InvoicePaymentNotice[]           @relation("PaymentNoticeCreatedBy")
   paymentNoticesReviewed  InvoicePaymentNotice[]           @relation("PaymentNoticeReviewedBy")
   companyStatusChanges    CompanyStatusHistory[]
+  driverPunishmentsLifted DriverPunishment[]               @relation("DriverPunishmentRevokedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -579,6 +599,18 @@ model Driver {
 
   deviceTokens DeviceToken[]
 
+  /// Recusas/expiracoes SEGUIDAS desde o ultimo aceite ou a ultima punicao.
+  ///
+  /// E um contador explicito, e nao uma consulta em `DeliveryOffer`, porque
+  /// nem toda oferta que termina em `EXPIRED` foi culpa do motoboy: pedido
+  /// cancelado pela loja e oferta devolvida por bloqueio administrativo gravam
+  /// exatamente o mesmo `EXPIRED`. Contar as linhas puniria alguem por uma
+  /// desistencia da empresa.
+  ///
+  /// Zera no aceite e ao aplicar a punicao — quem cumpriu o castigo volta com
+  /// a ficha limpa, em vez de ser punido de novo na recusa seguinte.
+  consecutiveOfferRefusals Int @default(0)
+
   /// Quando o último aviso de "sem posição" foi disparado para este motoboy.
   ///
   /// Existe para o aviso sair uma vez por EPISÓDIO de silêncio, e não a cada
@@ -597,6 +629,7 @@ model Driver {
   serviceTypes   DriverServiceType[]
   deliveries     Delivery[]
   offers         DeliveryOffer[]
+  punishments    DriverPunishment[]
   presenceLogs   DriverPresenceLog[]
   trackingPoints DeliveryLocationPoint[]
 
@@ -803,6 +836,7 @@ model Delivery {
   addresses                 DeliveryAddress[]
   statusHistory             DeliveryStatusHistory[]
   offers                    DeliveryOffer[]
+  driverPunishments         DriverPunishment[]
   walletTransactions        WalletTransaction[]
   trackingPoints            DeliveryLocationPoint[]
   integrationInboundEvents  IntegrationInboundEvent[]
@@ -946,6 +980,55 @@ model DeliveryOffer {
   @@index([driverId, response])
   @@index([deliveryId])
   @@map("delivery_offers")
+}
+
+/// Periodo em que o motoboy fica fora do despacho por ter recusado ou deixado
+/// expirar ofertas seguidas.
+///
+/// E um registro APPEND-ONLY, nao um campo em `Driver`. Punicao automatica
+/// erra — motoboy sem sinal perde duas ofertas e some da fila numa noite
+/// cheia — e quem for contestar precisa ver o que aconteceu: quantas recusas
+/// somaram, qual pedido fechou a conta, quem liberou antes da hora. Um
+/// `blockedUntil` sobrescrito a cada episodio nao responde nada disso.
+///
+/// A punicao ativa e derivada, nao denormalizada: `expiresAt > agora` e
+/// `revokedAt = null`. Assim nao existe estado a expirar por job — o job de
+/// fim de prazo so acorda o despacho, e a ausencia dele nunca deixa alguem
+/// punido para sempre.
+model DriverPunishment {
+  id       String @id @default(uuid())
+  driverId String
+
+  /// Pedido que fechou a contagem. Guardado para a regra "nao punir duas
+  /// vezes pelo mesmo pedido" e para o suporte saber do que se trata.
+  /// Nulo se o pedido for removido do historico no futuro.
+  deliveryId String?
+
+  reason DriverPunishmentReason
+
+  /// Quantas recusas/expiracoes seguidas somaram o gatilho, e por quantos
+  /// minutos a punicao vale. Congelados: sao os valores vigentes no momento
+  /// da aplicacao, nao os que estiverem na configuracao quando alguem ler.
+  offerCount Int
+  minutes    Int
+
+  appliedAt DateTime @default(now())
+  expiresAt DateTime
+
+  /// Liberacao manual pelo administrador antes do prazo.
+  revokedAt       DateTime?
+  revokedByUserId String?
+  revokedReason   String?
+
+  driver    Driver    @relation(fields: [driverId], references: [id])
+  delivery  Delivery? @relation(fields: [deliveryId], references: [id])
+  revokedBy User?     @relation("DriverPunishmentRevokedBy", fields: [revokedByUserId], references: [id])
+
+  /// O despacho pergunta "este motoboy esta punido agora?" a cada rodada de
+  /// selecao; e a consulta mais quente deste model.
+  @@index([driverId, expiresAt])
+  @@index([driverId, deliveryId])
+  @@map("driver_punishments")
 }
 
 // ============================================================================
@@ -1390,6 +1473,41 @@ model PlatformSettings {
   /// NULO desliga a regra. Quando configurado, o endereco precisa ter
   /// coordenadas e o aplicativo precisa enviar um fix com precisao valida.
   deliveryProximityRadiusMeters Int?
+
+  /// Liga a punicao automatica por recusa/expiracao de oferta.
+  ///
+  /// DESLIGADA por padrao, e o padrao aqui e uma decisao, nao inercia: ligada
+  /// sem querer, a regra tira motoboy do despacho numa noite cheia sem ninguem
+  /// ter pedido isso. Cada campo abaixo so tem efeito com esta chave ligada.
+  driverPunishmentEnabled Boolean @default(false)
+
+  /// Qual resposta conta para a contagem. Ver `DriverPunishmentTrigger`.
+  driverPunishmentTrigger DriverPunishmentTrigger @default(DECLINED)
+
+  /// Quantas recusas/expiracoes SEGUIDAS disparam a punicao. Um aceite zera a
+  /// contagem, e aplicar a punicao tambem: o motoboy volta do castigo com a
+  /// ficha limpa, em vez de ser punido de novo na primeira recusa seguinte.
+  ///
+  /// Null com a regra ligada = nao configurado; nada e aplicado.
+  driverPunishmentOfferCount Int?
+
+  /// Quantos minutos o motoboy fica fora do despacho. Ele continua online e
+  /// continua tocando as entregas que ja aceitou — o que para e a chegada de
+  /// oferta nova.
+  driverPunishmentMinutes Int?
+
+  /// Nao punir quem esta com entrega em andamento.
+  ///
+  /// Existe porque a recusa de quem esta na rua costuma ser a decisao certa:
+  /// ele ja tem trabalho em maos e recusar devolve o pedido a fila mais rapido
+  /// do que deixar expirar.
+  driverPunishmentIgnoreWithActiveDelivery Boolean @default(false)
+
+  /// Nao punir duas vezes pelo mesmo pedido.
+  ///
+  /// Sem isto, um pedido que ninguem quer volta a fila, chega de novo ao mesmo
+  /// motoboy e o pune outra vez pela mesma recusa.
+  driverPunishmentOncePerDelivery Boolean @default(true)
 
   updatedByUserId String?
   updatedBy       User?   @relation("PlatformSettingsUpdatedBy", fields: [updatedByUserId], references: [id])

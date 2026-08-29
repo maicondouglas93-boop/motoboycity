@@ -53,6 +53,12 @@ describe('AdminPlatformSettingsService', () => {
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
+        driverPunishmentEnabled: false,
+        driverPunishmentTrigger: 'DECLINED',
+        driverPunishmentOfferCount: null,
+        driverPunishmentMinutes: null,
+        driverPunishmentIgnoreWithActiveDelivery: false,
+        driverPunishmentOncePerDelivery: true,
         updatedBy: null,
         updatedAt: null,
       });

@@ -33,8 +33,10 @@ import {
   type AdminUpdateDriverPayload,
   type AdminDriverDocumentPayload,
   type AdminReviewDriverDocumentPayload,
+  revokeDriverPunishmentSchema,
+  type RevokeDriverPunishmentPayload,
 } from '@motoboycity/validation';
-import type { AdminPasswordChangeResult } from '@motoboycity/types';
+import type { AdminDriverPunishmentItem, AdminPasswordChangeResult } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
 import { AuthService, type RegisterDriverResult } from '../../auth/auth.service';
@@ -51,6 +53,7 @@ import {
   type DriverReviewResult,
   type DriverServiceTypesResult,
 } from './admin-drivers.service';
+import { DriverPunishmentService } from '../../driver-punishment/driver-punishment.service';
 
 @Controller('admin/drivers')
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
@@ -61,6 +64,7 @@ export class AdminDriversController {
     private readonly adminDriversService: AdminDriversService,
     private readonly authService: AuthService,
     private readonly audit: AdminAuditService,
+    private readonly punishmentService: DriverPunishmentService,
   ) {}
 
   @Get('registration-options')
@@ -201,5 +205,21 @@ export class AdminDriversController {
     @CurrentUser() admin: User,
   ): Promise<DriverServiceTypesResult> {
     return this.adminDriversService.replaceServiceTypes(id, body, admin.id);
+  }
+
+  @Get(':id/punishments')
+  punishments(@Param('id') id: string): Promise<AdminDriverPunishmentItem[]> {
+    return this.punishmentService.listForDriver(id);
+  }
+
+  @Post(':id/punishments/:punishmentId/revoke')
+  revokePunishment(
+    @Param('id') id: string,
+    @Param('punishmentId') punishmentId: string,
+    @Body(new ZodValidationPipe(revokeDriverPunishmentSchema))
+    body: RevokeDriverPunishmentPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminDriverPunishmentItem> {
+    return this.adminDriversService.revokePunishment(id, punishmentId, body.reason, admin.id);
   }
 }

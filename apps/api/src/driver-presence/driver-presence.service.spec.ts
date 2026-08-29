@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { DriverPresenceService } from './driver-presence.service';
@@ -90,6 +91,10 @@ describe('DriverPresenceService', () => {
         { provide: DispatchService, useValue: dispatchService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
         { provide: LiveDriverPresenceService, useValue: livePresence },
+        {
+          provide: DriverPunishmentService,
+          useValue: { activeFor: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
@@ -112,7 +117,7 @@ describe('DriverPresenceService', () => {
 
       const result = await service.get(driverUser);
 
-      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null });
+      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
     });
 
     it('retorna o wentOnlineAt do presence log aberto quando AVAILABLE', async () => {
@@ -123,7 +128,11 @@ describe('DriverPresenceService', () => {
 
       const result = await service.get(driverUser);
 
-      expect(result).toEqual({ availability: 'AVAILABLE', since: '2026-01-01T10:00:00.000Z' });
+      expect(result).toEqual({
+        availability: 'AVAILABLE',
+        since: '2026-01-01T10:00:00.000Z',
+        punishment: null,
+      });
     });
   });
 
@@ -315,7 +324,7 @@ describe('DriverPresenceService', () => {
         data: { wentOfflineAt: expect.any(Date) },
       });
       expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
-      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null });
+      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
     });
   });
 
@@ -360,6 +369,7 @@ describe('DriverPresenceService', () => {
       expect(result).toEqual({
         availability: 'AVAILABLE',
         since: '2026-01-01T10:00:00.000Z',
+        punishment: null,
       });
     });
 

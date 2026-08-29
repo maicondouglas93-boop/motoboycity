@@ -203,6 +203,8 @@ export function HomeScreen({ navigation }: Props) {
   const activeDeliveries = useDispatchStore((state) => state.activeDeliveries);
   const socketConnected = useDispatchStore((state) => state.socketConnected);
   const setPresence = useDispatchStore((state) => state.setPresence);
+  const punishment = useDispatchStore((state) => state.punishment);
+  const setPunishment = useDispatchStore((state) => state.setPunishment);
   const setWantsToBeAvailable = useDispatchStore((state) => state.setWantsToBeAvailable);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -329,6 +331,9 @@ export function HomeScreen({ navigation }: Props) {
     try {
       const presence = await driverPresenceApi.get(token);
       setPresence(presence.availability, presence.since);
+      // Ele fica sabendo do castigo ao abrir o aplicativo, e nao so depois de
+      // ficar ativo e estranhar o silencio.
+      setPunishment(presence.punishment);
       setPresenceError(null);
       return presence;
     } catch {
@@ -360,8 +365,15 @@ export function HomeScreen({ navigation }: Props) {
             .set(token, { availability: 'UNAVAILABLE' })
             .catch(() => undefined);
         }
-        const unavailable = { availability: 'UNAVAILABLE' as const, since: null };
+        // A punicao nao termina por ele ficar offline: o prazo continua correndo,
+        // entao o estado local preserva o que a ultima leitura trouxe.
+        const unavailable = {
+          availability: 'UNAVAILABLE' as const,
+          since: null,
+          punishment: currentPresence?.punishment ?? null,
+        };
         setPresence(unavailable.availability, unavailable.since);
+        setPunishment(unavailable.punishment);
         return unavailable;
       }
 
@@ -732,6 +744,19 @@ export function HomeScreen({ navigation }: Props) {
           );
           navigation.popToTop();
         },
+        onPunishmentApplied: (aplicada) => {
+          setPunishment(aplicada);
+          Alert.alert(
+            'Voce esta fora do despacho',
+            `Voce ${aplicada.reason === 'DECLINED_OFFER' ? 'recusou' : 'deixou passar'} ` +
+              `${aplicada.offerCount} ofertas seguidas. Nenhum pedido novo chega ate ` +
+              `${formatarHora(aplicada.expiresAt)}. Os pedidos que voce ja aceitou seguem normalmente.`,
+          );
+        },
+        onPunishmentLifted: () => {
+          setPunishment(null);
+          Alert.alert('Voce voltou ao despacho', 'A administracao liberou voce antes do prazo.');
+        },
         onPresenceExpired: () => {
           setPresence('UNAVAILABLE', null);
           clearDriverQueue();
@@ -1088,6 +1113,21 @@ export function HomeScreen({ navigation }: Props) {
               </Text>
             </Pressable>
           ) : null}
+
+          {punishment && (
+            <View style={styles.avisoAtencao}>
+              <Text style={styles.avisoAtencaoTexto}>
+                Fora do despacho ate {formatarHora(punishment.expiresAt)}
+              </Text>
+              <Text style={styles.avisoAcao}>
+                {punishment.offerCount}{' '}
+                {punishment.reason === 'DECLINED_OFFER'
+                  ? 'ofertas recusadas seguidas'
+                  : 'ofertas sem resposta seguidas'}
+                . Pedido novo nao chega ate la; o que voce ja aceitou continua valendo.
+              </Text>
+            </View>
+          )}
 
           {presenceError && (
             <Pressable style={styles.avisoErro} onPress={refreshPresence}>

@@ -9174,3 +9174,171 @@ aceito, 201 recusado, enquanto o lote manteve 50 aceito e 51 recusado. A
 primeira tentativa dos comandos nao executou porque `pnpm` nao estava no PATH;
 a repeticao equivalente com `corepack pnpm` passou. Proximo passo: publicar API
 e Admin Web e entao configurar o valor desejado no ADM.
+
+## 2026-08-28 - Punicao automatica de entregadores
+
+O administrador passa a poder tirar do despacho, por um tempo configurado, o
+motoboy que recusa ou deixa expirar ofertas seguidas. A regra nasce
+DESLIGADA e cada campo so tem efeito com a chave ligada. O motoboy punido
+continua online e continua tocando o que ja aceitou; o que para e a chegada de
+oferta nova.
+
+Esta decisao contraria dois registros anteriores: `docs/gap-analysis-plataforma-atual.md`
+e `docs/plano-implementacao-2026-08.md` classificaram "punicao de entregadores"
+como gestao de frota fora de escopo. O responsavel pediu a implementacao nesta
+sessao; o registro fica aqui para a divergencia nao parecer descuido.
+
+### Decisoes de produto confirmadas nesta sessao
+
+- **Contagem por sequencia**, nao por janela de tempo: qualquer pedido aceito
+  zera o contador, e aplicar a punicao tambem zera. Quem cumpre o castigo volta
+  com a ficha limpa em vez de ficar a uma recusa da proxima punicao. A tela de
+  referencia nao tem campo de janela, o que sustentou essa leitura.
+- **Aviso no aplicativo** e obrigatorio. Sem ele, o motoboy fica com o botao
+  Ativo ligado, nenhuma corrida entrando, e conclui que o aplicativo quebrou.
+- **Liberacao manual pelo ADM** com motivo obrigatorio e auditoria.
+
+### O que conta como recusa, e o que nao conta
+
+Foi o ponto mais delicado do recorte. Tres caminhos diferentes gravam
+`DeliveryOffer.response = 'EXPIRED'`, e so um deles e culpa do motoboy:
+
+1. a oferta expirou sem resposta — conta (se o gatilho incluir EXPIRED);
+2. o pedido foi cancelado pela loja/admin (`cancelPendingOfferForDelivery`) —
+   nao conta, e nunca passou pelo caminho da punicao;
+3. o admin bloqueou/suspendeu o motoboy e as ofertas dele voltaram para a fila
+   (`releasePendingOffersForDriver`) — **nao conta**. Esse fluxo reaproveita
+   `handleOfferExpired`, entao a funcao ganhou `options.punish`, e o bloqueio
+   passa `false`. Sem isso o sistema puniria o motoboy pela decisao do admin.
+
+Por essa razao a contagem vive em `Driver.consecutiveOfferRefusals`, um contador
+explicito, e nao numa consulta em `DeliveryOffer`: contar as linhas `EXPIRED`
+misturaria os tres casos. Em lote, a recusa conta UMA vez — o lote e ofertado e
+respondido como unidade, e contar por item transformaria um "nao" em cinco.
+
+### Efeito no despacho
+
+`findNextEligibleDriverId` exclui os punidos junto com quem ja tem oferta
+pendente. `eligibleDriverWhere` nao foi tocado: suas condicoes descrevem quem
+PODE atender, e o punido continua podendo. A punicao e reconferida DENTRO da
+transacao de `createPendingOffers`, pelo mesmo motivo do teto de entregas
+simultaneas — entre escolher o motoboy e criar a oferta ele pode ter recusado
+outra corrida.
+
+A vitrine de pedidos disponiveis (`listAvailableForDriver`) tambem some, e
+`claimDelivery` recusa com 403. Sem isso a regra nao teria efeito nenhum:
+bastaria recusar a oferta e pegar o mesmo pedido na lista um segundo depois.
+
+Uma lacuna encontrada e fechada durante a implementacao: nada acordava o
+despacho no fim do castigo. Hoje a unica varredura de pedidos parados acontece
+quando um motoboy fica online; se todos os elegiveis estivessem punidos, o
+pedido ficaria na fila sem oferta nenhuma ate alguem entrar. Foi criado o job
+BullMQ `punishment-expire`, agendado para o fim do prazo, e a liberacao manual
+pelo ADM tambem dispara a varredura (`AdminDriversService.revokePunishment`).
+
+### Persistencia
+
+`DriverPunishment` e append-only e a punicao ativa e DERIVADA (`expiresAt >
+agora AND revokedAt IS NULL`), nao um campo `blockedUntil` sobrescrito. Assim
+nao existe estado a expirar por job: se o job falhar, ninguem fica punido para
+sempre — ele so serve para acordar o despacho. O registro guarda quantas
+recusas somaram, qual pedido fechou a conta, o prazo congelado e quem liberou
+antes da hora.
+
+Duas migrations aditivas, nenhuma destrutiva:
+`20260828193000_driver_punishment` (enums `DriverPunishmentTrigger` e
+`DriverPunishmentReason`, tabela `driver_punishments`, seis colunas em
+`platform_settings`) e `20260828194500_driver_refusal_counter`
+(`drivers.consecutiveOfferRefusals`, default 0).
+
+### Armadilha de ambiente encontrada
+
+O `prisma migrate dev` nao roda neste worktree: a migration
+`20260824105857_aviso_de_pagamento_da_loja` foi editada depois de aplicada no
+banco de desenvolvimento, e o Prisma exige `migrate reset` — que apagaria o
+banco. A migration foi gerada com `prisma migrate diff` contra um PostgreSQL
+temporario (`motoboycity_migtmp`, criado e descartado no mesmo container), lida
+antes de aplicar, e conferida com `--exit-code`: "No difference detected" prova
+que as 45 migrations somadas produzem exatamente o `schema.prisma`. Depois
+`prisma migrate deploy` aplicou as pendentes no dev local. **O drift continua
+la** e vai reaparecer no proximo `migrate dev`.
+
+Segunda armadilha, relacionada: o Prisma CLI deste projeto le `apps/api/.env` e
+esse valor VENCE um `DATABASE_URL` passado na linha de comando. Override
+inline nao funciona para o CLI (funciona para o Jest/Nest, que usa
+`ConfigModule` sem override). Comandos que precisam de outro banco tem de usar
+`--url` / `--shadow-database-url` explicitos.
+
+### Arquivos
+
+API: novo `apps/api/src/driver-punishment/` (service, spec, module);
+`dispatch.service.ts`, `dispatch.processor.ts`, `dispatch.module.ts`;
+`driver-presence.service.ts` e module; `admin-drivers.controller.ts`,
+`admin-drivers.service.ts` e module; `admin-platform-settings.service.ts`;
+duas migrations e `schema.prisma`.
+
+Contratos: `packages/validation/src/admin/update-platform-settings.schema.ts`,
+novo `revoke-driver-punishment.schema.ts`, `packages/types/src/driver.ts` e
+`pricing.ts`, `packages/api-client/src/admin-drivers.ts`.
+
+Admin Web: nova pagina `configuracoes/punicao/page.tsx`, novo
+`components/drivers/driver-punishments.tsx`, cartao no indice
+`configuracoes/page.tsx` e montagem no detalhe do entregador.
+
+Driver App: `store/dispatchStore.ts`, `lib/socket.ts`, `screens/HomeScreen.tsx`
+e `screens/AvailableDeliveriesScreen.tsx`.
+
+Um ajuste adjacente: o `.refine` de `updatePlatformSettingsSchema` era uma lista
+de dezesseis comparacoes, uma por campo. Esquecer de acrescentar uma linha ali
+nao quebra compilacao nem teste — apenas aceita um payload vazio em silencio.
+Passou a ser `Object.values(data).some((v) => v !== undefined)`.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` antes e depois do schema | aprovado |
+| `prisma migrate diff --exit-code` (45 migrations vs. schema) | "No difference detected" |
+| `prisma migrate deploy` no PostgreSQL local | 4 migrations pendentes aplicadas |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 952 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 21 suites, 118 testes aprovados |
+| `pnpm --filter @motoboycity/company-web test` | 17 arquivos, 63 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 235 testes aprovados |
+| builds de producao API, Company Web e Admin Web | aprovados (Admin Web com 38 paginas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: 21 testes unitarios em `driver-punishment.service.spec.ts`
+(cada ramo da regra, incluindo as duas excecoes configuraveis, a nao-empilhagem
+e as corridas de liberacao), 9 em `dispatch.service.spec.ts` (chamada nos
+lugares certos, ausencia no bloqueio administrativo, agendamento do job,
+exclusao da selecao, vitrine e claim) e 2 E2E em `delivery-offers.e2e-spec.ts`
+que provam no banco real que o pedido seguinte nao chega ao punido e que a
+liberacao pelo ADM o devolve ao despacho.
+
+O banco isolado `motoboycity_e2e_local` estava 14 migrations atras e foi
+atualizado com `migrate diff` + `db execute --url`, com as linhas
+correspondentes registradas em `_prisma_migrations` para continuar aceitando
+`migrate deploy`. O primeiro run local falhou em `delivery-lifecycle` por
+`THROTTLE_LIMIT` ausente (o CI usa 100000) e por raios de 100 m deixados em
+`platform_settings` por um run abortado — nenhum dos dois relacionado a este
+recorte.
+
+### Limitacoes e proximo passo
+
+- **Sem push.** A punicao chega por Socket.IO e pela resposta de
+  `GET /driver/presence`. Quem estiver com o aplicativo FECHADO so descobre ao
+  abrir. Um push proprio ficaria natural aqui e nao foi implementado.
+- **Sem tela de lista dos punidos no ADM.** A punicao aparece no detalhe do
+  entregador, onde tambem fica o botao de liberar. Nao ha uma visao "quem esta
+  punido agora" na Home.
+- **iOS nao verificado.** O aviso no aplicativo foi implementado em JavaScript
+  compartilhado; nao houve compilacao nativa nesta sessao.
+- Nao houve commit, push, deploy nem build Android.
+
+Proximo passo concreto: revisar o diff, publicar API e Admin Web e, no ADM,
+abrir `Configuracoes > Punicao de entregadores` para ligar a regra com os
+numeros desejados — ela nasce desligada e nao muda nada ate isso. O Driver App
+so precisa de release novo para o aviso na tela; a regra ja vale no servidor
+para qualquer versao instalada.
