@@ -10322,3 +10322,45 @@ Precisa de APK: entra no proximo release depois do pilot.13.
 Cobertura nova: quatro testes da janela — silencio na espera normal, aviso ao
 passar da janela, aviso imediato na recusa do servidor e aviso imediato num item
 retomado de outra sessao.
+
+## 2026-08-29 - Release pilot.14
+
+O `pilot.13` foi compilado e verificado, mas nunca chegou a nenhum aparelho.
+Como a unica mudanca de aplicativo desde ele era a janela de silencio do aviso
+de sincronizacao, foi descartado em favor do `pilot.14`: uma instalacao so, ja
+com tudo.
+
+Versao promovida para `0.1.0-pilot.14`, `versionCode` 14. Das cinco alteracoes
+desde o APK anterior, apenas `3515aaf` tocou o aplicativo; as outras tres
+funcionais — insucesso pelo painel, precisao configurável do destino por GPS e
+cobertura E2E do Google — sao de servidor e ja valiam para o `pilot.12`
+instalado.
+
+O artefato tem 75.132.233 bytes e SHA-256
+`61F98979389D2CB4F6F7E24078653AEFC1E86851A824970AD418E42FC08E0BED`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.14`, `versionCode` 14, minSdk 24 e targetSdk 36. O bundle contem
+`motoboycity-api.onrender.com` e nao contem `localhost:3333`, `127.0.0.1` nem
+`10.0.2.2`.
+
+Copias com o mesmo hash em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.14-vc14.apk`
+e `I:\MOTOboyCityeleases\motoboycity-0.1.0-pilot.14-vc14.apk`. Nenhum
+aparelho ADB conectado; o APK nao foi instalado.
+
+O procedimento registrado no release anterior funcionou sem tropeco: worktree
+curta em `C:\m14`, copia de `google-services.json` e `local.properties`,
+`pnpm install`, build do `@motoboycity/validation`, `assembleRelease` com
+`-Pmotoboycity.versionCode=14`. A remocao da worktree voltou a falhar com
+"Filename too long" e precisou de `rmdir /s /q`, como previsto. Senhas lidas
+apenas dos arquivos DPAPI, nunca exibidas, removidas ao final.
+
+### Proximo passo
+
+Instalar o `pilot.14` nos aparelhos e repetir o ciclo completo com destino
+definido na entrega e retorno. Conferir que o aviso de sincronizacao NAO aparece
+numa finalizacao normal, e que aparece quando a espera passa de seis segundos ou
+quando o servidor recusa.
