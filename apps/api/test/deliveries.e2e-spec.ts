@@ -246,6 +246,68 @@ describe('DeliveriesController (e2e)', () => {
     );
   });
 
+  /**
+   * A pergunta real de quem opera quase nunca e o numero do pedido: e "cade o
+   * pedido da Maria?". A busca casava so `externalOrderNumber`, modalidade e
+   * numero — a empresa mantinha agenda de clientes e ainda precisava saber o
+   * numero de cor para achar qualquer coisa.
+   */
+  describe('busca por destinatário', () => {
+    let buscaDeliveryId: string;
+
+    beforeAll(async () => {
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyAToken}`)
+        .send({
+          serviceTypeId,
+          dropoffAddress: validDropoff,
+          recipientName: 'Maria Aparecida Fonseca',
+          recipientPhone: '33988887777',
+        })
+        .expect(201);
+      buscaDeliveryId = criado.body.id;
+    });
+
+    async function buscar(q: string) {
+      const response = await request(app.getHttpServer())
+        .get('/deliveries/search')
+        .query({ q })
+        .set('Authorization', `Bearer ${companyAToken}`)
+        .expect(200);
+      return (response.body.items as Array<{ id: string }>).map((item) => item.id);
+    }
+
+    it('acha por parte do nome, sem diferenciar maiúscula', async () => {
+      expect(await buscar('aparecida')).toContain(buscaDeliveryId);
+    });
+
+    it('acha pelo telefone digitado com máscara', async () => {
+      expect(await buscar('(33) 98888-7777')).toContain(buscaDeliveryId);
+    });
+
+    it('não devolve o pedido para um nome que não é dele', async () => {
+      expect(await buscar('joaquim')).not.toContain(buscaDeliveryId);
+    });
+
+    /**
+     * O escopo por empresa continua valendo: buscar pelo nome certo na conta
+     * errada nao pode revelar o pedido de outra loja.
+     */
+    it('não vaza o pedido da empresa A para a empresa B', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/deliveries/search')
+        .query({ q: 'aparecida' })
+        .set('Authorization', `Bearer ${companyBToken}`)
+        .expect(200);
+      expect(
+        (response.body.items as Array<{ id: string }>).some(
+          (item) => item.id === buscaDeliveryId,
+        ),
+      ).toBe(false);
+    });
+  });
+
   it('empresa A lista e vê o próprio pedido', async () => {
     const response = await request(app.getHttpServer())
       .get('/deliveries')

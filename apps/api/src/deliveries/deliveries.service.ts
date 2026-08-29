@@ -3007,11 +3007,27 @@ export class DeliveriesService {
       query &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query),
     );
+    /**
+     * O telefone e gravado so com digitos; quem digita costuma trazer mascara.
+     * Sem normalizar, procurar "(33) 99999-9991" nunca acha o pedido de quem
+     * esta com o cliente na linha.
+     */
+    const somenteDigitos = query?.replace(/\D/g, '') ?? '';
     const queryFilter: Prisma.DeliveryWhereInput = query
       ? {
           OR: [
             { externalOrderNumber: { contains: query, mode: 'insensitive' } },
             { serviceType: { name: { contains: query, mode: 'insensitive' } } },
+            /**
+             * Destinatario entra na busca porque a pergunta real de quem opera
+             * quase nunca e o numero do pedido: e "cade o pedido da Maria?".
+             * A empresa mantem agenda de clientes e ainda assim precisava saber
+             * o numero de cor para achar qualquer coisa.
+             */
+            { recipientName: { contains: query, mode: 'insensitive' } },
+            ...(somenteDigitos.length >= 4
+              ? [{ recipientPhone: { contains: somenteDigitos } }]
+              : []),
             ...(parsedDisplayNumber === null ? [] : [{ displayNumber: parsedDisplayNumber }]),
             ...(isUuid ? [{ id: query }] : []),
           ],
