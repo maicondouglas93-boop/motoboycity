@@ -471,11 +471,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       return;
     }
 
-    setSuccessMessage(
-      finalLocally
-        ? 'Finalizacao salva no aparelho. Aguardando a confirmacao do servidor.'
-        : 'Entrega salva no aparelho. Aguardando a confirmacao do servidor antes do retorno.',
-    );
+    // So a etapa que MANTEM o motoboy nesta tela precisa de mensagem aqui; a
+    // que fecha o pedido leva ele para a Home, onde o banner assume.
+    if (!finalLocally) {
+      setSuccessMessage('Entrega salva no aparelho. Aguardando a confirmacao do servidor.');
+    }
 
     if (!finalLocally) {
       if (item.action === 'DELIVER' && delivery.requiresReturn) {
@@ -505,12 +505,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       useDispatchStore.getState().wantsToBeAvailable,
     ).catch(() => undefined);
 
-    Alert.alert(
-      'Finalizacao salva no celular',
-      'A corrida esta salva neste aparelho e sera confirmada, auditada e liberada ' +
-        'financeiramente assim que o servidor responder. Se algo falhar, o aviso aparece na ' +
-        'tela inicial.',
-    );
+    /*
+      Sem alerta modal aqui.
+
+      Este caminho ja levava tres avisos para o mesmo fato: uma mensagem de
+      sucesso que a tela descarta ao sair, um modal que pede um toque, e o
+      banner da Home — que e para onde o motoboy vai em seguida. O banner e o
+      unico que persiste, diz quantas acoes esperam e sincroniza no toque; os
+      outros dois so cobravam atencao para repetir o que ele ja ia ler.
+    */
     navigation.popToTop();
   }
 

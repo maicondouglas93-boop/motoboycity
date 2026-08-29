@@ -411,6 +411,55 @@ describe('delivery completion outbox', () => {
     expect(repaired).toMatchObject({ queuedAt: '2026-08-28T20:00:00.000Z', payload: returnFix });
   });
 
+  /**
+   * O item reparado precisa VOLTAR para a fila, e nao so ganhar a posicao.
+   *
+   * Como a sincronizacao ignora tudo que nao esta PENDING, um reparo que
+   * preservasse `NEEDS_REVIEW` consertava o item e o deixava parado: o motoboy
+   * tocava "concluir retorno", o GPS era capturado, e nada subia — e a tela
+   * ainda repetia o erro antigo sobre a localizacao que acabara de chegar.
+   */
+  it('reparar um retorno recusado devolve o item para a fila e limpa o erro antigo', async () => {
+    storage.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'user-1:COMPLETE_RETURN:delivery-12',
+          ownerUserId: 'user-1',
+          action: 'COMPLETE_RETURN',
+          deliveryId: 'delivery-12',
+          batchId: null,
+          groupKey: 'delivery-12',
+          displayNumber: 201,
+          companyName: 'cariocas burguers',
+          queuedAt: '2026-08-28T20:00:00.000Z',
+          state: 'NEEDS_REVIEW',
+          lastError: 'É necessário obter sua localização atual para concluir o retorno.',
+          payload: {},
+        },
+      ]),
+    );
+
+    const repaired = await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-12',
+      batchId: null,
+      displayNumber: 201,
+      companyName: 'cariocas burguers',
+      payload: returnFix,
+    });
+
+    expect(repaired).toMatchObject({ state: 'PENDING', lastError: null, payload: returnFix });
+
+    // E, estando PENDING, a proxima sincronizacao realmente o envia.
+    const api = executor();
+    await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(api.completeReturn).toHaveBeenCalledWith('token', 'delivery-12', returnFix);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
   it('usa o GPS reparado mesmo quando uma sincronizacao antiga ainda estava em andamento', async () => {
     storage.set(
       STORAGE_KEY,

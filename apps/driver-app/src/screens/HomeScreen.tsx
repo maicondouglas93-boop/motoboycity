@@ -1060,6 +1060,87 @@ export function HomeScreen({ navigation }: Props) {
     }
   }
 
+  /**
+   * Os avisos que valem a tela, do mais caro de ignorar para o menos.
+   *
+   * `completionQueue` vem primeiro porque e dinheiro que o servidor ainda nao
+   * confirmou. A punicao vem por ultimo: ela informa, mas nao ha nada que o
+   * motoboy possa fazer a respeito.
+   */
+  const avisos = [
+    completionQueue.length > 0 && queuedCompletionForBanner
+      ? {
+          chave: 'sincronizacao',
+          titulo:
+            queuedCompletionForBanner.state === 'NEEDS_REVIEW'
+              ? `Pedido #${queuedCompletionForBanner.displayNumber} precisa de atencao`
+              : `${completionQueue.length} finalizacao(oes) aguardando confirmacao`,
+          texto: completionSyncing
+            ? 'Sincronizando com o servidor...'
+            : queuedCompletionForBanner.lastError
+              ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError}`
+              : 'A acao esta salva neste celular. Toque para tentar sincronizar agora.',
+          rotulo: 'Sincronizar finalizacoes salvas no aparelho',
+          estilo: [
+            styles.avisoSincronizacao,
+            queuedCompletionForBanner.state === 'NEEDS_REVIEW' && styles.avisoSincronizacaoReview,
+          ],
+          estiloTitulo: styles.avisoSincronizacaoTitulo,
+          onPress: completionSyncing
+            ? undefined
+            : () => retryQueuedCompletions().catch(() => undefined),
+        }
+      : null,
+    trackingError
+      ? {
+          chave: 'rastreamento',
+          titulo: trackingError,
+          texto: 'Tocar para ativar o rastreamento',
+          estilo: styles.avisoAtencao,
+          estiloTitulo: styles.avisoAtencaoTexto,
+          onPress: () => reativarRastreamento(),
+        }
+      : null,
+    presenceError
+      ? {
+          chave: 'presenca',
+          titulo: presenceError,
+          texto: 'Tocar para tentar novamente',
+          estilo: styles.avisoErro,
+          estiloTitulo: styles.avisoErroTexto,
+          onPress: () => refreshPresence(),
+        }
+      : null,
+    aba === 'pendentes' && pendentesError
+      ? {
+          chave: 'pendentes',
+          titulo: pendentesError,
+          texto: 'Tocar para tentar novamente',
+          rotulo: 'Tentar carregar pedidos disponiveis novamente',
+          estilo: styles.avisoErro,
+          estiloTitulo: styles.avisoErroTexto,
+          onPress: () => carregarPendentes().catch(() => undefined),
+        }
+      : null,
+    punishment
+      ? {
+          chave: 'punicao',
+          titulo: `Fora do despacho ate ${formatarHora(punishment.expiresAt)}`,
+          texto:
+            `${punishment.offerCount} ` +
+            (punishment.reason === 'DECLINED_OFFER'
+              ? 'ofertas recusadas seguidas'
+              : 'ofertas sem resposta seguidas') +
+            '. Pedido novo nao chega ate la; o que voce ja aceitou continua valendo.',
+          estilo: styles.avisoAtencao,
+          estiloTitulo: styles.avisoAtencaoTexto,
+          onPress: undefined,
+        }
+      : null,
+  ].filter((aviso): aviso is NonNullable<typeof aviso> => aviso !== null);
+  const avisoAtivo = avisos[0] ?? null;
+  const avisosEmEspera = avisos.length - 1;
+
   return (
     <View style={styles.tela}>
       <MapBackdrop interactive sheetFraction={fracaoDaFolha} />
@@ -1121,75 +1202,33 @@ export function HomeScreen({ navigation }: Props) {
             </View>
           )}
 
-          {completionQueue.length > 0 ? (
+          {/*
+            UM aviso por vez, por prioridade.
+
+            Chegaram a caber cinco empilhados aqui — sincronizacao, punicao,
+            presenca, rastreamento e a falha da aba — empurrando a lista de
+            pedidos para fora da tela. Quem esta na moto le UM aviso; com cinco
+            nao le nenhum. A ordem segue o custo de ignorar: dinheiro parado na
+            frente, informacao sem acao no fim. Os demais nao somem calados, o
+            contador abaixo diz quantos esperam.
+          */}
+          {avisoAtivo && (
             <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Sincronizar finalizacoes salvas no aparelho"
-              disabled={completionSyncing}
-              style={[
-                styles.avisoSincronizacao,
-                completionQueue.some((item) => item.state === 'NEEDS_REVIEW') &&
-                  styles.avisoSincronizacaoReview,
-              ]}
-              onPress={() => retryQueuedCompletions().catch(() => undefined)}
+              accessibilityRole={avisoAtivo.onPress ? 'button' : 'text'}
+              accessibilityLabel={avisoAtivo.rotulo ?? avisoAtivo.titulo}
+              disabled={!avisoAtivo.onPress}
+              style={avisoAtivo.estilo}
+              onPress={() => avisoAtivo.onPress?.()}
             >
-              <Text style={styles.avisoSincronizacaoTitulo}>
-                {queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
-                  ? `Pedido #${queuedCompletionForBanner.displayNumber} precisa de atencao`
-                  : `${completionQueue.length} finalizacao(oes) aguardando confirmacao`}
-              </Text>
-              <Text style={styles.avisoSincronizacaoTexto}>
-                {completionSyncing
-                  ? 'Sincronizando com o servidor...'
-                  : queuedCompletionForBanner?.state === 'NEEDS_REVIEW'
-                    ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError ?? 'toque para revisar a sincronizacao.'}`
-                    : queuedCompletionForBanner?.lastError
-                      ? `${queuedCompletionForBanner.companyName}: ${queuedCompletionForBanner.lastError}`
-                      : 'A acao esta salva neste celular. Toque para tentar sincronizar agora.'}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {punishment && (
-            <View style={styles.avisoAtencao}>
-              <Text style={styles.avisoAtencaoTexto}>
-                Fora do despacho ate {formatarHora(punishment.expiresAt)}
-              </Text>
-              <Text style={styles.avisoAcao}>
-                {punishment.offerCount}{' '}
-                {punishment.reason === 'DECLINED_OFFER'
-                  ? 'ofertas recusadas seguidas'
-                  : 'ofertas sem resposta seguidas'}
-                . Pedido novo nao chega ate la; o que voce ja aceitou continua valendo.
-              </Text>
-            </View>
-          )}
-
-          {presenceError && (
-            <Pressable style={styles.avisoErro} onPress={refreshPresence}>
-              <Text style={styles.avisoErroTexto}>{presenceError}</Text>
-              <Text style={styles.avisoAcao}>Tocar para tentar novamente</Text>
+              <Text style={avisoAtivo.estiloTitulo}>{avisoAtivo.titulo}</Text>
+              <Text style={styles.avisoAcao}>{avisoAtivo.texto}</Text>
+              {avisosEmEspera > 0 && (
+                <Text style={styles.avisoContador}>
+                  +{avisosEmEspera} {avisosEmEspera === 1 ? 'outro aviso' : 'outros avisos'}
+                </Text>
+              )}
             </Pressable>
           )}
-
-          {trackingError && (
-            <Pressable style={styles.avisoAtencao} onPress={reativarRastreamento}>
-              <Text style={styles.avisoAtencaoTexto}>{trackingError}</Text>
-              <Text style={styles.avisoAcao}>Tocar para ativar o rastreamento</Text>
-            </Pressable>
-          )}
-
-          {aba === 'pendentes' && pendentesError ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Tentar carregar pedidos disponíveis novamente"
-              style={styles.avisoErro}
-              onPress={() => carregarPendentes().catch(() => undefined)}
-            >
-              <Text style={styles.avisoErroTexto}>{pendentesError}</Text>
-              <Text style={styles.avisoAcao}>Tocar para tentar novamente</Text>
-            </Pressable>
-          ) : null}
 
           <ScrollView
             style={styles.lista}
@@ -1396,6 +1435,7 @@ const styles = StyleSheet.create({
   },
   avisoAtencaoTexto: { color: colors.warning, fontSize: 13, fontWeight: '700' },
   avisoAcao: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+  avisoContador: { color: colors.inkSoft, fontSize: 11, fontWeight: '700', marginTop: 6 },
 
   lista: { flex: 1 },
   listaConteudo: { paddingBottom: 24 },

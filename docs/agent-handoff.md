@@ -9419,7 +9419,7 @@ Arquivos: `apps/api/src/deliveries/deliveries.service.ts`, mais os testes em
 | `pnpm lint` (raiz, 8 workspaces) | aprovado |
 | `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 956 testes aprovados |
 | `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
-| `pnpm --filter @motoboycity/api run build` | aprovado |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
 | Prettier nos arquivos alterados e `git diff --check` | aprovados |
 
 Dois testes unitarios que fixavam a recusa foram reescritos para o contrato
@@ -9879,3 +9879,134 @@ nos pedidos seguintes. Rede, timeout e outros 5xx continuam `PENDING` e
 interrompem corretamente. Validacoes locais: 112 testes do
 `DeliveriesService`, 21 testes da outbox, build da API e `git diff --check`
 aprovados. Mudanca ainda nao publicada neste registro.
+
+## 2026-08-29 - Fechamento do incidente de conclusao: saidas que faltavam e ruido de aviso
+
+Depois da auditoria do incidente do #206, tres defeitos ficaram provados e sem
+correcao. Este recorte fecha os dois primeiros e reduz o terceiro.
+
+### 1. O reparo do retorno consertava o item e o deixava parado
+
+`enqueueDeliveryCompletion` repara um retorno legado acrescentando a posicao que
+faltava. O reparo era `{ ...existing, payload }`, e o spread carregava junto o
+`state: 'NEEDS_REVIEW'` e o `lastError` da tentativa anterior. Como
+`synchronizeQueue` ignora tudo que nao esta `PENDING`, o item consertado nao
+subia.
+
+Na pratica: o motoboy tocava "concluir retorno", o aplicativo capturava o GPS,
+e nada acontecia — ele ainda precisava tocar no aviso amarelo, um gesto sem
+relacao aparente. E a tela repetia o erro ANTIGO, falando da localizacao que
+acabara de ser obtida.
+
+O reparo agora devolve `state: 'PENDING'` e limpa `lastError`. O teste que
+existia partia de um item ja `PENDING`, entao nunca exercitou o caso real; o
+teste novo parte de `NEEDS_REVIEW` e confirma que a sincronizacao seguinte
+envia.
+
+### 2. Pedido de preco diferido nao tinha NENHUMA saida
+
+Um pedido com destino definido na entrega, que o aplicativo nao conseguisse
+concluir, ficava preso em `COLLECTED` para sempre:
+
+- o motoboy nao fechava, porque a conclusao dependia do calculo que falhava;
+- `forceComplete` so aceita `DELIVERED` e `FAILED`;
+- `markDelivered` do painel recusava explicitamente esses pedidos — "Confirme
+  pelo aplicativo do motoboy" — que era justamente o que nao funcionava.
+
+Sem distancia nao ha preco, e inventar um seria cobrar a empresa e pagar o
+motoboy por um numero que ninguem mediu. Entao `manualDeliveryStageSchema`
+ganhou `distanceKm` OPCIONAL, exigido somente nesse caso: o administrador
+informa a distancia, ela fica no historico junto com o motivo, e o preco sai da
+`PricingService.quote` normal — mesma tabela, mesma taxa vigente.
+
+Um `distanceKm` enviado para um pedido que JA tem valor e recusado em vez de
+ignorado: descartar em silencio faria o admin acreditar que mudou o preco.
+
+### 3. Ruido de aviso no aplicativo
+
+Ate cinco avisos podiam se empilhar na Home — sincronizacao, punicao, presenca,
+rastreamento e falha da aba — empurrando a lista de pedidos para fora da tela.
+Foi o que apareceu durante as rodadas de diagnostico.
+
+Agora e UM aviso por vez, por prioridade, na ordem do custo de ignorar:
+finalizacao pendente (dinheiro), rastreamento, presenca, falha da aba e, por
+ultimo, punicao — que informa mas nao tem acao possivel. Os demais nao somem
+calados: um contador diz quantos esperam.
+
+Na tela de operacao, o mesmo fato gerava tres avisos: uma mensagem de sucesso
+que a tela descartava ao sair, um modal pedindo um toque, e o banner da Home
+para onde o motoboy ia em seguida. Ficou so o banner — o unico que persiste,
+diz quantas acoes esperam e sincroniza no toque. O modal permanece apenas
+quando o servidor RECUSOU a operacao, que e interrupcao legitima.
+
+### 4. A causa raiz: rota de zero metro lida como "sem rota"
+
+O JSON do proto3 omite inteiro de valor padrao. Uma rota de 0 m chega do Google
+com `duration: "0s"` e SEM `distanceMeters` — e `google-maps.service.ts` tratava
+essa ausencia como resposta invalida. Nenhum raio adiantava, porque a recusa
+acontecia antes de qualquer conta de distancia; e os tres fallbacks nao ajudavam,
+porque todos terminam no mesmo `getDistance` e trocar endereco por coordenada
+nao muda o comprimento da rota.
+
+`distanceMeters` ausente passou a valer ZERO. Lista de rotas vazia continua
+sendo ausencia de rota, com a frase preservada ao pe da letra porque
+`deliveries.service` decide por ela se vale tentar outra forma de endereco;
+rota presente sem `duration` virou uma terceira mensagem, porque e defeito de
+contrato e nao falta de caminho.
+
+**Decisao de negocio confirmada pelo responsavel: entrega de 0 km cobra a taxa
+base.** E o que a tabela ja produz — `Math.max(0, 0 - includedDistanceKm)` zera
+o valor por quilometro e sobra a bandeirada. Nada e inventado.
+
+Como zero tambem e o sintoma de um toque errado na porta da loja, a conclusao
+grava no historico: "Entrega concluída no mesmo ponto da coleta — distância
+calculada: 0 km. Cobrada pela taxa base da tabela." Sem isso, a cobranca
+apareceria na fatura sem explicacao.
+
+O diagnostico do Google deixou de ser mudo: origem e destino sao registrados
+como `endereco` ou `coord(lat,lng)` com 4 casas — cerca de 11 metros, suficiente
+para conferir a regiao e insuficiente para apontar uma porta. O texto do
+endereco nunca entra no log.
+
+### Arquivos
+
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts` e seu module e spec,
+`apps/driver-app/src/lib/deliveryCompletionOutbox.ts` e seu teste,
+`apps/driver-app/src/screens/HomeScreen.tsx`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+Sem migration, sem mudanca de schema Prisma e sem alteracao no contrato de
+conclusao usado pelo aplicativo.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` (raiz, 8 workspaces) | aprovado |
+| `pnpm lint` (raiz, 8 workspaces) | aprovado |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 974 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 22 suites, 132 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: um teste do reparo que parte de `NEEDS_REVIEW` e confirma o
+envio, e quatro do fechamento pelo painel — preco vindo da tabela, distancia no
+historico, recusa sem distancia e recusa de distancia em pedido ja precificado.
+
+### Limitacoes e proximo passo
+
+- O campo de distancia aparece em TODA entrega manual do painel, porque a lista
+  operacional nao carrega `destinationKnownAtCreation`. Quem decide e a API: ela
+  exige o numero nos pedidos de preco diferido e o recusa nos que ja tem valor.
+  Levar o campo ao contrato da lista deixaria a tela mais precisa, e e um
+  recorte proprio.
+- As mudancas do aplicativo so valem depois de um APK novo. As da API valem no
+  proximo deploy.
+- Nao houve commit, push nem deploy.
+
+Proximo passo concreto: decidir a causa do #206 com o log (rota zero vs.
+coordenada sem rota), corrigir `google-maps.service.ts` de acordo, e so entao
+montar o APK com estas mudancas de UX.

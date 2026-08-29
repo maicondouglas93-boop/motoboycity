@@ -213,7 +213,23 @@ export async function enqueueDeliveryCompletion(
         completionNeedsFreshReturnLocation(existing) &&
         payloadHasCoordinates(input.payload)
       ) {
-        const repaired = { ...existing, payload: input.payload };
+        /**
+         * O reparo devolve o item para PENDING, e nao so troca o payload.
+         *
+         * Um `{ ...existing }` puro carregava junto o `state: 'NEEDS_REVIEW'` e
+         * o `lastError` da tentativa que falhou por falta de posicao. A
+         * sincronizacao ignora tudo que nao esta PENDING, entao o item era
+         * consertado e ficava parado: o motoboy tocava "concluir retorno", o
+         * aplicativo capturava o GPS, e nada subia — ele ainda precisava tocar
+         * no aviso amarelo, um gesto sem relacao aparente. Pior, a tela repetia
+         * o erro ANTIGO, falando da localizacao que acabara de ser obtida.
+         */
+        const repaired = {
+          ...existing,
+          payload: input.payload,
+          state: 'PENDING' as const,
+          lastError: null,
+        };
         queued = repaired;
         return current.map((item) => (item.id === id ? repaired : item));
       }
