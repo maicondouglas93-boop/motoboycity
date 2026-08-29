@@ -2,6 +2,7 @@ import type { DeliveryDetail } from '@motoboycity/types';
 import type {
   CreateDeliveryPayload,
   ForceCompletePayload,
+  AdminMarkFailedPayload,
   ManualDeliveryStagePayload,
   ReassignDriverPayload,
 } from '@motoboycity/validation';
@@ -62,6 +63,9 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
       patch(accessToken, id, 'collect', payload),
     markDelivered: (accessToken: string, id: string, payload: ManualDeliveryStagePayload) =>
       patch(accessToken, id, 'deliver', payload),
+    markFailed: (accessToken: string, id: string, payload: AdminMarkFailedPayload) =>
+      patch(accessToken, id, 'fail', payload),
+
     forceComplete: (accessToken: string, id: string, payload: ForceCompletePayload) =>
       patch(accessToken, id, 'force-complete', payload),
   };

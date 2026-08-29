@@ -8,6 +8,7 @@ import type { DeliveryStatus, Prisma, User } from '@prisma/client';
 import type {
   CreateDeliveryPayload,
   ForceCompletePayload,
+  AdminMarkFailedPayload,
   ManualDeliveryStagePayload,
   ReassignDriverPayload,
 } from '@motoboycity/validation';
@@ -402,6 +403,21 @@ export class AdminDeliveriesService {
     const detail = await this.deliveriesService.detail(admin, deliveryId);
     this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
     return detail;
+  }
+
+  /**
+   * Insucesso registrado pelo painel.
+   *
+   * A regra inteira vive em `DeliveriesService`, junto com o insucesso do
+   * motoboy: duas copias do mesmo calculo de retorno divergiriam, e a que
+   * envelheceria seria esta, por ser a rara.
+   */
+  markFailed(
+    admin: User,
+    deliveryId: string,
+    payload: AdminMarkFailedPayload,
+  ): Promise<DeliveryDetail> {
+    return this.deliveriesService.markFailedByAdmin(admin, deliveryId, payload);
   }
 
   /**

@@ -3,10 +3,12 @@ import type { User } from '@prisma/client';
 import {
   forceCompleteSchema,
   createDeliverySchema,
+  adminMarkFailedSchema,
   manualDeliveryStageSchema,
   reassignDriverSchema,
   type CreateDeliveryPayload,
   type ForceCompletePayload,
+  type AdminMarkFailedPayload,
   type ManualDeliveryStagePayload,
   type ReassignDriverPayload,
 } from '@motoboycity/validation';
@@ -70,6 +72,15 @@ export class AdminDeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.adminDeliveriesService.markDelivered(user, id, body);
+  }
+
+  @Patch(':id/fail')
+  markFailed(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminMarkFailedSchema)) body: AdminMarkFailedPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.markFailed(user, id, body);
   }
 
   @Patch(':id/force-complete')

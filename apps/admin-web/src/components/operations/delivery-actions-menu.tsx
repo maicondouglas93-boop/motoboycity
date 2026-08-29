@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   EllipsisVertical,
   PackageCheck,
+  PackageX,
   Truck,
   UserCog,
 } from 'lucide-react';
@@ -40,7 +41,10 @@ import {
 import { session } from '@/lib/session';
 import { statusLabel } from '@/components/orders/status-chip';
 
-type DeliveryAction = 'reoffer' | 'reassign' | 'collect' | 'deliver' | 'cancel' | 'complete';
+type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
+
+type DeliveryAction =
+  'reoffer' | 'reassign' | 'collect' | 'deliver' | 'fail' | 'cancel' | 'complete';
 
 const REASSIGNABLE: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'];
 const CANCELLABLE: DeliveryStatus[] = [
@@ -89,6 +93,15 @@ function actionCopy(action: DeliveryAction, order: OperationalDeliveryItem) {
         confirm: 'Marcar como entregue',
         pending: 'Marcando...',
       };
+    case 'fail':
+      return {
+        title: `Registrar insucesso no pedido #${order.displayNumber}`,
+        description:
+          'A mercadoria volta para a loja: o pedido passa a exigir retorno e a taxa de retorno ' +
+          'entra no valor. O entregador continua responsável e recebe a corrida normal.',
+        confirm: 'Registrar insucesso',
+        pending: 'Registrando...',
+      };
     case 'cancel':
       return {
         title: `Cancelar pedido #${order.displayNumber}`,
@@ -115,12 +128,24 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   const [driverId, setDriverId] = useState('');
   const [reason, setReason] = useState('');
   const [distanceKm, setDistanceKm] = useState('');
+  const [failureReason, setFailureReason] = useState<FailureReason>('RECIPIENT_ABSENT');
   const [error, setError] = useState<string | null>(null);
 
   const canReassign = REASSIGNABLE.includes(order.status);
   const canReoffer = order.status === 'AWAITING_DRIVER';
   const canCollect = order.status === 'ACCEPTED';
-  const canDeliver = order.status === 'COLLECTED' && order.destinationKnownAtCreation;
+  /**
+   * A entrega manual vale para os DOIS tipos de pedido.
+   *
+   * Enquanto exigia `destinationKnownAtCreation`, o painel recusava exatamente
+   * os pedidos que travavam — os de preco diferido, cujo aplicativo nao
+   * conseguia concluir. A API passou a aceitar esses casos com a distancia
+   * informada; a tela precisava parar de bloquea-los.
+   */
+  const canDeliver = order.status === 'COLLECTED';
+  const canFail = order.status === 'COLLECTED';
+  /** So estes pedidos precisam da distancia: os outros ja tem valor congelado. */
+  const precisaDeDistancia = !order.destinationKnownAtCreation;
   const canCancel = CANCELLABLE.includes(order.status);
   const canComplete = FORCE_COMPLETABLE.includes(order.status);
 
@@ -156,6 +181,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
     setDriverId('');
     setReason('');
     setDistanceKm('');
+    setFailureReason('RECIPIENT_ABSENT');
     setAction(nextAction);
   };
 
@@ -184,6 +210,12 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
         case 'deliver':
           return adminDeliveriesApi.markDelivered(token, order.id, {
             ...payload,
+            ...(distancia !== undefined && { distanceKm: distancia }),
+          });
+        case 'fail':
+          return adminDeliveriesApi.markFailed(token, order.id, {
+            ...payload,
+            failureReason,
             ...(distancia !== undefined && { distanceKm: distancia }),
           });
         case 'cancel':
@@ -246,13 +278,16 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
           <DropdownMenuItem
             disabled={!canDeliver}
             onClick={() => openAction('deliver')}
-            title={
-              order.status === 'COLLECTED' && !order.destinationKnownAtCreation
-                ? 'Este pedido precisa do GPS do aplicativo para calcular o valor'
-                : 'Disponível depois da coleta'
-            }
+            title={canDeliver ? undefined : 'Disponível depois da coleta'}
           >
             <Truck /> Marcar como entregue
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!canFail}
+            onClick={() => openAction('fail')}
+            title={canFail ? undefined : 'Disponível depois da coleta'}
+          >
+            <PackageX /> Registrar insucesso
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!canComplete}
@@ -322,7 +357,27 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
                 numero nos que ja tem valor congelado, em vez de ignora-lo em
                 silencio. Nos dois casos a mensagem chega aqui.
               */}
-              {action === 'deliver' ? (
+              {action === 'fail' ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`delivery-${order.id}-failure`}>O que aconteceu</Label>
+                  <select
+                    id={`delivery-${order.id}-failure`}
+                    className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                    value={failureReason}
+                    onChange={(event) => setFailureReason(event.target.value as FailureReason)}
+                  >
+                    <option value="RECIPIENT_ABSENT">Destinatário ausente</option>
+                    <option value="ADDRESS_NOT_FOUND">Endereço não encontrado</option>
+                    <option value="RECIPIENT_REFUSED">Destinatário recusou</option>
+                    <option value="OTHER">Outro motivo</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    O pedido passa a exigir retorno à loja, e a taxa de retorno entra no valor.
+                  </p>
+                </div>
+              ) : null}
+
+              {(action === 'deliver' || action === 'fail') && precisaDeDistancia ? (
                 <div className="space-y-1.5">
                   <Label htmlFor={`delivery-${order.id}-distance`}>Distância percorrida (km)</Label>
                   <input

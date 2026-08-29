@@ -10090,3 +10090,92 @@ Instalar o `pilot.13` nos aparelhos e repetir o ciclo completo com destino
 definido na entrega e retorno: aceitar, coletar na loja, marcar entregue no
 destino, voltar e concluir o retorno. Conferir tambem que apenas UM aviso
 aparece na Home quando houver mais de uma pendencia.
+
+## 2026-08-29 - Insucesso pelo painel: o ultimo estado sem saida do ciclo
+
+A auditoria do ciclo de uma entrega encontrou UM estado do qual nem o motoboy
+nem o administrador conseguiam sair.
+
+### O estado
+
+Pedido de preco diferido — destino definido no momento da entrega — parado em
+`COLLECTED`, com a mercadoria na mao do motoboy.
+
+Registrar insucesso, em `markFailed`, passa por
+`calculateDeferredDestinationPricing`, que exige lat/lng, precisao de no maximo
+100 m e uma rota do Google. Falhando qualquer um dos tres, o motoboy nao
+registra. E o painel nao tinha equivalente: `markDelivered` ganhou `distanceKm`
+no recorte anterior, `markFailed` nao tinha nada, e `forceComplete` so aceita
+`DELIVERED` e `FAILED`.
+
+O pedido ficava preso indefinidamente, com o repasse do motoboy travado junto.
+
+### A correcao
+
+`DeliveriesService.markFailedByAdmin` espelha `markFailed`, inclusive na
+idempotencia e no `requiresReturn` que o insucesso liga. Duas diferencas
+deliberadas: a distancia vem do administrador em vez do GPS, e nao se cria
+endereco de destino, porque nao houve coordenada capturada para registrar.
+
+O preco sai das MESMAS rotinas do fluxo do motoboy — `quoteRequiredReturn` para
+o diferido, `calculateFailureReturnPricing` para o pedido ja precificado. O
+administrador informa a distancia; quanto a empresa paga e quanto o motoboy
+recebe continua vindo da tabela vigente. Distancia enviada num pedido que ja tem
+valor e recusada, nao ignorada.
+
+A regra vive em `DeliveriesService`, junto com o insucesso do motoboy;
+`AdminDeliveriesService.markFailed` so delega. Duas copias do mesmo calculo de
+retorno divergiriam, e a que envelheceria seria a rara.
+
+### Um defeito que so apareceu ao ligar a tela
+
+A saida administrativa da ENTREGA, publicada no recorte anterior, estava
+inalcancavel pelo painel: `canDeliver` exigia `destinationKnownAtCreation`, ou
+seja, o menu desabilitava "Marcar como entregue" exatamente nos pedidos de preco
+diferido — os unicos que travam. O rotulo ainda dizia "este pedido precisa do
+GPS do aplicativo para calcular o valor", que deixou de ser verdade quando a API
+passou a aceitar a distancia informada.
+
+Corrigido junto: `canDeliver` agora e so `status === 'COLLECTED'`, e o campo de
+distancia aparece somente quando o pedido realmente precisa dele — a lista
+operacional carrega `destinationKnownAtCreation`, ao contrario do que um
+registro anterior afirmou.
+
+### Arquivos
+
+`packages/validation/src/admin/delivery-override.schema.ts`,
+`packages/api-client/src/admin-deliveries.ts`,
+`apps/api/src/deliveries/deliveries.service.ts` e seu spec,
+`apps/api/src/admin/deliveries/admin-deliveries.service.ts` e controller,
+`apps/admin-web/src/components/operations/delivery-actions-menu.tsx`.
+
+Sem migration, sem mudanca no contrato usado pelo aplicativo: vale no proximo
+deploy, sem APK.
+
+### Validacoes executadas
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 82 suites, 984 testes aprovados |
+| `test:e2e` em `motoboycity_e2e_local` isolado | 25 suites, 236 testes aprovados |
+| builds de producao da API e do Admin Web | aprovados (41 rotas) |
+| Prettier nos arquivos alterados e `git diff --check` | aprovados |
+
+Cobertura nova: seis testes do insucesso administrativo — preco pela tabela com
+a distancia informada, recusa sem distancia, recusa de distancia em pedido ja
+precificado, exigencia de coleta previa, idempotencia e restricao a
+administrador.
+
+### O que a auditoria deixou em aberto
+
+- **Nenhum E2E cobre falha do Google na conclusao.** Todo o comportamento de
+  422/503 e dos tres fallbacks e coberto so por unitario com mock. E a maior
+  lacuna de teste do ciclo.
+- A criacao com destino conhecido nao tem os fallbacks da conclusao, e responde
+  "tente novamente em instantes" mesmo quando o endereco e irroteavel — afirma
+  uma causa temporaria que nao sabe ser temporaria.
+- `MAX_LOCATION_ACCURACY_METERS = 100` e constante de codigo. Com raio de
+  entrega em 5000 m, um fix de 800 m passa na proximidade e e recusado no
+  diferido; os dois limites nao conversam, e o operador nao alcanca nenhum dos
+  dois.

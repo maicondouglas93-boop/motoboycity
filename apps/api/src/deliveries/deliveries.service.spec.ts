@@ -1879,6 +1879,114 @@ describe('DeliveriesService', () => {
     });
   });
 
+  /**
+   * Era o unico estado sem saida do ciclo: pedido de preco diferido em
+   * COLLECTED cujo insucesso o motoboy nao conseguia registrar — porque
+   * dependia de GPS e de uma rota do Google — e o painel tambem nao.
+   */
+  describe('markFailedByAdmin', () => {
+    const base = {
+      reason: 'motoboy sem sinal; confirmado por telefone',
+      failureReason: 'RECIPIENT_ABSENT' as const,
+    };
+
+    it('registra o insucesso de preço diferido com a distância informada', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          driverValue: null,
+          distanceKm: null,
+        }),
+      );
+      pricingService.quote.mockResolvedValue({
+        totalValue: 15,
+        driverValue: 12,
+        platformValue: 3,
+        returnValue: 3,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
+
+      await service.markFailedByAdmin(adminUser, 'delivery-1', { ...base, distanceKm: 4.5 });
+
+      // O preco sai da tabela; o admin so informa a distancia.
+      expect(pricingService.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ distanceKm: 4.5, requiresReturn: true }),
+      );
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'FAILED',
+            requiresReturn: true,
+            distanceKm: 4.5,
+            driverValue: 12,
+          }),
+        }),
+      );
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            changedByUserId: 'user-admin-1',
+            note: expect.stringContaining('Distância informada pelo administrador: 4.5 km'),
+          }),
+        }),
+      );
+    });
+
+    it('recusa o preço diferido sem distância', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          driverValue: null,
+        }),
+      );
+
+      await expect(service.markFailedByAdmin(adminUser, 'delivery-1', base)).rejects.toThrow(
+        'Informe a distância',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa distância num pedido que já tem valor', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'COLLECTED' }),
+      );
+
+      await expect(
+        service.markFailedByAdmin(adminUser, 'delivery-1', { ...base, distanceKm: 5 }),
+      ).rejects.toThrow('já tem valor calculado');
+    });
+
+    it('exige coleta antes do insucesso', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'ACCEPTED' }),
+      );
+
+      await expect(service.markFailedByAdmin(adminUser, 'delivery-1', base)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('é idempotente quando o insucesso já foi registrado', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({ driverId: 'driver-1', status: 'FAILED', failedAt: new Date() }),
+      );
+
+      await expect(service.markFailedByAdmin(adminUser, 'delivery-1', base)).resolves.toBeDefined();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa quem não é administrador', async () => {
+      await expect(
+        service.markFailedByAdmin(driverUser, 'delivery-1', base),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
   describe('markFailed', () => {
     const failurePayload = {
       reason: 'RECIPIENT_ABSENT' as const,

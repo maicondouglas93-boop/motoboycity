@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {
   CompleteReturnPayload,
   CreateDeliveryBatchPayload,
+  AdminMarkFailedPayload,
   CreateDeliveryPayload,
   DeliveryOperationsQuery,
   DeliveryStageTimesQuery,
@@ -1939,6 +1940,143 @@ export class DeliveriesService {
     }
 
     const detail = await this.detail(user, id);
+    this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
+  }
+
+  /**
+   * Insucesso registrado pelo ADMINISTRADOR.
+   *
+   * Era o unico estado sem saida do ciclo. O insucesso do motoboy depende de
+   * GPS e de uma rota do Google quando o pedido calcula o preco na entrega;
+   * falhando qualquer um dos dois, ele ficava com a mercadoria na mao e o
+   * pedido preso em COLLECTED — sem acao para ele nem para o painel.
+   *
+   * Espelha `markFailed` de proposito, inclusive na idempotencia e no
+   * `requiresReturn` que o insucesso liga. As duas diferencas sao deliberadas:
+   * a distancia vem do administrador em vez do GPS, e nao se cria endereco de
+   * destino, porque nao houve coordenada capturada para registrar.
+   */
+  async markFailedByAdmin(
+    admin: User,
+    id: string,
+    payload: AdminMarkFailedPayload,
+  ): Promise<DeliveryDetail> {
+    if (admin.type !== 'ADMIN') {
+      throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      include: { company: { select: { regionId: true } } },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (
+      (delivery.status === 'FAILED' || delivery.status === 'COMPLETED') &&
+      delivery.failedAt !== null
+    ) {
+      return this.detail(admin, id);
+    }
+    if (delivery.status !== 'COLLECTED') {
+      throw new ConflictException('Só é possível registrar insucesso depois de coletar o pedido.');
+    }
+    if (!delivery.driverId) {
+      throw new ConflictException('O pedido não está atribuído a nenhum entregador.');
+    }
+
+    const precoDiferido = !delivery.destinationKnownAtCreation && delivery.driverValue === null;
+    if (precoDiferido && payload.distanceKm === undefined) {
+      throw new ConflictException(
+        'Este pedido calcula o valor pela localização da entrega, que não chegou. ' +
+          'Informe a distância percorrida para registrar o insucesso pelo painel.',
+      );
+    }
+    if (!precoDiferido && payload.distanceKm !== undefined) {
+      throw new ConflictException(
+        'Este pedido já tem valor calculado. A distância informada não seria usada.',
+      );
+    }
+
+    const failedAt = new Date();
+    /**
+     * O preco sai das MESMAS rotinas do fluxo do motoboy. O administrador
+     * informa a distancia; quanto a empresa paga e quanto o motoboy recebe
+     * continua vindo da tabela vigente.
+     */
+    const precoInformado = precoDiferido
+      ? await this.quoteRequiredReturn({
+          companyId: delivery.companyId,
+          regionId: delivery.company.regionId,
+          serviceTypeId: delivery.serviceTypeId,
+          distanceKm: payload.distanceKm as number,
+          at: failedAt,
+        })
+      : null;
+    const failureReturnPricing =
+      delivery.destinationKnownAtCreation && !delivery.requiresReturn
+        ? await this.calculateFailureReturnPricing(delivery, failedAt)
+        : null;
+
+    const nota =
+      `Insucesso registrado manualmente pelo administrador. Motivo: ${payload.reason}` +
+      (payload.note ? ` — ${payload.note}` : '') +
+      (precoInformado ? ` Distância informada pelo administrador: ${payload.distanceKm} km.` : '');
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.delivery.updateMany({
+          where: { id, status: 'COLLECTED', driverId: delivery.driverId },
+          data: {
+            status: 'FAILED',
+            statusChangedAt: failedAt,
+            failedAt,
+            failureReason: payload.failureReason,
+            failureNote: payload.note ?? null,
+            requiresReturn: true,
+            ...(failureReturnPricing && {
+              totalValue: failureReturnPricing.totalValue,
+              driverValue: failureReturnPricing.driverValue,
+              platformValue: failureReturnPricing.platformValue,
+              returnValue: failureReturnPricing.returnValue,
+            }),
+            ...(precoInformado && {
+              distanceKm: payload.distanceKm,
+              totalValue: precoInformado.totalValue,
+              driverValue: precoInformado.driverValue,
+              platformValue: precoInformado.platformValue,
+              returnValue: precoInformado.returnValue > 0 ? precoInformado.returnValue : null,
+              surchargeLabel: precoInformado.surchargeLabel,
+              surchargeValue:
+                precoInformado.surchargeValue > 0 ? precoInformado.surchargeValue : null,
+            }),
+          },
+        });
+        if (updated.count !== 1) {
+          throw new ConflictException('O insucesso já foi registrado por outra solicitação.');
+        }
+        await tx.deliveryStatusHistory.create({
+          data: {
+            deliveryId: id,
+            fromStatus: 'COLLECTED',
+            toStatus: 'FAILED',
+            changedByUserId: admin.id,
+            note: nota,
+          },
+        });
+        await this.integrationOutbox.record(tx, id, 'FAILED');
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const current = await this.prisma.delivery.findUnique({ where: { id } });
+        if ((current?.status === 'FAILED' || current?.status === 'COMPLETED') && current.failedAt) {
+          return this.detail(admin, id);
+        }
+      }
+      throw error;
+    }
+
+    const detail = await this.detail(admin, id);
     this.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
     return detail;
   }

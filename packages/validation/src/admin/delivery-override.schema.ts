@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deliveryFailureReasonValues } from '../deliveries/mark-failed.schema';
 
 /**
  * Motivo obrigatório em toda intervenção manual do admin.
@@ -43,6 +44,32 @@ export const manualDeliveryStageSchema = z.object({
     .optional(),
 });
 
+/**
+ * Insucesso registrado pelo administrador.
+ *
+ * Existe porque o insucesso do motoboy depende de GPS e de uma rota do Google
+ * quando o pedido calcula o preco na entrega. Falhando qualquer um dos dois, ele
+ * ficava com a mercadoria na mao e o pedido preso em COLLECTED — sem acao para
+ * ele NEM para o painel, que era o unico estado sem saida do ciclo.
+ *
+ * `distanceKm` segue a mesma regra da entrega manual: obrigatorio so quando o
+ * pedido calcularia o preco pela localizacao e ela nunca chegou; recusado
+ * quando o valor ja esta congelado.
+ */
+export const adminMarkFailedSchema = z.object({
+  reason: reasonSchema,
+  failureReason: z.enum(deliveryFailureReasonValues, {
+    message: 'Informe um motivo válido para o insucesso.',
+  }),
+  note: z.string().trim().max(500, 'A observação deve ter no máximo 500 caracteres.').optional(),
+  distanceKm: z
+    .number()
+    .positive('A distância precisa ser maior que zero.')
+    .max(300, 'A distância deve ser de no máximo 300 km.')
+    .optional(),
+});
+
+export type AdminMarkFailedPayload = z.infer<typeof adminMarkFailedSchema>;
 export type ReassignDriverPayload = z.infer<typeof reassignDriverSchema>;
 export type ForceCompletePayload = z.infer<typeof forceCompleteSchema>;
 export type ManualDeliveryStagePayload = z.infer<typeof manualDeliveryStageSchema>;
