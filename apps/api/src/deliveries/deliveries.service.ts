@@ -1404,12 +1404,26 @@ export class DeliveriesService {
         })
       : [delivery];
 
-    // Itens já CANCELLED/COMPLETED ficam de fora — sem isto, um item que já
-    // fechou sozinho (ex.: entrega sem retorno) travaria o cancelamento dos
-    // demais itens do lote, ainda ativos, pra sempre.
-    const cancellable = siblings.filter(
-      (item) => item.status !== 'CANCELLED' && item.status !== 'COMPLETED',
-    );
+    /**
+     * Itens já CANCELLED/COMPLETED ficam de fora — sem isto, um item que já
+     * fechou sozinho (ex.: entrega sem retorno) travaria o cancelamento dos
+     * demais itens do lote, ainda ativos, pra sempre.
+     *
+     * IRMAO ja entregue tambem fica de fora, e por outro motivo. Cancelar em
+     * `DELIVERED`/`FAILED` continua permitido quando e ESTE o pedido que a
+     * pessoa mandou cancelar — a regra de negocio diz que admin e motoboy
+     * cancelam em qualquer etapa ativa. O que nao pode e o efeito colateral:
+     * cancelar o item 2 de um lote arrastava junto o item 1, que ja tinha sido
+     * entregue, apagando do historico uma corrida que aconteceu e o repasse que
+     * ela ia gerar. Quem ja foi para a rua fecha pelo retorno, e ninguem pediu
+     * para cancelar aquele.
+     */
+    const jaFoiParaRua: DeliveryStatus[] = ['DELIVERED', 'FAILED'];
+    const cancellable = siblings.filter((item) => {
+      if (item.status === 'CANCELLED' || item.status === 'COMPLETED') return false;
+      if (item.id !== delivery.id && jaFoiParaRua.includes(item.status)) return false;
+      return true;
+    });
     if (cancellable.length === 0) {
       throw new ConflictException('Este pedido já está cancelado ou concluído.');
     }
