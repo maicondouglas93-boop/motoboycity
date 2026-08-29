@@ -556,4 +556,205 @@ describe('Despacho em lote — criação, concorrência e realtime (e2e)', () =>
       await setAvailability(driver1Token, 'UNAVAILABLE');
     });
   });
+  /**
+   * As corridas que a auditoria de concorrencia apontou como sem prova.
+   *
+   * Todas usam requisicoes concorrentes de verdade contra o banco real. Um
+   * teste unitario com `$transaction` mockado — que e o que a suite unitaria
+   * tem — executa o callback sem isolamento, sem lock e sem rollback: ele prova
+   * o caminho do codigo, nao a concorrencia.
+   */
+  describe('corridas entre atores', () => {
+    async function criarPedidoAvulso(): Promise<{ id: string }> {
+      const response = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(9) })
+        .expect(201);
+      return response.body;
+    }
+
+    async function ajustarConfiguracao(patch: Record<string, unknown>): Promise<void> {
+      await request(app.getHttpServer())
+        .patch('/admin/platform-settings')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send(patch)
+        .expect(200);
+    }
+
+    /**
+     * O motoboy recusando no segundo em que o job de expiracao dispara.
+     *
+     * NAO e um `Promise.all`: com o job rodando dentro do processo e a recusa
+     * atravessando o pipeline HTTP inteiro, a expiracao termina antes de a
+     * recusa comecar a escrever, e a janela ruim nunca abre. O que essa corrida
+     * PRODUZ, e o que este teste reproduz, e uma leitura velha — o job leu
+     * `PENDING` e o mundo mudou embaixo dele. Contra o banco real, com o
+     * pedido, a oferta e a contagem de verdade, o unico que sobra para
+     * defender e a guarda na escrita.
+     *
+     * Sem ela, esta chamada sobrescrevia a recusa dele com `EXPIRED` e
+     * contabilizava a segunda recusa — punindo antes do numero configurado, e
+     * mostrando "expirou" para quem apertou recusar.
+     */
+    it('expiração com leitura velha não sobrescreve a recusa nem conta de novo', async () => {
+      await ajustarConfiguracao({
+        driverPunishmentEnabled: true,
+        driverPunishmentTrigger: 'DECLINED_OR_EXPIRED',
+        // Alto de proposito: o teste mede a CONTAGEM, sem ninguem ser punido.
+        driverPunishmentOfferCount: 5,
+        driverPunishmentMinutes: 5,
+      });
+      await prisma.driver.update({
+        where: { id: driver1Id },
+        data: { consecutiveOfferRefusals: 0 },
+      });
+      await setAvailability(driver1Token, 'AVAILABLE');
+      const pedido = await criarPedidoAvulso();
+      const [oferta] = await pendingOffersFor([pedido.id]);
+      expect(oferta).toBeDefined();
+
+      await request(app.getHttpServer())
+        .patch(`/delivery-offers/${oferta!.id}/decline`)
+        .set('Authorization', `Bearer ${driver1Token}`)
+        .expect(200);
+      const depoisDaRecusa = await prisma.driver.findUniqueOrThrow({ where: { id: driver1Id } });
+      expect(depoisDaRecusa.consecutiveOfferRefusals).toBe(1);
+
+      // O job em voo: ele carrega o retrato de antes da recusa.
+      const leituraVelha = jest
+        .spyOn(prisma.deliveryOffer, 'findUnique')
+        .mockResolvedValueOnce({ ...oferta!, response: 'PENDING' });
+      try {
+        await dispatchService.handleOfferExpired(oferta!.id);
+      } finally {
+        leituraVelha.mockRestore();
+      }
+
+      const ofertaFinal = await prisma.deliveryOffer.findUniqueOrThrow({
+        where: { id: oferta!.id },
+      });
+      expect(ofertaFinal.response).toBe('DECLINED');
+      const motoboy = await prisma.driver.findUniqueOrThrow({ where: { id: driver1Id } });
+      expect(motoboy.consecutiveOfferRefusals).toBe(1);
+
+      await ajustarConfiguracao({ driverPunishmentEnabled: false });
+      await prisma.driver.update({
+        where: { id: driver1Id },
+        data: { consecutiveOfferRefusals: 0 },
+      });
+      await prisma.driverPunishment.deleteMany({ where: { driverId: driver1Id } });
+      await prisma.deliveryOffer.updateMany({
+        where: { driverId: driver1Id, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: new Date() },
+      });
+      await releaseAllDeliveries([pedido.id]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+
+    /**
+     * A loja cancelando no instante em que o job de ativacao dispara.
+     *
+     * `cancelScheduledActivation` tira o job da fila, mas remover nao
+     * interrompe um job que ja comecou — ele segue com o retrato `SCHEDULED`
+     * que leu antes. Mesma forma do teste acima, e pelo mesmo motivo: o que a
+     * corrida produz e a leitura velha.
+     *
+     * Sem a guarda na escrita, o pedido cancelado voltava para `AWAITING_DRIVER`
+     * e era ofertado. A loja via ressuscitar o que tinha acabado de cancelar, e
+     * o historico registrava uma transicao que partiu de outro estado.
+     */
+    it('ativação com leitura velha não ressuscita o agendado cancelado', async () => {
+      const agendadoPara = new Date(Date.now() + 3_600_000).toISOString();
+      const criado = await request(app.getHttpServer())
+        .post('/deliveries')
+        .set('Authorization', `Bearer ${companyToken}`)
+        .send({ serviceTypeId, dropoffAddress: dropoff(8), scheduledAt: agendadoPara })
+        .expect(201);
+      const pedidoId = criado.body.id as string;
+      expect(criado.body.status).toBe('SCHEDULED');
+
+      const agendado = await prisma.delivery.findUniqueOrThrow({ where: { id: pedidoId } });
+      await request(app.getHttpServer())
+        .patch(`/deliveries/${pedidoId}/cancel`)
+        .set('Authorization', `Bearer ${companyToken}`)
+        .expect(200);
+
+      const leituraVelha = jest
+        .spyOn(prisma.delivery, 'findUnique')
+        .mockResolvedValueOnce(agendado);
+      try {
+        await dispatchService.handleScheduledActivation(pedidoId);
+      } finally {
+        leituraVelha.mockRestore();
+      }
+
+      const final = await prisma.delivery.findUniqueOrThrow({ where: { id: pedidoId } });
+      expect(final.status).toBe('CANCELLED');
+      expect(await pendingOffersFor([pedidoId])).toHaveLength(0);
+      const historico = await prisma.deliveryStatusHistory.findMany({
+        where: { deliveryId: pedidoId },
+      });
+      expect(historico.some((linha) => linha.toStatus === 'AWAITING_DRIVER')).toBe(false);
+
+      await releaseAllDeliveries([pedidoId]);
+    });
+
+    /**
+     * A vitrine e o unico caminho de atribuicao que nao passa por oferta, entao
+     * a disputa dela nunca tinha sido exercitada de ponta a ponta.
+     */
+    it('dois motoboys assumindo o mesmo pedido da vitrine: só um leva', async () => {
+      const pedido = await criarPedidoAvulso();
+      await setAvailability(driver1Token, 'AVAILABLE');
+      await setAvailability(driver2Token, 'AVAILABLE');
+      // Todos deixaram passar: e exatamente por isso que a vitrine existe.
+      await prisma.deliveryOffer.updateMany({
+        where: { deliveryId: pedido.id, response: 'PENDING' },
+        data: { response: 'EXPIRED', respondedAt: new Date() },
+      });
+
+      const [primeiro, segundo] = await Promise.allSettled([
+        request(app.getHttpServer())
+          .patch(`/delivery-offers/available/${pedido.id}/claim`)
+          .set('Authorization', `Bearer ${driver1Token}`),
+        request(app.getHttpServer())
+          .patch(`/delivery-offers/available/${pedido.id}/claim`)
+          .set('Authorization', `Bearer ${driver2Token}`),
+      ]);
+
+      const status = [primeiro, segundo].map((resultado) =>
+        resultado.status === 'fulfilled' ? resultado.value.status : null,
+      );
+      expect(status.filter((codigo) => codigo === 200)).toHaveLength(1);
+      expect(status.filter((codigo) => codigo === 409)).toHaveLength(1);
+
+      const final = await prisma.delivery.findUniqueOrThrow({ where: { id: pedido.id } });
+      expect(final.status).toBe('ACCEPTED');
+      expect([driver1Id, driver2Id]).toContain(final.driverId);
+
+      await releaseAllDeliveries([pedido.id]);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+      await setAvailability(driver2Token, 'UNAVAILABLE');
+    });
+
+    /**
+     * A pergunta antiga era "cabe mais uma?". Um lote de tres passava por ela
+     * com teto de dois e o aceite atribuia os tres — o teto que o operador
+     * configurou nao valia justamente onde mais pesava.
+     */
+    it('lote que não cabe inteiro no teto não é ofertado a ninguém', async () => {
+      await ajustarConfiguracao({ maxConcurrentDeliveriesPerDriver: 2 });
+      await setAvailability(driver1Token, 'AVAILABLE');
+
+      const { deliveries } = await createBatch(3);
+      const deliveryIds = deliveries.map((delivery) => delivery.id);
+
+      expect(await pendingOffersFor(deliveryIds)).toHaveLength(0);
+
+      await ajustarConfiguracao({ maxConcurrentDeliveriesPerDriver: null });
+      await releaseAllDeliveries(deliveryIds);
+      await setAvailability(driver1Token, 'UNAVAILABLE');
+    });
+  });
 });
