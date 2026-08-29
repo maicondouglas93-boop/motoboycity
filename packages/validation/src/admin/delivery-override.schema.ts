@@ -25,6 +25,22 @@ export const forceCompleteSchema = z.object({
 /** Coleta/entrega confirmada manualmente pelo administrador. */
 export const manualDeliveryStageSchema = z.object({
   reason: reasonSchema,
+  /**
+   * Distância da entrega, obrigatória SOMENTE quando o pedido calcularia o
+   * preço pela localização do motoboy e essa localização nunca chegou.
+   *
+   * Existe porque esses pedidos podiam ficar presos em COLLECTED para sempre:
+   * o aplicativo não conseguia concluir e o painel recusava a conclusão por
+   * falta de preço. Sem distância não há preço, e inventar um seria pagar o
+   * motoboy e cobrar a empresa por um número que ninguém mediu — então o
+   * administrador informa o valor, ele fica no histórico junto com o motivo, e
+   * o preço sai da tabela vigente como em qualquer outra entrega.
+   */
+  distanceKm: z
+    .number()
+    .positive('A distância precisa ser maior que zero.')
+    .max(300, 'A distância deve ser de no máximo 300 km.')
+    .optional(),
 });
 
 export type ReassignDriverPayload = z.infer<typeof reassignDriverSchema>;

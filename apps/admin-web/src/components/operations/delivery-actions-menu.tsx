@@ -114,6 +114,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   const [action, setAction] = useState<DeliveryAction | null>(null);
   const [driverId, setDriverId] = useState('');
   const [reason, setReason] = useState('');
+  const [distanceKm, setDistanceKm] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const canReassign = REASSIGNABLE.includes(order.status);
@@ -146,6 +147,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
     setAction(null);
     setDriverId('');
     setReason('');
+    setDistanceKm('');
     setError(null);
   };
 
@@ -153,6 +155,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
     setError(null);
     setDriverId('');
     setReason('');
+    setDistanceKm('');
     setAction(nextAction);
   };
 
@@ -167,6 +170,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
     mutationFn: async () => {
       if (!token || !action) throw new Error('Sessão administrativa indisponível.');
       const payload = { reason: reason.trim() };
+      const distancia = distanceKm.trim() ? Number(distanceKm.trim().replace(',', '.')) : undefined;
       switch (action) {
         case 'reoffer':
           return adminOperationsApi.reofferDelivery(token, order.id, {
@@ -178,7 +182,10 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
         case 'collect':
           return adminDeliveriesApi.markCollected(token, order.id, payload);
         case 'deliver':
-          return adminDeliveriesApi.markDelivered(token, order.id, payload);
+          return adminDeliveriesApi.markDelivered(token, order.id, {
+            ...payload,
+            ...(distancia !== undefined && { distanceKm: distancia }),
+          });
         case 'cancel':
           return deliveriesApi.cancel(token, order.id, payload.reason);
         case 'complete':
@@ -305,6 +312,33 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
                       </option>
                     ))}
                   </select>
+                </div>
+              ) : null}
+
+              {/*
+                O campo aparece em toda entrega manual porque a lista
+                operacional nao diz se o pedido calcula o preco na entrega. Quem
+                sabe e a API: ela exige a distancia nesses pedidos e RECUSA o
+                numero nos que ja tem valor congelado, em vez de ignora-lo em
+                silencio. Nos dois casos a mensagem chega aqui.
+              */}
+              {action === 'deliver' ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`delivery-${order.id}-distance`}>Distância percorrida (km)</Label>
+                  <input
+                    id={`delivery-${order.id}-distance`}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    value={distanceKm}
+                    onChange={(event) => setDistanceKm(event.target.value)}
+                    placeholder="Ex.: 3,2"
+                    className="h-10 w-full rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Preencha somente quando o pedido calcularia o valor pela localização da entrega
+                    e ela não chegou. O preço sai da tabela vigente, e a distância fica no histórico
+                    junto com o motivo.
+                  </p>
                 </div>
               ) : null}
 

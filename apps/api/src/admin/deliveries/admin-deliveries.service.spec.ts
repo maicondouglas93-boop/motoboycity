@@ -4,6 +4,7 @@ import type { User } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
+import { PricingService } from '../../pricing/pricing.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminDeliveriesService } from './admin-deliveries.service';
 
@@ -35,6 +36,7 @@ describe('AdminDeliveriesService', () => {
   let prisma: {
     delivery: { findUnique: jest.Mock; findMany: jest.Mock };
     driver: { findUnique: jest.Mock };
+    company: { findUniqueOrThrow: jest.Mock };
     $transaction: jest.Mock;
   };
   let tx: {
@@ -47,6 +49,7 @@ describe('AdminDeliveriesService', () => {
     publishDeliveryUpdate: jest.Mock;
   };
   let financeLedgerService: { creditDriverRepasse: jest.Mock };
+  let pricingService: { quote: jest.Mock };
 
   beforeEach(async () => {
     tx = {
@@ -56,6 +59,7 @@ describe('AdminDeliveriesService', () => {
     prisma = {
       delivery: { findUnique: jest.fn(), findMany: jest.fn() },
       driver: { findUnique: jest.fn() },
+      company: { findUniqueOrThrow: jest.fn().mockResolvedValue({ regionId: 'region-1' }) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     deliveriesService = {
@@ -64,6 +68,16 @@ describe('AdminDeliveriesService', () => {
       publishDeliveryUpdate: jest.fn(),
     };
     financeLedgerService = { creditDriverRepasse: jest.fn() };
+    pricingService = {
+      quote: jest.fn().mockResolvedValue({
+        totalValue: 12,
+        driverValue: 9.6,
+        platformValue: 2.4,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,6 +86,7 @@ describe('AdminDeliveriesService', () => {
         { provide: DeliveriesService, useValue: deliveriesService },
         { provide: FinanceLedgerService, useValue: financeLedgerService },
         { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
+        { provide: PricingService, useValue: pricingService },
       ],
     }).compile();
 
@@ -366,6 +381,85 @@ describe('AdminDeliveriesService', () => {
       await expect(
         service.markDelivered(admin, 'delivery-1', { reason: 'etapa incorreta' }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    /**
+     * A saida que faltava. Sem ela, um pedido de preco diferido que o
+     * aplicativo nao conseguisse concluir ficava preso em COLLECTED para
+     * sempre: o motoboy nao fechava e o painel recusava por falta de preco.
+     */
+    it('fecha o pedido de preço diferido com a distância informada pelo admin', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        entrega({ destinationKnownAtCreation: false, driverValue: null, requiresReturn: false }),
+      );
+
+      await service.markDelivered(admin, 'delivery-1', {
+        reason: 'aplicativo nao concluiu; distancia conferida com o motoboy',
+        distanceKm: 3.2,
+      });
+
+      // O preco vem da tabela vigente, nunca de conta local.
+      expect(pricingService.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ distanceKm: 3.2, requiresReturn: false }),
+      );
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'COMPLETED',
+            distanceKm: 3.2,
+            totalValue: 12,
+            driverValue: 9.6,
+          }),
+        }),
+      );
+      expect(financeLedgerService.creditDriverRepasse).toHaveBeenCalledWith(tx, {
+        id: 'delivery-1',
+        driverId: 'driver-1',
+        driverValue: 9.6,
+      });
+    });
+
+    it('a distância informada fica no histórico, junto com o motivo', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        entrega({ destinationKnownAtCreation: false, driverValue: null, requiresReturn: false }),
+      );
+
+      await service.markDelivered(admin, 'delivery-1', {
+        reason: 'conferido com o motoboy',
+        distanceKm: 3.2,
+      });
+
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            note: expect.stringContaining('Distância informada pelo administrador: 3.2 km'),
+          }),
+        }),
+      );
+    });
+
+    it('continua recusando o preço diferido quando a distância não vem', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(
+        entrega({ destinationKnownAtCreation: false, driverValue: null }),
+      );
+
+      await expect(
+        service.markDelivered(admin, 'delivery-1', { reason: 'sem coordenada da entrega' }),
+      ).rejects.toThrow('Informe a distância');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Ignorar o numero em silencio faria o admin acreditar que mudou o preco de
+     * um pedido que ja tinha valor congelado.
+     */
+    it('recusa distância informada num pedido que já tem valor', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega({ requiresReturn: false }));
+
+      await expect(
+        service.markDelivered(admin, 'delivery-1', { reason: 'tentativa', distanceKm: 5 }),
+      ).rejects.toThrow('já tem valor calculado');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

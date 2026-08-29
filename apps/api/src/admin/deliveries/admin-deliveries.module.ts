@@ -4,9 +4,10 @@ import { FinanceModule } from '../../finance/finance.module';
 import { AdminDeliveriesController } from './admin-deliveries.controller';
 import { AdminDeliveriesService } from './admin-deliveries.service';
 import { IntegrationEventsModule } from '../../integrations/integration-events.module';
+import { PricingModule } from '../../pricing/pricing.module';
 
 @Module({
-  imports: [DeliveriesModule, FinanceModule, IntegrationEventsModule],
+  imports: [DeliveriesModule, FinanceModule, IntegrationEventsModule, PricingModule],
   controllers: [AdminDeliveriesController],
   providers: [AdminDeliveriesService],
 })

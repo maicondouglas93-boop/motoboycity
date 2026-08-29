@@ -15,6 +15,7 @@ import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliver
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
+import { PricingService } from '../../pricing/pricing.service';
 
 /**
  * Intervenções manuais do admin sobre um pedido.
@@ -50,7 +51,42 @@ export class AdminDeliveriesService {
     private readonly deliveriesService: DeliveriesService,
     private readonly financeLedgerService: FinanceLedgerService,
     private readonly integrationOutbox: IntegrationOutboxRecorder,
+    private readonly pricingService: PricingService,
   ) {}
+
+  /**
+   * Preco de um pedido cuja distancia so seria conhecida na entrega.
+   *
+   * A distancia vem do administrador, mas o PRECO nao: ele sai da mesma
+   * `PricingService.quote` que atende o aplicativo, com a tabela e a taxa
+   * vigentes. Assim a intervencao manual decide um numero medido, nunca
+   * quanto a empresa paga ou o motoboy recebe.
+   */
+  private async quoteDeferredDelivery(
+    delivery: { companyId: string; serviceTypeId: string; requiresReturn: boolean },
+    distanceKm: number,
+  ) {
+    const company = await this.prisma.company.findUniqueOrThrow({
+      where: { id: delivery.companyId },
+      select: { regionId: true },
+    });
+    const quote = await this.pricingService.quote({
+      companyId: delivery.companyId,
+      regionId: company.regionId,
+      serviceTypeId: delivery.serviceTypeId,
+      distanceKm,
+      requiresReturn: delivery.requiresReturn,
+    });
+    return {
+      distanceKm,
+      totalValue: quote.totalValue,
+      driverValue: quote.driverValue,
+      platformValue: quote.platformValue,
+      returnValue: quote.returnValue > 0 ? quote.returnValue : null,
+      surchargeLabel: quote.surchargeLabel,
+      surchargeValue: quote.surchargeValue > 0 ? quote.surchargeValue : null,
+    };
+  }
 
   createForCompany(
     admin: User,
@@ -254,14 +290,42 @@ export class AdminDeliveriesService {
     if (delivery.status !== 'COLLECTED') {
       throw new ConflictException('O pedido precisa estar coletado antes da entrega.');
     }
-    if (!delivery.destinationKnownAtCreation) {
+    /**
+     * Pedido com preco definido pela localizacao da entrega.
+     *
+     * Antes era recusado aqui, e essa recusa era a porta que faltava: quando o
+     * aplicativo nao conseguia concluir — GPS, rota, o que fosse — o pedido
+     * ficava preso em COLLECTED sem NENHUMA saida, nem pelo motoboy nem pelo
+     * painel. Agora o administrador pode fechar, desde que informe a distancia;
+     * o preco continua saindo de `PricingService`, nunca de uma conta local.
+     */
+    const precoDiferido = !delivery.destinationKnownAtCreation && delivery.driverValue === null;
+    if (precoDiferido && payload.distanceKm === undefined) {
       throw new ConflictException(
-        'Este pedido calcula o valor pela localização da entrega. Confirme pelo aplicativo do motoboy.',
+        'Este pedido calcula o valor pela localização da entrega, que não chegou. ' +
+          'Informe a distância percorrida para concluir pelo painel.',
       );
     }
-    if (!delivery.driverId || delivery.driverValue === null) {
+    if (!precoDiferido && payload.distanceKm !== undefined) {
+      // Recusar em vez de ignorar: um numero digitado e uma intencao, e
+      // descarta-lo em silencio faria o admin acreditar que mudou o preco.
+      throw new ConflictException(
+        'Este pedido já tem valor calculado. A distância informada não seria usada.',
+      );
+    }
+    if (!delivery.driverId) {
       throw new InternalServerErrorException(
-        'Não foi possível concluir: a entrega não tem entregador ou valor definido.',
+        'Não foi possível concluir: a entrega não tem entregador definido.',
+      );
+    }
+
+    const precoInformado = precoDiferido
+      ? await this.quoteDeferredDelivery(delivery, payload.distanceKm as number)
+      : null;
+    const driverValue = precoInformado?.driverValue ?? delivery.driverValue;
+    if (driverValue === null) {
+      throw new InternalServerErrorException(
+        'Não foi possível concluir: a entrega não tem valor definido.',
       );
     }
 
@@ -271,7 +335,19 @@ export class AdminDeliveriesService {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const updated = await tx.delivery.updateMany({
           where: { id: deliveryId, status: 'COLLECTED', driverId: delivery.driverId },
-          data: { status: nextStatus, statusChangedAt: changedAt },
+          data: {
+            status: nextStatus,
+            statusChangedAt: changedAt,
+            ...(precoInformado && {
+              distanceKm: precoInformado.distanceKm,
+              totalValue: precoInformado.totalValue,
+              driverValue: precoInformado.driverValue,
+              platformValue: precoInformado.platformValue,
+              returnValue: precoInformado.returnValue,
+              surchargeLabel: precoInformado.surchargeLabel,
+              surchargeValue: precoInformado.surchargeValue,
+            }),
+          },
         });
         if (updated.count !== 1) {
           throw new ConflictException('A entrega já foi registrada por outra solicitação.');
@@ -283,7 +359,11 @@ export class AdminDeliveriesService {
             fromStatus: 'COLLECTED',
             toStatus: 'DELIVERED',
             changedByUserId: admin.id,
-            note: `Entrega marcada manualmente pelo administrador. Motivo: ${payload.reason}`,
+            note:
+              `Entrega marcada manualmente pelo administrador. Motivo: ${payload.reason}` +
+              (precoInformado
+                ? ` Distância informada pelo administrador: ${precoInformado.distanceKm} km.`
+                : ''),
           },
         });
         await this.integrationOutbox.record(tx, deliveryId, 'DELIVERED');
@@ -301,7 +381,7 @@ export class AdminDeliveriesService {
           await this.financeLedgerService.creditDriverRepasse(tx, {
             id: deliveryId,
             driverId: delivery.driverId,
-            driverValue: delivery.driverValue,
+            driverValue,
           });
         }
       });
