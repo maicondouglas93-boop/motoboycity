@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { GoogleMapsService } from '../../maps/google-maps.service';
 import { CompanyCustomersService } from './company-customers.service';
 
 const companyUser = { id: 'user-a', type: 'COMPANY_MEMBER' } as User;
@@ -61,6 +62,7 @@ const customerRow = {
 
 describe('CompanyCustomersService', () => {
   let service: CompanyCustomersService;
+  let googleMaps: { geocode: jest.Mock };
   let prisma: {
     companyTeamMember: { findFirst: jest.Mock };
     companyCustomer: {
@@ -106,8 +108,16 @@ describe('CompanyCustomersService', () => {
     prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) =>
       callback(prisma),
     );
+    googleMaps = { geocode: jest.fn().mockResolvedValue(null) };
     const module = await Test.createTestingModule({
-      providers: [CompanyCustomersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        CompanyCustomersService,
+        { provide: PrismaService, useValue: prisma },
+        // O painel resolve o endereco pelo Google Places e ja manda a
+        // coordenada, entao o caminho normal nem chama isto. O duplo existe
+        // para os testes que gravam endereco SEM ponto.
+        { provide: GoogleMapsService, useValue: googleMaps },
+      ],
     }).compile();
     service = module.get(CompanyCustomersService);
   });
@@ -138,6 +148,62 @@ describe('CompanyCustomersService', () => {
     expect(result.addressLabel).toBe('Casa');
     expect(result.addresses).toHaveLength(1);
     expect(result.address.lat).toBe(-20.15);
+  });
+
+  /**
+   * O endereco salvo sem coordenada era uma armadilha silenciosa: ao escolher
+   * aquele cliente, o painel devolvia `address: null` e o pedido era barrado
+   * com "selecione no Google um endereco completo", sem dizer que o problema
+   * estava no cadastro. O painel resolve pelo Places e ja manda o ponto — este
+   * caminho existe para tudo que NAO passa por ele.
+   */
+  it('geocodifica o endereco quando a coordenada nao vem no payload', async () => {
+    const semCoordenada = {
+      ...payload,
+      address: { ...payload.address, lat: undefined, lng: undefined },
+    };
+    googleMaps.geocode.mockResolvedValue({ lat: -20.1501, lng: -41.7401 });
+    prisma.companyCustomer.findFirst.mockResolvedValue(null);
+    prisma.companyCustomer.create.mockResolvedValue(customerRow);
+
+    await service.create(companyUser, semCoordenada);
+
+    expect(googleMaps.geocode).toHaveBeenCalledWith(
+      'Rua das Flores, 100 - Lajinha - MG - 36930000',
+    );
+    const gravado = prisma.companyCustomer.create.mock.calls[0][0].data;
+    expect(gravado).toMatchObject({ lat: -20.1501, lng: -41.7401 });
+    expect(gravado.savedAddresses.create).toMatchObject({ lat: -20.1501, lng: -41.7401 });
+  });
+
+  it('nao chama o Google quando a coordenada ja veio pronta', async () => {
+    prisma.companyCustomer.findFirst.mockResolvedValue(null);
+    prisma.companyCustomer.create.mockResolvedValue(customerRow);
+
+    await service.create(companyUser, payload);
+
+    expect(googleMaps.geocode).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A agenda de clientes nao pode depender do Google estar de pe. Sem
+   * coordenada o cliente e salvo do mesmo jeito; quem decide se ela faz falta e
+   * a regra de proximidade, la na entrega.
+   */
+  it('salva o cliente mesmo quando a geocodificacao falha', async () => {
+    const semCoordenada = {
+      ...payload,
+      address: { ...payload.address, lat: undefined, lng: undefined },
+    };
+    googleMaps.geocode.mockRejectedValue(new Error('Google fora do ar'));
+    prisma.companyCustomer.findFirst.mockResolvedValue(null);
+    prisma.companyCustomer.create.mockResolvedValue(customerRow);
+
+    await expect(service.create(companyUser, semCoordenada)).resolves.toBeDefined();
+    expect(prisma.companyCustomer.create.mock.calls[0][0].data).toMatchObject({
+      lat: null,
+      lng: null,
+    });
   });
 
   it('cria cliente sem CPF e verifica duplicidade apenas pelo telefone', async () => {

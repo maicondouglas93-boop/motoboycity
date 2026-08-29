@@ -19,6 +19,7 @@ import type {
 } from '@motoboycity/validation';
 import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { GoogleMapsService } from '../../maps/google-maps.service';
 
 interface CustomerRow {
   id: string;
@@ -88,7 +89,64 @@ export function normalizeCustomerName(value: string): string {
 
 @Injectable()
 export class CompanyCustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly googleMapsService: GoogleMapsService,
+  ) {}
+
+  /**
+   * Garante a coordenada do endereco salvo do cliente.
+   *
+   * O painel resolve o endereco pelo Google Places, que so devolve resultado
+   * com ponto geografico — entao hoje a coordenada quase sempre chega pronta e
+   * este caminho nem roda. Ele existe para o que NAO passa pelo painel: o
+   * contrato aceita endereco sem `lat`/`lng`, e um endereco salvo sem ponto vira
+   * uma armadilha silenciosa — ao escolher aquele cliente, o pedido e barrado
+   * com "selecione no Google um endereco completo", sem dizer que o problema
+   * esta no cadastro.
+   *
+   * Nunca impede o cadastro. A agenda de clientes nao pode depender do Google
+   * estar de pe: sem coordenada o cliente e salvo do mesmo jeito, e quem
+   * decide se ela faz falta e a regra de proximidade, la na entrega.
+   */
+  private async resolverCoordenadaDoCliente(address: {
+    street: string;
+    number: string;
+    complement?: string | null;
+    city: string;
+    state: string;
+    zip: string;
+    lat?: number;
+    lng?: number;
+  }): Promise<{ lat: number | null; lng: number | null }> {
+    if (address.lat !== undefined && address.lng !== undefined) {
+      return { lat: address.lat, lng: address.lng };
+    }
+
+    const formatado = [
+      `${address.street}, ${address.number}`,
+      address.city,
+      address.state,
+      address.zip,
+    ]
+      .filter(Boolean)
+      .join(' - ');
+
+    try {
+      return (await this.googleMapsService.geocode(formatado)) ?? { lat: null, lng: null };
+    } catch {
+      return { lat: null, lng: null };
+    }
+  }
+
+  /**
+   * Roda SEMPRE fora da transacao: geocodificar e chamada de rede, e segurar
+   * uma transacao aberta esperando o Google prenderia conexao do banco.
+   */
+  private async addressDataComCoordenada(address: CreateCompanyCustomerPayload['address']) {
+    const ponto = await this.resolverCoordenadaDoCliente(address);
+    return { ...this.addressData(address), lat: ponto.lat, lng: ponto.lng };
+  }
 
   async list(
     user: User,
@@ -169,6 +227,7 @@ export class CompanyCustomersService {
   async create(user: User, payload: CreateCompanyCustomerPayload): Promise<CompanyCustomer> {
     const companyId = await this.resolveCompanyId(user);
     await this.assertNoDuplicate(companyId, payload.cpf, payload.phone);
+    const enderecoComPonto = await this.addressDataComCoordenada(payload.address);
 
     try {
       const customer = await this.prisma.$transaction(async (tx) => {
@@ -179,13 +238,13 @@ export class CompanyCustomersService {
             normalizedName: normalizeCustomerName(payload.name),
             cpf: payload.cpf ?? null,
             phone: payload.phone,
-            ...this.addressData(payload.address),
+            ...enderecoComPonto,
             savedAddresses: {
               create: {
                 label: payload.addressLabel,
                 normalizedLabel: normalizeCustomerName(payload.addressLabel),
                 isPrimary: true,
-                ...this.addressData(payload.address),
+                ...enderecoComPonto,
               },
             },
           },
@@ -214,6 +273,7 @@ export class CompanyCustomersService {
     if (!existing) throw new NotFoundException('Cliente nao encontrado.');
 
     await this.assertNoDuplicate(companyId, payload.cpf, payload.phone, id);
+    const enderecoComPonto = await this.addressDataComCoordenada(payload.address);
     try {
       const customer = await this.prisma.$transaction(async (tx) => {
         await this.linkUnassignedDeliveries(tx, companyId, id, existing.phone);
@@ -224,14 +284,14 @@ export class CompanyCustomersService {
             normalizedName: normalizeCustomerName(payload.name),
             cpf: payload.cpf ?? null,
             phone: payload.phone,
-            ...this.addressData(payload.address),
+            ...enderecoComPonto,
             savedAddresses: {
               updateMany: {
                 where: { isPrimary: true },
                 data: {
                   label: payload.addressLabel,
                   normalizedLabel: normalizeCustomerName(payload.addressLabel),
-                  ...this.addressData(payload.address),
+                  ...enderecoComPonto,
                 },
               },
             },
@@ -255,6 +315,7 @@ export class CompanyCustomersService {
   ): Promise<CompanyCustomerSavedAddress> {
     const companyId = await this.resolveCompanyId(user);
     await this.assertCustomerOwnership(companyId, customerId);
+    const enderecoComPonto = await this.addressDataComCoordenada(payload.address);
     try {
       const address = await this.prisma.companyCustomerSavedAddress.create({
         data: {
@@ -262,7 +323,7 @@ export class CompanyCustomersService {
           label: payload.label,
           normalizedLabel: normalizeCustomerName(payload.label),
           isPrimary: false,
-          ...this.addressData(payload.address),
+          ...enderecoComPonto,
         },
       });
       return this.toSavedAddress(address);
@@ -283,13 +344,14 @@ export class CompanyCustomersService {
       where: { id: addressId, customerId, customer: { companyId } },
     });
     if (!existing) throw new NotFoundException('Endereco do cliente nao encontrado.');
+    const enderecoComPonto = await this.addressDataComCoordenada(payload.address);
 
     try {
       const address = await this.prisma.$transaction(async (tx) => {
         if (existing.isPrimary) {
           await tx.companyCustomer.update({
             where: { id: customerId },
-            data: this.addressData(payload.address),
+            data: enderecoComPonto,
           });
         }
         return tx.companyCustomerSavedAddress.update({
@@ -297,7 +359,7 @@ export class CompanyCustomersService {
           data: {
             label: payload.label,
             normalizedLabel: normalizeCustomerName(payload.label),
-            ...this.addressData(payload.address),
+            ...enderecoComPonto,
           },
         });
       });

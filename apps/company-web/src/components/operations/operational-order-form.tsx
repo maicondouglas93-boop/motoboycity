@@ -264,19 +264,31 @@ export function OperationalOrderForm({
     if (mode === 'batch' && (drafts.length < 2 || drafts.length > 50)) {
       return setError('O lote precisa ter entre 2 e 50 entregas.');
     }
-    if (
-      destinationKnown &&
-      drafts.some(
-        (draft) =>
-          !draft.address ||
-          !draft.address.street ||
-          !(draft.number || draft.address.number) ||
-          !draft.address.city ||
-          !draft.address.state ||
-          !draft.address.zip,
-      )
-    ) {
-      return setError('Selecione no Google um endereço completo para cada destino.');
+    const incompleto = (draft: DeliveryDraft) =>
+      !draft.address ||
+      !draft.address.street ||
+      !(draft.number || draft.address.number) ||
+      !draft.address.city ||
+      !draft.address.state ||
+      !draft.address.zip;
+
+    if (destinationKnown && drafts.some(incompleto)) {
+      /**
+       * Diz QUAL e o problema quando ele vem do cadastro.
+       *
+       * O endereco salvo de um cliente pode estar sem coordenada — o contrato
+       * aceita, mesmo que o painel sempre mande o ponto do Places. Nesse caso o
+       * cliente escolhido preenchia nome e telefone, o endereco chegava vazio, e
+       * a pessoa lia "selecione no Google um endereco completo" sem entender por
+       * que o cliente que ela acabou de escolher nao servia. Salvar o endereco de
+       * novo pelo cadastro resolve de vez, porque a API passou a geocodificar.
+       */
+      const veioDeClienteSalvo = drafts.some((draft) => incompleto(draft) && draft.customerId);
+      return setError(
+        veioDeClienteSalvo
+          ? 'O endereço salvo deste cliente está sem localização. Selecione o endereço no Google aqui, ou abra o cliente e salve o endereço novamente para corrigir de vez.'
+          : 'Selecione no Google um endereço completo para cada destino.',
+      );
     }
     mutation.mutate();
   }
