@@ -9741,3 +9741,30 @@ Ordem preservada: validar o codigo com a versao nova, carregar as credenciais de
 release na sessao, gerar e verificar o APK oficial, criar os commits, fazer push,
 acompanhar CI/deploys e so entao distribuir o mesmo artefato conferido. Ate este
 ponto nao houve commit, push, deploy nem APK novo.
+
+## 2026-08-28 - Release pilot.11 concluido
+
+O release foi concluido no commit `e6c10bf` e enviado para `origin/main`. O CI
+`33228301883` aprovou typecheck, lint, testes unitarios e E2E e os builds da API,
+Company Web e Admin Web. Os deploys Vercel de Company Web e Admin Web ficaram
+com status `success`; a API publica e o Admin Web responderam HTTP 200 no smoke
+sem cache. Nao houve migration nem operacao direta no banco.
+
+O APK oficial foi gerado em worktree curta, com Firebase, chave do mapa, ambiente
+`production` e API `https://motoboycity-api.onrender.com`. O bundle contem essa
+URL e nao contem `localhost:3333`, `127.0.0.1` ou `10.0.2.2`. O `apksigner`
+confirmou assinatura v2 e o certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, versionName
+`0.1.0-pilot.11`, versionCode 11, minSdk 24 e targetSdk 36.
+
+O artefato tem 75.128.597 bytes e SHA-256
+`2CB2E85E89A29415008A28DDE39FD2F8ED94D888B5317A0BA0E1D599F00B57DD`.
+As copias verificadas estao em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.11-vc11.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.11-vc11.apk`.
+
+As senhas foram lidas apenas de arquivos DPAPI temporarios, nao foram exibidas e
+foram removidas depois da assinatura. A worktree curta tambem foi removida.
+Resta instalar o APK em aparelho real e executar o smoke autenticado de retorno
+com GPS indisponivel e de ligacao/desligamento das regras opcionais no ADM.
