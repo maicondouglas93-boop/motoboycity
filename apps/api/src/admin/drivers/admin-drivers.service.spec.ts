@@ -16,12 +16,23 @@ describe('AdminDriversService', () => {
     driver: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock; findMany: jest.Mock };
     serviceType: { findMany: jest.Mock };
     driverServiceType: { deleteMany: jest.Mock; createMany: jest.Mock };
+    driverCompanyBlock: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      delete: jest.Mock;
+    };
+    company: { findUnique: jest.Mock };
     driverPresenceLog: { updateMany: jest.Mock };
     deliveryStatusHistory: { groupBy: jest.Mock };
     region: { findMany: jest.Mock };
+    $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
-  let dispatchService: { releasePendingOffersForDriver: jest.Mock };
+  let dispatchService: {
+    releasePendingOffersForDriver: jest.Mock;
+    dispatchAvailableDeliveries: jest.Mock;
+  };
   let authService: { replacePassword: jest.Mock };
   let livePresence: { remove: jest.Mock };
   let realtimeGateway: {
@@ -41,15 +52,26 @@ describe('AdminDriversService', () => {
       },
       serviceType: { findMany: jest.fn() },
       driverServiceType: { deleteMany: jest.fn(), createMany: jest.fn() },
+      driverCompanyBlock: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn(),
+        delete: jest.fn(),
+      },
+      company: { findUnique: jest.fn() },
       driverPresenceLog: { updateMany: jest.fn() },
       deliveryStatusHistory: { groupBy: jest.fn().mockResolvedValue([]) },
       region: { findMany: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'driver-1' }]),
       $transaction: jest
         .fn()
         .mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma)),
     };
 
-    dispatchService = { releasePendingOffersForDriver: jest.fn().mockResolvedValue(0) };
+    dispatchService = {
+      releasePendingOffersForDriver: jest.fn().mockResolvedValue(0),
+      dispatchAvailableDeliveries: jest.fn().mockResolvedValue(undefined),
+    };
     authService = {
       replacePassword: jest.fn().mockImplementation(
         async (
@@ -174,6 +196,54 @@ describe('AdminDriversService', () => {
         select: { id: true, name: true },
       });
       expect(result.regions).toHaveLength(2);
+    });
+  });
+
+  describe('bloqueio por empresa', () => {
+    it('bloqueia e solta somente ofertas pendentes daquela empresa', async () => {
+      const blockedAt = new Date('2026-08-29T12:00:00.000Z');
+      prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
+      prisma.company.findUnique.mockResolvedValue({ id: 'company-1', tradeName: 'Loja X' });
+      prisma.driverCompanyBlock.create.mockResolvedValue({
+        id: 'block-1',
+        driverId: 'driver-1',
+        companyId: 'company-1',
+        reason: 'Solicitacao da empresa',
+        blockedAt,
+        company: { id: 'company-1', tradeName: 'Loja X' },
+      });
+
+      await expect(
+        service.blockCompany(
+          'driver-1',
+          { companyId: 'company-1', reason: 'Solicitacao da empresa' },
+          'admin-1',
+        ),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          id: 'block-1',
+          company: { id: 'company-1', tradeName: 'Loja X' },
+        }),
+      );
+      expect(dispatchService.releasePendingOffersForDriver).toHaveBeenCalledWith(
+        'driver-1',
+        'company-1',
+      );
+    });
+
+    it('libera a empresa e acorda os pedidos que ficaram sem candidato', async () => {
+      prisma.driverCompanyBlock.findUnique.mockResolvedValue({
+        id: 'block-1',
+        company: { tradeName: 'Loja X' },
+      });
+
+      await expect(service.unblockCompany('driver-1', 'company-1', 'admin-1')).resolves.toEqual({
+        driverId: 'driver-1',
+        companyId: 'company-1',
+        blocked: false,
+      });
+      expect(prisma.driverCompanyBlock.delete).toHaveBeenCalledWith({ where: { id: 'block-1' } });
+      expect(dispatchService.dispatchAvailableDeliveries).toHaveBeenCalled();
     });
   });
 

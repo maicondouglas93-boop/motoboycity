@@ -166,14 +166,23 @@ com o retrato que leu antes, e só o `where` o detém.
 
 Elegibilidade do motoboy: região, `approvalStatus`, `accountStatus`,
 `availability`, modalidade atribuída, presença viva no Redis, teto de entregas
-simultâneas e punição ativa. Quem já tem oferta pendente e quem está punido
-entram pela mesma porta de exclusão — `eligibleDriverWhere` descreve quem *pode*
-atender, e o punido continua podendo.
+simultâneas, punição ativa e ausência de `DriverCompanyBlock` para a empresa do
+pedido. Quem já tem oferta pendente e quem está punido entram pela mesma porta
+de exclusão — `eligibleDriverWhere` descreve quem *pode* atender, enquanto a
+punição descreve quem está temporariamente fora.
+
+O bloqueio seletivo é uma relação persistente `(driverId, companyId)` com
+unicidade no banco. Ele é revalidado ao criar e aceitar oferta, ao assumir pela
+vitrine e ao reatribuir pelo admin; não depende de a tela estar atualizada. A
+mudança usa o mesmo lock de linha do motoboy que a emissão de oferta. Bloquear
+remove apenas ofertas pendentes da empresa escolhida; nunca altera uma entrega
+que já está em andamento.
 
 A vitrine (`claimDelivery`) é o único caminho de atribuição que não passa por
 oferta, então **repete as checagens por conta própria**: região, modalidade,
-punição e teto, este último dentro da transação e sob o mesmo `FOR UPDATE` no
-motoboy. A listagem filtra, mas a listagem pode estar velha na tela.
+punição, bloqueio por empresa e teto, estes últimos dentro da transação e sob o
+mesmo `FOR UPDATE` no motoboy. A listagem filtra, mas a listagem pode estar velha
+na tela.
 
 O teto de entregas simultâneas pergunta "cabe o que estou prestes a entregar?",
 recebendo a **quantidade** — não "cabe mais uma?". Com a pergunta antiga, um lote

@@ -19,6 +19,7 @@ import {
 import { ChangePasswordDialog } from '@/components/users/change-password-dialog';
 import { DriverDocumentsManager, EditDriverDialog } from '@/components/drivers/driver-maintenance';
 import { DriverPunishments } from '@/components/drivers/driver-punishments';
+import { DriverCompanyBlocks } from '@/components/drivers/driver-company-blocks';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -198,6 +199,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           </header>
 
           <DriverPunishments driverId={driver.id} token={token} />
+          <DriverCompanyBlocks driverId={driver.id} token={token} />
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard

@@ -62,6 +62,12 @@ conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
 aiqfome (importação e ciclo logístico).
 
+**No worktree, ainda não publicado:** bloqueio seletivo motoboy × empresa pelo
+detalhe do entregador no ADM. O vínculo é persistente e auditado; filtra despacho
+automático, reoferta, vitrine, aceite e reatribuição, solta oferta pendente da
+empresa escolhida e preserva entregas já em andamento. A migration aditiva é
+`20260829120000_driver_company_blocks`.
+
 O `README.md` descreve uma "Fase 0" que não corresponde à implementação. **Não
 use o README como fonte de verdade.**
 
@@ -130,7 +136,7 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **82 suítes / 1001** testes unitários da API, **22 / 136** do
+Cobertura atual: **82 suítes / 1006** testes unitários da API, **22 / 136** do
 Driver App, **17 arquivos / 63** da Company Web, **25 / 243** E2E.
 
 ### E2E

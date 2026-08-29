@@ -21,6 +21,7 @@ const motoboyApto = {
 function entrega(over: Record<string, unknown> = {}) {
   return {
     id: 'delivery-1',
+    companyId: 'company-1',
     batchId: null,
     status: 'COLLECTED',
     driverId: 'driver-1',
@@ -41,8 +42,10 @@ describe('AdminDeliveriesService', () => {
     $transaction: jest.Mock;
   };
   let tx: {
+    $queryRaw: jest.Mock;
     delivery: { update: jest.Mock; updateMany: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
+    driverCompanyBlock: { findUnique: jest.Mock };
   };
   let deliveriesService: {
     createForCompany: jest.Mock;
@@ -55,8 +58,10 @@ describe('AdminDeliveriesService', () => {
 
   beforeEach(async () => {
     tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'driver-2' }]),
       delivery: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
+      driverCompanyBlock: { findUnique: jest.fn().mockResolvedValue(null) },
     };
     prisma = {
       delivery: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -185,6 +190,20 @@ describe('AdminDeliveriesService', () => {
           reason: 'moto quebrou',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('recusa reatribuir para motoboy bloqueado pela empresa do pedido', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(entrega());
+      prisma.driver.findUnique.mockResolvedValue(motoboyApto);
+      tx.driverCompanyBlock.findUnique.mockResolvedValue({ id: 'block-1' });
+
+      await expect(
+        service.reassignDriver(admin, 'delivery-1', {
+          driverId: 'driver-2',
+          reason: 'moto quebrou',
+        }),
+      ).rejects.toThrow('bloqueado para atender esta empresa');
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
     });
 
     it('troca e registra autor e motivo no histórico', async () => {

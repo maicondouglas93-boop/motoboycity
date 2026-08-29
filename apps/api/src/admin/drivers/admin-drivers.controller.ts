@@ -21,10 +21,12 @@ import { Throttle } from '@nestjs/throttler';
 import {
   changeAdminPasswordSchema,
   createAdminDriverSchema,
+  createDriverCompanyBlockSchema,
   listDriversQuerySchema,
   replaceDriverServiceTypesSchema,
   type ChangeAdminPasswordPayload,
   type CreateAdminDriverPayload,
+  type CreateDriverCompanyBlockPayload,
   type ListDriversQuery,
   type ReplaceDriverServiceTypesPayload,
   adminUpdateDriverSchema,
@@ -36,7 +38,11 @@ import {
   revokeDriverPunishmentSchema,
   type RevokeDriverPunishmentPayload,
 } from '@motoboycity/validation';
-import type { AdminDriverPunishmentItem, AdminPasswordChangeResult } from '@motoboycity/types';
+import type {
+  AdminDriverCompanyBlockItem,
+  AdminDriverPunishmentItem,
+  AdminPasswordChangeResult,
+} from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
 import { AuthService, type RegisterDriverResult } from '../../auth/auth.service';
@@ -112,6 +118,31 @@ export class AdminDriversController {
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.adminDriversService.detail(id);
+  }
+
+  @Get(':id/company-blocks')
+  companyBlocks(@Param('id') id: string): Promise<AdminDriverCompanyBlockItem[]> {
+    return this.adminDriversService.listCompanyBlocks(id);
+  }
+
+  @Post(':id/company-blocks')
+  @HttpCode(HttpStatus.CREATED)
+  blockCompany(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(createDriverCompanyBlockSchema))
+    body: CreateDriverCompanyBlockPayload,
+    @CurrentUser() admin: User,
+  ): Promise<AdminDriverCompanyBlockItem> {
+    return this.adminDriversService.blockCompany(id, body, admin.id);
+  }
+
+  @Delete(':id/company-blocks/:companyId')
+  unblockCompany(
+    @Param('id') id: string,
+    @Param('companyId') companyId: string,
+    @CurrentUser() admin: User,
+  ): Promise<{ driverId: string; companyId: string; blocked: false }> {
+    return this.adminDriversService.unblockCompany(id, companyId, admin.id);
   }
 
   @Put(':id')

@@ -208,6 +208,13 @@ repetidas indefinidamente.
 Decisão exclusiva do admin, sem prazo definido, sem processo formal de
 recurso.
 
+O administrador também pode impedir um motoboy de atender uma empresa
+específica, com motivo obrigatório e possibilidade de liberação posterior.
+Esse bloqueio vale somente para trabalho novo: retira ofertas pendentes daquela
+empresa, exclui seus pedidos do despacho automático e da vitrine do motoboy e
+impede reoferta, aceite e reatribuição manual. Entregas que já estavam aceitas
+ou coletadas continuam com o mesmo motoboy até o encerramento normal.
+
 ## Saque
 
 Liberado toda segunda-feira pro motoboy solicitar. Sem valor mínimo, sem

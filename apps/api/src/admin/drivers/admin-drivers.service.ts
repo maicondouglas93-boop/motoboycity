@@ -3,17 +3,20 @@ import type {
   AdminDriverDocumentPayload,
   AdminReviewDriverDocumentPayload,
   AdminUpdateDriverPayload,
+  CreateDriverCompanyBlockPayload,
   ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/validation';
-import type {
-  Driver,
-  DriverAccountStatus,
-  DriverApprovalStatus,
-  DriverAvailability,
+import {
+  Prisma,
+  type Driver,
+  type DriverAccountStatus,
+  type DriverApprovalStatus,
+  type DriverAvailability,
 } from '@prisma/client';
 import type {
   AdminDriverListItem,
   AdminDriverDetail,
+  AdminDriverCompanyBlockItem,
   AdminDriverPunishmentItem,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
@@ -261,6 +264,115 @@ export class AdminDriversService {
         createdAt: document.createdAt.toISOString(),
       })),
     };
+  }
+
+  async listCompanyBlocks(driverId: string): Promise<AdminDriverCompanyBlockItem[]> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException('Motoboy nao encontrado.');
+
+    const blocks = await this.prisma.driverCompanyBlock.findMany({
+      where: { driverId },
+      orderBy: { blockedAt: 'desc' },
+      include: { company: { select: { id: true, tradeName: true } } },
+    });
+    return blocks.map((block) => this.toCompanyBlockItem(block));
+  }
+
+  async blockCompany(
+    driverId: string,
+    payload: CreateDriverCompanyBlockPayload,
+    actorUserId: string,
+  ): Promise<AdminDriverCompanyBlockItem> {
+    const block = await this.prisma.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      if (!driver) throw new NotFoundException('Motoboy nao encontrado.');
+
+      // Serializa com a criacao de oferta e a reatribuicao manual. Assim a
+      // operacao que obtiver o lock primeiro define se o pedido ainda e novo
+      // (bloqueado) ou ja virou uma entrega em andamento (preservada).
+      await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
+      );
+
+      const [company, existing] = await Promise.all([
+        tx.company.findUnique({
+          where: { id: payload.companyId },
+          select: { id: true, tradeName: true },
+        }),
+        tx.driverCompanyBlock.findUnique({
+          where: { driverId_companyId: { driverId, companyId: payload.companyId } },
+          select: { id: true },
+        }),
+      ]);
+      if (!company) throw new NotFoundException('Empresa nao encontrada.');
+      if (existing) {
+        throw new ConflictException('Este motoboy ja esta bloqueado para esta empresa.');
+      }
+
+      const created = await tx.driverCompanyBlock.create({
+        data: { driverId, companyId: payload.companyId, reason: payload.reason },
+        include: { company: { select: { id: true, tradeName: true } } },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_COMPANY_BLOCKED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Motoboy impedido de atender a empresa ${company.tradeName}. Motivo: ${payload.reason}`,
+          metadata: { companyId: company.id },
+        },
+        tx,
+      );
+      return created;
+    });
+
+    // A restricao ja esta persistida. Mesmo que a limpeza externa falhe, os
+    // guards de aceite abaixo impedem que uma oferta antiga seja assumida.
+    await this.dispatchService
+      .releasePendingOffersForDriver(driverId, payload.companyId)
+      .catch((error: unknown) =>
+        this.logger.warn(`Falha ao soltar oferta da empresa bloqueada: ${String(error)}`),
+      );
+    return this.toCompanyBlockItem(block);
+  }
+
+  async unblockCompany(
+    driverId: string,
+    companyId: string,
+    actorUserId: string,
+  ): Promise<{ driverId: string; companyId: string; blocked: false }> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
+      );
+      const block = await tx.driverCompanyBlock.findUnique({
+        where: { driverId_companyId: { driverId, companyId } },
+        include: { company: { select: { tradeName: true } } },
+      });
+      if (!block) throw new NotFoundException('Bloqueio entre motoboy e empresa nao encontrado.');
+
+      await tx.driverCompanyBlock.delete({ where: { id: block.id } });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_COMPANY_UNBLOCKED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary: `Motoboy liberado para atender a empresa ${block.company.tradeName}.`,
+          metadata: { companyId },
+        },
+        tx,
+      );
+    });
+
+    // Pode haver pedido parado justamente porque este era o unico motoboy
+    // elegivel. A varredura faz a liberacao surtir efeito imediatamente.
+    await this.dispatchService.dispatchAvailableDeliveries().catch(() => undefined);
+    return { driverId, companyId, blocked: false };
   }
 
   async update(
@@ -742,6 +854,22 @@ export class AdminDriversService {
     }
 
     return { driverId: updated.id, accountStatus: updated.accountStatus };
+  }
+
+  private toCompanyBlockItem(block: {
+    id: string;
+    driverId: string;
+    reason: string;
+    blockedAt: Date;
+    company: { id: string; tradeName: string };
+  }): AdminDriverCompanyBlockItem {
+    return {
+      id: block.id,
+      driverId: block.driverId,
+      company: block.company,
+      reason: block.reason,
+      blockedAt: block.blockedAt.toISOString(),
+    };
   }
 
   private async findOrThrow(driverId: string): Promise<Driver> {

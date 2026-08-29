@@ -141,6 +141,15 @@ export interface DriverAccountStatusResult {
   accountStatus: DriverAccountStatus;
 }
 
+/** Empresa cujos novos pedidos este motoboy nao pode atender. */
+export interface AdminDriverCompanyBlockItem {
+  id: string;
+  driverId: string;
+  company: { id: string; tradeName: string };
+  reason: string;
+  blockedAt: string;
+}
+
 /**
  * Punicao automatica por recusa/expiracao de oferta.
  *

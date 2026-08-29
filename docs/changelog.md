@@ -10256,3 +10256,37 @@ Não verificável sem tocar em infraestrutura: se o Redis de produção tem
 persistência configurada — o que decide se um reinício perde os `SCHEDULED`. A
 varredura nova cobre esse caso independentemente da resposta, que é justamente o
 motivo de ela existir.
+
+## 2026-08-29 — bloqueio seletivo de motoboy por empresa
+
+Implementada a opção administrativa de impedir que um motoboy atenda uma
+empresa específica, sem bloquear sua conta inteira e sem retirar dele entregas
+que já estão em andamento.
+
+- Nova relação persistente e única `DriverCompanyBlock(driverId, companyId)`,
+  com motivo obrigatório e migration aditiva
+  `20260829120000_driver_company_blocks`.
+- Novas rotas no detalhe do motoboy para listar, criar e remover bloqueios. As
+  duas mutações entram na auditoria administrativa.
+- O bloqueio compõe a elegibilidade do despacho automático e da reoferta
+  manual, esconde os pedidos da vitrine do motoboy e fecha as portas de aceite,
+  claim e reatribuição manual mesmo com tela ou oferta antiga.
+- Ao bloquear, somente as ofertas pendentes daquela empresa são expiradas sem
+  punir o motoboy e o pedido volta ao despacho. Ao liberar, a varredura acorda
+  pedidos que possam ter ficado sem candidato.
+- A alteração é serializada pelo lock da linha do motoboy. Quem entrar primeiro
+  decide a fronteira: trabalho que já virou entrega em andamento é preservado;
+  trabalho ainda novo é barrado.
+- O Admin Web ganhou o cartão **Empresas bloqueadas** no detalhe do entregador,
+  com seleção da empresa, motivo e ação explícita de liberar.
+
+Arquivos principais: schema/migration Prisma; `admin-drivers.*`,
+`admin-deliveries.service.ts`, `dispatch.service.ts`; contratos em
+`packages/validation`, `packages/types` e `packages/api-client`; componente
+`driver-company-blocks.tsx` e tela de detalhe do entregador.
+
+Validações executadas: `prisma validate`; Prisma Client gerado; `migrate diff`
+entre todo o histórico de migrations e o schema em PostgreSQL temporário (**No
+difference detected**); `pnpm typecheck` e `pnpm lint` nos 8 workspaces; 82
+suítes unitárias da API, **1006 testes aprovados**; builds de produção da API e
+do Admin Web aprovados (38 páginas); `git diff --check` aprovado.

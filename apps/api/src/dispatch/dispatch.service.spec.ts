@@ -52,6 +52,7 @@ describe('DispatchService', () => {
     };
     driverPresenceLog: { findMany: jest.Mock };
     driver: { findUnique: jest.Mock; findFirst: jest.Mock };
+    driverCompanyBlock: { findUnique: jest.Mock; findFirst: jest.Mock };
     deliveryStatusHistory: { createMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -86,6 +87,7 @@ describe('DispatchService', () => {
     deliveryOffer: { create: jest.Mock; findFirst: jest.Mock; updateMany: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
     driverPunishment: { findFirst: jest.Mock };
+    driverCompanyBlock: { findUnique: jest.Mock; findFirst: jest.Mock };
   };
 
   beforeEach(async () => {
@@ -105,6 +107,10 @@ describe('DispatchService', () => {
       },
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
       driverPunishment: { findFirst: jest.fn().mockResolvedValue(null) },
+      driverCompanyBlock: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
     prisma = {
       delivery: {
@@ -128,6 +134,10 @@ describe('DispatchService', () => {
         findUnique: jest.fn(),
         // Padrao: o motoboy atende a regiao e a modalidade do pedido.
         findFirst: jest.fn().mockResolvedValue({ id: 'driver-1' }),
+      },
+      driverCompanyBlock: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       deliveryStatusHistory: { createMany: jest.fn().mockResolvedValue({ count: 1 }) },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
@@ -196,6 +206,21 @@ describe('DispatchService', () => {
   });
 
   describe('releasePendingOffersForDriver', () => {
+    it('pode soltar somente ofertas da empresa bloqueada', async () => {
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+
+      await service.releasePendingOffersForDriver('driver-1', 'company-1');
+
+      expect(prisma.deliveryOffer.findMany).toHaveBeenCalledWith({
+        where: {
+          driverId: 'driver-1',
+          response: 'PENDING',
+          delivery: { companyId: 'company-1' },
+        },
+        select: { id: true },
+      });
+    });
+
     it('redespacha de forma idempotente uma oferta que já ficou EXPIRED', async () => {
       prisma.deliveryOffer.findUnique.mockResolvedValue({
         id: 'offer-1',
@@ -388,12 +413,14 @@ describe('DispatchService', () => {
         service as unknown as {
           findNextEligibleDriverId(input: {
             excludeDriverIds: string[];
+            companyId: string;
             regionId: string;
             serviceTypeIds: string[];
           }): Promise<string | null>;
         }
       ).findNextEligibleDriverId({
         excludeDriverIds: [],
+        companyId: 'company-1',
         regionId: 'region-1',
         serviceTypeIds: ['service-1'],
       });
@@ -421,6 +448,7 @@ describe('DispatchService', () => {
     it('não faz nada se já existe oferta pendente', async () => {
       prisma.delivery.findUnique.mockResolvedValue({
         id: 'delivery-1',
+        companyId: 'company-1',
         status: 'AWAITING_DRIVER',
         company: { regionId: 'region-1' },
         serviceTypeId: 'service-1',
@@ -468,6 +496,7 @@ describe('DispatchService', () => {
         id: 'delivery-1',
         status: 'AWAITING_DRIVER',
         displayNumber: 7,
+        companyId: 'company-1',
         destinationKnownAtCreation: true,
         totalValue: { toString: () => '16.90' },
         driverValue: { toString: () => '13.52' },
@@ -571,6 +600,7 @@ describe('DispatchService', () => {
               approvalStatus: 'APPROVED',
               accountStatus: 'ACTIVE',
               availability: 'AVAILABLE',
+              companyBlocks: { none: { companyId: 'company-1' } },
               // Sem filtro por entregas em andamento: o motoboy junta varias
               // entregas na mesma saida. O teto, quando existe, e aplicado por
               // contagem depois da consulta.
@@ -1292,6 +1322,13 @@ describe('DispatchService', () => {
   });
 
   describe('acceptOffer', () => {
+    beforeEach(() => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        companyId: 'company-1',
+        batchId: null,
+      });
+    });
     it('lança NotFoundException se a oferta não existe', async () => {
       prisma.deliveryOffer.findUnique.mockResolvedValue(null);
 
@@ -1310,6 +1347,21 @@ describe('DispatchService', () => {
 
       await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toBeInstanceOf(
         ForbiddenException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('recusa oferta pendente quando o ADM bloqueou a empresa para o motoboy', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'PENDING',
+      });
+      prisma.driverCompanyBlock.findFirst.mockResolvedValue({ id: 'block-1' });
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'nao pode atender pedidos desta empresa',
       );
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -1486,7 +1538,7 @@ describe('DispatchService', () => {
           response: 'ACCEPTED',
         });
       prisma.delivery.findUnique
-        .mockResolvedValueOnce({ id: 'delivery-1', batchId: null })
+        .mockResolvedValueOnce({ id: 'delivery-1', companyId: 'company-1', batchId: null })
         .mockResolvedValueOnce({
           id: 'delivery-1',
           displayNumber: 9,
@@ -1510,10 +1562,14 @@ describe('DispatchService', () => {
         driverId: 'driver-1',
         deliveryId: 'delivery-1',
       });
-      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', batchId: 'batch-1' });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        companyId: 'company-1',
+        batchId: 'batch-1',
+      });
       prisma.delivery.findMany.mockResolvedValue([
-        { id: 'delivery-1', displayNumber: 7 },
-        { id: 'delivery-2', displayNumber: 8 },
+        { id: 'delivery-1', displayNumber: 7, companyId: 'company-1' },
+        { id: 'delivery-2', displayNumber: 8, companyId: 'company-1' },
       ]);
       prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }, { id: 'offer-2' }]);
       tx.deliveryOffer.updateMany.mockResolvedValue({ count: 2 });
@@ -2256,7 +2312,11 @@ describe('DispatchService', () => {
         deliveryId: 'delivery-1',
         response: 'PENDING',
       });
-      prisma.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', batchId: null });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        companyId: 'company-1',
+        batchId: null,
+      });
       tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
       tx.delivery.updateMany.mockResolvedValue({ count: 1 });
       tx.delivery.findUniqueOrThrow.mockResolvedValue({

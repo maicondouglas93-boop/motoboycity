@@ -1,6 +1,7 @@
 import type {
   AdminDriverListItem,
   AdminDriverDetail,
+  AdminDriverCompanyBlockItem,
   AdminDriverPunishmentItem,
   AdminDriverRegistrationOptions,
   AdminPasswordChangeResult,
@@ -17,6 +18,7 @@ import type {
   AdminUpdateDriverPayload,
   ChangeAdminPasswordPayload,
   CreateAdminDriverPayload,
+  CreateDriverCompanyBlockPayload,
   RevokeDriverPunishmentPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
@@ -70,6 +72,41 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    async companyBlocks(
+      accessToken: string,
+      driverId: string,
+    ): Promise<AdminDriverCompanyBlockItem[]> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<AdminDriverCompanyBlockItem[]>(response);
+    },
+
+    async blockCompany(
+      accessToken: string,
+      driverId: string,
+      payload: CreateDriverCompanyBlockPayload,
+    ): Promise<AdminDriverCompanyBlockItem> {
+      const response = await fetch(`${baseUrl}/admin/drivers/${driverId}/company-blocks`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminDriverCompanyBlockItem>(response);
+    },
+
+    async unblockCompany(
+      accessToken: string,
+      driverId: string,
+      companyId: string,
+    ): Promise<{ driverId: string; companyId: string; blocked: false }> {
+      const response = await fetch(
+        `${baseUrl}/admin/drivers/${driverId}/company-blocks/${companyId}`,
+        { method: 'DELETE', headers: withAuth(accessToken) },
+      );
+      return parseJsonOrThrow<{ driverId: string; companyId: string; blocked: false }>(response);
     },
 
     async update(

@@ -362,6 +362,7 @@ export class DispatchService {
     for (;;) {
       const candidateDriverId = await this.findNextEligibleDriverId({
         excludeDriverIds: [...excludedDriverIds],
+        companyId: delivery.companyId,
         regionId: delivery.company.regionId,
         serviceTypeIds,
         quantidade: deliveryIds.length,
@@ -371,6 +372,7 @@ export class DispatchService {
       const creation = await this.createPendingOffers({
         deliveryIds,
         driverId: candidateDriverId,
+        companyId: delivery.companyId,
         regionId: delivery.company.regionId,
         serviceTypeIds,
       });
@@ -529,10 +531,13 @@ export class DispatchService {
     }
 
     const serviceTypeIds = [...new Set(deliveries.map((item) => item.serviceTypeId))];
+    if (await this.isCompanyBlocked(driverId, delivery.companyId)) {
+      throw new ConflictException('Este motoboy esta bloqueado para atender esta empresa.');
+    }
     const selectedDriver = await this.prisma.driver.findFirst({
       where: {
         id: driverId,
-        ...this.eligibleDriverWhere(delivery.company.regionId, serviceTypeIds),
+        ...this.eligibleDriverWhere(delivery.company.regionId, serviceTypeIds, delivery.companyId),
       },
       select: { id: true, user: { select: { name: true } } },
     });
@@ -566,6 +571,7 @@ export class DispatchService {
     const creation = await this.createPendingOffers({
       deliveryIds,
       driverId,
+      companyId: delivery.companyId,
       regionId: delivery.company.regionId,
       serviceTypeIds,
     });
@@ -894,9 +900,13 @@ export class DispatchService {
    * Sem isto, o pedido ficava parado ate a oferta expirar sozinha: ninguem mais era
    * chamado durante esse tempo, mesmo havendo motoboy livre.
    */
-  async releasePendingOffersForDriver(driverId: string): Promise<number> {
+  async releasePendingOffersForDriver(driverId: string, companyId?: string): Promise<number> {
     const pending = await this.prisma.deliveryOffer.findMany({
-      where: { driverId, response: 'PENDING' },
+      where: {
+        driverId,
+        response: 'PENDING',
+        ...(companyId && { delivery: { companyId } }),
+      },
       select: { id: true },
     });
 
@@ -1047,6 +1057,10 @@ export class DispatchService {
         offeredDelivery.batchId,
       );
     }
+    if (!offeredDelivery) {
+      throw new NotFoundException('Pedido da oferta nao encontrado.');
+    }
+    await this.assertCompanyAllowed(driverId, [offeredDelivery.companyId]);
 
     const acceptedAt = new Date();
     const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
@@ -1058,6 +1072,10 @@ export class DispatchService {
     let delivery: { id: string; displayNumber: number; companyId: string };
     try {
       delivery = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
+        );
+        await this.assertCompanyAllowed(driverId, [offeredDelivery.companyId], tx);
         const offerUpdate = await tx.deliveryOffer.updateMany({
           where: { id: offerId, response: 'PENDING' },
           data: { response: 'ACCEPTED', respondedAt: new Date() },
@@ -1173,6 +1191,7 @@ export class DispatchService {
       orderBy: { createdAt: 'asc' },
     });
     const deliveryIds = deliveries.map((delivery) => delivery.id);
+    const companyIds = [...new Set(deliveries.map((delivery) => delivery.companyId))];
     const offers = await this.prisma.deliveryOffer.findMany({
       where: { deliveryId: { in: deliveryIds }, driverId, response: 'PENDING' },
       select: { id: true },
@@ -1181,12 +1200,17 @@ export class DispatchService {
       throw new ConflictException('O lote não está mais disponível para aceite.');
     }
     const offerIds = offers.map((offer) => offer.id);
+    await this.assertCompanyAllowed(driverId, companyIds);
     const acceptedAt = new Date();
     const pickupDeadlineAt = await this.pickupDeadlineFrom(acceptedAt);
     await this.schedulePickupExpiry(deliveryId, driverId, pickupDeadlineAt);
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
+        );
+        await this.assertCompanyAllowed(driverId, companyIds, tx);
         const offerUpdate = await tx.deliveryOffer.updateMany({
           where: { id: { in: offerIds }, response: 'PENDING' },
           data: { response: 'ACCEPTED', respondedAt: new Date() },
@@ -1424,11 +1448,13 @@ export class DispatchService {
   private async createPendingOffers({
     deliveryIds,
     driverId,
+    companyId,
     regionId,
     serviceTypeIds,
   }: {
     deliveryIds: string[];
     driverId: string;
+    companyId: string;
     regionId: string;
     serviceTypeIds: string[];
   }): Promise<PendingOfferCreationResult> {
@@ -1467,7 +1493,10 @@ export class DispatchService {
           }
 
           const eligibleDriver = await tx.driver.findFirst({
-            where: { id: driverId, ...this.eligibleDriverWhere(regionId, serviceTypeIds) },
+            where: {
+              id: driverId,
+              ...this.eligibleDriverWhere(regionId, serviceTypeIds, companyId),
+            },
             select: { id: true },
           });
           if (!eligibleDriver) {
@@ -1586,7 +1615,10 @@ export class DispatchService {
       where: {
         status: 'AWAITING_DRIVER',
         driverId: null,
-        company: { regionId: driver.regionId },
+        company: {
+          regionId: driver.regionId,
+          driverBlocks: { none: { driverId } },
+        },
         serviceTypeId: { in: serviceTypeIds },
         // Sem oferta pendente: se alguem esta com o pedido na mao agora, ele
         // ainda nao esta livre para a vitrine.
@@ -1662,6 +1694,7 @@ export class DispatchService {
     if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
       throw new ConflictException('Este pedido já não está mais disponível.');
     }
+    await this.assertCompanyAllowed(driverId, [alvo.companyId]);
 
     // A vitrine ja esconde os pedidos de quem esta punido; esta checagem fecha
     // a porta para uma tela desatualizada ou uma chamada direta a API.
@@ -1697,7 +1730,10 @@ export class DispatchService {
      */
     const serviceTypeIds = [...new Set(irmaos.map((item) => item.serviceTypeId))];
     const elegivel = await this.prisma.driver.findFirst({
-      where: { id: driverId, ...this.eligibleDriverWhere(alvo.company.regionId, serviceTypeIds) },
+      where: {
+        id: driverId,
+        ...this.eligibleDriverWhere(alvo.company.regionId, serviceTypeIds, alvo.companyId),
+      },
       select: { id: true },
     });
     if (!elegivel) {
@@ -1734,6 +1770,7 @@ export class DispatchService {
         await tx.$queryRaw<Array<{ id: string }>>(
           Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${driverId} FOR UPDATE`,
         );
+        await this.assertCompanyAllowed(driverId, [alvo.companyId], tx);
         if (!(await this.cabeMaisUmaEntrega(driverId, limiteSimultaneo, ids.length, tx))) {
           throw new ConflictException(
             ids.length > 1
@@ -1961,6 +1998,9 @@ export class DispatchService {
     if (!delivery || delivery.status !== 'AWAITING_DRIVER') {
       return null;
     }
+    if (await this.isCompanyBlocked(offer.driverId, delivery.companyId)) {
+      return null;
+    }
 
     const settings = await this.platformSettingsService.get();
     if (settings.dispatchOfferTimeoutSeconds === null) {
@@ -1985,11 +2025,13 @@ export class DispatchService {
 
   private async findNextEligibleDriverId({
     excludeDriverIds,
+    companyId,
     regionId,
     serviceTypeIds,
     quantidade = 1,
   }: {
     excludeDriverIds: string[];
+    companyId: string;
     regionId: string;
     serviceTypeIds: string[];
     /** Quantas entregas serao ofertadas juntas — o lote inteiro precisa caber. */
@@ -2011,7 +2053,7 @@ export class DispatchService {
       where: {
         wentOfflineAt: null,
         driverId: excluded.length > 0 ? { notIn: excluded } : undefined,
-        driver: this.eligibleDriverWhere(regionId, serviceTypeIds),
+        driver: this.eligibleDriverWhere(regionId, serviceTypeIds, companyId),
       },
       orderBy: { wentOnlineAt: 'asc' },
       take: 50,
@@ -2125,7 +2167,37 @@ export class DispatchService {
     }
   }
 
-  private eligibleDriverWhere(regionId: string, serviceTypeIds: string[]): Prisma.DriverWhereInput {
+  private async isCompanyBlocked(
+    driverId: string,
+    companyId: string,
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<boolean> {
+    const block = await tx.driverCompanyBlock.findUnique({
+      where: { driverId_companyId: { driverId, companyId } },
+      select: { id: true },
+    });
+    return block !== null;
+  }
+
+  private async assertCompanyAllowed(
+    driverId: string,
+    companyIds: string[],
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<void> {
+    const block = await tx.driverCompanyBlock.findFirst({
+      where: { driverId, companyId: { in: companyIds } },
+      select: { id: true },
+    });
+    if (block) {
+      throw new ForbiddenException('Voce nao pode atender pedidos desta empresa.');
+    }
+  }
+
+  private eligibleDriverWhere(
+    regionId: string,
+    serviceTypeIds: string[],
+    companyId: string,
+  ): Prisma.DriverWhereInput {
     /**
      * Sem filtro por entregas em andamento.
      *
@@ -2140,6 +2212,7 @@ export class DispatchService {
       approvalStatus: 'APPROVED',
       accountStatus: 'ACTIVE',
       availability: 'AVAILABLE',
+      companyBlocks: { none: { companyId } },
       AND: serviceTypeIds.map((serviceTypeId) => ({
         serviceTypes: {
           some: { serviceTypeId, serviceType: { active: true } },

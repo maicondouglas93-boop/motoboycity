@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import type { DeliveryStatus, Prisma, User } from '@prisma/client';
+import { Prisma, type DeliveryStatus, type User } from '@prisma/client';
 import type {
   CreateDeliveryPayload,
   ForceCompletePayload,
@@ -197,6 +197,22 @@ export class AdminDeliveriesService {
     const pickupDeadlineAt = renovaPrazo ? await this.dispatchService.novoPrazoDeColeta() : null;
 
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "drivers" WHERE "id" = ${payload.driverId} FOR UPDATE`,
+      );
+      const bloqueio = await tx.driverCompanyBlock.findUnique({
+        where: {
+          driverId_companyId: {
+            driverId: payload.driverId,
+            companyId: delivery.companyId,
+          },
+        },
+        select: { id: true },
+      });
+      if (bloqueio) {
+        throw new ConflictException('Este motoboy esta bloqueado para atender esta empresa.');
+      }
+
       /**
        * Condicional: a guarda de status acima e uma LEITURA. Sem ela no `where`,
        * uma finalizacao concorrente entre a leitura e esta linha trocava o
