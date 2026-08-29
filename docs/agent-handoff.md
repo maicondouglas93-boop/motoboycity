@@ -10010,3 +10010,83 @@ historico, recusa sem distancia e recusa de distancia em pedido ja precificado.
 Proximo passo concreto: decidir a causa do #206 com o log (rota zero vs.
 coordenada sem rota), corrigir `google-maps.service.ts` de acordo, e so entao
 montar o APK com estas mudancas de UX.
+
+## 2026-08-29 - Release pilot.13 e fechamento do incidente de conclusao
+
+### Deploy de servidor
+
+Os commits `0646418` (rota de zero metro), `a1088ef` (saida administrativa por
+distancia informada) e `b0ec9a8` (fila e ruido de aviso no app) foram enviados
+ao `main`. O CI `33234881517` aprovou migrations e seed isolados, typecheck,
+lint, testes unitarios da API, seguranca do reset, testes do Driver App, E2E e
+os builds de API, Company Web e Admin Web. A API publica e o Admin Web
+responderam HTTP 200 apos o deploy. Nao houve migration nem operacao no banco.
+
+As duas correcoes de servidor valem para o `pilot.12` que ja estava instalado:
+nenhuma delas mudou contrato.
+
+### APK oficial
+
+Versao promovida em `9262852` para `0.1.0-pilot.13`, `versionCode` 13.
+
+O artefato tem 75.130.081 bytes e SHA-256
+`82EF84F1B1CD44DB3CF17A01E456E702B0202005547B972B0DA88C85E2CC688C`.
+O `apksigner` confirmou APK Signature Scheme v2, RSA 4096 e o certificado
+oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `aapt` confirmou pacote `com.motoboycity.driverapp`, `versionName`
+`0.1.0-pilot.13`, `versionCode` 13, minSdk 24 e targetSdk 36. O bundle contem
+`motoboycity-api.onrender.com` e nao contem `localhost:3333`, `127.0.0.1` nem
+`10.0.2.2`.
+
+Copias verificadas, com o mesmo hash, em
+`apps/driver-app/android/app/build/outputs/apk/release/motoboycity-0.1.0-pilot.13-vc13.apk`
+e `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.13-vc13.apk`. Nenhum aparelho
+ADB estava conectado; o APK nao foi instalado.
+
+### Tres armadilhas do build, para a proxima vez
+
+**Caminho longo.** O build na pasta do projeto falha em `ninja` com "Filename
+longer than 260 characters", no `RNCSafeAreaViewShadowNode.cpp.o` do
+`react-native-safe-area-context`. E por isso que os releases anteriores usaram
+worktree curta. Repetido aqui com `git worktree add C:\m13`.
+
+**A worktree precisa de tres coisas que o Git nao leva.** Alem de
+`pnpm install`, e obrigatorio copiar `android/app/google-services.json` e
+`android/local.properties`, e rodar
+`pnpm --filter @motoboycity/validation build` — sem o `dist/`, o
+`createBundleReleaseJsAndAssets` falha resolvendo `@motoboycity/validation`,
+porque so esse pacote aponta o `main` para `dist/`; `types` e `api-client`
+apontam para `src/`.
+
+**Remover a worktree tambem esbarra no caminho longo.** `git worktree remove`
+falha com "Filename too long"; o registro sai, os arquivos ficam. Foi preciso
+`cmd /c rmdir /s /q C:\m13` depois.
+
+**JDK.** O pin em `~/.gradle/gradle.properties` nao existe mais nesta maquina; o
+build usa o `JAVA_HOME`, hoje em `C:\Program Files\java\jdk-21.0.5`. O `keytool`
+do PATH vem do JDK 25 da Microsoft e serve para inspecionar o keystore, mas nao
+e o que compila.
+
+### Credenciais
+
+O alias da chave e `motoboycity` — unica entrada do keystore, `PrivateKeyEntry`
+de 24/08/2026. O keystore oficial esta em
+`I:\MOTOboyCity\signing\motoboycity-release.jks`, com copia identica em
+`D:\MOTOboyCity-Backup\signing\`. Nenhum desses caminhos e segredo; as senhas
+foram lidas apenas de arquivos DPAPI criados pelo responsavel em `%TEMP%`,
+usadas no processo, nunca exibidas nem registradas, e os arquivos foram
+removidos ao final.
+
+### Correcao de um registro anterior
+
+Uma sessao anterior registrou que `I:\MOTOboyCity\releases` parava no pilot.9.
+Nao para: os pilot.10, 11 e 12 estao la. A leitura foi enganada pela ordenacao
+alfabetica, em que `pilot.1x` vem antes de `pilot.7`.
+
+### Proximo passo
+
+Instalar o `pilot.13` nos aparelhos e repetir o ciclo completo com destino
+definido na entrega e retorno: aceitar, coletar na loja, marcar entregue no
+destino, voltar e concluir o retorno. Conferir tambem que apenas UM aviso
+aparece na Home quando houver mais de uma pendencia.
