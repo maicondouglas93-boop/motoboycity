@@ -25,7 +25,11 @@ jobs:
       - name: Gerar o dump
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-          PG_MAJOR: ${{ vars.PG_MAJOR || '17' }}
+          # Produção roda PostgreSQL 18. A variável de repositório continua
+          # existindo para o dia em que o provedor subir a major sem aviso —
+          # nesse dia o dump falha em vez de sair truncado, e trocar a variável
+          # é mais rápido que abrir PR.
+          PG_MAJOR: ${{ vars.PG_MAJOR || '18' }}
         run: |
           set -euo pipefail
           if [ -z "${DATABASE_URL}" ]; then

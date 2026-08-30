@@ -95,9 +95,10 @@ Em **Settings → Secrets and variables → Actions → New repository secret**:
 | `GCP_SERVICE_ACCOUNT_KEY` | JSON inteiro do `chave.json`                |
 | `GCS_BUCKET`              | só o nome do balde, sem `gs://`             |
 
-Se o Postgres de produção não for a major 17, crie também a **variável** (não
-segredo) `PG_MAJOR` com a major correta. Para descobrir:
-`psql "$DATABASE_URL" -tAc 'SHOW server_version;'`.
+Produção roda **PostgreSQL 18**, e o workflow já usa essa major por padrão —
+não é preciso criar variável nenhuma. Se um dia o provedor subir a versão, o
+dump falha em vez de sair truncado, e a saída é criar a **variável** (não
+segredo) `PG_MAJOR` com a major nova.
 
 > **O repositório é público.** Segredos de Actions não são expostos em workflow
 > agendado, e nenhum passo aqui imprime o valor deles. Mas quem tiver acesso de
@@ -116,27 +117,33 @@ mesmo; só muda onde ele executa.
 
 ## Restaurar
 
-O que ninguém faz antes de precisar. Faça uma vez agora, contra o banco local.
+O que ninguém faz antes de precisar. Faça uma vez agora.
+
+> **Não restaure no `motoboycity-postgres` do `docker-compose`.** Ele é
+> PostgreSQL **17**, e produção é **18**: um dump feito pelo 18 não entra num
+> servidor 17. Restaurar para trás não é suportado, e a falha só aparece no meio
+> do processo. Por isso o teste sobe um servidor 18 descartável — que também tem
+> a vantagem de não encostar no seu banco de desenvolvimento.
 
 ```bash
 # 1. baixe o backup mais recente
 gcloud storage ls gs://SEU-BALDE
 gcloud storage cp gs://SEU-BALDE/motoboycity-AAAA-MM-DD-HHMM.dump .
 
-# 2. crie um banco vazio de teste no container local
-docker exec motoboycity-postgres psql -U motoboycity -d postgres \
-  -c "CREATE DATABASE restore_teste;"
+# 2. suba um PostgreSQL 18 descartável na porta 5440
+docker run -d --name restore-teste -e POSTGRES_PASSWORD=teste \
+  -p 5440:5432 postgres:18-alpine
 
-# 3. restaure
-docker exec -i motoboycity-postgres pg_restore \
-  --dbname="postgresql://motoboycity:SENHA@localhost:5432/restore_teste" \
+# 3. restaure (pg_restore da MESMA imagem 18, não o do container local)
+docker run --rm -i postgres:18-alpine pg_restore \
+  --dbname="postgresql://postgres:teste@host.docker.internal:5440/postgres" \
   --no-owner --no-privileges --verbose < motoboycity-AAAA-MM-DD-HHMM.dump
 ```
 
 **Confira que restaurou de verdade**, e não só que o comando terminou:
 
 ```bash
-docker exec motoboycity-postgres psql -U motoboycity -d restore_teste -tAc \
+docker exec restore-teste psql -U postgres -tAc \
   "SELECT (SELECT count(*) FROM deliveries) AS pedidos,
           (SELECT count(*) FROM companies) AS empresas,
           (SELECT count(*) FROM drivers) AS entregadores;"
@@ -145,11 +152,10 @@ docker exec motoboycity-postgres psql -U motoboycity -d restore_teste -tAc \
 Os números têm que bater com produção. Um `pg_restore` que termina com avisos e
 zero linhas é o desfecho silencioso que a gente quer descobrir hoje, não no dia.
 
-Apague o banco de teste ao terminar — ele contém dado pessoal real:
+Destrua o servidor de teste ao terminar — ele contém dado pessoal real:
 
 ```bash
-docker exec motoboycity-postgres psql -U motoboycity -d postgres \
-  -c "DROP DATABASE restore_teste;"
+docker rm -f restore-teste
 ```
 
 ## Restaurar em produção
