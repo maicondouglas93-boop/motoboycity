@@ -1,0 +1,88 @@
+name: Backup do banco
+
+# Diário às 06:10 UTC = 03:10 em São Paulo — depois do corte de faturamento das
+# 00:05 e antes de o movimento do dia começar. `workflow_dispatch` existe para
+# você provar que funciona sem esperar o horário.
+on:
+  schedule:
+    - cron: '10 6 * * *'
+  workflow_dispatch:
+
+# Nenhuma permissão no repositório: este workflow não lê nem escreve código.
+permissions: {}
+
+concurrency:
+  group: backup-banco
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    # Um dump que trava não pode segurar o runner por seis horas.
+    timeout-minutes: 30
+
+    steps:
+      - name: Gerar o dump
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          PG_MAJOR: ${{ vars.PG_MAJOR || '17' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "PRODUCTION_DATABASE_URL não configurado nos segredos do repositório." >&2
+            exit 1
+          fi
+
+          # O nome sai pronto daqui, com data e hora.
+          #
+          # Objeto com nome único faz duas coisas: impede que uma execução
+          # sobrescreva a anterior, e permite que a conta de serviço tenha
+          # SOMENTE permissão de criar objeto — sem ler e sem apagar. Assim,
+          # uma chave vazada não expõe nem destrói backup nenhum.
+          NOME="motoboycity-$(date -u +%Y-%m-%d-%H%M).dump"
+
+          # `pg_dump` roda dentro da imagem oficial do Postgres, e não do apt do
+          # runner: a versão do cliente precisa ser >= a do servidor, e o apt do
+          # Ubuntu costuma estar atrás. Fixar a major aqui torna uma falha de
+          # versão explícita, em vez de intermitente.
+          #
+          # -Fc (formato custom): comprimido e restaurável seletivamente com
+          # pg_restore — um .sql puro não permite restaurar só uma tabela.
+          # --no-owner e --no-privileges: o banco de destino de uma restauração
+          # raramente tem os mesmos papéis, e sem isso cada GRANT falha.
+          if ! docker run --rm -i \
+            -e PGCONNECT_TIMEOUT=30 \
+            "postgres:${PG_MAJOR}-alpine" \
+            pg_dump --format=custom --no-owner --no-privileges \
+            "${DATABASE_URL}" > "${NOME}" 2> dump.log
+          then
+            echo "pg_dump falhou. Últimas linhas do log:" >&2
+            tail -20 dump.log >&2
+            exit 1
+          fi
+
+          # Um dump truncado é pior que nenhum: passa despercebido até o dia em
+          # que alguém precisa restaurar.
+          TAMANHO=$(stat -c%s "${NOME}")
+          echo "Dump gerado: ${NOME} (${TAMANHO} bytes)"
+          if [ "${TAMANHO}" -lt 20000 ]; then
+            echo "Menor que 20 KB — quase certamente incompleto. Abortando." >&2
+            exit 1
+          fi
+
+          echo "ARQUIVO=${NOME}" >> "$GITHUB_ENV"
+
+      - name: Autenticar no Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Enviar para o Cloud Storage
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: ${{ env.ARQUIVO }}
+          destination: ${{ secrets.GCS_BUCKET }}
+          process_gcloudignore: false
+
+      - name: Confirmar
+        run: echo "Backup salvo como ${ARQUIVO} em gs://${{ secrets.GCS_BUCKET }}"
