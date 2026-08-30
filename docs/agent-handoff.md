@@ -27,10 +27,10 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `1a5aee7` — `main` sincronizado com `origin/main` |
+| Commit publicado | `21ab4fb` — `main` sincronizado com `origin/main` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado, 47 migrations |
+| Banco | PostgreSQL gerenciado, 48 migrations |
 | APK nos aparelhos | **`pilot.15`** — o `pilot.16` está pronto e **não instalado**. Confirme no painel, não nesta linha (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
