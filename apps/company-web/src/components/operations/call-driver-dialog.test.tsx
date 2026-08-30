@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createBatch: vi.fn(),
   operations: vi.fn(),
   serviceTypes: vi.fn(),
+  businessHours: vi.fn(),
 }));
 
 vi.mock('@/lib/api-client', () => ({
@@ -21,6 +22,7 @@ vi.mock('@/lib/api-client', () => ({
     redispatch: vi.fn(),
   },
   serviceTypesApi: { list: mocks.serviceTypes },
+  companyBusinessHoursApi: { status: mocks.businessHours },
 }));
 
 vi.mock('@/lib/session', () => ({
@@ -66,6 +68,49 @@ describe('CallDriverDialog', () => {
       },
     ]);
     mocks.create.mockImplementation(() => new Promise(() => undefined));
+    mocks.businessHours.mockResolvedValue({
+      accepting: true,
+      nextOpeningLabel: null,
+      todayWindows: [],
+    });
+  });
+
+  /**
+   * Fora do horário a API recusa com 409. Deixar o botão ativo transformaria
+   * uma informação que já está na tela em erro depois do clique.
+   */
+  it('trava o envio e diz quando reabre, fora do horário', async () => {
+    mocks.businessHours.mockResolvedValue({
+      accepting: false,
+      nextOpeningLabel: 'amanhã às 08:00',
+      todayWindows: [{ startMinute: 480, endMinute: 1080 }],
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+    await screen.findByText('Atendimento fechado agora.');
+
+    expect(screen.getByText('Reabre amanhã às 08:00.')).toBeVisible();
+    expect(screen.getByText('Hoje: 08:00–18:00')).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Chamar entregador' })).toBeDisabled(),
+    );
+  });
+
+  /**
+   * Se a consulta do horário falhar, quem decide continua sendo a API: um
+   * botão travado por uma consulta secundária que caiu impediria a loja de
+   * trabalhar num horário em que ela pode.
+   */
+  it('não trava o envio quando a consulta do horário falha', async () => {
+    mocks.businessHours.mockRejectedValue(new Error('rede'));
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+    await screen.findByText('Moto');
+
+    expect(screen.getByRole('button', { name: 'Chamar entregador' })).toBeEnabled();
+    expect(screen.queryByText('Atendimento fechado agora.')).toBeNull();
   });
 
   it('mostra o acompanhamento imediatamente enquanto a API cria o pedido', async () => {
@@ -80,6 +125,11 @@ describe('CallDriverDialog', () => {
     expect(
       screen.getByText('Enviando o pedido e iniciando a busca por um entregador...'),
     ).toBeVisible();
-    expect(screen.getByText('Iniciando busca...')).toBeVisible();
+    /**
+     * O radar tem que estar PROCURANDO já aqui, e não só depois que a API
+     * responde: se ele esperasse a confirmação, a tela ficaria parada
+     * justamente no trecho em que a pessoa está olhando para ela.
+     */
+    expect(screen.getByRole('img', { name: 'Procurando um entregador disponível' })).toBeVisible();
   });
 });

@@ -10883,3 +10883,105 @@ sabe.
 O aviso preso resolve com um toque: a retentativa manual encontra o pedido já
 concluído, a API responde que está tudo certo, e o item sai da fila. Não é
 preciso limpar dados nem reinstalar.
+
+## 2026-08-30 — Aviso de vida do backup, radar de despacho e aviso de fora do horário
+
+Três entregas independentes, feitas na mesma sessão.
+
+### 1. O backup agora avisa que rodou, e o painel cobra o silêncio
+
+O backup diário para o Cloud Storage já existia. Faltava a pergunta que
+importa: **e quando ele parar?** Perguntar ao GitHub se o workflow falhou só
+detecta a falha que ele consegue reportar — workflow apagado, agendamento
+suspenso por inatividade do repositório, segredo expirado: em todos esses casos
+o silêncio parece sucesso.
+
+A saída foi inverter o sinal. O workflow, depois de o arquivo estar no balde,
+bate em `POST /ops/check-in/backup-banco` com um segredo compartilhado no
+cabeçalho `x-job-token`. A API grava a data em `job_check_ins`. O sino do painel
+admin cobra a **ausência** desse aviso: 36 horas viram alerta, 7 dias viram
+crítico, e "nunca confirmou" (nenhuma linha) já nasce crítico.
+
+- Modelo `JobCheckIn` e migration **aditiva**
+  `20260830140000_job_check_ins` — só `CREATE TABLE`.
+- `JobCheckInService` compara o token em **tempo constante** (`timingSafeEqual`):
+  a rota é pública por natureza, porque quem chama é um runner sem sessão.
+- A checagem virou **guard** (`JobTokenGuard`), e não uma linha dentro do
+  handler. No Nest o pipe de validação roda antes do corpo do método: com a
+  checagem no handler, quem não tinha o segredo recebia **400 com as mensagens
+  do schema** em vez de 401 — a rota respondia sobre o formato do corpo antes de
+  decidir se aquela pessoa podia falar com ela.
+- O texto diz "8 dias" e não "192 horas" a partir de dois dias: é o aviso em que
+  a gravidade precisa ser óbvia de bater o olho.
+
+**Dois segredos novos no GitHub** (`API_URL` e `JOB_CHECK_IN_TOKEN`) e a mesma
+variável `JOB_CHECK_IN_TOKEN` no ambiente da API. Sem eles o workflow só emite
+`::warning::` e o sino passa a reclamar de um backup que existe.
+
+### 2. Radar de despacho: a espera pela busca em todos os pontos de criação
+
+Chamar entregador acontecia em três lugares e a espera só existia em um. O
+formulário completo da central respondia com uma frase verde — "3 pedidos
+criados" — e a busca por motoboy acontecia sem que a loja visse nada. A criação
+pela administração fazia o mesmo.
+
+Agora os três abrem o mesmo acompanhamento: `DispatchTrackingPanel`, extraído de
+dentro do `CallDriverDialog`. A janela entra no ar **no envio**, e não na
+resposta: são os segundos em que a pessoa está olhando para a tela.
+
+A animação é um radar — pulso saindo da loja, varredura girando, pontos
+acendendo. Dois detalhes que não são decoração:
+
+- **A cor obedece à regra da marca.** O âmbar é reservado a movimento ("tem
+  motoboy na rua com isso"). Enquanto procura, o radar é o azul-petróleo da
+  estrutura; no aceite ele vira âmbar. **A virada de cor é o aviso**, antes de
+  qualquer texto.
+- **Cada ponto acende quando a varredura passa por cima dele**, porque o atraso
+  da animação do ponto é o ângulo dele dividido pela volta. É o que separa um
+  radar de um monte de pisca-pisca fora de compasso.
+
+**Nada de GSAP nem Three.js.** Tudo é `transform` e `opacity`, animado na GPU
+sem passar pelo layout — 0 KB de dependência num painel que roda em computador
+de balcão de loja. `prefers-reduced-motion` para o giro e mantém a cena legível.
+
+A reoferta do admin (`reoffer`) **não** entrou: lá o admin escolhe o motoboy
+específico. Não há busca, e um radar ali estaria encenando uma procura que não
+acontece.
+
+### 3. A loja passa a saber que o atendimento está fechado
+
+`assertWithinBusinessHours` recusava a criação com 409 fora do expediente, e a
+loja descobria isso depois de digitar o pedido inteiro. Novo
+`GET /company/business-hours` devolve `accepting`, `nextOpeningLabel` e as
+faixas de hoje.
+
+Ele existe separado do endpoint do admin por uma razão que não é de estilo: o
+admin resolve "a primeira região ativa", e o bloqueio real usa a região **da
+empresa**. Reaproveitar o do admin faria a loja de outra praça ler o horário de
+outra região — e ler "aberto" para depois tomar recusa no envio.
+
+A resposta vem com `accepting` **já combinado** (interruptor geral + existência
+de faixas + relógio), justamente para o painel não recompor a regra e divergir
+dela. Com a operação fechada, a Home mostra a faixa e os dois botões de criar
+ficam desabilitados. Se a consulta do horário falhar, o botão continua ativo: na
+dúvida quem decide é a API, não a ausência de resposta de uma consulta
+secundária.
+
+### Validações
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `apps/api` — `jest` | 84 suítes, **1030** testes |
+| `apps/company-web` — `vitest` | 19 arquivos, **72** testes |
+| `POST /ops/check-in/backup-banco` contra a API local | 401 sem token, 401 com token errado, 400 com corpo inválido e token certo, 200 no caminho feliz |
+| Interruptor do sino, ponta a ponta | 40h → alerta; 8 dias → crítico; linha apagada → "nunca confirmou"; check-in do workflow → aviso some |
+| `GET /company/business-hours` vs. `POST /deliveries` | os dois disseram "abre amanhã às 08:00", palavra por palavra |
+| Radar nos três estados, no navegador | procurando, aceite (vira âmbar) e cancelado, com dado real |
+| Testes do painel com a derivação de estado quebrada | 3 de 8 falharam, como esperado |
+
+### O que ficou fora
+
+`apps/company-web/src/components/orders/create-order-form.tsx` cria entrega e
+**não é importado por ninguém**. Não ganhou nem o acompanhamento nem o aviso de
+horário: é código morto, e a correção é apagá-lo, não alimentá-lo.

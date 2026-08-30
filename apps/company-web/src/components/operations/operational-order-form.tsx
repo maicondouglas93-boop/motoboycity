@@ -30,6 +30,8 @@ import {
 } from '@/lib/company-customer';
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import type { CloneSeed } from './clone-delivery';
+import { DispatchTrackingDialog } from './dispatch-tracking-dialog';
+import { useServiceHours } from './service-closed-notice';
 import {
   GoogleAddressAutocomplete,
   type SelectedGoogleAddress,
@@ -123,9 +125,18 @@ export function OperationalOrderForm({
    */
   const [clonedFrom, setClonedFrom] = useState<number | null>(clone?.displayNumber ?? null);
   const [cloneWarnings, setCloneWarnings] = useState<string[]>(clone?.seed.warnings ?? []);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const creationAttempt = useRef<IdempotencyAttempt | null>(null);
+  /**
+   * Os pedidos recém-criados, para o acompanhamento.
+   *
+   * Antes daqui saía só uma frase verde — "3 pedidos criados" — e a busca por
+   * entregador acontecia sem que a loja visse nada. Quem lançava pelo
+   * formulário completo ficava sem a espera que o atalho da barra já mostrava,
+   * como se fossem dois produtos.
+   */
+  const [trackedIds, setTrackedIds] = useState<string[]>([]);
+  const [trackedBatchId, setTrackedBatchId] = useState<string | null>(null);
 
   function discardClone() {
     setClonedFrom(null);
@@ -199,6 +210,13 @@ export function OperationalOrderForm({
     onUnregisteredCustomers?.(missing);
   }
 
+  /**
+   * Mesmo cache do aviso da Home. O aviso em si já está lá em cima, logo abaixo
+   * do cabeçalho — repetir a faixa dentro do formulário seria dizer duas vezes
+   * a mesma coisa na mesma tela. O que falta aqui é o botão obedecer a ela.
+   */
+  const serviceHours = useServiceHours(token);
+
   const mutation = useMutation({
     mutationFn: async () => {
       const request =
@@ -222,10 +240,10 @@ export function OperationalOrderForm({
     },
     onSuccess: ({ result, submittedDrafts }) => {
       creationAttempt.current = null;
-      const count = 'deliveries' in result ? result.deliveries.length : 1;
-      setMessage(
-        count === 1 ? 'Pedido criado e enviado ao despacho.' : `${count} pedidos criados.`,
+      setTrackedIds(
+        'deliveries' in result ? result.deliveries.map((item) => item.id) : [result.id],
       );
+      setTrackedBatchId('deliveries' in result ? result.batchId : null);
       setError(null);
       setDrafts(mode === 'batch' ? [emptyDraft(), emptyDraft()] : [emptyDraft()]);
       setClonedFrom(null);
@@ -235,7 +253,6 @@ export function OperationalOrderForm({
       void identifyUnregisteredCustomers(submittedDrafts);
     },
     onError: (mutationError) => {
-      setMessage(null);
       setError(
         mutationError instanceof ApiError
           ? mutationError.message
@@ -259,7 +276,6 @@ export function OperationalOrderForm({
   function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setMessage(null);
     if (!selectedServiceTypeId) return setError('Selecione uma modalidade.');
     if (mode === 'batch' && (drafts.length < 2 || drafts.length > 50)) {
       return setError('O lote precisa ter entre 2 e 50 entregas.');
@@ -509,8 +525,29 @@ export function OperationalOrderForm({
         </Button>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {message && <p className="text-sm text-status-entregue">{message}</p>}
-      <Button type="submit" className="w-full" disabled={mutation.isPending}>
+      {/*
+        A janela abre já no envio (`mutation.isPending`): esperar a resposta
+        deixaria a tela parada de dois a cinco segundos exatamente no momento
+        em que a pessoa quer saber se deu certo.
+      */}
+      <DispatchTrackingDialog
+        open={mutation.isPending || trackedIds.length > 0}
+        onOpenChange={(next) => {
+          if (!next) {
+            setTrackedIds([]);
+            setTrackedBatchId(null);
+          }
+        }}
+        token={token}
+        deliveryIds={trackedIds}
+        batchId={trackedBatchId}
+        creating={mutation.isPending}
+      />
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={mutation.isPending || serviceHours.data?.accepting === false}
+      >
         {mutation.isPending
           ? 'Criando...'
           : mode === 'batch'

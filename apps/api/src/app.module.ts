@@ -14,6 +14,7 @@ import { AdminOperationsModule } from './admin/operations/admin-operations.modul
 import { AdminServiceTypesModule } from './admin/service-types/admin-service-types.module';
 import { AuthModule } from './auth/auth.module';
 import { CompanyAddressModule } from './company/company-address.module';
+import { CompanyBusinessHoursModule } from './company/business-hours/company-business-hours.module';
 import { CompanyProfileModule } from './company/profile/company-profile.module';
 import { CompanyCustomersModule } from './company/customers/company-customers.module';
 import { CompanyReportsModule } from './company/reports/company-reports.module';
@@ -82,6 +83,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     PricingModule,
     GoogleMapsModule,
     CompanyAddressModule,
+    CompanyBusinessHoursModule,
     CompanyProfileModule,
     CompanyCustomersModule,
     CompanyReportsModule,

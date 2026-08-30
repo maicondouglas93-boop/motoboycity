@@ -203,3 +203,21 @@ export interface CashPositionItem {
   /** Saques pedidos e ainda não pagos. */
   pendingWithdrawalValue: number;
 }
+
+/**
+ * O horário como a LOJA precisa ver: uma pergunta só — dá para pedir agora?
+ *
+ * `accepting` já combina o interruptor geral, a existência de faixas e o
+ * relógio. O painel não recombina nada: se ele repetisse a regra do lado do
+ * navegador, o dia em que ela mudasse na API a tela passaria a discordar do
+ * bloqueio real — e discordar aqui significa dizer "aberto" para quem vai
+ * tomar um erro ao enviar o pedido.
+ */
+export interface CompanyBusinessHoursStatus {
+  /** `false` quando o horário está fora do expediente e a API vai recusar. */
+  accepting: boolean;
+  /** Ex.: "amanhã às 08:00". `null` quando não há abertura configurada à frente. */
+  nextOpeningLabel: string | null;
+  /** As faixas de hoje, para a loja conferir sem abrir outra tela. */
+  todayWindows: { startMinute: number; endMinute: number }[];
+}

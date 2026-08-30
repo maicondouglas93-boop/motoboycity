@@ -78,6 +78,18 @@ conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
 aiqfome (importação e ciclo logístico); central de avisos nos dois painéis.
 
+O sino do admin cobra o **silêncio do backup**: o workflow avisa a API em
+`POST /ops/check-in/backup-banco` depois de subir o arquivo, e a ausência desse
+aviso vira alerta em 36 h e crítico em 7 dias. Depende de dois segredos no
+GitHub (`API_URL`, `JOB_CHECK_IN_TOKEN`) e da mesma variável no ambiente da API
+— sem eles o sino diz, corretamente, que o backup nunca confirmou.
+
+Chamar entregador abre o mesmo **acompanhamento com radar** nos três pontos de
+criação (atalho da barra, formulário da central e lançamento pela
+administração). E a loja passa a ver que o atendimento está fechado antes de
+digitar o pedido: `GET /company/business-hours` responde com a mesma regra que
+bloqueia a criação, pela região **da empresa**.
+
 Também está publicado o bloqueio seletivo motoboy × empresa pelo detalhe do
 entregador no ADM (commit `8c3edfd`). O vínculo é persistente e auditado; filtra
 despacho automático, reoferta, vitrine, aceite e reatribuição, solta oferta
@@ -115,6 +127,13 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 3. **Rotação dos segredos** registrada no changelog da integração aiqfome.
+4. **Dois segredos novos no GitHub** — `API_URL` (endereço da API em produção) e
+   `JOB_CHECK_IN_TOKEN` (qualquer coisa longa e aleatória) — e a variável
+   `JOB_CHECK_IN_TOKEN` com o **mesmo valor** no ambiente da API. Enquanto não
+   existirem, o backup continua rodando e subindo, mas o sino do admin reclama
+   de um backup que existe.
+5. **Confirmar a regra de ciclo de vida de 30 dias** no balde do Cloud Storage —
+   ela foi documentada e nunca foi confirmada como criada.
 
 ### Dívida técnica priorizada
 

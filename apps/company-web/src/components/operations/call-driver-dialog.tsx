@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '@motoboycity/api-client';
 import type { CreateDeliveryPayload } from '@motoboycity/types';
-import { Bike, Info, Loader2, Phone, Receipt, RotateCw, X } from 'lucide-react';
+import { Bike, Info, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -19,11 +19,11 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ElapsedTime } from '@/components/orders/elapsed-time';
-import { StatusChip } from '@/components/orders/status-chip';
 import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-client';
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import { session } from '@/lib/session';
+import { DispatchTrackingPanel } from './dispatch-tracking-panel';
+import { ServiceClosedNotice, useServiceHours } from './service-closed-notice';
 
 /**
  * O lote da API começa em duas entregas; uma entrega é criação avulsa.
@@ -51,6 +51,13 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   const [trackedIds, setTrackedIds] = useState<string[]>([]);
   const [trackedBatchId, setTrackedBatchId] = useState<string | null>(null);
 
+  /**
+   * O horário só é consultado com o modal aberto — mas o resultado é o mesmo
+   * cache da Home (`['company', 'business-hours']`), então abrir o atalho não
+   * dispara uma segunda consulta se a Home já perguntou.
+   */
+  const serviceHours = useServiceHours(open ? token : null);
+
   const addressQuery = useQuery({
     queryKey: ['company', 'address'],
     queryFn: () => companyAddressApi.get(token as string),
@@ -61,69 +68,6 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     queryFn: () => serviceTypesApi.list(token as string, { active: true }),
     enabled: Boolean(token) && open,
   });
-
-  /**
-   * Consulta somente o lote ou pedido criado. Nesse recorte a API não limita
-   * os terminais recentes; assim um lote grande nunca perde cancelados nem
-   * declara aceite sem ter confirmado todos os pedidos.
-   */
-  const trackedOperationsQuery = useQuery({
-    queryKey: ['deliveries', 'tracked-operations', trackedBatchId ?? trackedIds[0]],
-    queryFn: () =>
-      deliveriesApi.operations(token as string, {
-        ...(trackedBatchId
-          ? { batchId: trackedBatchId }
-          : { deliveryId: trackedIds[0] as string }),
-      }),
-    enabled: Boolean(token) && trackedIds.length > 0,
-    refetchInterval: 3_000,
-  });
-
-  const tracked = [
-    ...(trackedOperationsQuery.data?.active ?? []),
-    ...(trackedOperationsQuery.data?.recent ?? []),
-  ].filter((delivery) => trackedIds.includes(delivery.id));
-  const trackingIncomplete = tracked.length !== trackedIds.length;
-
-  /**
-   * Quantas ainda procuram entregador.
-   *
-   * O sinal e o STATUS, nao a ausencia de entregador: um pedido cancelado
-   * tambem nao tem entregador, e contando por ausencia ele aparecia como "ainda
-   * procurando" para sempre.
-   */
-  const pendingCount = tracked.filter(
-    (delivery) => delivery.status === 'AWAITING_DRIVER' || delivery.status === 'SCHEDULED',
-  ).length;
-  const cancelledCount = tracked.filter((delivery) => delivery.status === 'CANCELLED').length;
-
-  function trackingMessage(): string {
-    if (mutation.isPending) {
-      return 'Enviando o pedido e iniciando a busca por um entregador...';
-    }
-    if (trackedOperationsQuery.isError) {
-      return 'Não foi possível consultar o andamento. Tente novamente.';
-    }
-    if (trackedOperationsQuery.isLoading || trackingIncomplete) {
-      return 'Atualizando o andamento de todos os pedidos...';
-    }
-    if (cancelledCount === trackedIds.length) {
-      return trackedIds.length === 1 ? 'Pedido cancelado.' : 'Pedidos cancelados.';
-    }
-    if (pendingCount === 0) {
-      if (cancelledCount > 0) {
-        const acceptedCount = trackedIds.length - cancelledCount;
-        return `${acceptedCount} aceito(s) e ${cancelledCount} cancelado(s).`;
-      }
-      return tracked.length === 1 ? 'Entregador a caminho.' : 'Todos os pedidos foram aceitos.';
-    }
-    if (pendingCount === trackedIds.length) {
-      return trackedIds.length === 1
-        ? 'Pedido criado. Acompanhe abaixo até um entregador aceitar.'
-        : `${trackedIds.length} pedidos criados. Acompanhe abaixo até um entregador aceitar.`;
-    }
-    return `${pendingCount} de ${trackedIds.length} ainda procurando entregador.`;
-  }
 
   const pickupAddress = addressQuery.data?.address ?? null;
   const serviceTypes = serviceTypesQuery.data ?? [];
@@ -195,42 +139,6 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     mutation.mutate();
   }
 
-  /**
-   * Cancelar e reenviar sao acoes por pedido, mas o `onSettled` recarrega a
-   * consulta compartilhada — o painel inteiro se atualiza sozinho.
-   */
-  const [actingOnId, setActingOnId] = useState<string | null>(null);
-
-  const cancelMutation = useMutation({
-    mutationFn: (id: string) => deliveriesApi.cancel(token as string, id),
-    onMutate: (id: string) => setActingOnId(id),
-    onError: (mutationError) =>
-      setError(
-        mutationError instanceof ApiError
-          ? mutationError.message
-          : 'Não foi possível cancelar o pedido.',
-      ),
-    onSettled: () => {
-      setActingOnId(null);
-      void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
-    },
-  });
-
-  const redispatchMutation = useMutation({
-    mutationFn: (id: string) => deliveriesApi.redispatch(token as string, id),
-    onMutate: (id: string) => setActingOnId(id),
-    onError: (mutationError) =>
-      setError(
-        mutationError instanceof ApiError
-          ? mutationError.message
-          : 'Não foi possível chamar novamente.',
-      ),
-    onSettled: () => {
-      setActingOnId(null);
-      void queryClient.invalidateQueries({ queryKey: ['company', 'operations'] });
-    },
-  });
-
   function reset() {
     creationAttempt.current = null;
     setTrackedIds([]);
@@ -264,123 +172,16 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
         {isTracking ? (
           <>
             <DialogBody className="space-y-3">
-              {/*
-                O texto acompanha o estado. Continuar dizendo "ate um entregador
-                aceitar" depois que ja aceitaram seria a tela mentindo para quem
-                esta olhando justamente para saber disso.
-              */}
-              <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
-                {trackingMessage()}
-              </p>
-
-              {trackedOperationsQuery.isError ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void trackedOperationsQuery.refetch()}
-                >
-                  Tentar novamente
-                </Button>
-              ) : tracked.length === 0 ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                  {mutation.isPending ? 'Iniciando busca...' : 'Carregando...'}
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {tracked.map((delivery) => (
-                    <li
-                      key={delivery.id}
-                      className="rounded-xl border border-portal/15 bg-gradient-to-br from-card to-portal-soft/35 p-3 shadow-sm"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="flex items-baseline gap-2">
-                          <span className="font-mono text-sm font-semibold">
-                            #{delivery.displayNumber}
-                          </span>
-                          {/* Ha quanto tempo neste estado — o mesmo medidor da fila. */}
-                          <ElapsedTime since={delivery.statusChangedAt} />
-                        </span>
-                        <StatusChip status={delivery.status} />
-                      </div>
-
-                      {delivery.driver ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                          <span className="font-medium">{delivery.driver.name}</span>
-                          {delivery.driver.phone && (
-                            <a
-                              href={`tel:${delivery.driver.phone}`}
-                              className="inline-flex items-center gap-1 text-muted-foreground underline underline-offset-2"
-                            >
-                              <Phone className="size-3.5" aria-hidden="true" />
-                              {delivery.driver.phone}
-                            </a>
-                          )}
-                        </div>
-                      ) : delivery.status === 'AWAITING_DRIVER' ? (
-                        <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                          Procurando um entregador disponível...
-                        </p>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {/*
-                          A API so aceita cancelamento da empresa em SCHEDULED e
-                          AWAITING_DRIVER. Mostrar o botao depois do aceite
-                          ofereceria uma acao que volta erro.
-
-                          E no lote o cancelamento pega TODOS os irmaos, entao o
-                          texto diz isso — "Cancelar" seco faria a pessoa achar
-                          que perde so um dos pedidos.
-                        */}
-                        {delivery.status === 'AWAITING_DRIVER' && (
-                          <>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={actingOnId === delivery.id}
-                              onClick={() => redispatchMutation.mutate(delivery.id)}
-                            >
-                              <RotateCw className="mr-1.5 size-3.5" aria-hidden="true" />
-                              Chamar de novo
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="text-destructive hover:text-destructive"
-                              disabled={actingOnId === delivery.id}
-                              onClick={() => {
-                                const message =
-                                  delivery.batchId && trackedIds.length > 1
-                                    ? `Cancelar os ${trackedIds.length} pedidos deste lote?`
-                                    : `Cancelar o pedido #${delivery.displayNumber}?`;
-                                if (window.confirm(message)) {
-                                  cancelMutation.mutate(delivery.id);
-                                }
-                              }}
-                            >
-                              <X className="mr-1.5 size-3.5" aria-hidden="true" />
-                              {delivery.batchId && trackedIds.length > 1
-                                ? `Cancelar os ${trackedIds.length}`
-                                : 'Cancelar'}
-                            </Button>
-                          </>
-                        )}
-                        <Link
-                          href={`/pedidos/${delivery.id}`}
-                          className="text-xs font-semibold text-portal underline decoration-portal/35 decoration-2 underline-offset-4 transition-colors hover:text-portal-deep"
-                        >
-                          Abrir detalhes
-                        </Link>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <DispatchTrackingPanel
+                token={token as string}
+                deliveryIds={trackedIds}
+                batchId={trackedBatchId}
+                creating={mutation.isPending}
+                allowActions
+                detailHref={(id) => `/pedidos/${id}`}
+                onError={setError}
+              />
+              {error && <p className="text-center text-sm text-destructive">{error}</p>}
             </DialogBody>
 
             <DialogFooter className="flex gap-2">
@@ -439,6 +240,8 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
                   className="w-24"
                 />
               </div>
+
+              <ServiceClosedNotice token={open ? token : null} />
 
               <p className="flex items-start gap-2 rounded-xl border border-portal/20 bg-portal-soft/65 p-3 text-sm text-portal-deep">
                 <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />O entregador confirma
@@ -506,7 +309,20 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
             </DialogBody>
 
             <DialogFooter>
-              <Button type="submit" className="w-full" disabled={mutation.isPending}>
+              {/*
+                Desabilitar fora do horário, e não deixar tentar: a API recusa
+                de qualquer jeito, e um botão que só serve para produzir erro é
+                pior que um botão apagado com o motivo escrito logo acima.
+
+                Se a consulta do horário falhar, `accepting` fica indefinido e o
+                botão continua ativo — na dúvida, quem decide é a API, não a
+                ausência de resposta de uma consulta secundária.
+              */}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={mutation.isPending || serviceHours.data?.accepting === false}
+              >
                 {mutation.isPending ? 'Chamando...' : 'Chamar entregador'}
               </Button>
             </DialogFooter>

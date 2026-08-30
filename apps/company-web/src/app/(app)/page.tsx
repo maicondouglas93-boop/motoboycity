@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CompanyCustomer,
@@ -18,6 +26,7 @@ import { AddressSetupForm } from '@/components/orders/address-setup-form';
 import { HomeDeliveryTrackingShare } from '@/components/orders/home-delivery-tracking-share';
 import { CompanyOperationsMap } from '@/components/operations/company-operations-map';
 import { OperationalOrderForm } from '@/components/operations/operational-order-form';
+import { ServiceClosedNotice } from '@/components/operations/service-closed-notice';
 import { CustomerForm } from '@/components/customers/customer-form';
 import { FmSoftwarePromo } from '@/components/layout/fm-software-promo';
 import { buildCloneSeed, type CloneSeed } from '@/components/operations/clone-delivery';
@@ -155,9 +164,8 @@ function ConteudoHome() {
       void queryClient.invalidateQueries({ queryKey: ['deliveries', 'search'] });
     };
     const updateDeliveryLocation = (point: DeliveryLocationRealtimeEvent) => {
-      queryClient.setQueryData<DeliveryOperationsResult>(
-        ['company', 'operations'],
-        (current) => updateDeliveryLocationInOperations(current, point),
+      queryClient.setQueryData<DeliveryOperationsResult>(['company', 'operations'], (current) =>
+        updateDeliveryLocationInOperations(current, point),
       );
     };
     socket.on('delivery:updated', refresh);
@@ -259,6 +267,12 @@ function ConteudoHome() {
           {connected ? 'Tempo real conectado' : 'Reconectando'}
         </div>
       </header>
+
+      {/*
+        Antes dos erros de carga: se a operação está fechada, essa é a primeira
+        coisa que muda o que a pessoa vai fazer nos próximos minutos.
+      */}
+      <ServiceClosedNotice token={token} />
 
       {serviceTypesQuery.isError && (
         <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">

@@ -31,6 +31,7 @@ import { Separator } from '@/components/ui/separator';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { PendingButtonLabel } from '@/components/ui/pending-button-label';
 import { adminCompaniesApi, adminDeliveriesApi, adminServiceTypesApi } from '@/lib/api-client';
+import { DispatchTrackingPanel } from '@/components/operations/dispatch-tracking-panel';
 
 interface Props {
   accessToken: string;
@@ -69,7 +70,14 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
   const [requiresCollectionRecipient, setRequiresCollectionRecipient] = useState(false);
   const [requiresDeliveryProof, setRequiresDeliveryProof] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  /**
+   * Os pedidos lançados nesta sessão do modal.
+   *
+   * Substituem a faixa "Pedido #123 criado": ela dizia que o registro existe,
+   * que é a parte fácil. O que a administração precisa ver é a parte incerta —
+   * se apareceu entregador. Esse é o mesmo acompanhamento que a loja vê.
+   */
+  const [trackedIds, setTrackedIds] = useState<string[]>([]);
 
   const activeCompanies = companies.filter((company) => company.status === 'ACTIVE');
   const companyLabels = Object.fromEntries(
@@ -108,12 +116,11 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
     onSuccess: (delivery) => {
       attemptRef.current = null;
       setError(null);
-      setSuccess(`Pedido #${delivery.displayNumber} criado para ${delivery.companyName}.`);
+      setTrackedIds([delivery.id]);
       void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
       void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
     },
     onError: (mutationError) => {
-      setSuccess(null);
       setError(
         mutationError instanceof ApiError
           ? mutationError.message
@@ -143,7 +150,7 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
     setRequiresCollectionRecipient(false);
     setRequiresDeliveryProof(false);
     setError(null);
-    setSuccess(null);
+    setTrackedIds([]);
   }
 
   function selectCompany(value: string | null) {
@@ -154,7 +161,6 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
   function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setSuccess(null);
 
     if (!companyId) return setError('Selecione uma empresa.');
     if (!selectedServiceTypeId) return setError('Selecione um tipo de serviço.');
@@ -199,274 +205,313 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
     });
   }
 
+  /*
+    Entrar no acompanhamento já no envio, e não só quando a API responde: a
+    criação leva alguns segundos e é o trecho em que a pessoa fica olhando.
+  */
+  const isTracking = mutation.isPending || trackedIds.length > 0;
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // Fechar encerra o acompanhamento: o pedido segue na central, que é
+        // onde ele vive depois de criado.
+        if (!next) setTrackedIds([]);
+      }}
+    >
       <DialogTrigger render={children as React.ReactElement} />
       <DialogContent closeDisabled={mutation.isPending}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <PackagePlus className="size-5 text-primary" /> Lançar pedido para empresa
+            <PackagePlus className="size-5 text-primary" />
+            {isTracking ? 'Acompanhando' : 'Lançar pedido para empresa'}
           </DialogTitle>
-          <DialogDescription>
-            Selecione a empresa. O endereço de coleta e a tabela de preços dela serão usados.
-          </DialogDescription>
+          {!isTracking && (
+            <DialogDescription>
+              Selecione a empresa. O endereço de coleta e a tabela de preços dela serão usados.
+            </DialogDescription>
+          )}
         </DialogHeader>
 
-        <form className="contents" onSubmit={submit}>
-          <DialogBody className="space-y-5">
-            <div className="space-y-1.5">
-              <Label>Empresa</Label>
-              <Select items={companyLabels} value={companyId} onValueChange={selectCompany}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione uma empresa cadastrada" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((company) => (
-                    <SelectItem
-                      key={company.id}
-                      value={company.id}
-                      disabled={company.status !== 'ACTIVE'}
-                    >
-                      <Building2 className="size-4" />
-                      {company.tradeName}
-                      {company.status !== 'ACTIVE' && (
-                        <span className="text-xs text-muted-foreground">Não ativa</span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {activeCompanies.length === 0 && (
-                <p className="text-xs text-destructive">
-                  Nenhuma empresa ativa pode receber pedidos.
-                </p>
-              )}
-            </div>
-
-            {companyId && (
-              <>
-                <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
-                  <p className="flex items-center gap-2 text-sm font-semibold">
-                    <MapPin className="size-4 text-primary" /> Coleta
+        {isTracking ? (
+          <>
+            <DialogBody className="space-y-3">
+              <DispatchTrackingPanel
+                token={accessToken}
+                deliveryIds={trackedIds}
+                batchId={null}
+                creating={mutation.isPending}
+                detailHref={(id) => `/pedidos/${id}`}
+              />
+            </DialogBody>
+            <DialogFooter className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={mutation.isPending}
+                onClick={() => setTrackedIds([])}
+              >
+                Lançar outro
+              </Button>
+              <Button type="button" onClick={() => setOpen(false)}>
+                Fechar
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <form className="contents" onSubmit={submit}>
+            <DialogBody className="space-y-5">
+              <div className="space-y-1.5">
+                <Label>Empresa</Label>
+                <Select items={companyLabels} value={companyId} onValueChange={selectCompany}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione uma empresa cadastrada" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map((company) => (
+                      <SelectItem
+                        key={company.id}
+                        value={company.id}
+                        disabled={company.status !== 'ACTIVE'}
+                      >
+                        <Building2 className="size-4" />
+                        {company.tradeName}
+                        {company.status !== 'ACTIVE' && (
+                          <span className="text-xs text-muted-foreground">Não ativa</span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {activeCompanies.length === 0 && (
+                  <p className="text-xs text-destructive">
+                    Nenhuma empresa ativa pode receber pedidos.
                   </p>
-                  {companyQuery.isLoading ? (
-                    <p className="mt-2 text-sm text-muted-foreground">Carregando endereço...</p>
-                  ) : pickupAddress ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {pickupAddress.street}, {pickupAddress.number}
-                      {pickupAddress.complement ? ` - ${pickupAddress.complement}` : ''} ·{' '}
-                      {pickupAddress.city}/{pickupAddress.state}
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-sm text-destructive">
-                      Cadastre um endereço principal para esta empresa antes de lançar o pedido.
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Tipo de serviço</Label>
-                    <Select
-                      items={serviceTypeLabels}
-                      value={selectedServiceTypeId}
-                      onValueChange={(value) => setServiceTypeId(value ?? '')}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {serviceTypes.map((serviceType) => (
-                          <SelectItem key={serviceType.id} value={serviceType.id}>
-                            {serviceType.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="admin-delivery-scheduled-at">Agendar (opcional)</Label>
-                    <div className="relative">
-                      <CalendarClock className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
-                      <Input
-                        id="admin-delivery-scheduled-at"
-                        type="datetime-local"
-                        value={scheduledAt}
-                        onChange={(event) => setScheduledAt(event.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <fieldset className="grid gap-2 sm:grid-cols-2">
-                  <legend className="mb-2 text-sm font-medium">Destino</legend>
-                  <label className="rounded-xl border p-3 text-sm has-checked:border-primary/60 has-checked:bg-primary/8">
-                    <input
-                      type="radio"
-                      name="admin-destination"
-                      checked={destinationKnown}
-                      onChange={() => setDestinationKnown(true)}
-                    />
-                    <span className="ml-2 font-medium">Informar endereço agora</span>
-                  </label>
-                  <label className="rounded-xl border p-3 text-sm has-checked:border-primary/60 has-checked:bg-primary/8">
-                    <input
-                      type="radio"
-                      name="admin-destination"
-                      checked={!destinationKnown}
-                      onChange={() => setDestinationKnown(false)}
-                    />
-                    <span className="ml-2 font-medium">Motoboy define pelo GPS</span>
-                  </label>
-                </fieldset>
-
-                {destinationKnown && (
-                  <div className="space-y-3 rounded-2xl border bg-card/60 p-4">
-                    <p className="text-sm font-semibold">Endereço de entrega</p>
-                    <Input
-                      placeholder="Rua"
-                      value={street}
-                      onChange={(e) => setStreet(e.target.value)}
-                    />
-                    <div className="grid grid-cols-[110px_1fr] gap-2">
-                      <Input
-                        placeholder="Número"
-                        value={number}
-                        onChange={(e) => setNumber(e.target.value)}
-                      />
-                      <Input
-                        placeholder="Complemento"
-                        value={complement}
-                        onChange={(e) => setComplement(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid grid-cols-[1fr_80px_130px] gap-2">
-                      <Input
-                        placeholder="Cidade"
-                        value={city}
-                        onChange={(e) => setCity(e.target.value)}
-                      />
-                      <Input
-                        placeholder="UF"
-                        maxLength={2}
-                        value={state}
-                        onChange={(e) => setState(e.target.value.toUpperCase())}
-                      />
-                      <Input
-                        placeholder="CEP"
-                        value={zip}
-                        onChange={(e) => setZip(e.target.value)}
-                      />
-                    </div>
-                    <Input
-                      placeholder="Ponto de referência"
-                      value={referenceNote}
-                      onChange={(e) => setReferenceNote(e.target.value)}
-                    />
-                  </div>
                 )}
+              </div>
 
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
-                    placeholder="Nome do destinatário"
-                    value={recipientName}
-                    onChange={(e) => setRecipientName(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Telefone do destinatario"
-                    value={recipientPhone}
-                    onChange={(e) => setRecipientPhone(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Número externo do pedido"
-                    value={externalOrderNumber}
-                    onChange={(e) => setExternalOrderNumber(e.target.value)}
-                  />
-                  <select
-                    className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
-                    value={customerPaymentMethod}
-                    onChange={(event) =>
-                      setCustomerPaymentMethod(event.target.value as CustomerPaymentMethod | '')
-                    }
-                  >
-                    <option value="">Pagamento do cliente</option>
-                    <option value="PREPAID">Pré-pago</option>
-                    <option value="CARD">Cartão</option>
-                    <option value="CASH">Dinheiro</option>
-                    <option value="PIX">Pix</option>
-                  </select>
-                </div>
+              {companyId && (
+                <>
+                  <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
+                    <p className="flex items-center gap-2 text-sm font-semibold">
+                      <MapPin className="size-4 text-primary" /> Coleta
+                    </p>
+                    {companyQuery.isLoading ? (
+                      <p className="mt-2 text-sm text-muted-foreground">Carregando endereço...</p>
+                    ) : pickupAddress ? (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {pickupAddress.street}, {pickupAddress.number}
+                        {pickupAddress.complement ? ` - ${pickupAddress.complement}` : ''} ·{' '}
+                        {pickupAddress.city}/{pickupAddress.state}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-destructive">
+                        Cadastre um endereço principal para esta empresa antes de lançar o pedido.
+                      </p>
+                    )}
+                  </div>
 
-                <textarea
-                  rows={3}
-                  value={driverNote}
-                  onChange={(event) => setDriverNote(event.target.value)}
-                  placeholder="Observação para o motoboy"
-                  className="w-full rounded-xl border border-input bg-card/90 px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
-                />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Tipo de serviço</Label>
+                      <Select
+                        items={serviceTypeLabels}
+                        value={selectedServiceTypeId}
+                        onValueChange={(value) => setServiceTypeId(value ?? '')}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {serviceTypes.map((serviceType) => (
+                            <SelectItem key={serviceType.id} value={serviceType.id}>
+                              {serviceType.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="admin-delivery-scheduled-at">Agendar (opcional)</Label>
+                      <div className="relative">
+                        <CalendarClock className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
+                        <Input
+                          id="admin-delivery-scheduled-at"
+                          type="datetime-local"
+                          value={scheduledAt}
+                          onChange={(event) => setScheduledAt(event.target.value)}
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="grid gap-2 text-sm sm:grid-cols-3">
-                  <label className="flex items-center gap-2 rounded-xl border p-3">
-                    <Checkbox
-                      checked={requiresReturn}
-                      onCheckedChange={(value) => setRequiresReturn(Boolean(value))}
+                  <Separator />
+
+                  <fieldset className="grid gap-2 sm:grid-cols-2">
+                    <legend className="mb-2 text-sm font-medium">Destino</legend>
+                    <label className="rounded-xl border p-3 text-sm has-checked:border-primary/60 has-checked:bg-primary/8">
+                      <input
+                        type="radio"
+                        name="admin-destination"
+                        checked={destinationKnown}
+                        onChange={() => setDestinationKnown(true)}
+                      />
+                      <span className="ml-2 font-medium">Informar endereço agora</span>
+                    </label>
+                    <label className="rounded-xl border p-3 text-sm has-checked:border-primary/60 has-checked:bg-primary/8">
+                      <input
+                        type="radio"
+                        name="admin-destination"
+                        checked={!destinationKnown}
+                        onChange={() => setDestinationKnown(false)}
+                      />
+                      <span className="ml-2 font-medium">Motoboy define pelo GPS</span>
+                    </label>
+                  </fieldset>
+
+                  {destinationKnown && (
+                    <div className="space-y-3 rounded-2xl border bg-card/60 p-4">
+                      <p className="text-sm font-semibold">Endereço de entrega</p>
+                      <Input
+                        placeholder="Rua"
+                        value={street}
+                        onChange={(e) => setStreet(e.target.value)}
+                      />
+                      <div className="grid grid-cols-[110px_1fr] gap-2">
+                        <Input
+                          placeholder="Número"
+                          value={number}
+                          onChange={(e) => setNumber(e.target.value)}
+                        />
+                        <Input
+                          placeholder="Complemento"
+                          value={complement}
+                          onChange={(e) => setComplement(e.target.value)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-[1fr_80px_130px] gap-2">
+                        <Input
+                          placeholder="Cidade"
+                          value={city}
+                          onChange={(e) => setCity(e.target.value)}
+                        />
+                        <Input
+                          placeholder="UF"
+                          maxLength={2}
+                          value={state}
+                          onChange={(e) => setState(e.target.value.toUpperCase())}
+                        />
+                        <Input
+                          placeholder="CEP"
+                          value={zip}
+                          onChange={(e) => setZip(e.target.value)}
+                        />
+                      </div>
+                      <Input
+                        placeholder="Ponto de referência"
+                        value={referenceNote}
+                        onChange={(e) => setReferenceNote(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input
+                      placeholder="Nome do destinatário"
+                      value={recipientName}
+                      onChange={(e) => setRecipientName(e.target.value)}
                     />
-                    Exige retorno
-                  </label>
-                  <label className="flex items-center gap-2 rounded-xl border p-3">
-                    <Checkbox
-                      checked={requiresCollectionRecipient}
-                      onCheckedChange={(value) => setRequiresCollectionRecipient(Boolean(value))}
+                    <Input
+                      placeholder="Telefone do destinatario"
+                      value={recipientPhone}
+                      onChange={(e) => setRecipientPhone(e.target.value)}
                     />
-                    Confirmar coleta
-                  </label>
-                  <label className="flex items-center gap-2 rounded-xl border p-3">
-                    <Checkbox
-                      checked={requiresDeliveryProof}
-                      onCheckedChange={(value) => setRequiresDeliveryProof(Boolean(value))}
+                    <Input
+                      placeholder="Número externo do pedido"
+                      value={externalOrderNumber}
+                      onChange={(e) => setExternalOrderNumber(e.target.value)}
                     />
-                    Exigir comprovante
-                  </label>
-                </div>
-              </>
-            )}
+                    <select
+                      className="h-9 rounded-lg border border-input bg-card/90 px-3 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
+                      value={customerPaymentMethod}
+                      onChange={(event) =>
+                        setCustomerPaymentMethod(event.target.value as CustomerPaymentMethod | '')
+                      }
+                    >
+                      <option value="">Pagamento do cliente</option>
+                      <option value="PREPAID">Pré-pago</option>
+                      <option value="CARD">Cartão</option>
+                      <option value="CASH">Dinheiro</option>
+                      <option value="PIX">Pix</option>
+                    </select>
+                  </div>
 
-            {error && (
-              <ActionFeedback tone="error" title="Não foi possível lançar o pedido">
-                {error}
-              </ActionFeedback>
-            )}
-            {success && (
-              <ActionFeedback tone="success" title="Pedido lançado">
-                {success}
-              </ActionFeedback>
-            )}
-          </DialogBody>
+                  <textarea
+                    rows={3}
+                    value={driverNote}
+                    onChange={(event) => setDriverNote(event.target.value)}
+                    placeholder="Observação para o motoboy"
+                    className="w-full rounded-xl border border-input bg-card/90 px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
+                  />
 
-          <DialogFooter className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={mutation.isPending}
-            >
-              Fechar
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                !companyId || !pickupAddress || serviceTypesQuery.isLoading || mutation.isPending
-              }
-            >
-              <PendingButtonLabel pending={mutation.isPending} pendingLabel="Lançando...">
-                Lançar pedido
-              </PendingButtonLabel>
-            </Button>
-          </DialogFooter>
-        </form>
+                  <div className="grid gap-2 text-sm sm:grid-cols-3">
+                    <label className="flex items-center gap-2 rounded-xl border p-3">
+                      <Checkbox
+                        checked={requiresReturn}
+                        onCheckedChange={(value) => setRequiresReturn(Boolean(value))}
+                      />
+                      Exige retorno
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border p-3">
+                      <Checkbox
+                        checked={requiresCollectionRecipient}
+                        onCheckedChange={(value) => setRequiresCollectionRecipient(Boolean(value))}
+                      />
+                      Confirmar coleta
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border p-3">
+                      <Checkbox
+                        checked={requiresDeliveryProof}
+                        onCheckedChange={(value) => setRequiresDeliveryProof(Boolean(value))}
+                      />
+                      Exigir comprovante
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {error && (
+                <ActionFeedback tone="error" title="Não foi possível lançar o pedido">
+                  {error}
+                </ActionFeedback>
+              )}
+            </DialogBody>
+
+            <DialogFooter className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpen(false)}
+                disabled={mutation.isPending}
+              >
+                Fechar
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !companyId || !pickupAddress || serviceTypesQuery.isLoading || mutation.isPending
+                }
+              >
+                <PendingButtonLabel pending={mutation.isPending} pendingLabel="Lançando...">
+                  Lançar pedido
+                </PendingButtonLabel>
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
