@@ -76,13 +76,19 @@ jobs:
 
           echo "ARQUIVO=${NOME}" >> "$GITHUB_ENV"
 
+      # `v3` nas duas ações do Google porque a `v2` declara Node 20, que o
+      # GitHub aposentou: hoje ele FORÇA a execução em Node 24 e emite aviso, e
+      # no dia em que parar de forçar o backup quebra sem ninguém ter mexido em
+      # nada. A `v3` é a mesma ação já em Node 24, e os parâmetros que usamos
+      # aqui (`credentials_json`, `path`, `destination`, `process_gcloudignore`)
+      # continuam valendo.
       - name: Autenticar no Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
       - name: Enviar para o Cloud Storage
-        uses: google-github-actions/upload-cloud-storage@v2
+        uses: google-github-actions/upload-cloud-storage@v3
         with:
           path: ${{ env.ARQUIVO }}
           destination: ${{ secrets.GCS_BUCKET }}

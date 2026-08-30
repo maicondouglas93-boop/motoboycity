@@ -127,13 +127,6 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 3. **Rotação dos segredos** registrada no changelog da integração aiqfome.
-4. **Dois segredos novos no GitHub** — `API_URL` (endereço da API em produção) e
-   `JOB_CHECK_IN_TOKEN` (qualquer coisa longa e aleatória) — e a variável
-   `JOB_CHECK_IN_TOKEN` com o **mesmo valor** no ambiente da API. Enquanto não
-   existirem, o backup continua rodando e subindo, mas o sino do admin reclama
-   de um backup que existe.
-5. **Confirmar a regra de ciclo de vida de 30 dias** no balde do Cloud Storage —
-   ela foi documentada e nunca foi confirmada como criada.
 
 ### Dívida técnica priorizada
 

@@ -47,6 +47,12 @@ gcloud storage buckets create gs://SEU-BALDE \
 `southamerica-east1` (São Paulo) porque o dado é de titulares brasileiros e a
 latência do envio importa pouco perto disso.
 
+Vale deixar a **exclusão reversível** (soft delete) ligada, como está. Ela é a
+segunda camada da mesma ideia da conta de serviço abaixo: mesmo um apagamento
+feito de dentro do console, por engano, tem volta durante a retenção. O preço é
+saber que objeto apagado continua sendo cobrado nesse período — com a retenção
+padrão de 7 dias, paga-se cerca de 37 dias de armazenamento, e não 30.
+
 Retenção de 30 dias, para o custo não crescer para sempre:
 
 ```bash
