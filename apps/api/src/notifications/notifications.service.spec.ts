@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { InvoiceService } from '../finance/invoice.service';
 import { AdminNotificationsService } from './admin-notifications.service';
+import { JobCheckInService } from './job-check-in.service';
 import { CompanyNotificationsService } from './company-notifications.service';
 
 const companyUser = { id: 'user-a', type: 'COMPANY_MEMBER' } as User;
@@ -33,6 +34,7 @@ describe('central de avisos', () => {
   let prisma: ReturnType<typeof semNada>;
   let invoiceService: { refreshOverdueInvoices: jest.Mock };
   let platformSettings: { get: jest.Mock };
+  let jobCheckIn: { ultimoAviso: jest.Mock };
 
   async function montarEmpresa() {
     const module = await Test.createTestingModule({
@@ -52,6 +54,7 @@ describe('central de avisos', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: InvoiceService, useValue: invoiceService },
         { provide: AdminPlatformSettingsService, useValue: platformSettings },
+        { provide: JobCheckInService, useValue: jobCheckIn },
       ],
     }).compile();
     return module.get(AdminNotificationsService);
@@ -61,6 +64,10 @@ describe('central de avisos', () => {
     prisma = semNada();
     invoiceService = { refreshOverdueInvoices: jest.fn().mockResolvedValue(undefined) };
     platformSettings = { get: jest.fn().mockResolvedValue(configuracaoCompleta) };
+    // Padrao: o backup avisou ha pouco. Os testes de atraso sobrescrevem.
+    jobCheckIn = {
+      ultimoAviso: jest.fn().mockResolvedValue({ lastRunAt: new Date(), detail: null }),
+    };
   });
 
   describe('empresa', () => {
@@ -168,6 +175,64 @@ describe('central de avisos', () => {
         'admin:settings:dispatch-timeout',
         'admin:settings:driver-commission',
       ]);
+    });
+
+    /**
+     * A ausencia do aviso e o sinal. Perguntar ao GitHub se o workflow falhou
+     * so detecta a falha que ele consegue reportar; se a rotina for apagada ou
+     * nunca agendar, o silencio parece sucesso.
+     */
+    it('avisa quando o backup para de dar sinal', async () => {
+      const quarentaHorasAtras = new Date(Date.now() - 40 * 3_600_000);
+      jobCheckIn.ultimoAviso.mockResolvedValue({ lastRunAt: quarentaHorasAtras, detail: null });
+      const service = await montarAdmin();
+
+      const { items } = await service.list();
+
+      const aviso = items.find((item) => item.id === 'admin:backup:stale');
+      expect(aviso).toMatchObject({ severity: 'warning' });
+      expect(aviso?.description).toContain('40 horas');
+    });
+
+    it('nao reclama de um backup que rodou hoje', async () => {
+      const service = await montarAdmin();
+
+      const { items } = await service.list();
+
+      expect(items.map((item) => item.id)).not.toContain('admin:backup:stale');
+    });
+
+    /**
+     * Um dia sem backup e problema, mas nao para a operacao hoje. Uma semana
+     * significa que ninguem olhou, e a unica rede de protecao dos dados nao
+     * existe mais.
+     */
+    it('vira critico depois de uma semana sem sinal', async () => {
+      jobCheckIn.ultimoAviso.mockResolvedValue({
+        lastRunAt: new Date(Date.now() - 8 * 24 * 3_600_000),
+        detail: null,
+      });
+      const service = await montarAdmin();
+
+      const { items, criticalCount } = await service.list();
+
+      const aviso = items.find((item) => item.id === 'admin:backup:stale');
+      expect(aviso?.severity).toBe('critical');
+      // Dia, e nao "192 horas": aqui a gravidade precisa ser obvia de bater o
+      // olho, sem a pessoa dividir de cabeca.
+      expect(aviso?.description).toContain('8 dias');
+      expect(criticalCount).toBe(1);
+    });
+
+    it('trata "nunca avisou" como pendente, e nao como tudo em ordem', async () => {
+      jobCheckIn.ultimoAviso.mockResolvedValue(null);
+      const service = await montarAdmin();
+
+      const { items } = await service.list();
+
+      const aviso = items.find((item) => item.id === 'admin:backup:stale');
+      expect(aviso?.title).toContain('nunca confirmou');
+      expect(aviso?.severity).toBe('critical');
     });
 
     it('conta empresas e entregadores esperando aprovacao', async () => {

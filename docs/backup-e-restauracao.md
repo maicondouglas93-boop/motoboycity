@@ -89,11 +89,17 @@ parado na pasta Downloads é o jeito mais comum de vazar uma.
 
 Em **Settings → Secrets and variables → Actions → New repository secret**:
 
-| Segredo                   | Conteúdo                                    |
-| ------------------------- | ------------------------------------------- |
-| `PRODUCTION_DATABASE_URL` | string de conexão do PostgreSQL de produção |
-| `GCP_SERVICE_ACCOUNT_KEY` | JSON inteiro do `chave.json`                |
-| `GCS_BUCKET`              | só o nome do balde, sem `gs://`             |
+| Segredo                   | Conteúdo                                                   |
+| ------------------------- | ---------------------------------------------------------- |
+| `PRODUCTION_DATABASE_URL` | string de conexão do PostgreSQL de produção                |
+| `GCP_SERVICE_ACCOUNT_KEY` | JSON inteiro do `chave.json`                               |
+| `GCS_BUCKET`              | só o nome do balde, sem `gs://`                            |
+| `API_URL`                 | endereço da API em produção, ex. `https://api.exemplo.com` |
+| `JOB_CHECK_IN_TOKEN`      | segredo compartilhado com a API (ver seção 5)              |
+
+Os dois últimos são do aviso de vida, e não do backup em si — sem eles o dump
+continua rodando e subindo, mas o painel não fica sabendo e passa a reclamar de
+um backup que existe.
 
 Produção roda **PostgreSQL 18**, e o workflow já usa essa major por padrão —
 não é preciso criar variável nenhuma. Se um dia o provedor subir a versão, o
@@ -105,7 +111,43 @@ segredo) `PG_MAJOR` com a major nova.
 > escrita ao repositório pode criar um workflow que os leia — trate o acesso ao
 > repositório como acesso ao banco.
 
-### 5. Prove que funciona
+### 5. O aviso de vida (o sino do painel admin)
+
+Um backup que para de rodar não avisa nada: workflow apagado, agendamento que
+o GitHub suspende por inatividade do repositório, segredo expirado — em todos
+esses casos o **silêncio parece sucesso**. Por isso a última coisa que o
+workflow faz, já com o arquivo no balde, é bater na API:
+
+```
+POST /ops/check-in/backup-banco
+x-job-token: <JOB_CHECK_IN_TOKEN>
+{"sizeBytes": 1348231, "detail": "motoboycity-2026-08-30-0310.dump"}
+```
+
+A API guarda a data na tabela `job_check_ins`. O sino do painel admin cobra a
+**ausência** desse aviso: **36 horas** sem sinal viram alerta amarelo, **7 dias**
+viram crítico, e "nunca confirmou" (nenhuma linha na tabela) já nasce crítico.
+Perguntar ao GitHub se o workflow falhou só pegaria a falha que ele consegue
+reportar; cobrar a ausência pega também a rotina que nunca chegou a rodar.
+
+Gere o segredo (qualquer coisa longa e aleatória serve):
+
+```bash
+openssl rand -hex 32
+```
+
+O **mesmo valor** vai em dois lugares:
+
+1. segredo `JOB_CHECK_IN_TOKEN` no GitHub (tabela acima);
+2. variável de ambiente `JOB_CHECK_IN_TOKEN` no serviço da API, no provedor.
+
+O endpoint fica **fora do login** de propósito — quem chama é um runner sem
+sessão de usuário — e por isso o segredo é comparado em tempo constante, atrás
+de um guard que roda antes da validação do corpo. Enquanto a variável não
+existir na API, a rota responde 401 a todo mundo e o sino continua dizendo que
+o backup nunca confirmou.
+
+### 6. Prove que funciona
 
 **Actions → Backup do banco → Run workflow.** Não espere o horário; se algo
 estiver errado, você quer saber agora.
@@ -167,9 +209,9 @@ problema conhecido por um irreversível.
 
 ## Ainda em aberto
 
-- **Ninguém é avisado se o backup parar.** Um workflow agendado que falha três
-  semanas seguidas passa despercebido — e o silêncio parece sucesso. Vale ligar
-  a notificação de falha de Actions, ou puxar isso para o sino do painel.
+- **O aviso de vida depende da API estar de pé.** Se a API cair junto, o sino
+  não é lido por ninguém. É a limitação aceita: ele cobre rotina quebrada, não
+  desastre geral — para esse caso o alerta tem que vir de fora, e não existe.
 - **Frequência diária.** Perde-se até 24 horas de operação. Se isso for
   inaceitável, o caminho não é dump mais frequente e sim recuperação
   ponto-no-tempo do provedor.

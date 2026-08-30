@@ -88,5 +88,32 @@ jobs:
           destination: ${{ secrets.GCS_BUCKET }}
           process_gcloudignore: false
 
+      # Só depois do envio: avisar antes seria mentir sobre um backup que ainda
+      # pode ter falhado no upload.
+      - name: Avisar a API que o backup terminou
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          JOB_TOKEN: ${{ secrets.JOB_CHECK_IN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_URL:-}" ] || [ -z "${JOB_TOKEN:-}" ]; then
+            echo "::warning::API_URL ou JOB_CHECK_IN_TOKEN ausentes — o painel não vai saber que este backup rodou."
+            exit 0
+          fi
+
+          TAMANHO=$(stat -c%s "${ARQUIVO}")
+          # `--fail` para o curl devolver erro em 4xx/5xx em vez de sair 0 com o
+          # corpo do erro. O backup em si já está salvo; falhar aqui derruba o
+          # job de propósito, porque um aviso que não chega faz o painel
+          # reclamar de um backup que existe — e um alarme falso ensina a
+          # ignorar o alarme.
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST "${API_URL%/}/ops/check-in/backup-banco" \
+            -H "x-job-token: ${JOB_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"sizeBytes\":${TAMANHO},\"detail\":\"${ARQUIVO}\"}" \
+            -o /dev/null
+          echo "Painel avisado."
+
       - name: Confirmar
         run: echo "Backup salvo como ${ARQUIVO} em gs://${{ secrets.GCS_BUCKET }}"

@@ -3,6 +3,12 @@ import type { NotificationItem, NotificationsResult } from '@motoboycity/types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { InvoiceService } from '../finance/invoice.service';
+import {
+  BACKUP_ABANDONADO_DIAS,
+  BACKUP_ATRASADO_HORAS,
+  BACKUP_JOB,
+  JobCheckInService,
+} from './job-check-in.service';
 
 /** Mesma régua da empresa: além disso, alguém precisa olhar. */
 const MINUTOS_SEM_MOTOBOY = 15;
@@ -13,26 +19,29 @@ export class AdminNotificationsService {
     private readonly prisma: PrismaService,
     private readonly platformSettings: AdminPlatformSettingsService,
     private readonly invoiceService: InvoiceService,
+    private readonly jobCheckIn: JobCheckInService,
   ) {}
 
   async list(): Promise<NotificationsResult> {
     await this.invoiceService.refreshOverdueInvoices();
 
     const limiteDeEspera = new Date(Date.now() - MINUTOS_SEM_MOTOBOY * 60_000);
-    const [settings, empresas, entregadores, avisos, vencidas, semMotoboy] = await Promise.all([
-      this.platformSettings.get(),
-      this.prisma.company.count({ where: { status: 'PENDING_APPROVAL' } }),
-      this.prisma.driver.count({ where: { approvalStatus: 'PENDING' } }),
-      this.prisma.invoicePaymentNotice.count({ where: { status: 'PENDING' } }),
-      this.prisma.invoice.aggregate({
-        where: { status: 'OVERDUE' },
-        _count: { _all: true },
-        _sum: { totalValue: true },
-      }),
-      this.prisma.delivery.count({
-        where: { status: 'AWAITING_DRIVER', createdAt: { lte: limiteDeEspera } },
-      }),
-    ]);
+    const [settings, empresas, entregadores, avisos, vencidas, semMotoboy, backup] =
+      await Promise.all([
+        this.platformSettings.get(),
+        this.prisma.company.count({ where: { status: 'PENDING_APPROVAL' } }),
+        this.prisma.driver.count({ where: { approvalStatus: 'PENDING' } }),
+        this.prisma.invoicePaymentNotice.count({ where: { status: 'PENDING' } }),
+        this.prisma.invoice.aggregate({
+          where: { status: 'OVERDUE' },
+          _count: { _all: true },
+          _sum: { totalValue: true },
+        }),
+        this.prisma.delivery.count({
+          where: { status: 'AWAITING_DRIVER', createdAt: { lte: limiteDeEspera } },
+        }),
+        this.jobCheckIn.ultimoAviso(BACKUP_JOB),
+      ]);
 
     const items: NotificationItem[] = [];
 
@@ -122,6 +131,35 @@ export class AdminNotificationsService {
       });
     }
 
+    /**
+     * O backup parou de dar sinal.
+     *
+     * A pergunta não é "o workflow falhou?" — perguntar isso ao GitHub só
+     * detecta a falha que ele consegue reportar. Se a rotina for apagada,
+     * desabilitada ou nunca chegar a agendar, o silêncio parece sucesso. Aqui a
+     * AUSÊNCIA do aviso é o sinal, e ela cobre todos esses casos de uma vez.
+     *
+     * Vira crítico só depois de uma semana: um dia sem backup é problema, mas
+     * não para a operação hoje; uma semana significa que ninguém olhou e a
+     * única rede de proteção dos dados não existe mais.
+     */
+    const horasSemBackup = backup
+      ? (Date.now() - backup.lastRunAt.getTime()) / 3_600_000
+      : Number.POSITIVE_INFINITY;
+    if (horasSemBackup >= BACKUP_ATRASADO_HORAS) {
+      const abandonado = horasSemBackup >= BACKUP_ABANDONADO_DIAS * 24;
+      items.push({
+        id: 'admin:backup:stale',
+        severity: abandonado ? 'critical' : 'warning',
+        title: backup ? 'Backup do banco atrasado' : 'Backup do banco nunca confirmou',
+        description: backup
+          ? `Sem aviso de conclusão há ${formatarEspera(horasSemBackup)}. O último foi em ${formatarData(backup.lastRunAt)}.`
+          : 'Nenhuma execução avisou que terminou. Confira os segredos e rode a rotina na mão.',
+        href: null,
+        actionLabel: null,
+      });
+    }
+
     if (semMotoboy > 0) {
       items.push({
         id: 'admin:deliveries:awaiting-driver',
@@ -139,6 +177,21 @@ export class AdminNotificationsService {
 
 function pluralizar(quantidade: number, singular: string, plural: string): string {
   return `${quantidade} ${quantidade === 1 ? singular : plural}`;
+}
+
+/**
+ * Depois de dois dias, hora vira ruído: "192 horas" obriga a pessoa a dividir
+ * de cabeça justamente no aviso em que a gravidade precisa ser óbvia.
+ */
+function formatarEspera(horas: number): string {
+  if (horas < 48) {
+    return pluralizar(Math.floor(horas), 'hora', 'horas');
+  }
+  return pluralizar(Math.floor(horas / 24), 'dia', 'dias');
+}
+
+function formatarData(data: Date): string {
+  return data.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function formatarValor(valor: number): string {

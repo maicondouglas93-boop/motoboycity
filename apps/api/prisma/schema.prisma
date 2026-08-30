@@ -1744,3 +1744,23 @@ model Notification {
   @@index([userId, readAt])
   @@map("notifications")
 }
+
+/// Último aviso de vida de uma rotina externa — hoje, o backup diário do banco.
+///
+/// A pergunta que isto responde não é "o backup falhou?", e sim "há quanto
+/// tempo ninguém avisa que rodou?". Perguntar ao GitHub se o workflow teve
+/// sucesso só detecta a falha que o próprio workflow consegue reportar; se ele
+/// for apagado, desabilitado ou nunca chegar a agendar, o silêncio parece
+/// sucesso. A ausência do aviso é o sinal.
+///
+/// `id` é o nome da rotina, e não um uuid: uma linha por rotina, atualizada no
+/// lugar. Assim outra tarefa futura entra aqui sem schema novo.
+model JobCheckIn {
+  id        String   @id @db.VarChar(60)
+  lastRunAt DateTime
+  sizeBytes BigInt?
+  detail    String?  @db.VarChar(200)
+  updatedAt DateTime @updatedAt
+
+  @@map("job_check_ins")
+}

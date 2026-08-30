@@ -3,9 +3,12 @@ import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-pl
 import { FinanceModule } from '../finance/finance.module';
 import { AdminNotificationsService } from './admin-notifications.service';
 import { CompanyNotificationsService } from './company-notifications.service';
+import { JobCheckInService } from './job-check-in.service';
+import { JobTokenGuard } from './job-token.guard';
 import {
   AdminNotificationsController,
   CompanyNotificationsController,
+  JobCheckInController,
 } from './notifications.controller';
 
 /**
@@ -15,7 +18,12 @@ import {
  */
 @Module({
   imports: [AdminPlatformSettingsModule, FinanceModule],
-  controllers: [CompanyNotificationsController, AdminNotificationsController],
-  providers: [CompanyNotificationsService, AdminNotificationsService],
+  controllers: [CompanyNotificationsController, AdminNotificationsController, JobCheckInController],
+  providers: [
+    CompanyNotificationsService,
+    AdminNotificationsService,
+    JobCheckInService,
+    JobTokenGuard,
+  ],
 })
 export class NotificationsModule {}
