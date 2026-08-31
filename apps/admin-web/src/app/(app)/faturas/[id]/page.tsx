@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -23,8 +24,23 @@ import { InvoiceWhatsAppDialog } from '@/components/finance/invoice-whatsapp-dia
 import { UpdateInvoiceDueDateDialog } from '@/components/finance/update-invoice-due-date-dialog';
 import { CancelInvoiceDialog } from '@/components/finance/cancel-invoice-dialog';
 import { formatarData } from '@/lib/dinheiro';
+import { paginar } from '@/lib/paginacao';
+import { ReportPagination } from '@/components/reports/report-pagination';
 
 const date = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
+
+/**
+ * 25, e não os 10 do resto do painel: a fatura é um documento que alguém abre
+ * para CONFERIR o fechamento, e quanto mais linhas couberem numa olhada, menos
+ * vezes a pessoa perde o fio.
+ */
+const DELIVERY_PAGE_SIZE_PADRAO = 25;
+
+/**
+ * Abaixo disso não há o que paginar, e a régua seria enfeite embaixo de uma
+ * tabela de oito linhas.
+ */
+const MINIMO_PARA_PAGINAR = 10;
 
 /**
  * Status de fatura em português. O mesmo mapa da listagem — a linha do tempo
@@ -62,6 +78,13 @@ export default function AdminInvoiceDetailPage() {
     queryFn: () => adminCompaniesApi.detail(token as string, invoiceQuery.data!.companyId),
     enabled: Boolean(token && invoiceQuery.data?.companyId),
   });
+  /**
+   * Antes dos returns antecipados de propósito: esta página tem três, e um
+   * `useState` depois deles mudaria a quantidade de hooks entre um render e
+   * outro — o React quebra em cima disso.
+   */
+  const [deliveryPage, setDeliveryPage] = useState(1);
+  const [deliveryPageSize, setDeliveryPageSize] = useState<number>(DELIVERY_PAGE_SIZE_PADRAO);
   if (!token)
     return <p className="text-sm text-muted-foreground">Faça login para consultar esta fatura.</p>;
   if (invoiceQuery.isLoading) {
@@ -92,6 +115,19 @@ export default function AdminInvoiceDetailPage() {
     );
   }
   const invoice = invoiceQuery.data;
+
+  const totalDeliveries = invoice.deliveries.length;
+  // A conta dos limites vive em `lib/paginacao`, testada — o que erra aqui não
+  // é o JSX, é a página que sobra apontando para além do fim.
+  const pagina = paginar(totalDeliveries, deliveryPage, deliveryPageSize);
+  const deliveriesDaPagina = invoice.deliveries.slice(pagina.inicio, pagina.fim);
+  /**
+   * A régua é fixa, e não o tamanho escolhido: se dependesse da escolha, quem
+   * selecionasse "100 por página" numa fatura de 12 pedidos veria os controles
+   * sumirem — junto com o seletor que os traria de volta.
+   */
+  const mostrarPaginacao = totalDeliveries > MINIMO_PARA_PAGINAR;
+
   const whatsappContacts = (companyQuery.data?.teamMembers ?? [])
     .filter((member) => member.active && member.role === 'OWNER')
     .map((member) => ({
@@ -218,7 +254,7 @@ export default function AdminInvoiceDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invoice.deliveries.map((delivery) => (
+              {deliveriesDaPagina.map((delivery) => (
                 <TableRow key={delivery.id}>
                   <TableCell className="font-medium">
                     <span className="flex flex-wrap items-center gap-1.5">
@@ -250,6 +286,24 @@ export default function AdminInvoiceDetailPage() {
               ))}
             </TableBody>
           </Table>
+
+          {mostrarPaginacao && (
+            <div className="border-t border-border/70 p-3">
+              <ReportPagination
+                page={pagina.numero}
+                pageSize={deliveryPageSize}
+                total={totalDeliveries}
+                // A lista já está inteira na memória: não há busca para esperar.
+                isFetching={false}
+                onPageChange={setDeliveryPage}
+                onPageSizeChange={(size) => {
+                  setDeliveryPageSize(size);
+                  setDeliveryPage(1);
+                }}
+                itemLabel="pedidos"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
       <Card>

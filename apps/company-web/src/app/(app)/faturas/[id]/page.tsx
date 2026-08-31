@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,8 @@ import {
 import { companyInvoicesApi } from '@/lib/api-client';
 import { formatarData, formatarDataHora } from '@/lib/dinheiro';
 import { session } from '@/lib/session';
+import { paginar } from '@/lib/paginacao';
+import { ReportPagination } from '@/components/reports/report-pagination';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -42,6 +45,21 @@ function invoiceHistoryTitle(
   return `${fromStatus ? invoiceStatusLabel[fromStatus] : 'Criação'} → ${invoiceStatusLabel[toStatus] ?? toStatus}`;
 }
 
+/**
+ * 25, e não os 10 dos relatórios: a fatura é um documento que a loja abre para
+ * CONFERIR o fechamento, e quanto mais linhas couberem numa olhada, menos vezes
+ * ela perde o fio.
+ */
+const DELIVERY_PAGE_SIZE_PADRAO = 25;
+
+/**
+ * Abaixo disso não há o que paginar, e a régua seria enfeite embaixo de uma
+ * tabela de oito linhas. Fixa de propósito: se dependesse do tamanho escolhido,
+ * quem selecionasse "100 por página" numa fatura de 12 pedidos veria os
+ * controles sumirem — junto com o seletor que os traria de volta.
+ */
+const MINIMO_PARA_PAGINAR = 10;
+
 export default function CompanyInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const token = session.getToken();
@@ -50,6 +68,13 @@ export default function CompanyInvoiceDetailPage() {
     queryFn: () => companyInvoicesApi.detail(token as string, id),
     enabled: Boolean(token && id),
   });
+  /**
+   * Antes dos returns antecipados de propósito: esta página tem três, e um
+   * `useState` depois deles mudaria a quantidade de hooks entre um render e
+   * outro — o React quebra em cima disso.
+   */
+  const [deliveryPage, setDeliveryPage] = useState(1);
+  const [deliveryPageSize, setDeliveryPageSize] = useState<number>(DELIVERY_PAGE_SIZE_PADRAO);
 
   if (!token)
     return <p className="text-sm text-muted-foreground">Faça login para consultar esta fatura.</p>;
@@ -64,6 +89,14 @@ export default function CompanyInvoiceDetailPage() {
   }
 
   const invoice = invoiceQuery.data;
+
+  const totalDeliveries = invoice.deliveries.length;
+  // A conta dos limites vive em `lib/paginacao`, testada — o que erra aqui não
+  // é o JSX, é a página que sobra apontando para além do fim.
+  const pagina = paginar(totalDeliveries, deliveryPage, deliveryPageSize);
+  const deliveriesDaPagina = invoice.deliveries.slice(pagina.inicio, pagina.fim);
+  const mostrarPaginacao = totalDeliveries > MINIMO_PARA_PAGINAR;
+
   const statusTone =
     invoice.status === 'PAID'
       ? 'secondary'
@@ -141,7 +174,7 @@ export default function CompanyInvoiceDetailPage() {
 
       <Card className="premium-panel">
         <CardHeader>
-          <CardTitle>Pedidos faturados ({invoice.deliveries.length})</CardTitle>
+          <CardTitle>Pedidos faturados ({totalDeliveries})</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -153,7 +186,7 @@ export default function CompanyInvoiceDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invoice.deliveries.map((delivery) => (
+              {deliveriesDaPagina.map((delivery) => (
                 <TableRow key={delivery.id}>
                   <TableCell className="font-medium">
                     <Link
@@ -169,6 +202,24 @@ export default function CompanyInvoiceDetailPage() {
               ))}
             </TableBody>
           </Table>
+
+          {mostrarPaginacao && (
+            <div className="border-t border-border/70 p-3">
+              <ReportPagination
+                page={pagina.numero}
+                pageSize={deliveryPageSize}
+                total={totalDeliveries}
+                // A lista já está inteira na memória: não há busca para esperar.
+                isFetching={false}
+                onPageChange={setDeliveryPage}
+                onPageSizeChange={(size) => {
+                  setDeliveryPageSize(size);
+                  setDeliveryPage(1);
+                }}
+                itemLabel="pedidos"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
