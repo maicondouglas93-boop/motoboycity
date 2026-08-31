@@ -20,6 +20,7 @@ import { formatarData, formatarDataHora } from '@/lib/dinheiro';
 import { session } from '@/lib/session';
 import { paginar } from '@/lib/paginacao';
 import { ReportPagination } from '@/components/reports/report-pagination';
+import { InvoicePixCard } from '@/components/finance/invoice-pix-card';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -171,6 +172,12 @@ export default function CompanyInvoiceDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      <InvoicePixCard
+        token={token}
+        invoiceId={invoice.id}
+        invoiceStatus={invoice.status}
+      />
 
       <Card className="premium-panel">
         <CardHeader>

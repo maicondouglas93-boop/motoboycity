@@ -236,9 +236,15 @@ cortes devidos diariamente às 00:05 de `America/Sao_Paulo` e cada ciclo é
 processado uma única vez, mesmo quando não há pedidos faturáveis.
 
 Empresas já existentes mantêm, por padrão, o fechamento automático semanal de
-segunda-feira. O vencimento permanece no mesmo dia do fechamento. A cobrança é
-manual/offline pro lançamento — sem gateway de pagamento (boleto/PIX
-automático) planejado ainda.
+segunda-feira. O vencimento permanece no mesmo dia do fechamento.
+
+A empresa pode gerar uma cobrança **Pix pelo Asaas** para uma fatura pendente ou
+vencida. Existe no máximo uma cobrança corrente por fatura; timeout é reconciliado
+pela referência externa antes de qualquer nova criação. A fatura nunca é quitada
+pelo navegador nem por `PAYMENT_CONFIRMED`: somente um webhook autenticado
+`PAYMENT_RECEIVED`, com status `RECEIVED`, cliente, referência e valor exato
+conferidos, muda a fatura para `PAID`/`ONLINE` e grava o histórico. O ID do evento
+do Asaas é persistido para que reentregas não produzam duas baixas.
 
 O administrador também pode configurar, por empresa, a suspensão automática
 após 1 a 365 dias de atraso. Sem prazo configurado, o bloqueio fica desativado.

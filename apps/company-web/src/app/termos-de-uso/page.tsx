@@ -141,6 +141,12 @@ const sections: LegalSection[] = [
           podem gerar avisos, restrições de uso ou bloqueio, de acordo com a configuração contratada
           e a legislação aplicável.
         </p>
+        <p>
+          Quando disponível, a empresa poderá pagar a fatura por PIX processado pelo Asaas. A baixa
+          automática depende da confirmação do provedor; gerar o QR Code não equivale a pagar. A
+          empresa deve conferir favorecido, valor e vencimento antes de autorizar a transação no
+          banco e comunicar qualquer divergência pelo canal oficial.
+        </p>
       </>
     ),
   },
@@ -261,7 +267,7 @@ export default function TermsOfUsePage() {
       kind="terms"
       title="Termos de Uso"
       summary="Regras para empresas, equipes e entregadores utilizarem a plataforma de forma segura, transparente e responsável."
-      updatedAt="27 de agosto de 2026"
+      updatedAt="31 de agosto de 2026"
       sections={sections}
     />
   );

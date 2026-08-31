@@ -171,6 +171,16 @@ Uma corrida de 0 km é cobrada pela **taxa base** da tabela, e o histórico
 registra que ela fechou no mesmo ponto da coleta — cobrança legítima, mas também
 o sintoma de um toque errado, e a fatura precisa poder ser explicada.
 
+O pagamento Pix de fatura é integrado ao Asaas em
+`apps/api/src/finance/asaas`. `AsaasCustomer` reserva e reutiliza o cliente da
+empresa; `InvoicePixCharge` conserva a referência externa, o pagamento e o QR
+Code; `AsaasWebhookEvent` é a caixa de entrada idempotente. A API key e o token
+do webhook existem somente na API. `GET/POST /company/invoices/:id/pix` sempre
+resolve a empresa pela sessão, e `/integrations/asaas/webhook` usa comparação de
+token em tempo constante. O navegador apenas inicia/exibe a cobrança: a baixa
+ocorre em transação no webhook `PAYMENT_RECEIVED`, depois de conferir pagamento,
+cliente, referência, modalidade e centavos.
+
 ## 6. Despacho e concorrência
 
 A oferta pendente única por pedido é a garantia central, e tem três camadas:

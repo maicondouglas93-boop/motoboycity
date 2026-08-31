@@ -193,6 +193,27 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum AsaasResourceStatus {
+  CREATING
+  ACTIVE
+  FAILED
+}
+
+enum InvoicePixChargeStatus {
+  CREATING
+  ACTIVE
+  RECEIVED
+  CANCELLED
+  FAILED
+  RECONCILIATION_REQUIRED
+}
+
+enum AsaasWebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+}
+
 enum InvoiceClosingMode {
   AUTOMATIC
   MANUAL
@@ -456,6 +477,7 @@ model Company {
   pricingTables PricingTable[]
   statusHistory CompanyStatusHistory[]
   driverBlocks  DriverCompanyBlock[]
+  asaasCustomer AsaasCustomer?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1222,12 +1244,76 @@ model Invoice {
   deliveries     Delivery[]
   statusHistory  InvoiceStatusHistory[]
   paymentNotices InvoicePaymentNotice[]
+  pixCharge      InvoicePixCharge?
 
   createdAt DateTime @default(now())
 
   @@index([companyId, status])
   @@index([dueDate, status])
   @@map("invoices")
+}
+
+/// Identificador do cliente da empresa no Asaas. A reserva CREATING impede
+/// que duas faturas abertas ao mesmo tempo criem dois clientes no provedor.
+model AsaasCustomer {
+  id                 String              @id @default(uuid())
+  companyId          String              @unique
+  providerCustomerId String?             @unique
+  status             AsaasResourceStatus @default(CREATING)
+  errorCode          String?             @db.VarChar(80)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("asaas_customers")
+}
+
+/// Uma cobrança Pix por fatura. O externalReference e o id do pagamento no
+/// Asaas permitem reconciliar timeout sem criar uma segunda cobrança.
+model InvoicePixCharge {
+  id                 String                 @id @default(uuid())
+  invoiceId          String                 @unique
+  providerPaymentId  String?                @unique
+  providerCustomerId String?
+  externalReference  String                 @unique
+  status             InvoicePixChargeStatus @default(CREATING)
+  providerStatus     String?                @db.VarChar(40)
+  pixPayload         String?                @db.Text
+  pixEncodedImage    String?                @db.Text
+  expiresAt          DateTime?
+  receivedAt         DateTime?
+  errorCode          String?                @db.VarChar(80)
+
+  invoice       Invoice             @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  webhookEvents AsaasWebhookEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("invoice_pix_charges")
+}
+
+/// Caixa de entrada idempotente dos webhooks financeiros do Asaas. O id do
+/// evento e globalmente único no provedor e evita baixar a fatura duas vezes.
+model AsaasWebhookEvent {
+  id                String                  @id @db.VarChar(120)
+  eventType         String                  @db.VarChar(80)
+  providerPaymentId String?                 @db.VarChar(120)
+  chargeId          String?
+  status            AsaasWebhookEventStatus @default(RECEIVED)
+  note              String?                 @db.VarChar(500)
+  receivedAt        DateTime                @default(now())
+  processedAt       DateTime?
+
+  charge InvoicePixCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+
+  @@index([providerPaymentId])
+  @@index([status, receivedAt])
+  @@map("asaas_webhook_events")
 }
 
 enum InvoicePaymentNoticeStatus {

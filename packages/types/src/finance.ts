@@ -788,3 +788,19 @@ export interface CompanyInvoiceDetail extends CompanyInvoiceListItem {
   }>;
   statusHistory: InvoiceDetail['statusHistory'];
 }
+
+export type InvoicePixChargeStatus =
+  'CREATING' | 'ACTIVE' | 'RECEIVED' | 'CANCELLED' | 'FAILED' | 'RECONCILIATION_REQUIRED';
+
+/** Cobrança Pix da fatura visível somente para a empresa proprietária. */
+export interface CompanyInvoicePixCharge {
+  invoiceId: string;
+  invoiceNumber: string;
+  status: InvoicePixChargeStatus;
+  totalValue: number;
+  pixPayload: string | null;
+  /** PNG em Base64, sem o prefixo data:image. */
+  pixEncodedImage: string | null;
+  expiresAt: string | null;
+  receivedAt: string | null;
+}

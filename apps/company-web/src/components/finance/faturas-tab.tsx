@@ -231,12 +231,20 @@ export function FaturasTab({ token }: { token: string }) {
                           Fatura paga ou cancelada nao tem o que avisar.
                         */}
                         {(fatura.status === 'PENDING' || fatura.status === 'OVERDUE') && (
-                          <PaymentNoticeDialog
-                            token={token}
-                            invoiceId={fatura.id}
-                            invoiceNumber={fatura.number}
-                            invoiceTotal={fatura.totalValue}
-                          />
+                          <>
+                            <Link
+                              href={`/faturas/${fatura.id}`}
+                              className="inline-flex h-8 items-center rounded-lg bg-portal px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-portal-deep"
+                            >
+                              Pagar com Pix
+                            </Link>
+                            <PaymentNoticeDialog
+                              token={token}
+                              invoiceId={fatura.id}
+                              invoiceNumber={fatura.number}
+                              invoiceTotal={fatura.totalValue}
+                            />
+                          </>
                         )}
                         <Link
                           href={`/faturas/${fatura.id}`}

@@ -158,6 +158,32 @@ const sections: LegalSection[] = [
     ),
   },
   {
+    id: 'asaas',
+    title: 'Pagamento de faturas pelo Asaas',
+    content: (
+      <>
+        <p>
+          Quando a empresa optar por pagar uma fatura por PIX, a MOTOboyCity poderá compartilhar
+          com o Asaas nome empresarial ou nome fantasia, CPF ou CNPJ, e-mail, telefone, valor,
+          vencimento e uma referência interna da cobrança. Receberemos identificadores e eventos
+          necessários para gerar o QR Code, confirmar o pagamento, evitar duplicidade e manter a
+          auditoria financeira.
+        </p>
+        <p>
+          O Asaas atua como provedor de pagamento e também trata os dados conforme sua própria{' '}
+          <a
+            href="https://central.ajuda.asaas.com/hc/pt-br/articles/32098003163035-Pol%C3%ADtica-de-Privacidade"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Política de Privacidade
+          </a>
+          .
+        </p>
+      </>
+    ),
+  },
+  {
     id: 'compartilhamento',
     title: 'Com quem compartilhamos',
     content: (
@@ -167,6 +193,7 @@ const sections: LegalSection[] = [
           <li>empresa solicitante, membros autorizados e entregador responsável;</li>
           <li>destinatário que recebeu legitimamente um link de rastreamento;</li>
           <li>aiqfome e outras integrações expressamente autorizadas pela empresa;</li>
+          <li>Asaas, quando a empresa gerar ou pagar uma cobrança PIX de fatura;</li>
           <li>
             provedores de mapas, rotas, hospedagem, banco de dados, cache, notificações e
             comunicação;
@@ -307,7 +334,7 @@ export default function PrivacyPolicyPage() {
       kind="privacy"
       title="Política de Privacidade"
       summary="Entenda quais dados usamos para operar as entregas, por que eles são necessários e como você pode exercer seus direitos."
-      updatedAt="27 de agosto de 2026"
+      updatedAt="31 de agosto de 2026"
       sections={sections}
     />
   );

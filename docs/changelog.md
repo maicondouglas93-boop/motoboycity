@@ -11326,3 +11326,49 @@ Não foi executado E2E nem smoke autenticado no navegador porque não havia uma
 base isolada nem credencial Company de teste fornecidas. A consulta SQL agregada
 foi coberta em unidade; a validação real contra PostgreSQL permanece para a
 homologação antes de chamar o recorte de publicado.
+
+## 2026-08-31 — Cobrança Pix de faturas pelo Asaas
+
+Implementado o fluxo ponta a ponta para a empresa pagar faturas pendentes ou
+vencidas por Pix. O detalhe da fatura gera e exibe QR Code e copia-e-cola; a
+lista ganhou a ação principal **Pagar com Pix**, preservando **Já paguei** como
+contingência manual.
+
+A API cria/reutiliza o cliente Asaas da empresa e reserva uma cobrança única por
+fatura. Referências externas persistidas permitem reconciliar resposta perdida
+antes de uma nova tentativa. A baixa não confia no navegador nem em
+`PAYMENT_CONFIRMED`: o webhook autenticado aceita apenas `PAYMENT_RECEIVED` com
+status `RECEIVED`, e confere ID do pagamento, cliente, referência, modalidade
+Pix e valor exato. Eventos são idempotentes pelo ID do Asaas e a transição para
+`PAID`/`ONLINE` mais o histórico ocorre na mesma transação.
+
+Dados e rollback: a migration `20260831120000_asaas_invoice_pix` é aditiva e não
+reescreve faturas existentes. O rollback exige primeiro retirar o uso das rotas
+e depois remover somente as três tabelas e três enums novos; entregas, faturas e
+históricos anteriores permanecem intactos.
+
+Arquivos principais:
+
+- `apps/api/src/finance/asaas/*` e `apps/api/src/finance/finance.module.ts`;
+- `apps/api/prisma/schema.prisma` e migration `20260831120000_asaas_invoice_pix`;
+- `packages/types/src/finance.ts` e `packages/api-client/src/invoices.ts`;
+- `apps/company-web/src/components/finance/invoice-pix-card.tsx` e telas de fatura;
+- termos de uso e política de privacidade do Company Web, com transparência sobre o Asaas;
+- `apps/api/.env.example` e `docs/asaas-pix.md`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` | aprovado |
+| Jest focado do Asaas | 2 suítes / 11 testes aprovados |
+| Jest unitário completo da API | 86 suítes / 1064 testes aprovados |
+| Vitest focado do Pix | 1 arquivo / 3 testes aprovados |
+| Vitest completo do Company Web | 25 arquivos / 102 testes aprovados |
+| `pnpm typecheck` | 8 projetos aprovados |
+| `pnpm lint` | 8 projetos aprovados; permanece 1 aviso preexistente no Driver App |
+| build da API e do Company Web | aprovados; painel gerou 22 páginas |
+
+Não foram aplicadas migrations, usadas credenciais reais, feito E2E contra o
+Asaas nem deploy. A homologação depende da configuração descrita em
+`docs/asaas-pix.md`.

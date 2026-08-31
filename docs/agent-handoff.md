@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-31**, depois do ranking de clientes no Company Web.
+> Última revisão: **2026-08-31**, depois da implementação local do Pix Asaas.
 
 ## Como atualizar
 
@@ -90,6 +90,13 @@ composição da operação ou um endereço realmente muda.
 A agenda da empresa possui um Top 10 real por entregas concluídas. Os três
 primeiros aparecem em um pódio e os demais continuam numa lista; a consulta
 agregada é isolada pela empresa e não exigiu migration.
+
+O recorte local de faturamento possui cobrança Pix Asaas: a empresa gera e copia
+o QR Code no detalhe da fatura, enquanto a API reutiliza o cliente, reconcilia
+timeout pela referência externa e só dá baixa por `PAYMENT_RECEIVED` autenticado
+e validado. Ele ainda **não está publicado nem habilitado**: exige a migration
+`20260831120000_asaas_invoice_pix`, as três variáveis `ASAAS_*` e o webhook do
+painel Asaas conforme `docs/asaas-pix.md`.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e

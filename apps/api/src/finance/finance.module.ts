@@ -20,6 +20,9 @@ import { FinancialPayoutService } from './financial-payout.service';
 import { FinancialReleaseScheduler } from './financial-release.scheduler';
 import { AdminWithdrawalController, DriverWithdrawalController } from './withdrawal.controller';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AsaasClient } from './asaas/asaas.client';
+import { AsaasBillingService } from './asaas/asaas-billing.service';
+import { AsaasWebhookController, CompanyInvoicePixController } from './asaas/asaas.controller';
 import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-platform-settings.module';
 
 @Module({
@@ -42,6 +45,8 @@ import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-pl
     AdminPaymentNoticeController,
     DriverWithdrawalController,
     AdminWithdrawalController,
+    CompanyInvoicePixController,
+    AsaasWebhookController,
   ],
   providers: [
     AdminFinancialService,
@@ -54,6 +59,8 @@ import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-pl
     FinancialPayoutService,
     FinancialPayoutProcessor,
     FinancialReleaseScheduler,
+    AsaasClient,
+    AsaasBillingService,
   ],
   //  sai daqui para a central de avisos poder reusar a mesma
   // atualizacao de vencimento, em vez de reimplementar a regra de OVERDUE.

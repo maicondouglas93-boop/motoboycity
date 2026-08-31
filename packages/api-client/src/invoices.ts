@@ -1,6 +1,7 @@
 import type {
   CompanyInvoiceDetail,
   CompanyInvoiceListItem,
+  CompanyInvoicePixCharge,
   InvoiceDetail,
   InvoiceListItem,
   InvoiceStatus,
@@ -45,6 +46,27 @@ export function createCompanyInvoicesApi({ baseUrl }: CompanyInvoicesApiConfig) 
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyInvoiceDetail>(response);
+    },
+
+    async pixCharge(
+      accessToken: string,
+      invoiceId: string,
+    ): Promise<CompanyInvoicePixCharge | null> {
+      const response = await apiFetch(`${baseUrl}/company/invoices/${invoiceId}/pix`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<CompanyInvoicePixCharge | null>(response);
+    },
+
+    async createPixCharge(
+      accessToken: string,
+      invoiceId: string,
+    ): Promise<CompanyInvoicePixCharge> {
+      const response = await apiFetch(`${baseUrl}/company/invoices/${invoiceId}/pix`, {
+        method: 'POST',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<CompanyInvoicePixCharge>(response);
     },
   };
 }
