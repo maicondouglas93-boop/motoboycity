@@ -11177,3 +11177,24 @@ qualquer fronteira de arredondamento.
 | `apps/api` — `jest` | 84 suítes, **1037** testes |
 | `pnpm typecheck` e `pnpm lint` | aprovados |
 | Testes com a carência e a escalada removidas | 2 falharam, como esperado |
+
+## 2026-08-31 — `pilot.16` na rua
+
+Distribuído aos aparelhos. Ele leva as duas correções da fila offline: item em
+revisão passa a ser reconferido contra o servidor em vez de reenviado, e
+insucesso conta como fim de linha para uma entrega guardada — que é a origem do
+"Pedido #307 precisa de atenção" que ficou preso na tela de um motoboy.
+
+Duas ressalvas registradas, para ninguém tratar isto como assunto encerrado:
+
+**A versão por aparelho continua sendo a do painel.** Quem não abriu o app ainda
+está no `pilot.15`. A fonte é `Driver.appVersion`, em **Home → Fila de despacho →
+clique no motoboy**, e só aparece para quem está online. Esta linha e a tabela do
+handoff são escritas à mão e já estiveram erradas antes.
+
+**Os dois testes de aparelho continuam sem ser feitos.** O `pilot.16` foi para a
+rua sem que ninguém exercitasse: negar "Permitir o tempo todo" num Android 11+ e
+num Android 10, conferindo que o alerta oferece "Abrir ajustes"; e matar a rede
+no meio de uma finalização, conferindo que a espera termina em 15 s com mensagem
+em vez de girar para sempre. O item no handoff foi reescrito para dizer só isso,
+em vez de continuar amarrado à instalação que já aconteceu.

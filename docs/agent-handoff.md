@@ -31,7 +31,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 48 migrations |
-| APK nos aparelhos | **`pilot.15`** — o `pilot.16` está pronto e **não instalado**. Confirme no painel, não nesta linha (veja abaixo) |
+| APK nos aparelhos | **`pilot.16`** distribuído em 31/08/2026. Quem ainda não abriu o app pode estar no `pilot.15`: confirme por motoboy no painel, não nesta linha (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -122,11 +122,13 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Instalar o `pilot.16`** e, junto, os testes de aparelho que ainda não
-   aconteceram — dois cenários que só existem em aparelho: **negar "Permitir o tempo todo"** num Android 11+ e num
-   Android 10, conferindo que o alerta oferece "Abrir ajustes" e que o atalho
-   abre a tela certa; e **matar a rede no meio de uma finalização**, conferindo
-   que a espera termina em 15 s com mensagem em vez de ficar girando.
+1. **Os dois testes que só existem em aparelho**, ainda não feitos — o
+   `pilot.16` já está distribuído, mas ele foi para a rua sem estes dois
+   cenários terem sido exercitados: **negar "Permitir o tempo todo"** num
+   Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
+   e que o atalho abre a tela certa; e **matar a rede no meio de uma
+   finalização**, conferindo que a espera termina em 15 s com mensagem em vez de
+   ficar girando.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
