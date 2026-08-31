@@ -11393,3 +11393,40 @@ ajuste.
 Nenhuma credencial foi lida ou registrada. O pagamento real ainda depende da
 configuração privada das três variáveis `ASAAS_*`, do webhook e de um smoke no
 Sandbox.
+
+## 2026-08-31 — Diagnóstico seguro das falhas Pix no Asaas
+
+O primeiro smoke em produção retornou `502` ao consultar uma cobrança já
+reservada. A API descartava o status e o código devolvidos pelo Asaas e também
+transformava configuração ausente em um `502` genérico, impedindo distinguir
+credencial recusada, ambiente incorreto, limite, indisponibilidade e dados
+inválidos.
+
+O cliente agora identifica a operação (`FIND_PAYMENT`, `CREATE_PAYMENT`, cliente
+ou QR Code), preserva somente o status HTTP e o primeiro código técnico
+sanitizado do provedor e nunca conserva a descrição livre da resposta. Os logs
+registram esses metadados com o ID interno da fatura, sem chave, CPF/CNPJ,
+payload ou corpo da resposta. A tela recebe mensagens acionáveis para `401`,
+`403`, `400`, `429`, timeout e falha 5xx; uma configuração ausente mantém o
+`503` original. Somente falha na chamada de criação do pagamento pode marcar o
+resultado como incerto e exigir reconciliação — timeout em uma consulta não é
+mais tratado como possível cobrança criada.
+
+Arquivos alterados:
+
+- `apps/api/src/finance/asaas/asaas.client.ts` e novo teste do cliente;
+- `apps/api/src/finance/asaas/asaas-billing.service.ts` e seus testes.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado do Asaas | 2 suítes / 12 testes aprovados |
+| Jest unitário completo da API | 87 suítes / 1069 testes aprovados |
+| typecheck da API | aprovado |
+| lint da API | aprovado sem avisos |
+| build da API | aprovado |
+
+Não houve mudança de banco, migration, contrato compartilhado ou segredo. A
+causa concreta do ambiente de produção ainda depende de repetir a tentativa
+depois da publicação e ler o código seguro retornado/logado.

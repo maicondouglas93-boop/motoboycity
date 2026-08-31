@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -39,7 +40,8 @@ export class AsaasBillingService {
     if (charge.status === 'ACTIVE' && charge.providerPaymentId && this.needsQrRefresh(charge)) {
       try {
         return await this.hydrateQrCode(charge.id, charge.providerPaymentId, invoice);
-      } catch {
+      } catch (error) {
+        this.logAsaasFailure('refresh-qr-code', invoice.id, error);
         return this.toResponse(charge, invoice);
       }
     }
@@ -61,8 +63,12 @@ export class AsaasBillingService {
       if (!this.needsQrRefresh(charge)) return this.toResponse(charge, invoice);
       try {
         return await this.hydrateQrCode(charge.id, charge.providerPaymentId, invoice);
-      } catch {
-        throw new BadGatewayException('Não foi possível atualizar o QR Code. Tente novamente.');
+      } catch (error) {
+        this.logAsaasFailure('refresh-qr-code', invoice.id, error);
+        throw this.publicAsaasException(
+          error,
+          'Não foi possível atualizar o QR Code. Tente novamente.',
+        );
       }
     }
 
@@ -154,6 +160,7 @@ export class AsaasBillingService {
       });
       return this.hydrateQrCode(charge.id, payment.id, invoice);
     } catch (error) {
+      this.logAsaasFailure('create-pix', invoice.id, error);
       const persisted = await this.prisma.invoicePixCharge.findUnique({
         where: { id: charge.id },
         select: { providerPaymentId: true, status: true },
@@ -168,11 +175,12 @@ export class AsaasBillingService {
         where: { id: charge.id, status: 'CREATING' },
         data: {
           status: unknown ? 'RECONCILIATION_REQUIRED' : 'FAILED',
-          errorCode: error instanceof AsaasProviderError ? error.code : 'UNEXPECTED_ERROR',
+          errorCode: this.safeAsaasErrorCode(error),
         },
       });
       if (error instanceof ConflictException) throw error;
-      throw new BadGatewayException(
+      throw this.publicAsaasException(
+        error,
         unknown
           ? 'O Asaas não confirmou se criou a cobrança. Tente novamente para reconciliar sem duplicar.'
           : 'Não foi possível gerar o Pix no Asaas. Tente novamente em instantes.',
@@ -387,7 +395,7 @@ export class AsaasBillingService {
         where: { id: record.id },
         data: {
           status: 'FAILED',
-          errorCode: error instanceof AsaasProviderError ? error.code : 'UNEXPECTED_ERROR',
+          errorCode: this.safeAsaasErrorCode(error),
         },
       });
       throw error;
@@ -401,8 +409,12 @@ export class AsaasBillingService {
     let payment: AsaasPayment | null;
     try {
       payment = await this.client.findPaymentByExternalReference(charge.externalReference);
-    } catch {
-      throw new BadGatewayException('Não foi possível consultar a cobrança no Asaas. Tente novamente.');
+    } catch (error) {
+      this.logAsaasFailure('reconcile-pix', invoice.id, error);
+      throw this.publicAsaasException(
+        error,
+        'Não foi possível consultar a cobrança no Asaas. Tente novamente.',
+      );
     }
     if (!payment) return null;
     const customer = await this.prisma.asaasCustomer.findUnique({
@@ -565,6 +577,85 @@ export class AsaasBillingService {
       !charge.pixEncodedImage ||
       (charge.expiresAt !== null && charge.expiresAt.getTime() <= this.clock.now().getTime())
     );
+  }
+
+  private safeAsaasErrorCode(error: unknown): string {
+    if (error instanceof AsaasProviderError) {
+      return [error.operation, error.code, error.httpStatus, error.providerCode]
+        .filter((part) => part !== undefined && part !== '')
+        .join(':')
+        .slice(0, 80);
+    }
+    if (error instanceof HttpException) return `HTTP_${error.getStatus()}`;
+    return 'UNEXPECTED_ERROR';
+  }
+
+  private logAsaasFailure(context: string, invoiceId: string, error: unknown): void {
+    if (error instanceof AsaasProviderError) {
+      this.logger.error(
+        `Asaas ${context} falhou invoiceId=${invoiceId} operation=${error.operation} code=${error.code} httpStatus=${error.httpStatus ?? 'none'} providerCode=${error.providerCode ?? 'none'} outcomeUnknown=${error.outcomeUnknown}`,
+      );
+      return;
+    }
+    const errorType =
+      error instanceof Error ? error.constructor.name.replace(/[^a-zA-Z0-9_.-]/g, '_') : 'unknown';
+    const httpStatus = error instanceof HttpException ? error.getStatus() : 'none';
+    this.logger.error(
+      `Asaas ${context} falhou invoiceId=${invoiceId} errorType=${errorType} httpStatus=${httpStatus}`,
+    );
+  }
+
+  private publicAsaasException(error: unknown, fallbackMessage: string): HttpException {
+    if (error instanceof HttpException) return error;
+    if (!(error instanceof AsaasProviderError)) {
+      return new BadGatewayException(fallbackMessage);
+    }
+    if (error.httpStatus === 401) {
+      if (error.providerCode === 'invalid_environment') {
+        return new BadGatewayException(
+          'A chave do Asaas não pertence ao ambiente configurado. Use chave Sandbox com ASAAS_ENVIRONMENT=sandbox.',
+        );
+      }
+      if (error.providerCode === 'invalid_access_token_format') {
+        return new BadGatewayException(
+          'O formato da chave do Asaas está inválido. Confira se ela foi copiada completa, incluindo o caractere $.',
+        );
+      }
+      if (error.providerCode === 'invalid_access_token') {
+        return new BadGatewayException(
+          'A chave do Asaas está inválida ou foi revogada. Gere ou ative uma chave no painel Asaas.',
+        );
+      }
+      if (error.providerCode === 'access_token_not_found') {
+        return new BadGatewayException(
+          'A chave do Asaas não chegou ao provedor. Confira ASAAS_API_KEY no servidor.',
+        );
+      }
+      return new BadGatewayException(
+        'A credencial do Asaas foi recusada. Confira ASAAS_ENVIRONMENT e ASAAS_API_KEY no servidor.',
+      );
+    }
+    if (error.httpStatus === 403) {
+      return new BadGatewayException(
+        'O Asaas recusou o acesso desta integração. Confira as permissões da chave no painel Asaas.',
+      );
+    }
+    if (error.httpStatus === 400) {
+      return new BadGatewayException(
+        'O Asaas recusou os dados enviados. Confira o cadastro financeiro da empresa.',
+      );
+    }
+    if (error.httpStatus === 429) {
+      return new BadGatewayException(
+        'O Asaas limitou temporariamente as solicitações. Aguarde alguns segundos e tente novamente.',
+      );
+    }
+    if (error.code === 'NETWORK_OR_TIMEOUT' || (error.httpStatus ?? 0) >= 500) {
+      return new BadGatewayException(
+        'O Asaas está indisponível ou demorou para responder. Tente novamente em instantes.',
+      );
+    }
+    return new BadGatewayException(fallbackMessage);
   }
 
   private isUniqueViolation(error: unknown): boolean {

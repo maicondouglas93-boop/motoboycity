@@ -1,7 +1,12 @@
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  ForbiddenException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { AsaasBillingService } from './asaas-billing.service';
-import type { AsaasClient } from './asaas.client';
+import { AsaasProviderError, type AsaasClient } from './asaas.client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { FinancialClock } from '../financial-clock.service';
 import type { User } from '@prisma/client';
@@ -229,5 +234,111 @@ describe('AsaasBillingService cobrança', () => {
     expect(client.createPixPayment).toHaveBeenCalledWith(
       expect.objectContaining({ customer: 'cus-1', value: 25.5, dueDate: '2026-08-31' }),
     );
+  });
+
+  it('explica quando o Asaas rejeita a credencial ao reconciliar uma tentativa', async () => {
+    const invoice = {
+      id: 'invoice-1',
+      companyId: 'company-1',
+      number: 'FAT-1',
+      status: 'PENDING',
+      dueDate: new Date('2026-08-31T00:00:00.000Z'),
+      totalValue: { toString: () => '11.50' },
+      company: {
+        id: 'company-1',
+        tradeName: 'Loja teste',
+        document: '39.535.445/0001-01',
+        teamMembers: [],
+      },
+    };
+    const prisma = {
+      companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      invoice: { findUnique: jest.fn().mockResolvedValue(invoice) },
+      invoicePixCharge: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'charge-1',
+          invoiceId: 'invoice-1',
+          externalReference: 'invoice-ref',
+          providerCustomerId: null,
+          status: 'FAILED',
+          updatedAt: new Date('2026-08-31T14:00:00.000Z'),
+        }),
+      },
+    } as unknown as PrismaService;
+    const client = {
+      findPaymentByExternalReference: jest
+        .fn()
+        .mockRejectedValue(
+          new AsaasProviderError(
+            'FIND_PAYMENT',
+            'REQUEST_REJECTED',
+            401,
+            false,
+            'invalid_environment',
+          ),
+        ),
+    } as unknown as AsaasClient;
+    const service = new AsaasBillingService(
+      prisma,
+      client,
+      {} as ConfigService,
+      { now: jest.fn(() => NOW) } as unknown as FinancialClock,
+    );
+
+    await expect(
+      service.createForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
+    ).rejects.toMatchObject({
+      constructor: BadGatewayException,
+      response: {
+        message:
+          'A chave do Asaas não pertence ao ambiente configurado. Use chave Sandbox com ASAAS_ENVIRONMENT=sandbox.',
+      },
+    });
+  });
+
+  it('nao mascara configuracao ausente como 502 generico', async () => {
+    const invoice = {
+      id: 'invoice-1',
+      companyId: 'company-1',
+      number: 'FAT-1',
+      status: 'PENDING',
+      dueDate: new Date('2026-08-31T00:00:00.000Z'),
+      totalValue: { toString: () => '11.50' },
+      company: {
+        id: 'company-1',
+        tradeName: 'Loja teste',
+        document: '39.535.445/0001-01',
+        teamMembers: [],
+      },
+    };
+    const prisma = {
+      companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      invoice: { findUnique: jest.fn().mockResolvedValue(invoice) },
+      invoicePixCharge: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'charge-1',
+          invoiceId: 'invoice-1',
+          externalReference: 'invoice-ref',
+          providerCustomerId: null,
+          status: 'FAILED',
+          updatedAt: new Date('2026-08-31T14:00:00.000Z'),
+        }),
+      },
+    } as unknown as PrismaService;
+    const client = {
+      findPaymentByExternalReference: jest
+        .fn()
+        .mockRejectedValue(new ServiceUnavailableException('Configuração Asaas ausente.')),
+    } as unknown as AsaasClient;
+    const service = new AsaasBillingService(
+      prisma,
+      client,
+      {} as ConfigService,
+      { now: jest.fn(() => NOW) } as unknown as FinancialClock,
+    );
+
+    await expect(
+      service.createForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });
