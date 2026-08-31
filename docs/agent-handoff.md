@@ -78,7 +78,11 @@ conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
 aiqfome (importação e ciclo logístico); central de avisos nos dois painéis.
 
-O sino do admin cobra o **silêncio do backup**: o workflow avisa a API em
+O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
+(`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e
+continua `PENDING` há mais de 6 h vira alerta, e 2 dias vira crítico — a régua é
+o resultado, não o erro, então ele pega também o caso de o job parar de rodar. E
+o **silêncio do backup**: o workflow avisa a API em
 `POST /ops/check-in/backup-banco` depois de subir o arquivo, e a ausência desse
 aviso vira alerta em 36 h e crítico em 7 dias. Depende de dois segredos no
 GitHub (`API_URL`, `JOB_CHECK_IN_TOKEN`) e da mesma variável no ambiente da API

@@ -22,6 +22,13 @@ function semNada() {
     companyAddress: { findFirst: jest.fn().mockResolvedValue({ lat: -20.15, lng: -41.62 }) },
     company: { count: jest.fn().mockResolvedValue(0) },
     driver: { count: jest.fn().mockResolvedValue(0) },
+    walletTransaction: {
+      aggregate: jest.fn().mockResolvedValue({
+        _count: { _all: 0 },
+        _sum: { amount: null },
+        _min: { releaseAt: null },
+      }),
+    },
   };
 }
 
@@ -233,6 +240,68 @@ describe('central de avisos', () => {
       const aviso = items.find((item) => item.id === 'admin:backup:stale');
       expect(aviso?.title).toContain('nunca confirmou');
       expect(aviso?.severity).toBe('critical');
+    });
+
+    /**
+     * O aviso que devolve o alarme perdido em 31/08/2026. Ao proteger o
+     * arranque da API, a falha da liberação de repasses deixou de derrubar o
+     * deploy e virou uma linha de log. Sem este aviso, o crédito do motoboy
+     * fica preso e nenhuma tela acusa.
+     */
+    it('avisa repasse vencido que nao foi liberado, e diz o valor preso', async () => {
+      prisma.walletTransaction.aggregate.mockResolvedValue({
+        _count: { _all: 3 },
+        _sum: { amount: 240.5 },
+        _min: { releaseAt: new Date(Date.now() - 9 * 3_600_000) },
+      });
+      const service = await montarAdmin();
+
+      const { items } = await service.list();
+
+      const aviso = items.find((item) => item.id === 'admin:repasses:overdue');
+      expect(aviso).toMatchObject({ severity: 'warning', href: '/financeiro?aba=carteiras' });
+      expect(aviso?.title).toContain('3 repasses vencidos');
+      expect(aviso?.description).toContain('240,50');
+      expect(aviso?.description).toContain('9 horas');
+    });
+
+    it('vira critico depois de dois dias com o dinheiro preso', async () => {
+      prisma.walletTransaction.aggregate.mockResolvedValue({
+        _count: { _all: 1 },
+        _sum: { amount: 80 },
+        _min: { releaseAt: new Date(Date.now() - 3 * 24 * 3_600_000) },
+      });
+      const service = await montarAdmin();
+
+      const { items, criticalCount } = await service.list();
+
+      expect(items.find((item) => item.id === 'admin:repasses:overdue')?.severity).toBe('critical');
+      expect(criticalCount).toBe(1);
+    });
+
+    /**
+     * A janela de carência existe porque `releaseAt` e o job semanal disparam
+     * no mesmo instante (segunda 00:00). Sem ela, todo domingo à meia-noite o
+     * sino acusaria uma falha que é só a fila ainda não ter rodado.
+     */
+    it('so olha repasse vencido ha mais de seis horas', async () => {
+      const service = await montarAdmin();
+
+      await service.list();
+
+      const filtro = prisma.walletTransaction.aggregate.mock.calls[0][0].where;
+      expect(filtro).toMatchObject({ type: 'CREDIT_REPASSE', status: 'PENDING' });
+      const corte = filtro.releaseAt.lte.getTime();
+      expect(Date.now() - corte).toBeGreaterThanOrEqual(6 * 3_600_000 - 1_000);
+      expect(Date.now() - corte).toBeLessThan(7 * 3_600_000);
+    });
+
+    it('nao inventa aviso de repasse quando nao ha nenhum vencido', async () => {
+      const service = await montarAdmin();
+
+      const { items } = await service.list();
+
+      expect(items.map((item) => item.id)).not.toContain('admin:repasses:overdue');
     });
 
     it('conta empresas e entregadores esperando aprovacao', async () => {

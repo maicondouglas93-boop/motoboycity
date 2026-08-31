@@ -13,6 +13,20 @@ import {
 /** Mesma régua da empresa: além disso, alguém precisa olhar. */
 const MINUTOS_SEM_MOTOBOY = 15;
 
+/**
+ * Repasse vencido e ainda pendente: a partir daqui não é corrida de horário, é
+ * falha.
+ *
+ * `releaseAt` é sempre segunda 00:00 no fuso da operação, e o job semanal roda
+ * segunda 00:00 — os dois disparam no mesmo instante. Seis horas depois, a
+ * única explicação para o crédito continuar `PENDING` é que a liberação não
+ * aconteceu.
+ */
+const HORAS_REPASSE_ATRASADO = 6;
+
+/** Dois dias sem o motoboy poder sacar o que é dele já não é atraso. */
+const DIAS_REPASSE_ABANDONADO = 2;
+
 @Injectable()
 export class AdminNotificationsService {
   constructor(
@@ -25,8 +39,10 @@ export class AdminNotificationsService {
   async list(): Promise<NotificationsResult> {
     await this.invoiceService.refreshOverdueInvoices();
 
-    const limiteDeEspera = new Date(Date.now() - MINUTOS_SEM_MOTOBOY * 60_000);
-    const [settings, empresas, entregadores, avisos, vencidas, semMotoboy, backup] =
+    const agora = Date.now();
+    const limiteDeEspera = new Date(agora - MINUTOS_SEM_MOTOBOY * 60_000);
+    const limiteDoRepasse = new Date(agora - HORAS_REPASSE_ATRASADO * 3_600_000);
+    const [settings, empresas, entregadores, avisos, vencidas, semMotoboy, backup, repasses] =
       await Promise.all([
         this.platformSettings.get(),
         this.prisma.company.count({ where: { status: 'PENDING_APPROVAL' } }),
@@ -41,6 +57,23 @@ export class AdminNotificationsService {
           where: { status: 'AWAITING_DRIVER', createdAt: { lte: limiteDeEspera } },
         }),
         this.jobCheckIn.ultimoAviso(BACKUP_JOB),
+        /**
+         * O dinheiro do motoboy que já deveria ter saído de bloqueado.
+         *
+         * `_min` do vencimento vem junto para o aviso dizer há quanto tempo, e
+         * não só quantos: "3 repasses parados" não diz se é de hoje de manhã ou
+         * de duas semanas atrás.
+         */
+        this.prisma.walletTransaction.aggregate({
+          where: {
+            type: 'CREDIT_REPASSE',
+            status: 'PENDING',
+            releaseAt: { lte: limiteDoRepasse },
+          },
+          _count: { _all: true },
+          _sum: { amount: true },
+          _min: { releaseAt: true },
+        }),
       ]);
 
     const items: NotificationItem[] = [];
@@ -87,6 +120,38 @@ export class AdminNotificationsService {
         // para ca, e um salto a mais e um salto que pode se perder.
         href: '/financeiro?aba=faturas',
         actionLabel: 'Ver faturas',
+      });
+    }
+
+    /**
+     * Repasse vencido e não liberado — o aviso que devolve o alarme perdido.
+     *
+     * Até 31/08/2026, quando a liberação falhava o sintoma era barulhento: o
+     * erro subia pelo `onModuleInit` e a API não subia. Proteger o arranque
+     * (necessário, porque a liberação é rede de segurança e não podia derrubar
+     * a casa) trocou uma falha visível por uma linha de log que ninguém lê.
+     *
+     * Sem este aviso, o desfecho é o pior de todos: o crédito do motoboy fica
+     * preso em `PENDING`, ele não consegue sacar, e nenhuma tela acusa nada.
+     * Aqui a régua é o RESULTADO — dinheiro que já deveria estar disponível e
+     * não está — e não o erro, que pode nem existir se o job parar de rodar.
+     */
+    if (repasses._count._all > 0) {
+      const vencidoHa = repasses._min.releaseAt
+        ? (Date.now() - repasses._min.releaseAt.getTime()) / 3_600_000
+        : HORAS_REPASSE_ATRASADO;
+      const abandonado = vencidoHa >= DIAS_REPASSE_ABANDONADO * 24;
+      items.push({
+        id: 'admin:repasses:overdue',
+        severity: abandonado ? 'critical' : 'warning',
+        title: pluralizar(
+          repasses._count._all,
+          'repasse vencido e não liberado',
+          'repasses vencidos e não liberados',
+        ),
+        description: `${formatarValor(Number(repasses._sum.amount ?? 0))} presos há ${formatarEspera(vencidoHa)}. O motoboy não consegue sacar enquanto isso.`,
+        href: '/financeiro?aba=carteiras',
+        actionLabel: 'Ver carteiras',
       });
     }
 

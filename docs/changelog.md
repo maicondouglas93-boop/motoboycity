@@ -11121,3 +11121,59 @@ priorizada no handoff. Vinte segundos é curativo, não conserto.
 | `pnpm typecheck` e `pnpm lint` | aprovados |
 | Teste de resiliência com o `try/catch` removido | falhou, como esperado |
 | `/health` em produção durante a falha | `200` em 0,22 s — versão anterior servindo |
+
+## 2026-08-31 — O sino cobra repasse vencido, devolvendo o alarme que a correção do arranque tirou
+
+Correção de rumo dentro do mesmo dia. Ao proteger o `onModuleInit` para a API
+parar de não subir, o sintoma deixou de ser barulhento — o deploy quebrava — e
+virou uma linha de log que ninguém lê. A troca estava certa (disponibilidade da
+API vale mais que um alarme acidental), mas deixava o pior desfecho possível sem
+vigia: o crédito do motoboy preso em `PENDING`, ele sem conseguir sacar, e
+nenhuma tela acusando nada.
+
+Nova regra `admin:repasses:overdue`, no mesmo padrão do aviso de backup: a régua
+é o **resultado**, e não o erro. Dinheiro que já deveria estar disponível e não
+está aparece no sino, mesmo que nenhuma exceção tenha sido lançada — o que cobre
+também o caso de o job simplesmente parar de rodar.
+
+### Por que seis horas de carência
+
+`releaseAt` é sempre segunda-feira 00:00 no fuso da operação, e o job semanal
+roda `0 0 * * 1` no mesmo fuso: os dois disparam no mesmo instante. Sem carência,
+todo domingo à meia-noite o sino acusaria uma falha que é só a fila ainda não ter
+rodado. Seis horas depois, a única explicação para o crédito continuar `PENDING`
+é que a liberação não aconteceu.
+
+Vira crítico em dois dias, que é quando deixa de ser atraso.
+
+### Verificado contra banco real, não só com mock
+
+Com a API local ligada ao `motoboycity_dev`:
+
+| Cenário | Resposta de `GET /admin/notifications` |
+| --- | --- |
+| 3 repasses vencidos há 9 h | `warning` — "R$ 27,60 presos", leva para `/financeiro?aba=carteiras` |
+| os mesmos, vencidos há 3 dias | `critical` |
+| vencidos há 2 h (dentro da carência) | nenhum aviso |
+| liberados | nenhum aviso |
+
+E, de brinde, o conserto do arranque provou a si mesmo: ao subir a API com três
+repasses vencidos e pendentes, o `recuperarAtrasados()` liberou os três. É o
+caminho corrigido hoje de manhã, funcionando ponta a ponta.
+
+### Uma diferença de uma hora que não era defeito
+
+Nos primeiros testes o aviso dizia "8 horas" para 9, e "2 dias" para 3. A causa é
+que o container do Postgres está 0,75 s à frente do relógio do host, e
+`formatarEspera` usa `Math.floor` — 8,9998 h vira 8. Escrevendo um instante UTC
+exato, o aviso responde "10 horas" para 10 horas. Em produção o caso não existe:
+`releaseAt` é sempre 00:00 e o aviso só dispara seis horas depois, longe de
+qualquer fronteira de arredondamento.
+
+### Validações
+
+| Comando | Resultado |
+| --- | --- |
+| `apps/api` — `jest` | 84 suítes, **1037** testes |
+| `pnpm typecheck` e `pnpm lint` | aprovados |
+| Testes com a carência e a escalada removidas | 2 falharam, como esperado |
