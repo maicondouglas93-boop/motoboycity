@@ -1,13 +1,55 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { DeliveryOperationsResult } from '@motoboycity/types';
 import { Phone } from 'lucide-react';
+import { io } from 'socket.io-client';
 import { Button } from '@/components/ui/button';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
 import { StatusChip } from '@/components/orders/status-chip';
-import { deliveriesApi } from '@/lib/api-client';
+import { baseUrl, deliveriesApi } from '@/lib/api-client';
 import { DispatchRadar, type DispatchRadarState } from './dispatch-radar';
+
+const DISPATCH_RECOVERY_INTERVAL_MS = 30_000;
+const REALTIME_REFRESH_DEBOUNCE_MS = 200;
+
+function deliveryUpdateTouchesTracking(
+  payload: unknown,
+  deliveryIds: string[],
+  batchId: string | null,
+): boolean {
+  if (!payload || typeof payload !== 'object') return true;
+  const update = payload as { id?: unknown; deliveryId?: unknown; batchId?: unknown };
+  const updateId =
+    typeof update.deliveryId === 'string'
+      ? update.deliveryId
+      : typeof update.id === 'string'
+        ? update.id
+        : null;
+  const updateBatchId = typeof update.batchId === 'string' ? update.batchId : null;
+
+  if (batchId && updateBatchId) return batchId === updateBatchId;
+  if (updateId) return deliveryIds.includes(updateId);
+  return true;
+}
+
+function dispatchTrackingNeedsRecovery(
+  data: DeliveryOperationsResult | undefined,
+  deliveryIds: string[],
+): boolean {
+  if (!data || deliveryIds.length === 0) return deliveryIds.length > 0;
+  const tracked = [...data.active, ...data.recent].filter((delivery) =>
+    deliveryIds.includes(delivery.id),
+  );
+  return (
+    tracked.length !== deliveryIds.length ||
+    tracked.some(
+      (delivery) => delivery.status === 'AWAITING_DRIVER' || delivery.status === 'SCHEDULED',
+    )
+  );
+}
 
 /**
  * O acompanhamento da busca, do momento em que o pedido sai até o aceite.
@@ -36,6 +78,10 @@ export function DispatchTrackingPanel({
   creating,
   detailHref,
 }: Props) {
+  const queryClient = useQueryClient();
+  const trackingScope = batchId ?? deliveryIds[0] ?? null;
+  const trackingIdsKey = deliveryIds.join(',');
+
   /**
    * Consulta somente o lote ou pedido criado. Nesse recorte a API não limita
    * os terminais recentes; assim um lote grande nunca perde cancelados nem
@@ -48,8 +94,45 @@ export function DispatchTrackingPanel({
         ...(batchId ? { batchId } : { deliveryId: deliveryIds[0] as string }),
       }),
     enabled: Boolean(token) && deliveryIds.length > 0,
-    refetchInterval: 3_000,
+    refetchInterval: (query) =>
+      dispatchTrackingNeedsRecovery(query.state.data, deliveryIds)
+        ? DISPATCH_RECOVERY_INTERVAL_MS
+        : false,
   });
+
+  /**
+   * Atualiza no evento e deixa os 30 segundos apenas como rede de seguranca.
+   * O refetch no `connect` cobre tanto a corrida inicial quanto uma reconexao
+   * depois de o navegador perder eventos.
+   */
+  useEffect(() => {
+    if (!token || !trackingScope || !trackingIdsKey) return;
+    const trackedDeliveryIds = trackingIdsKey.split(',');
+    const socket = io(baseUrl, { auth: { token } });
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const refreshTrackedOperation = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void queryClient.invalidateQueries({
+          queryKey: ['deliveries', 'tracked-operations', trackingScope],
+          exact: true,
+        });
+      }, REALTIME_REFRESH_DEBOUNCE_MS);
+    };
+    const refreshMatchingOperation = (payload: unknown) => {
+      if (deliveryUpdateTouchesTracking(payload, trackedDeliveryIds, batchId)) {
+        refreshTrackedOperation();
+      }
+    };
+
+    socket.on('connect', refreshTrackedOperation);
+    socket.on('delivery:updated', refreshMatchingOperation);
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      socket.disconnect();
+    };
+  }, [batchId, queryClient, token, trackingIdsKey, trackingScope]);
 
   const tracked = [
     ...(trackedOperationsQuery.data?.active ?? []),

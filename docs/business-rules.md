@@ -217,8 +217,13 @@ ou coletadas continuam com o mesmo motoboy até o encerramento normal.
 
 ## Saque
 
-Liberado toda segunda-feira pro motoboy solicitar. Sem valor mínimo, sem
-taxa.
+O administrador escolhe o dia da semana em que o motoboy pode solicitar o
+saque, usando o fuso de `America/Sao_Paulo`, ou libera a solicitação em qualquer
+dia. O padrão preservado para instalações existentes é segunda-feira. Sem valor
+mínimo e sem taxa.
+
+Essa configuração altera somente o dia da solicitação. A liberação semanal dos
+créditos continua acontecendo na segunda-feira.
 
 ## Antecipação
 

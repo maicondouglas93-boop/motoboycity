@@ -11478,3 +11478,82 @@ Não foram executados E2E, migration no banco compartilhado nem chamadas com
 credencial real. A Produção ainda exige a migration publicada pelo Render, uma
 chave `$aact_prod_`, um webhook próprio da conta real e o smoke financeiro
 controlado descrito em `docs/asaas-pix.md`.
+
+## 2026-08-31 — Release `pilot.17`: dia de saque configurável no aplicativo
+
+O aplicativo foi promovido para `0.1.0-pilot.17`, `versionCode` 17, para levar
+aos aparelhos a política de saque configurada no ADM. A carteira e a tela de
+solicitação agora usam `openToday` e `weekdayLabel` recebidos da API, em vez de
+decidirem localmente que toda solicitação acontece na segunda-feira. A recusa
+continua no servidor, de modo que relógio incorreto ou APK antigo não fura a
+regra.
+
+O release foi compilado em worktree curta `C:\m17`, com JDK 21,
+`MOTOBOYCITY_APP_ENV=production`, API oficial, Firebase e chave do Maps. O
+Gradle executou `processReleaseGoogleServices`, lint vital, validação da
+assinatura e `assembleRelease` com sucesso. As senhas foram fornecidas somente
+em arquivos DPAPI temporários e nunca foram exibidas nem registradas.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.17-vc17.apk`
+
+- 75.154.485 bytes;
+- SHA-256 `5CBB8B633C235F8BA83E06B1ADC0151DD8E7F8205CB2E98C53408F422C3AC360`;
+- pacote `com.motoboycity.driverapp`, minSdk 24 e targetSdk 36;
+- assinatura APK v2, RSA 4096 e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- bundle com `motoboycity-api.onrender.com`, `0.1.0-pilot.17` e o texto da
+  política vinda do servidor; sem `localhost:3333`, `127.0.0.1` ou `10.0.2.2`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/validation build` | aprovado |
+| `pnpm typecheck` | 8 workspaces aprovados |
+| `pnpm lint` | 8 workspaces aprovados, com um aviso preexistente de `no-void` no Driver App |
+| Jest do Driver App | 25 suítes / 159 testes aprovados |
+| `clean assembleRelease --no-daemon` | aprovado em 9 min 42 s |
+| `aapt`, `apksigner` e inspeção do bundle | aprovados conforme o artefato acima |
+
+Nenhum aparelho ADB estava conectado. O APK não foi instalado nem distribuído;
+o próximo passo é instalar com atualização preservando os dados e testar o dia
+de saque escolhido no ADM. A tabela do handoff continua apontando `pilot.16`
+como versão nos aparelhos até essa distribuição realmente acontecer.
+
+## 2026-08-31 — Radar de despacho orientado a evento
+
+Os radares de criação do Admin Web e do Company Web deixaram de consultar a
+central operacional a cada 3 segundos. Enquanto a busca está aberta, cada
+painel agora escuta `delivery:updated` na sala Socket.IO que já existia e
+invalida somente a consulta do pedido ou lote acompanhado. A conexão também
+reconcilia o estado inicial e qualquer reconexão, cobrindo eventos perdidos.
+
+O polling permanece como rede de segurança a cada 30 segundos somente enquanto
+algum item continua em `SCHEDULED` ou `AWAITING_DRIVER`; depois de aceite ou
+cancelamento ele para. Eventos de um lote recebidos na mesma rajada são
+coalescidos por 200 ms, e atualizações identificavelmente alheias ao pedido são
+ignoradas. Isso reduz em 90% o polling durante a busca e elimina as consultas
+depois do desfecho, sem alterar o backend ou o contrato realtime.
+
+Arquivos funcionais e de teste:
+
+- `apps/admin-web/src/components/operations/dispatch-tracking-panel.tsx`;
+- `apps/company-web/src/components/operations/dispatch-tracking-panel.tsx`;
+- testes do radar e ajustes dos mocks de seus dois consumidores no Company Web.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Vitest focado do radar | 1 arquivo / 11 testes aprovados |
+| Vitest completo do Company Web | 25 arquivos / 105 testes aprovados |
+| testes do Admin Web | 11 testes aprovados |
+| typecheck de Company Web e Admin Web | aprovados |
+| lint de Company Web e Admin Web | aprovados sem avisos |
+| build do Company Web | aprovado; 22 páginas |
+| build do Admin Web | aprovado; 38 páginas |
+
+Não houve mudança de API, schema, migration, segredo ou dependência. Este
+recorte segue no mesmo release que publica o `pilot.17`.

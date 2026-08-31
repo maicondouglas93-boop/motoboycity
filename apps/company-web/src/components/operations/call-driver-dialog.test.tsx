@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/api-client', () => ({
+  apiBaseUrl: 'https://api.example.test',
   companyAddressApi: { get: mocks.address },
   deliveriesApi: {
     create: mocks.create,
@@ -23,6 +24,10 @@ vi.mock('@/lib/api-client', () => ({
   },
   serviceTypesApi: { list: mocks.serviceTypes },
   companyBusinessHoursApi: { status: mocks.businessHours },
+}));
+
+vi.mock('socket.io-client', () => ({
+  io: () => ({ on: vi.fn(), disconnect: vi.fn() }),
 }));
 
 vi.mock('@/lib/session', () => ({
@@ -44,6 +49,8 @@ function renderDialog() {
 
 describe('CallDriverDialog', () => {
   beforeEach(() => {
+    mocks.operations.mockReset();
+    mocks.operations.mockResolvedValue({ active: [], recent: [], counts: {} });
     mocks.address.mockResolvedValue({
       address: {
         id: 'pickup-1',

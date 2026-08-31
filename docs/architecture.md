@@ -242,6 +242,12 @@ ativa o agendado vencido, reagenda o job que sumiu **antes de o pedido atrasar**
 e varre a fila. Cada passo reusa um caminho que já confere o estado, então rodar
 duas vezes junto não duplica nada.
 
+Nos radares de criação dos dois painéis, `delivery:updated` é o gatilho primário
+para atualizar o pedido. Uma coalescência curta transforma a rajada de eventos
+de um lote em uma consulta; o polling de 30 s existe apenas para reconciliar
+evento perdido e é desligado assim que todos os itens saem de
+`SCHEDULED`/`AWAITING_DRIVER`.
+
 ## 7. Contrato de lote
 
 Um lote é um grupo de **2 a 50 entregas imediatas** criadas na mesma chamada, por
@@ -296,6 +302,12 @@ pelo painel.
 
 **Nenhum limite que governe a operação deve morar como constante de código.** Se
 o operador não alcança, ele não opera.
+
+O dia para solicitar saque também vive em `PlatformSettings`.
+`withdrawalWeekday` usa `0` (domingo) a `6` (sábado), no fuso de
+`America/Sao_Paulo`; `null` significa qualquer dia e o padrão `1` preserva a
+segunda-feira. Essa política não muda a liberação semanal dos créditos, que
+continua na segunda-feira.
 
 ## 9. A fila offline do aplicativo
 

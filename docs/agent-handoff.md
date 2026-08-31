@@ -49,22 +49,25 @@ coisas correm em paralelo.
 varre a fila. Não duplica entre reinícios nem entre instâncias; se sumir do Redis,
 volta no próximo boot da API.
 
-### APK atual
+### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.16-vc16.apk`
-SHA-256 `2CD4877E859540FBDDF2A2365031A975F259A61EF22862985F7155375A196A2A`,
-75.147.349 bytes, `versionCode` 16, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.17-vc17.apk`
+SHA-256 `5CBB8B633C235F8BA83E06B1ADC0151DD8E7F8205CB2E98C53408F422C3AC360`,
+75.154.485 bytes, `versionCode` 17, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima do `pilot.15` já instalado.
+anteriores, então ele atualiza por cima do `pilot.16` instalado.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 `localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As correções foram conferidas por
 texto dentro do bundle, e não só pelo commit.
 
-O `pilot.16` traz as duas correções da fila offline: item em revisão passa a ser
-reconferido contra o servidor, e insucesso conta como fim de linha para uma
-entrega guardada.
+O `pilot.17` faz a carteira e a solicitação de saque obedecerem ao dia escolhido
+pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho. O
+servidor continua sendo a autoridade da regra. Não havia aparelho ADB conectado
+no build; o APK foi compilado e verificado, mas ainda não foi instalado nem
+distribuído. Por isso a tabela acima continua registrando `pilot.16` nos
+aparelhos.
 
 Os `pilot.13` e `pilot.14` foram compilados, verificados e **descartados** sem
 chegar a nenhum aparelho.
@@ -115,7 +118,12 @@ GitHub (`API_URL`, `JOB_CHECK_IN_TOKEN`) e da mesma variável no ambiente da API
 
 Chamar entregador abre o mesmo **acompanhamento com radar** nos três pontos de
 criação (atalho da barra, formulário da central e lançamento pela
-administração). E a loja passa a ver que o atendimento está fechado antes de
+administração). O radar recebe `delivery:updated` por Socket.IO, reconcilia ao
+conectar e usa consulta de 30 s somente como segurança enquanto ainda houver
+pedido procurando entregador; depois do aceite ou cancelamento, o polling para.
+Eventos em rajada de um lote são coalescidos em uma única consulta.
+
+E a loja passa a ver que o atendimento está fechado antes de
 digitar o pedido: `GET /company/business-hours` responde com a mesma regra que
 bloqueia a criação, pela região **da empresa**.
 
@@ -147,9 +155,9 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Os dois testes que só existem em aparelho**, ainda não feitos — o
-   `pilot.16` já está distribuído, mas ele foi para a rua sem estes dois
-   cenários terem sido exercitados: **negar "Permitir o tempo todo"** num
+1. **Instalar e testar o `pilot.17` em aparelho real.** Além de conferir que a
+   tela e o botão de saque obedecem ao dia escolhido no ADM, permanecem os dois
+   cenários ainda não exercitados: **negar "Permitir o tempo todo"** num
    Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
    e que o atalho abre a tela certa; e **matar a rede no meio de uma
    finalização**, conferindo que a espera termina em 15 s com mensagem em vez de

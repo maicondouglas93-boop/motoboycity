@@ -1,12 +1,25 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DispatchTrackingPanel } from './dispatch-tracking-panel';
+import {
+  deliveryUpdateTouchesTracking,
+  DispatchTrackingPanel,
+  dispatchTrackingNeedsRecovery,
+} from './dispatch-tracking-panel';
 
-const mocks = vi.hoisted(() => ({ operations: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  operations: vi.fn(),
+  io: vi.fn(),
+  socketOn: vi.fn(),
+  socketDisconnect: vi.fn(),
+  socketListeners: new Map<string, (payload?: unknown) => void>(),
+}));
+
+vi.mock('socket.io-client', () => ({ io: mocks.io }));
 
 vi.mock('@/lib/api-client', () => ({
+  apiBaseUrl: 'https://api.example.test',
   deliveriesApi: {
     operations: mocks.operations,
     cancel: vi.fn(),
@@ -58,7 +71,49 @@ const ENCERRADO = 'Busca encerrada';
 describe('acompanhamento do despacho', () => {
   beforeEach(() => {
     mocks.operations.mockReset();
+    mocks.io.mockReset();
+    mocks.socketOn.mockReset();
+    mocks.socketDisconnect.mockReset();
+    mocks.socketListeners.clear();
+    mocks.socketOn.mockImplementation(
+      (event: string, listener: (payload?: unknown) => void) => {
+        mocks.socketListeners.set(event, listener);
+      },
+    );
+    mocks.io.mockReturnValue({
+      on: mocks.socketOn,
+      disconnect: mocks.socketDisconnect,
+    });
     mocks.operations.mockResolvedValue({ active: [], recent: [], counts: {} });
+  });
+
+  it('sabe quando o polling de seguranca ainda e necessario', () => {
+    expect(
+      dispatchTrackingNeedsRecovery(
+        { active: [pedido('1', 'AWAITING_DRIVER')], recent: [], counts: {} },
+        ['1'],
+      ),
+    ).toBe(true);
+    expect(
+      dispatchTrackingNeedsRecovery(
+        { active: [pedido('1', 'ACCEPTED', true)], recent: [], counts: {} },
+        ['1'],
+      ),
+    ).toBe(false);
+    expect(
+      dispatchTrackingNeedsRecovery(
+        { active: [pedido('1', 'ACCEPTED', true)], recent: [], counts: {} },
+        ['1', '2'],
+      ),
+    ).toBe(true);
+  });
+
+  it('filtra eventos alheios sem depender de um unico formato de payload', () => {
+    expect(deliveryUpdateTouchesTracking({ id: '1' }, ['1'], null)).toBe(true);
+    expect(deliveryUpdateTouchesTracking({ deliveryId: '1' }, ['1'], null)).toBe(true);
+    expect(deliveryUpdateTouchesTracking({ id: '2' }, ['1'], null)).toBe(false);
+    expect(deliveryUpdateTouchesTracking({ batchId: 'lote-1' }, ['1'], 'lote-1')).toBe(true);
+    expect(deliveryUpdateTouchesTracking({ batchId: 'lote-2' }, ['1'], 'lote-1')).toBe(false);
   });
 
   it('já procura enquanto a criação está no ar', () => {
@@ -93,6 +148,31 @@ describe('acompanhamento do despacho', () => {
     expect(await screen.findByRole('img', { name: ENCONTRADO })).toBeVisible();
     expect(screen.getByText('Entregador a caminho.')).toBeVisible();
     expect(screen.getByText('Zé da Moto')).toBeVisible();
+  });
+
+  it('refaz uma unica consulta quando o socket avisa do aceite em rajada', async () => {
+    mocks.operations
+      .mockResolvedValueOnce({
+        active: [pedido('1', 'AWAITING_DRIVER')],
+        recent: [],
+        counts: {},
+      })
+      .mockResolvedValue({
+        active: [pedido('1', 'ACCEPTED', true)],
+        recent: [],
+        counts: {},
+      });
+    montar({ deliveryIds: ['1'] });
+
+    await screen.findByRole('img', { name: PROCURANDO });
+    await act(async () => {
+      mocks.socketListeners.get('delivery:updated')?.({ id: '1' });
+      mocks.socketListeners.get('delivery:updated')?.({ id: '1' });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+
+    await waitFor(() => expect(mocks.operations).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('img', { name: ENCONTRADO })).toBeVisible();
   });
 
   it('cancelado encerra a busca em vez de girar para sempre', async () => {

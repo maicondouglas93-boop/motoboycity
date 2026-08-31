@@ -7,12 +7,24 @@ import { OperationalOrderForm } from '@/components/operations/operational-order-
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   createBatch: vi.fn(),
+  operations: vi.fn(),
   match: vi.fn(),
 }));
 
 vi.mock('@/lib/api-client', () => ({
-  deliveriesApi: { create: mocks.create, createBatch: mocks.createBatch },
+  apiBaseUrl: 'https://api.example.test',
+  deliveriesApi: {
+    create: mocks.create,
+    createBatch: mocks.createBatch,
+    operations: mocks.operations,
+    cancel: vi.fn(),
+    redispatch: vi.fn(),
+  },
   companyCustomersApi: { match: mocks.match },
+}));
+
+vi.mock('socket.io-client', () => ({
+  io: () => ({ on: vi.fn(), disconnect: vi.fn() }),
 }));
 
 vi.mock('@/components/ui/select', () => ({
@@ -147,8 +159,10 @@ describe('OperationalOrderForm com clientes', () => {
   beforeEach(() => {
     mocks.create.mockReset();
     mocks.createBatch.mockReset();
+    mocks.operations.mockReset();
     mocks.match.mockReset();
     mocks.create.mockResolvedValue({ id: 'delivery-1', displayNumber: 123 });
+    mocks.operations.mockResolvedValue({ active: [], recent: [], counts: {} });
   });
 
   it('cria entrega com o snapshot preenchido pelo cliente selecionado', async () => {
