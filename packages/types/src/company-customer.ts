@@ -51,3 +51,18 @@ export interface CompanyCustomerListResult {
   page: number;
   pageSize: number;
 }
+
+export interface CompanyCustomerRankingItem {
+  id: string;
+  name: string;
+  phone: string;
+  totalDeliveries: number;
+  completedDeliveries: number;
+  inProgressDeliveries: number;
+  cancelledDeliveries: number;
+  lastDeliveryAt: string | null;
+}
+
+export interface CompanyCustomerRankingResult {
+  items: CompanyCustomerRankingItem[];
+}

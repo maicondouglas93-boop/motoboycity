@@ -11279,3 +11279,50 @@ Arquivos:
 Não houve mudança de API, contrato, banco ou variável de ambiente. Não foi feito
 smoke autenticado no navegador nesta sessão; a regressão de câmera foi coberta
 pela política testada que ignora movimento GPS e reage a mudanças reais da área.
+
+## 2026-08-31 — Ranking e pódio dos melhores clientes
+
+A página **Clientes** do Company Web ganhou um Top 10 baseado no histórico real
+da empresa. Os três primeiros aparecem num pódio responsivo, com primeiro lugar
+em destaque, medalhas, iniciais, quantidade e taxa de conclusão; as posições de
+quatro a dez continuam numa lista compacta. Todos os itens levam ao detalhe do
+cliente e existem estados próprios de carregamento, falha com nova tentativa e
+agenda ainda sem entregas.
+
+"Melhor cliente" foi definido como maior número de entregas em `COMPLETED`. Os
+desempates usam entrega mais recente, total de entregas, nome e ID. A métrica não
+trata o valor do frete como compra do destinatário. O novo endpoint autenticado
+`GET /company/customers/ranking?limit=10` resolve a empresa pelo membro ativo e
+agrega apenas seus clientes e pedidos, incluindo o legado ainda não vinculado
+quando o telefone normalizado coincide.
+
+O contrato foi atualizado de ponta a ponta em `packages/types`,
+`packages/validation` e `packages/api-client`. Não houve alteração de schema,
+migration, `.env` ou segredo.
+
+Arquivos principais:
+
+- `apps/api/src/company/customers/company-customers.controller.ts` e
+  `company-customers.service.ts`;
+- `apps/company-web/src/components/customers/customer-ranking.tsx`;
+- `apps/company-web/src/app/(app)/clientes/page.tsx`;
+- `packages/types/src/company-customer.ts`;
+- `packages/validation/src/company/company-customer.schema.ts`;
+- `packages/api-client/src/company-customers.ts`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado de clientes | 2 suítes / 26 testes aprovados |
+| Jest unitário completo da API | 84 suítes / 1045 testes aprovados |
+| Vitest focado do pódio | 1 arquivo / 3 testes aprovados |
+| Vitest completo do Company Web | 24 arquivos / 99 testes aprovados |
+| `pnpm typecheck` | 8 projetos aprovados |
+| `pnpm lint` | 8 projetos aprovados; permanece 1 aviso preexistente no Driver App |
+| build da API e do Company Web | aprovados; painel gerou 22 páginas |
+
+Não foi executado E2E nem smoke autenticado no navegador porque não havia uma
+base isolada nem credencial Company de teste fornecidas. A consulta SQL agregada
+foi coberta em unidade; a validação real contra PostgreSQL permanece para a
+homologação antes de chamar o recorte de publicado.

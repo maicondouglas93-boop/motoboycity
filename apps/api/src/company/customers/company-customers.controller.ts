@@ -2,15 +2,18 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } fro
 import type {
   CompanyCustomer,
   CompanyCustomerDetail,
+  CompanyCustomerRankingResult,
   CompanyCustomerSavedAddress,
 } from '@motoboycity/types';
 import {
   companyCustomerSavedAddressSchema,
+  companyCustomerRankingQuerySchema,
   createCompanyCustomerSchema,
   listCompanyCustomersQuerySchema,
   matchCompanyCustomerQuerySchema,
   updateCompanyCustomerSchema,
   type CompanyCustomerSavedAddressPayload,
+  type CompanyCustomerRankingQuery,
   type CreateCompanyCustomerPayload,
   type ListCompanyCustomersQuery,
   type MatchCompanyCustomerQuery,
@@ -42,6 +45,15 @@ export class CompanyCustomersController {
     @Query(new ZodValidationPipe(matchCompanyCustomerQuerySchema)) query: MatchCompanyCustomerQuery,
   ): Promise<{ customer: CompanyCustomer | null }> {
     return this.companyCustomersService.match(user, query);
+  }
+
+  @Get('ranking')
+  ranking(
+    @CurrentUser() user: User,
+    @Query(new ZodValidationPipe(companyCustomerRankingQuerySchema))
+    query: CompanyCustomerRankingQuery,
+  ): Promise<CompanyCustomerRankingResult> {
+    return this.companyCustomersService.ranking(user, query);
   }
 
   @Get(':id')

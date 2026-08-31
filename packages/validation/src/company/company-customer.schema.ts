@@ -80,6 +80,10 @@ export const listCompanyCustomersQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+export const companyCustomerRankingQuerySchema = z.object({
+  limit: z.coerce.number().int().min(3).max(50).default(10),
+});
+
 export const matchCompanyCustomerQuerySchema = z
   .object({
     cpf: optionalCompanyCustomerCpfSchema,
@@ -93,5 +97,6 @@ export const matchCompanyCustomerQuerySchema = z
 export type CreateCompanyCustomerPayload = z.infer<typeof createCompanyCustomerSchema>;
 export type UpdateCompanyCustomerPayload = z.infer<typeof updateCompanyCustomerSchema>;
 export type ListCompanyCustomersQuery = z.infer<typeof listCompanyCustomersQuerySchema>;
+export type CompanyCustomerRankingQuery = z.infer<typeof companyCustomerRankingQuerySchema>;
 export type MatchCompanyCustomerQuery = z.infer<typeof matchCompanyCustomerQuerySchema>;
 export type CompanyCustomerSavedAddressPayload = z.infer<typeof companyCustomerSavedAddressSchema>;

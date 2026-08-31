@@ -7,11 +7,14 @@ import {
 import type {
   CompanyCustomer,
   CompanyCustomerDetail,
+  CompanyCustomerRankingItem,
+  CompanyCustomerRankingResult,
   CompanyCustomerSavedAddress,
   CompanyCustomerStatistics,
 } from '@motoboycity/types';
 import type {
   CompanyCustomerSavedAddressPayload,
+  CompanyCustomerRankingQuery,
   CreateCompanyCustomerPayload,
   ListCompanyCustomersQuery,
   MatchCompanyCustomerQuery,
@@ -61,6 +64,17 @@ interface DeliveryStatisticsRow {
   inProgressDeliveries: bigint;
   completedDeliveries: bigint;
   cancelledDeliveries: bigint;
+}
+
+interface CustomerRankingRow {
+  id: string;
+  name: string;
+  phone: string;
+  totalDeliveries: bigint;
+  completedDeliveries: bigint;
+  inProgressDeliveries: bigint;
+  cancelledDeliveries: bigint;
+  lastDeliveryAt: Date | null;
 }
 
 interface MostUsedAddressRow {
@@ -200,6 +214,55 @@ export class CompanyCustomersService {
         customer.savedAddresses,
       ),
     };
+  }
+
+  async ranking(
+    user: User,
+    query: CompanyCustomerRankingQuery,
+  ): Promise<CompanyCustomerRankingResult> {
+    const companyId = await this.resolveCompanyId(user);
+    const rows = await this.prisma.$queryRaw<CustomerRankingRow[]>`
+      SELECT
+        c."id",
+        c."name",
+        c."phone",
+        COUNT(d."id")::bigint AS "totalDeliveries",
+        COUNT(d."id") FILTER (WHERE d."status" = 'COMPLETED')::bigint AS "completedDeliveries",
+        COUNT(d."id") FILTER (
+          WHERE d."status" NOT IN ('COMPLETED', 'CANCELLED')
+        )::bigint AS "inProgressDeliveries",
+        COUNT(d."id") FILTER (WHERE d."status" = 'CANCELLED')::bigint AS "cancelledDeliveries",
+        MAX(d."createdAt") AS "lastDeliveryAt"
+      FROM "company_customers" AS c
+      LEFT JOIN "deliveries" AS d
+        ON d."companyId" = c."companyId"
+        AND (
+          d."companyCustomerId" = c."id"
+          OR (
+            d."companyCustomerId" IS NULL
+            AND (
+              CASE
+                WHEN length(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')) IN (12, 13)
+                  AND left(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g'), 2) = '55'
+                THEN substring(regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g') FROM 3)
+                ELSE regexp_replace(COALESCE(d."recipientPhone", ''), '[^0-9]', '', 'g')
+              END
+            ) = c."phone"
+          )
+        )
+      WHERE c."companyId" = ${companyId}
+      GROUP BY c."id", c."name", c."phone"
+      HAVING COUNT(d."id") > 0
+      ORDER BY
+        COUNT(d."id") FILTER (WHERE d."status" = 'COMPLETED') DESC,
+        MAX(d."createdAt") DESC NULLS LAST,
+        COUNT(d."id") DESC,
+        c."name" ASC,
+        c."id" ASC
+      LIMIT ${query.limit}
+    `;
+
+    return { items: rows.map((row) => this.toRankingItem(row)) };
   }
 
   async match(
@@ -502,6 +565,19 @@ export class CompanyCustomersService {
       lat: address.lat === null ? null : Number(address.lat),
       lng: address.lng === null ? null : Number(address.lng),
       referenceNote: address.referenceNote,
+    };
+  }
+
+  private toRankingItem(row: CustomerRankingRow): CompanyCustomerRankingItem {
+    return {
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      totalDeliveries: Number(row.totalDeliveries),
+      completedDeliveries: Number(row.completedDeliveries),
+      inProgressDeliveries: Number(row.inProgressDeliveries),
+      cancelledDeliveries: Number(row.cancelledDeliveries),
+      lastDeliveryAt: row.lastDeliveryAt?.toISOString() ?? null,
     };
   }
 

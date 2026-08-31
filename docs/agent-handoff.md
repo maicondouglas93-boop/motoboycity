@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-31**, depois da estabilização da câmera do mapa no Company Web.
+> Última revisão: **2026-08-31**, depois do ranking de clientes no Company Web.
 
 ## Como atualizar
 
@@ -86,6 +86,10 @@ login; nenhuma migration foi necessária.
 O mapa da central operacional mantém o zoom e o arraste da empresa durante
 atualizações de GPS. O enquadramento automático continua na abertura e quando a
 composição da operação ou um endereço realmente muda.
+
+A agenda da empresa possui um Top 10 real por entregas concluídas. Os três
+primeiros aparecem em um pódio e os demais continuam numa lista; a consulta
+agregada é isolada pela empresa e não exigiu migration.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e
@@ -207,8 +211,8 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **84 suítes / 1043** testes unitários da API, **25 / 155** do
-Driver App, **22 arquivos / 93** da Company Web, **25 / 247** E2E.
+Cobertura atual: **84 suítes / 1045** testes unitários da API, **25 / 155** do
+Driver App, **24 arquivos / 99** da Company Web, **25 / 247** E2E.
 
 ### E2E
 

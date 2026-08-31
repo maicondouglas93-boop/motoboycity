@@ -494,6 +494,14 @@ status como em andamento. Entregas anteriores sao vinculadas pelo telefone
 normalizado dentro da mesma empresa, sem alterar destinatario ou endereco do
 pedido.
 
+A pagina da agenda mostra um ranking de ate dez clientes que ja possuem ao
+menos uma entrega. "Melhor cliente" significa maior quantidade de entregas em
+`COMPLETED`; em empate, vence quem teve a entrega mais recente, depois quem tem
+mais entregas no total, nome e ID. O podio destaca os tres primeiros e nao usa
+valor monetario do frete como gasto do destinatario. A consulta inclui entregas
+historicas ainda sem vinculo pelo mesmo telefone normalizado e permanece sempre
+isolada pela empresa da sessao.
+
 O cadastro previo permanece opcional. Depois que uma entrega manual e criada
 com nome, telefone e destino completo, o Company Web procura correspondencia
 exata pelo telefone normalizado e oferece salvar o cliente. O convite acontece

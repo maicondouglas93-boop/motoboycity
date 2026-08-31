@@ -1,5 +1,6 @@
 import {
   companyCustomerInputSchema,
+  companyCustomerRankingQuerySchema,
   companyCustomerSavedAddressSchema,
   listCompanyCustomersQuerySchema,
   matchCompanyCustomerQuerySchema,
@@ -80,5 +81,12 @@ describe('company customer validation', () => {
   it('aplica paginacao segura e exige identificador no match', () => {
     expect(listCompanyCustomersQuerySchema.parse({})).toEqual({ page: 1, pageSize: 20 });
     expect(matchCompanyCustomerQuerySchema.safeParse({}).success).toBe(false);
+  });
+
+  it('limita o tamanho do ranking de clientes', () => {
+    expect(companyCustomerRankingQuerySchema.parse({})).toEqual({ limit: 10 });
+    expect(companyCustomerRankingQuerySchema.parse({ limit: '20' })).toEqual({ limit: 20 });
+    expect(companyCustomerRankingQuerySchema.safeParse({ limit: 2 }).success).toBe(false);
+    expect(companyCustomerRankingQuerySchema.safeParse({ limit: 51 }).success).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import { ApiError } from '@motoboycity/api-client';
 import type { CompanyCustomer } from '@motoboycity/types';
 import { Eye, MapPin, Pencil, Phone, Plus, Search, Trash2, UserRound } from 'lucide-react';
 import { CustomerForm } from '@/components/customers/customer-form';
+import { CustomerRanking } from '@/components/customers/customer-ranking';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -49,6 +50,13 @@ export default function CompanyCustomersPage() {
         pageSize: PAGE_SIZE,
       }),
     enabled: Boolean(token),
+  });
+
+  const rankingQuery = useQuery({
+    queryKey: ['company', 'customers', 'ranking', 10],
+    queryFn: () => companyCustomersApi.ranking(token as string, 10),
+    enabled: Boolean(token),
+    staleTime: 60_000,
   });
 
   const deleteMutation = useMutation({
@@ -99,6 +107,13 @@ export default function CompanyCustomersPage() {
           <Plus className="size-4" aria-hidden="true" /> Novo cliente
         </Button>
       </header>
+
+      <CustomerRanking
+        items={rankingQuery.data?.items ?? []}
+        isLoading={rankingQuery.isLoading}
+        isError={rankingQuery.isError}
+        onRetry={() => void rankingQuery.refetch()}
+      />
 
       <Card className="premium-panel">
         <CardContent className="pt-4">

@@ -2,6 +2,7 @@ import type {
   CompanyCustomer,
   CompanyCustomerDetail,
   CompanyCustomerListResult,
+  CompanyCustomerRankingResult,
   CompanyCustomerSavedAddress,
 } from '@motoboycity/types';
 import type {
@@ -42,6 +43,14 @@ export function createCompanyCustomersApi({ baseUrl }: CompanyCustomersApiConfig
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<CompanyCustomerDetail>(response);
+    },
+
+    async ranking(accessToken: string, limit = 10): Promise<CompanyCustomerRankingResult> {
+      const params = new URLSearchParams({ limit: String(limit) });
+      const response = await apiFetch(`${baseUrl}/company/customers/ranking?${params.toString()}`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<CompanyCustomerRankingResult>(response);
     },
 
     async match(

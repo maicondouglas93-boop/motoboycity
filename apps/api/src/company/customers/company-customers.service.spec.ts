@@ -288,6 +288,41 @@ describe('CompanyCustomersService', () => {
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
+  it('ordena e converte o ranking agregado da propria empresa', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        id: 'customer-a',
+        name: 'Joao da Silva',
+        phone: '33999999991',
+        totalDeliveries: 42n,
+        completedDeliveries: 39n,
+        inProgressDeliveries: 2n,
+        cancelledDeliveries: 1n,
+        lastDeliveryAt: new Date('2026-08-30T18:00:00.000Z'),
+      },
+    ]);
+
+    await expect(service.ranking(companyUser, { limit: 10 })).resolves.toEqual({
+      items: [
+        {
+          id: 'customer-a',
+          name: 'Joao da Silva',
+          phone: '33999999991',
+          totalDeliveries: 42,
+          completedDeliveries: 39,
+          inProgressDeliveries: 2,
+          cancelledDeliveries: 1,
+          lastDeliveryAt: '2026-08-30T18:00:00.000Z',
+        },
+      ],
+    });
+    expect(prisma.companyTeamMember.findFirst).toHaveBeenCalledWith({
+      where: { userId: companyUser.id, active: true },
+      select: { companyId: true },
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('nao revela cliente de outra empresa por ID manipulado', async () => {
     prisma.companyCustomer.findFirst.mockResolvedValue(null);
 
