@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-29**, depois da auditoria do aplicativo do motoboy.
+> Última revisão: **2026-08-31**, depois da estabilização da câmera do mapa no Company Web.
 
 ## Como atualizar
 
@@ -77,6 +77,15 @@ manual; ciclo completo de coleta, entrega, insucesso e retorno, com destino
 conhecido ou definido na entrega; punição automática por recusa; carteira,
 repasse semanal, saque e faturamento; rastreamento público por link; integração
 aiqfome (importação e ciclo logístico); central de avisos nos dois painéis.
+
+O perfil da empresa permite que qualquer membro ativo altere a própria senha
+confirmando a credencial atual. O
+sucesso revoga tokens e sockets antigos, limpa a sessão do painel e exige novo
+login; nenhuma migration foi necessária.
+
+O mapa da central operacional mantém o zoom e o arraste da empresa durante
+atualizações de GPS. O enquadramento automático continua na abertura e quando a
+composição da operação ou um endereço realmente muda.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e
@@ -198,8 +207,8 @@ pnpm --filter @motoboycity/driver-app exec jest --runInBand
 pnpm --filter @motoboycity/company-web test
 ```
 
-Cobertura atual: **83 suítes / 1020** testes unitários da API, **25 / 155** do
-Driver App, **19 arquivos / 72** da Company Web, **25 / 247** E2E.
+Cobertura atual: **84 suítes / 1043** testes unitários da API, **25 / 155** do
+Driver App, **22 arquivos / 93** da Company Web, **25 / 247** E2E.
 
 ### E2E
 

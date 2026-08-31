@@ -313,6 +313,15 @@ Tokens emitidos antes da introdução dessa impressão são rejeitados uma únic
 vez após o deploy; os usuários precisam entrar novamente. Isso evita que um
 token legado sobreviva a uma redefinição administrativa.
 
+## Troca da própria senha pela empresa
+
+Qualquer membro ativo autenticado da empresa pode alterar a senha da própria
+conta, sem depender do administrador. A operação exige a senha atual correta,
+uma nova senha diferente com pelo menos oito caracteres e confirmação apenas na
+interface. Depois da troca, tokens REST e conexões realtime da credencial
+anterior são encerrados, e o usuário precisa entrar novamente com a nova senha.
+Senha e hash nunca fazem parte da resposta, dos logs ou da interface.
+
 ## Foto de perfil
 
 Qualquer usuário autenticado pode substituir a própria foto de perfil. O

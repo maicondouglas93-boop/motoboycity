@@ -1,6 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { User } from '@prisma/client';
+import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { CompanyProfileService } from './company-profile.service';
 
 const owner = {
@@ -29,6 +31,8 @@ describe('CompanyProfileService', () => {
     user: { update: jest.Mock };
   };
   let service: CompanyProfileService;
+  let authService: { changeOwnPassword: jest.Mock };
+  let realtimeGateway: { disconnectUser: jest.Mock };
 
   beforeEach(() => {
     tx = {
@@ -40,7 +44,13 @@ describe('CompanyProfileService', () => {
       companyTeamMember: { findFirst: jest.fn() },
       $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     };
-    service = new CompanyProfileService(prisma as unknown as PrismaService);
+    authService = { changeOwnPassword: jest.fn() };
+    realtimeGateway = { disconnectUser: jest.fn() };
+    service = new CompanyProfileService(
+      prisma as unknown as PrismaService,
+      authService as unknown as AuthService,
+      realtimeGateway as unknown as RealtimeGateway,
+    );
   });
 
   it('retorna os dados da empresa e do usuário autenticado', async () => {
@@ -122,5 +132,35 @@ describe('CompanyProfileService', () => {
     await expect(service.update(owner, payload)).rejects.toBeInstanceOf(ForbiddenException);
     expect(tx.company.update).not.toHaveBeenCalled();
     expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it('troca a senha da propria conta e encerra suas conexoes realtime', async () => {
+    authService.changeOwnPassword.mockResolvedValue({ changed: true });
+
+    await expect(
+      service.changePassword(owner, {
+        currentPassword: 'senhaAtual123',
+        newPassword: 'senhaNova123',
+      }),
+    ).resolves.toEqual({ changed: true });
+
+    expect(authService.changeOwnPassword).toHaveBeenCalledWith(
+      owner.id,
+      'senhaAtual123',
+      'senhaNova123',
+    );
+    expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith(owner.id);
+  });
+
+  it('nao desconecta a sessao quando a troca de senha falha', async () => {
+    authService.changeOwnPassword.mockRejectedValue(new Error('senha invalida'));
+
+    await expect(
+      service.changePassword(owner, {
+        currentPassword: 'senhaErrada123',
+        newPassword: 'senhaNova123',
+      }),
+    ).rejects.toThrow('senha invalida');
+    expect(realtimeGateway.disconnectUser).not.toHaveBeenCalled();
   });
 });

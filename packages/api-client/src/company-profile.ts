@@ -1,5 +1,8 @@
-import type { CompanyProfile } from '@motoboycity/types';
-import type { UpdateCompanyProfilePayload } from '@motoboycity/validation';
+import type { CompanyProfile, OwnPasswordChangeResult } from '@motoboycity/types';
+import type {
+  ChangeOwnPasswordPayload,
+  UpdateCompanyProfilePayload,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -30,6 +33,18 @@ export function createCompanyProfileApi({ baseUrl }: CompanyProfileApiConfig) {
         body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<CompanyProfile>(response);
+    },
+
+    async changePassword(
+      accessToken: string,
+      payload: ChangeOwnPasswordPayload,
+    ): Promise<OwnPasswordChangeResult> {
+      const response = await apiFetch(`${baseUrl}/company/profile/password`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<OwnPasswordChangeResult>(response);
     },
   };
 }

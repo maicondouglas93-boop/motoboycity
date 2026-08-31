@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type SubmitEvent } from 'react';
+import { useState, useSyncExternalStore, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +14,18 @@ import { RouteDiagram } from '@/components/brand/route-diagram';
 import { authApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
+function subscribeToLocation() {
+  return () => undefined;
+}
+
+function passwordChangedSnapshot() {
+  return new URLSearchParams(window.location.search).get('passwordChanged') === '1';
+}
+
+function passwordChangedServerSnapshot() {
+  return false;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -21,6 +33,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const passwordChanged = useSyncExternalStore(
+    subscribeToLocation,
+    passwordChangedSnapshot,
+    passwordChangedServerSnapshot,
+  );
 
   const mutation = useMutation({
     mutationFn: authApi.login,
@@ -94,6 +111,15 @@ export default function LoginPage() {
           <p className="mt-1.5 text-sm text-muted-foreground">
             Use o e-mail cadastrado pela sua empresa.
           </p>
+
+          {passwordChanged && (
+            <p
+              className="mt-5 rounded-xl border border-emerald-300/70 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+              role="status"
+            >
+              Senha alterada com sucesso. Entre novamente com sua nova senha.
+            </p>
+          )}
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
             <div className="space-y-1.5">

@@ -12,3 +12,8 @@ export interface AuthUser {
 export interface AdminPasswordChangeResult {
   userId: string;
 }
+
+/** A troca da propria senha nunca devolve a credencial nem seu hash. */
+export interface OwnPasswordChangeResult {
+  changed: true;
+}

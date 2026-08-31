@@ -11198,3 +11198,84 @@ num Android 10, conferindo que o alerta oferece "Abrir ajustes"; e matar a rede
 no meio de uma finalização, conferindo que a espera termina em 15 s com mensagem
 em vez de girar para sempre. O item no handoff foi reescrito para dizer só isso,
 em vez de continuar amarrado à instalação que já aconteceu.
+
+## 2026-08-31 — Empresa altera a própria senha no perfil
+
+O perfil do Company Web agora oferece uma área de **Segurança da conta** para
+qualquer membro ativo alterar a senha da própria credencial sem depender do
+administrador. O formulário exige senha atual, nova senha de pelo menos oito
+caracteres e confirmação local; confirmação e senhas nunca entram na resposta,
+em logs ou em documentação.
+
+A API expõe `PUT /company/profile/password`, protegida por `JwtAuthGuard`,
+`CompanyOnlyGuard` e limite de cinco tentativas por minuto. A senha atual é
+comparada com bcrypt. A gravação usa `updateMany` condicionado pelo hash lido,
+de modo que duas trocas concorrentes não possam confirmar silenciosamente sobre
+uma credencial já alterada. Senha atual incorreta responde `403`, não `401`,
+porque erro de digitação não representa sessão expirada.
+
+Depois da troca, o fingerprint do novo hash invalida todos os JWT anteriores e
+o servidor derruba os sockets já conectados. O painel limpa token e cache e
+redireciona para o login, que confirma o sucesso e pede a nova senha. Não houve
+mudança de schema, migration, `.env` ou segredo.
+
+Arquivos principais:
+
+- `packages/validation/src/auth/change-own-password.schema.ts`;
+- `packages/types/src/user.ts` e `packages/api-client/src/company-profile.ts`;
+- `apps/api/src/auth/auth.service.ts` e `apps/api/src/company/profile/`;
+- `apps/company-web/src/components/profile/change-password-form.tsx`;
+- `apps/company-web/src/app/(app)/perfil/page.tsx` e `app/login/page.tsx`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| build de `@motoboycity/validation` | aprovado |
+| Jest focado de autenticação e perfil | 2 suítes / 33 testes aprovados |
+| Jest unitário completo da API | 84 suítes / 1043 testes aprovados |
+| Vitest focado do formulário | 1 arquivo / 3 testes aprovados |
+| Vitest completo do Company Web | 22 arquivos / 93 testes aprovados |
+| `pnpm typecheck` | 8 projetos aprovados |
+| `pnpm lint` | 8 projetos aprovados; permanece 1 aviso preexistente no Driver App |
+| build da API e build do Company Web | aprovados; painel gerou 22 páginas |
+
+O primeiro lint detectou `setState` síncrono num efeito usado apenas pelo aviso
+pós-troca; o aviso foi refeito com `useSyncExternalStore` e a repetição passou.
+Não foi executado E2E nem smoke autenticado em navegador: não eram necessários
+para validar o contrato local e não havia credencial Company de teste fornecida.
+Próximo passo concreto: homologar a troca em uma conta controlada, confirmando
+senha antiga recusada, nova aceita e outra aba desconectada.
+
+## 2026-08-31 — Mapa operacional da empresa preserva o zoom
+
+O mapa da central operacional deixou de executar `fitBounds` a cada atualização
+de localização do motoboy. O GPS continua movendo o marcador em tempo real, mas
+agora a câmera respeita o zoom e o arraste feitos pela empresa. O enquadramento
+automático permanece na primeira carga e quando entra ou sai um marcador da
+operação, o ponto de coleta muda ou um destino é corrigido.
+
+A decisão é baseada em uma chave estável da área operacional: ela inclui os IDs
+dos pedidos e as coordenadas fixas de coleta/destino, mas exclui as coordenadas
+móveis do motoboy e independe da ordem recebida da API. Assim, polling, eventos
+Socket.IO e seleção de um card podem atualizar os marcadores sem provocar saltos
+de câmera.
+
+Arquivos:
+
+- `apps/company-web/src/components/operations/company-operations-map.tsx`;
+- `apps/company-web/src/components/operations/company-operations-map.test.ts`;
+- `docs/agent-handoff.md` e `docs/changelog.md`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Vitest focado do mapa | 1 arquivo / 3 testes aprovados |
+| Vitest completo do Company Web | 23 arquivos / 96 testes aprovados |
+| typecheck do Company Web | aprovado |
+| ESLint dos dois arquivos do mapa | aprovado sem avisos |
+
+Não houve mudança de API, contrato, banco ou variável de ambiente. Não foi feito
+smoke autenticado no navegador nesta sessão; a regressão de câmera foi coberta
+pela política testada que ignora movimento GPS e reage a mudanças reais da área.

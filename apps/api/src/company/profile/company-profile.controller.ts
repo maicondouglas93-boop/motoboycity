@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
-import type { CompanyProfile } from '@motoboycity/types';
+import { Throttle } from '@nestjs/throttler';
+import type { CompanyProfile, OwnPasswordChangeResult } from '@motoboycity/types';
 import {
+  changeOwnPasswordSchema,
+  type ChangeOwnPasswordPayload,
   updateCompanyProfileSchema,
   type UpdateCompanyProfilePayload,
 } from '@motoboycity/validation';
@@ -27,5 +30,14 @@ export class CompanyProfileController {
     @Body(new ZodValidationPipe(updateCompanyProfileSchema)) body: UpdateCompanyProfilePayload,
   ): Promise<CompanyProfile> {
     return this.companyProfileService.update(user, body);
+  }
+
+  @Put('password')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  changePassword(
+    @CurrentUser() user: User,
+    @Body(new ZodValidationPipe(changeOwnPasswordSchema)) body: ChangeOwnPasswordPayload,
+  ): Promise<OwnPasswordChangeResult> {
+    return this.companyProfileService.changePassword(user, body);
   }
 }

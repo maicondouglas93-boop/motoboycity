@@ -36,7 +36,7 @@ const validDriverPayload = {
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: {
-    user: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock };
+    user: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
     company: { findUnique: jest.Mock; create: jest.Mock };
     companyTeamMember: { create: jest.Mock; findFirst: jest.Mock };
     driver: { findUnique: jest.Mock; create: jest.Mock };
@@ -49,7 +49,12 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     prisma = {
-      user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+      user: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
       company: { findUnique: jest.fn(), create: jest.fn() },
       companyTeamMember: { create: jest.fn(), findFirst: jest.fn() },
       driver: { findUnique: jest.fn(), create: jest.fn() },
@@ -310,6 +315,62 @@ describe('AuthService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'user-1' }, select: { id: true } }),
       );
+    });
+  });
+
+  describe('changeOwnPassword', () => {
+    it('confere a senha atual e troca o hash com guarda contra concorrencia', async () => {
+      const currentPasswordHash = await bcrypt.hash('senhaAtual123', 4);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: currentPasswordHash,
+      });
+      prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.changeOwnPassword('user-1', 'senhaAtual123', 'senhaNova123'),
+      ).resolves.toEqual({ changed: true });
+
+      const update = prisma.user.updateMany.mock.calls[0]?.[0];
+      expect(update.where).toEqual({ id: 'user-1', passwordHash: currentPasswordHash });
+      expect(update.data.passwordHash).not.toBe('senhaNova123');
+      await expect(bcrypt.compare('senhaNova123', update.data.passwordHash)).resolves.toBe(true);
+    });
+
+    it('recusa quando a senha atual esta incorreta sem gravar outro hash', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: await bcrypt.hash('senhaAtual123', 4),
+      });
+
+      await expect(
+        service.changeOwnPassword('user-1', 'senhaErrada123', 'senhaNova123'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('recusa reutilizar a senha atual', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: await bcrypt.hash('senhaAtual123', 4),
+      });
+
+      await expect(
+        service.changeOwnPassword('user-1', 'senhaAtual123', 'senhaAtual123'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('recusa quando a credencial mudou entre a conferencia e a gravacao', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: await bcrypt.hash('senhaAtual123', 4),
+      });
+      prisma.user.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.changeOwnPassword('user-1', 'senhaAtual123', 'senhaNova123'),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

@@ -34,10 +34,47 @@ interface Props {
 /** Verde da placa: a mesma cor que o motoboy ja tinha no mapa. */
 const COR_DO_MOTOBOY = '#0b6e4f';
 
+/**
+ * Identifica mudancas que realmente exigem reenquadrar a operacao.
+ *
+ * A posicao do motoboy fica deliberadamente fora da chave: ela muda a cada
+ * evento de GPS e deve mover somente o marcador, sem desfazer o zoom ou o
+ * arraste feitos pela empresa. Destinos e ponto de coleta entram com as
+ * coordenadas porque uma correcao de endereco muda a area da operacao.
+ */
+export function operationsMapCameraScope(
+  pickupAddress: Pick<CompanyAddressItem, 'lat' | 'lng'>,
+  deliveries: Pick<OperationalDeliveryItem, 'id' | 'addresses' | 'lastLocation'>[],
+) {
+  const scope: string[] = [];
+
+  if (pickupAddress.lat !== null && pickupAddress.lng !== null) {
+    scope.push(`pickup:${pickupAddress.lat}:${pickupAddress.lng}`);
+  }
+
+  for (const delivery of deliveries) {
+    const dropoff = delivery.addresses.find(
+      (address) => address.type === 'DROPOFF' && address.lat !== null && address.lng !== null,
+    );
+    if (
+      dropoff?.lat !== null &&
+      dropoff?.lng !== null &&
+      dropoff?.lat !== undefined &&
+      dropoff?.lng !== undefined
+    ) {
+      scope.push(`dropoff:${delivery.id}:${dropoff.lat}:${dropoff.lng}`);
+    }
+    if (delivery.lastLocation) scope.push(`driver:${delivery.id}`);
+  }
+
+  return scope.sort().join('|');
+}
+
 export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const lastCameraScopeRef = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
   /**
    * A loja e um centro melhor que o centro da cidade: as entregas saem dela, e
@@ -81,6 +118,10 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
 
   useEffect(() => {
     if (!ready || !mapRef.current || !window.google) return;
+    const cameraScope = operationsMapCameraScope(
+      { lat: pickupAddress.lat, lng: pickupAddress.lng },
+      deliveries,
+    );
     markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
     /**
@@ -182,15 +223,19 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
      * calcada de um endereco so. Com um ponto, o certo e centralizar e deixar o
      * zoom como esta, o que tambem respeita quem ja tinha ajustado a vista.
      */
-    const map = mapRef.current;
-    if (markersRef.current.length === 1) {
-      map.setCenter(markersRef.current[0]!.getPosition()!);
-    } else if (markersRef.current.length > 1) {
-      google.maps.event.addListenerOnce(map, 'idle', () => {
-        const zoom = map.getZoom();
-        if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
-      });
-      map.fitBounds(bounds, 64);
+    const shouldReframe = lastCameraScopeRef.current !== cameraScope;
+    lastCameraScopeRef.current = cameraScope;
+    if (shouldReframe) {
+      const map = mapRef.current;
+      if (markersRef.current.length === 1) {
+        map.setCenter(markersRef.current[0]!.getPosition()!);
+      } else if (markersRef.current.length > 1) {
+        google.maps.event.addListenerOnce(map, 'idle', () => {
+          const zoom = map.getZoom();
+          if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
+        });
+        map.fitBounds(bounds, 64);
+      }
     }
 
     return () => {

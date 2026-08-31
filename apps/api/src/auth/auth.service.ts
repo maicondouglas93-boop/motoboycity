@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import type {
   AdminPasswordChangeResult,
+  OwnPasswordChangeResult,
   RegisterCompanyResult as SharedRegisterCompanyResult,
   RegisterDriverResult as SharedRegisterDriverResult,
 } from '@motoboycity/types';
@@ -170,6 +171,36 @@ export class AuthService {
       }
       throw error;
     }
+  }
+
+  async changeOwnPassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<OwnPasswordChangeResult> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw new ForbiddenException('A senha atual está incorreta.');
+    }
+    if (currentPassword === newPassword) {
+      throw new ConflictException('A nova senha deve ser diferente da senha atual.');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, PASSWORD_HASH_ROUNDS);
+    const updated = await this.prisma.user.updateMany({
+      where: { id: user.id, passwordHash: user.passwordHash },
+      data: { passwordHash },
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(
+        'A senha foi alterada em outra sessão. Entre novamente e repita a operação.',
+      );
+    }
+
+    return { changed: true };
   }
 
   async registerDriver(

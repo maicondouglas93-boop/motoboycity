@@ -1,12 +1,21 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import type { CompanyProfile } from '@motoboycity/types';
-import type { UpdateCompanyProfilePayload } from '@motoboycity/validation';
+import type { CompanyProfile, OwnPasswordChangeResult } from '@motoboycity/types';
+import type {
+  ChangeOwnPasswordPayload,
+  UpdateCompanyProfilePayload,
+} from '@motoboycity/validation';
 import type { User } from '@prisma/client';
+import { AuthService } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
 @Injectable()
 export class CompanyProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+    private readonly realtimeGateway: RealtimeGateway,
+  ) {}
 
   async get(user: User): Promise<CompanyProfile> {
     this.assertCompanyUser(user);
@@ -74,6 +83,20 @@ export class CompanyProfileService {
         canEdit: true,
       };
     });
+  }
+
+  async changePassword(
+    user: User,
+    payload: ChangeOwnPasswordPayload,
+  ): Promise<OwnPasswordChangeResult> {
+    this.assertCompanyUser(user);
+    const result = await this.authService.changeOwnPassword(
+      user.id,
+      payload.currentPassword,
+      payload.newPassword,
+    );
+    this.realtimeGateway.disconnectUser(user.id);
+    return result;
   }
 
   private assertCompanyUser(user: User): void {

@@ -11,6 +11,7 @@ import {
   CompanyDataForm,
   companyProfileQueryKey,
 } from '@/components/profile/company-data-form';
+import { ChangePasswordForm } from '@/components/profile/change-password-form';
 import { authApi, companyProfileApi } from '@/lib/api-client';
 import { authUserQueryKey, authUserQueryOptions } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
@@ -240,6 +241,8 @@ export default function CompanyProfilePage() {
           </Card>
         </div>
       )}
+
+      {user && <ChangePasswordForm token={token} />}
 
       {user && companyProfileQuery.isPending && (
         <Card>
