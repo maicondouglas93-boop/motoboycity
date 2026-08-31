@@ -11372,3 +11372,24 @@ Arquivos principais:
 Não foram aplicadas migrations, usadas credenciais reais, feito E2E contra o
 Asaas nem deploy. A homologação depende da configuração descrita em
 `docs/asaas-pix.md`.
+
+## 2026-08-31 — Publicação do Pix Asaas e correção do portão E2E
+
+`main` foi enviado ao GitHub. O Render publicou a API executando
+`prisma migrate deploy` antes do build; a rota nova do webhook respondeu `401`
+sem token, confirmando que o controller novo está ativo sem realizar escrita. O
+`/health` respondeu `200`. Os deploys do Company Web e Admin Web ficaram verdes
+na Vercel, e a página pública de termos já contém a transparência sobre o Asaas.
+
+O primeiro CI da release aplicou as migrations, passou typecheck, lint, testes
+unitários e 24 das 25 suítes E2E. A suíte
+`admin-platform-settings.e2e-spec.ts` ainda comparava a resposta inteira sem o
+campo `withdrawalWeekday`, introduzido no commit anterior, e falhou em três
+expectativas apesar de a resposta estar correta. As três expectativas passaram
+a incluir o padrão preservado `withdrawalWeekday: 1`. O E2E local não foi
+executado contra banco compartilhado; a nova execução fica a cargo do CI deste
+ajuste.
+
+Nenhuma credencial foi lida ou registrada. O pagamento real ainda depende da
+configuração privada das três variáveis `ASAAS_*`, do webhook e de um smoke no
+Sandbox.

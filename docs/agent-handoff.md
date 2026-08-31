@@ -8,7 +8,7 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-31**, depois da implementação local do Pix Asaas.
+> Última revisão: **2026-08-31**, depois da publicação do código do Pix Asaas.
 
 ## Como atualizar
 
@@ -27,10 +27,10 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `db5381d` — `main` sincronizado com `origin/main` |
+| Commit publicado | `main` sincronizado com `origin/main` em 31/08/2026 (release Pix Asaas) |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado, 48 migrations |
+| Banco | PostgreSQL gerenciado, 50 migrations |
 | APK nos aparelhos | **`pilot.16`** distribuído em 31/08/2026. Quem ainda não abriu o app pode estar no `pilot.15`: confirme por motoboy no painel, não nesta linha (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -91,12 +91,14 @@ A agenda da empresa possui um Top 10 real por entregas concluídas. Os três
 primeiros aparecem em um pódio e os demais continuam numa lista; a consulta
 agregada é isolada pela empresa e não exigiu migration.
 
-O recorte local de faturamento possui cobrança Pix Asaas: a empresa gera e copia
+O faturamento publicado possui cobrança Pix Asaas: a empresa gera e copia
 o QR Code no detalhe da fatura, enquanto a API reutiliza o cliente, reconcilia
 timeout pela referência externa e só dá baixa por `PAYMENT_RECEIVED` autenticado
-e validado. Ele ainda **não está publicado nem habilitado**: exige a migration
-`20260831120000_asaas_invoice_pix`, as três variáveis `ASAAS_*` e o webhook do
-painel Asaas conforme `docs/asaas-pix.md`.
+e validado. A migration `20260831120000_asaas_invoice_pix` foi aplicada pelo
+build do Render e API/Company Web foram publicados. A habilitação operacional
+continua dependendo das três variáveis `ASAAS_*`, do webhook no painel Asaas e
+do smoke controlado conforme `docs/asaas-pix.md`; esses segredos não são
+verificáveis pelo repositório.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e
