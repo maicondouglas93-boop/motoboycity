@@ -27,7 +27,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `21ab4fb` — `main` sincronizado com `origin/main` |
+| Commit publicado | `db5381d` — `main` sincronizado com `origin/main` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado, 48 migrations |
@@ -127,6 +127,13 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 3. **Rotação dos segredos** registrada no changelog da integração aiqfome.
+4. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+   projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
+   `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
+   incêndio, um furto ou um ransomware levam as duas — e sem o keystore o
+   aplicativo instalado **nunca mais recebe atualização**, porque o Android
+   recusa APK assinado por outra chave. Se for para a nuvem, tem que ir
+   criptografado. Tudo o mais neste documento tem conserto; isto não tem.
 
 ### Dívida técnica priorizada
 
@@ -150,6 +157,20 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 6. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
    continuam pendentes.
 7. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
+8. **Uma consulta por repasse dentro da transação.**
+   `releaseDueRepasses` faz `1 + N + M` idas ao banco dentro de UMA transação
+   serializável: uma busca, um `updateMany` por candidato e um `update` por
+   carteira. Com a API em `virginia` e o Neon em `sa-east-1`, cada ida custa
+   mais de 100 ms — foi isso que estourou o prazo padrão de 5 s do Prisma e
+   derrubou o deploy de 31/08/2026. O prazo foi elevado para 20 s, mas isso é
+   curativo: o conserto é liberar em lote. Não foi feito porque é código de
+   dinheiro e o `updated.count === 1` por linha é uma defesa de concorrência
+   que não se troca sem teste de integração.
+9. **O CI não roda suíte de front-end nenhuma.** O `ci.yml` cobre API,
+   driver-app e E2E; os testes do `company-web` (vitest) e do `admin-web`
+   (`node --test`) só rodam na mão. Escrever teste de painel hoje é escrever
+   algo que nenhum PR vai executar — são duas linhas no workflow para mudar
+   isso.
 
 ## Ambiente de desenvolvimento
 

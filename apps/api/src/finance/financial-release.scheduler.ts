@@ -32,17 +32,53 @@ export class FinancialReleaseScheduler implements OnModuleInit {
       { pattern: '5 0 * * *', tz: 'America/Sao_Paulo' },
       { name: CLOSE_COMPANY_INVOICES_JOB, data: {} },
     );
-    const released = await this.financialPayoutService.releaseDueRepasses();
-    if (released > 0) {
-      this.logger.log(`${released} repasse(s) atrasado(s) liberado(s) na inicialização.`);
+    await this.recuperarAtrasados();
+  }
+
+  /**
+   * A recuperação do que ficou atrasado NÃO pode derrubar a subida da API.
+   *
+   * Isto aqui é rede de segurança: o trabalho de verdade acontece nos jobs
+   * agendados logo acima, e o processador do BullMQ chama exatamente os mesmos
+   * métodos. Enquanto essas chamadas ficaram sem proteção, uma falha delas
+   * estourava dentro do `onModuleInit`, o Nest abortava o bootstrap e o
+   * processo saía com código 1 — a API inteira não subia por causa da rede de
+   * segurança dela.
+   *
+   * Foi o que aconteceu no deploy de 31/08/2026: `P2028` (transação expirada)
+   * em `releaseDueRepasses`, e o Render registrou "No open ports detected".
+   * A produção só não caiu porque o Render mantém a versão anterior quando a
+   * nova não abre porta.
+   *
+   * Falhar aqui é aceitável e o job agendado tenta de novo. Não subir não é.
+   */
+  private async recuperarAtrasados(): Promise<void> {
+    try {
+      const released = await this.financialPayoutService.releaseDueRepasses();
+      if (released > 0) {
+        this.logger.log(`${released} repasse(s) atrasado(s) liberado(s) na inicialização.`);
+      }
+    } catch (error) {
+      this.logger.error(
+        'Não foi possível liberar repasses atrasados na inicialização. O job semanal tentará de novo.',
+        error instanceof Error ? error.stack : String(error),
+      );
     }
-    const billing = await this.invoiceService.processScheduledBilling();
-    if (billing.invoices.length > 0) {
-      this.logger.log(`${billing.invoices.length} fatura(s) fechada(s) na inicialização.`);
-    }
-    if (billing.blockedCompanyIds.length > 0) {
-      this.logger.warn(
-        `${billing.blockedCompanyIds.length} empresa(s) bloqueada(s) por inadimplencia na inicialização.`,
+
+    try {
+      const billing = await this.invoiceService.processScheduledBilling();
+      if (billing.invoices.length > 0) {
+        this.logger.log(`${billing.invoices.length} fatura(s) fechada(s) na inicialização.`);
+      }
+      if (billing.blockedCompanyIds.length > 0) {
+        this.logger.warn(
+          `${billing.blockedCompanyIds.length} empresa(s) bloqueada(s) por inadimplencia na inicialização.`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        'Não foi possível processar o faturamento na inicialização. O job diário tentará de novo.',
+        error instanceof Error ? error.stack : String(error),
       );
     }
   }

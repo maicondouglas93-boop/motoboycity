@@ -43,4 +43,40 @@ describe('FinancialReleaseScheduler', () => {
     expect(queue.removeJobScheduler).toHaveBeenCalledWith('weekly-company-invoice-close');
     expect(invoiceService.processScheduledBilling).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * Estes dois testes existem por causa de um deploy real: em 31/08/2026 a
+   * liberação de repasses estourou `P2028` (transação expirada) contra o Neon,
+   * o erro subiu pelo `onModuleInit`, o Nest abortou o bootstrap e o processo
+   * saiu com código 1. O Render registrou "No open ports detected" e o deploy
+   * falhou inteiro.
+   *
+   * A recuperação do atraso é rede de segurança — os jobs agendados fazem o
+   * mesmo trabalho. Rede de segurança que derruba a casa não é rede.
+   */
+  it('sobe mesmo se a liberação de repasses falhar', async () => {
+    payoutService.releaseDueRepasses.mockRejectedValue(new Error('P2028'));
+
+    await expect(scheduler.onModuleInit()).resolves.toBeUndefined();
+
+    // E o faturamento ainda é tentado: uma falha não cancela a outra tarefa.
+    expect(invoiceService.processScheduledBilling).toHaveBeenCalledTimes(1);
+  });
+
+  it('sobe mesmo se o faturamento falhar', async () => {
+    invoiceService.processScheduledBilling.mockRejectedValue(new Error('P2028'));
+
+    await expect(scheduler.onModuleInit()).resolves.toBeUndefined();
+  });
+
+  /**
+   * O agendamento em si continua fatal de propósito: sem ele, repasse e
+   * faturamento nunca mais rodam, e falhar calado deixaria a operação sem
+   * nenhum dos dois sem ninguém perceber.
+   */
+  it('não engole falha ao registrar os agendamentos', async () => {
+    queue.upsertJobScheduler.mockRejectedValue(new Error('redis fora'));
+
+    await expect(scheduler.onModuleInit()).rejects.toThrow('redis fora');
+  });
 });

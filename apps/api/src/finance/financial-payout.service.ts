@@ -21,6 +21,23 @@ import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-ti
 
 type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
 
+/**
+ * Prazos explícitos da transação financeira, em vez dos padrões do Prisma
+ * (`maxWait` 2 s, `timeout` 5 s).
+ *
+ * A API roda em `virginia` e o banco fica no Neon em `sa-east-1`: cada ida e
+ * volta custa mais de cem milissegundos, e estas transações fazem uma consulta
+ * por repasse liberado. Cinco segundos é um orçamento que a rede sozinha
+ * consome — e o estouro não vem como lentidão, vem como `P2028` (transação
+ * expirada), que derrubava a subida da API inteira e devolvia 500 para o
+ * motoboy pedindo saque.
+ *
+ * Vinte segundos é folga para a latência entre regiões, não licença para
+ * transação longa: a consulta por repasse dentro da transação continua sendo
+ * dívida registrada no handoff, e é ela que precisa sumir.
+ */
+const PRAZOS_DA_TRANSACAO = { maxWait: 10_000, timeout: 20_000 } as const;
+
 const withdrawalInclude = {
   wallet: {
     include: {
@@ -497,6 +514,7 @@ export class FinancialPayoutService {
       try {
         return await this.prisma.$transaction(callback, {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          ...PRAZOS_DA_TRANSACAO,
         });
       } catch (error) {
         const canRetry =

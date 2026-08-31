@@ -10985,3 +10985,139 @@ secundária.
 `apps/company-web/src/components/orders/create-order-form.tsx` cria entrega e
 **não é importado por ninguém**. Não ganhou nem o acompanhamento nem o aviso de
 horário: é código morto, e a correção é apagá-lo, não alimentá-lo.
+
+## 2026-08-31 — Checkup geral antes de uma pausa
+
+Nenhuma mudança de comportamento. É um retrato medido do estado, feito porque o
+projeto vai ficar sem manutenção ativa por um tempo e a próxima pessoa a abrir
+isto — inclusive o próprio autor, em alguns meses — precisa de números, não de
+lembrança.
+
+### O que foi medido
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 workspaces) | aprovados |
+| `apps/api` — `jest` | 84 suítes, **1030** testes |
+| `apps/driver-app` — `jest --runInBand` | 25 suítes, **155** testes |
+| `apps/company-web` — `vitest` | 21 arquivos, **90** testes |
+| `apps/admin-web` — `node --test` | **11** testes |
+| `prisma validate` | schema válido, 48 migrations no repositório |
+| Segredo rastreado no Git | nenhum — os dois achados são `.env.example` e fixture de teste |
+| `.env` no `.gitignore` | coberto; só arquivos `.example` rastreados |
+| API de produção | `401` em rota protegida, 0,21 s — aplicação de pé e quente |
+| Painéis admin e empresa | `200`, 0,4 s e 0,76 s |
+| `POST /ops/check-in/backup-banco` em produção | `401` sem token — rota publicada e guardada |
+
+**Não medido:** E2E e qualquer checagem que precise do banco. O Docker Desktop
+travou na inicialização nesta sessão e não subiu.
+
+### Dependências
+
+`pnpm audit` acusa 5 vulnerabilidades — 3 altas, 2 moderadas. Nenhuma alcançável
+por tráfego de produção, e nenhuma é dependência direta nossa:
+
+| Pacote | Vem de | Por que não é urgente |
+| --- | --- | --- |
+| `image-size` (2 avisos) | `react-native` → `metro` | Empacotador. Roda na máquina de quem compila, nunca no aparelho |
+| `deepmerge-ts` | `@prisma/client` → `@prisma/config` | Só na leitura de configuração do CLI, com entrada nossa |
+| `uuid` | `firebase-admin` → `@google-cloud/storage` | A falha exige passar `buf`, que nenhum chamador nosso passa |
+| `fast-xml-parser` | `@react-native-async-storage/async-storage` | Mesma cadeia de build do aplicativo |
+
+Todas dependem de o autor de cima subir a versão. Vale reconferir ao voltar, não
+vale forçar `override` agora.
+
+### O risco que não tem conserto
+
+O **keystore** existe em duas cópias — `I:\MOTOboyCity\signing\` e
+`D:\MOTOboyCity-Backup\signing\` — e as duas estão **no mesmo computador**.
+Perder as duas significa nunca mais atualizar o aplicativo instalado, porque o
+Android recusa APK assinado por outra chave. Todo o resto neste changelog tem
+conserto; isto não tem. Subiu para "pendente de ação humana" no handoff.
+
+O banco, esse sim, está coberto: o backup diário no Cloud Storage roda, foi
+restaurado de verdade uma vez, e o sino do painel admin cobra o silêncio dele.
+
+### O que está pronto e não foi para a rua
+
+- **`pilot.16`** está compilado em `I:\MOTOboyCity\releases\` e os aparelhos
+  seguem no `pilot.15`. Ele corrige o aviso preso de pedido já encerrado.
+- **Ações do Google na `v3`** no workflow de backup: publicado, mas nenhuma
+  execução rodou depois da troca. Uma execução manual prova.
+
+### Uma descoberta desta sessão
+
+**O CI não roda suíte de front-end nenhuma.** Apareceu ao ligar o script de
+teste do `admin-web`: o `ci.yml` cobre API, driver-app e E2E, e os 101 testes
+dos dois painéis nunca rodaram lá. Não foi corrigido aqui porque mexer no CI
+afeta todo PR futuro — está registrado como dívida.
+
+## 2026-08-31 — A rede de segurança derrubava a casa: deploy do Render falhando no arranque
+
+O deploy falhou e a causa não era build, era **arranque**. O log do Render
+terminava em `No open ports detected` porque o processo saía com código 1 antes
+de abrir a porta:
+
+```
+FinancialReleaseScheduler.onModuleInit
+  → FinancialPayoutService.withSerializableTransaction
+    → prisma.walletTransaction.updateMany()
+      → P2028: Transaction not found. Transaction ID is invalid, refers to an
+        old closed transaction...
+```
+
+A produção não caiu: o Render mantém a versão anterior quando a nova não abre
+porta. Mas o efeito é pior do que um deploy perdido — significa que a API podia
+deixar de subir a qualquer reinício, e a chance cresce sozinha, porque quanto
+mais repasses se acumulam mais longa fica a transação.
+
+### As duas causas
+
+**A transação não cabia no prazo.** `releaseDueRepasses` faz `1 + N + M` idas ao
+banco dentro de UMA transação serializável: uma busca, um `updateMany` por
+candidato e um `update` por carteira. A API roda em `virginia` e o Neon fica em
+`sa-east-1` — cada ida passa de 100 ms, e o padrão do Prisma para transação
+interativa é `timeout` de **5 s**. A rede sozinha consome o orçamento. O estouro
+não aparece como lentidão: aparece como `P2028`.
+
+O `withSerializableTransaction` só tentava de novo em `P2034` (conflito de
+serialização). `P2028` passava direto.
+
+**E a falha era fatal.** A recuperação do que ficou atrasado é **rede de
+segurança**: os jobs agendados logo acima fazem o mesmo trabalho, e o
+processador do BullMQ chama exatamente os mesmos métodos. Mesmo assim ela rodava
+sem proteção dentro do `onModuleInit` — então uma falha dela abortava o
+bootstrap do Nest e a API inteira não subia. Rede de segurança que derruba a
+casa não é rede.
+
+### O que mudou
+
+- `financial-release.scheduler.ts`: a recuperação de atrasados foi para
+  `recuperarAtrasados()`, com `try/catch` **por tarefa** — uma falha não cancela
+  a outra, e nenhuma das duas impede a API de subir. O registro dos agendamentos
+  continua fatal de propósito: sem ele, repasse e faturamento nunca mais rodam,
+  e falhar calado deixaria a operação sem os dois sem ninguém perceber.
+- `financial-payout.service.ts`: prazos explícitos
+  (`maxWait` 10 s, `timeout` 20 s) em vez dos padrões. Isso também conserta um
+  bug que ninguém tinha ligado ao deploy: `requestWithdrawal` usa o mesmo
+  ajudante, e um saque de motoboy que passasse de 5 s voltava 500.
+
+Três testes novos, um deles garantindo que o agendamento continua falhando alto.
+Com o `try/catch` removido, o teste da resiliência falha.
+
+### O que NÃO foi feito, e por quê
+
+A causa raiz é a consulta por repasse dentro da transação. Liberar em lote
+resolveria de vez, mas o `updated.count === 1` por linha é uma defesa de
+concorrência em código de dinheiro, e trocá-la exige teste de integração — que
+não rodou nesta sessão porque o Docker não subiu. Ficou registrado como dívida
+priorizada no handoff. Vinte segundos é curativo, não conserto.
+
+### Validações
+
+| Comando | Resultado |
+| --- | --- |
+| `apps/api` — `jest` | 84 suítes, **1033** testes |
+| `pnpm typecheck` e `pnpm lint` | aprovados |
+| Teste de resiliência com o `try/catch` removido | falhou, como esperado |
+| `/health` em produção durante a falha | `200` em 0,22 s — versão anterior servindo |
