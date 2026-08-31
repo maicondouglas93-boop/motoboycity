@@ -193,6 +193,11 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum AsaasEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
 enum AsaasResourceStatus {
   CREATING
   ACTIVE
@@ -467,17 +472,17 @@ model Company {
   approvedAt       DateTime?
   approvedBy       User?     @relation("CompanyApprovedBy", fields: [approvedByUserId], references: [id])
 
-  teamMembers   CompanyTeamMember[]
-  addresses     CompanyAddress[]
-  customers     CompanyCustomer[]
-  deliveries    Delivery[]
-  wallet        Wallet?
-  invoices      Invoice[]
-  integrations  Integration[]
-  pricingTables PricingTable[]
-  statusHistory CompanyStatusHistory[]
-  driverBlocks  DriverCompanyBlock[]
-  asaasCustomer AsaasCustomer?
+  teamMembers    CompanyTeamMember[]
+  addresses      CompanyAddress[]
+  customers      CompanyCustomer[]
+  deliveries     Delivery[]
+  wallet         Wallet?
+  invoices       Invoice[]
+  integrations   Integration[]
+  pricingTables  PricingTable[]
+  statusHistory  CompanyStatusHistory[]
+  driverBlocks   DriverCompanyBlock[]
+  asaasCustomers AsaasCustomer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1244,7 +1249,7 @@ model Invoice {
   deliveries     Delivery[]
   statusHistory  InvoiceStatusHistory[]
   paymentNotices InvoicePaymentNotice[]
-  pixCharge      InvoicePixCharge?
+  pixCharges     InvoicePixCharge[]
 
   createdAt DateTime @default(now())
 
@@ -1253,12 +1258,13 @@ model Invoice {
   @@map("invoices")
 }
 
-/// Identificador do cliente da empresa no Asaas. A reserva CREATING impede
-/// que duas faturas abertas ao mesmo tempo criem dois clientes no provedor.
+/// Identificador do cliente da empresa em cada ambiente Asaas. A reserva
+/// CREATING impede que duas faturas abertas criem dois clientes no provedor.
 model AsaasCustomer {
   id                 String              @id @default(uuid())
-  companyId          String              @unique
-  providerCustomerId String?             @unique
+  companyId          String
+  environment        AsaasEnvironment    @default(SANDBOX)
+  providerCustomerId String?
   status             AsaasResourceStatus @default(CREATING)
   errorCode          String?             @db.VarChar(80)
 
@@ -1267,18 +1273,21 @@ model AsaasCustomer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([status])
+  @@unique([companyId, environment])
+  @@unique([environment, providerCustomerId])
+  @@index([environment, status])
   @@map("asaas_customers")
 }
 
-/// Uma cobrança Pix por fatura. O externalReference e o id do pagamento no
-/// Asaas permitem reconciliar timeout sem criar uma segunda cobrança.
+/// Uma cobrança Pix por fatura e ambiente. O externalReference e o id do
+/// pagamento no Asaas permitem reconciliar timeout sem duplicar a cobrança.
 model InvoicePixCharge {
   id                 String                 @id @default(uuid())
-  invoiceId          String                 @unique
-  providerPaymentId  String?                @unique
+  invoiceId          String
+  environment        AsaasEnvironment       @default(SANDBOX)
+  providerPaymentId  String?
   providerCustomerId String?
-  externalReference  String                 @unique
+  externalReference  String
   status             InvoicePixChargeStatus @default(CREATING)
   providerStatus     String?                @db.VarChar(40)
   pixPayload         String?                @db.Text
@@ -1293,14 +1302,18 @@ model InvoicePixCharge {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([status])
+  @@unique([invoiceId, environment])
+  @@unique([environment, providerPaymentId])
+  @@unique([environment, externalReference])
+  @@index([environment, status])
   @@map("invoice_pix_charges")
 }
 
-/// Caixa de entrada idempotente dos webhooks financeiros do Asaas. O id do
-/// evento e globalmente único no provedor e evita baixar a fatura duas vezes.
+/// Caixa de entrada idempotente dos webhooks financeiros do Asaas. O ambiente
+/// e o id do evento evitam baixar a fatura duas vezes.
 model AsaasWebhookEvent {
-  id                String                  @id @db.VarChar(120)
+  id                String                  @db.VarChar(120)
+  environment       AsaasEnvironment        @default(SANDBOX)
   eventType         String                  @db.VarChar(80)
   providerPaymentId String?                 @db.VarChar(120)
   chargeId          String?
@@ -1311,8 +1324,9 @@ model AsaasWebhookEvent {
 
   charge InvoicePixCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
 
-  @@index([providerPaymentId])
-  @@index([status, receivedAt])
+  @@id([environment, id])
+  @@index([environment, providerPaymentId])
+  @@index([environment, status, receivedAt])
   @@map("asaas_webhook_events")
 }
 

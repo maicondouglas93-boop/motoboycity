@@ -11430,3 +11430,51 @@ Arquivos alterados:
 Não houve mudança de banco, migration, contrato compartilhado ou segredo. A
 causa concreta do ambiente de produção ainda depende de repetir a tentativa
 depois da publicação e ler o código seguro retornado/logado.
+
+## 2026-08-31 — Isolamento Asaas entre Sandbox e Produção
+
+A homologação Sandbox foi concluída de ponta a ponta no ambiente publicado:
+QR Code gerado, pagamento simulado, webhook `PAYMENT_RECEIVED` respondido com
+HTTP `200` e fatura baixada como `PAID`/`ONLINE`. A auditoria anterior à virada
+real identificou que customer, cobrança, QR Code e evento ainda compartilhavam
+o mesmo namespace do banco. Trocar somente a URL e a chave faria a API tentar
+usar em Produção os IDs criados no Sandbox.
+
+A migration aditiva `20260831155700_asaas_environment_isolation` cria o enum
+`AsaasEnvironment`, classifica os registros existentes como `SANDBOX` e passa a
+reservar customer e cobrança por empresa/fatura e ambiente. Eventos usam chave
+idempotente composta por ambiente e ID do Asaas. O serviço deriva o ambiente
+exclusivamente de `ASAAS_ENVIRONMENT`, falha fechado se ele estiver ausente e
+escopa todas as leituras, reconciliações e webhooks. Assim, a futura chave de
+Produção criará seus próprios IDs e nunca exibirá um QR Code do Sandbox.
+
+Dados e rollback: nenhum registro financeiro é apagado ou reclassificado como
+Produção. O rollback da migration só é seguro antes de existir mais de um
+registro por empresa/fatura em ambientes diferentes; depois da primeira
+cobrança real, deve ser feito por migration corretiva, preservando a trilha de
+auditoria. A fatura usada no smoke Sandbox permanece com a baixa que o teste
+registrou e precisa ser tratada como dado sintético confirmado pela operação.
+
+Arquivos principais:
+
+- `apps/api/prisma/schema.prisma` e migration
+  `20260831155700_asaas_environment_isolation`;
+- `apps/api/src/finance/asaas/asaas-billing.service.ts`, configuração e testes;
+- `docs/asaas-pix.md`, `docs/architecture.md` e `docs/business-rules.md`.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| `prisma validate` e `prisma generate` | aprovados |
+| Migration completa em PostgreSQL 17 local descartável | aprovada; banco temporário removido |
+| Jest focado do Asaas | 2 suítes / 15 testes aprovados |
+| Jest unitário completo da API | 87 suítes / 1071 testes aprovados |
+| typecheck da API | aprovado |
+| lint da API | aprovado sem avisos |
+| build da API | aprovado |
+
+Não foram executados E2E, migration no banco compartilhado nem chamadas com
+credencial real. A Produção ainda exige a migration publicada pelo Render, uma
+chave `$aact_prod_`, um webhook próprio da conta real e o smoke financeiro
+controlado descrito em `docs/asaas-pix.md`.

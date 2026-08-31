@@ -6,17 +6,18 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CompanyInvoicePixCharge } from '@motoboycity/types';
-import { Prisma, type User } from '@prisma/client';
+import { AsaasEnvironment, Prisma, type User } from '@prisma/client';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { dateInSaoPaulo } from '../finance-release.utils';
 import { FinancialClock } from '../financial-clock.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AsaasClient, AsaasProviderError, type AsaasPayment } from './asaas.client';
-import { readAsaasWebhookToken } from './asaas.config';
+import { readAsaasEnvironment, readAsaasWebhookToken } from './asaas.config';
 import type { AsaasWebhookEnvelope } from './asaas.schemas';
 
 const RESERVATION_TTL_MS = 30_000;
@@ -35,7 +36,10 @@ export class AsaasBillingService {
 
   async getForCompany(user: User, invoiceId: string): Promise<CompanyInvoicePixCharge | null> {
     const invoice = await this.companyInvoice(user, invoiceId);
-    const charge = await this.prisma.invoicePixCharge.findUnique({ where: { invoiceId } });
+    const environment = this.providerEnvironment();
+    const charge = await this.prisma.invoicePixCharge.findUnique({
+      where: { invoiceId_environment: { invoiceId, environment } },
+    });
     if (!charge) return null;
     if (charge.status === 'ACTIVE' && charge.providerPaymentId && this.needsQrRefresh(charge)) {
       try {
@@ -50,6 +54,7 @@ export class AsaasBillingService {
 
   async createForCompany(user: User, invoiceId: string): Promise<CompanyInvoicePixCharge> {
     const invoice = await this.companyInvoice(user, invoiceId);
+    const environment = this.providerEnvironment();
     if (invoice.status !== 'PENDING' && invoice.status !== 'OVERDUE') {
       throw new ConflictException('Somente faturas pendentes ou vencidas podem ser pagas por Pix.');
     }
@@ -57,7 +62,9 @@ export class AsaasBillingService {
       throw new ConflictException('A fatura precisa ter valor positivo para gerar o Pix.');
     }
 
-    let charge = await this.prisma.invoicePixCharge.findUnique({ where: { invoiceId } });
+    let charge = await this.prisma.invoicePixCharge.findUnique({
+      where: { invoiceId_environment: { invoiceId, environment } },
+    });
     if (charge?.status === 'RECEIVED') return this.toResponse(charge, invoice);
     if (charge?.status === 'ACTIVE' && charge.providerPaymentId) {
       if (!this.needsQrRefresh(charge)) return this.toResponse(charge, invoice);
@@ -78,6 +85,7 @@ export class AsaasBillingService {
         charge = await this.prisma.invoicePixCharge.create({
           data: {
             invoiceId,
+            environment,
             externalReference: this.invoiceReference(invoiceId),
             status: 'CREATING',
           },
@@ -85,19 +93,23 @@ export class AsaasBillingService {
         ownsReservation = true;
       } catch (error) {
         if (!this.isUniqueViolation(error)) throw error;
-        charge = await this.prisma.invoicePixCharge.findUniqueOrThrow({ where: { invoiceId } });
+        charge = await this.prisma.invoicePixCharge.findUniqueOrThrow({
+          where: { invoiceId_environment: { invoiceId, environment } },
+        });
       }
     }
 
     if (!ownsReservation) {
-      const reconciled = await this.reconcilePayment(charge, invoice);
+      const reconciled = await this.reconcilePayment(charge, invoice, environment);
       if (reconciled) return reconciled;
 
       if (
         charge.status === 'CREATING' &&
         this.clock.now().getTime() - charge.updatedAt.getTime() < RESERVATION_TTL_MS
       ) {
-        throw new ConflictException('O Pix já está sendo gerado. Aguarde alguns segundos e tente novamente.');
+        throw new ConflictException(
+          'O Pix já está sendo gerado. Aguarde alguns segundos e tente novamente.',
+        );
       }
       if (
         charge.status === 'RECONCILIATION_REQUIRED' &&
@@ -128,13 +140,15 @@ export class AsaasBillingService {
         },
       });
       if (claimed.count !== 1) {
-        throw new ConflictException('A cobrança foi alterada por outra solicitação. Atualize e tente novamente.');
+        throw new ConflictException(
+          'A cobrança foi alterada por outra solicitação. Atualize e tente novamente.',
+        );
       }
       charge = await this.prisma.invoicePixCharge.findUniqueOrThrow({ where: { id: charge.id } });
     }
 
     try {
-      const customerId = await this.ensureCustomer(invoice.company);
+      const customerId = await this.ensureCustomer(invoice.company, environment);
       const invoiceDueDate = invoice.dueDate.toISOString().slice(0, 10);
       const providerDueDate = [invoiceDueDate, dateInSaoPaulo(this.clock.now())].sort().at(-1)!;
       const payment = await this.client.createPixPayment({
@@ -193,11 +207,13 @@ export class AsaasBillingService {
     envelope: AsaasWebhookEnvelope,
   ): Promise<{ received: true }> {
     this.assertWebhookToken(suppliedToken);
+    const environment = this.providerEnvironment();
 
     await this.prisma.$transaction(async (tx) => {
       const inserted = await tx.asaasWebhookEvent.createMany({
         data: {
           id: envelope.id,
+          environment,
           eventType: envelope.event,
           providerPaymentId: envelope.payment?.id ?? null,
         },
@@ -206,16 +222,33 @@ export class AsaasBillingService {
       if (inserted.count === 0) return;
 
       if (envelope.event !== 'PAYMENT_RECEIVED' || !envelope.payment) {
-        await this.finishEvent(tx, envelope.id, 'IGNORED', 'Evento sem baixa financeira.');
+        await this.finishEvent(
+          tx,
+          environment,
+          envelope.id,
+          'IGNORED',
+          'Evento sem baixa financeira.',
+        );
         return;
       }
 
       const charge = await tx.invoicePixCharge.findUnique({
-        where: { providerPaymentId: envelope.payment.id },
+        where: {
+          environment_providerPaymentId: {
+            environment,
+            providerPaymentId: envelope.payment.id,
+          },
+        },
         include: { invoice: true },
       });
       if (!charge) {
-        await this.finishEvent(tx, envelope.id, 'IGNORED', 'Cobrança não pertence à plataforma.');
+        await this.finishEvent(
+          tx,
+          environment,
+          envelope.id,
+          'IGNORED',
+          'Cobrança não pertence à plataforma.',
+        );
         return;
       }
 
@@ -223,10 +256,10 @@ export class AsaasBillingService {
       if (mismatch) {
         this.logger.error(`Webhook Asaas ${envelope.id} ignorado: ${mismatch}`);
         await tx.asaasWebhookEvent.update({
-          where: { id: envelope.id },
+          where: { environment_id: { environment, id: envelope.id } },
           data: { chargeId: charge.id },
         });
-        await this.finishEvent(tx, envelope.id, 'IGNORED', mismatch);
+        await this.finishEvent(tx, environment, envelope.id, 'IGNORED', mismatch);
         return;
       }
 
@@ -241,10 +274,15 @@ export class AsaasBillingService {
       });
 
       if (charge.invoice.status === 'PENDING' || charge.invoice.status === 'OVERDUE') {
-        const paymentDate = this.validPaymentDate(envelope.payment) ?? dateInSaoPaulo(this.clock.now());
+        const paymentDate =
+          this.validPaymentDate(envelope.payment) ?? dateInSaoPaulo(this.clock.now());
         const updated = await tx.invoice.updateMany({
           where: { id: charge.invoiceId, status: charge.invoice.status },
-          data: { status: 'PAID', paymentDate: this.dateOnly(paymentDate), paymentMethod: 'ONLINE' },
+          data: {
+            status: 'PAID',
+            paymentDate: this.dateOnly(paymentDate),
+            paymentMethod: 'ONLINE',
+          },
         });
         if (updated.count !== 1) throw new Error('INVOICE_CONCURRENT_TRANSITION');
         await tx.invoiceStatusHistory.create({
@@ -261,11 +299,12 @@ export class AsaasBillingService {
           `Pagamento Asaas ${envelope.payment.id} recebido para fatura cancelada ${charge.invoiceId}.`,
         );
         await tx.asaasWebhookEvent.update({
-          where: { id: envelope.id },
+          where: { environment_id: { environment, id: envelope.id } },
           data: { chargeId: charge.id },
         });
         await this.finishEvent(
           tx,
+          environment,
           envelope.id,
           'IGNORED',
           'Pagamento recebido para fatura cancelada; exige conciliação manual.',
@@ -276,11 +315,12 @@ export class AsaasBillingService {
           `Pagamento Asaas ${envelope.payment.id} recebido para fatura ${charge.invoiceId} já baixada por outro meio.`,
         );
         await tx.asaasWebhookEvent.update({
-          where: { id: envelope.id },
+          where: { environment_id: { environment, id: envelope.id } },
           data: { chargeId: charge.id },
         });
         await this.finishEvent(
           tx,
+          environment,
           envelope.id,
           'IGNORED',
           'Fatura já estava paga por outro meio; exige conciliação manual.',
@@ -289,10 +329,16 @@ export class AsaasBillingService {
       }
 
       await tx.asaasWebhookEvent.update({
-        where: { id: envelope.id },
+        where: { environment_id: { environment, id: envelope.id } },
         data: { chargeId: charge.id },
       });
-      await this.finishEvent(tx, envelope.id, 'PROCESSED', 'Pagamento Pix conciliado.');
+      await this.finishEvent(
+        tx,
+        environment,
+        envelope.id,
+        'PROCESSED',
+        'Pagamento Pix conciliado.',
+      );
     });
 
     return { received: true };
@@ -327,26 +373,37 @@ export class AsaasBillingService {
     return invoice;
   }
 
-  private async ensureCustomer(company: {
-    id: string;
-    tradeName: string;
-    document: string;
-    teamMembers: Array<{ role: string; user: { email: string; phone: string } }>;
-  }): Promise<string> {
+  private async ensureCustomer(
+    company: {
+      id: string;
+      tradeName: string;
+      document: string;
+      teamMembers: Array<{ role: string; user: { email: string; phone: string } }>;
+    },
+    environment: AsaasEnvironment,
+  ): Promise<string> {
     const document = company.document.replace(/\D/g, '');
     if (document.length !== 11 && document.length !== 14) {
-      throw new ConflictException('O CPF/CNPJ da empresa precisa estar válido antes de gerar o Pix.');
+      throw new ConflictException(
+        'O CPF/CNPJ da empresa precisa estar válido antes de gerar o Pix.',
+      );
     }
     const externalReference = `motoboycity-company-${company.id}`;
-    let record = await this.prisma.asaasCustomer.findUnique({ where: { companyId: company.id } });
+    let record = await this.prisma.asaasCustomer.findUnique({
+      where: { companyId_environment: { companyId: company.id, environment } },
+    });
     let ownsReservation = false;
     if (!record) {
       try {
-        record = await this.prisma.asaasCustomer.create({ data: { companyId: company.id } });
+        record = await this.prisma.asaasCustomer.create({
+          data: { companyId: company.id, environment },
+        });
         ownsReservation = true;
       } catch (error) {
         if (!this.isUniqueViolation(error)) throw error;
-        record = await this.prisma.asaasCustomer.findUniqueOrThrow({ where: { companyId: company.id } });
+        record = await this.prisma.asaasCustomer.findUniqueOrThrow({
+          where: { companyId_environment: { companyId: company.id, environment } },
+        });
       }
     }
     if (record.status === 'ACTIVE' && record.providerCustomerId) return record.providerCustomerId;
@@ -364,7 +421,9 @@ export class AsaasBillingService {
       record.status === 'CREATING' &&
       this.clock.now().getTime() - record.updatedAt.getTime() < RESERVATION_TTL_MS
     ) {
-      throw new ConflictException('O cadastro financeiro da empresa já está sendo criado. Tente novamente.');
+      throw new ConflictException(
+        'O cadastro financeiro da empresa já está sendo criado. Tente novamente.',
+      );
     }
     if (!ownsReservation) {
       const claimed = await this.prisma.asaasCustomer.updateMany({
@@ -405,6 +464,7 @@ export class AsaasBillingService {
   private async reconcilePayment(
     charge: { id: string; externalReference: string; providerCustomerId: string | null },
     invoice: Awaited<ReturnType<AsaasBillingService['companyInvoice']>>,
+    environment: AsaasEnvironment,
   ) {
     let payment: AsaasPayment | null;
     try {
@@ -418,7 +478,7 @@ export class AsaasBillingService {
     }
     if (!payment) return null;
     const customer = await this.prisma.asaasCustomer.findUnique({
-      where: { companyId: invoice.companyId },
+      where: { companyId_environment: { companyId: invoice.companyId, environment } },
       select: { providerCustomerId: true },
     });
     const expectedCustomerId = charge.providerCustomerId ?? customer?.providerCustomerId;
@@ -489,7 +549,8 @@ export class AsaasBillingService {
   ): string | null {
     if (payment.status !== 'RECEIVED') return 'PAYMENT_RECEIVED sem status RECEIVED.';
     if (payment.billingType !== 'PIX') return 'Forma de pagamento diferente de PIX.';
-    if (payment.externalReference !== charge.externalReference) return 'External reference divergente.';
+    if (payment.externalReference !== charge.externalReference)
+      return 'External reference divergente.';
     if (!charge.providerCustomerId || payment.customer !== charge.providerCustomerId) {
       return 'Cliente Asaas divergente.';
     }
@@ -511,14 +572,25 @@ export class AsaasBillingService {
 
   private async finishEvent(
     tx: Prisma.TransactionClient,
+    environment: AsaasEnvironment,
     id: string,
     status: 'PROCESSED' | 'IGNORED',
     note: string,
   ) {
     await tx.asaasWebhookEvent.update({
-      where: { id },
+      where: { environment_id: { environment, id } },
       data: { status, note, processedAt: this.clock.now() },
     });
+  }
+
+  private providerEnvironment(): AsaasEnvironment {
+    const environment = readAsaasEnvironment(this.config);
+    if (!environment) {
+      throw new ServiceUnavailableException(
+        'Pagamento Pix indisponível. Configure ASAAS_ENVIRONMENT na API.',
+      );
+    }
+    return environment === 'production' ? AsaasEnvironment.PRODUCTION : AsaasEnvironment.SANDBOX;
   }
 
   private validPaymentDate(payment: NonNullable<AsaasWebhookEnvelope['payment']>): string | null {
@@ -612,8 +684,11 @@ export class AsaasBillingService {
     }
     if (error.httpStatus === 401) {
       if (error.providerCode === 'invalid_environment') {
+        const configuredEnvironment = readAsaasEnvironment(this.config);
         return new BadGatewayException(
-          'A chave do Asaas não pertence ao ambiente configurado. Use chave Sandbox com ASAAS_ENVIRONMENT=sandbox.',
+          configuredEnvironment === 'production'
+            ? 'A chave do Asaas não pertence ao ambiente configurado. Use uma chave de Produção com ASAAS_ENVIRONMENT=production.'
+            : 'A chave do Asaas não pertence ao ambiente configurado. Use chave Sandbox com ASAAS_ENVIRONMENT=sandbox.',
         );
       }
       if (error.providerCode === 'invalid_access_token_format') {

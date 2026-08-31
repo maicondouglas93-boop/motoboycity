@@ -181,6 +181,12 @@ token em tempo constante. O navegador apenas inicia/exibe a cobrança: a baixa
 ocorre em transação no webhook `PAYMENT_RECEIVED`, depois de conferir pagamento,
 cliente, referência, modalidade e centavos.
 
+Os três registros persistem também `AsaasEnvironment`. Customers, cobranças,
+QR Codes e eventos do Sandbox e da Produção nunca compartilham namespace; as
+reservas são únicas por empresa/fatura e ambiente, e o webhook procura o
+pagamento somente no ambiente configurado na API. A migration de isolamento
+retroativo classifica como `SANDBOX` os registros criados durante a homologação.
+
 ## 6. Despacho e concorrência
 
 A oferta pendente única por pedido é a garantia central, e tem três camadas:

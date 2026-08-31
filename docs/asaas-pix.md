@@ -25,8 +25,25 @@
 6. No Sandbox, use uma empresa controlada, abra uma fatura pendente, gere o QR
    Code e simule o recebimento. Confirme que a fatura muda para `PAID`, método
    `ONLINE`, e que reenviar o mesmo webhook não cria outro histórico.
-7. Somente depois da homologação troque para `ASAAS_ENVIRONMENT=production`,
-   com a API key e o webhook da conta de produção.
+7. A homologação deve usar banco isolado. Se o Sandbox já foi testado no mesmo
+   banco da aplicação, publique primeiro a migration
+   `20260831155700_asaas_environment_isolation`: ela marca os registros atuais
+   como `SANDBOX` e impede reutilizar customer, cobrança, QR Code ou webhook no
+   ambiente real.
+8. Na conta **Produção** do Asaas, gere uma API key de produção e crie um novo
+   webhook. Webhooks e credenciais do Sandbox não migram para Produção.
+9. Desative o webhook do Sandbox e altere, juntas, as três variáveis da API:
+
+   ```text
+   ASAAS_ENVIRONMENT=production
+   ASAAS_API_KEY=<chave da produção>
+   ASAAS_WEBHOOK_TOKEN=<token do webhook de produção>
+   ```
+
+10. Depois que o deploy estiver saudável, faça um smoke com uma fatura
+    controlada e de baixo valor: gere o Pix, confira valor e cliente no Asaas,
+    pague de verdade e confirme webhook HTTP `200` e fatura `PAID`/`ONLINE` nos
+    painéis Company e ADM.
 
 ## Garantias do fluxo
 
@@ -36,6 +53,9 @@
   `PAYMENT_RECEIVED` com status `RECEIVED`.
 - Valor em centavos, cliente Asaas, ID do pagamento e referência externa têm de
   corresponder à cobrança persistida.
-- O ID do evento é único no banco, então a entrega repetida do Asaas é segura.
+- Customers, cobranças, QR Codes e eventos são isolados entre Sandbox e
+  Produção. Uma fatura tem no máximo uma cobrança por ambiente.
+- O ID do evento é único dentro do ambiente, então a entrega repetida do Asaas
+  é segura.
 - Após timeout de criação, a API consulta a referência externa antes de tentar
   criar novamente.

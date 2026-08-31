@@ -14,6 +14,19 @@ import type { User } from '@prisma/client';
 const NOW = new Date('2026-08-31T15:00:00.000Z');
 const WEBHOOK_TOKEN = 'w'.repeat(40);
 
+function asaasConfig(environment: 'sandbox' | 'production' = 'sandbox') {
+  return {
+    get: jest.fn(
+      (key: string) =>
+        ({
+          ASAAS_API_KEY: 'api-key',
+          ASAAS_WEBHOOK_TOKEN: WEBHOOK_TOKEN,
+          ASAAS_ENVIRONMENT: environment,
+        })[key],
+    ),
+  } as unknown as ConfigService;
+}
+
 function subject(options?: { inserted?: number; invoiceStatus?: string; paymentValue?: number }) {
   const tx = {
     asaasWebhookEvent: {
@@ -38,17 +51,11 @@ function subject(options?: { inserted?: number; invoiceStatus?: string; paymentV
     invoiceStatusHistory: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
-    $transaction: jest.fn(async (operation: (client: typeof tx) => Promise<unknown>) => operation(tx)),
-  } as unknown as PrismaService;
-  const config = {
-    get: jest.fn((key: string) =>
-      ({
-        ASAAS_API_KEY: 'api-key',
-        ASAAS_WEBHOOK_TOKEN: WEBHOOK_TOKEN,
-        ASAAS_ENVIRONMENT: 'sandbox',
-      })[key],
+    $transaction: jest.fn(async (operation: (client: typeof tx) => Promise<unknown>) =>
+      operation(tx),
     ),
-  } as unknown as ConfigService;
+  } as unknown as PrismaService;
+  const config = asaasConfig();
   const clock = { now: jest.fn(() => NOW) } as unknown as FinancialClock;
   const service = new AsaasBillingService(prisma, {} as AsaasClient, config, clock);
   const envelope = {
@@ -77,7 +84,22 @@ describe('AsaasBillingService webhook', () => {
 
   it('baixa a fatura somente no PAYMENT_RECEIVED validado', async () => {
     const { service, tx, envelope } = subject();
-    await expect(service.receiveWebhook(WEBHOOK_TOKEN, envelope)).resolves.toEqual({ received: true });
+    await expect(service.receiveWebhook(WEBHOOK_TOKEN, envelope)).resolves.toEqual({
+      received: true,
+    });
+    expect(tx.asaasWebhookEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ environment: 'SANDBOX' }) }),
+    );
+    expect(tx.invoicePixCharge.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          environment_providerPaymentId: {
+            environment: 'SANDBOX',
+            providerPaymentId: 'pay-1',
+          },
+        },
+      }),
+    );
     expect(tx.invoice.updateMany).toHaveBeenCalledWith({
       where: { id: 'invoice-1', status: 'PENDING' },
       data: {
@@ -140,6 +162,56 @@ describe('AsaasBillingService cobrança', () => {
     expect(findCharge).not.toHaveBeenCalled();
   });
 
+  it('consulta somente cobranças do ambiente de produção configurado', async () => {
+    const findCharge = jest.fn().mockResolvedValue(null);
+    const prisma = {
+      companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      invoice: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'invoice-1',
+          companyId: 'company-1',
+          number: 'FAT-1',
+          totalValue: { toString: () => '10.00' },
+        }),
+      },
+      invoicePixCharge: { findUnique: findCharge },
+    } as unknown as PrismaService;
+    const service = new AsaasBillingService(prisma, {} as AsaasClient, asaasConfig('production'), {
+      now: jest.fn(() => NOW),
+    } as unknown as FinancialClock);
+
+    await expect(
+      service.getForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
+    ).resolves.toBeNull();
+    expect(findCharge).toHaveBeenCalledWith({
+      where: {
+        invoiceId_environment: { invoiceId: 'invoice-1', environment: 'PRODUCTION' },
+      },
+    });
+  });
+
+  it('falha fechado quando o ambiente do Asaas não está configurado', async () => {
+    const findCharge = jest.fn();
+    const prisma = {
+      companyTeamMember: { findFirst: jest.fn().mockResolvedValue({ companyId: 'company-1' }) },
+      invoice: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'invoice-1', companyId: 'company-1' }),
+      },
+      invoicePixCharge: { findUnique: findCharge },
+    } as unknown as PrismaService;
+    const service = new AsaasBillingService(
+      prisma,
+      {} as AsaasClient,
+      { get: jest.fn() } as unknown as ConfigService,
+      { now: jest.fn(() => NOW) } as unknown as FinancialClock,
+    );
+
+    await expect(
+      service.getForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(findCharge).not.toHaveBeenCalled();
+  });
+
   it('cria cliente e Pix uma vez e usa hoje como vencimento operacional da fatura atrasada', async () => {
     const invoice = {
       id: 'invoice-1',
@@ -152,9 +224,7 @@ describe('AsaasBillingService cobrança', () => {
         id: 'company-1',
         tradeName: 'Loja teste',
         document: '39.535.445/0001-01',
-        teamMembers: [
-          { role: 'OWNER', user: { email: 'loja@example.com', phone: '11999999999' } },
-        ],
+        teamMembers: [{ role: 'OWNER', user: { email: 'loja@example.com', phone: '11999999999' } }],
       },
     };
     const createdCharge = {
@@ -220,17 +290,22 @@ describe('AsaasBillingService cobrança', () => {
         expirationDate: '2026-08-31T18:00:00.000Z',
       }),
     } as unknown as AsaasClient;
-    const config = {} as ConfigService;
+    const config = asaasConfig();
     const clock = { now: jest.fn(() => NOW) } as unknown as FinancialClock;
     const service = new AsaasBillingService(prisma, client, config, clock);
 
     await expect(
-      service.createForCompany(
-        { id: 'user-1', type: 'COMPANY_MEMBER' } as User,
-        'invoice-1',
-      ),
+      service.createForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
     ).resolves.toMatchObject({ status: 'ACTIVE', pixPayload: 'pix-payload', totalValue: 25.5 });
     expect(client.createCustomer).toHaveBeenCalledTimes(1);
+    expect(prisma.invoicePixCharge.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ environment: 'SANDBOX' }) }),
+    );
+    expect(prisma.asaasCustomer.findUnique).toHaveBeenCalledWith({
+      where: {
+        companyId_environment: { companyId: 'company-1', environment: 'SANDBOX' },
+      },
+    });
     expect(client.createPixPayment).toHaveBeenCalledWith(
       expect.objectContaining({ customer: 'cus-1', value: 25.5, dueDate: '2026-08-31' }),
     );
@@ -278,12 +353,9 @@ describe('AsaasBillingService cobrança', () => {
           ),
         ),
     } as unknown as AsaasClient;
-    const service = new AsaasBillingService(
-      prisma,
-      client,
-      {} as ConfigService,
-      { now: jest.fn(() => NOW) } as unknown as FinancialClock,
-    );
+    const service = new AsaasBillingService(prisma, client, asaasConfig(), {
+      now: jest.fn(() => NOW),
+    } as unknown as FinancialClock);
 
     await expect(
       service.createForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),
@@ -330,12 +402,9 @@ describe('AsaasBillingService cobrança', () => {
         .fn()
         .mockRejectedValue(new ServiceUnavailableException('Configuração Asaas ausente.')),
     } as unknown as AsaasClient;
-    const service = new AsaasBillingService(
-      prisma,
-      client,
-      {} as ConfigService,
-      { now: jest.fn(() => NOW) } as unknown as FinancialClock,
-    );
+    const service = new AsaasBillingService(prisma, client, asaasConfig(), {
+      now: jest.fn(() => NOW),
+    } as unknown as FinancialClock);
 
     await expect(
       service.createForCompany({ id: 'user-1', type: 'COMPANY_MEMBER' } as User, 'invoice-1'),

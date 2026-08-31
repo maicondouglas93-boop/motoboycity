@@ -8,7 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-31**, depois da publicação do código do Pix Asaas.
+> Última revisão: **2026-08-31**, depois da homologação Sandbox e da preparação
+> do isolamento para a Produção Asaas.
 
 ## Como atualizar
 
@@ -27,10 +28,10 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `main` sincronizado com `origin/main` em 31/08/2026 (release Pix Asaas) |
+| Commit publicado | `main` sincronizado com `origin/main` em 31/08/2026 (Pix Asaas com isolamento Sandbox/Produção; confirmar o deploy automático no Render) |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado, 50 migrations |
+| Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
 | APK nos aparelhos | **`pilot.16`** distribuído em 31/08/2026. Quem ainda não abriu o app pode estar no `pilot.15`: confirme por motoboy no painel, não nesta linha (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -91,14 +92,16 @@ A agenda da empresa possui um Top 10 real por entregas concluídas. Os três
 primeiros aparecem em um pódio e os demais continuam numa lista; a consulta
 agregada é isolada pela empresa e não exigiu migration.
 
-O faturamento publicado possui cobrança Pix Asaas: a empresa gera e copia
-o QR Code no detalhe da fatura, enquanto a API reutiliza o cliente, reconcilia
-timeout pela referência externa e só dá baixa por `PAYMENT_RECEIVED` autenticado
-e validado. A migration `20260831120000_asaas_invoice_pix` foi aplicada pelo
-build do Render e API/Company Web foram publicados. A habilitação operacional
-continua dependendo das três variáveis `ASAAS_*`, do webhook no painel Asaas e
-do smoke controlado conforme `docs/asaas-pix.md`; esses segredos não são
-verificáveis pelo repositório.
+O faturamento publicado possui cobrança Pix Asaas: a empresa gera e copia o QR
+Code no detalhe da fatura, enquanto a API reutiliza o cliente, reconcilia timeout
+pela referência externa e só dá baixa por `PAYMENT_RECEIVED` autenticado e
+validado. A homologação Sandbox concluiu QR, pagamento simulado, webhook HTTP
+`200` e baixa automática. A migration
+`20260831155700_asaas_environment_isolation` classifica esses IDs como Sandbox
+e separa customer, cobrança, QR e evento do futuro ambiente real. A habilitação
+da Produção ainda depende da chave `$aact_prod_`, webhook próprio, troca conjunta
+das três variáveis `ASAAS_*` e smoke real controlado conforme
+`docs/asaas-pix.md`; os segredos não são verificáveis pelo repositório.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e

@@ -8,6 +8,8 @@ export interface AsaasRuntimeConfig {
   environment: 'sandbox' | 'production';
 }
 
+export type AsaasRuntimeEnvironment = AsaasRuntimeConfig['environment'];
+
 const BASE_URLS = {
   sandbox: 'https://api-sandbox.asaas.com/v3',
   production: 'https://api.asaas.com/v3',
@@ -16,9 +18,9 @@ const BASE_URLS = {
 export function readAsaasRuntimeConfig(config: ConfigService): AsaasRuntimeConfig | null {
   const apiKey = config.get<string>('ASAAS_API_KEY')?.trim();
   const webhookToken = readAsaasWebhookToken(config);
-  const environment = config.get<string>('ASAAS_ENVIRONMENT')?.trim().toLowerCase();
+  const environment = readAsaasEnvironment(config);
 
-  if (!apiKey || !webhookToken || (environment !== 'sandbox' && environment !== 'production')) {
+  if (!apiKey || !webhookToken || !environment) {
     return null;
   }
 
@@ -28,6 +30,11 @@ export function readAsaasRuntimeConfig(config: ConfigService): AsaasRuntimeConfi
     environment,
     baseUrl: BASE_URLS[environment],
   };
+}
+
+export function readAsaasEnvironment(config: ConfigService): AsaasRuntimeEnvironment | null {
+  const environment = config.get<string>('ASAAS_ENVIRONMENT')?.trim().toLowerCase();
+  return environment === 'sandbox' || environment === 'production' ? environment : null;
 }
 
 export function readAsaasWebhookToken(config: ConfigService): string | null {
