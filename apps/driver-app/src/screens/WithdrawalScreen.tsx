@@ -21,7 +21,7 @@ import { driverWalletApi } from '../lib/apiClient';
 import { formatarDinheiro } from '../lib/format';
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '../lib/idempotency';
 import { session } from '../lib/session';
-import { isWithdrawalDay, parseWithdrawalAmount } from '../lib/withdrawal';
+import { parseWithdrawalAmount, rotuloDoBotaoFechado, tituloDaRegra } from '../lib/withdrawal';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
 
@@ -63,10 +63,22 @@ export function WithdrawalScreen({ navigation }: Props) {
   );
 
   const amount = parseWithdrawalAmount(amountText);
-  const monday = isWithdrawalDay();
+  /**
+   * Quem decide o dia é o servidor, e a tela só exibe.
+   *
+   * Enquanto a carteira não chegou, `politica` é nula e o texto diz que está
+   * confirmando — em vez de afirmar um dia que este aparelho não tem como
+   * saber. O botão já depende de `wallet`, então não há janela em que ele
+   * fique clicável sem a política.
+   */
+  const politica = wallet?.withdrawal ?? null;
+  const aberto = politica?.openToday ?? false;
   const hasValidAmount =
-    Number.isFinite(amount) && amount > 0 && Boolean(wallet) && amount <= (wallet?.availableBalance ?? 0);
-  const canSubmit = monday && hasValidAmount && !submitting;
+    Number.isFinite(amount) &&
+    amount > 0 &&
+    Boolean(wallet) &&
+    amount <= (wallet?.availableBalance ?? 0);
+  const canSubmit = aberto && hasValidAmount && !submitting;
 
   async function requestWithdrawal() {
     if (!wallet || !hasValidAmount) {
@@ -127,12 +139,14 @@ export function WithdrawalScreen({ navigation }: Props) {
             </Text>
           </View>
 
-          <View style={[styles.ruleBox, monday ? styles.ruleBoxOpen : styles.ruleBoxClosed]}>
-            <Icon name={monday ? 'check' : 'calendar'} size={22} color={monday ? colors.success : colors.warning} />
+          <View style={[styles.ruleBox, aberto ? styles.ruleBoxOpen : styles.ruleBoxClosed]}>
+            <Icon
+              name={aberto ? 'check' : 'calendar'}
+              size={22}
+              color={aberto ? colors.success : colors.warning}
+            />
             <View style={styles.ruleText}>
-              <Text style={styles.ruleTitle}>
-                {monday ? 'Solicitações abertas hoje' : 'Solicitações disponíveis às segundas'}
-              </Text>
+              <Text style={styles.ruleTitle}>{tituloDaRegra(politica)}</Text>
               <Text style={styles.ruleDescription}>
                 O saque não possui taxa nem valor mínimo. O servidor confirma o dia e o saldo no
                 momento da solicitação.
@@ -201,7 +215,13 @@ export function WithdrawalScreen({ navigation }: Props) {
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <PrimaryButton
-            label={submitting ? 'Solicitando...' : monday ? 'Solicitar saque' : 'Disponível na segunda-feira'}
+            label={
+              submitting
+                ? 'Solicitando...'
+                : aberto
+                  ? 'Solicitar saque'
+                  : rotuloDoBotaoFechado(politica)
+            }
             disabled={!canSubmit}
             onPress={() => requestWithdrawal().catch(() => undefined)}
           />
@@ -269,9 +289,19 @@ const styles = StyleSheet.create({
   destinationTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   destinationDescription: { color: colors.inkSoft, fontSize: 12, lineHeight: 18 },
   field: { gap: 8 },
-  fieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  fieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   fieldLabel: { color: colors.ink, fontSize: 17, fontWeight: '700' },
-  useAll: { color: colors.actionSoft, fontSize: 12, fontWeight: '800', textDecorationLine: 'underline' },
+  useAll: {
+    color: colors.actionSoft,
+    fontSize: 12,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   inputShell: {
     minHeight: 60,
     flexDirection: 'row',

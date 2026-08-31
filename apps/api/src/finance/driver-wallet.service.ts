@@ -1,7 +1,10 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { ListWalletTransactionsQuery } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
+import type { WithdrawalPolicy } from '@motoboycity/types';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
+import { isWithdrawalDayInSaoPaulo, withdrawalWeekdayLabel } from './finance-release.utils';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 export type WalletTransactionType =
@@ -26,6 +29,8 @@ export interface WalletTransactionItem {
 
 export interface DriverWalletSummary {
   walletId: string | null;
+  /** Ver `WithdrawalPolicy` em `packages/types`: a decisão vem pronta daqui. */
+  withdrawal: WithdrawalPolicy;
   availableBalance: number;
   blockedBalance: number;
   pendingWithdrawalAmount: number;
@@ -128,7 +133,23 @@ export function calculateWalletBalances(
 
 @Injectable()
 export class DriverWalletService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly platformSettings: AdminPlatformSettingsService,
+  ) {}
+
+  /**
+   * A politica vai junto da carteira, e nao num endpoint proprio: a tela do
+   * saque ja carrega a carteira, e um segundo pedido so para saber o dia
+   * abriria a janela em que os dois discordam.
+   */
+  private async politicaDoSaque(): Promise<WithdrawalPolicy> {
+    const { withdrawalWeekday } = await this.platformSettings.get();
+    return {
+      openToday: isWithdrawalDayInSaoPaulo(new Date(), withdrawalWeekday),
+      weekdayLabel: withdrawalWeekdayLabel(withdrawalWeekday),
+    };
+  }
 
   async getForDriver(
     user: User,
@@ -186,6 +207,7 @@ export class DriverWalletService {
     if (!wallet) {
       return {
         walletId: null,
+        withdrawal: await this.politicaDoSaque(),
         availableBalance: 0,
         blockedBalance: 0,
         pendingWithdrawalAmount: 0,
@@ -203,6 +225,7 @@ export class DriverWalletService {
 
     return {
       walletId: wallet.id,
+      withdrawal: await this.politicaDoSaque(),
       availableBalance: balances.availableBalance,
       blockedBalance: balances.blockedBalance,
       pendingWithdrawalAmount: balances.pendingWithdrawalAmount,

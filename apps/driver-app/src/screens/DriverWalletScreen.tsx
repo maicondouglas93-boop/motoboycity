@@ -163,7 +163,14 @@ export function DriverWalletScreen({ navigation }: Props) {
               <View style={styles.processingBanner}>
                 <Icon name="info" size={20} color={colors.ink} />
                 <Text style={styles.processingText}>
-                  Solicitações de saque são abertas às segundas-feiras.
+                  {wallet.withdrawal.weekdayLabel
+                    ? `Solicitações de saque são abertas ${
+                        wallet.withdrawal.weekdayLabel === 'sábado' ||
+                        wallet.withdrawal.weekdayLabel === 'domingo'
+                          ? 'aos'
+                          : 'às'
+                      } ${wallet.withdrawal.weekdayLabel}s.`
+                    : 'Solicitações de saque estão abertas todos os dias.'}
                 </Text>
               </View>
 
@@ -322,11 +329,18 @@ function TransactionRow({
       onPress={onPress}
       style={({ pressed }) => [styles.transaction, pressed && styles.transactionPressed]}
     >
-      <View style={[styles.transactionDot, { backgroundColor: isCredit ? colors.success : colors.danger }]} />
+      <View
+        style={[
+          styles.transactionDot,
+          { backgroundColor: isCredit ? colors.success : colors.danger },
+        ]}
+      />
       <View style={styles.transactionMain}>
         <Text style={styles.transactionTitle}>
           {transactionLabels[transaction.type]}
-          {transaction.relatedDelivery ? ` do pedido #${transaction.relatedDelivery.displayNumber}` : ''}
+          {transaction.relatedDelivery
+            ? ` do pedido #${transaction.relatedDelivery.displayNumber}`
+            : ''}
         </Text>
         <Text style={styles.transactionMeta}>
           {transaction.relatedDelivery?.companyName ??
@@ -380,7 +394,13 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 },
   },
-  processingText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  processingText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
   balanceRow: { flexDirection: 'row', alignItems: 'stretch', paddingVertical: 8 },
   balanceBlock: { flex: 1, gap: 5, paddingHorizontal: 10 },
   balanceDivider: { width: 1, backgroundColor: colors.divider },
@@ -450,10 +470,20 @@ const styles = StyleSheet.create({
   transactionValue: { fontSize: 14, fontWeight: '800' },
   credit: { color: colors.success },
   debit: { color: colors.danger },
-  detailsLink: { color: colors.actionSoft, fontSize: 11, fontWeight: '700', textDecorationLine: 'underline' },
+  detailsLink: {
+    color: colors.actionSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   withdrawals: { gap: 10 },
   withdrawalCard: { elevation: 0, shadowOpacity: 0 },
-  withdrawalHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  withdrawalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   withdrawalText: { flex: 1, gap: 3 },
   withdrawalValue: { color: colors.ink, fontSize: 17, fontWeight: '800' },
   paymentReference: { marginTop: 7, color: colors.inkSoft, fontSize: 12 },

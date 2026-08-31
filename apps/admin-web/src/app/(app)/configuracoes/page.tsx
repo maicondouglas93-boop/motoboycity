@@ -174,7 +174,8 @@ export default function SettingsPage() {
     {
       href: '/configuracoes/horario',
       title: 'Horário de funcionamento',
-      description: 'Defina as faixas em que a operação aceita pedidos, e bloqueie fora delas.',
+      description:
+        'Defina as faixas em que a operação aceita pedidos, e o dia em que o motoboy pode pedir saque.',
       icon: CalendarClock,
       tom: 'horarios',
       situacao: !horarios

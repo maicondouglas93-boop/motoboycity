@@ -2,6 +2,8 @@ import {
   dateInSaoPaulo,
   invoiceClosingCutoff,
   isMondayInSaoPaulo,
+  isWithdrawalDayInSaoPaulo,
+  withdrawalWeekdayLabel,
   latestInvoiceClosingDateInSaoPaulo,
   latestInvoiceClosingDateForPolicyInSaoPaulo,
   nextInvoiceClosingDateInSaoPaulo,
@@ -147,5 +149,47 @@ describe('nextInvoiceClosingDateInSaoPaulo', () => {
     expect(nextInvoiceClosingDateInSaoPaulo(new Date('2026-09-02T12:00:00.000Z'))).toBe(
       '2026-09-07',
     );
+  });
+});
+
+/**
+ * O dia do saque virou configuração do administrador. Estes testes existem
+ * porque a regra é avaliada no relógio de SÃO PAULO: em UTC a segunda começa
+ * às 21h de domingo, e o motoboy pediria saque num dia que, para ele, ainda
+ * não chegou.
+ */
+describe('dia de solicitar saque', () => {
+  // 2026-08-26 é uma quarta-feira.
+  const quartaDeManha = new Date('2026-08-26T13:00:00.000Z');
+  // 23h de terça em São Paulo já é quarta em UTC — o caso que separa os fusos.
+  const terca23hSaoPaulo = new Date('2026-08-26T02:00:00.000Z');
+
+  it('aceita quando o dia bate com o configurado', () => {
+    expect(isWithdrawalDayInSaoPaulo(quartaDeManha, 3)).toBe(true);
+  });
+
+  it('recusa nos outros dias', () => {
+    expect(isWithdrawalDayInSaoPaulo(quartaDeManha, 1)).toBe(false);
+    expect(isWithdrawalDayInSaoPaulo(quartaDeManha, 4)).toBe(false);
+  });
+
+  /** `null` é escolha do administrador — "qualquer dia" —, não falta de configuração. */
+  it('null libera todos os dias', () => {
+    expect(isWithdrawalDayInSaoPaulo(quartaDeManha, null)).toBe(true);
+    expect(isWithdrawalDayInSaoPaulo(terca23hSaoPaulo, null)).toBe(true);
+  });
+
+  it('usa o relógio da operação, e não o UTC', () => {
+    // Em UTC já é quarta; em São Paulo ainda é terça.
+    expect(terca23hSaoPaulo.getUTCDay()).toBe(3);
+    expect(isWithdrawalDayInSaoPaulo(terca23hSaoPaulo, 2)).toBe(true);
+    expect(isWithdrawalDayInSaoPaulo(terca23hSaoPaulo, 3)).toBe(false);
+  });
+
+  it('nomeia o dia para a mensagem e para a tela', () => {
+    expect(withdrawalWeekdayLabel(0)).toBe('domingo');
+    expect(withdrawalWeekdayLabel(3)).toBe('quarta-feira');
+    expect(withdrawalWeekdayLabel(6)).toBe('sábado');
+    expect(withdrawalWeekdayLabel(null)).toBeNull();
   });
 });

@@ -14,9 +14,10 @@ import type {
   RequestWithdrawalPayload,
 } from '@motoboycity/validation';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { calculateWalletBalances, type WalletTransactionType } from './driver-wallet.service';
 import { FinancialClock } from './financial-clock.service';
-import { isMondayInSaoPaulo } from './finance-release.utils';
+import { isWithdrawalDayInSaoPaulo, withdrawalWeekdayLabel } from './finance-release.utils';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
@@ -87,6 +88,7 @@ export class FinancialPayoutService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: FinancialClock,
+    private readonly platformSettings: AdminPlatformSettingsService,
   ) {}
 
   /**
@@ -144,9 +146,20 @@ export class FinancialPayoutService {
     payload: RequestWithdrawalPayload,
   ): Promise<WithdrawalRequestItem> {
     const now = this.clock.now();
-    if (!isMondayInSaoPaulo(now)) {
+    /**
+     * O dia é configurável, e a decisão continua sendo do SERVIDOR.
+     *
+     * O aplicativo mostra o botão conforme a política que recebe da carteira,
+     * mas a recusa mora aqui: uma versão antiga instalada, um relógio de
+     * aparelho errado ou uma chamada direta à API não podem furar a regra.
+     */
+    const { withdrawalWeekday } = await this.platformSettings.get();
+    if (!isWithdrawalDayInSaoPaulo(now, withdrawalWeekday)) {
+      const dia = withdrawalWeekdayLabel(withdrawalWeekday);
       throw new UnprocessableEntityException(
-        'Saques estão disponíveis somente às segundas-feiras.',
+        dia
+          ? `Saques estão disponíveis somente ${dia === 'sábado' || dia === 'domingo' ? 'aos' : 'às'} ${dia}s.`
+          : 'Saques não estão disponíveis hoje.',
       );
     }
     if (user.type !== 'DRIVER') {

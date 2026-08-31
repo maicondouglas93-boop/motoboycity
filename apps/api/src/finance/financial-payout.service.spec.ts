@@ -19,10 +19,17 @@ describe('FinancialPayoutService', () => {
     walletTransaction: { findUnique: jest.fn() },
   };
   const clock = { now: jest.fn() };
-  const service = new FinancialPayoutService(prisma as never, clock as FinancialClock);
+  /** Padrao dos testes: segunda-feira, que e a regra que existia antes de o dia virar configuravel. */
+  const platformSettings = { get: jest.fn().mockResolvedValue({ withdrawalWeekday: 1 }) };
+  const service = new FinancialPayoutService(
+    prisma as never,
+    clock as FinancialClock,
+    platformSettings as never,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    platformSettings.get.mockResolvedValue({ withdrawalWeekday: 1 });
     prisma.$transaction.mockImplementation((callback: (client: typeof tx) => unknown) => callback(tx));
     tx.walletTransaction.findMany.mockResolvedValue([
       { id: 'credit-1', walletId: 'wallet-1', amount: { toString: () => '12.5' } },
@@ -156,6 +163,43 @@ describe('FinancialPayoutService', () => {
       prisma.walletTransaction.findUnique.mockResolvedValue({
         withdrawalRequest: withdrawal(),
       });
+
+      await expect(
+        service.requestWithdrawal(driverUser, { amount: 100, idempotencyKey }),
+      ).resolves.toMatchObject({ id: 'withdrawal-1' });
+    });
+
+    /**
+     * O dia do saque virou configuração. Estes testes existem porque a recusa
+     * precisa continuar morando no SERVIDOR: o aplicativo mostra o botão
+     * conforme a política que recebe, mas uma versão antiga instalada, um
+     * relógio de aparelho errado ou uma chamada direta à API não podem furar
+     * a regra.
+     */
+    it('recusa fora do dia configurado, dizendo qual é o dia', async () => {
+      // Relógio numa segunda-feira, com o saque configurado para quarta.
+      platformSettings.get.mockResolvedValue({ withdrawalWeekday: 3 });
+
+      await expect(
+        service.requestWithdrawal(driverUser, { amount: 100, idempotencyKey }),
+      ).rejects.toThrow('quarta-feiras');
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('aceita no dia configurado, mesmo não sendo segunda', async () => {
+      clock.now.mockReturnValue(new Date('2026-08-26T13:00:00.000Z')); // quarta
+      platformSettings.get.mockResolvedValue({ withdrawalWeekday: 3 });
+
+      await expect(
+        service.requestWithdrawal(driverUser, { amount: 100, idempotencyKey }),
+      ).resolves.toMatchObject({ id: 'withdrawal-1' });
+    });
+
+    /** `null` é a escolha "qualquer dia", e não falta de configuração. */
+    it('com dia nulo, aceita em qualquer dia', async () => {
+      clock.now.mockReturnValue(new Date('2026-08-27T13:00:00.000Z')); // quinta
+      platformSettings.get.mockResolvedValue({ withdrawalWeekday: null });
 
       await expect(
         service.requestWithdrawal(driverUser, { amount: 100, idempotencyKey }),

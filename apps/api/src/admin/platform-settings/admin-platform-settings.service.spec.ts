@@ -77,6 +77,14 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        /**
+         * O único que NÃO nasce nulo, e de propósito: 1 é segunda-feira, a
+         * regra fixa que existia antes de o dia do saque virar configuração.
+         * Nulo aqui significaria "qualquer dia", e uma instalação que nunca
+         * configurou nada passaria a aceitar saque todo dia — mudança de
+         * comportamento escondida numa migration.
+         */
+        withdrawalWeekday: 1,
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
@@ -107,6 +115,14 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        /**
+         * O único que NÃO nasce nulo, e de propósito: 1 é segunda-feira, a
+         * regra fixa que existia antes de o dia do saque virar configuração.
+         * Nulo aqui significaria "qualquer dia", e uma instalação que nunca
+         * configurou nada passaria a aceitar saque todo dia — mudança de
+         * comportamento escondida numa migration.
+         */
+        withdrawalWeekday: 1,
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
@@ -304,6 +320,14 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: 30,
         slaAlertMinutesToDeliver: null,
+        /**
+         * O único que NÃO nasce nulo, e de propósito: 1 é segunda-feira, a
+         * regra fixa que existia antes de o dia do saque virar configuração.
+         * Nulo aqui significaria "qualquer dia", e uma instalação que nunca
+         * configurou nada passaria a aceitar saque todo dia — mudança de
+         * comportamento escondida numa migration.
+         */
+        withdrawalWeekday: 1,
         maxConcurrentDeliveriesPerDriver: null,
         maxDeliveriesPerBatch: null,
         deliveryProximityRadiusMeters: null,
@@ -333,6 +357,14 @@ describe('AdminPlatformSettingsService', () => {
         slaAlertMinutesToAccept: null,
         slaAlertMinutesToCollect: null,
         slaAlertMinutesToDeliver: null,
+        /**
+         * O único que NÃO nasce nulo, e de propósito: 1 é segunda-feira, a
+         * regra fixa que existia antes de o dia do saque virar configuração.
+         * Nulo aqui significaria "qualquer dia", e uma instalação que nunca
+         * configurou nada passaria a aceitar saque todo dia — mudança de
+         * comportamento escondida numa migration.
+         */
+        withdrawalWeekday: 1,
         maxConcurrentDeliveriesPerDriver: 3,
         maxDeliveriesPerBatch: 8,
         deliveryProximityRadiusMeters: 120,

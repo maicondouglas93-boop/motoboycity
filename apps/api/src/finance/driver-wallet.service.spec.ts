@@ -9,10 +9,13 @@ describe('DriverWalletService', () => {
     wallet: { findUnique: jest.fn() },
     walletTransaction: { findMany: jest.fn() },
   };
-  const service = new DriverWalletService(prisma as never);
+  /** Segunda-feira: a regra que existia antes de o dia virar configuravel. */
+  const platformSettings = { get: jest.fn().mockResolvedValue({ withdrawalWeekday: 1 }) };
+  const service = new DriverWalletService(prisma as never, platformSettings as never);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    platformSettings.get.mockResolvedValue({ withdrawalWeekday: 1 });
     prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
   });
 
@@ -21,6 +24,7 @@ describe('DriverWalletService', () => {
 
     await expect(service.getForDriver(driverUser, { limit: 100 })).resolves.toEqual({
       walletId: null,
+      withdrawal: { openToday: expect.any(Boolean), weekdayLabel: 'segunda-feira' },
       availableBalance: 0,
       blockedBalance: 0,
       pendingWithdrawalAmount: 0,

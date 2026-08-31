@@ -1438,6 +1438,17 @@ model PlatformSettings {
   /// recusando pedidos porque a tabela está vazia.
   businessHoursEnabled Boolean @default(false)
 
+  /// Dia da semana em que o motoboy pode SOLICITAR saque (0 = domingo .. 6 =
+  /// sábado). Null = qualquer dia, sem restrição.
+  ///
+  /// Isto NÃO é o dia em que o dinheiro é liberado — esse continua sendo a
+  /// segunda-feira de `nextMondayReleaseAt`, junto com o job semanal. São
+  /// coisas separadas: uma diz quando o crédito sai de bloqueado, a outra diz
+  /// quando o motoboy pode pedir para sacar o que já está disponível.
+  ///
+  /// O padrão 1 preserva a regra fixa que existia antes deste campo.
+  withdrawalWeekday Int? @default(1)
+
   /// Intervalo mínimo (minutos) que a MARCAÇÃO RETROATIVA precisa respeitar
   /// entre uma etapa e a seguinte. É o que separa "esqueci de tocar o botão" de
   /// "declarei coleta e entrega no mesmo minuto e faturei sem sair do lugar".

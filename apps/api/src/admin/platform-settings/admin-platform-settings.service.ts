@@ -33,6 +33,8 @@ export class AdminPlatformSettingsService {
         collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
+        // Segunda-feira, que era a regra fixa antes de o dia virar configuravel.
+        withdrawalWeekday: 1,
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
         locationSilenceAlertMinutes: null,
@@ -82,6 +84,9 @@ export class AdminPlatformSettingsService {
       }),
       ...(payload.businessHoursEnabled !== undefined && {
         businessHoursEnabled: payload.businessHoursEnabled,
+      }),
+      ...(payload.withdrawalWeekday !== undefined && {
+        withdrawalWeekday: payload.withdrawalWeekday,
       }),
       ...(payload.minMinutesBeforeCollect !== undefined && {
         minMinutesBeforeCollect: payload.minMinutesBeforeCollect,
@@ -167,6 +172,7 @@ export class AdminPlatformSettingsService {
     collectionProximityRadiusMeters: number | null;
     returnProximityRadiusMeters: number | null;
     businessHoursEnabled: boolean;
+    withdrawalWeekday: number | null;
     minMinutesBeforeCollect: number | null;
     minMinutesBeforeDeliver: number | null;
     locationSilenceAlertMinutes: number | null;
@@ -197,6 +203,7 @@ export class AdminPlatformSettingsService {
       collectionProximityRadiusMeters: settings.collectionProximityRadiusMeters,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
       businessHoursEnabled: settings.businessHoursEnabled,
+      withdrawalWeekday: settings.withdrawalWeekday,
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,
       minMinutesBeforeDeliver: settings.minMinutesBeforeDeliver,
       locationSilenceAlertMinutes: settings.locationSilenceAlertMinutes,

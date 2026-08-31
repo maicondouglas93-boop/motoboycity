@@ -27,8 +27,24 @@ export interface WalletTransactionItem {
   createdAt: string;
 }
 
+/**
+ * A política do saque, decidida no SERVIDOR e entregue pronta.
+ *
+ * O aplicativo tinha a própria cópia da regra ("segunda-feira") escrita no
+ * código. Com o dia configurável, uma segunda cópia passaria a mentir no dia
+ * seguinte à primeira troca — bloqueando o botão no dia certo e liberando no
+ * errado. Aqui ele recebe a decisão, não a regra.
+ */
+export interface WithdrawalPolicy {
+  /** Hoje é dia de solicitar? Já considera o fuso da operação. */
+  openToday: boolean;
+  /** Ex.: "quarta-feira". `null` quando não há restrição de dia. */
+  weekdayLabel: string | null;
+}
+
 export interface DriverWalletSummary {
   walletId: string | null;
+  withdrawal: WithdrawalPolicy;
   availableBalance: number;
   blockedBalance: number;
   pendingWithdrawalAmount: number;

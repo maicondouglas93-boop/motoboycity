@@ -53,10 +53,44 @@ function seedFromHours(hours: BusinessHoursResult['hours']): RangeDraft[][] {
   return porDia;
 }
 
+/** "Qualquer dia" é escolha do administrador, e não ausência de configuração. */
+const DIAS_DO_SAQUE = [
+  { valor: 'qualquer', rotulo: 'Qualquer dia' },
+  { valor: '0', rotulo: 'Domingo' },
+  { valor: '1', rotulo: 'Segunda-feira' },
+  { valor: '2', rotulo: 'Terça-feira' },
+  { valor: '3', rotulo: 'Quarta-feira' },
+  { valor: '4', rotulo: 'Quinta-feira' },
+  { valor: '5', rotulo: 'Sexta-feira' },
+  { valor: '6', rotulo: 'Sábado' },
+] as const;
+
 export default function BusinessHoursPage() {
   const token = session.getToken();
   const queryClient = useQueryClient();
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
+
+  const settingsQuery = useQuery({
+    queryKey: ['admin', 'platform-settings'],
+    queryFn: () => adminPlatformSettingsApi.get(token as string),
+    enabled: Boolean(token),
+  });
+
+  const withdrawalMutation = useMutation({
+    mutationFn: (weekday: number | null) =>
+      adminPlatformSettingsApi.update(token as string, { withdrawalWeekday: weekday }),
+    onSuccess: () => {
+      setWithdrawalError(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
+    },
+    onError: (mutationError) =>
+      setWithdrawalError(
+        mutationError instanceof ApiError
+          ? mutationError.message
+          : 'Não foi possível mudar o dia do saque.',
+      ),
+  });
 
   const hoursQuery = useQuery({
     queryKey: ['admin', 'business-hours'],
@@ -95,8 +129,8 @@ export default function BusinessHoursPage() {
   if (hoursQuery.isError) {
     return (
       <p className="text-sm text-destructive">
-        Não foi possível carregar o horário de funcionamento. Recarregue a página
-        antes de alterar qualquer coisa.
+        Não foi possível carregar o horário de funcionamento. Recarregue a página antes de alterar
+        qualquer coisa.
       </p>
     );
   }
@@ -131,6 +165,57 @@ export default function BusinessHoursPage() {
                   }
         }
       />
+
+      <Card>
+        <CardContent className="space-y-3 pt-6">
+          <div>
+            <p className="font-medium">Dia em que o motoboy pode pedir saque</p>
+            {/*
+              Isto NAO e o dia em que o dinheiro e liberado — esse continua sendo
+              a segunda-feira do repasse semanal. Um diz quando o credito sai de
+              bloqueado; o outro, quando da para pedir o que ja esta disponivel.
+            */}
+            <p className="text-sm text-muted-foreground">
+              A liberação do dinheiro continua semanal, na segunda-feira. Isto muda só o dia em que
+              a solicitação de saque é aceita.
+            </p>
+          </div>
+          <select
+            aria-label="Dia do saque"
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            value={
+              settingsQuery.data?.withdrawalWeekday === null ||
+              settingsQuery.data?.withdrawalWeekday === undefined
+                ? 'qualquer'
+                : String(settingsQuery.data.withdrawalWeekday)
+            }
+            disabled={settingsQuery.isLoading || withdrawalMutation.isPending}
+            onChange={(event) =>
+              withdrawalMutation.mutate(
+                event.target.value === 'qualquer' ? null : Number(event.target.value),
+              )
+            }
+          >
+            {DIAS_DO_SAQUE.map((dia) => (
+              <option key={dia.valor} value={dia.valor}>
+                {dia.rotulo}
+              </option>
+            ))}
+          </select>
+          {withdrawalError && <p className="text-sm text-destructive">{withdrawalError}</p>}
+          {/*
+            O aviso existe porque a regra tambem vive dentro do aplicativo
+            instalado. Trocar o dia aqui so chega ao motoboy depois de um APK
+            novo — ate la o app mostra o dia antigo, e o servidor recusa no dia
+            que o app libera.
+          */}
+          <p className="rounded-lg border border-primary/20 bg-admin-soft/50 px-3 py-2 text-xs text-muted-foreground">
+            O aplicativo instalado precisa ser atualizado para refletir a troca. Enquanto isso, o
+            motoboy vê o dia antigo na tela — o servidor é quem decide, e ele já obedece a esta
+            configuração.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">

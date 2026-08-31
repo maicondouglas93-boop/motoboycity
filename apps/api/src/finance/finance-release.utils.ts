@@ -17,6 +17,43 @@ export function isMondayInSaoPaulo(date: Date): boolean {
   return saoPauloDateParts(date).weekday === 1;
 }
 
+const NOME_DO_DIA = [
+  'domingo',
+  'segunda-feira',
+  'terça-feira',
+  'quarta-feira',
+  'quinta-feira',
+  'sexta-feira',
+  'sábado',
+];
+
+/**
+ * Hoje é dia de SOLICITAR saque?
+ *
+ * `null` vale qualquer dia — é uma escolha do administrador, e não ausência de
+ * configuração. Quem não quer restringir dia nenhum não precisa de um segundo
+ * interruptor para dizer isso.
+ *
+ * A avaliação é no relógio de São Paulo, e não no do servidor: em UTC, a
+ * segunda-feira começa às 21h de domingo para quem opera — e o motoboy pediria
+ * saque num dia que, para ele, ainda não chegou.
+ *
+ * Separado de `isMondayInSaoPaulo` de propósito: aquela função responde por
+ * QUANDO O DINHEIRO É LIBERADO, que continua semanal e não virou configurável.
+ * Fundir as duas faria uma troca de dia de saque mexer, sem querer, na data em
+ * que o crédito sai de bloqueado.
+ */
+export function isWithdrawalDayInSaoPaulo(date: Date, weekday: number | null): boolean {
+  if (weekday === null) return true;
+  return saoPauloDateParts(date).weekday === weekday;
+}
+
+/** Nome do dia para a mensagem de recusa e para a tela do motoboy. */
+export function withdrawalWeekdayLabel(weekday: number | null): string | null {
+  if (weekday === null) return null;
+  return NOME_DO_DIA[weekday] ?? null;
+}
+
 /**
  * A entrega fechada em uma segunda ainda entra no próximo ciclo. O horário
  * em UTC representa 00:00 de São Paulo (UTC-03), preservando a data correta

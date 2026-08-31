@@ -20,9 +20,18 @@ import { FinancialPayoutService } from './financial-payout.service';
 import { FinancialReleaseScheduler } from './financial-release.scheduler';
 import { AdminWithdrawalController, DriverWithdrawalController } from './withdrawal.controller';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-platform-settings.module';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: FINANCE_QUEUE }), RealtimeModule],
+  // `AdminPlatformSettingsModule` porque o dia do saque virou configuracao: o
+  // servico do saque e o da carteira leem `withdrawalWeekday` de la. Sem o
+  // import, o Nest nao resolve a dependencia e a API nao sobe — foi o que
+  // aconteceu na primeira tentativa.
+  imports: [
+    BullModule.registerQueue({ name: FINANCE_QUEUE }),
+    RealtimeModule,
+    AdminPlatformSettingsModule,
+  ],
   controllers: [
     DriverWalletController,
     AdminFinancialController,
