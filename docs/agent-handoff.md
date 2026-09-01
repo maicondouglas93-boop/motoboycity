@@ -9,7 +9,7 @@
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
 > Última revisão: **2026-09-01**, depois de gerar e verificar o release
-> `pilot.18` e preparar a publicação conjunta dos mapas e da Fase 0 segura.
+> `pilot.19` com a recuperação silenciosa da fila local de finalizações.
 
 ## Como atualizar
 
@@ -28,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `main` publicado em 01/09/2026 com mapas estáveis, alerta de oferta em primeiro plano e baseline seguro da API |
+| Commit publicado | `main` publicado em 01/09/2026 até o recorte do `pilot.19`; o APK continua com distribuição manual |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -51,18 +51,18 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.18-vc18.apk`
-SHA-256 `5E883EDFDFD9433543D1FDC49C27AFA5F75EFECE166324A0F33E532AB0DB3114`,
-75.156.889 bytes, `versionCode` 18, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.19-vc19.apk`
+SHA-256 `A11B46BEF80FA4D4003FE748F5A7F753C0265CA7D19E779A3F37199D63EB80B7`,
+75.163.801 bytes, `versionCode` 19, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.16` ou `pilot.17`.
+anteriores, então ele atualiza por cima de `pilot.16`, `pilot.17` ou `pilot.18`.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-`localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As correções foram conferidas por
-texto dentro do bundle, e não só pelo commit.
+URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
+foram conferidas por texto dentro do bundle, e não só pelo commit.
 
-O `pilot.18` inclui a carteira e a solicitação de saque obedecendo ao dia financeiro
+O `pilot.19` mantém a carteira e a solicitação de saque obedecendo ao dia financeiro
 escolhido pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho.
 No servidor, esse mesmo dia agora libera os repasses às 00:00; `null` significa
 liberação diária às 00:00. O servidor continua sendo a autoridade da regra.
@@ -71,14 +71,13 @@ React Native, com o aplicativo em primeiro plano. Ele reutiliza o `OfferAlarm`
 nativo, para ao responder, expirar, trocar de oferta ou desmontar a tela e
 identifica a oferta para uma resolução atrasada não silenciar a próxima.
 
-Uma correção posterior ao artefato `pilot.18` autorrepara a fila local quando
+O `pilot.19` também autorrepara a fila local quando
 existe uma finalização `DELIVER`, mas a API confirma que o pedido ainda está em
 `ACCEPTED`. A tentativa incompatível e qualquer retorno que dependia dela saem
 silenciosamente, sem contar como entrega ou bloquear **Pedido coletado**. Toda
 mutação confere também a geração (`queuedAt`), para uma sincronização antiga
 não tocar numa tentativa nova com o mesmo ID. Finalizações válidas em
-`COLLECTED` continuam preservadas. Essa correção exige um APK posterior ao
-`pilot.18`; o artefato descrito acima não a contém.
+`COLLECTED` continuam preservadas.
 
 O APK foi compilado e verificado, mas ainda não foi instalado nem distribuído.
 Por isso a tabela acima continua registrando `pilot.16` nos aparelhos. O toque e
@@ -186,14 +185,15 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Instalar e testar o `pilot.18` em aparelho real.** Além de conferir que a
+1. **Instalar e testar o `pilot.19` em aparelho real.** Além de conferir que a
    tela e o botão de saque obedecem ao dia escolhido no ADM, permanecem os dois
    cenários ainda não exercitados: **negar "Permitir o tempo todo"** num
    Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
    e que o atalho abre a tela certa; e **matar a rede no meio de uma
    finalização**, conferindo que a espera termina em 15 s com mensagem em vez de
    ficar girando. Confirmar também que uma oferta recebida com o aplicativo
-   aberto toca e vibra até ser respondida ou expirar.
+   aberto toca e vibra até ser respondida ou expirar e que o fluxo normal
+   **aceitar → coletar → entregar** não mostra o aviso antigo do pedido #547.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
@@ -307,11 +307,12 @@ AGP não suporta JDK 24+.
 Keystore oficial em `I:\MOTOboyCity\signing\motoboycity-release.jks`, alias
 `motoboycity`, com cópia em `D:\MOTOboyCity-Backup\signing\`. As senhas são
 lidas apenas de arquivos DPAPI criados pelo responsável em `%TEMP%`, usadas no
-processo, **nunca exibidas**, e removidas ao final.
+processo e **nunca exibidas** nem versionadas. Os valores em memória e as
+variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Limpo depois do commit desta correção. Podem existir arquivos locais não
+Limpo depois dos commits do `pilot.19`. Podem existir arquivos locais não
 rastreados (`.codex/`, `temp*.tsx`) deixados por outras sessões — **não os
 inclua em commit** e não os remova sem decisão do responsável. O repositório é
 **público**: toda alteração exige varredura de segredo antes do push.

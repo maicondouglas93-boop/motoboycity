@@ -11824,3 +11824,44 @@ Arquivos funcionais: `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`,
 Não houve mudança de API, contrato compartilhado, banco, migration, segredo ou
 dependência. A correção exige um APK posterior ao `pilot.18`; nenhum APK,
 commit, push ou deploy foi executado neste recorte.
+
+## 2026-09-01 — Release Android oficial `pilot.19`
+
+A recuperação silenciosa da fila local foi consolidada no commit funcional
+`ce6293b` e o Driver App foi promovido para `0.1.0-pilot.19`, com `versionCode`
+19. O release foi compilado na worktree curta `C:\m19`, usando JDK 21,
+`MOTOBOYCITY_APP_ENV=production`, a API oficial, Firebase, Google Maps e a chave
+de assinatura oficial. As senhas protegidas por DPAPI foram abertas somente na
+memória do processo, sem exibição ou registro, e as variáveis foram removidas
+ao final.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.19-vc19.apk`
+
+- 75.163.801 bytes;
+- SHA-256 `A11B46BEF80FA4D4003FE748F5A7F753C0265CA7D19E779A3F37199D63EB80B7`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 19,
+  `versionName` `0.1.0-pilot.19`, minSdk 24 e targetSdk 36;
+- assinatura APK v2, RSA 4096 e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- bundle com `https://motoboycity-api.onrender.com` e sem URL HTTP, HTTPS ou
+  WebSocket local em `localhost`, `127.0.0.1` ou `10.0.2.2`;
+- `processReleaseGoogleServices` executado durante o build.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado da fila de finalizações | 1 suíte / 43 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 174 testes aprovados |
+| typecheck do Driver App | aprovado |
+| lint do Driver App | aprovado; um aviso preexistente de `no-void` em `apiClient.ts` |
+| `clean assembleRelease --no-daemon` | aprovado em 9 min 16 s; 427 tarefas |
+| `aapt dump badging` | versão, pacote, minSdk e targetSdk aprovados |
+| `apksigner verify --verbose --print-certs` | assinatura v2 e certificado oficial aprovados |
+| inspeção do bundle e comparação de hash | API de produção aprovada e cópia oficial idêntica |
+
+O APK foi gerado e verificado, mas não foi instalado nem distribuído nesta
+sessão. Não houve mudança de API, contrato compartilhado, banco, migration,
+dependência ou segredo.
