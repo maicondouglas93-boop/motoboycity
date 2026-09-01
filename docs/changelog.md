@@ -11779,3 +11779,14 @@ O repositório foi varrido antes do push sem segredo no diff. Não houve schema,
 migration, mudança de banco, E2E, teste de carga ou instalação em aparelho. O
 push de `main` aciona automaticamente Render e Vercel; a confirmação do APK em
 uma oferta real permanece uma ação manual antes da distribuição ampla.
+
+## 2026-09-01 — Fila operacional sobe na coluna esquerda do ADM
+
+Na Home administrativa, os cards da coluna esquerda foram invertidos conforme
+a prioridade operacional: **Filas operacionais** aparece primeiro e **Filtros**
+fica logo abaixo. Somente a ordem dos dois blocos JSX mudou; estados, consultas,
+ações, mapa e contratos permanecem iguais.
+
+O typecheck e o lint do Admin Web passaram, e `git diff --check` não encontrou
+erro de whitespace. Não houve mudança de API, banco, dependência, commit, push
+ou deploy neste recorte.

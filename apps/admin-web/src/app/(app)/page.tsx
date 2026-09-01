@@ -567,77 +567,6 @@ export default function AdminDashboardPage() {
 
       <section className="grid min-h-[760px] w-full min-w-0 grid-cols-[minmax(0,1fr)] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
-          <Card className="premium-panel min-w-0">
-            <CardHeader className="py-3">
-              <CardTitle className="text-sm">Filtros</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-0">
-              <div className="relative">
-                <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  placeholder="Pedido ou nº externo"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </div>
-              <select
-                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
-                value={companyId}
-                onChange={(event) => setCompanyId(event.target.value)}
-              >
-                <option value="">Todas as empresas</option>
-                {companiesQuery.data?.map((company) => (
-                  <option key={company.id} value={company.id}>
-                    {company.tradeName}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
-                value={driverId}
-                onChange={(event) => setDriverId(event.target.value)}
-              >
-                <option value="">Todos os motoboys</option>
-                {driversQuery.data?.map((driver) => (
-                  <option key={driver.id} value={driver.id}>
-                    {driver.name}
-                  </option>
-                ))}
-              </select>
-              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-                {filterStatuses.map((status) => (
-                  <label key={status} className="flex min-w-0 items-start gap-2 text-xs">
-                    <Checkbox
-                      checked={statuses.includes(status)}
-                      onCheckedChange={(checked) =>
-                        setStatuses((current) =>
-                          checked
-                            ? [...current, status]
-                            : current.filter((item) => item !== status),
-                        )
-                      }
-                    />
-                    <span className="min-w-0 break-words leading-4">{statusLabel(status)}</span>
-                  </label>
-                ))}
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                onClick={() => {
-                  setQuery('');
-                  setCompanyId('');
-                  setDriverId('');
-                  setStatuses([]);
-                }}
-              >
-                Limpar filtros
-              </Button>
-            </CardContent>
-          </Card>
-
           <Card className="premium-panel gap-0 overflow-hidden py-0">
             <CardHeader className="border-b border-primary/10 bg-gradient-to-r from-admin-soft/75 to-card px-3 py-3">
               <CardTitle className="space-y-3 text-sm">
@@ -789,6 +718,77 @@ export default function AdminDashboardPage() {
                   );
                 })
               )}
+            </CardContent>
+          </Card>
+
+          <Card className="premium-panel min-w-0">
+            <CardHeader className="py-3">
+              <CardTitle className="text-sm">Filtros</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              <div className="relative">
+                <Search className="absolute top-2.5 left-3 size-4 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Pedido ou nº externo"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <select
+                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
+                value={companyId}
+                onChange={(event) => setCompanyId(event.target.value)}
+              >
+                <option value="">Todas as empresas</option>
+                {companiesQuery.data?.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.tradeName}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
+                value={driverId}
+                onChange={(event) => setDriverId(event.target.value)}
+              >
+                <option value="">Todos os motoboys</option>
+                {driversQuery.data?.map((driver) => (
+                  <option key={driver.id} value={driver.id}>
+                    {driver.name}
+                  </option>
+                ))}
+              </select>
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                {filterStatuses.map((status) => (
+                  <label key={status} className="flex min-w-0 items-start gap-2 text-xs">
+                    <Checkbox
+                      checked={statuses.includes(status)}
+                      onCheckedChange={(checked) =>
+                        setStatuses((current) =>
+                          checked
+                            ? [...current, status]
+                            : current.filter((item) => item !== status),
+                        )
+                      }
+                    />
+                    <span className="min-w-0 break-words leading-4">{statusLabel(status)}</span>
+                  </label>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setQuery('');
+                  setCompanyId('');
+                  setDriverId('');
+                  setStatuses([]);
+                }}
+              >
+                Limpar filtros
+              </Button>
             </CardContent>
           </Card>
         </div>
