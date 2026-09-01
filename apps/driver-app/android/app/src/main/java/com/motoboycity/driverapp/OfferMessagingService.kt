@@ -223,6 +223,7 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
     val atual = OfferSessionStore.ofertaAtual(this)
     if (atual != null && atual !in offerIds) return
     val resolvida = atual ?: offerIds.first()
+    ForegroundOfferAlarm.stop(resolvida)
     OfferSessionStore.marcarOfertaResolvida(this, resolvida)
     getSystemService(NotificationManager::class.java)?.cancel(
       OfferActionReceiver.OFFER_NOTIFICATION_ID,

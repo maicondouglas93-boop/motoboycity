@@ -149,3 +149,36 @@ class OfferAlarm(private val context: Context) {
     const val TAG = "OfferAlarm"
   }
 }
+
+/**
+ * Alarme compartilhado pela tela React Native da oferta.
+ *
+ * A Activity nativa possui seu proprio alarme porque o Android controla o
+ * ciclo dela. Com o aplicativo aberto, a oferta vive na navegacao React Native
+ * e precisa atravessar a ponte. Manter uma unica instancia por processo torna
+ * iniciar/parar idempotente e impede dois toques concorrentes para a mesma
+ * oferta.
+ */
+object ForegroundOfferAlarm {
+  private var alarm: OfferAlarm? = null
+  private var activeOfferId: String? = null
+
+  @Synchronized
+  fun start(context: Context, offerId: String) {
+    if (activeOfferId != null && activeOfferId != offerId) {
+      alarm?.parar()
+      alarm = null
+    }
+    activeOfferId = offerId
+    val current = alarm ?: OfferAlarm(context.applicationContext).also { alarm = it }
+    current.tocar()
+  }
+
+  @Synchronized
+  fun stop(offerId: String? = null) {
+    if (offerId != null && activeOfferId != offerId) return
+    alarm?.parar()
+    alarm = null
+    activeOfferId = null
+  }
+}

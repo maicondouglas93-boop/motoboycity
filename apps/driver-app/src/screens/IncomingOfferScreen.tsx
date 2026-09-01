@@ -12,7 +12,11 @@ import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { formatarDinheiro } from '../lib/format';
 import { LocationError } from '../lib/location';
-import { dispensarOfertaNativa } from '../lib/offerSession';
+import {
+  dispensarOfertaNativa,
+  iniciarAlarmeDaOfertaNativa,
+  pararAlarmeDaOfertaNativa,
+} from '../lib/offerSession';
 import { offerDeadline, remainingOfferSeconds } from '../lib/offerDeadline';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -91,6 +95,15 @@ export function IncomingOfferScreen({ navigation }: Props) {
   const [secondsLeft, setSecondsLeft] = useState(offer?.expiresInSeconds ?? 0);
   const [status, setStatus] = useState<'idle' | 'accepting' | 'declining'>('idle');
   const responseInFlight = useRef(false);
+  const activeOfferId = offer?.offerId;
+
+  useEffect(() => {
+    if (!activeOfferId) return;
+    iniciarAlarmeDaOfertaNativa(activeOfferId).catch(() => undefined);
+    return () => {
+      pararAlarmeDaOfertaNativa(activeOfferId).catch(() => undefined);
+    };
+  }, [activeOfferId]);
 
   useEffect(() => {
     if (!offer) {
@@ -132,6 +145,7 @@ export function IncomingOfferScreen({ navigation }: Props) {
         setStatus('idle');
         return;
       }
+      await pararAlarmeDaOfertaNativa(currentOffer.offerId);
 
       if (action === 'accept') {
         const accepted = await deliveryOffersApi.accept(token, currentOffer.offerId);
@@ -176,6 +190,9 @@ export function IncomingOfferScreen({ navigation }: Props) {
         }
       }
       setStatus('idle');
+      if (useDispatchStore.getState().incomingOffer?.offerId === currentOffer.offerId) {
+        await iniciarAlarmeDaOfertaNativa(currentOffer.offerId);
+      }
       Alert.alert(
         'Oferta não respondida',
         error instanceof ApiError ? error.message : 'Não foi possível responder a esta oferta.',

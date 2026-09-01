@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!--
       Permite exibir a Activity da oferta e, quando o motoboy ativar a opcao,
       o atalho flutuante sobre a tela inicial ou outro aplicativo.

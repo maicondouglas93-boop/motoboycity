@@ -11,7 +11,9 @@ import {
   abrirAjusteDeTelaCheia,
   consultarApresentacaoNativa,
   dispensarOfertaNativa,
+  iniciarAlarmeDaOfertaNativa,
   limparSessaoNativa,
+  pararAlarmeDaOfertaNativa,
   salvarSessaoNativa,
 } from '../src/lib/offerSession';
 import { pushTokensApi } from '../src/lib/apiClient';
@@ -165,6 +167,14 @@ describe('push do app do motoboy', () => {
     await dispensarOfertaNativa('oferta-1');
 
     expect(NativeModules.OfferSession.dismiss).toHaveBeenCalledWith('oferta-1');
+  });
+
+  it('controla o alarme nativo usado pela tela React Native da oferta', async () => {
+    await iniciarAlarmeDaOfertaNativa('oferta-1');
+    await pararAlarmeDaOfertaNativa('oferta-1');
+
+    expect(NativeModules.OfferSession.startOfferAlarm).toHaveBeenCalledWith('oferta-1');
+    expect(NativeModules.OfferSession.stopOfferAlarm).toHaveBeenCalledWith('oferta-1');
   });
 
   it('consulta e abre o acesso especial de tela cheia do Android', async () => {

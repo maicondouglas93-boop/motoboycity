@@ -42,6 +42,7 @@ class OfferActionReceiver : BroadcastReceiver() {
         ) {
           // So remove depois de a API confirmar. Numa falha de rede, a oferta
           // continua acionavel para o motoboy tentar de novo dentro do prazo.
+          ForegroundOfferAlarm.stop(offerId)
           cancelarNotificacaoDaOferta(appContext)
           OfferSessionStore.marcarOfertaResolvida(appContext, offerId)
           OfferActivity.notifyResolved(appContext, offerId)

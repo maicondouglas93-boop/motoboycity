@@ -3,6 +3,8 @@ import { NativeModules, Platform } from 'react-native';
 interface OfferSessionNativo {
   save(apiUrl: string, accessToken: string): Promise<void>;
   clear(): Promise<void>;
+  startOfferAlarm(offerId: string): Promise<void>;
+  stopOfferAlarm(offerId: string): Promise<void>;
   dismiss(offerId: string): Promise<void>;
   presentationStatus(): Promise<NativeOfferPresentationStatus>;
   openFullScreenSettings(): Promise<void>;
@@ -44,6 +46,18 @@ export async function salvarSessaoNativa(apiUrl: string, accessToken: string): P
 export async function limparSessaoNativa(): Promise<void> {
   if (Platform.OS !== 'android' || !modulo) return;
   await modulo.clear().catch(() => undefined);
+}
+
+/** Inicia som e vibracao enquanto a oferta esta na tela React Native. */
+export async function iniciarAlarmeDaOfertaNativa(offerId: string): Promise<void> {
+  if (Platform.OS !== 'android' || !modulo) return;
+  await modulo.startOfferAlarm(offerId).catch(() => undefined);
+}
+
+/** Para o alarme ao responder, expirar ou sair da tela de oferta. */
+export async function pararAlarmeDaOfertaNativa(offerId: string): Promise<void> {
+  if (Platform.OS !== 'android' || !modulo) return;
+  await modulo.stopOfferAlarm(offerId).catch(() => undefined);
 }
 
 /** Remove a faixa/cartão Android depois que o React Native resolveu a oferta. */

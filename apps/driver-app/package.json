@@ -1,6 +1,6 @@
 {
   "name": "@motoboycity/driver-app",
-  "version": "0.1.0-pilot.17",
+  "version": "0.1.0-pilot.18",
   "private": true,
   "description": "MOTOboyCity — Aplicativo Mobile do Motoboy (React Native CLI / bare).",
   "scripts": {

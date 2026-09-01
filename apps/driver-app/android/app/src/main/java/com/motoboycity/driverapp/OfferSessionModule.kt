@@ -40,19 +40,40 @@ class OfferSessionModule(
    */
   @ReactMethod
   fun clear(promise: Promise) {
+    ForegroundOfferAlarm.stop()
     OfferSessionStore.limpar(reactContext)
+    promise.resolve(null)
+  }
+
+  /** Liga o mesmo toque insistente quando a oferta esta na tela React Native. */
+  @ReactMethod
+  fun startOfferAlarm(offerId: String, promise: Promise) {
+    ForegroundOfferAlarm.start(reactContext, offerId)
+    promise.resolve(null)
+  }
+
+  /** Para o toque ao responder, expirar ou sair da tela React Native. */
+  @ReactMethod
+  fun stopOfferAlarm(offerId: String, promise: Promise) {
+    ForegroundOfferAlarm.stop(offerId)
     promise.resolve(null)
   }
 
   /** Fecha a faixa/cartão nativos quando a resposta aconteceu no React Native. */
   @ReactMethod
   fun dismiss(offerId: String, promise: Promise) {
+    ForegroundOfferAlarm.stop(offerId)
     OfferSessionStore.marcarOfertaResolvida(reactContext, offerId)
     reactContext
       .getSystemService(NotificationManager::class.java)
       ?.cancel(OfferActionReceiver.OFFER_NOTIFICATION_ID)
     OfferActivity.notifyResolved(reactContext, offerId)
     promise.resolve(null)
+  }
+
+  override fun invalidate() {
+    ForegroundOfferAlarm.stop()
+    super.invalidate()
   }
 
   /** Estado exibido em Ajustes; nenhuma permissão é presumida pela interface. */

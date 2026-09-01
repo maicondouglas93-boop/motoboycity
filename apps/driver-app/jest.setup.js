@@ -39,6 +39,8 @@ const { NativeModules } = require('react-native');
 NativeModules.OfferSession = {
   save: jest.fn(() => Promise.resolve()),
   clear: jest.fn(() => Promise.resolve()),
+  startOfferAlarm: jest.fn(() => Promise.resolve()),
+  stopOfferAlarm: jest.fn(() => Promise.resolve()),
   dismiss: jest.fn(() => Promise.resolve()),
   presentationStatus: jest.fn(() =>
     Promise.resolve({
