@@ -28,7 +28,7 @@ export interface WalletTransactionItem {
 }
 
 /**
- * A política do saque, decidida no SERVIDOR e entregue pronta.
+ * A política do ciclo de repasse e saque, decidida no SERVIDOR e entregue pronta.
  *
  * O aplicativo tinha a própria cópia da regra ("segunda-feira") escrita no
  * código. Com o dia configurável, uma segunda cópia passaria a mentir no dia
@@ -38,7 +38,7 @@ export interface WalletTransactionItem {
 export interface WithdrawalPolicy {
   /** Hoje é dia de solicitar? Já considera o fuso da operação. */
   openToday: boolean;
-  /** Ex.: "quarta-feira". `null` quando não há restrição de dia. */
+  /** Ex.: "quarta-feira". `null` quando o ciclo ocorre todos os dias às 00:00. */
   weekdayLabel: string | null;
 }
 

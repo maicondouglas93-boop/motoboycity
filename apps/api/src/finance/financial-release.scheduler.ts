@@ -5,11 +5,11 @@ import {
   CLOSE_COMPANY_INVOICES_JOB,
   FINANCE_QUEUE,
   RELEASE_DRIVER_REPASSES_JOB,
-} from './financial-payout.processor';
+} from './financial-payout.constants';
 import { FinancialPayoutService } from './financial-payout.service';
 import { InvoiceService } from './invoice.service';
 
-/** Agenda repasses semanais e processa as politicas de faturamento diariamente. */
+/** Confere diariamente o ciclo configurável de repasses e o faturamento. */
 @Injectable()
 export class FinancialReleaseScheduler implements OnModuleInit {
   private readonly logger = new Logger(FinancialReleaseScheduler.name);
@@ -21,9 +21,10 @@ export class FinancialReleaseScheduler implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.financeQueue.removeJobScheduler('weekly-driver-repasse-release');
     await this.financeQueue.upsertJobScheduler(
-      'weekly-driver-repasse-release',
-      { pattern: '0 0 * * 1', tz: 'America/Sao_Paulo' },
+      'daily-driver-repasse-release',
+      { pattern: '0 0 * * *', tz: 'America/Sao_Paulo' },
       { name: RELEASE_DRIVER_REPASSES_JOB, data: {} },
     );
     await this.financeQueue.removeJobScheduler('weekly-company-invoice-close');
@@ -50,7 +51,7 @@ export class FinancialReleaseScheduler implements OnModuleInit {
    * A produção só não caiu porque o Render mantém a versão anterior quando a
    * nova não abre porta.
    *
-   * Falhar aqui é aceitável e o job agendado tenta de novo. Não subir não é.
+   * Falhar aqui é aceitável e o job diário tenta de novo. Não subir não é.
    */
   private async recuperarAtrasados(): Promise<void> {
     try {
@@ -60,7 +61,7 @@ export class FinancialReleaseScheduler implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error(
-        'Não foi possível liberar repasses atrasados na inicialização. O job semanal tentará de novo.',
+        'Não foi possível liberar repasses atrasados na inicialização. O job diário tentará de novo.',
         error instanceof Error ? error.stack : String(error),
       );
     }

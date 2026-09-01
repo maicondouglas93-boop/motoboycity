@@ -62,9 +62,10 @@ O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 `localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As correções foram conferidas por
 texto dentro do bundle, e não só pelo commit.
 
-O `pilot.17` faz a carteira e a solicitação de saque obedecerem ao dia escolhido
-pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho. O
-servidor continua sendo a autoridade da regra. Não havia aparelho ADB conectado
+O `pilot.17` faz a carteira e a solicitação de saque obedecerem ao dia financeiro
+escolhido pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho.
+No servidor, esse mesmo dia agora libera os repasses às 00:00; `null` significa
+liberação diária às 00:00. O servidor continua sendo a autoridade da regra. Não havia aparelho ADB conectado
 no build; o APK foi compilado e verificado, mas ainda não foi instalado nem
 distribuído. Por isso a tabela acima continua registrando `pilot.16` nos
 aparelhos.

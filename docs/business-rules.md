@@ -217,13 +217,15 @@ ou coletadas continuam com o mesmo motoboy até o encerramento normal.
 
 ## Saque
 
-O administrador escolhe o dia da semana em que o motoboy pode solicitar o
-saque, usando o fuso de `America/Sao_Paulo`, ou libera a solicitação em qualquer
-dia. O padrão preservado para instalações existentes é segunda-feira. Sem valor
-mínimo e sem taxa.
+O administrador escolhe o dia do ciclo financeiro, usando o fuso de
+`America/Sao_Paulo`. Às 00:00 desse dia, o repasse das entregas sai do saldo
+bloqueado e o motoboy pode solicitar o saque. Domingo, sábado ou qualquer outro
+dia numerado continuam sendo ciclos semanais; a opção “todos os dias” cria um
+ciclo diário às 00:00. O padrão preservado é segunda-feira. Sem valor mínimo e
+sem taxa.
 
-Essa configuração altera somente o dia da solicitação. A liberação semanal dos
-créditos continua acontecendo na segunda-feira.
+Ao trocar o dia, o servidor recalcula também os créditos ainda bloqueados. Uma
+entrega concluída depois das 00:00 do próprio dia entra no ciclo seguinte.
 
 ## Antecipação
 

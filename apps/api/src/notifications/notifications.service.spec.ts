@@ -280,7 +280,7 @@ describe('central de avisos', () => {
     });
 
     /**
-     * A janela de carência existe porque `releaseAt` e o job semanal disparam
+     * A janela de carência existe porque `releaseAt` e o job diário disparam
      * no mesmo instante (segunda 00:00). Sem ela, todo domingo à meia-noite o
      * sino acusaria uma falha que é só a fila ainda não ter rodado.
      */

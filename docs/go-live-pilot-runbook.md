@@ -1156,11 +1156,11 @@ adulterar relógio ou banco, o que invalidaria o teste.
 Regra atual em `America/Sao_Paulo`:
 
 - entrega concluída gera crédito pendente;
-- segunda-feira às 00:00 libera repasses vencidos;
+- 00:00 do dia financeiro configurado libera repasses vencidos;
 - às 00:05 de cada dia, o job fecha somente os ciclos automáticos devidos para
   cada empresa, conforme frequência e dia configurados;
 - empresas em modo manual são fechadas pelo admin quando ele decidir;
-- motoboy solicita saque somente na segunda-feira;
+- motoboy solicita saque somente no dia financeiro configurado;
 - admin aprova e marca o PIX como pago manualmente;
 - admin marca a fatura como paga manualmente.
 
@@ -1176,8 +1176,8 @@ Confirme:
 
 ### No próximo fechamento configurado
 
-1. se for segunda-feira, às 00:00 confirme a liberação do crédito;
-2. se for segunda-feira, no app solicite um saque permitido;
+1. no dia financeiro configurado, às 00:00 confirme a liberação do crédito;
+2. nesse mesmo dia, no app solicite um saque permitido;
 3. no admin `/financeiro/saques`, aprove o saque solicitado;
 4. realize o PIX fora da plataforma somente se for um teste financeiro
    autorizado; caso contrário, mantenha o valor fictício e não marque pago;
@@ -1301,7 +1301,7 @@ Mesmo com o piloto aprovado, ainda faltam no mínimo:
 - resolução ou aceitação formal dos advisories altos transitivos conhecidos;
 - backup automático local ativo; ainda faltam restore periódico comprovado e
   uma segunda cópia criptografada fora da máquina;
-- homologação financeira na segunda-feira real para saque e na data de corte
+- homologação financeira no dia real configurado para saque e na data de corte
   configurada para cada empresa;
 - contratos e processo operacional com empresas e motoboys;
 - integração Aiqfome homologada, se for habilitada.
@@ -1391,7 +1391,7 @@ Se você começar do estado atual, siga esta sequência sem pular etapas:
 20. executar lote;
 21. executar cancelamentos e falhas controladas;
 22. validar o financeiro imediato;
-23. validar o saque na segunda-feira e cada política de fechamento configurada;
+23. validar a liberação e o saque no dia financeiro escolhido e cada política de fechamento configurada;
 24. revisar evidências e decidir ampliar, corrigir ou encerrar o piloto.
 
 Até o item 7, não existe artefato confiável para colocar na rua. Até o item

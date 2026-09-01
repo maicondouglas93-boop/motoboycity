@@ -2,7 +2,9 @@ import { InternalServerErrorException } from '@nestjs/common';
 import { FinanceLedgerService } from './finance-ledger.service';
 
 describe('FinanceLedgerService', () => {
-  const service = new FinanceLedgerService();
+  const platformSettings = { get: jest.fn() };
+  const clock = { now: jest.fn() };
+  const service = new FinanceLedgerService(platformSettings as never, clock as never);
   const tx = {
     wallet: { upsert: jest.fn() },
     walletTransaction: { create: jest.fn() },
@@ -11,9 +13,43 @@ describe('FinanceLedgerService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    platformSettings.get.mockResolvedValue({ withdrawalWeekday: 1 });
+    clock.now.mockReturnValue(new Date('2026-08-25T12:00:00.000Z'));
     tx.wallet.upsert.mockResolvedValue({ id: 'wallet-1' });
     tx.walletTransaction.create.mockResolvedValue({ id: 'transaction-1' });
     tx.walletUpdate.mockResolvedValue({ id: 'wallet-1' });
+  });
+
+  it('agenda o crédito para 00:00 do dia escolhido pelo administrador', async () => {
+    platformSettings.get.mockResolvedValue({ withdrawalWeekday: 0 });
+
+    await service.creditDriverRepasse(prismaTransaction() as never, {
+      id: 'delivery-sunday',
+      driverId: 'driver-1',
+      driverValue: 10,
+    });
+
+    expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        releaseAt: new Date('2026-08-30T03:00:00.000Z'),
+      }),
+    });
+  });
+
+  it('na opção todos os dias agenda para a próxima meia-noite', async () => {
+    platformSettings.get.mockResolvedValue({ withdrawalWeekday: null });
+
+    await service.creditDriverRepasse(prismaTransaction() as never, {
+      id: 'delivery-daily',
+      driverId: 'driver-1',
+      driverValue: 10,
+    });
+
+    expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        releaseAt: new Date('2026-08-26T03:00:00.000Z'),
+      }),
+    });
   });
 
   function prismaTransaction() {

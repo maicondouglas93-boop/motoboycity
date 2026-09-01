@@ -15,7 +15,8 @@ import { CompanyFinancialService } from './company-financial.service';
 import { AdminInvoicesController, CompanyInvoicesController } from './invoice.controller';
 import { InvoiceService } from './invoice.service';
 import { FinancialClock } from './financial-clock.service';
-import { FinancialPayoutProcessor, FINANCE_QUEUE } from './financial-payout.processor';
+import { FinancialPayoutProcessor } from './financial-payout.processor';
+import { FINANCE_QUEUE } from './financial-payout.constants';
 import { FinancialPayoutService } from './financial-payout.service';
 import { FinancialReleaseScheduler } from './financial-release.scheduler';
 import { AdminWithdrawalController, DriverWithdrawalController } from './withdrawal.controller';
@@ -26,8 +27,8 @@ import { AsaasWebhookController, CompanyInvoicePixController } from './asaas/asa
 import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-platform-settings.module';
 
 @Module({
-  // `AdminPlatformSettingsModule` porque o dia do saque virou configuracao: o
-  // servico do saque e o da carteira leem `withdrawalWeekday` de la. Sem o
+  // `AdminPlatformSettingsModule` porque o ciclo de repasse e saque virou
+  // configuracao: ledger, saque e carteira leem `withdrawalWeekday` de la. Sem o
   // import, o Nest nao resolve a dependencia e a API nao sobe — foi o que
   // aconteceu na primeira tentativa.
   imports: [

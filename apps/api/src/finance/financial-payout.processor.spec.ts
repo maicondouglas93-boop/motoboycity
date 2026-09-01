@@ -24,7 +24,7 @@ describe('FinancialPayoutProcessor', () => {
     });
   });
 
-  it('executa a liberação idempotente de repasses pelo job semanal', async () => {
+  it('executa a reconciliação idempotente de repasses pelo job diário', async () => {
     await processor.process({ name: RELEASE_DRIVER_REPASSES_JOB } as Job);
 
     expect(payoutService.releaseDueRepasses).toHaveBeenCalledWith(undefined, {

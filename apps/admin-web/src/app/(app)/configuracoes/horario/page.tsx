@@ -53,9 +53,9 @@ function seedFromHours(hours: BusinessHoursResult['hours']): RangeDraft[][] {
   return porDia;
 }
 
-/** "Qualquer dia" é escolha do administrador, e não ausência de configuração. */
+/** `qualquer` significa um ciclo diário às 00:00, e não liberação imediata. */
 const DIAS_DO_SAQUE = [
-  { valor: 'qualquer', rotulo: 'Qualquer dia' },
+  { valor: 'qualquer', rotulo: 'Todos os dias, às 00:00' },
   { valor: '0', rotulo: 'Domingo' },
   { valor: '1', rotulo: 'Segunda-feira' },
   { valor: '2', rotulo: 'Terça-feira' },
@@ -88,7 +88,7 @@ export default function BusinessHoursPage() {
       setWithdrawalError(
         mutationError instanceof ApiError
           ? mutationError.message
-          : 'Não foi possível mudar o dia do saque.',
+          : 'Não foi possível mudar o dia da liberação e do saque.',
       ),
   });
 
@@ -169,19 +169,15 @@ export default function BusinessHoursPage() {
       <Card>
         <CardContent className="space-y-3 pt-6">
           <div>
-            <p className="font-medium">Dia em que o motoboy pode pedir saque</p>
-            {/*
-              Isto NAO e o dia em que o dinheiro e liberado — esse continua sendo
-              a segunda-feira do repasse semanal. Um diz quando o credito sai de
-              bloqueado; o outro, quando da para pedir o que ja esta disponivel.
-            */}
+            <p className="font-medium">Dia da liberação dos repasses e do saque</p>
             <p className="text-sm text-muted-foreground">
-              A liberação do dinheiro continua semanal, na segunda-feira. Isto muda só o dia em que
-              a solicitação de saque é aceita.
+              Às 00:00 do dia escolhido, o dinheiro das entregas sai do saldo bloqueado e fica
+              disponível. A solicitação de saque é aceita nesse mesmo dia. Em “todos os dias”, a
+              liberação acontece diariamente às 00:00.
             </p>
           </div>
           <select
-            aria-label="Dia do saque"
+            aria-label="Dia da liberação dos repasses e do saque"
             className="h-9 rounded-md border bg-background px-3 text-sm"
             value={
               settingsQuery.data?.withdrawalWeekday === null ||
@@ -210,9 +206,8 @@ export default function BusinessHoursPage() {
             que o app libera.
           */}
           <p className="rounded-lg border border-primary/20 bg-admin-soft/50 px-3 py-2 text-xs text-muted-foreground">
-            O aplicativo instalado precisa ser atualizado para refletir a troca. Enquanto isso, o
-            motoboy vê o dia antigo na tela — o servidor é quem decide, e ele já obedece a esta
-            configuração.
+            O servidor recalcula também os repasses que ainda estão bloqueados. O APK pilot.17
+            precisa estar instalado para o texto e o botão de saque acompanharem o dia escolhido.
           </p>
         </CardContent>
       </Card>

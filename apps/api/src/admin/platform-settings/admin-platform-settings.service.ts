@@ -1,6 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Injectable, Logger } from '@nestjs/common';
 import type { DriverPunishmentTrigger, PlatformSettingsItem } from '@motoboycity/types';
 import type { UpdatePlatformSettingsPayload } from '@motoboycity/validation';
+import type { Queue } from 'bullmq';
+import {
+  FINANCE_QUEUE,
+  RELEASE_DRIVER_REPASSES_JOB,
+} from '../../finance/financial-payout.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 
@@ -13,9 +19,12 @@ export type { PlatformSettingsItem };
 
 @Injectable()
 export class AdminPlatformSettingsService {
+  private readonly logger = new Logger(AdminPlatformSettingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AdminAuditService,
+    @InjectQueue(FINANCE_QUEUE) private readonly financeQueue: Queue,
   ) {}
 
   async get(): Promise<PlatformSettingsItem> {
@@ -33,7 +42,7 @@ export class AdminPlatformSettingsService {
         collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
         businessHoursEnabled: false,
-        // Segunda-feira, que era a regra fixa antes de o dia virar configuravel.
+        // Segunda-feira, que era o ciclo fixo antes de o dia virar configuravel.
         withdrawalWeekday: 1,
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
@@ -160,6 +169,28 @@ export class AdminPlatformSettingsService {
       );
       return updated;
     });
+
+    if (payload.withdrawalWeekday !== undefined) {
+      try {
+        await this.financeQueue.add(
+          RELEASE_DRIVER_REPASSES_JOB,
+          { reason: 'platform-weekday-changed' },
+          {
+            jobId: `repasse-policy-${settings.updatedAt.getTime()}`,
+            removeOnComplete: 100,
+            removeOnFail: 100,
+          },
+        );
+      } catch (error) {
+        // O agendamento diário reconcilia novamente à meia-noite. A falha do
+        // gatilho imediato não pode devolver erro depois de a configuração e
+        // a auditoria já terem sido gravadas com sucesso.
+        this.logger.error(
+          'O dia financeiro foi salvo, mas a reconciliação imediata dos repasses não entrou na fila.',
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     return this.toItem(settings);
   }

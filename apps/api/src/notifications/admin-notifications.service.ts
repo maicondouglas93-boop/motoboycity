@@ -17,8 +17,8 @@ const MINUTOS_SEM_MOTOBOY = 15;
  * Repasse vencido e ainda pendente: a partir daqui não é corrida de horário, é
  * falha.
  *
- * `releaseAt` é sempre segunda 00:00 no fuso da operação, e o job semanal roda
- * segunda 00:00 — os dois disparam no mesmo instante. Seis horas depois, a
+ * `releaseAt` é 00:00 do ciclo escolhido no fuso da operação, e o job diário
+ * roda sempre à meia-noite — os dois disparam no mesmo instante. Seis horas depois, a
  * única explicação para o crédito continuar `PENDING` é que a liberação não
  * aconteceu.
  */

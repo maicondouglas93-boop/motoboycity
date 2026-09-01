@@ -303,11 +303,12 @@ pelo painel.
 **Nenhum limite que governe a operação deve morar como constante de código.** Se
 o operador não alcança, ele não opera.
 
-O dia para solicitar saque também vive em `PlatformSettings`.
-`withdrawalWeekday` usa `0` (domingo) a `6` (sábado), no fuso de
-`America/Sao_Paulo`; `null` significa qualquer dia e o padrão `1` preserva a
-segunda-feira. Essa política não muda a liberação semanal dos créditos, que
-continua na segunda-feira.
+O ciclo de repasse e saque vive em `PlatformSettings`. `withdrawalWeekday` usa
+`0` (domingo) a `6` (sábado), no fuso de `America/Sao_Paulo`; o crédito sai de
+`PENDING` às 00:00 desse dia e o saque é aceito no mesmo dia. `null` significa
+ciclo diário às 00:00, e o padrão `1` preserva a segunda-feira. O job roda todo
+dia para reconciliar o `releaseAt`; uma troca pelo ADM também enfileira essa
+reconciliação imediatamente, incluindo os repasses que já estavam bloqueados.
 
 ## 9. A fila offline do aplicativo
 

@@ -11557,3 +11557,42 @@ Arquivos funcionais e de teste:
 
 Não houve mudança de API, schema, migration, segredo ou dependência. Este
 recorte segue no mesmo release que publica o `pilot.17`.
+
+## 2026-08-31 — Dia configurável também libera os repasses
+
+`withdrawalWeekday` deixou de controlar somente a abertura da solicitação de
+saque. O mesmo valor agora define o ciclo financeiro às 00:00 de São Paulo:
+`0` a `6` liberam semanalmente de domingo a sábado, e `null` representa um ciclo
+diário às 00:00. O padrão continua sendo segunda-feira.
+
+Cada novo crédito de entrega nasce com `releaseAt` calculado para o ciclo
+escolhido. O processador financeiro passou a conferir os repasses diariamente à
+meia-noite e recalcula as datas das linhas ainda `PENDING`; ao salvar a
+configuração, o ADM também enfileira essa reconciliação imediatamente. Isso faz
+uma mudança para domingo ou sábado alcançar inclusive o saldo já bloqueado, sem
+liberar duas vezes graças às atualizações condicionais por status.
+
+O painel agora chama o campo de “Dia da liberação dos repasses e do saque” e
+explica explicitamente o horário. A antiga opção “Qualquer dia” aparece como
+“Todos os dias, às 00:00”, evitando sugerir liberação imediata no meio do dia.
+Não houve mudança de coluna, migration, enum ou formato de payload; o campo
+persistido foi mantido e teve sua semântica ampliada de forma compatível.
+
+Arquivos principais: utilitários, ledger, serviço/processador/agendador e testes
+de `apps/api/src/finance`; configuração operacional da API e do Admin Web;
+contratos compartilhados e documentação operacional.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado de finanças/configuração | 6 suítes / 64 testes aprovados |
+| Jest completo da API | 87 suítes / 1.080 testes aprovados |
+| `pnpm typecheck` | 8 workspaces aprovados |
+| `pnpm lint` | 8 workspaces aprovados; um aviso preexistente de `no-void` no Driver App |
+| build da API | aprovado |
+| build do Admin Web | aprovado; 38 páginas |
+| testes do Admin Web | 11 testes aprovados |
+
+Não foram executados E2E nem migration, porque não há alteração de banco. Não
+houve commit, push ou deploy neste recorte.

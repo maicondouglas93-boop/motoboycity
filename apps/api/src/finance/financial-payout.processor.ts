@@ -3,10 +3,13 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { FinancialPayoutService } from './financial-payout.service';
 import { InvoiceService } from './invoice.service';
+import {
+  CLOSE_COMPANY_INVOICES_JOB,
+  FINANCE_QUEUE,
+  RELEASE_DRIVER_REPASSES_JOB,
+} from './financial-payout.constants';
 
-export const FINANCE_QUEUE = 'finance';
-export const RELEASE_DRIVER_REPASSES_JOB = 'release-driver-repasses';
-export const CLOSE_COMPANY_INVOICES_JOB = 'close-company-invoices';
+export { CLOSE_COMPANY_INVOICES_JOB, FINANCE_QUEUE, RELEASE_DRIVER_REPASSES_JOB };
 
 @Processor(FINANCE_QUEUE)
 export class FinancialPayoutProcessor extends WorkerHost {
@@ -21,6 +24,9 @@ export class FinancialPayoutProcessor extends WorkerHost {
 
   async process(job: Job): Promise<void> {
     if (job.name === RELEASE_DRIVER_REPASSES_JOB) {
+      // Além de liberar os vencidos, reconcilia `releaseAt` com o dia atual da
+      // plataforma. Assim uma troca feita pelo ADM alcança créditos que já
+      // estavam bloqueados para o ciclo anterior.
       await this.financialPayoutService.releaseDueRepasses(undefined, {
         includeLegacyWithoutReleaseAt: true,
       });

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getQueueToken } from '@nestjs/bullmq';
 import { updatePlatformSettingsSchema } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
@@ -11,6 +12,7 @@ describe('AdminPlatformSettingsService', () => {
     $transaction: jest.Mock;
   };
   let audit: { record: jest.Mock };
+  let financeQueue: { add: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -19,12 +21,14 @@ describe('AdminPlatformSettingsService', () => {
     };
     prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
     audit = { record: jest.fn() };
+    financeQueue = { add: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminPlatformSettingsService,
         { provide: PrismaService, useValue: prisma },
         { provide: AdminAuditService, useValue: audit },
+        { provide: getQueueToken('finance'), useValue: financeQueue },
       ],
     }).compile();
 
@@ -159,6 +163,36 @@ describe('AdminPlatformSettingsService', () => {
   });
 
   describe('update', () => {
+    it('aciona a reconciliação dos repasses quando muda o dia financeiro', async () => {
+      const updatedAt = new Date('2026-08-31T20:00:00.000Z');
+      prisma.platformSettings.upsert.mockResolvedValue({
+        withdrawalWeekday: 0,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt,
+      });
+
+      await service.update({ withdrawalWeekday: 0 }, 'admin-1');
+
+      expect(financeQueue.add).toHaveBeenCalledWith(
+        'release-driver-repasses',
+        { reason: 'platform-weekday-changed' },
+        expect.objectContaining({ jobId: `repasse-policy-${updatedAt.getTime()}` }),
+      );
+    });
+
+    it('não falha depois de salvar se o gatilho imediato ficar sem Redis', async () => {
+      prisma.platformSettings.upsert.mockResolvedValue({
+        withdrawalWeekday: 6,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-08-31T20:00:00.000Z'),
+      });
+      financeQueue.add.mockRejectedValue(new Error('redis fora'));
+
+      await expect(service.update({ withdrawalWeekday: 6 }, 'admin-1')).resolves.toMatchObject({
+        withdrawalWeekday: 6,
+      });
+    });
+
     it('faz upsert gravando quem atualizou, com os dois campos', async () => {
       prisma.platformSettings.upsert.mockResolvedValue({
         driverCommissionPercentage: { toString: () => '75.00' },

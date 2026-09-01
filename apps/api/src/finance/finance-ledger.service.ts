@@ -1,6 +1,8 @@
 import { InternalServerErrorException, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { nextMondayReleaseAt } from './finance-release.utils';
+import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
+import { FinancialClock } from './financial-clock.service';
+import { nextRepasseReleaseAt } from './finance-release.utils';
 
 interface CompletedDeliveryCredit {
   id: string;
@@ -18,6 +20,11 @@ interface CompletedDeliveryCredit {
  */
 @Injectable()
 export class FinanceLedgerService {
+  constructor(
+    private readonly platformSettings: AdminPlatformSettingsService,
+    private readonly clock: FinancialClock,
+  ) {}
+
   async creditDriverRepasse(
     tx: Prisma.TransactionClient,
     delivery: CompletedDeliveryCredit,
@@ -28,6 +35,8 @@ export class FinanceLedgerService {
       );
     }
 
+    const { withdrawalWeekday } = await this.platformSettings.get();
+    const completedAt = this.clock.now();
     const wallet = await tx.wallet.upsert({
       where: { driverId: delivery.driverId },
       update: {},
@@ -42,7 +51,7 @@ export class FinanceLedgerService {
         amount: delivery.driverValue,
         relatedDeliveryId: delivery.id,
         idempotencyKey: `driver-repasse:${delivery.id}`,
-        releaseAt: nextMondayReleaseAt(new Date()),
+        releaseAt: nextRepasseReleaseAt(completedAt, withdrawalWeekday),
       },
     });
 

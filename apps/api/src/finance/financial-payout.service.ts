@@ -17,7 +17,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { calculateWalletBalances, type WalletTransactionType } from './driver-wallet.service';
 import { FinancialClock } from './financial-clock.service';
-import { isWithdrawalDayInSaoPaulo, withdrawalWeekdayLabel } from './finance-release.utils';
+import {
+  isWithdrawalDayInSaoPaulo,
+  nextRepasseReleaseAt,
+  withdrawalWeekdayLabel,
+} from './finance-release.utils';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
@@ -92,32 +96,43 @@ export class FinancialPayoutService {
   ) {}
 
   /**
-   * Libera créditos cuja data prevista já chegou. O job semanal inclui os
-   * créditos legados sem releaseAt; a inicialização da API só recupera jobs
-   * atrasados que já possuíam uma data prevista.
+   * Reconcilia a data prevista com o ciclo atual e libera o que já venceu.
+   * O job diário inclui créditos legados sem `releaseAt`; a inicialização da
+   * API recupera somente linhas que já possuíam uma data prevista.
    */
   async releaseDueRepasses(
     now = this.clock.now(),
     options: { includeLegacyWithoutReleaseAt?: boolean } = {},
   ): Promise<number> {
     const includeLegacy = options.includeLegacyWithoutReleaseAt ?? false;
+    const { withdrawalWeekday } = await this.platformSettings.get();
     return this.withSerializableTransaction(async (tx) => {
       const candidates = await tx.walletTransaction.findMany({
         where: {
           type: 'CREDIT_REPASSE',
           status: 'PENDING',
-          OR: [{ releaseAt: { lte: now } }, ...(includeLegacy ? [{ releaseAt: null }] : [])],
+          ...(!includeLegacy && { releaseAt: { not: null } }),
         },
-        select: { id: true, walletId: true, amount: true },
+        select: { id: true, walletId: true, amount: true, createdAt: true, releaseAt: true },
       });
 
       const releasedByWallet = new Map<string, number>();
+      let releasedCount = 0;
       for (const candidate of candidates) {
+        const configuredReleaseAt = nextRepasseReleaseAt(candidate.createdAt, withdrawalWeekday);
+        const shouldRelease = configuredReleaseAt.getTime() <= now.getTime();
+        const scheduleChanged = candidate.releaseAt?.getTime() !== configuredReleaseAt.getTime();
+        if (!shouldRelease && !scheduleChanged) continue;
+
         const updated = await tx.walletTransaction.updateMany({
           where: { id: candidate.id, status: 'PENDING' },
-          data: { status: 'RELEASED' },
+          data: {
+            releaseAt: configuredReleaseAt,
+            ...(shouldRelease && { status: 'RELEASED' }),
+          },
         });
-        if (updated.count === 1) {
+        if (updated.count === 1 && shouldRelease) {
+          releasedCount += 1;
           releasedByWallet.set(
             candidate.walletId,
             roundCurrency(
@@ -137,7 +152,7 @@ export class FinancialPayoutService {
         });
       }
 
-      return candidates.length;
+      return releasedCount;
     });
   }
 

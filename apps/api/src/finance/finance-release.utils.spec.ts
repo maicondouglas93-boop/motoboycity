@@ -9,6 +9,7 @@ import {
   nextInvoiceClosingDateInSaoPaulo,
   nextInvoiceClosingDateForPolicyInSaoPaulo,
   nextMondayReleaseAt,
+  nextRepasseReleaseAt,
 } from './finance-release.utils';
 
 describe('regra semanal de liberação financeira', () => {
@@ -27,6 +28,31 @@ describe('regra semanal de liberação financeira', () => {
   it('avalia a segunda-feira no fuso de São Paulo, não no UTC', () => {
     expect(isMondayInSaoPaulo(new Date('2026-08-24T00:30:00.000Z'))).toBe(false);
     expect(isMondayInSaoPaulo(new Date('2026-08-24T12:00:00.000Z'))).toBe(true);
+  });
+
+  it('agenda domingo e sábado às 00:00 no fuso de São Paulo', () => {
+    const terca = new Date('2026-08-25T12:00:00.000Z');
+
+    expect(nextRepasseReleaseAt(terca, 0).toISOString()).toBe('2026-08-30T03:00:00.000Z');
+    expect(nextRepasseReleaseAt(terca, 6).toISOString()).toBe('2026-08-29T03:00:00.000Z');
+  });
+
+  it('no próprio dia usa o ciclo da semana seguinte', () => {
+    expect(nextRepasseReleaseAt(new Date('2026-08-29T15:00:00.000Z'), 6).toISOString()).toBe(
+      '2026-09-05T03:00:00.000Z',
+    );
+  });
+
+  it('todos os dias significa a próxima meia-noite, não liberação imediata', () => {
+    expect(nextRepasseReleaseAt(new Date('2026-08-25T12:00:00.000Z'), null).toISOString()).toBe(
+      '2026-08-26T03:00:00.000Z',
+    );
+  });
+
+  it('recusa um dia corrompido em vez de liberar no ciclo errado', () => {
+    expect(() => nextRepasseReleaseAt(new Date('2026-08-25T12:00:00.000Z'), 7)).toThrow(
+      'entre 0 (domingo) e 6 (sábado)',
+    );
   });
 
   it('mantém o corte anterior até 00:05 e troca para a segunda atual no horário confirmado', () => {

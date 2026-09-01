@@ -62,14 +62,14 @@ export const updatePlatformSettingsSchema = z
       .optional(),
     businessHoursEnabled: z.boolean().optional(),
     /**
-     * Dia da semana do saque. `null` e uma escolha — "qualquer dia" —, e nao
-     * ausencia de configuracao; por isso `nullable` alem de `optional`.
+     * Dia da liberação dos repasses e do saque. `null` é a escolha "todos os
+     * dias às 00:00", e não ausência de configuração; por isso `nullable`.
      */
     withdrawalWeekday: z
       .number()
-      .int('O dia do saque deve ser um número inteiro.')
-      .min(0, 'O dia do saque vai de 0 (domingo) a 6 (sábado).')
-      .max(6, 'O dia do saque vai de 0 (domingo) a 6 (sábado).')
+      .int('O dia financeiro deve ser um número inteiro.')
+      .min(0, 'O dia financeiro vai de 0 (domingo) a 6 (sábado).')
+      .max(6, 'O dia financeiro vai de 0 (domingo) a 6 (sábado).')
       .nullable()
       .optional(),
     /**

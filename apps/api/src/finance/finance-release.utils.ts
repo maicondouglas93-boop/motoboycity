@@ -12,7 +12,7 @@ export interface InvoiceClosingPolicy {
 
 export { dateInSaoPaulo };
 
-/** A liberação financeira ocorre toda segunda-feira no fuso operacional. */
+/** Compatibilidade para relatórios/testes antigos que perguntam especificamente por segunda. */
 export function isMondayInSaoPaulo(date: Date): boolean {
   return saoPauloDateParts(date).weekday === 1;
 }
@@ -38,10 +38,9 @@ const NOME_DO_DIA = [
  * segunda-feira começa às 21h de domingo para quem opera — e o motoboy pediria
  * saque num dia que, para ele, ainda não chegou.
  *
- * Separado de `isMondayInSaoPaulo` de propósito: aquela função responde por
- * QUANDO O DINHEIRO É LIBERADO, que continua semanal e não virou configurável.
- * Fundir as duas faria uma troca de dia de saque mexer, sem querer, na data em
- * que o crédito sai de bloqueado.
+ * A mesma configuração também determina quando o crédito sai do saldo
+ * bloqueado. Assim o servidor nunca abre o saque antes do ciclo financeiro
+ * escolhido pelo administrador.
  */
 export function isWithdrawalDayInSaoPaulo(date: Date, weekday: number | null): boolean {
   if (weekday === null) return true;
@@ -55,20 +54,41 @@ export function withdrawalWeekdayLabel(weekday: number | null): string | null {
 }
 
 /**
- * A entrega fechada em uma segunda ainda entra no próximo ciclo. O horário
- * em UTC representa 00:00 de São Paulo (UTC-03), preservando a data correta
- * nos extratos do produto.
+ * Próximo ciclo de liberação às 00:00 de São Paulo.
+ *
+ * Um dia numerado representa o próximo ciclo semanal naquele dia. Se a
+ * entrega terminar no próprio dia, ela entra na semana seguinte — o corte das
+ * 00:00 já passou. `null` é a opção "todos os dias" e aponta para a próxima
+ * meia-noite, nunca para uma liberação imediata no meio do dia.
  */
-export function nextMondayReleaseAt(date: Date): Date {
+export function nextRepasseReleaseAt(date: Date, weekday: number | null): Date {
+  if (weekday !== null && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)) {
+    throw new RangeError('O dia financeiro deve estar entre 0 (domingo) e 6 (sábado).');
+  }
   const parts = saoPauloDateParts(date);
   const localDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   const currentWeekday = localDate.getUTCDay();
-  const daysUntilNextMonday = currentWeekday === 1 ? 7 : (8 - currentWeekday) % 7;
-  localDate.setUTCDate(localDate.getUTCDate() + daysUntilNextMonday);
+  const configuredWeekday = weekday;
+  const daysUntilRelease =
+    configuredWeekday === null
+      ? 1
+      : configuredWeekday === currentWeekday
+        ? 7
+        : (configuredWeekday - currentWeekday + 7) % 7;
+  localDate.setUTCDate(localDate.getUTCDate() + daysUntilRelease);
 
-  return new Date(
-    Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth(), localDate.getUTCDate(), 3, 0, 0),
+  return saoPauloLocalToUtc(
+    localDate.getUTCFullYear(),
+    localDate.getUTCMonth() + 1,
+    localDate.getUTCDate(),
+    0,
+    0,
   );
+}
+
+/** Compatibilidade para consumidores antigos: segunda-feira às 00:00. */
+export function nextMondayReleaseAt(date: Date): Date {
+  return nextRepasseReleaseAt(date, 1);
 }
 
 /**

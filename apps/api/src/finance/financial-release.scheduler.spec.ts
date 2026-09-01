@@ -24,13 +24,13 @@ describe('FinancialReleaseScheduler', () => {
     });
   });
 
-  it('agenda repasses semanais e faturamento diario no fuso operacional', async () => {
+  it('confere repasses e faturamento diariamente no fuso operacional', async () => {
     await scheduler.onModuleInit();
 
     expect(queue.upsertJobScheduler).toHaveBeenNthCalledWith(
       1,
-      'weekly-driver-repasse-release',
-      { pattern: '0 0 * * 1', tz: 'America/Sao_Paulo' },
+      'daily-driver-repasse-release',
+      { pattern: '0 0 * * *', tz: 'America/Sao_Paulo' },
       { name: 'release-driver-repasses', data: {} },
     );
     expect(queue.upsertJobScheduler).toHaveBeenNthCalledWith(
@@ -40,6 +40,7 @@ describe('FinancialReleaseScheduler', () => {
       { name: 'close-company-invoices', data: {} },
     );
     expect(payoutService.releaseDueRepasses).toHaveBeenCalledTimes(1);
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('weekly-driver-repasse-release');
     expect(queue.removeJobScheduler).toHaveBeenCalledWith('weekly-company-invoice-close');
     expect(invoiceService.processScheduledBilling).toHaveBeenCalledTimes(1);
   });

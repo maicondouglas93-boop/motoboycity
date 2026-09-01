@@ -45,12 +45,9 @@ export interface PlatformSettingsItem {
   /** Liga o bloqueio de pedido fora do horário de funcionamento. */
   businessHoursEnabled: boolean;
   /**
-   * Dia da semana em que o motoboy pode SOLICITAR saque (0 = domingo .. 6 =
-   * sábado). `null` = qualquer dia.
-   *
-   * Não confundir com o dia em que o dinheiro é liberado, que continua sendo a
-   * segunda-feira do repasse semanal. Um diz quando o crédito sai de bloqueado;
-   * o outro, quando dá para pedir o que já está disponível.
+   * Dia do ciclo financeiro (0 = domingo .. 6 = sábado). Às 00:00 desse dia,
+   * o repasse sai de bloqueado e a solicitação de saque é aceita. `null` =
+   * ciclo diário às 00:00 e saque permitido todos os dias.
    */
   withdrawalWeekday: number | null;
   /**
@@ -113,8 +110,8 @@ export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
   businessHoursEnabled?: boolean;
   /**
-   * Dia do saque (0 = domingo .. 6 = sábado). `null` é a escolha "qualquer
-   * dia", e por isso é diferente de omitir o campo, que significa "não mexer".
+   * Dia da liberação e do saque (0 = domingo .. 6 = sábado). `null` é o ciclo
+   * diário às 00:00; omitir o campo significa "não mexer".
    */
   withdrawalWeekday?: number | null;
   dispatchOfferTimeoutSeconds?: number;
