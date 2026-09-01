@@ -49,6 +49,11 @@ export class LiveDriverPresenceService implements OnModuleInit, OnModuleDestroy 
     await this.redis.quit();
   }
 
+  /** Reutiliza a conexao existente; readiness nao abre outro cliente Redis. */
+  async ping(): Promise<void> {
+    await this.redis.ping();
+  }
+
   async upsert(snapshot: LiveDriverSnapshot): Promise<void> {
     const expiresAt = Date.now() + DRIVER_PRESENCE_TTL_SECONDS * 1000;
     await this.redis

@@ -11,14 +11,14 @@ class TestController {
   execute(): void {}
 }
 
-function httpContext(statusCode = 200): ExecutionContext {
+function httpContext(statusCode = 200, setHeader = jest.fn()): ExecutionContext {
   return {
     getType: () => 'http',
     getClass: () => TestController,
     getHandler: () => TestController.prototype.execute,
     switchToHttp: () => ({
       getRequest: () => ({ method: 'GET' }),
-      getResponse: () => ({ statusCode }),
+      getResponse: () => ({ statusCode, setHeader }),
       getNext: () => undefined,
     }),
   } as unknown as ExecutionContext;
@@ -54,9 +54,15 @@ describe('RequestPerformanceInterceptor', () => {
     const next: CallHandler = { handle: () => of('ok') };
 
     await expect(lastValueFrom(interceptor.intercept(httpContext(), next))).resolves.toBe('ok');
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^GET TestController\.execute status=200 durationMs=\d+$/),
-    );
+    const logged = JSON.parse(warn.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    expect(logged).toMatchObject({
+      kind: 'http_request',
+      method: 'GET',
+      operation: 'TestController.execute',
+      status: 200,
+    });
+    expect(logged['requestId']).toEqual(expect.any(String));
+    expect(logged['durationMs']).toEqual(expect.any(Number));
   });
 
   it('registra 5xx e relanca o mesmo erro', async () => {
@@ -67,10 +73,26 @@ describe('RequestPerformanceInterceptor', () => {
     const next: CallHandler = { handle: () => throwError(() => failure) };
 
     await expect(lastValueFrom(interceptor.intercept(httpContext(), next))).rejects.toBe(failure);
-    expect(logger).toHaveBeenCalledWith(
-      expect.stringMatching(/^GET TestController\.execute status=500 durationMs=\d+$/),
-    );
+    const logged = JSON.parse(logger.mock.calls[0]?.[0] as string) as Record<string, unknown>;
+    expect(logged).toMatchObject({
+      kind: 'http_request',
+      method: 'GET',
+      operation: 'TestController.execute',
+      status: 500,
+    });
     expect(logger.mock.calls[0]?.[0]).not.toContain('detalhe que nao deve ir para o log');
+  });
+
+  it('devolve um request id novo sem confiar em dados do cliente', async () => {
+    process.env['SLOW_REQUEST_THRESHOLD_MS'] = '1000000';
+    const setHeader = jest.fn();
+    const interceptor = new RequestPerformanceInterceptor();
+
+    await lastValueFrom(
+      interceptor.intercept(httpContext(200, setHeader), { handle: () => of('ok') }),
+    );
+
+    expect(setHeader).toHaveBeenCalledWith('X-Request-Id', expect.any(String));
   });
 
   it('nao deixa uma falha do logger afetar a resposta', async () => {

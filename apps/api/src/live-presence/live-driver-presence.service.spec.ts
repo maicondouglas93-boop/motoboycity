@@ -1,6 +1,7 @@
 const mockRedis = {
   connect: jest.fn(),
   quit: jest.fn(),
+  ping: jest.fn(),
   get: jest.fn(),
   zrange: jest.fn(),
   zrevrange: jest.fn(),
@@ -31,6 +32,7 @@ describe('LiveDriverPresenceService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.get.mockResolvedValue(null);
+    mockRedis.ping.mockResolvedValue('PONG');
     mockRedis.zrange.mockResolvedValue([]);
     mockRedis.zrevrange.mockResolvedValue([]);
     mockRedis.zadd.mockResolvedValue(1);
@@ -64,6 +66,13 @@ describe('LiveDriverPresenceService', () => {
       emitAdminActivity: jest.fn(),
       emitDispatchQueueUpdated: jest.fn(),
     };
+  });
+
+  it('reutiliza a conexao Redis para a readiness', async () => {
+    const service = new LiveDriverPresenceService(prisma as never, realtime as never);
+
+    await expect(service.ping()).resolves.toBeUndefined();
+    expect(mockRedis.ping).toHaveBeenCalledTimes(1);
   });
 
   it('não expira a presença se um heartbeat venceu a corrida antes do update', async () => {
