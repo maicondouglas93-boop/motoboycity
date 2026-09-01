@@ -6,6 +6,7 @@ import {
   completionDeservesAttention,
   DELIVERY_COMPLETION_SYNC_TIMEOUT_MS,
   completionClosesDeliveryLocally,
+  discardStaleCompletionBeforeCollection,
   enqueueDeliveryCompletion,
   getPendingDeliveryCompletions,
   retryDeliveryCompletionQueue,
@@ -64,6 +65,21 @@ const deliveryInput = {
   payload: { lat: -20.15, lng: -41.62, accuracy: 12 },
 };
 
+type DeliverInput = Extract<Parameters<typeof enqueueDeliveryCompletion>[0], { action: 'DELIVER' }>;
+
+async function seedNeedsReview(
+  input: DeliverInput = deliveryInput,
+): Promise<PendingDeliveryCompletion> {
+  const queued = await enqueueDeliveryCompletion(input);
+  const needsReview = {
+    ...queued,
+    state: 'NEEDS_REVIEW' as const,
+    lastError: 'O pedido precisa estar coletado antes de ser entregue.',
+  };
+  storage.set(STORAGE_KEY, JSON.stringify([needsReview]));
+  return needsReview;
+}
+
 beforeEach(() => {
   storage.clear();
   (AsyncStorage.getItem as jest.Mock).mockImplementation(
@@ -91,6 +107,122 @@ describe('delivery completion outbox', () => {
     expect(queue[0]).toMatchObject({ payload: deliveryInput.payload, state: 'PENDING' });
   });
 
+  it('remove da tela uma entrega local impossivel antes da coleta', async () => {
+    const queued = await seedNeedsReview();
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'ACCEPTED' },
+        queued,
+        snapshot,
+      ),
+    ).resolves.toBe(true);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
+  it('preserva a finalizacao offline quando a coleta esta confirmada', async () => {
+    const queued = await seedNeedsReview();
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'COLLECTED' },
+        queued,
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(1);
+  });
+
+  it('nao remove diretamente uma tentativa que ainda pode estar sincronizando', async () => {
+    const queued = await enqueueDeliveryCompletion(deliveryInput);
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'ACCEPTED' },
+        queued,
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([queued]);
+  });
+
+  it('nao apaga uma tentativa nova que reutilizou o mesmo id', async () => {
+    const stale = await seedNeedsReview();
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+    const replacement = {
+      ...stale,
+      queuedAt: new Date(Date.parse(stale.queuedAt) + 1_000).toISOString(),
+      state: 'PENDING' as const,
+      lastError: null,
+      payload: { lat: -21, lng: -42, accuracy: 5 },
+    };
+    storage.set(STORAGE_KEY, JSON.stringify([replacement]));
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'ACCEPTED' },
+        stale,
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([replacement]);
+  });
+
+  it('nao apaga uma tentativa que voltou para PENDING por acao manual', async () => {
+    const stale = await seedNeedsReview();
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+    await retryDeliveryCompletionQueue('user-1', stale.id);
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'ACCEPTED' },
+        stale,
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([
+      expect.objectContaining({ id: stale.id, state: 'PENDING', lastError: null }),
+    ]);
+  });
+
+  it('remove junto o retorno que dependia da entrega impossivel', async () => {
+    const stale = await seedNeedsReview({ ...deliveryInput, batchId: 'batch-1' });
+    await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-1',
+      batchId: 'batch-1',
+      displayNumber: 15,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+    const snapshot = await getPendingDeliveryCompletions('user-1');
+
+    await expect(
+      discardStaleCompletionBeforeCollection(
+        'user-1',
+        { id: deliveryInput.deliveryId, status: 'ACCEPTED' },
+        stale,
+        snapshot,
+      ),
+    ).resolves.toBe(true);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
   it('sincroniza em serie e remove somente depois da confirmacao da API', async () => {
     await enqueueDeliveryCompletion(deliveryInput);
     await enqueueDeliveryCompletion({
@@ -110,6 +242,61 @@ describe('delivery completion outbox', () => {
     expect(calls).toEqual(['delivery-1', 'delivery-2']);
     expect(result.syncedIds).toHaveLength(2);
     expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
+  it('uma sincronizacao antiga nao remove uma nova geracao da mesma entrega', async () => {
+    const stale = await enqueueDeliveryCompletion(deliveryInput);
+    let confirmRequest: (() => void) | undefined;
+    const request = new Promise<void>((resolve) => {
+      confirmRequest = resolve;
+    });
+    const api = executor({ deliver: jest.fn(() => request) });
+
+    const syncing = synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const replacement = {
+      ...stale,
+      queuedAt: new Date(Date.parse(stale.queuedAt) + 1_000).toISOString(),
+      payload: { lat: -21, lng: -42, accuracy: 5 },
+    };
+    storage.set(STORAGE_KEY, JSON.stringify([replacement]));
+    confirmRequest?.();
+
+    const result = await syncing;
+
+    expect(result.syncedIds).toEqual([]);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([replacement]);
+  });
+
+  it('uma recusa antiga nao coloca uma nova geracao em revisao', async () => {
+    const stale = await enqueueDeliveryCompletion(deliveryInput);
+    let rejectRequest: ((reason: unknown) => void) | undefined;
+    const request = new Promise<never>((_resolve, reject) => {
+      rejectRequest = reject;
+    });
+    const api = executor({
+      deliver: jest.fn(() => request),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COLLECTED',
+        statusHistory: [],
+      }),
+    });
+
+    const syncing = synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const replacement = {
+      ...stale,
+      queuedAt: new Date(Date.parse(stale.queuedAt) + 1_000).toISOString(),
+      payload: { lat: -21, lng: -42, accuracy: 5 },
+    };
+    storage.set(STORAGE_KEY, JSON.stringify([replacement]));
+    rejectRequest?.(new ApiError(422, { message: 'fora do raio' }));
+
+    const result = await syncing;
+
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([replacement]);
   });
 
   it('mantem a acao e o GPS quando a rede cai', async () => {
@@ -245,26 +432,13 @@ describe('delivery completion outbox', () => {
   });
 
   /**
-   * O beco sem saida da fila offline.
-   *
-   * O motoboy marca entregue sem rede, o admin cancela o pedido, e a fila volta
-   * a rodar. A acao guardada perdeu o objeto: o servidor recusa para sempre, e
-   * antes disso o item ficava em revisao permanentemente — banner que nao saia
-   * da tela, toque que repetia a mesma recusa, e nenhum jeito de descartar.
+   * Regressao do pedido #547: uma DELIVER local apareceu quando a API ainda
+   * confirmava ACCEPTED. Essa combinacao nunca pode virar revisao nem bloquear
+   * o botao de coleta; a entrega nao aconteceu e o item local e incompativel.
    */
-  /**
-   * O fantasma do pedido #307, visto em producao.
-   *
-   * A acao subiu antes de a coleta existir e foi para revisao com "precisa
-   * estar coletado". Doze minutos depois o administrador marcou a coleta, o
-   * motoboy entregou, e o pedido fechou normalmente — mas o aviso vermelho
-   * continuou na tela dele no dia seguinte, porque nada mais olhava para aquele
-   * item. "Precisa estar coletado" e condicao TEMPORARIA travestida de recusa
-   * definitiva.
-   */
-  it('reconfere o item em revisao e o remove quando o pedido ja foi entregue', async () => {
+  it('descarta sem aviso a entrega local quando o servidor ainda esta em ACCEPTED', async () => {
     await enqueueDeliveryCompletion(deliveryInput);
-    const recusa = executor({
+    const api = executor({
       deliver: jest
         .fn()
         .mockRejectedValue(new ApiError(409, { message: 'precisa estar coletado' })),
@@ -272,8 +446,62 @@ describe('delivery completion outbox', () => {
         .fn()
         .mockResolvedValue({ ...deliveredDetail(), status: 'ACCEPTED', statusHistory: [] }),
     });
-    await synchronizePendingDeliveryCompletions('token', 'user-1', recusa);
-    expect((await getPendingDeliveryCompletions('user-1'))[0]?.state).toBe('NEEDS_REVIEW');
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(result.staleIds).toHaveLength(1);
+    expect(result.syncedIds).toHaveLength(0);
+    expect(result.discardedIds).toHaveLength(0);
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(0);
+  });
+
+  it('descarta o retorno dependente sem envia-lo quando a entrega ainda esta em ACCEPTED', async () => {
+    const delivery = await enqueueDeliveryCompletion({ ...deliveryInput, batchId: 'batch-1' });
+    const completeReturn = await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-1',
+      batchId: 'batch-1',
+      displayNumber: 15,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+    const api = executor({
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new ApiError(409, { message: 'precisa estar coletado' })),
+      detail: jest
+        .fn()
+        .mockResolvedValue({ ...deliveredDetail(), status: 'ACCEPTED', statusHistory: [] }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(new Set(result.staleIds)).toEqual(new Set([delivery.id, completeReturn.id]));
+    expect(api.completeReturn).not.toHaveBeenCalled();
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
+  it('limpa item legado em revisao sem reenviar uma entrega anterior a coleta', async () => {
+    const queued = await seedNeedsReview();
+    const api = executor({
+      detail: jest
+        .fn()
+        .mockResolvedValue({ ...deliveredDetail(), status: 'ACCEPTED', statusHistory: [] }),
+    });
+
+    const result = await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+    expect(result.staleIds).toEqual([queued.id]);
+    expect(result.needsReviewCount).toBe(0);
+    expect(await getPendingDeliveryCompletions('user-1')).toHaveLength(0);
+    expect(api.deliver).not.toHaveBeenCalled();
+  });
+
+  it('reconfere o item em revisao e o remove quando o pedido ja foi entregue', async () => {
+    await seedNeedsReview();
 
     // O mundo andou: coleta feita pelo admin, entrega feita pelo motoboy.
     const depois = executor({
@@ -757,6 +985,72 @@ describe('delivery completion outbox', () => {
     expect(queue).toHaveLength(2);
     expect(queue[0].state).toBe('NEEDS_REVIEW');
     expect(queue[1].state).toBe('PENDING');
+  });
+
+  it('nao envia o retorno quando a entrega anterior ja estava em revisao', async () => {
+    await seedNeedsReview({ ...deliveryInput, batchId: 'batch-1' });
+    await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-1',
+      batchId: 'batch-1',
+      displayNumber: 15,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+    const api = executor({
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COLLECTED',
+        statusHistory: [],
+      }),
+    });
+
+    await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    const queue = await getPendingDeliveryCompletions('user-1');
+
+    expect(api.deliver).not.toHaveBeenCalled();
+    expect(api.completeReturn).not.toHaveBeenCalled();
+    expect(queue).toHaveLength(2);
+    expect(queue[0].state).toBe('NEEDS_REVIEW');
+    expect(queue[1].state).toBe('PENDING');
+  });
+
+  it('continua as outras entregas do lote enquanto bloqueia somente o retorno', async () => {
+    await seedNeedsReview({ ...deliveryInput, batchId: 'batch-1' });
+    await enqueueDeliveryCompletion({
+      ...deliveryInput,
+      deliveryId: 'delivery-2',
+      batchId: 'batch-1',
+      displayNumber: 16,
+    });
+    await enqueueDeliveryCompletion({
+      ownerUserId: 'user-1',
+      action: 'COMPLETE_RETURN',
+      deliveryId: 'delivery-1',
+      batchId: 'batch-1',
+      displayNumber: 15,
+      companyName: 'Loja A',
+      payload: returnFix,
+    });
+    const api = executor({
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COLLECTED',
+        statusHistory: [],
+      }),
+    });
+
+    await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+    const queue = await getPendingDeliveryCompletions('user-1');
+
+    expect(api.deliver).toHaveBeenCalledTimes(1);
+    expect(api.deliver).toHaveBeenCalledWith('token', 'delivery-2', deliveryInput.payload);
+    expect(api.completeReturn).not.toHaveBeenCalled();
+    expect(queue).toEqual([
+      expect.objectContaining({ deliveryId: 'delivery-1', state: 'NEEDS_REVIEW' }),
+      expect.objectContaining({ action: 'COMPLETE_RETURN', state: 'PENDING' }),
+    ]);
   });
 
   it('mantem sincronizacoes concorrentes isoladas por conta', async () => {

@@ -70,6 +70,13 @@ export type EnqueueDeliveryCompletionInput =
 export interface DeliveryCompletionSyncResult {
   syncedIds: string[];
   /**
+   * Entregas locais removidas porque o servidor confirmou que o pedido ainda
+   * esta em ACCEPTED. Elas nao foram sincronizadas nem encerradas: eram uma
+   * finalizacao impossivel antes da coleta e saem silenciosamente para liberar
+   * o fluxo correto.
+   */
+  staleIds: string[];
+  /**
    * Itens retirados da fila porque o pedido acabou por outro caminho —
    * cancelamento pela administracao, ou o insucesso que o proprio motoboy
    * registrou depois. Nao foram sincronizados; deixaram de ter onde ser
@@ -320,6 +327,76 @@ export function pendingCompletionForDelivery(
   );
 }
 
+type CompletionAttemptIdentity = Pick<PendingDeliveryCompletion, 'id' | 'ownerUserId' | 'queuedAt'>;
+
+function completionAttemptKey(item: CompletionAttemptIdentity): string {
+  return `${item.ownerUserId}\u0000${item.id}\u0000${item.queuedAt}`;
+}
+
+function isSameCompletionAttempt(
+  current: CompletionAttemptIdentity,
+  expected: CompletionAttemptIdentity,
+): boolean {
+  return completionAttemptKey(current) === completionAttemptKey(expected);
+}
+
+function completionIsStaleBeforeCollection(
+  item: PendingDeliveryCompletion,
+  delivery: Pick<DeliveryDetail, 'id' | 'status'>,
+): boolean {
+  return (
+    item.action === 'DELIVER' && item.deliveryId === delivery.id && delivery.status === 'ACCEPTED'
+  );
+}
+
+/**
+ * Remove uma finalizacao legada ja recusada usando o detalhe que a propria
+ * tela acabou de receber da API. A tentativa e os retornos dependentes sao
+ * comparados pela geracao observada; uma acao nova com o mesmo id fica intacta.
+ */
+export async function discardStaleCompletionBeforeCollection(
+  ownerUserId: string,
+  delivery: Pick<DeliveryDetail, 'id' | 'status'>,
+  expected: PendingDeliveryCompletion,
+  queueSnapshot: ReadonlyArray<PendingDeliveryCompletion>,
+): Promise<boolean> {
+  if (
+    delivery.status !== 'ACCEPTED' ||
+    expected.ownerUserId !== ownerUserId ||
+    expected.state !== 'NEEDS_REVIEW' ||
+    !completionIsStaleBeforeCollection(expected, delivery)
+  ) {
+    return false;
+  }
+
+  const expectedAttempts = new Set(
+    queueSnapshot
+      .filter(
+        (item) =>
+          isSameCompletionAttempt(item, expected) ||
+          (item.ownerUserId === ownerUserId &&
+            item.action === 'COMPLETE_RETURN' &&
+            item.groupKey === expected.groupKey),
+      )
+      .map(completionAttemptKey),
+  );
+
+  let removed = false;
+  await replaceQueue((current) => {
+    const targetStillExists = current.some(
+      (item) =>
+        item.state === 'NEEDS_REVIEW' &&
+        isSameCompletionAttempt(item, expected) &&
+        completionIsStaleBeforeCollection(item, delivery),
+    );
+    if (!targetStillExists) return current;
+
+    removed = true;
+    return current.filter((item) => !expectedAttempts.has(completionAttemptKey(item)));
+  });
+  return removed;
+}
+
 /**
  * Define apenas os itens que podem sair da lista local enquanto a confirmacao
  * oficial aguarda internet. No retorno em lote, irmaos ainda coletados
@@ -353,8 +430,23 @@ function operationWasApplied(item: PendingDeliveryCompletion, delivery: Delivery
   );
 }
 
-async function removeItem(id: string): Promise<void> {
-  await replaceQueue((current) => current.filter((item) => item.id !== id));
+async function removeItems(
+  expected: ReadonlyArray<PendingDeliveryCompletion>,
+): Promise<PendingDeliveryCompletion[]> {
+  const expectedAttempts = new Set(expected.map(completionAttemptKey));
+  const removed: PendingDeliveryCompletion[] = [];
+  await replaceQueue((current) =>
+    current.filter((item) => {
+      if (!expectedAttempts.has(completionAttemptKey(item))) return true;
+      removed.push(item);
+      return false;
+    }),
+  );
+  return removed;
+}
+
+async function removeItem(item: PendingDeliveryCompletion): Promise<boolean> {
+  return (await removeItems([item])).length > 0;
 }
 
 async function markNeedsReview(
@@ -363,7 +455,7 @@ async function markNeedsReview(
 ): Promise<void> {
   await replaceQueue((current) =>
     current.map((item) =>
-      item.id !== attempted.id
+      !isSameCompletionAttempt(item, attempted)
         ? item
         : completionNeedsFreshReturnLocation(attempted) && !completionNeedsFreshReturnLocation(item)
           ? // Uma tentativa antiga com `{}` perdeu a corrida para a recaptura
@@ -380,7 +472,7 @@ async function markPendingError(
 ): Promise<void> {
   await replaceQueue((current) =>
     current.map((item) =>
-      item.id === attempted.id && item.state === 'PENDING'
+      isSameCompletionAttempt(item, attempted) && item.state === 'PENDING'
         ? { ...item, lastError: message.slice(0, 240) }
         : item,
     ),
@@ -419,7 +511,7 @@ function completionNoLongerApplicable(
   return delivery.statusHistory.some((history) => history.toStatus === 'FAILED');
 }
 
-type CompletionResolution = 'applied' | 'obsolete' | 'unresolved';
+type CompletionResolution = 'applied' | 'obsolete' | 'stale' | 'unresolved';
 
 /**
  * Consulta o estado real do pedido depois de uma recusa definitiva.
@@ -438,6 +530,7 @@ async function resolveCompletionAgainstServer(
   );
   if (!current) return 'unresolved';
   if (operationWasApplied(item, current)) return 'applied';
+  if (completionIsStaleBeforeCollection(item, current)) return 'stale';
   return completionNoLongerApplicable(item, current) ? 'obsolete' : 'unresolved';
 }
 
@@ -447,13 +540,16 @@ async function synchronizeQueue(
   executor: DeliveryCompletionSyncExecutor,
 ): Promise<DeliveryCompletionSyncResult> {
   const syncedIds: string[] = [];
+  const staleIds: string[] = [];
   const discardedIds: string[] = [];
-  const blockedGroups = new Set<string>();
+  const blockedReturnGroups = new Set<string>();
+  const suppressedAttempts = new Set<string>();
   let authRequired = false;
   let serverUnavailable = false;
   const queue = await getPendingDeliveryCompletions(ownerUserId);
 
   for (const item of queue) {
+    if (suppressedAttempts.has(completionAttemptKey(item))) continue;
     /**
      * Item em revisao NAO e reenviado — isso continua sendo decisao do motoboy —
      * mas e RECONFERIDO contra o servidor.
@@ -471,23 +567,40 @@ async function synchronizeQueue(
     if (item.state === 'NEEDS_REVIEW') {
       const resolucao = await resolveCompletionAgainstServer(accessToken, item, executor);
       if (resolucao === 'applied') {
-        await removeItem(item.id);
-        syncedIds.push(item.id);
+        if (await removeItem(item)) syncedIds.push(item.id);
+      } else if (resolucao === 'stale') {
+        const staleFamily = [
+          item,
+          ...queue.filter(
+            (candidate) =>
+              candidate.ownerUserId === item.ownerUserId &&
+              candidate.action === 'COMPLETE_RETURN' &&
+              candidate.groupKey === item.groupKey,
+          ),
+        ];
+        staleFamily.forEach((candidate) => suppressedAttempts.add(completionAttemptKey(candidate)));
+        const removed = await removeItems(staleFamily);
+        removed.forEach((candidate) => {
+          if (!staleIds.includes(candidate.id)) staleIds.push(candidate.id);
+        });
       } else if (resolucao === 'obsolete') {
-        await removeItem(item.id);
-        discardedIds.push(item.id);
+        if (await removeItem(item)) discardedIds.push(item.id);
+      } else {
+        // Uma etapa dependente do mesmo lote nunca pode ultrapassar a acao que
+        // ainda precisa de revisao. Em especial, retorno nao sobe antes de a
+        // entrega ter sido confirmada.
+        blockedReturnGroups.add(item.groupKey);
       }
       continue;
     }
-    if (blockedGroups.has(item.groupKey)) continue;
+    if (item.action === 'COMPLETE_RETURN' && blockedReturnGroups.has(item.groupKey)) continue;
     try {
       if (item.action === 'DELIVER') {
         await withSyncTimeout(executor.deliver(accessToken, item.deliveryId, item.payload));
       } else {
         await withSyncTimeout(executor.completeReturn(accessToken, item.deliveryId, item.payload));
       }
-      await removeItem(item.id);
-      syncedIds.push(item.id);
+      if (await removeItem(item)) syncedIds.push(item.id);
     } catch (error) {
       if (!(error instanceof ApiError)) {
         await markPendingError(
@@ -511,27 +624,46 @@ async function synchronizeQueue(
 
       const resolucao = await resolveCompletionAgainstServer(accessToken, item, executor);
       if (resolucao === 'applied') {
-        await removeItem(item.id);
-        syncedIds.push(item.id);
+        if (await removeItem(item)) syncedIds.push(item.id);
+        continue;
+      }
+      if (resolucao === 'stale') {
+        // O servidor confirmou que a coleta nunca aconteceu. A tentativa
+        // local e incompativel e nao pode bloquear justamente o botao que
+        // inicia a coleta. Remove sem banner e sem fingir que foi sincronizada.
+        const staleFamily = [
+          item,
+          ...queue.filter(
+            (candidate) =>
+              candidate.ownerUserId === item.ownerUserId &&
+              candidate.action === 'COMPLETE_RETURN' &&
+              candidate.groupKey === item.groupKey,
+          ),
+        ];
+        staleFamily.forEach((candidate) => suppressedAttempts.add(completionAttemptKey(candidate)));
+        const removed = await removeItems(staleFamily);
+        removed.forEach((candidate) => {
+          if (!staleIds.includes(candidate.id)) staleIds.push(candidate.id);
+        });
         continue;
       }
       if (resolucao === 'obsolete') {
         // Sai da fila, mas NAO entra em `syncedIds`: nada foi sincronizado, o
         // pedido simplesmente deixou de existir para esta acao. Quem chamou
         // avisa o motoboy uma vez, em vez de deixar um banner permanente.
-        await removeItem(item.id);
-        discardedIds.push(item.id);
+        if (await removeItem(item)) discardedIds.push(item.id);
         continue;
       }
 
       await markNeedsReview(item, error.message);
-      blockedGroups.add(item.groupKey);
+      blockedReturnGroups.add(item.groupKey);
     }
   }
 
   const remaining = await getPendingDeliveryCompletions(ownerUserId);
   return {
     syncedIds,
+    staleIds,
     discardedIds,
     pendingCount: remaining.filter((item) => item.state === 'PENDING').length,
     needsReviewCount: remaining.filter((item) => item.state === 'NEEDS_REVIEW').length,

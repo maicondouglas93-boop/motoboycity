@@ -137,6 +137,15 @@ na sincronização. Entrega e retorno pendentes são enviados na ordem, sem
 duplicar histórico ou crédito, e a fila é vinculada à identidade do motoboy
 para nunca ser transmitida pela conta de outra pessoa no mesmo aparelho.
 
+Uma finalização local `DELIVER` é incompatível quando a API confirma que o
+pedido ainda está em `ACCEPTED`: não houve coleta oficial e não existe entrega
+válida para reenviar. Esse registro e qualquer `COMPLETE_RETURN` dependente são
+removidos silenciosamente, não contam como sincronizados e não podem bloquear o
+botão de coleta. Cada mutação compara o ID e a geração (`queuedAt`) observada,
+para uma sincronização antiga nunca alterar uma tentativa nova. Entregas
+guardadas quando o estado real é `COLLECTED` continuam preservadas. Avisos ficam
+reservados para problemas que ainda exigem uma ação real do motoboy.
+
 ## Intervenções operacionais pelo administrador
 
 Nos cards das filas, o administrador pode trocar o entregador, confirmar

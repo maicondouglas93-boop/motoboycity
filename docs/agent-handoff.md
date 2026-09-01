@@ -71,6 +71,15 @@ React Native, com o aplicativo em primeiro plano. Ele reutiliza o `OfferAlarm`
 nativo, para ao responder, expirar, trocar de oferta ou desmontar a tela e
 identifica a oferta para uma resolução atrasada não silenciar a próxima.
 
+Uma correção posterior ao artefato `pilot.18` autorrepara a fila local quando
+existe uma finalização `DELIVER`, mas a API confirma que o pedido ainda está em
+`ACCEPTED`. A tentativa incompatível e qualquer retorno que dependia dela saem
+silenciosamente, sem contar como entrega ou bloquear **Pedido coletado**. Toda
+mutação confere também a geração (`queuedAt`), para uma sincronização antiga
+não tocar numa tentativa nova com o mesmo ID. Finalizações válidas em
+`COLLECTED` continuam preservadas. Essa correção exige um APK posterior ao
+`pilot.18`; o artefato descrito acima não a contém.
+
 O APK foi compilado e verificado, mas ainda não foi instalado nem distribuído.
 Por isso a tabela acima continua registrando `pilot.16` nos aparelhos. O toque e
 a vibração em primeiro plano ainda exigem um teste com oferta real no aparelho.
@@ -302,7 +311,7 @@ processo, **nunca exibidas**, e removidas ao final.
 
 ## Estado do worktree
 
-Limpo. Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`)
-deixados por outras sessões — **não os inclua em commit** e não os remova sem
-decisão do responsável. O repositório é **público**: toda alteração exige
-varredura de segredo antes do push.
+Limpo depois do commit desta correção. Podem existir arquivos locais não
+rastreados (`.codex/`, `temp*.tsx`) deixados por outras sessões — **não os
+inclua em commit** e não os remova sem decisão do responsável. O repositório é
+**público**: toda alteração exige varredura de segredo antes do push.

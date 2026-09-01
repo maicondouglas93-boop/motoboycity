@@ -11790,3 +11790,37 @@ ações, mapa e contratos permanecem iguais.
 O typecheck e o lint do Admin Web passaram, e `git diff --check` não encontrou
 erro de whitespace. Não houve mudança de API, banco, dependência, commit, push
 ou deploy neste recorte.
+
+## 2026-09-01 — Fila local não bloqueia a coleta com uma entrega impossível
+
+O pedido #547 revelou uma ação local `DELIVER` enquanto a API ainda confirmava
+o pedido em `ACCEPTED`. Ela virava `NEEDS_REVIEW`, mostrava “precisa estar
+coletado” e desabilitava o próprio botão **Pedido coletado**.
+
+A reconciliação agora classifica exatamente `DELIVER + ACCEPTED` como
+finalização incompatível. A tentativa e qualquer `COMPLETE_RETURN` dependente
+saem silenciosamente, sem serem enviados, contados como sincronizados ou
+transformados em outro aviso. Entregas confirmadas em `COLLECTED`, problemas
+acionáveis, rede, timeout e 5xx mantêm o tratamento anterior.
+
+A segunda revisão protegeu duas corridas antes do release. Remoção e marcação
+comparam `ownerUserId + id + queuedAt`, portanto uma resposta atrasada não
+alcança uma tentativa nova que reutilizou o ID. A tela versiona suas leituras e
+relê a fila depois do autorreparo, sem restaurar um snapshot removido. Uma etapa
+de entrega em revisão impede apenas o retorno dependente; outras entregas por
+item do mesmo lote continuam sendo sincronizadas.
+
+Arquivos funcionais: `apps/driver-app/src/lib/deliveryCompletionOutbox.ts`,
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` e
+`apps/driver-app/__tests__/deliveryCompletionOutbox.test.ts`.
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado da fila de finalizações | 1 suíte / 43 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 174 testes aprovados |
+| typecheck do Driver App | aprovado |
+| lint do Driver App | aprovado; um aviso preexistente de `no-void` em `apiClient.ts` |
+
+Não houve mudança de API, contrato compartilhado, banco, migration, segredo ou
+dependência. A correção exige um APK posterior ao `pilot.18`; nenhum APK,
+commit, push ou deploy foi executado neste recorte.

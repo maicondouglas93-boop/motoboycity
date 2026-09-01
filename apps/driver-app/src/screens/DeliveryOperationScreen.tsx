@@ -33,6 +33,7 @@ import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionClosesDeliveryLocally,
   COMPLETION_QUIET_WINDOW_MS,
+  discardStaleCompletionBeforeCollection,
   enqueueDeliveryCompletion,
   getPendingDeliveryCompletions,
   pendingCompletionForDelivery,
@@ -166,6 +167,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
    */
   const [avisoPendenteVisivel, setAvisoPendenteVisivel] = useState(false);
   const previousPendingCompletionId = useRef<string | null>(null);
+  const pendingRefreshVersion = useRef(0);
   const operationInFlight = useRef(false);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
 
@@ -236,13 +238,37 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   }, [navigation, route.params.deliveryId]);
 
   const refreshPendingCompletion = useCallback(async () => {
+    const refreshVersion = ++pendingRefreshVersion.current;
     const ownerUserId = await session.getUserId();
     if (!ownerUserId || !delivery) {
-      setPendingCompletion(null);
+      if (refreshVersion === pendingRefreshVersion.current) setPendingCompletion(null);
       return;
     }
     const queue = await getPendingDeliveryCompletions(ownerUserId);
-    setPendingCompletion(pendingCompletionForDelivery(queue, delivery) ?? null);
+    const staleDelivery = queue.find(
+      (item) =>
+        item.action === 'DELIVER' &&
+        item.deliveryId === delivery.id &&
+        item.state === 'NEEDS_REVIEW',
+    );
+
+    if (delivery.status === 'ACCEPTED' && staleDelivery) {
+      try {
+        await discardStaleCompletionBeforeCollection(ownerUserId, delivery, staleDelivery, queue);
+      } finally {
+        // Nunca reutiliza o retrato anterior: outra sincronizacao pode ter
+        // removido ou substituido a tentativa enquanto o AsyncStorage gravava.
+        const refreshedQueue = await getPendingDeliveryCompletions(ownerUserId);
+        if (refreshVersion === pendingRefreshVersion.current) {
+          setPendingCompletion(pendingCompletionForDelivery(refreshedQueue, delivery) ?? null);
+        }
+      }
+      return;
+    }
+
+    if (refreshVersion === pendingRefreshVersion.current) {
+      setPendingCompletion(pendingCompletionForDelivery(queue, delivery) ?? null);
+    }
   }, [delivery]);
 
   useEffect(() => {
@@ -486,11 +512,29 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       return undefined;
     }
 
+    if (
+      syncAttempt.result?.staleIds.includes(queued.id) ||
+      syncAttempt.result?.discardedIds.includes(queued.id)
+    ) {
+      // A API confirmou que esta acao nao tem mais onde ser aplicada. Atualiza
+      // o estado real sem mostrar sucesso falso nem deixar um aviso tecnico.
+      setPendingCompletion(null);
+      await loadDelivery();
+      return undefined;
+    }
+
     const remaining = (await getPendingDeliveryCompletions(ownerUserId)).find(
       (item) => item.id === queued.id,
     );
     setPendingCompletion(remaining ?? null);
-    return remaining ?? null;
+    if (remaining) return remaining;
+    if (syncAttempt.result?.syncedIds.includes(queued.id)) return null;
+
+    // Outra sincronizacao pode ter retirado o item enquanto esta chamada
+    // aguardava. Sem o resultado que prova a aplicacao, recarrega o servidor e
+    // nao transforma ausencia na fila em uma confirmacao falsa.
+    await loadDelivery();
+    return undefined;
   }
 
   async function keepCompletionPendingLocally(

@@ -329,13 +329,19 @@ operação que nunca ia passar. Item em `NEEDS_REVIEW` **não sincroniza sozinho
 por desenho — e todo caminho que o conserta precisa devolvê-lo a `PENDING`.
 
 **Revisão só existe para o que o motoboy ainda pode resolver.** Depois de uma
-recusa definitiva, a fila consulta o pedido de verdade e separa três desfechos:
-já aplicado (sai como sincronizado), **obsoleto** — o pedido foi cancelado e a
-ação perdeu o objeto — ou não resolvido, que é o único que vira revisão. Sem essa
-distinção, uma entrega marcada offline num pedido que o admin cancelou ficava em
-revisão para sempre: o banner não saía da tela e tocar nele repetia a mesma
-recusa. O obsoleto sai da fila com aviso único e **não** conta como sincronizado,
-porque nada foi.
+recusa definitiva, a fila consulta o pedido de verdade e separa quatro
+desfechos: já aplicado (sai como sincronizado), **obsoleto** — o pedido foi
+cancelado e a ação perdeu o objeto —, **incompatível antes da coleta** — existe
+`DELIVER` local, mas a API ainda confirma `ACCEPTED` —, ou não resolvido, que é o
+único que vira revisão. O obsoleto sai com aviso único; o incompatível e qualquer
+retorno que dependia dele saem silenciosamente e liberam a coleta. Nenhum conta
+como sincronizado, porque nenhuma entrega foi aplicada.
+
+Remoção e marcação comparam `ownerUserId + id + queuedAt`: uma sincronização
+atrasada não pode apagar nem colocar em revisão uma geração nova que reutilizou
+o ID determinístico da ação. Uma entrega em revisão bloqueia somente o retorno
+que depende dela; outras entregas por item do mesmo lote continuam sendo
+sincronizadas.
 
 O aviso de espera só aparece depois de seis segundos, ou de imediato se o
 servidor recusou. Um aviso que aparece sempre deixa de ser aviso.
