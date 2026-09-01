@@ -11620,3 +11620,162 @@ em duas transações. O Jest completo da API passou com 87 suítes / 1.081 teste
 `pnpm typecheck` e `pnpm lint` passaram nos 8 workspaces (permanece somente o
 aviso preexistente de `no-void` no Driver App), e o build da API passou. Não
 houve alteração de schema, migration, segredo ou APK.
+
+## 2026-09-01 — Marcadores operacionais deixam de piscar a cada GPS
+
+Os mapas do Admin Web e do Company Web apagavam todos os marcadores com
+`setMap(null)` e os recriavam sempre que o TanStack Query recebia uma posição
+por Socket.IO ou polling. Além do desaparecimento momentâneo dos pedidos, o
+marcador do motoboy voltava primeiro como ponto verde e depois trocava novamente
+para o retrato assíncrono, produzindo o piscar visível mesmo com a câmera já
+estabilizada.
+
+Cada mapa agora mantém um registro de marcadores por chave estável. Atualizações
+de GPS usam `setPosition`; status e seleção alteram apenas o ícone necessário;
+entradas novas criam marcador e somente entidades que saíram da operação são
+removidas. O retrato conserva a mesma instância e só é recalculado quando nome,
+avatar ou seleção mudam. Respostas assíncronas antigas são ignoradas se o
+marcador já saiu ou mudou de identidade visual.
+
+Um teste de componente reproduz a atualização GPS e prova que continuam
+existindo as mesmas três instâncias (coleta, destino e motoboy), que o marcador
+do motoboy recebe `setPosition`, não recebe `setMap(null)` e não reaplica o
+retrato. Não houve alteração de API, backend, contrato, banco, variável de
+ambiente ou aplicativo móvel.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| teste focado do mapa da empresa | 2 arquivos / 4 testes aprovados |
+| testes completos do Company Web | 26 arquivos / 106 testes aprovados |
+| testes do Admin Web | 11 testes aprovados; apenas avisos preexistentes de tipo de módulo |
+| `pnpm typecheck` | 8 workspaces aprovados |
+| `pnpm lint` | 8 workspaces aprovados; um aviso preexistente de `no-void` no Driver App |
+| build do Admin Web | aprovado; 38 páginas |
+| build do Company Web | aprovado; 22 páginas |
+
+Não houve smoke autenticado no navegador, commit, push ou deploy neste recorte.
+
+## 2026-09-01 — Oferta aberta passa a tocar e vibrar no Driver App
+
+O aplicativo já tinha um `OfferAlarm` nativo com toque de chamada em laço e
+vibração repetida, mas ele vivia somente na `OfferActivity`, aberta quando a
+oferta chegava com o aplicativo minimizado. Em primeiro plano, o Socket.IO
+navegava para `IncomingOfferScreen`, que mostrava o cartão React Native sem
+acionar esse alarme; a faixa nativa dependia apenas do som curto e das
+configurações persistentes do canal Android.
+
+A ponte `OfferSession` agora expõe início e parada do alarme existente. A tela
+React Native inicia ao receber uma oferta e para ao responder, expirar ou sair.
+Falha ao responder religa o alerta enquanto a mesma oferta continuar pendente.
+O controlador compartilhado guarda o `offerId`: encerramento atrasado de uma
+oferta antiga não silencia uma nova. Limpeza de sessão, resolução por push e
+resposta pelos botões nativos também encerram o alerta correspondente.
+
+O Manifest declara explicitamente a permissão normal `VIBRATE`. Não foi
+adicionada dependência, nem houve alteração de API, Firebase, banco, contrato ou
+variável de ambiente.
+
+### Validação
+
+| Comando | Resultado |
+| --- | --- |
+| testes focados de push/tela da oferta | 2 suítes / 15 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 161 testes aprovados |
+| typecheck do Driver App | aprovado |
+| lint do Driver App | aprovado; um aviso preexistente de `no-void` |
+| `:app:compileDebugKotlin` | aprovado; aviso preexistente de API Android depreciada |
+
+Não foi gerado nem instalado APK, conforme solicitado. O comportamento ainda
+precisa de teste em aparelho na próxima versão. Não houve commit, push ou deploy.
+
+## 2026-09-01 — Baseline seguro de performance e readiness aditiva
+
+A primeira etapa da auditoria de latência foi reduzida de propósito para não
+alterar o sistema operacional que já está funcionando. Não houve mudança em
+pedido, dispatch, Socket.IO, BullMQ, contratos, aplicativo, banco, migration ou
+configuração de deploy.
+
+O interceptor HTTP existente agora gera `X-Request-Id` no servidor e mantém uma
+janela local limitada por controller/handler e classe de status. A cada 60
+segundos, por padrão, uma linha JSON registra quantidade, média, p50, p95, p99,
+máximo, uptime e memória da instância. Os logs individuais continuam restritos
+a requests lentos e erros 5xx e não incluem URL, query, corpo, token ou mensagem
+interna da exceção. A janela reinicia com o processo e não é apresentada como
+métrica histórica multi-instância.
+
+O armazenamento dos percentis usa um buffer circular limitado, sem remoção
+linear por request. O snapshot informa separadamente quantas amostras recentes
+entraram nos percentis; quantidade, média e máximo continuam cobrindo a janela
+inteira.
+
+`GET /health` foi preservado como liveness simples. A nova rota aditiva
+`GET /health/ready` testa PostgreSQL e Redis em paralelo com timeout curto,
+reutilizando a conexão Redis de presença; responde 503 sem revelar host,
+credencial ou causa interna quando uma dependência falha. O healthcheck do
+Render não foi alterado.
+
+Arquivos principais: `apps/api/src/common/{request-performance.interceptor,
+latency-metrics}.ts`, `apps/api/src/health/*`,
+`apps/api/src/live-presence/live-driver-presence.service.ts`, exemplos de
+ambiente e `docs/performance-baseline.md`.
+
+### Validação parcial
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado de métricas/interceptor/readiness | 5 suítes / 19 testes aprovados |
+| typecheck da API | aprovado |
+| lint da API | aprovado sem avisos |
+| build da API | aprovado |
+
+Não foram executados E2E, migration, aplicativo, carga, commit, push ou deploy.
+
+## 2026-09-01 — Release `pilot.18` e publicação do recorte seguro
+
+O conjunto validado foi organizado em três commits funcionais antes da
+publicação: marcadores persistentes nos mapas (`cc5399b`), toque e vibração da
+oferta em primeiro plano no Driver App (`f1a04eb`) e baseline seguro de
+performance/readiness da API (`018c976`). Nenhuma correção estrutural da
+auditoria foi incluída; ela permanece adiada para outro recorte.
+
+O Driver App foi promovido para `0.1.0-pilot.18`, `versionCode` 18. O release
+foi compilado na worktree curta `C:\m18`, com JDK 21,
+`MOTOBOYCITY_APP_ENV=production`, API oficial, Firebase, Maps e a chave de
+assinatura oficial. As senhas foram lidas dos arquivos DPAPI somente na memória
+do processo e não foram exibidas ou registradas.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.18-vc18.apk`
+
+- 75.156.889 bytes;
+- SHA-256 `5E883EDFDFD9433543D1FDC49C27AFA5F75EFECE166324A0F33E532AB0DB3114`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 18,
+  `versionName` `0.1.0-pilot.18`, minSdk 24 e targetSdk 36;
+- assinatura APK v2, RSA 4096 e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- bundle com `motoboycity-api.onrender.com`, `0.1.0-pilot.18` e a ponte
+  `startOfferAlarm`, sem `localhost:3333`, `127.0.0.1` ou `10.0.2.2`.
+
+### Validação conjunta
+
+| Comando | Resultado |
+| --- | --- |
+| Jest focado da API | 5 suítes / 19 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 161 testes aprovados |
+| testes completos do Company Web | 26 arquivos / 106 testes aprovados |
+| testes do Admin Web | 11 testes aprovados; avisos preexistentes de tipo de módulo |
+| typecheck direto dos workspaces | 8 workspaces aprovados |
+| lint direto dos workspaces | 8 workspaces aprovados; um aviso preexistente de `no-void` no Driver App |
+| build da API | aprovado |
+| build do Company Web | aprovado; 22 páginas |
+| build do Admin Web | aprovado; 38 páginas |
+| `clean assembleRelease --no-daemon` | aprovado em 8 min 22 s; 427 tarefas |
+| `aapt`, `apksigner` e inspeção do bundle | aprovados conforme o artefato acima |
+
+O repositório foi varrido antes do push sem segredo no diff. Não houve schema,
+migration, mudança de banco, E2E, teste de carga ou instalação em aparelho. O
+push de `main` aciona automaticamente Render e Vercel; a confirmação do APK em
+uma oferta real permanece uma ação manual antes da distribuição ampla.

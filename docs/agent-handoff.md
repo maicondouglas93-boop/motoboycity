@@ -8,8 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-08-31**, depois da homologação Sandbox e da preparação
-> do isolamento para a Produção Asaas.
+> Última revisão: **2026-09-01**, depois de gerar e verificar o release
+> `pilot.18` e preparar a publicação conjunta dos mapas e da Fase 0 segura.
 
 ## Como atualizar
 
@@ -28,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `main` sincronizado com `origin/main` em 31/08/2026 (Pix Asaas com isolamento Sandbox/Produção; confirmar o deploy automático no Render) |
+| Commit publicado | `main` publicado em 01/09/2026 com mapas estáveis, alerta de oferta em primeiro plano e baseline seguro da API |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -51,24 +51,29 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.17-vc17.apk`
-SHA-256 `5CBB8B633C235F8BA83E06B1ADC0151DD8E7F8205CB2E98C53408F422C3AC360`,
-75.154.485 bytes, `versionCode` 17, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.18-vc18.apk`
+SHA-256 `5E883EDFDFD9433543D1FDC49C27AFA5F75EFECE166324A0F33E532AB0DB3114`,
+75.156.889 bytes, `versionCode` 18, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima do `pilot.16` instalado.
+anteriores, então ele atualiza por cima de `pilot.16` ou `pilot.17`.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 `localhost:3333`, `127.0.0.1` nem `10.0.2.2`. As correções foram conferidas por
 texto dentro do bundle, e não só pelo commit.
 
-O `pilot.17` faz a carteira e a solicitação de saque obedecerem ao dia financeiro
+O `pilot.18` inclui a carteira e a solicitação de saque obedecendo ao dia financeiro
 escolhido pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho.
 No servidor, esse mesmo dia agora libera os repasses às 00:00; `null` significa
-liberação diária às 00:00. O servidor continua sendo a autoridade da regra. Não havia aparelho ADB conectado
-no build; o APK foi compilado e verificado, mas ainda não foi instalado nem
-distribuído. Por isso a tabela acima continua registrando `pilot.16` nos
-aparelhos.
+liberação diária às 00:00. O servidor continua sendo a autoridade da regra.
+Também liga o toque insistente e a vibração quando a oferta abre dentro da tela
+React Native, com o aplicativo em primeiro plano. Ele reutiliza o `OfferAlarm`
+nativo, para ao responder, expirar, trocar de oferta ou desmontar a tela e
+identifica a oferta para uma resolução atrasada não silenciar a próxima.
+
+O APK foi compilado e verificado, mas ainda não foi instalado nem distribuído.
+Por isso a tabela acima continua registrando `pilot.16` nos aparelhos. O toque e
+a vibração em primeiro plano ainda exigem um teste com oferta real no aparelho.
 
 A reconciliação dos repasses pendentes é processada em transações de até 25
 lançamentos. Isso preserva a atualização condicional por status e impede que o
@@ -95,7 +100,10 @@ login; nenhuma migration foi necessária.
 
 O mapa da central operacional mantém o zoom e o arraste da empresa durante
 atualizações de GPS. O enquadramento automático continua na abertura e quando a
-composição da operação ou um endereço realmente muda.
+composição da operação ou um endereço realmente muda. Nos mapas do ADM e da
+empresa, cada pedido e motoboy conserva a mesma instância de marcador; eventos
+realtime apenas atualizam posição e aparência, sem apagar e recriar todos os
+ícones nem repetir o carregamento do retrato.
 
 A agenda da empresa possui um Top 10 real por entregas concluídas. Os três
 primeiros aparecem em um pódio e os demais continuam numa lista; a consulta
@@ -142,6 +150,14 @@ aditiva é `20260829120000_driver_company_blocks`.
 O `README.md` descreve uma "Fase 0" que não corresponde à implementação. **Não
 use o README como fonte de verdade.**
 
+A API possui um baseline local de performance sem dependência externa. Cada
+resposta recebe `X-Request-Id`; requests lentos/5xx continuam em log sem dados
+pessoais e snapshots por instância registram média, p50, p95 e p99 por handler.
+`GET /health` continua sendo liveness; `GET /health/ready` confere PostgreSQL e
+Redis sem expor a causa interna. O Render **ainda não foi apontado** para a nova
+readiness. Esta etapa não instrumenta celular, Socket ou T0–T17 completos; o
+procedimento e os limites estão em `docs/performance-baseline.md`.
+
 ## Configuração que precisa estar preenchida
 
 Sem estes valores a operação não roda, e a falha aparece longe da causa:
@@ -161,13 +177,14 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
 ### Pendente de ação humana
 
-1. **Instalar e testar o `pilot.17` em aparelho real.** Além de conferir que a
+1. **Instalar e testar o `pilot.18` em aparelho real.** Além de conferir que a
    tela e o botão de saque obedecem ao dia escolhido no ADM, permanecem os dois
    cenários ainda não exercitados: **negar "Permitir o tempo todo"** num
    Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
    e que o atalho abre a tela certa; e **matar a rede no meio de uma
    finalização**, conferindo que a espera termina em 15 s com mensagem em vez de
-   ficar girando.
+   ficar girando. Confirmar também que uma oferta recebida com o aplicativo
+   aberto toca e vibra até ser respondida ou expirar.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
