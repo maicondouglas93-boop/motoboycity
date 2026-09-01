@@ -16,7 +16,7 @@ describe('FinancialPayoutService', () => {
   };
   const prisma = {
     $transaction: jest.fn(),
-    walletTransaction: { findUnique: jest.fn() },
+    walletTransaction: { findMany: jest.fn(), findUnique: jest.fn() },
   };
   const clock = { now: jest.fn() };
   /** Padrao dos testes: segunda-feira, que e a regra que existia antes de o dia virar configuravel. */
@@ -33,7 +33,7 @@ describe('FinancialPayoutService', () => {
     prisma.$transaction.mockImplementation((callback: (client: typeof tx) => unknown) =>
       callback(tx),
     );
-    tx.walletTransaction.findMany.mockResolvedValue([
+    prisma.walletTransaction.findMany.mockResolvedValue([
       {
         id: 'credit-1',
         walletId: 'wallet-1',
@@ -67,13 +67,14 @@ describe('FinancialPayoutService', () => {
 
     await expect(service.releaseDueRepasses(now)).resolves.toBe(2);
 
-    expect(tx.walletTransaction.findMany).toHaveBeenCalledWith({
+    expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith({
       where: {
         type: 'CREDIT_REPASSE',
         status: 'PENDING',
         releaseAt: { not: null },
       },
       select: { id: true, walletId: true, amount: true, createdAt: true, releaseAt: true },
+      orderBy: [{ walletId: 'asc' }, { id: 'asc' }],
     });
     expect(tx.walletTransaction.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.wallet.update).toHaveBeenCalledWith({
@@ -90,7 +91,7 @@ describe('FinancialPayoutService', () => {
       includeLegacyWithoutReleaseAt: true,
     });
 
-    expect(tx.walletTransaction.findMany).toHaveBeenCalledWith(
+    expect(prisma.walletTransaction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { type: 'CREDIT_REPASSE', status: 'PENDING' },
       }),
@@ -100,7 +101,7 @@ describe('FinancialPayoutService', () => {
   it('reagenda e libera os créditos já bloqueados quando o ADM muda o ciclo', async () => {
     const now = new Date('2026-08-30T03:00:00.000Z'); // domingo 00:00
     platformSettings.get.mockResolvedValue({ withdrawalWeekday: 0 });
-    tx.walletTransaction.findMany.mockResolvedValue([
+    prisma.walletTransaction.findMany.mockResolvedValue([
       {
         id: 'credit-old-policy',
         walletId: 'wallet-1',
@@ -126,6 +127,25 @@ describe('FinancialPayoutService', () => {
         cachedAvailableBalance: { increment: 12.5 },
       },
     });
+  });
+
+  it('divide muitos repasses em transacoes curtas para nao expirar no banco remoto', async () => {
+    prisma.walletTransaction.findMany.mockResolvedValue(
+      Array.from({ length: 26 }, (_, index) => ({
+        id: `credit-${String(index).padStart(2, '0')}`,
+        walletId: 'wallet-1',
+        amount: { toString: () => '1' },
+        createdAt: new Date('2026-08-18T12:00:00.000Z'),
+        releaseAt: new Date('2026-08-24T03:00:00.000Z'),
+      })),
+    );
+
+    await expect(service.releaseDueRepasses(new Date('2026-08-24T03:00:00.000Z'))).resolves.toBe(
+      26,
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.wallet.update).toHaveBeenCalledTimes(2);
   });
 
   describe('requestWithdrawal', () => {

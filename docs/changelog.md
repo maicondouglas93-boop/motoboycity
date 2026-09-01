@@ -11596,3 +11596,27 @@ contratos compartilhados e documentação operacional.
 
 Não foram executados E2E nem migration, porque não há alteração de banco. Não
 houve commit, push ou deploy neste recorte.
+
+## 2026-08-31 — Reconciliação de repasses deixa de expirar com saldo acumulado
+
+O teste em aparelho mostrou a política nova chegando corretamente ao APK, mas
+os lançamentos continuavam `PENDING`: inclusive repasses com `releaseAt` em
+31/08/2026 às 00:00 ainda apareciam bloqueados às 22:11. Isso descartou APK e
+cache de tela como causa e confirmou a falha no processamento financeiro.
+
+`releaseDueRepasses` buscava todos os candidatos e fazia um `updateMany` por
+linha dentro de uma única transação serializável. Esse é o mesmo desenho que já
+havia produzido `P2028` entre a API na Virgínia e o Neon em São Paulo; com mais
+saldo acumulado, o prazo de 20 segundos também deixou de ser suficiente.
+
+A busca dos candidatos agora acontece antes das escritas e a reconciliação é
+dividida em transações de até 25 lançamentos. Cada escrita continua condicionada
+a `status = PENDING`; somente as linhas realmente alteradas movimentam o cache
+da carteira. Assim, concorrência e repetição do job continuam idempotentes, mas
+uma carteira acumulada não prende todos os repasses numa transação longa.
+
+O teste focado passou com 1 suíte / 10 testes, incluindo 26 repasses divididos
+em duas transações. O Jest completo da API passou com 87 suítes / 1.081 testes;
+`pnpm typecheck` e `pnpm lint` passaram nos 8 workspaces (permanece somente o
+aviso preexistente de `no-void` no Driver App), e o build da API passou. Não
+houve alteração de schema, migration, segredo ou APK.

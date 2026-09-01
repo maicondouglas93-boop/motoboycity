@@ -70,6 +70,11 @@ no build; o APK foi compilado e verificado, mas ainda não foi instalado nem
 distribuído. Por isso a tabela acima continua registrando `pilot.16` nos
 aparelhos.
 
+A reconciliação dos repasses pendentes é processada em transações de até 25
+lançamentos. Isso preserva a atualização condicional por status e impede que o
+acúmulo de saldo bloqueado estoure o prazo do Prisma/Neon e deixe créditos
+vencidos em `PENDING`.
+
 Os `pilot.13` e `pilot.14` foram compilados, verificados e **descartados** sem
 chegar a nenhum aparelho.
 
@@ -197,16 +202,7 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 6. **Presença multi-sessão (P1-04)** e **cobertura E2E do bloqueio/suspensão**
    continuam pendentes.
 7. **iOS nunca compilado.** Todo o aplicativo foi validado só em Android.
-8. **Uma consulta por repasse dentro da transação.**
-   `releaseDueRepasses` faz `1 + N + M` idas ao banco dentro de UMA transação
-   serializável: uma busca, um `updateMany` por candidato e um `update` por
-   carteira. Com a API em `virginia` e o Neon em `sa-east-1`, cada ida custa
-   mais de 100 ms — foi isso que estourou o prazo padrão de 5 s do Prisma e
-   derrubou o deploy de 31/08/2026. O prazo foi elevado para 20 s, mas isso é
-   curativo: o conserto é liberar em lote. Não foi feito porque é código de
-   dinheiro e o `updated.count === 1` por linha é uma defesa de concorrência
-   que não se troca sem teste de integração.
-9. **O CI não roda suíte de front-end nenhuma.** O `ci.yml` cobre API,
+8. **O CI não roda suíte de front-end nenhuma.** O `ci.yml` cobre API,
    driver-app e E2E; os testes do `company-web` (vitest) e do `admin-web`
    (`node --test`) só rodam na mão. Escrever teste de painel hoje é escrever
    algo que nenhum PR vai executar — são duas linhas no workflow para mudar

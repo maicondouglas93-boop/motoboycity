@@ -38,10 +38,11 @@ type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED';
  * motoboy pedindo saque.
  *
  * Vinte segundos é folga para a latência entre regiões, não licença para
- * transação longa: a consulta por repasse dentro da transação continua sendo
- * dívida registrada no handoff, e é ela que precisa sumir.
+ * transação longa. A reconciliação de repasses é dividida em lotes pequenos;
+ * as demais operações financeiras continuam usando o mesmo prazo explícito.
  */
 const PRAZOS_DA_TRANSACAO = { maxWait: 10_000, timeout: 20_000 } as const;
+const REPASSES_POR_TRANSACAO = 25;
 
 const withdrawalInclude = {
   wallet: {
@@ -98,7 +99,8 @@ export class FinancialPayoutService {
   /**
    * Reconcilia a data prevista com o ciclo atual e libera o que já venceu.
    * O job diário inclui créditos legados sem `releaseAt`; a inicialização da
-   * API recupera somente linhas que já possuíam uma data prevista.
+   * API recupera somente linhas que já possuíam uma data prevista. Os lotes
+   * mantêm cada transação curta sem retirar a guarda condicional por status.
    */
   async releaseDueRepasses(
     now = this.clock.now(),
@@ -106,54 +108,62 @@ export class FinancialPayoutService {
   ): Promise<number> {
     const includeLegacy = options.includeLegacyWithoutReleaseAt ?? false;
     const { withdrawalWeekday } = await this.platformSettings.get();
-    return this.withSerializableTransaction(async (tx) => {
-      const candidates = await tx.walletTransaction.findMany({
-        where: {
-          type: 'CREDIT_REPASSE',
-          status: 'PENDING',
-          ...(!includeLegacy && { releaseAt: { not: null } }),
-        },
-        select: { id: true, walletId: true, amount: true, createdAt: true, releaseAt: true },
-      });
-
-      const releasedByWallet = new Map<string, number>();
-      let releasedCount = 0;
-      for (const candidate of candidates) {
-        const configuredReleaseAt = nextRepasseReleaseAt(candidate.createdAt, withdrawalWeekday);
-        const shouldRelease = configuredReleaseAt.getTime() <= now.getTime();
-        const scheduleChanged = candidate.releaseAt?.getTime() !== configuredReleaseAt.getTime();
-        if (!shouldRelease && !scheduleChanged) continue;
-
-        const updated = await tx.walletTransaction.updateMany({
-          where: { id: candidate.id, status: 'PENDING' },
-          data: {
-            releaseAt: configuredReleaseAt,
-            ...(shouldRelease && { status: 'RELEASED' }),
-          },
-        });
-        if (updated.count === 1 && shouldRelease) {
-          releasedCount += 1;
-          releasedByWallet.set(
-            candidate.walletId,
-            roundCurrency(
-              (releasedByWallet.get(candidate.walletId) ?? 0) + numberValue(candidate.amount),
-            ),
-          );
-        }
-      }
-
-      for (const [walletId, amount] of releasedByWallet) {
-        await tx.wallet.update({
-          where: { id: walletId },
-          data: {
-            cachedBlockedBalance: { decrement: amount },
-            cachedAvailableBalance: { increment: amount },
-          },
-        });
-      }
-
-      return releasedCount;
+    const candidates = await this.prisma.walletTransaction.findMany({
+      where: {
+        type: 'CREDIT_REPASSE',
+        status: 'PENDING',
+        ...(!includeLegacy && { releaseAt: { not: null } }),
+      },
+      select: { id: true, walletId: true, amount: true, createdAt: true, releaseAt: true },
+      orderBy: [{ walletId: 'asc' }, { id: 'asc' }],
     });
+
+    let releasedCount = 0;
+    for (let offset = 0; offset < candidates.length; offset += REPASSES_POR_TRANSACAO) {
+      const batch = candidates.slice(offset, offset + REPASSES_POR_TRANSACAO);
+      releasedCount += await this.withSerializableTransaction(async (tx) => {
+        const releasedByWallet = new Map<string, number>();
+        let batchReleasedCount = 0;
+
+        for (const candidate of batch) {
+          const configuredReleaseAt = nextRepasseReleaseAt(candidate.createdAt, withdrawalWeekday);
+          const shouldRelease = configuredReleaseAt.getTime() <= now.getTime();
+          const scheduleChanged = candidate.releaseAt?.getTime() !== configuredReleaseAt.getTime();
+          if (!shouldRelease && !scheduleChanged) continue;
+
+          const updated = await tx.walletTransaction.updateMany({
+            where: { id: candidate.id, status: 'PENDING' },
+            data: {
+              releaseAt: configuredReleaseAt,
+              ...(shouldRelease && { status: 'RELEASED' }),
+            },
+          });
+          if (updated.count === 1 && shouldRelease) {
+            batchReleasedCount += 1;
+            releasedByWallet.set(
+              candidate.walletId,
+              roundCurrency(
+                (releasedByWallet.get(candidate.walletId) ?? 0) + numberValue(candidate.amount),
+              ),
+            );
+          }
+        }
+
+        for (const [walletId, amount] of releasedByWallet) {
+          await tx.wallet.update({
+            where: { id: walletId },
+            data: {
+              cachedBlockedBalance: { decrement: amount },
+              cachedAvailableBalance: { increment: amount },
+            },
+          });
+        }
+
+        return batchReleasedCount;
+      });
+    }
+
+    return releasedCount;
   }
 
   async requestWithdrawal(
