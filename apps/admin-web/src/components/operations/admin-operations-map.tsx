@@ -38,12 +38,30 @@ interface Props {
   onSelect: (selection: NonNullable<AdminMapSelection>) => void;
 }
 
+interface ManagedMarker {
+  marker: google.maps.Marker;
+  clickListener: google.maps.MapsEventListener;
+  appearanceKey: string;
+  portraitRequestKey?: string;
+}
+
+function updatePosition(
+  marker: google.maps.Marker,
+  position: google.maps.LatLngLiteral,
+): void {
+  const current = marker.getPosition();
+  if (!current || current.lat() !== position.lat || current.lng() !== position.lng) {
+    marker.setPosition(position);
+  }
+}
+
 export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef(new Map<string, ManagedMarker>());
   const viewportRef = useRef({ key: '', framed: false });
   const viewportIdleListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  const onSelectRef = useRef(onSelect);
   const [ready, setReady] = useState(false);
   // O painel do admin olha a operacao inteira, entao o centro e sempre a cidade.
   const initialCenterRef = useRef(LAJINHA_CENTER);
@@ -55,7 +73,12 @@ export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelec
   useEffect(() => onGoogleMapsAuthFailure(setError), []);
 
   useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
     let cancelled = false;
+    const markerRegistry = markersRef.current;
     loadGoogleMaps()
       .then((maps) => {
         if (cancelled || !containerRef.current) return;
@@ -77,45 +100,56 @@ export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelec
         google.maps.event.removeListener(viewportIdleListenerRef.current);
         viewportIdleListenerRef.current = null;
       }
+      for (const managed of markerRegistry.values()) {
+        managed.clickListener.remove();
+        managed.marker.setMap(null);
+      }
+      markerRegistry.clear();
     };
   }, []);
 
   useEffect(() => {
     if (!ready || !mapRef.current || !data) return;
-    markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = [];
-    /**
-     * O retrato do motoboy chega depois (canvas, e as vezes rede). Sem esta
-     * trava, uma atualizacao que troca os marcadores deixaria o retrato antigo
-     * pousar num marcador que ja foi removido do mapa.
-     */
-    let descartado = false;
     const bounds = new google.maps.LatLngBounds();
-    const marker = (
+    const desiredKeys = new Set<string>();
+    const upsertMarker = (
+      key: string,
       position: google.maps.LatLngLiteral,
       title: string,
-      color: string,
-      selected: boolean,
+      zIndex: number,
+      icon: google.maps.Icon | google.maps.Symbol,
+      appearanceKey: string,
       click: () => void,
+      preserveExistingAppearance = false,
     ) => {
+      desiredKeys.add(key);
+      bounds.extend(position);
+      const existing = markersRef.current.get(key);
+      if (existing) {
+        updatePosition(existing.marker, position);
+        existing.marker.setTitle(title);
+        existing.marker.setZIndex(zIndex);
+        if (!preserveExistingAppearance && existing.appearanceKey !== appearanceKey) {
+          existing.marker.setIcon(icon);
+          existing.appearanceKey = appearanceKey;
+        }
+        return existing;
+      }
+
       const item = new google.maps.Marker({
         map: mapRef.current,
         position,
         title,
-        zIndex: selected ? 100 : 1,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillColor: color,
-          fillOpacity: 1,
-          strokeColor: '#fff',
-          strokeWeight: selected ? 3 : 2,
-          scale: selected ? 11 : 8,
-        },
+        zIndex,
+        icon,
       });
-      item.addListener('click', click);
-      markersRef.current.push(item);
-      bounds.extend(position);
-      return item;
+      const managed: ManagedMarker = {
+        marker: item,
+        clickListener: item.addListener('click', click),
+        appearanceKey,
+      };
+      markersRef.current.set(key, managed);
+      return managed;
     };
 
     if (mode !== 'drivers') {
@@ -133,65 +167,105 @@ export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelec
               ? { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng }
               : null;
         if (!location) continue;
-        marker(
+        const selected = selection?.kind === 'delivery' && selection.id === delivery.id;
+        const color = statusHex(delivery.status);
+        upsertMarker(
+          `delivery:${delivery.id}`,
           location,
           `#${delivery.displayNumber} · ${delivery.companyName}`,
-          statusHex(delivery.status),
-          selection?.kind === 'delivery' && selection.id === delivery.id,
-          () => onSelect({ kind: 'delivery', id: delivery.id }),
+          selected ? 100 : 1,
+          {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: '#fff',
+            strokeWeight: selected ? 3 : 2,
+            scale: selected ? 11 : 8,
+          },
+          `delivery:${color}:${selected}`,
+          () => onSelectRef.current({ kind: 'delivery', id: delivery.id }),
         );
       }
     }
     if (mode !== 'orders') {
       for (const driver of data.onlineDrivers) {
         const selecionado = selection?.kind === 'driver' && selection.id === driver.id;
-        const item = marker(
+        const key = `driver:${driver.id}`;
+        // Copias locais mantem os dados da consulta imutaveis enquanto a API
+        // imperativa do Google atualiza a instancia persistente do marcador.
+        const driverName = `${driver.name}`;
+        const driverAvatarUrl = driver.avatarUrl ? `${driver.avatarUrl}` : null;
+        const portraitRequestKey = `${driverName}|${driverAvatarUrl ?? ''}|${selecionado}`;
+        const managed = upsertMarker(
+          key,
           { lat: driver.location.lat, lng: driver.location.lng },
-          driver.name,
-          COR_DO_MOTOBOY,
-          selecionado,
-          () => onSelect({ kind: 'driver', id: driver.id }),
+          driverName,
+          selecionado ? 100 : 1,
+          {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: COR_DO_MOTOBOY,
+            fillOpacity: 1,
+            strokeColor: '#fff',
+            strokeWeight: selecionado ? 3 : 2,
+            scale: selecionado ? 11 : 8,
+          },
+          `driver-fallback:${portraitRequestKey}`,
+          () => onSelectRef.current({ kind: 'driver', id: driver.id }),
+          true,
         );
         /*
           O ponto colorido aparece primeiro e o retrato substitui quando fica
           pronto. Esperar o retrato para so entao criar o marcador deixaria o
           mapa vazio enquanto as fotos carregam.
         */
-        void retratoDoMotoboy({
-          nome: driver.name,
-          avatarUrl: driver.avatarUrl,
-          cor: COR_DO_MOTOBOY,
-          selecionado,
-        }).then((retrato) => {
-          if (descartado || !retrato) return;
-          const lado = selecionado ? 44 : 34;
-          item.setIcon({
-            url: retrato,
-            scaledSize: new google.maps.Size(lado, lado),
-            anchor: new google.maps.Point(lado / 2, lado / 2),
+        if (managed.portraitRequestKey !== portraitRequestKey) {
+          managed.portraitRequestKey = portraitRequestKey;
+          void retratoDoMotoboy({
+            nome: driverName,
+            avatarUrl: driverAvatarUrl,
+            cor: COR_DO_MOTOBOY,
+            selecionado,
+          }).then((retrato) => {
+            const current = markersRef.current.get(key);
+            if (current !== managed || current.portraitRequestKey !== portraitRequestKey || !retrato) {
+              return;
+            }
+            const lado = selecionado ? 44 : 34;
+            current.marker.setIcon({
+              url: retrato,
+              scaledSize: new google.maps.Size(lado, lado),
+              anchor: new google.maps.Point(lado / 2, lado / 2),
+            });
+            current.appearanceKey = `driver-portrait:${portraitRequestKey}`;
           });
-        });
+        }
       }
     }
+
+    for (const [key, managed] of markersRef.current) {
+      if (desiredKeys.has(key)) continue;
+      managed.clickListener.remove();
+      managed.marker.setMap(null);
+      markersRef.current.delete(key);
+    }
     /**
-     * Atualizacoes de localizacao recriam os marcadores, mas nao podem tomar o
-     * controle da camera. O socket invalida `admin/operations` a cada
-     * `driver:location`; executar `fitBounds` em cada resposta fazia o mapa
-     * aproximar e voltar continuamente. A camera so e reenquadrada na primeira
-     * carga ou quando o operador muda modo/filtros (`viewportKey`).
+     * Atualizacoes de localizacao movem o marcador existente e nao podem tomar
+     * o controle da camera. A camera so e reenquadrada na primeira carga ou
+     * quando o operador muda modo/filtros (`viewportKey`).
      */
     const map = mapRef.current;
     if (viewportRef.current.key !== viewportKey) {
       viewportRef.current = { key: viewportKey, framed: false };
     }
-    if (!viewportRef.current.framed && markersRef.current.length > 0) {
+    if (!viewportRef.current.framed && markersRef.current.size > 0) {
       viewportRef.current.framed = true;
       if (viewportIdleListenerRef.current) {
         google.maps.event.removeListener(viewportIdleListenerRef.current);
         viewportIdleListenerRef.current = null;
       }
-      if (markersRef.current.length === 1) {
-        map.setCenter(markersRef.current[0]!.getPosition()!);
+      if (markersRef.current.size === 1) {
+        const onlyMarker = markersRef.current.values().next().value as ManagedMarker;
+        map.setCenter(onlyMarker.marker.getPosition()!);
       } else {
         viewportIdleListenerRef.current = google.maps.event.addListenerOnce(map, 'idle', () => {
           viewportIdleListenerRef.current = null;
@@ -202,10 +276,7 @@ export function AdminOperationsMap({ data, mode, viewportKey, selection, onSelec
       }
     }
 
-    return () => {
-      descartado = true;
-    };
-  }, [data, mode, onSelect, ready, selection, viewportKey]);
+  }, [data, mode, ready, selection, viewportKey]);
 
   return (
     <div className="premium-panel relative h-full min-h-[600px] w-full min-w-0 max-w-full overflow-hidden rounded-2xl border bg-muted ring-1 ring-white/80">

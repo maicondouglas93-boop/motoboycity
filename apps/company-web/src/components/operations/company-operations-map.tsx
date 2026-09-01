@@ -31,6 +31,23 @@ interface Props {
   onSelect: (deliveryId: string) => void;
 }
 
+interface ManagedMarker {
+  marker: google.maps.Marker;
+  clickListener: google.maps.MapsEventListener | null;
+  appearanceKey: string;
+  portraitRequestKey?: string;
+}
+
+function updatePosition(
+  marker: google.maps.Marker,
+  position: google.maps.LatLngLiteral,
+): void {
+  const current = marker.getPosition();
+  if (!current || current.lat() !== position.lat || current.lng() !== position.lng) {
+    marker.setPosition(position);
+  }
+}
+
 /** Verde da placa: a mesma cor que o motoboy ja tinha no mapa. */
 const COR_DO_MOTOBOY = '#0b6e4f';
 
@@ -73,8 +90,9 @@ export function operationsMapCameraScope(
 export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markersRef = useRef(new Map<string, ManagedMarker>());
   const lastCameraScopeRef = useRef<string | null>(null);
+  const onSelectRef = useRef(onSelect);
   const [ready, setReady] = useState(false);
   /**
    * A loja e um centro melhor que o centro da cidade: as entregas saem dela, e
@@ -95,7 +113,12 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
   useEffect(() => onGoogleMapsAuthFailure(setError), []);
 
   useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
     let cancelled = false;
+    const markerRegistry = markersRef.current;
     loadGoogleMaps()
       .then((maps) => {
         if (cancelled || !containerRef.current) return;
@@ -113,6 +136,11 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       );
     return () => {
       cancelled = true;
+      for (const managed of markerRegistry.values()) {
+        managed.clickListener?.remove();
+        managed.marker.setMap(null);
+      }
+      markerRegistry.clear();
     };
   }, []);
 
@@ -122,47 +150,59 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       { lat: pickupAddress.lat, lng: pickupAddress.lng },
       deliveries,
     );
-    markersRef.current.forEach((marker) => marker.setMap(null));
-    markersRef.current = [];
-    /**
-     * O retrato chega depois. Sem esta trava, uma atualizacao que troca os
-     * marcadores deixaria o retrato antigo pousar num marcador ja removido.
-     */
-    let descartado = false;
     const bounds = new google.maps.LatLngBounds();
-    const addMarker = (
+    const desiredKeys = new Set<string>();
+    const upsertMarker = (
+      key: string,
       position: google.maps.LatLngLiteral,
       title: string,
-      color: string,
+      icon: google.maps.Icon | google.maps.Symbol,
+      appearanceKey: string,
       onClick?: () => void,
-      scale = 8,
+      preserveExistingAppearance = false,
     ) => {
+      desiredKeys.add(key);
+      bounds.extend(position);
+      const existing = markersRef.current.get(key);
+      if (existing) {
+        updatePosition(existing.marker, position);
+        existing.marker.setTitle(title);
+        if (!preserveExistingAppearance && existing.appearanceKey !== appearanceKey) {
+          existing.marker.setIcon(icon);
+          existing.appearanceKey = appearanceKey;
+        }
+        return existing;
+      }
+
       const marker = new google.maps.Marker({
         map: mapRef.current,
         position,
         title,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillColor: color,
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 2,
-          scale,
-        },
+        icon,
       });
-      if (onClick) marker.addListener('click', onClick);
-      markersRef.current.push(marker);
-      bounds.extend(position);
-      return marker;
+      const managed: ManagedMarker = {
+        marker,
+        clickListener: onClick ? marker.addListener('click', onClick) : null,
+        appearanceKey,
+      };
+      markersRef.current.set(key, managed);
+      return managed;
     };
 
     if (pickupAddress.lat !== null && pickupAddress.lng !== null) {
-      addMarker(
+      upsertMarker(
+        'pickup',
         { lat: pickupAddress.lat, lng: pickupAddress.lng },
         'Ponto de coleta',
-        '#10252f',
-        undefined,
-        10,
+        {
+          path: google.maps.SymbolPath.CIRCLE,
+          fillColor: '#10252f',
+          fillOpacity: 1,
+          strokeColor: '#ffffff',
+          strokeWeight: 2,
+          scale: 10,
+        },
+        'pickup',
       );
     }
     for (const delivery of deliveries) {
@@ -175,21 +215,43 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
         dropoff?.lat !== undefined &&
         dropoff?.lng !== undefined
       ) {
-        addMarker(
+        const selected = selectedId === delivery.id;
+        const color = statusHex(delivery.status);
+        upsertMarker(
+          `delivery:${delivery.id}:dropoff`,
           { lat: dropoff.lat, lng: dropoff.lng },
           `Pedido #${delivery.displayNumber}`,
-          statusHex(delivery.status),
-          () => onSelect(delivery.id),
-          selectedId === delivery.id ? 11 : 8,
+          {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+            scale: selected ? 11 : 8,
+          },
+          `delivery:${color}:${selected}`,
+          () => onSelectRef.current(delivery.id),
         );
       }
       if (delivery.lastLocation) {
-        const item = addMarker(
+        const key = `delivery:${delivery.id}:driver`;
+        const selected = selectedId === delivery.id;
+        const portraitRequestKey = `${delivery.driver?.name ?? ''}|${delivery.driver?.avatarUrl ?? ''}|${selected}`;
+        const managed = upsertMarker(
+          key,
           { lat: delivery.lastLocation.lat, lng: delivery.lastLocation.lng },
           delivery.driver ? `Motoboy: ${delivery.driver.name}` : 'Posição do motoboy',
-          COR_DO_MOTOBOY,
-          () => onSelect(delivery.id),
-          7,
+          {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: COR_DO_MOTOBOY,
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+            scale: 7,
+          },
+          `driver-fallback:${portraitRequestKey}`,
+          () => onSelectRef.current(delivery.id),
+          true,
         );
         /*
           A loja ve o rosto de quem esta com o pedido dela. O ponto verde
@@ -198,22 +260,54 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
         */
         if (delivery.driver) {
           const motoboy = delivery.driver;
-          void retratoDoMotoboy({
-            nome: motoboy.name,
-            avatarUrl: motoboy.avatarUrl,
-            cor: COR_DO_MOTOBOY,
-            selecionado: selectedId === delivery.id,
-          }).then((retrato) => {
-            if (descartado || !retrato) return;
-            const lado = selectedId === delivery.id ? 42 : 32;
-            item.setIcon({
-              url: retrato,
-              scaledSize: new google.maps.Size(lado, lado),
-              anchor: new google.maps.Point(lado / 2, lado / 2),
+          if (managed.portraitRequestKey !== portraitRequestKey) {
+            managed.portraitRequestKey = portraitRequestKey;
+            void retratoDoMotoboy({
+              nome: motoboy.name,
+              avatarUrl: motoboy.avatarUrl,
+              cor: COR_DO_MOTOBOY,
+              selecionado: selected,
+            }).then((retrato) => {
+              const current = markersRef.current.get(key);
+              if (
+                current !== managed ||
+                current.portraitRequestKey !== portraitRequestKey ||
+                !retrato
+              ) {
+                return;
+              }
+              const lado = selected ? 42 : 32;
+              current.marker.setIcon({
+                url: retrato,
+                scaledSize: new google.maps.Size(lado, lado),
+                anchor: new google.maps.Point(lado / 2, lado / 2),
+              });
+              current.appearanceKey = `driver-portrait:${portraitRequestKey}`;
             });
-          });
+          }
+        } else {
+          const fallbackKey = `driver-fallback:${portraitRequestKey}`;
+          managed.portraitRequestKey = portraitRequestKey;
+          if (managed.appearanceKey !== fallbackKey) {
+            managed.marker.setIcon({
+              path: google.maps.SymbolPath.CIRCLE,
+              fillColor: COR_DO_MOTOBOY,
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2,
+              scale: 7,
+            });
+            managed.appearanceKey = fallbackKey;
+          }
         }
       }
+    }
+
+    for (const [key, managed] of markersRef.current) {
+      if (desiredKeys.has(key)) continue;
+      managed.clickListener?.remove();
+      managed.marker.setMap(null);
+      markersRef.current.delete(key);
     }
     /**
      * Enquadrar so quando ha o que enquadrar.
@@ -227,9 +321,10 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
     lastCameraScopeRef.current = cameraScope;
     if (shouldReframe) {
       const map = mapRef.current;
-      if (markersRef.current.length === 1) {
-        map.setCenter(markersRef.current[0]!.getPosition()!);
-      } else if (markersRef.current.length > 1) {
+      if (markersRef.current.size === 1) {
+        const onlyMarker = markersRef.current.values().next().value as ManagedMarker;
+        map.setCenter(onlyMarker.marker.getPosition()!);
+      } else if (markersRef.current.size > 1) {
         google.maps.event.addListenerOnce(map, 'idle', () => {
           const zoom = map.getZoom();
           if (zoom !== undefined && zoom > MAX_AUTO_ZOOM) map.setZoom(MAX_AUTO_ZOOM);
@@ -238,10 +333,7 @@ export function CompanyOperationsMap({ pickupAddress, deliveries, selectedId, on
       }
     }
 
-    return () => {
-      descartado = true;
-    };
-  }, [deliveries, onSelect, pickupAddress.lat, pickupAddress.lng, ready, selectedId]);
+  }, [deliveries, pickupAddress.lat, pickupAddress.lng, ready, selectedId]);
 
   return (
     <div className="premium-panel relative h-full min-h-[480px] overflow-hidden rounded-3xl border-2 border-white/85 bg-muted ring-1 ring-portal/10">
