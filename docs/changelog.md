@@ -11974,3 +11974,42 @@ documentos operacionais correspondentes.
 
 Não houve schema, migration, dado, dependência ou segredo alterado. Nenhum APK,
 commit, push ou deploy foi executado neste recorte.
+
+## 2026-09-03 — Release Android oficial `pilot.20`
+
+A recuperação de GPS e a robustez do aceite foram consolidadas no commit
+`fdf7e57` e enviadas para `main`, acionando o deploy automático. A saúde pública
+da API respondeu HTTP 200 após o push. O Driver App foi compilado a partir desse
+commit na worktree curta `C:\m20`, com JDK 21, ambiente de produção, API oficial,
+Firebase, Google Maps e a chave de assinatura oficial. As senhas protegidas por
+DPAPI existiram somente na memória do processo e as variáveis foram removidas ao
+final.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.20-vc20.apk`
+
+- 75.167.673 bytes;
+- SHA-256 `62C7000394031D5A3BF6B05D492AFBFE9F4AF3A715FB5C0D95B1946A505A3210`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 20,
+  `versionName` `0.1.0-pilot.20`, minSdk 24 e targetSdk 36;
+- assinatura válida e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- bundle com `https://motoboycity-api.onrender.com` e sem `localhost:3333`,
+  `127.0.0.1` ou `10.0.2.2`;
+- cópia oficial conferida pelo mesmo SHA-256 da origem.
+
+| Validação | Resultado |
+| --- | --- |
+| Jest focado da API | 3 suítes / 227 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 188 testes aprovados |
+| Typecheck do monorepo | 8 pacotes aprovados |
+| Lint da API e do Driver App | aprovado; um aviso preexistente de `no-void` no app |
+| Build da API e Kotlin debug | aprovados |
+| `clean assembleRelease --no-daemon` | aprovado em 8 min 25 s; 427 tarefas |
+| `aapt` e `apksigner` | versão, SDKs, assinatura e certificado aprovados |
+| inspeção do bundle e comparação de hash | ambiente de produção e cópia oficial aprovados |
+
+O APK foi gerado e verificado, mas não foi instalado nem distribuído nesta
+sessão. Não houve schema, migration, dado, dependência ou segredo alterado pelo
+release.

@@ -8,8 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-03**, depois de corrigir a recuperação de GPS na
-> entrega e endurecer o recebimento e o aceite de ofertas no aplicativo.
+> Última revisão: **2026-09-03**, depois de publicar a recuperação de GPS e a
+> robustez do aceite e gerar o APK oficial `pilot.20`.
 
 ## Como atualizar
 
@@ -28,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `main` publicado em 01/09/2026 até o recorte do `pilot.19`; o APK continua com distribuição manual |
+| Commit publicado | `main` publicado em 03/09/2026 até `fdf7e57`; o push aciona o deploy automático e o APK continua com distribuição manual |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -51,12 +51,12 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.19-vc19.apk`
-SHA-256 `A11B46BEF80FA4D4003FE748F5A7F753C0265CA7D19E779A3F37199D63EB80B7`,
-75.163.801 bytes, `versionCode` 19, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.20-vc20.apk`
+SHA-256 `62C7000394031D5A3BF6B05D492AFBFE9F4AF3A715FB5C0D95B1946A505A3210`,
+75.167.673 bytes, `versionCode` 20, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.16`, `pilot.17` ou `pilot.18`.
+anteriores, então ele atualiza por cima de `pilot.19` e versões anteriores.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
@@ -101,17 +101,15 @@ O APK foi compilado e verificado e o `pilot.19` já foi instalado em pelo menos
 um aparelho. A extensão da distribuição e o teste do toque e da vibração em uma
 oferta real ainda precisam ser confirmados pelo painel/operação.
 
-### Alterações locais aguardando publicação
+### Correções publicadas no `pilot.20`
 
-Há uma correção posterior ao `pilot.19`, ainda sem commit, push, deploy ou novo
-APK; o código do app já está preparado como `0.1.0-pilot.20`. GPS recusado
-especificamente por baixa precisão no destino agora oferece
+GPS recusado especificamente por baixa precisão no destino agora oferece
 **Tentar GPS novamente** e só substitui esse fix inválido. O aceite já gravado
 no PostgreSQL não falha mais por limpeza posterior do Redis; o Android retenta
 uma vez respostas 5xx; oferta atrasada usa a expiração absoluta do servidor; e
 uma oscilação curta não mostra alerta vermelho nem desliga quem ainda está
-confirmado online. Publicação segura: API primeiro e depois APK com
-`versionCode` 20.
+confirmado online. A API foi enviada primeiro no commit `fdf7e57`; o APK oficial
+usa `versionCode` 20 e ainda precisa ser instalado/distribuído aos motoboys.
 
 A reconciliação dos repasses pendentes é processada em transações de até 25
 lançamentos. Isso preserva a atualização condicional por status e impede que o
@@ -350,7 +348,7 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Modificado pela correção de GPS/aceite descrita acima, ainda sem commit ou push.
+Limpo depois da publicação da correção de GPS/aceite e do release `pilot.20`.
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do
 responsável. O repositório é **público**: toda alteração exige varredura de
