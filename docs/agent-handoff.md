@@ -8,8 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-01**, depois de gerar e verificar o release
-> `pilot.19` com a recuperação silenciosa da fila local de finalizações.
+> Última revisão: **2026-09-03**, depois de tornar consistente a leitura da
+> carteira do motoboy sem alterar saldos ou lançamentos.
 
 ## Como atualizar
 
@@ -32,7 +32,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
-| APK nos aparelhos | **`pilot.16`** distribuído em 31/08/2026. Quem ainda não abriu o app pode estar no `pilot.15`: confirme por motoboy no painel, não nesta linha (veja abaixo) |
+| APK nos aparelhos | O **`pilot.19`** já foi instalado em pelo menos um aparelho em 02/09/2026; a extensão do rollout não foi confirmada. Confira a versão de cada motoboy pelo heartbeat no painel (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -62,6 +62,24 @@ O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
 foram conferidas por texto dentro do bundle, e não só pelo commit.
 
+### AAB pronto para envio à Google Play
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.19-vc19.aab`
+SHA-256 `157DD14393781FC94C22168085E9A6C82CC5768FD61D266D3077111AE7B1014D`,
+53.722.655 bytes, pacote `com.motoboycity.driverapp`, `versionCode` 19,
+`versionName` `0.1.0-pilot.19`, minSdk 24 e targetSdk 36. A assinatura JAR foi
+verificada e usa o certificado oficial SHA-256
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+O `processReleaseGoogleServices` foi executado; o bundle contém a API de
+produção e não contém URL HTTP/HTTPS/WebSocket local.
+
+O AAB ainda **não foi enviado** à Play Console. Ao ativar o Play App Signing,
+preserve a chave de assinatura oficial já usada nos APKs distribuídos; aceitar
+uma chave de app diferente quebra a continuidade de atualização entre a Play e
+as instalações manuais. Como o AAB também usa `versionCode` 19, ele não atualiza
+um aparelho que já esteja no APK `versionCode` 19; o próximo release destinado
+a esses aparelhos deverá usar `versionCode` 20 ou maior.
+
 O `pilot.19` mantém a carteira e a solicitação de saque obedecendo ao dia financeiro
 escolhido pelo ADM, recebido da API, em vez de fixarem segunda-feira no aparelho.
 No servidor, esse mesmo dia agora libera os repasses às 00:00; `null` significa
@@ -79,14 +97,20 @@ mutação confere também a geração (`queuedAt`), para uma sincronização ant
 não tocar numa tentativa nova com o mesmo ID. Finalizações válidas em
 `COLLECTED` continuam preservadas.
 
-O APK foi compilado e verificado, mas ainda não foi instalado nem distribuído.
-Por isso a tabela acima continua registrando `pilot.16` nos aparelhos. O toque e
-a vibração em primeiro plano ainda exigem um teste com oferta real no aparelho.
+O APK foi compilado e verificado e o `pilot.19` já foi instalado em pelo menos
+um aparelho. A extensão da distribuição e o teste do toque e da vibração em uma
+oferta real ainda precisam ser confirmados pelo painel/operação.
 
 A reconciliação dos repasses pendentes é processada em transações de até 25
 lançamentos. Isso preserva a atualização condicional por status e impede que o
 acúmulo de saldo bloqueado estoure o prazo do Prisma/Neon e deixe créditos
 vencidos em `PENDING`.
+
+O `GET /driver/wallet` lê o cache da carteira, o extrato visível e o ledger
+completo no mesmo snapshot `RepeatableRead`. Assim, uma entrega ou liberação
+concorrente não cria um aviso falso de divergência. A rota continua somente de
+leitura: divergências históricas reais permanecem visíveis e não são reparadas
+automaticamente por uma consulta.
 
 Os `pilot.13` e `pilot.14` foram compilados, verificados e **descartados** sem
 chegar a nenhum aparelho.

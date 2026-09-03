@@ -376,6 +376,11 @@ Três trilhas, com propósitos distintos:
 - `WalletTransaction` — todo movimento de dinheiro, append-only, com o saldo
   como cache derivado e nunca como fonte da verdade.
 
+A consulta da carteira do motoboy compara cache e ledger dentro de um único
+snapshot `RepeatableRead`. Isso evita divergência aparente quando outro processo
+registra ou libera saldo durante o carregamento da tela. A consulta não altera
+dados nem reconcilia automaticamente uma divergência histórica real.
+
 Intervenção manual do administrador sempre exige motivo. Sem ele, a trilha mostra
 que alguém mudou o pedido e não mostra por quê — que é exatamente a pergunta de
 quem for conferir depois.

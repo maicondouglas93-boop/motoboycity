@@ -4,10 +4,15 @@ import { DriverWalletService } from './driver-wallet.service';
 const driverUser = { id: 'user-driver-1', type: 'DRIVER' } as User;
 
 describe('DriverWalletService', () => {
-  const prisma = {
-    driver: { findUnique: jest.fn() },
+  const transactionClient = {
     wallet: { findUnique: jest.fn() },
     walletTransaction: { findMany: jest.fn() },
+  };
+  const prisma = {
+    driver: { findUnique: jest.fn() },
+    $transaction: jest.fn((callback: (tx: typeof transactionClient) => unknown) =>
+      callback(transactionClient),
+    ),
   };
   /** Segunda-feira: a regra que existia antes de o dia virar configuravel. */
   const platformSettings = { get: jest.fn().mockResolvedValue({ withdrawalWeekday: 1 }) };
@@ -20,7 +25,7 @@ describe('DriverWalletService', () => {
   });
 
   it('retorna carteira vazia para entregador que ainda não concluiu pedidos', async () => {
-    prisma.wallet.findUnique.mockResolvedValue(null);
+    transactionClient.wallet.findUnique.mockResolvedValue(null);
 
     await expect(service.getForDriver(driverUser, { limit: 100 })).resolves.toEqual({
       walletId: null,
@@ -32,7 +37,7 @@ describe('DriverWalletService', () => {
       transactions: [],
       withdrawalRequests: [],
     });
-    expect(prisma.walletTransaction.findMany).not.toHaveBeenCalled();
+    expect(transactionClient.walletTransaction.findMany).not.toHaveBeenCalled();
   });
 
   it('deriva saldos do ledger e reserva saques pendentes', async () => {
@@ -51,7 +56,7 @@ describe('DriverWalletService', () => {
       status: 'PENDING',
       amount: { toString: () => '15.00' },
     };
-    prisma.wallet.findUnique.mockResolvedValue({
+    transactionClient.wallet.findUnique.mockResolvedValue({
       id: 'wallet-1',
       cachedAvailableBalance: { toString: () => '35.00' },
       cachedBlockedBalance: { toString: () => '10.00' },
@@ -70,7 +75,7 @@ describe('DriverWalletService', () => {
       ],
       withdrawalRequests: [],
     });
-    prisma.walletTransaction.findMany.mockResolvedValue([
+    transactionClient.walletTransaction.findMany.mockResolvedValue([
       releasedCredit,
       pendingCredit,
       pendingWithdrawal,
@@ -82,6 +87,9 @@ describe('DriverWalletService', () => {
     expect(result.blockedBalance).toBe(10);
     expect(result.pendingWithdrawalAmount).toBe(15);
     expect(result.cacheMatchesLedger).toBe(true);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
+    });
     expect(result.transactions).toEqual([
       expect.objectContaining({
         id: 'tx-1',

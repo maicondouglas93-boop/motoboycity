@@ -11865,3 +11865,74 @@ ao final.
 O APK foi gerado e verificado, mas não foi instalado nem distribuído nesta
 sessão. Não houve mudança de API, contrato compartilhado, banco, migration,
 dependência ou segredo.
+
+## 2026-09-02 — Android App Bundle oficial `pilot.19`
+
+Foi gerado o AAB assinado do Driver App para o primeiro envio à Google Play,
+sem mudança funcional ou de código. O build partiu do commit `ad59dcb`, em uma
+worktree curta `C:\a19`, com JDK 21, ambiente de produção, API oficial, Firebase
+e a mesma chave oficial dos APKs. As senhas protegidas por DPAPI existiram
+somente na memória do processo e as variáveis foram removidas ao final.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.19-vc19.aab`
+
+- 53.722.655 bytes;
+- SHA-256 `157DD14393781FC94C22168085E9A6C82CC5768FD61D266D3077111AE7B1014D`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 19,
+  `versionName` `0.1.0-pilot.19`, minSdk 24 e targetSdk 36;
+- assinatura JAR válida, RSA 4096 e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- estrutura base do AAB, manifesto, DEX, bibliotecas nativas e bundle JavaScript
+  presentes;
+- `processReleaseGoogleServices` executado;
+- API `https://motoboycity-api.onrender.com` presente e nenhuma URL
+  HTTP/HTTPS/WebSocket local em `localhost` ou `10.0.2.2`.
+
+| Comando | Resultado |
+| --- | --- |
+| build dos pacotes + `bundleRelease` | aprovado; 383 tarefas, 6 min 51 s |
+| `jarsigner -verify` | aprovado; certificado autoassinado oficial válido para o app |
+| `keytool -printcert -jarfile` | certificado oficial e RSA 4096 confirmados |
+| inspeção do manifesto e da estrutura ZIP | pacote, versões, SDKs e módulos aprovados |
+| comparação SHA-256 após cópia | origem e artefato oficial idênticos |
+
+O arquivo não foi enviado à Play Console. O Play App Signing deve preservar a
+chave de assinatura já usada nas instalações manuais. Este AAB usa
+`versionCode` 19 e, portanto, não substitui um APK já instalado com o mesmo
+código; um release posterior para esses aparelhos deve usar 20 ou maior. Não
+houve commit, push, upload, exportação de chave, mudança de API, banco,
+migration, dependência ou segredo neste recorte.
+
+## 2026-09-03 — Snapshot consistente na carteira do motoboy
+
+O `GET /driver/wallet` consultava o cache da `Wallet` e o ledger completo em
+queries independentes. Se uma entrega ou liberação de repasse fosse gravada
+entre essas leituras, a resposta podia combinar dois instantes diferentes e
+mostrar no aplicativo um aviso falso de divergência de saldo.
+
+As duas leituras agora são feitas na mesma transação de leitura com isolamento
+`RepeatableRead`. A rota não altera saldo nem lançamentos e não tenta reparar
+dados durante um `GET`; uma divergência histórica real continua retornando
+`cacheMatchesLedger: false` para conferência financeira.
+
+Arquivos alterados neste recorte:
+
+- `apps/api/src/finance/driver-wallet.service.ts`;
+- `apps/api/src/finance/driver-wallet.service.spec.ts`;
+- `docs/agent-handoff.md`;
+- `docs/architecture.md`;
+- `docs/changelog.md`.
+
+| Validação | Resultado |
+| --- | --- |
+| Jest focado de `driver-wallet.service` | 1 suíte / 2 testes aprovados |
+| typecheck da API | aprovado |
+| lint da API | aprovado |
+| build da API | aprovado |
+
+O comando inicial via Corepack não iniciou o Jest porque o executável `pnpm`
+não estava disponível no `PATH`; a mesma suíte foi executada diretamente pelo
+binário local do Jest. Não houve mudança de contrato, schema, migration, dados,
+APK, dependência ou segredo.

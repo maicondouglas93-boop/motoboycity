@@ -164,47 +164,64 @@ export class DriverWalletService {
       throw new ForbiddenException('Usuário não está vinculado a um cadastro de motoboy.');
     }
 
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { driverId: driver.id },
-      include: {
-        transactions: {
-          where: {
-            ...(filters.status && { status: filters.status }),
-            ...(filters.from || filters.to
-              ? {
-                  createdAt: {
-                    ...(filters.from && { gte: this.startOfDay(filters.from) }),
-                    ...(filters.to && { lte: this.endOfDay(filters.to) }),
-                  },
-                }
-              : {}),
-          },
+    const snapshot = await this.prisma.$transaction(
+      async (tx) => {
+        const wallet = await tx.wallet.findUnique({
+          where: { driverId: driver.id },
           include: {
-            delivery: {
-              select: {
-                id: true,
-                displayNumber: true,
-                company: { select: { tradeName: true } },
+            transactions: {
+              where: {
+                ...(filters.status && { status: filters.status }),
+                ...(filters.from || filters.to
+                  ? {
+                      createdAt: {
+                        ...(filters.from && { gte: this.startOfDay(filters.from) }),
+                        ...(filters.to && { lte: this.endOfDay(filters.to) }),
+                      },
+                    }
+                  : {}),
               },
+              include: {
+                delivery: {
+                  select: {
+                    id: true,
+                    displayNumber: true,
+                    company: { select: { tradeName: true } },
+                  },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+              take: filters.limit,
+            },
+            withdrawalRequests: {
+              include: {
+                statusHistory: {
+                  orderBy: { changedAt: 'asc' },
+                  include: { changedByUser: { select: { id: true, name: true } } },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+              take: 100,
             },
           },
-          orderBy: { createdAt: 'desc' },
-          take: filters.limit,
-        },
-        withdrawalRequests: {
-          include: {
-            statusHistory: {
-              orderBy: { changedAt: 'asc' },
-              include: { changedByUser: { select: { id: true, name: true } } },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        },
-      },
-    });
+        });
 
-    if (!wallet) {
+        if (!wallet) return null;
+
+        const allTransactions = await tx.walletTransaction.findMany({
+          where: { walletId: wallet.id },
+          select: { type: true, status: true, amount: true },
+        });
+
+        return { wallet, allTransactions };
+      },
+      // Cache e ledger precisam pertencer ao mesmo instante. Sem este snapshot,
+      // uma entrega concluída entre as duas leituras gerava um falso alerta de
+      // divergência, embora a escrita financeira tivesse sido atômica.
+      { isolationLevel: 'RepeatableRead' },
+    );
+
+    if (!snapshot) {
       return {
         walletId: null,
         withdrawal: await this.politicaDoSaque(),
@@ -217,10 +234,7 @@ export class DriverWalletService {
       };
     }
 
-    const allTransactions = await this.prisma.walletTransaction.findMany({
-      where: { walletId: wallet.id },
-      select: { type: true, status: true, amount: true },
-    });
+    const { wallet, allTransactions } = snapshot;
     const balances = calculateWalletBalances(allTransactions);
 
     return {
