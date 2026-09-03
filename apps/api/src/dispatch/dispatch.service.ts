@@ -416,6 +416,9 @@ export class DispatchService {
       throw schedulingFailure.reason;
     }
 
+    const offeredAt = offers[0]!.offeredAt;
+    const expiresAtEpochMs = offeredAt.getTime() + timeoutSeconds * 1000;
+
     // A oferta valida consome a vez deste motoboy. A mudanca de prioridade e
     // operacional e nao pode invalidar uma oferta que ja nasceu com timeout;
     // por isso uma falha isolada aqui e registrada, mas nao interrompe o envio.
@@ -434,7 +437,8 @@ export class DispatchService {
         offerId: offers[0]!.id,
         principal: delivery,
         entregas: deliveries,
-        expiresInSeconds: timeoutSeconds,
+        expiresInSeconds: remainingSeconds(offeredAt, timeoutSeconds),
+        expiresAtEpochMs,
       }),
     );
     this.realtimeGateway.emitAdminActivity(
@@ -454,7 +458,6 @@ export class DispatchService {
      * indisponivel nao pode virar pedido nao despachado.
      */
     const quantidade = deliveries.length;
-    const expiresAtEpochMs = Date.now() + timeoutSeconds * 1000;
     const corpo =
       quantidade > 1
         ? `O lote com ${quantidade} entregas está disponível.`
@@ -468,7 +471,7 @@ export class DispatchService {
           type: 'offer',
           offerId: offers[0]!.id,
           deliveryId: delivery.id,
-          expiresInSeconds: String(timeoutSeconds),
+          expiresInSeconds: String(remainingSeconds(offeredAt, timeoutSeconds)),
           expiresAtEpochMs: String(expiresAtEpochMs),
         },
       });
@@ -604,6 +607,9 @@ export class DispatchService {
       throw schedulingFailure.reason;
     }
 
+    const offeredAt = offers[0]!.offeredAt;
+    const expiresAtEpochMs = offeredAt.getTime() + timeoutSeconds * 1000;
+
     try {
       await this.livePresence.moveToDispatchTail(driverId);
     } catch (error: unknown) {
@@ -619,7 +625,8 @@ export class DispatchService {
         offerId: offers[0]!.id,
         principal: delivery,
         entregas: deliveries,
-        expiresInSeconds: timeoutSeconds,
+        expiresInSeconds: remainingSeconds(offeredAt, timeoutSeconds),
+        expiresAtEpochMs,
       }),
     );
     this.realtimeGateway.emitAdminActivity(
@@ -627,7 +634,6 @@ export class DispatchService {
     );
 
     const quantidade = deliveries.length;
-    const expiresAtEpochMs = Date.now() + timeoutSeconds * 1000;
     const body =
       quantidade > 1
         ? `O lote com ${quantidade} entregas esta disponivel.`
@@ -641,7 +647,7 @@ export class DispatchService {
           type: 'offer',
           offerId: offers[0]!.id,
           deliveryId: delivery.id,
-          expiresInSeconds: String(timeoutSeconds),
+          expiresInSeconds: String(remainingSeconds(offeredAt, timeoutSeconds)),
           expiresAtEpochMs: String(expiresAtEpochMs),
         },
       });
@@ -987,6 +993,39 @@ export class DispatchService {
     await this.dispatchQueue.remove(expireJobId(offerId));
   }
 
+  /**
+   * O aceite ja foi confirmado no banco. Falhar ao limpar o job auxiliar nao
+   * pode devolver 500 e fazer o motoboy acreditar que perdeu o pedido.
+   * O job remanescente e seguro: ao executar, encontra a oferta ACCEPTED e faz
+   * no-op. Registramos a falha para a infraestrutura poder ser investigada.
+   */
+  private cancelAcceptedOfferTimeouts(offerIds: string[]): void {
+    const removals = Promise.allSettled(
+      offerIds.map((offerId) => this.cancelOfferTimeout(offerId)),
+    );
+    removals
+      .then((results) => {
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            this.logger.warn(
+              `Falha ao remover timeout da oferta aceita ${offerIds[index]}: ${String(result.reason)}`,
+            );
+          }
+        });
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`Falha inesperada na limpeza de ofertas aceitas: ${String(error)}`);
+      });
+  }
+
+  private ensurePickupExpiryAfterAccepted(deliveryId: string, driverId: string): void {
+    this.ensurePickupExpiry(deliveryId, driverId).catch((error: unknown) => {
+      this.logger.warn(
+        `Falha ao conferir prazo de coleta do pedido ja aceito ${deliveryId}: ${String(error)}`,
+      );
+    });
+  }
+
   async cancelScheduledActivation(deliveryId: string): Promise<void> {
     await this.dispatchQueue.remove(activateJobId(deliveryId));
   }
@@ -1120,7 +1159,7 @@ export class DispatchService {
       throw error;
     }
 
-    await this.cancelOfferTimeout(offerId);
+    this.cancelAcceptedOfferTimeouts([offerId]);
     await this.notifyOfferResolved(driverId, [offerId], 'accepted');
     await this.zerarSequenciaDeRecusas(driverId);
     await this.emitAcceptedActivities([delivery], driverId);
@@ -1263,7 +1302,7 @@ export class DispatchService {
       throw error;
     }
 
-    await Promise.all(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    this.cancelAcceptedOfferTimeouts(offerIds);
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
     await this.zerarSequenciaDeRecusas(driverId);
     const accepted = deliveries.find((delivery) => delivery.id === deliveryId)!;
@@ -1328,14 +1367,14 @@ export class DispatchService {
     driverId: string,
     result: AcceptOfferResult,
   ): Promise<void> {
-    await this.ensurePickupExpiry(result.deliveryId, driverId);
+    this.ensurePickupExpiryAfterAccepted(result.deliveryId, driverId);
     const deliveryIds = result.deliveryIds ?? [result.deliveryId];
     const offers = await this.prisma.deliveryOffer.findMany({
       where: { driverId, deliveryId: { in: deliveryIds }, response: 'ACCEPTED' },
       select: { id: true },
     });
     const offerIds = offers.map((item) => item.id);
-    await Promise.allSettled(offerIds.map((id) => this.cancelOfferTimeout(id)));
+    this.cancelAcceptedOfferTimeouts(offerIds);
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
   }
 
@@ -1688,7 +1727,7 @@ export class DispatchService {
     }
     const claimedBeforeRetry = await this.assignedDeliveryResult(alvo, driverId);
     if (claimedBeforeRetry) {
-      await this.ensurePickupExpiry(claimedBeforeRetry.deliveryId, driverId);
+      this.ensurePickupExpiryAfterAccepted(claimedBeforeRetry.deliveryId, driverId);
       return claimedBeforeRetry;
     }
     if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
@@ -1811,7 +1850,7 @@ export class DispatchService {
       if (error instanceof ConflictException) {
         const claimedDuringRace = await this.assignedDeliveryResultById(deliveryId, driverId);
         if (claimedDuringRace) {
-          await this.ensurePickupExpiry(claimedDuringRace.deliveryId, driverId);
+          this.ensurePickupExpiryAfterAccepted(claimedDuringRace.deliveryId, driverId);
           return claimedDuringRace;
         }
       }
@@ -2020,6 +2059,7 @@ export class DispatchService {
       principal: delivery,
       entregas,
       expiresInSeconds: remainingSeconds(offer.offeredAt, settings.dispatchOfferTimeoutSeconds),
+      expiresAtEpochMs: offer.offeredAt.getTime() + settings.dispatchOfferTimeoutSeconds * 1000,
     });
   }
 

@@ -123,9 +123,9 @@ vira o endereço e o preço**: cria a linha `DROPOFF` e dispara Google Maps e
 | lat/lng | opcional se o raio estiver desligado | **obrigatório** |
 | Falha do Google | não impede concluir | impede — sem rota não há preço |
 
-A mensagem de recusa por precisão **explica** essa diferença ao motoboy. Sem
-isso, ele lê "800 m é demais" com um raio de 5000 m configurado na tela e conclui,
-com razão, que o sistema se contradiz.
+A API identifica a recusa por precisão com um código estável. O aplicativo
+traduz esse caso em uma ação curta de **Tentar GPS novamente**, sem repetir uma
+mensagem técnica que o motoboy não consegue resolver de outra forma.
 
 ### A assimetria que já produziu três incidentes
 
@@ -234,6 +234,14 @@ de dez passava para quem tinha duas de teto três.
 A ordem da fila vive no Redis; uma oferta válida consome a vez do motoboy e o
 move para o fim, tornando a fila circular.
 
+Toda oferta inclui `expiresAtEpochMs`, calculado a partir de `offeredAt` e do
+timeout configurado. Esse instante absoluto governa o contador do app; o campo
+relativo permanece para compatibilidade. Mensagens repetidas podem encurtar o
+prazo local, nunca estendê-lo. O aceite é decidido na transação do PostgreSQL;
+depois dela, remover timeouts antigos e garantir novamente o job de coleta são
+efeitos idempotentes e não bloqueantes. Redis lento ou indisponível nessa limpeza
+não pode devolver falha para uma entrega que já pertence ao motoboy.
+
 **A varredura de minuto em minuto é a rede de segurança** (`DispatchScheduler`).
 O despacho já foi 100% orientado a evento, e o pedido agendado tinha um gatilho
 só: o job no Redis, criado depois do commit. Um `queue.add` que falhasse deixava
@@ -327,6 +335,13 @@ Classificação da resposta do servidor — é ela que decide o comportamento:
 Confundir 422 com 503 foi o que deixou um motoboy retentando a noite inteira uma
 operação que nunca ia passar. Item em `NEEDS_REVIEW` **não sincroniza sozinho**,
 por desenho — e todo caminho que o conserta precisa devolvê-lo a `PENDING`.
+
+O item persiste também um código opcional da resposta. Para
+`DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW`, e somente quando o pedido ainda está
+`COLLECTED`, o toque manual captura outra posição e substitui o fix rejeitado.
+Itens antigos sem código reconhecem apenas a frase histórica exata desse erro;
+qualquer outro `DELIVER` ou `COMPLETE_RETURN` conserva o GPS original. Se a nova
+captura falhar, o item continua intacto em revisão e nada inválido é reenviado.
 
 **Revisão só existe para o que o motoboy ainda pode resolver.** Depois de uma
 recusa definitiva, a fila consulta o pedido de verdade e separa quatro

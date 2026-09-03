@@ -26,6 +26,7 @@ import type {
 import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type {
   DeliveryOperationsResult,
+  DeliveryCompletionErrorCode,
   DeliveryStageTimesResult,
   DeliverySearchResult,
   DeliverySummaryResult,
@@ -121,6 +122,8 @@ type OperationalDeliveryRow = Prisma.DeliveryGetPayload<{
  * de "triangulacao de antena". Ele vale somente quando a coordenada define o destino e o preco.
  */
 const MAX_LOCATION_ACCURACY_METERS = 100;
+const DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW: DeliveryCompletionErrorCode =
+  'DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW';
 
 /**
  * Recusa o fix impreciso demais para VIRAR o destino.
@@ -136,12 +139,14 @@ function assertAccuracyForCapturedDestination(
   limitMeters: number,
 ): void {
   if (accuracy === undefined || accuracy <= limitMeters) return;
-  throw new ConflictException(
-    `A precisão do GPS agora (${Math.round(accuracy)}m) é baixa demais para definir o destino ` +
+  throw new ConflictException({
+    code: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
+    message:
+      `A precisão do GPS agora (${Math.round(accuracy)}m) é baixa demais para definir o destino ` +
       `desta entrega, que exige ${limitMeters}m ou melhor. O limite é mais rígido que o raio ` +
       `porque a sua posição vira o endereço e o valor da corrida. Aguarde o sinal melhorar e ` +
       `tente de novo.`,
-  );
+  });
 }
 
 export interface DeliveryAddressItem {

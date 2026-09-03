@@ -105,6 +105,10 @@ object OfferNativeClient {
     for (attempt in 0 until attempts) {
       try {
         client.newCall(request).execute().use { response ->
+          // Aceite e idempotente. Uma indisponibilidade temporaria depois de o
+          // servidor receber a primeira tentativa pode ser reconciliada pela
+          // segunda, sem criar duas atribuicoes.
+          if (response.code >= 500 && attempt < attempts - 1) return@use
           return when {
             response.isSuccessful ->
               if (action == OfferActionReceiver.ACTION_ACCEPT) {

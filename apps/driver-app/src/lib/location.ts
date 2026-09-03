@@ -154,6 +154,15 @@ export async function captureCurrentLocation(): Promise<LocationFix> {
 
 const COMPLETION_PRECISE_TIMEOUT_MS = 8_000;
 const COMPLETION_APPROXIMATE_TIMEOUT_MS = 4_000;
+const COMPLETION_SECOND_PRECISE_TIMEOUT_MS = 4_000;
+/** Alvo para tentar melhorar o fix; a API continua sendo quem aceita ou recusa. */
+const COMPLETION_ACCURACY_RETRY_TARGET_METERS = 100;
+
+function moreAccurateLocation(first: LocationFix, second: LocationFix): LocationFix {
+  if (first.accuracy === undefined) return first;
+  if (second.accuracy === undefined) return first;
+  return second.accuracy < first.accuracy ? second : first;
+}
 
 /**
  * Captura para coleta, entrega e retorno — tenta o melhor fix, mas nunca
@@ -174,7 +183,10 @@ const COMPLETION_APPROXIMATE_TIMEOUT_MS = 4_000;
  * Nao ha teto de precisao aqui, ao contrario da captura de presenca: o teto e
  * o proprio raio configurado, e quem escolheu o raio foi o administrador.
  */
-export async function captureCompletionLocation(): Promise<LocationFix | null> {
+export async function captureCompletionLocation(options?: {
+  /** Tenta uma segunda leitura curta quando este ponto pode virar destino/preco. */
+  improveImpreciseFix?: boolean;
+}): Promise<LocationFix | null> {
   try {
     await ensurePreciseLocationPermission();
   } catch {
@@ -186,11 +198,34 @@ export async function captureCompletionLocation(): Promise<LocationFix | null> {
   // vale insistir por uma nova antes de aceitar qualquer alternativa. A espera
   // total fica limitada a 12 segundos para a tela nao parecer travada.
   try {
-    return await obterPosicao({
+    const firstPreciseFix = await obterPosicao({
       enableHighAccuracy: true,
       timeout: COMPLETION_PRECISE_TIMEOUT_MS,
       maximumAge: 0,
     });
+
+    if (
+      !options?.improveImpreciseFix ||
+      firstPreciseFix.accuracy === undefined ||
+      firstPreciseFix.accuracy <= COMPLETION_ACCURACY_RETRY_TARGET_METERS
+    ) {
+      return firstPreciseFix;
+    }
+
+    // Alguns aparelhos entregam primeiro uma leitura de rede mesmo com
+    // `enableHighAccuracy`. Uma segunda leitura curta costuma receber o GPS
+    // estabilizado. Se nao melhorar, o primeiro ponto ainda segue para a API.
+    try {
+      const secondPreciseFix = await obterPosicao({
+        enableHighAccuracy: true,
+        timeout: COMPLETION_SECOND_PRECISE_TIMEOUT_MS,
+        maximumAge: 0,
+      });
+      return moreAccurateLocation(firstPreciseFix, secondPreciseFix);
+    } catch (secondError) {
+      if (!(secondError instanceof LocationError)) throw secondError;
+      return firstPreciseFix;
+    }
   } catch (erroDoGpsFino) {
     if (!(erroDoGpsFino instanceof LocationError)) throw erroDoGpsFino;
   }

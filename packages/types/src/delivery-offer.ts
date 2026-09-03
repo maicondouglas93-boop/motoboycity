@@ -37,6 +37,8 @@ export interface DeliveryOfferPayload {
   batchId?: string | null;
   deliveryCount?: number;
   expiresInSeconds: number;
+  /** Instante absoluto em que o servidor considera a oferta vencida. */
+  expiresAtEpochMs: number;
 }
 
 export interface AcceptOfferResult {

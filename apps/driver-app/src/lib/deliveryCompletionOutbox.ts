@@ -2,11 +2,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ApiError } from '@motoboycity/api-client';
 import type {
   CompleteReturnPayload,
+  DeliveryCompletionErrorCode,
   DeliveryDetail,
   DeliveryListItem,
   MarkDeliveredPayload,
 } from '@motoboycity/types';
 import { deliveriesApi } from './apiClient';
+
+export const DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW: DeliveryCompletionErrorCode =
+  'DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW';
 
 const STORAGE_KEY = 'motoboycity.driver.deliveryCompletionOutbox.v1';
 export const DELIVERY_COMPLETION_SYNC_TIMEOUT_MS = 15_000;
@@ -26,6 +30,8 @@ type BasePendingDeliveryCompletion = {
   queuedAt: string;
   state: DeliveryCompletionState;
   lastError: string | null;
+  /** Ausente nos registros persistidos por APKs anteriores. */
+  lastErrorCode?: string | null;
 };
 
 export type PendingDeliveryCompletion =
@@ -129,6 +135,9 @@ function isPendingDeliveryCompletion(value: unknown): value is PendingDeliveryCo
     typeof item.queuedAt === 'string' &&
     (item.state === 'PENDING' || item.state === 'NEEDS_REVIEW') &&
     (item.lastError === null || typeof item.lastError === 'string') &&
+    (item.lastErrorCode === undefined ||
+      item.lastErrorCode === null ||
+      typeof item.lastErrorCode === 'string') &&
     !!item.payload &&
     typeof item.payload === 'object'
   );
@@ -140,6 +149,14 @@ function payloadHasCoordinates(payload: CompleteReturnPayload): boolean {
     Number.isFinite(payload.lat) &&
     typeof payload.lng === 'number' &&
     Number.isFinite(payload.lng)
+  );
+}
+
+function payloadHasMeasuredCoordinates(payload: CompleteReturnPayload): boolean {
+  return (
+    payloadHasCoordinates(payload) &&
+    typeof payload.accuracy === 'number' &&
+    Number.isFinite(payload.accuracy)
   );
 }
 
@@ -175,6 +192,23 @@ export function completionDeservesAttention(
 /** Identifica retornos gravados pelo APK antigo, que persistia `payload: {}`. */
 export function completionNeedsFreshReturnLocation(item: PendingDeliveryCompletion): boolean {
   return item.action === 'COMPLETE_RETURN' && !payloadHasCoordinates(item.payload);
+}
+
+const LEGACY_LOW_ACCURACY_DESTINATION_MESSAGE = 'baixa demais para definir o destino desta entrega';
+
+/**
+ * Somente esta recusa autoriza trocar o GPS congelado de uma entrega.
+ * O trecho historico resolve em um toque o item salvo por APKs sem `code`;
+ * novos erros usam o contrato estruturado e nao dependem de texto humano.
+ */
+export function completionNeedsFreshDeliveryLocation(item: PendingDeliveryCompletion): boolean {
+  return (
+    item.action === 'DELIVER' &&
+    item.state === 'NEEDS_REVIEW' &&
+    (item.lastErrorCode === DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW ||
+      (item.lastErrorCode == null &&
+        item.lastError?.includes(LEGACY_LOW_ACCURACY_DESTINATION_MESSAGE) === true))
+  );
 }
 
 async function readQueueUnsafe(): Promise<PendingDeliveryCompletion[]> {
@@ -251,11 +285,15 @@ export async function enqueueDeliveryCompletion(
     if (existing) {
       // Compatibilidade com o APK antigo: se uma nova tentativa trouxer o GPS
       // que faltava, enriquece o item legado sem substituir um fix ja salvo.
-      if (
+      const repairsLegacyReturn =
         input.action === 'COMPLETE_RETURN' &&
         completionNeedsFreshReturnLocation(existing) &&
-        payloadHasCoordinates(input.payload)
-      ) {
+        payloadHasCoordinates(input.payload);
+      const repairsLowAccuracyDelivery =
+        input.action === 'DELIVER' &&
+        completionNeedsFreshDeliveryLocation(existing) &&
+        payloadHasMeasuredCoordinates(input.payload);
+      if (repairsLegacyReturn || repairsLowAccuracyDelivery) {
         /**
          * O reparo devolve o item para PENDING, e nao so troca o payload.
          *
@@ -272,6 +310,7 @@ export async function enqueueDeliveryCompletion(
           payload: input.payload,
           state: 'PENDING' as const,
           lastError: null,
+          lastErrorCode: null,
         };
         queued = repaired;
         return current.map((item) => (item.id === id ? repaired : item));
@@ -291,6 +330,7 @@ export async function enqueueDeliveryCompletion(
       queuedAt: new Date().toISOString(),
       state: 'PENDING' as const,
       lastError: null,
+      lastErrorCode: null,
     };
     queued =
       input.action === 'DELIVER'
@@ -451,8 +491,10 @@ async function removeItem(item: PendingDeliveryCompletion): Promise<boolean> {
 
 async function markNeedsReview(
   attempted: PendingDeliveryCompletion,
-  message: string,
+  error: ApiError,
 ): Promise<void> {
+  const message = error.message;
+  const code = error.body?.code ?? null;
   await replaceQueue((current) =>
     current.map((item) =>
       !isSameCompletionAttempt(item, attempted)
@@ -461,7 +503,12 @@ async function markNeedsReview(
           ? // Uma tentativa antiga com `{}` perdeu a corrida para a recaptura
             // manual. Mantem PENDING para o sync encadeado usar o fix novo.
             item
-          : { ...item, state: 'NEEDS_REVIEW' as const, lastError: message.slice(0, 240) },
+          : {
+              ...item,
+              state: 'NEEDS_REVIEW' as const,
+              lastError: message.slice(0, 240),
+              lastErrorCode: code,
+            },
     ),
   );
 }
@@ -655,7 +702,7 @@ async function synchronizeQueue(
         continue;
       }
 
-      await markNeedsReview(item, error.message);
+      await markNeedsReview(item, error);
       blockedReturnGroups.add(item.groupKey);
     }
   }
@@ -701,7 +748,7 @@ export function synchronizePendingDeliveryCompletions(
 export async function retryDeliveryCompletionQueue(
   ownerUserId: string,
   itemId?: string,
-  freshReturnLocation?: CompleteReturnPayload,
+  freshLocation?: CompleteReturnPayload,
 ): Promise<void> {
   await replaceQueue((current) =>
     current.map((item) => {
@@ -709,18 +756,27 @@ export async function retryDeliveryCompletionQueue(
         item.ownerUserId === ownerUserId && (itemId === undefined || item.id === itemId);
       if (!selected) return item;
 
-      const repairedPayload =
-        completionNeedsFreshReturnLocation(item) &&
-        freshReturnLocation &&
-        payloadHasCoordinates(freshReturnLocation)
-          ? freshReturnLocation
-          : item.payload;
+      const needsFreshReturn = completionNeedsFreshReturnLocation(item);
+      const needsFreshDelivery = completionNeedsFreshDeliveryLocation(item);
+      const canRepairReturn =
+        needsFreshReturn && freshLocation && payloadHasCoordinates(freshLocation);
+      const canRepairDelivery =
+        needsFreshDelivery && freshLocation && payloadHasMeasuredCoordinates(freshLocation);
+
+      // Nao reenvia o mesmo fix que o servidor acabou de recusar. O registro
+      // continua intacto ate uma captura nova realmente existir.
+      if ((needsFreshReturn || needsFreshDelivery) && !canRepairReturn && !canRepairDelivery) {
+        return item;
+      }
+
+      const repairedPayload = canRepairReturn || canRepairDelivery ? freshLocation : item.payload;
 
       return {
         ...item,
         payload: repairedPayload,
         state: 'PENDING' as const,
         lastError: null,
+        lastErrorCode: null,
       };
     }),
   );

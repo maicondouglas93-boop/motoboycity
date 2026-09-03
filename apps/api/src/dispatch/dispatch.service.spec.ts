@@ -522,6 +522,7 @@ describe('DispatchService', () => {
         id: 'offer-1',
         deliveryId: 'delivery-1',
         driverId: 'driver-1',
+        offeredAt: new Date(),
       });
 
       await service.dispatchDelivery('delivery-1');
@@ -578,6 +579,7 @@ describe('DispatchService', () => {
           },
         ],
         expiresInSeconds: 90,
+        expiresAtEpochMs: expect.any(Number),
       });
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalled();
       expect(push.sendToDriver).toHaveBeenCalledWith('driver-1', {
@@ -647,6 +649,7 @@ describe('DispatchService', () => {
         id: 'offer-2',
         deliveryId: 'delivery-1',
         driverId: 'driver-2',
+        offeredAt: new Date(),
       });
 
       await service.dispatchDelivery('delivery-1');
@@ -691,6 +694,7 @@ describe('DispatchService', () => {
         id: 'offer-1',
         deliveryId: 'delivery-1',
         driverId: 'driver-1',
+        offeredAt: new Date(),
       });
       queue.add.mockRejectedValueOnce(new Error('redis indisponivel'));
 
@@ -730,6 +734,7 @@ describe('DispatchService', () => {
         id: 'offer-1',
         deliveryId: 'delivery-1',
         driverId: 'driver-1',
+        offeredAt: new Date(),
       });
 
       await service.dispatchDelivery('delivery-1');
@@ -775,7 +780,7 @@ describe('DispatchService', () => {
         .mockResolvedValueOnce([{ driverId: 'driver-already-tried' }])
         .mockResolvedValueOnce([{ driverId: 'driver-busy' }]);
       prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-2' }]);
-      tx.deliveryOffer.create.mockResolvedValue({ id: 'offer-2' });
+      tx.deliveryOffer.create.mockResolvedValue({ id: 'offer-2', offeredAt: new Date() });
 
       await service.dispatchDelivery('delivery-1');
 
@@ -930,8 +935,8 @@ describe('DispatchService', () => {
       prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
       tx.$queryRaw.mockResolvedValue([{ id: 'delivery-1' }, { id: 'delivery-2' }]);
       tx.deliveryOffer.create
-        .mockResolvedValueOnce({ id: 'offer-1' })
-        .mockResolvedValueOnce({ id: 'offer-2' });
+        .mockResolvedValueOnce({ id: 'offer-1', offeredAt: new Date() })
+        .mockResolvedValueOnce({ id: 'offer-2', offeredAt: new Date() });
 
       await service.dispatchDelivery('delivery-1');
 
@@ -968,6 +973,7 @@ describe('DispatchService', () => {
           }),
         ],
         expiresInSeconds: 60,
+        expiresAtEpochMs: expect.any(Number),
         batchId: 'batch-1',
         deliveryCount: 2,
       });
@@ -1463,6 +1469,70 @@ describe('DispatchService', () => {
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
     });
 
+    it('mantem o aceite confirmado quando o Redis falha ao limpar o timeout', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        companyId: 'company-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        {
+          id: 'delivery-1',
+          displayNumber: 9,
+          companyId: 'company-1',
+          company: { tradeName: 'Loja A' },
+        },
+      ]);
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        user: { name: 'Motoboy A' },
+      });
+      queue.remove.mockReturnValueOnce(new Promise(() => undefined));
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(tx.deliveryOffer.updateMany).toHaveBeenCalled();
+      expect(tx.delivery.updateMany).toHaveBeenCalled();
+    });
+
+    it('reconcilia aceite anterior mesmo se o Redis falhar ao conferir o prazo', async () => {
+      const deadlineAt = new Date('2026-09-03T18:00:00.000Z');
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'ACCEPTED',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        driverId: 'driver-1',
+        batchId: null,
+        status: 'ACCEPTED',
+        pickupDeadlineAt: deadlineAt,
+      });
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }]);
+      queue.add.mockRejectedValueOnce(new Error('redis indisponivel'));
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it('congela o prazo configurado e agenda a expiracao antes de aceitar', async () => {
       platformSettingsService.get.mockResolvedValue({
         dispatchOfferTimeoutSeconds: 60,
@@ -1605,6 +1675,40 @@ describe('DispatchService', () => {
         deliveryIds: ['delivery-1', 'delivery-2'],
         displayNumbers: [7, 8],
       });
+    });
+
+    it('mantem o aceite do lote quando um timeout nao pode ser removido', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        companyId: 'company-1',
+        batchId: 'batch-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', displayNumber: 7, companyId: 'company-1' },
+        { id: 'delivery-2', displayNumber: 8, companyId: 'company-1' },
+      ]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }, { id: 'offer-2' }]);
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 2 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+      queue.remove
+        .mockRejectedValueOnce(new Error('redis indisponivel'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 7,
+        batchId: 'batch-1',
+        deliveryIds: ['delivery-1', 'delivery-2'],
+        displayNumbers: [7, 8],
+      });
+
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
+      expect(queue.remove).toHaveBeenCalledWith('expire-offer-2');
     });
   });
 
@@ -2204,6 +2308,7 @@ describe('DispatchService', () => {
       expect(oferta?.offerId).toBe('offer-1');
       expect(oferta?.expiresInSeconds).toBeLessThanOrEqual(81);
       expect(oferta?.expiresInSeconds).toBeGreaterThanOrEqual(78);
+      expect(oferta?.expiresAtEpochMs).toBe(ofertadaEm.getTime() + 120_000);
     });
   });
 

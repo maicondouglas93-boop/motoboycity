@@ -68,11 +68,13 @@ describe('buildOfferPayload', () => {
       principal: principal(),
       entregas: [entrega()],
       expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
     });
 
     expect(payload.totalValue).toBe(10);
     expect(payload.driverValue).toBe(8);
     expect(payload.distanceKm).toBe(3);
+    expect(payload.expiresAtEpochMs).toBe(123_000);
     expect(payload.deliveries).toHaveLength(1);
     expect(payload.batchId).toBeUndefined();
   });
@@ -88,6 +90,7 @@ describe('buildOfferPayload', () => {
       principal: semLote as unknown as Parameters<typeof buildOfferPayload>[0]['principal'],
       entregas: [entrega()],
       expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
     });
 
     expect(payload).not.toHaveProperty('batchId');
@@ -103,6 +106,7 @@ describe('buildOfferPayload', () => {
         entrega({ id: 'delivery-2', displayNumber: 1002, batchId: 'batch-1', totalValue: 15 }),
       ],
       expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
     });
 
     expect(payload.totalValue).toBe(25);
@@ -123,6 +127,7 @@ describe('buildOfferPayload', () => {
       }),
       entregas: [entrega({ destinationKnownAtCreation: false, totalValue: null })],
       expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
     });
 
     expect(payload.totalValue).toBeNull();
@@ -142,6 +147,7 @@ describe('buildOfferPayload', () => {
         entrega({ id: 'delivery-2', batchId: 'batch-1', requiresReturn: true }),
       ],
       expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
     });
 
     expect(payload.requiresReturn).toBe(true);

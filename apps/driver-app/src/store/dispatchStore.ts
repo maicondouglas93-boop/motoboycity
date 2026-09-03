@@ -5,12 +5,14 @@ import type {
   DriverPunishmentStatus,
 } from '@motoboycity/types';
 import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
+import { stableOfferDeadline } from '../lib/offerDeadline';
 
 interface DispatchState {
   availability: DriverAvailability;
   wantsToBeAvailable: boolean;
   since: string | null;
   incomingOffer: DeliveryOfferPayload | null;
+  incomingOfferExpiresAtMs: number | null;
   activeDeliveries: ActiveDeliveryItem[];
   socketConnected: boolean;
   /**
@@ -40,13 +42,29 @@ export const useDispatchStore = create<DispatchState>((set) => ({
   wantsToBeAvailable: false,
   since: null,
   incomingOffer: null,
+  incomingOfferExpiresAtMs: null,
   activeDeliveries: [],
   socketConnected: false,
   punishment: null,
   setPresence: (availability, since) => set({ availability, since }),
   setPunishment: (punishment) => set({ punishment }),
   setWantsToBeAvailable: (wantsToBeAvailable) => set({ wantsToBeAvailable }),
-  setIncomingOffer: (incomingOffer) => set({ incomingOffer }),
+  setIncomingOffer: (incomingOffer) =>
+    set((state) => {
+      if (!incomingOffer) {
+        return { incomingOffer: null, incomingOfferExpiresAtMs: null };
+      }
+      return {
+        incomingOffer,
+        incomingOfferExpiresAtMs: stableOfferDeadline(
+          state.incomingOffer?.offerId ?? null,
+          state.incomingOfferExpiresAtMs,
+          incomingOffer.offerId,
+          incomingOffer.expiresInSeconds,
+          { expiresAtEpochMs: incomingOffer.expiresAtEpochMs },
+        ),
+      };
+    }),
   setActiveDeliveries: (activeDeliveries) => set({ activeDeliveries }),
   setSocketConnected: (socketConnected) => set({ socketConnected }),
 }));

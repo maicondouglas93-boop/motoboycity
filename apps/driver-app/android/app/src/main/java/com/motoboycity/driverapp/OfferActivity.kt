@@ -200,7 +200,11 @@ class OfferActivity : Activity() {
   private fun showOffer(offer: NativeOfferPresentation) {
     handler.removeCallbacks(loadDeadlineGuard)
     currentOfferId = offer.offerId
-    deadlineMs = System.currentTimeMillis() + offer.expiresInSeconds * 1000L
+    val deadlineFromApi = System.currentTimeMillis() + offer.expiresInSeconds * 1000L
+    // O push traz o prazo absoluto. O GET pode encurtar esse prazo, mas uma
+    // resposta lenta nunca pode reiniciar o cronometro e manter botoes ativos
+    // depois de a oferta ter expirado no servidor.
+    deadlineMs = if (deadlineMs > 0L) minOf(deadlineMs, deadlineFromApi) else deadlineFromApi
     val card = cardContainer()
     card.addView(brand())
     card.addView(summary(offer))

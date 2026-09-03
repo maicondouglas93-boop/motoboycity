@@ -6,6 +6,8 @@ import {
   completionDeservesAttention,
   DELIVERY_COMPLETION_SYNC_TIMEOUT_MS,
   completionClosesDeliveryLocally,
+  completionNeedsFreshDeliveryLocation,
+  DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
   discardStaleCompletionBeforeCollection,
   enqueueDeliveryCompletion,
   getPendingDeliveryCompletions,
@@ -429,6 +431,86 @@ describe('delivery completion outbox', () => {
       state: 'PENDING',
       lastError: null,
     });
+  });
+
+  it('recaptura somente o GPS recusado por baixa precisao', async () => {
+    await enqueueDeliveryCompletion({
+      ...deliveryInput,
+      payload: { lat: -20.15, lng: -41.62, accuracy: 208 },
+    });
+    const rejectedApi = executor({
+      deliver: jest.fn().mockRejectedValue(
+        new ApiError(409, {
+          code: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
+          message: 'A precisao do GPS agora e baixa demais para definir o destino desta entrega.',
+        }),
+      ),
+      detail: jest.fn().mockResolvedValue({
+        ...deliveredDetail(),
+        status: 'COLLECTED',
+        statusHistory: [],
+      }),
+    });
+
+    await synchronizePendingDeliveryCompletions('token', 'user-1', rejectedApi);
+    const rejected = (await getPendingDeliveryCompletions('user-1'))[0]!;
+    expect(rejected).toMatchObject({
+      state: 'NEEDS_REVIEW',
+      lastErrorCode: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
+      payload: { accuracy: 208 },
+    });
+    expect(completionNeedsFreshDeliveryLocation(rejected)).toBe(true);
+
+    const freshFix = { lat: -20.151, lng: -41.621, accuracy: 22 };
+    await retryDeliveryCompletionQueue('user-1', rejected.id, freshFix);
+    const acceptedApi = executor();
+    await synchronizePendingDeliveryCompletions('token', 'user-1', acceptedApi);
+
+    expect(acceptedApi.deliver).toHaveBeenCalledWith('token', 'delivery-1', freshFix);
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
+  });
+
+  it('nao reenvia o mesmo GPS ruim quando a nova captura falha', async () => {
+    const stored = {
+      ...(await enqueueDeliveryCompletion({
+        ...deliveryInput,
+        payload: { lat: -20.15, lng: -41.62, accuracy: 208 },
+      })),
+      state: 'NEEDS_REVIEW' as const,
+      lastError: 'GPS sem precisao',
+      lastErrorCode: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
+    };
+    storage.set(STORAGE_KEY, JSON.stringify([stored]));
+
+    await retryDeliveryCompletionQueue('user-1', stored.id);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([stored]);
+  });
+
+  it('reconhece a mensagem historica salva por APK sem codigo', async () => {
+    const legacy = {
+      ...(await enqueueDeliveryCompletion(deliveryInput)),
+      state: 'NEEDS_REVIEW' as const,
+      lastError:
+        'A precisao do GPS agora (208m) e baixa demais para definir o destino desta entrega, que exige 100m ou melhor.',
+    };
+    delete legacy.lastErrorCode;
+    storage.set(STORAGE_KEY, JSON.stringify([legacy]));
+
+    const [loaded] = await getPendingDeliveryCompletions('user-1');
+    expect(loaded).toBeDefined();
+    expect(completionNeedsFreshDeliveryLocation(loaded!)).toBe(true);
+  });
+
+  it('preserva o GPS congelado quando a recusa tem outro motivo', async () => {
+    const original = await seedNeedsReview();
+    const freshFix = { lat: -21, lng: -42, accuracy: 5 };
+
+    await retryDeliveryCompletionQueue('user-1', original.id, freshFix);
+
+    expect(await getPendingDeliveryCompletions('user-1')).toEqual([
+      expect.objectContaining({ state: 'PENDING', payload: deliveryInput.payload }),
+    ]);
   });
 
   /**

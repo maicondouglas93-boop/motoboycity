@@ -8,8 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-03**, depois de tornar consistente a leitura da
-> carteira do motoboy sem alterar saldos ou lançamentos.
+> Última revisão: **2026-09-03**, depois de corrigir a recuperação de GPS na
+> entrega e endurecer o recebimento e o aceite de ofertas no aplicativo.
 
 ## Como atualizar
 
@@ -100,6 +100,18 @@ não tocar numa tentativa nova com o mesmo ID. Finalizações válidas em
 O APK foi compilado e verificado e o `pilot.19` já foi instalado em pelo menos
 um aparelho. A extensão da distribuição e o teste do toque e da vibração em uma
 oferta real ainda precisam ser confirmados pelo painel/operação.
+
+### Alterações locais aguardando publicação
+
+Há uma correção posterior ao `pilot.19`, ainda sem commit, push, deploy ou novo
+APK; o código do app já está preparado como `0.1.0-pilot.20`. GPS recusado
+especificamente por baixa precisão no destino agora oferece
+**Tentar GPS novamente** e só substitui esse fix inválido. O aceite já gravado
+no PostgreSQL não falha mais por limpeza posterior do Redis; o Android retenta
+uma vez respostas 5xx; oferta atrasada usa a expiração absoluta do servidor; e
+uma oscilação curta não mostra alerta vermelho nem desliga quem ainda está
+confirmado online. Publicação segura: API primeiro e depois APK com
+`versionCode` 20.
 
 A reconciliação dos repasses pendentes é processada em transações de até 25
 lançamentos. Isso preserva a atualização condicional por status e impede que o
@@ -218,6 +230,8 @@ Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
    ficar girando. Confirmar também que uma oferta recebida com o aplicativo
    aberto toca e vibra até ser respondida ou expirar e que o fluxo normal
    **aceitar → coletar → entregar** não mostra o aviso antigo do pedido #547.
+   No próximo APK, testar também o #777 com **Tentar GPS novamente**, um aceite
+   durante oscilação de rede e uma oferta recebida perto do fim do prazo.
 2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
@@ -336,7 +350,8 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Limpo depois dos commits do `pilot.19`. Podem existir arquivos locais não
-rastreados (`.codex/`, `temp*.tsx`) deixados por outras sessões — **não os
-inclua em commit** e não os remova sem decisão do responsável. O repositório é
-**público**: toda alteração exige varredura de segredo antes do push.
+Modificado pela correção de GPS/aceite descrita acima, ainda sem commit ou push.
+Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
+por outras sessões — **não os inclua em commit** e não os remova sem decisão do
+responsável. O repositório é **público**: toda alteração exige varredura de
+segredo antes do push.

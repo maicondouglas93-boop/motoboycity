@@ -154,6 +154,13 @@ export interface DeliverySummaryResult {
   completedPlatformValue: number;
 }
 
+/**
+ * A coordenada enviada definiria o destino e o preco, mas o GPS nao atingiu
+ * a precisao tecnica minima. O app pode pedir uma nova captura somente para
+ * este erro; nos demais, deve preservar a prova de local original.
+ */
+export type DeliveryCompletionErrorCode = 'DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW';
+
 export interface DeliveryDispatchAuditItem {
   id: string;
   offerId: string;

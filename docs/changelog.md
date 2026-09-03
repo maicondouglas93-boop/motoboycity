@@ -11936,3 +11936,41 @@ O comando inicial via Corepack não iniciou o Jest porque o executável `pnpm`
 não estava disponível no `PATH`; a mesma suíte foi executada diretamente pelo
 binário local do Jest. Não houve mudança de contrato, schema, migration, dados,
 APK, dependência ou segredo.
+
+## 2026-09-03 — Recuperação de GPS e robustez do aceite no Driver App
+
+O erro visto no pedido #777 era uma finalização com destino definido na entrega
+salva com GPS de 208 m. A API recusava corretamente a precisão, mas o outbox
+congelava o mesmo fix e a tela não oferecia uma saída útil. A API agora responde
+esse caso com o código estável
+`DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW`. Somente esse erro permite que um
+toque explícito em **Tentar GPS novamente** substitua a medição rejeitada; demais
+erros continuam preservando o payload original. Itens legados reconhecem apenas
+a mensagem histórica estrita e uma captura que falhar não reenvia o GPS ruim.
+
+O fluxo de ofertas também foi endurecido. Depois do aceite transacional, limpeza
+de timeout e reforço do job de coleta são não bloqueantes, portanto Redis lento
+não devolve 500 para um pedido já aceito. O cliente Android retenta uma vez 5xx,
+falha temporária da ponte nativa não é tratada como notificação desabilitada, e
+o contador usa `expiresAtEpochMs` do servidor para uma oferta atrasada ou
+repetida nunca ganhar tempo. Uma falha transitória de presença deixa de exibir o
+alerta vermelho enquanto o último estado confirmado ainda é online.
+O pacote do Driver App foi preparado como `0.1.0-pilot.20`; o release deve usar
+o próximo `versionCode`, 20.
+
+Arquivos alterados: serviços e testes de `apps/api/src/deliveries` e
+`apps/api/src/dispatch`; fluxo, outbox, GPS, presença, oferta e código Android em
+`apps/driver-app`; contratos em `packages/types` e `packages/api-client`; e os
+documentos operacionais correspondentes.
+
+| Validação | Resultado |
+| --- | --- |
+| Jest focado da API | 3 suítes / 227 testes aprovados |
+| Jest completo do Driver App | 26 suítes / 188 testes aprovados |
+| Typecheck do monorepo | 8 pacotes aprovados |
+| Lint da API e do Driver App | aprovado; um aviso preexistente de `no-void` no app |
+| Build da API | aprovado |
+| Compilação Kotlin `:app:compileDebugKotlin` | aprovada |
+
+Não houve schema, migration, dado, dependência ou segredo alterado. Nenhum APK,
+commit, push ou deploy foi executado neste recorte.

@@ -128,7 +128,11 @@ internet. A ação é salva primeiro no aparelho e fica claramente identificada
 como pendente de sincronização; o aplicativo tenta enviá-la novamente ao abrir,
 voltar ao primeiro plano, reconectar ou por comando manual. A coordenada e a
 precisão capturadas ao marcar a entrega ou concluir o retorno ficam congeladas
-junto da ação e não podem ser recapturadas depois.
+junto da ação. A única exceção é uma entrega cujo próprio destino será definido
+por esse GPS e que a API recusou especificamente por baixa precisão: por toque
+explícito em **Tentar GPS novamente**, o aplicativo pode trocar somente esse fix
+inválido por uma medição atual. Falhas de rota, proximidade, sessão, estado ou
+qualquer outro motivo continuam usando o payload original.
 
 O encerramento local não antecipa efeitos oficiais. Status auditável, horário
 da transição, cálculo definitivo, faturamento e repasse só passam a valer após
@@ -178,6 +182,14 @@ resposta, a oferta passa automaticamente pro próximo da fila.
 Uma oferta criada com timeout válido consome a vez do motoboy e o move para o
 fim da sequência. Assim a fila é circular mesmo quando o motoboy pode carregar
 mais de um pedido; recusa e expiração continuam procurando o próximo elegível.
+O prazo nasce no servidor e viaja também como instante absoluto; Socket,
+consulta pendente e push nunca reiniciam o cronômetro quando a mensagem chega
+atrasada ou repetida.
+
+Depois que o aceite foi confirmado na transação do banco, falha ou lentidão ao
+remover o job antigo do Redis não transforma o aceite em erro para o motoboy. A
+limpeza é posterior e idempotente; se o job remanescente executar, encontra a
+oferta já aceita e não expira o pedido.
 
 A Home do administrador mostra a sequência global dos motoboys online e permite
 reordená-la. Sem ajuste manual, a prioridade inicial segue a entrada online mais
@@ -211,6 +223,10 @@ ou não possuir permissão/GPS válidos encerra o rastreamento e cancela a inten
 persistida. Falhas transitórias de rede, limite ou servidor mantêm a intenção e
 continuam sendo tentadas; recusas definitivas de autenticação ou conta não são
 repetidas indefinidamente.
+
+Da mesma forma, somente uma resposta nativa válida confirmando notificações
+desabilitadas retira o motoboy do despacho por esse motivo. Uma falha temporária
+na ponte Android não é interpretada como permissão negada.
 
 ## Suspensão/bloqueio de motoboy
 

@@ -33,6 +33,7 @@ import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionClosesDeliveryLocally,
   COMPLETION_QUIET_WINDOW_MS,
+  completionNeedsFreshDeliveryLocation,
   discardStaleCompletionBeforeCollection,
   enqueueDeliveryCompletion,
   getPendingDeliveryCompletions,
@@ -547,6 +548,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       item.action === 'COMPLETE_RETURN' || (item.action === 'DELIVER' && !delivery.requiresReturn);
 
     if (item.state === 'NEEDS_REVIEW') {
+      if (completionNeedsFreshDeliveryLocation(item)) return;
       Alert.alert(
         'Finalizacao precisa de atencao',
         item.lastError ??
@@ -621,7 +623,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       } else if (nextOperation === 'deliver') {
         // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
         // tentativa posterior nunca pode recapturar outra rua por engano.
-        const payload = posicaoParaEnvio(await captureCompletionLocation());
+        const payload = posicaoParaEnvio(
+          await captureCompletionLocation({
+            improveImpreciseFix: !delivery.destinationKnownAtCreation,
+          }),
+        );
         const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
         if (queued === undefined) return;
         if (queued) {
@@ -788,9 +794,16 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     pendingCompletion.state === 'PENDING' &&
     delivery.status === 'DELIVERED' &&
     delivery.requiresReturn;
+  const canRetryDeliveryGps =
+    delivery.status === 'COLLECTED' &&
+    pendingCompletion !== null &&
+    completionNeedsFreshDeliveryLocation(pendingCompletion);
   const controlsBusy = operationBusy || pendingCompletion !== null;
-  const primaryBusy = operationBusy || (pendingCompletion !== null && !canQueueDependentReturn);
+  const primaryBusy =
+    operationBusy ||
+    (pendingCompletion !== null && !canQueueDependentReturn && !canRetryDeliveryGps);
   const copy = deliveryOperationCopy(delivery.status);
+  const primaryActionLabel = canRetryDeliveryGps ? 'Tentar GPS novamente' : copy.primaryActionLabel;
   const action =
     delivery.status === 'ACCEPTED'
       ? ('collect' as const)
@@ -844,6 +857,10 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
   function handlePrimaryAction() {
     if (!action || primaryBusy) return;
+    if (canRetryDeliveryGps) {
+      runOperation('deliver').catch(() => undefined);
+      return;
+    }
     if (action === 'deliver' && !currentDelivery.destinationKnownAtCreation) {
       setDeliverConfirmationOpen(true);
       return;
@@ -895,24 +912,38 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           <View
             style={[
               styles.pendingBanner,
-              pendingCompletion.state === 'NEEDS_REVIEW' && styles.pendingBannerReview,
+              pendingCompletion.state === 'NEEDS_REVIEW' &&
+                !canRetryDeliveryGps &&
+                styles.pendingBannerReview,
             ]}
             accessibilityLiveRegion="polite"
           >
             <Icon
-              name={pendingCompletion.state === 'NEEDS_REVIEW' ? 'info' : 'clock'}
+              name={
+                pendingCompletion.state === 'NEEDS_REVIEW' && !canRetryDeliveryGps
+                  ? 'info'
+                  : 'clock'
+              }
               size={20}
-              color={pendingCompletion.state === 'NEEDS_REVIEW' ? colors.danger : colors.warning}
+              color={
+                pendingCompletion.state === 'NEEDS_REVIEW' && !canRetryDeliveryGps
+                  ? colors.danger
+                  : colors.warning
+              }
             />
             <View style={styles.pendingBannerCopy}>
               <Text style={styles.pendingBannerTitle}>
-                {pendingCompletion.state === 'NEEDS_REVIEW'
-                  ? 'Finalizacao precisa de atencao'
-                  : 'Aguardando sincronizacao'}
+                {canRetryDeliveryGps
+                  ? 'GPS sem precisao'
+                  : pendingCompletion.state === 'NEEDS_REVIEW'
+                    ? 'Finalizacao precisa de atencao'
+                    : 'Aguardando sincronizacao'}
               </Text>
               <Text style={styles.pendingBannerText}>
-                {pendingCompletion.lastError ??
-                  'A acao esta salva neste aparelho e sera confirmada quando o servidor responder.'}
+                {canRetryDeliveryGps
+                  ? 'Va para um local aberto e toque em "Tentar GPS novamente".'
+                  : (pendingCompletion.lastError ??
+                    'A acao esta salva neste aparelho e sera confirmada quando o servidor responder.')}
               </Text>
             </View>
           </View>
@@ -1056,7 +1087,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           ) : null}
         </ScrollView>
 
-        {action && copy.primaryActionLabel ? (
+        {action && primaryActionLabel ? (
           <View style={styles.footer}>
             {delivery.status === 'ACCEPTED' ? (
               <Pressable
@@ -1076,7 +1107,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={copy.primaryActionLabel}
+              accessibilityLabel={primaryActionLabel}
               disabled={primaryBusy}
               onPress={handlePrimaryAction}
               style={({ pressed }) => [
@@ -1088,7 +1119,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               {operationBusy ? (
                 <ActivityIndicator color={colors.actionText} />
               ) : (
-                <Text style={styles.footerPrimaryText}>{copy.primaryActionLabel}</Text>
+                <Text style={styles.footerPrimaryText}>{primaryActionLabel}</Text>
               )}
             </Pressable>
 

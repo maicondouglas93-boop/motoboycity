@@ -54,6 +54,43 @@ describe('captura de posicao para coleta, entrega e retorno', () => {
     );
   });
 
+  it('nao atrasa etapas com endereco conhecido para refinar um ponto utilizavel', async () => {
+    responder({ ok: true, accuracy: 208 });
+
+    await expect(captureCompletionLocation()).resolves.toMatchObject({ accuracy: 208 });
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it('tenta uma segunda leitura e usa o GPS que melhorou', async () => {
+    responder({ ok: true, accuracy: 208 }, { ok: true, accuracy: 35 });
+
+    await expect(captureCompletionLocation({ improveImpreciseFix: true })).resolves.toMatchObject({
+      accuracy: 35,
+    });
+    expect(getCurrentPosition).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Function),
+      expect.any(Function),
+      { enableHighAccuracy: true, timeout: 4_000, maximumAge: 0 },
+    );
+  });
+
+  it('preserva o melhor ponto quando a segunda leitura piora', async () => {
+    responder({ ok: true, accuracy: 208 }, { ok: true, accuracy: 400 });
+
+    await expect(captureCompletionLocation({ improveImpreciseFix: true })).resolves.toMatchObject({
+      accuracy: 208,
+    });
+  });
+
+  it('preserva a primeira leitura quando a segunda nao responde', async () => {
+    responder({ ok: true, accuracy: 208 }, { ok: false });
+
+    await expect(captureCompletionLocation({ improveImpreciseFix: true })).resolves.toMatchObject({
+      accuracy: 208,
+    });
+  });
+
   /**
    * O caso que travava o motoboy: garagem, predio, economia de bateria. Antes a
    * acao nem saia do celular; agora ela sai com a posicao que existir.

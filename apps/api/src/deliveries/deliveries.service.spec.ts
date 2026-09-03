@@ -2309,6 +2309,26 @@ describe('DeliveriesService', () => {
           }),
         ).rejects.toThrow('vira o endereço e o valor');
       });
+
+      it('identifica a precisao insuficiente para o app recapturar o GPS', async () => {
+        pedidoDiferidoColetado();
+        platformSettingsService.get.mockResolvedValue({
+          businessHoursEnabled: false,
+          deferredDestinationMaxAccuracyMeters: 100,
+        });
+
+        await expect(
+          service.markDelivered(driverUser, 'delivery-1', {
+            lat: -20.15,
+            lng: -41.74,
+            accuracy: 208,
+          }),
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW',
+          }),
+        });
+      });
     });
 
     it('rejeita se o pedido não está COLLECTED', async () => {

@@ -2,6 +2,7 @@ import { notifyUnauthorized } from './http';
 
 export interface ApiErrorBody {
   message?: string;
+  code?: string;
   issues?: { path: string; message: string }[];
 }
 

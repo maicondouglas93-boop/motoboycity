@@ -40,6 +40,7 @@ import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionDeservesAttention,
+  completionNeedsFreshDeliveryLocation,
   completionNeedsFreshReturnLocation,
   getPendingDeliveryCompletions,
   retryDeliveryCompletionQueue,
@@ -63,16 +64,12 @@ import { API_BASE_URL } from '../lib/config';
 import {
   abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
-  consultarApresentacaoNativa,
+  consultarApresentacaoNativaParaDespacho,
   dispensarOfertaNativa,
   salvarSessaoNativa,
 } from '../lib/offerSession';
 import { ativarPush } from '../lib/push';
-import {
-  connectDriverSocket,
-  disconnectDriverSocket,
-  reconnectDriverSocket,
-} from '../lib/socket';
+import { connectDriverSocket, disconnectDriverSocket, reconnectDriverSocket } from '../lib/socket';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -100,8 +97,12 @@ async function verificarNotificacaoObrigatoria(): Promise<NotificationReadiness>
   if (!pushAtivo) return 'unavailable';
   if (Platform.OS !== 'android') return 'ready';
 
-  const apresentacao = await consultarApresentacaoNativa();
-  if (!apresentacao?.notificationsEnabled) return 'disabled';
+  const apresentacao = await consultarApresentacaoNativaParaDespacho().catch(() => null);
+  // Ausencia/falha de consulta nao prova que a permissao foi desligada. O FCM
+  // e o socket continuam validos, portanto so uma resposta nativa afirmativa
+  // pode retirar o motoboy da fila.
+  if (!apresentacao) return 'unavailable';
+  if (!apresentacao.notificationsEnabled) return 'disabled';
   if (apresentacao.overlayNeedsManualGrant && !apresentacao.overlayGranted) {
     return 'overlay-disabled';
   }
@@ -322,7 +323,14 @@ export function HomeScreen({ navigation }: Props) {
   }, [esperandoEmSilencio]);
 
   const syncCompletionQueue = useCallback(
-    async (token: string, retryItem?: { id: string; needsFreshReturnLocation: boolean }) => {
+    async (
+      token: string,
+      retryItem?: {
+        id: string;
+        needsFreshCompletionLocation: boolean;
+        improveImpreciseFix: boolean;
+      },
+    ) => {
       const ownerUserId = await resolveOwnerUserId(token);
       if (!ownerUserId) return null;
       setCompletionSyncing(true);
@@ -330,9 +338,17 @@ export function HomeScreen({ navigation }: Props) {
         if (retryItem) {
           // So recaptura no toque manual. Fazer isso automaticamente ao abrir o
           // app mudaria a prova de local sem uma acao consciente do motoboy.
-          const freshFix = retryItem.needsFreshReturnLocation
-            ? await captureCompletionLocation()
+          const freshFix = retryItem.needsFreshCompletionLocation
+            ? await captureCompletionLocation({
+                improveImpreciseFix: retryItem.improveImpreciseFix,
+              })
             : null;
+          if (retryItem.needsFreshCompletionLocation && !freshFix) {
+            // Mantem a revisao e o GPS anterior intactos. Reenviar o mesmo fix
+            // so repetiria a recusa e daria a impressao de que o toque falhou.
+            setCompletionQueue(await getPendingDeliveryCompletions(ownerUserId));
+            return null;
+          }
           await retryDeliveryCompletionQueue(
             ownerUserId,
             retryItem.id,
@@ -413,7 +429,9 @@ export function HomeScreen({ navigation }: Props) {
       setPresenceError(null);
       return presence;
     } catch {
-      setPresenceError('Nao foi possivel confirmar sua disponibilidade. Verifique a conexao.');
+      // Esta leitura e seguida pela recuperacao automatica. Uma unica falha de
+      // rede nao deve piscar um alerta vermelho antes de ela tentar manter o
+      // estado conhecido.
       return null;
     } finally {
       setPresenceLoading(false);
@@ -487,8 +505,13 @@ export function HomeScreen({ navigation }: Props) {
         const retryAutomatically =
           !(error instanceof LocationError) && isTransientPresenceError(error);
         if (retryAutomatically) {
+          const lastKnownOnline =
+            currentPresence?.availability === 'AVAILABLE' ||
+            useDispatchStore.getState().availability === 'AVAILABLE';
           setPresenceError(
-            'Sinal instavel. O aplicativo continuara tentando manter voce online automaticamente.',
+            lastKnownOnline
+              ? null
+              : 'Sem conexao para entrar na fila. O aplicativo continuara tentando automaticamente.',
           );
           return currentPresence ?? null;
         }
@@ -1111,15 +1134,21 @@ export function HomeScreen({ navigation }: Props) {
     if (!token || completionSyncing || completionRetryInFlight.current) return;
     completionRetryInFlight.current = true;
     try {
+      const retryWithFreshLocation = completionQueue.find(
+        (item) =>
+          completionNeedsFreshReturnLocation(item) || completionNeedsFreshDeliveryLocation(item),
+      );
       const retryReview = completionQueue.find((item) => item.state === 'NEEDS_REVIEW');
-      const legacyReturn = completionQueue.find(completionNeedsFreshReturnLocation);
-      const retryItem = retryReview ?? legacyReturn;
+      const retryItem = retryWithFreshLocation ?? retryReview;
       const result = await syncCompletionQueue(
         token,
         retryItem
           ? {
               id: retryItem.id,
-              needsFreshReturnLocation: completionNeedsFreshReturnLocation(retryItem),
+              needsFreshCompletionLocation:
+                completionNeedsFreshReturnLocation(retryItem) ||
+                completionNeedsFreshDeliveryLocation(retryItem),
+              improveImpreciseFix: completionNeedsFreshDeliveryLocation(retryItem),
             }
           : undefined,
       );

@@ -71,6 +71,17 @@ export async function consultarApresentacaoNativa(): Promise<NativeOfferPresenta
   return modulo.presentationStatus().catch(() => null);
 }
 
+/**
+ * Consulta usada para decidir se o motoboy pode permanecer no despacho.
+ * Diferente da consulta visual acima, uma falha da bridge precisa subir para
+ * o chamador: `null` nao pode significar ao mesmo tempo "modulo ausente" e
+ * "notificacoes desligadas", pois o segundo caso retira o motoboy da fila.
+ */
+export async function consultarApresentacaoNativaParaDespacho(): Promise<NativeOfferPresentationStatus | null> {
+  if (Platform.OS !== 'android' || !modulo) return null;
+  return modulo.presentationStatus();
+}
+
 export async function abrirAjusteDeTelaCheia(): Promise<void> {
   if (Platform.OS !== 'android' || !modulo) return;
   await modulo.openFullScreenSettings().catch(() => undefined);

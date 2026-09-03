@@ -17,7 +17,7 @@ import {
   iniciarAlarmeDaOfertaNativa,
   pararAlarmeDaOfertaNativa,
 } from '../lib/offerSession';
-import { offerDeadline, remainingOfferSeconds } from '../lib/offerDeadline';
+import { remainingOfferSeconds } from '../lib/offerDeadline';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -91,6 +91,7 @@ function paradasDaOferta(deliveries: readonly DeliveryOfferItem[], emLote: boole
 
 export function IncomingOfferScreen({ navigation }: Props) {
   const offer = useDispatchStore((state) => state.incomingOffer);
+  const offerExpiresAtMs = useDispatchStore((state) => state.incomingOfferExpiresAtMs);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const [secondsLeft, setSecondsLeft] = useState(offer?.expiresInSeconds ?? 0);
   const [status, setStatus] = useState<'idle' | 'accepting' | 'declining'>('idle');
@@ -112,14 +113,14 @@ export function IncomingOfferScreen({ navigation }: Props) {
   }, [offer, navigation]);
 
   useEffect(() => {
-    if (!offer) return;
-    const expiresAt = offerDeadline(offer.expiresInSeconds);
+    if (!activeOfferId || offerExpiresAtMs === null) return;
+    const offerId = activeOfferId;
 
     const updateCountdown = () => {
-      const remaining = remainingOfferSeconds(expiresAt);
+      const remaining = remainingOfferSeconds(offerExpiresAtMs);
       setSecondsLeft(remaining);
       if (remaining === 0) {
-        dispensarOfertaNativa(offer.offerId).catch(() => undefined);
+        dispensarOfertaNativa(offerId).catch(() => undefined);
         setIncomingOffer(null);
       }
     };
@@ -129,7 +130,7 @@ export function IncomingOfferScreen({ navigation }: Props) {
     const interval = setInterval(updateCountdown, 1_000);
 
     return () => clearInterval(interval);
-  }, [offer, setIncomingOffer]);
+  }, [activeOfferId, offerExpiresAtMs, setIncomingOffer]);
 
   if (!offer) return null;
 

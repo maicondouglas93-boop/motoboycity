@@ -61,8 +61,9 @@ export function buildOfferPayload(input: {
   };
   entregas: EntregaDaOferta[];
   expiresInSeconds: number;
+  expiresAtEpochMs: number;
 }): DeliveryOfferPayload {
-  const { offerId, principal, entregas, expiresInSeconds } = input;
+  const { offerId, principal, entregas, expiresInSeconds, expiresAtEpochMs } = input;
   /**
    * `Boolean`, e nao `!== null`: um pedido avulso pode chegar com `batchId`
    * indefinido em vez de nulo, e `undefined !== null` e verdadeiro — o payload
@@ -113,6 +114,7 @@ export function buildOfferPayload(input: {
       requiresReturn: item.requiresReturn,
     })),
     expiresInSeconds,
+    expiresAtEpochMs,
     ...(emLote ? { batchId: principal.batchId, deliveryCount: entregas.length } : {}),
   };
 }

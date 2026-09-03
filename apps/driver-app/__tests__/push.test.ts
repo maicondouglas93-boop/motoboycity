@@ -10,6 +10,7 @@ import {
   abrirAjusteDeSobreposicao,
   abrirAjusteDeTelaCheia,
   consultarApresentacaoNativa,
+  consultarApresentacaoNativaParaDespacho,
   dispensarOfertaNativa,
   iniciarAlarmeDaOfertaNativa,
   limparSessaoNativa,
@@ -191,5 +192,13 @@ describe('push do app do motoboy', () => {
     expect(NativeModules.OfferSession.presentationStatus).toHaveBeenCalled();
     expect(NativeModules.OfferSession.openFullScreenSettings).toHaveBeenCalled();
     expect(NativeModules.OfferSession.openOverlaySettings).toHaveBeenCalled();
+  });
+
+  it('na consulta do despacho distingue falha da bridge de permissao desligada', async () => {
+    (NativeModules.OfferSession.presentationStatus as jest.Mock).mockRejectedValueOnce(
+      new Error('bridge ocupada'),
+    );
+
+    await expect(consultarApresentacaoNativaParaDespacho()).rejects.toThrow('bridge ocupada');
   });
 });

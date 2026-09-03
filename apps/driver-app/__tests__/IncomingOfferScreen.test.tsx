@@ -17,6 +17,7 @@ const offer: DeliveryOfferPayload = {
   distanceKm: 1.5,
   requiresReturn: false,
   expiresInSeconds: 60,
+  expiresAtEpochMs: Date.now() + 60_000,
   deliveries: [
     {
       deliveryId: 'delivery-1',
