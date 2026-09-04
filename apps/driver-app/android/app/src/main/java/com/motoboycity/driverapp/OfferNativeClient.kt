@@ -15,6 +15,7 @@ data class NativeOfferStop(
 
 data class NativeOfferPresentation(
   val offerId: String,
+  val deliveryIds: List<String>,
   val displayNumber: Int,
   val companyName: String,
   val paymentMethod: String,
@@ -77,6 +78,12 @@ object OfferNativeClient {
               if (offer.offerId != expectedOfferId || offer.expiresInSeconds <= 0) {
                 FetchResult.Unavailable
               } else {
+                OfferSessionStore.marcarOfertaApresentada(
+                  context,
+                  offer.offerId,
+                  offer.deliveryIds.firstOrNull(),
+                  System.currentTimeMillis() + offer.expiresInSeconds * 1_000L,
+                )
                 FetchResult.Success(offer)
               }
             }
@@ -89,6 +96,9 @@ object OfferNativeClient {
   }
 
   fun respond(context: Context, action: String, offerId: String): ActionResult {
+    if (!OfferSessionStore.ofertaPodeSerRespondida(context, offerId)) {
+      return ActionResult.UNAVAILABLE
+    }
     val apiUrl = OfferSessionStore.apiUrl(context)
     val token = OfferSessionStore.accessToken(context)
     if (apiUrl.isNullOrBlank() || token.isNullOrBlank()) return ActionResult.NO_SESSION
@@ -104,32 +114,44 @@ object OfferNativeClient {
     val attempts = if (action == OfferActionReceiver.ACTION_ACCEPT) 2 else 1
     for (attempt in 0 until attempts) {
       try {
-        client.newCall(request).execute().use { response ->
-          // Aceite e idempotente. Uma indisponibilidade temporaria depois de o
-          // servidor receber a primeira tentativa pode ser reconciliada pela
-          // segunda, sem criar duas atribuicoes.
-          if (response.code >= 500 && attempt < attempts - 1) return@use
-          return when {
-            response.isSuccessful ->
-              if (action == OfferActionReceiver.ACTION_ACCEPT) {
-                startTrackingAcceptedDeliveries(
-                  context,
-                  apiUrl,
-                  token,
-                  response.body?.string(),
-                )
-                ActionResult.ACCEPTED
-              } else {
-                ActionResult.DECLINED
-              }
-            response.code == 404 || response.code == 409 -> ActionResult.UNAVAILABLE
-            response.code == 401 || response.code == 403 -> ActionResult.NO_SESSION
-            else -> ActionResult.FAILURE
+        val call = client.newCall(request)
+        call.timeout().timeout(ACTION_ATTEMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val result =
+          call.execute().use { response ->
+            // Aceite e idempotente. Uma indisponibilidade temporaria depois de o
+            // servidor receber a primeira tentativa pode ser reconciliada pela
+            // segunda, sem criar duas atribuicoes.
+            when {
+              response.isSuccessful ->
+                if (action == OfferActionReceiver.ACTION_ACCEPT) {
+                  startTrackingAcceptedDeliveries(
+                    context,
+                    apiUrl,
+                    token,
+                    response.body?.string(),
+                  )
+                  ActionResult.ACCEPTED
+                } else {
+                  ActionResult.DECLINED
+                }
+              response.code == 404 || response.code == 409 -> ActionResult.UNAVAILABLE
+              response.code == 401 || response.code == 403 -> ActionResult.NO_SESSION
+              response.code >= 500 || response.code == 429 -> null
+              else -> ActionResult.FAILURE
+            }
           }
-        }
+        if (result != null) return result
       } catch (_: Exception) {
-        if (attempt == attempts - 1) return ActionResult.FAILURE
+        // A segunda tentativa idempotente cobre resposta perdida. Depois dela,
+        // o GET de reconciliacao abaixo consulta o estado persistido.
       }
+    }
+
+    if (action == OfferActionReceiver.ACTION_ACCEPT) {
+      if (!OfferSessionStore.ofertaPodeSerRespondida(context, offerId)) {
+        return ActionResult.UNAVAILABLE
+      }
+      return reconcileAcceptedDelivery(context, apiUrl, token, offerId) ?: ActionResult.FAILURE
     }
     return ActionResult.FAILURE
   }
@@ -137,10 +159,12 @@ object OfferNativeClient {
   private fun parseOffer(json: JSONObject): NativeOfferPresentation {
     val deliveries = json.getJSONArray("deliveries")
     val inBatch = deliveries.length() > 1
+    val deliveryIds = mutableListOf<String>()
     val stops = mutableListOf<NativeOfferStop>()
 
     for (index in 0 until deliveries.length()) {
       val delivery = deliveries.getJSONObject(index)
+      delivery.optString("deliveryId").takeIf { it.isNotBlank() }?.let(deliveryIds::add)
       val prefix = if (inBatch) "Pedido #${delivery.optInt("displayNumber")} — " else ""
       stops +=
         NativeOfferStop(
@@ -174,6 +198,7 @@ object OfferNativeClient {
 
     return NativeOfferPresentation(
       offerId = json.getString("offerId"),
+      deliveryIds = deliveryIds,
       displayNumber = json.optInt("displayNumber"),
       companyName = json.optString("companyName", "Empresa"),
       paymentMethod = if (json.optString("paymentMethod") == "ONLINE") "Pago online" else "Faturado",
@@ -233,19 +258,77 @@ object OfferNativeClient {
         }
       }
       response.optString("deliveryId").takeIf { it.isNotBlank() }?.let { deliveryIds.add(it) }
-      if (deliveryIds.isEmpty()) return
-
-      DeliveryLocationTrackingService.startOrUpdate(
-        context,
-        deliveryIds,
-        apiUrl,
-        token,
-        BuildConfig.VERSION_NAME,
-      )
+      startTrackingDeliveryIds(context, apiUrl, token, deliveryIds)
     } catch (_: Exception) {
       // O aceite já foi confirmado pela API. Falha ao interpretar a resposta
       // não pode transformar sucesso em nova tentativa e aceite duplicado.
     }
+  }
+
+  /**
+   * Se o PATCH foi aplicado e apenas a resposta se perdeu, a oferta ja nao
+   * aparece em /pending. A entrega do push permite confirmar pelo grupo
+   * protegido do proprio motoboy, sem adivinhar sucesso e sem rota nova.
+   */
+  private fun reconcileAcceptedDelivery(
+    context: Context,
+    apiUrl: String,
+    token: String,
+    offerId: String,
+  ): ActionResult? {
+    val deliveryId = OfferSessionStore.entregaDaOferta(context, offerId) ?: return null
+    val request =
+      Request.Builder()
+        .url("$apiUrl/deliveries/$deliveryId/group")
+        .header("Authorization", "Bearer $token")
+        .get()
+        .build()
+
+    return try {
+      val call = client.newCall(request)
+      call.timeout().timeout(RECONCILIATION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+      call.execute().use { response ->
+        if (response.code == 401) return@use ActionResult.NO_SESSION
+        if (!response.isSuccessful) return@use null
+        if (OfferSessionStore.ofertaAtual(context) != offerId) return@use null
+
+        val body = response.body?.string()?.takeIf { it.isNotBlank() } ?: return@use null
+        val deliveries = JSONObject(body).optJSONArray("deliveries") ?: return@use null
+        val operationalIds = mutableListOf<String>()
+        var expectedAccepted = false
+        for (index in 0 until deliveries.length()) {
+          val delivery = deliveries.optJSONObject(index) ?: continue
+          val id = delivery.optString("id")
+          val status = delivery.optString("status")
+          if (id.isBlank() || status !in TRACKABLE_STATUSES) continue
+          operationalIds.add(id)
+          if (id == deliveryId && status == "ACCEPTED") expectedAccepted = true
+        }
+        if (!expectedAccepted) return@use null
+
+        startTrackingDeliveryIds(context, apiUrl, token, operationalIds)
+        ActionResult.ACCEPTED
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun startTrackingDeliveryIds(
+    context: Context,
+    apiUrl: String,
+    token: String,
+    deliveryIds: Collection<String>,
+  ) {
+    val uniqueDeliveryIds = deliveryIds.filter(String::isNotBlank).distinct()
+    if (uniqueDeliveryIds.isEmpty()) return
+    DeliveryLocationTrackingService.startOrUpdate(
+      context,
+      uniqueDeliveryIds,
+      apiUrl,
+      token,
+      BuildConfig.VERSION_NAME,
+    )
   }
 
   private val client =
@@ -254,4 +337,8 @@ object OfferNativeClient {
       .connectTimeout(3, TimeUnit.SECONDS)
       .readTimeout(5, TimeUnit.SECONDS)
       .build()
+
+  private const val ACTION_ATTEMPT_TIMEOUT_MS = 2_500L
+  private const val RECONCILIATION_TIMEOUT_MS = 2_000L
+  private val TRACKABLE_STATUSES = setOf("ACCEPTED", "COLLECTED")
 }

@@ -20,6 +20,8 @@ object OfferSessionStore {
   private const val CHAVE_URL = "apiUrl"
   private const val CHAVE_TOKEN = "accessToken"
   private const val CHAVE_OFERTA_ATUAL = "currentOfferId"
+  private const val CHAVE_ENTREGA_ATUAL = "currentDeliveryId"
+  private const val CHAVE_OFERTA_EXPIRA_EM = "currentOfferExpiresAtEpochMs"
   private const val CHAVE_OFERTA_RESOLVIDA = "resolvedOfferId"
   private const val CHAVE_OFERTA_RESOLVIDA_EM = "resolvedOfferAt"
   private const val JANELA_DEDUPLICACAO_MS = 5 * 60 * 1000L
@@ -36,12 +38,45 @@ object OfferSessionStore {
 
   fun accessToken(context: Context): String? = prefs(context).getString(CHAVE_TOKEN, null)
 
-  fun marcarOfertaApresentada(context: Context, offerId: String) {
-    prefs(context).edit().putString(CHAVE_OFERTA_ATUAL, offerId).apply()
+  fun marcarOfertaApresentada(
+    context: Context,
+    offerId: String,
+    deliveryId: String? = null,
+    expiresAtEpochMs: Long? = null,
+  ) {
+    val editor = prefs(context).edit().putString(CHAVE_OFERTA_ATUAL, offerId)
+    if (deliveryId.isNullOrBlank()) {
+      editor.remove(CHAVE_ENTREGA_ATUAL)
+    } else {
+      editor.putString(CHAVE_ENTREGA_ATUAL, deliveryId)
+    }
+    if (expiresAtEpochMs == null || expiresAtEpochMs <= 0L) {
+      editor.remove(CHAVE_OFERTA_EXPIRA_EM)
+    } else {
+      editor.putLong(CHAVE_OFERTA_EXPIRA_EM, expiresAtEpochMs)
+    }
+    editor.apply()
   }
 
   fun ofertaAtual(context: Context): String? =
     prefs(context).getString(CHAVE_OFERTA_ATUAL, null)
+
+  fun entregaDaOferta(context: Context, offerId: String): String? {
+    val preferencias = prefs(context)
+    if (preferencias.getString(CHAVE_OFERTA_ATUAL, null) != offerId) return null
+    return preferencias.getString(CHAVE_ENTREGA_ATUAL, null)
+  }
+
+  fun ofertaPodeSerRespondida(
+    context: Context,
+    offerId: String,
+    agoraEpochMs: Long = System.currentTimeMillis(),
+  ): Boolean {
+    val preferencias = prefs(context)
+    if (preferencias.getString(CHAVE_OFERTA_ATUAL, null) != offerId) return false
+    val expiraEm = preferencias.getLong(CHAVE_OFERTA_EXPIRA_EM, 0L)
+    return expiraEm <= 0L || agoraEpochMs < expiraEm
+  }
 
   /**
    * Impede que um push atrasado reabra uma oferta que o motoboy acabou de
@@ -60,6 +95,8 @@ object OfferSessionStore {
 
     if (preferencias.getString(CHAVE_OFERTA_ATUAL, null) == offerId) {
       editor.remove(CHAVE_OFERTA_ATUAL)
+      editor.remove(CHAVE_ENTREGA_ATUAL)
+      editor.remove(CHAVE_OFERTA_EXPIRA_EM)
     }
 
     editor.apply()

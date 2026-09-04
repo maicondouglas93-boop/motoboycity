@@ -390,7 +390,10 @@ export class DispatchService {
         this.dispatchQueue.add(
           OFFER_EXPIRE_JOB,
           { offerId: offer.id },
-          { delay: timeoutSeconds * 1000, jobId: expireJobId(offer.id) },
+          {
+            delay: Math.max(0, offer.offeredAt.getTime() + timeoutSeconds * 1000 - Date.now()),
+            jobId: expireJobId(offer.id),
+          },
         ),
       ),
     );
@@ -590,7 +593,10 @@ export class DispatchService {
         this.dispatchQueue.add(
           OFFER_EXPIRE_JOB,
           { offerId: offer.id },
-          { delay: timeoutSeconds * 1000, jobId: expireJobId(offer.id) },
+          {
+            delay: Math.max(0, offer.offeredAt.getTime() + timeoutSeconds * 1000 - Date.now()),
+            jobId: expireJobId(offer.id),
+          },
         ),
       ),
     );
@@ -1080,7 +1086,7 @@ export class DispatchService {
 
     const acceptedBeforeRetry = await this.acceptedOfferResult(offer, driverId);
     if (acceptedBeforeRetry) {
-      await this.finishAcceptedOfferRetry(driverId, acceptedBeforeRetry);
+      this.finishAcceptedOfferRetry(driverId, acceptedBeforeRetry);
       return acceptedBeforeRetry;
     }
 
@@ -1152,17 +1158,13 @@ export class DispatchService {
       if (error instanceof ConflictException) {
         const acceptedDuringRace = await this.acceptedOfferResultById(offerId, driverId);
         if (acceptedDuringRace) {
-          await this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
+          this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
           return acceptedDuringRace;
         }
       }
       throw error;
     }
 
-    this.cancelAcceptedOfferTimeouts([offerId]);
-    await this.notifyOfferResolved(driverId, [offerId], 'accepted');
-    await this.zerarSequenciaDeRecusas(driverId);
-    await this.emitAcceptedActivities([delivery], driverId);
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId: delivery.id,
       displayNumber: delivery.displayNumber,
@@ -1170,6 +1172,7 @@ export class DispatchService {
       driverId,
       status: 'ACCEPTED',
     });
+    this.finishAcceptedOfferInBackground(driverId, [offerId], [delivery]);
 
     return { deliveryId: delivery.id, displayNumber: delivery.displayNumber };
   }
@@ -1289,7 +1292,7 @@ export class DispatchService {
           acceptedDuringRace.deliveryIds &&
           acceptedDuringRace.displayNumbers
         ) {
-          await this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
+          this.finishAcceptedOfferRetry(driverId, acceptedDuringRace);
           return {
             deliveryId: acceptedDuringRace.deliveryId,
             displayNumber: acceptedDuringRace.displayNumber,
@@ -1302,11 +1305,7 @@ export class DispatchService {
       throw error;
     }
 
-    this.cancelAcceptedOfferTimeouts(offerIds);
-    await this.notifyOfferResolved(driverId, offerIds, 'accepted');
-    await this.zerarSequenciaDeRecusas(driverId);
     const accepted = deliveries.find((delivery) => delivery.id === deliveryId)!;
-    await this.emitAcceptedActivities(deliveries, driverId);
     for (const item of deliveries) {
       this.realtimeGateway.emitDeliveryUpdated(item.companyId, {
         deliveryId: item.id,
@@ -1317,6 +1316,7 @@ export class DispatchService {
         status: 'ACCEPTED',
       });
     }
+    this.finishAcceptedOfferInBackground(driverId, offerIds, deliveries);
     return {
       deliveryId,
       displayNumber: accepted.displayNumber,
@@ -1363,12 +1363,18 @@ export class DispatchService {
     };
   }
 
-  private async finishAcceptedOfferRetry(
-    driverId: string,
-    result: AcceptOfferResult,
-  ): Promise<void> {
+  private finishAcceptedOfferRetry(driverId: string, result: AcceptOfferResult): void {
     this.ensurePickupExpiryAfterAccepted(result.deliveryId, driverId);
     const deliveryIds = result.deliveryIds ?? [result.deliveryId];
+    this.runAcceptedOfferRetryCleanup(driverId, deliveryIds).catch((error: unknown) => {
+      this.logger.warn(`Falha ao finalizar reconciliacao de aceite: ${String(error)}`);
+    });
+  }
+
+  private async runAcceptedOfferRetryCleanup(
+    driverId: string,
+    deliveryIds: string[],
+  ): Promise<void> {
     const offers = await this.prisma.deliveryOffer.findMany({
       where: { driverId, deliveryId: { in: deliveryIds }, response: 'ACCEPTED' },
       select: { id: true },
@@ -1376,6 +1382,41 @@ export class DispatchService {
     const offerIds = offers.map((item) => item.id);
     this.cancelAcceptedOfferTimeouts(offerIds);
     await this.notifyOfferResolved(driverId, offerIds, 'accepted');
+  }
+
+  /**
+   * A transacao acima ja tornou o motoboy dono do pedido. Estes efeitos mantem
+   * notificacoes e paineis sincronizados, mas nao podem segurar a resposta do
+   * aceite: FCM, Redis ou uma leitura de enriquecimento lentos faziam o celular
+   * estourar o timeout e dizer que o toque falhou mesmo com o pedido aceito.
+   */
+  private finishAcceptedOfferInBackground(
+    driverId: string,
+    offerIds: string[],
+    deliveries: Array<{ id: string; displayNumber: number; companyId: string }>,
+  ): void {
+    this.cancelAcceptedOfferTimeouts(offerIds);
+
+    const tasks: Array<{ label: string; promise: Promise<unknown> }> = [
+      {
+        label: 'sincronizar notificacao da oferta aceita',
+        promise: this.notifyOfferResolved(driverId, offerIds, 'accepted'),
+      },
+      {
+        label: 'zerar sequencia de recusas apos aceite',
+        promise: this.zerarSequenciaDeRecusas(driverId),
+      },
+      {
+        label: 'publicar atividade administrativa do aceite',
+        promise: this.emitAcceptedActivities(deliveries, driverId),
+      },
+    ];
+
+    for (const task of tasks) {
+      task.promise.catch((error: unknown) => {
+        this.logger.warn(`Falha ao ${task.label}: ${String(error)}`);
+      });
+    }
   }
 
   private async expireBatchOffer(

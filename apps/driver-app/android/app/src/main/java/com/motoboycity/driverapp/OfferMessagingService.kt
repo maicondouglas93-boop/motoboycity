@@ -39,10 +39,16 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
 
     val ehOferta = dados["type"] == "offer"
     val offerId = dados["offerId"].orEmpty()
+    val deliveryId = dados["deliveryId"]
     if (ehOferta && (offerId.isBlank() || OfferSessionStore.ofertaFoiResolvidaRecentemente(this, offerId))) {
       return
     }
-    val expiresAtMs = dados["expiresAtEpochMs"]?.toLongOrNull()
+    val expiresAtMs =
+      dados["expiresAtEpochMs"]?.toLongOrNull()
+        ?: dados["expiresInSeconds"]
+          ?.toLongOrNull()
+          ?.coerceAtLeast(1L)
+          ?.let { System.currentTimeMillis() + it * 1_000L }
     val remainingMs = expiresAtMs?.minus(System.currentTimeMillis())
     if (ehOferta && remainingMs != null && remainingMs <= 0L) {
       OfferSessionStore.marcarOfertaResolvida(this, offerId)
@@ -155,7 +161,7 @@ class OfferMessagingService : ReactNativeFirebaseMessagingService() {
           .setFullScreenIntent(pendente, true)
       }
 
-      OfferSessionStore.marcarOfertaApresentada(this, offerId)
+      OfferSessionStore.marcarOfertaApresentada(this, offerId, deliveryId, expiresAtMs)
     }
 
     manager.notify(

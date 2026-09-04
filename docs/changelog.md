@@ -12013,3 +12013,57 @@ final.
 O APK foi gerado e verificado, mas não foi instalado nem distribuído nesta
 sessão. Não houve schema, migration, dado, dependência ou segredo alterado pelo
 release.
+
+## 2026-09-04 — Aceite rápido e reconexão leve no Driver App
+
+Relatos de demora ou falha aparente ao aceitar ofertas coincidiam com dois
+comportamentos evitáveis. A API persistia o aceite corretamente, mas segurava a
+resposta HTTP enquanto aguardava Firebase, limpeza auxiliar de Redis, punição e
+atividade administrativa. Se algum desses efeitos demorasse, o celular podia
+exibir falha mesmo com o pedido já atribuído. Além disso, toda reconexão do
+Socket repetia quase todo o bootstrap do aplicativo, multiplicando consultas e
+competindo com a resposta da oferta justamente numa rede instável.
+
+O commit da atribuição e o evento imediato da entrega continuam síncronos. Os
+efeitos auxiliares posteriores ao aceite agora executam em segundo plano, cada
+um com tratamento próprio de falha, e o retry idempotente também retorna sem
+esperar limpeza auxiliar. O job de expiração passou a usar o mesmo instante
+absoluto de `offeredAt` usado pelo contador do celular, evitando prazo extra na
+fila.
+
+No Driver App, a primeira conexão não repete o bootstrap e reconexões simultâneas
+são consolidadas. Uma reconexão real recupera oferta e entregas e reafirma apenas
+a presença essencial, para o motoboy não permanecer indisponível caso o TTL
+tenha vencido. No aceite pela notificação Android, duas tentativas idempotentes
+têm orçamento total limitado e, numa resposta perdida, o app consulta a entrega
+já protegida pelo próprio token. Essa confirmação só vale para a mesma oferta,
+dentro do prazo salvo e com a entrega ainda em `ACCEPTED`; estado concluído ou
+falho nunca é anunciado como novo aceite.
+
+O pacote foi preparado como `0.1.0-pilot.21`; o release correspondente deve
+usar o `versionCode` 21.
+
+Arquivos alterados:
+
+- `apps/api/src/dispatch/dispatch.service.ts`;
+- `apps/api/src/dispatch/dispatch.service.spec.ts`;
+- `apps/driver-app/src/screens/HomeScreen.tsx`;
+- `apps/driver-app/package.json`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferMessagingService.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferNativeClient.kt`;
+- `apps/driver-app/android/app/src/main/java/com/motoboycity/driverapp/OfferSessionStore.kt`;
+- `docs/agent-handoff.md`;
+- `docs/changelog.md`.
+
+| Validação | Resultado |
+| --- | --- |
+| Jest focado de `dispatch.service` | 1 suíte / 99 testes aprovados |
+| Build da API | aprovado |
+| Typecheck do Driver App | aprovado |
+| Jest completo do Driver App | 26 suítes / 188 testes aprovados |
+| Kotlin `:app:compileDebugKotlin` | aprovado; apenas avisos de depreciação já conhecidos |
+| Lint da API e do Driver App | aprovado; um aviso preexistente de `no-void` no app |
+| `git diff --check` | aprovado |
+
+Não houve mudança de contrato, schema, migration, dado, dependência ou segredo.
+Nenhum commit, push, deploy ou APK foi executado neste recorte.

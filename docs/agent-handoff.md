@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-03**, depois de publicar a recuperação de GPS e a
-> robustez do aceite e gerar o APK oficial `pilot.20`.
+> Última revisão: **2026-09-04**, depois de preparar localmente a correção de
+> latência do aceite e recuperação leve de reconexão. Ela ainda não foi
+> publicada nem incluída em um novo APK.
 
 ## Como atualizar
 
@@ -348,7 +349,14 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Limpo depois da publicação da correção de GPS/aceite e do release `pilot.20`.
+Há uma correção local, ainda sem commit, push, deploy ou APK, para reduzir a
+latência do aceite e a carga das reconexões. Ela altera `dispatch.service`, o
+`HomeScreen`, o cliente nativo de ofertas e seus testes/documentação. API build,
+99 testes focados de dispatch, typecheck e 188 testes do Driver App e compilação
+Kotlin foram aprovados. O pacote local está preparado como `pilot.21` /
+`versionCode` 21. O código que está em produção continua em `fdf7e57` e o APK
+oficial continua sendo o `pilot.20`.
+
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do
 responsável. O repositório é **público**: toda alteração exige varredura de

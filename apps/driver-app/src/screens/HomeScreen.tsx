@@ -201,6 +201,7 @@ export function HomeScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
   const acceptingPendingRef = useRef(false);
   const presenceRecoveryRef = useRef<Promise<DriverPresenceItem | null> | null>(null);
+  const socketRecoveryRef = useRef<Promise<void> | null>(null);
   const pendingListVersionRef = useRef(0);
   const queueRequestVersionRef = useRef(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -662,6 +663,7 @@ export function HomeScreen({ navigation }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    let socketConnectedOnce = false;
 
     async function bootstrap() {
       const token = await session.getToken();
@@ -744,37 +746,45 @@ export function HomeScreen({ navigation }: Props) {
 
       connectDriverSocket(token, {
         onConnected: () => {
-          verificarNotificacaoObrigatoria()
-            .then(async (readiness) => {
-              const reconnectCompletionSync = await syncCompletionQueue(token).catch(() => null);
-              if (reconnectCompletionSync?.authRequired) return;
-              let reconnectedPresence = await syncPresence(token);
-              await retirarDaFilaSemNotificacao(token, readiness, false);
-              if (!notificacaoBloqueiaPresenca(readiness)) {
-                reconnectedPresence = await recoverDesiredOnlinePresence(
-                  token,
-                  reconnectedPresence,
-                );
-              }
-              if (
-                reconnectedPresence?.availability === 'AVAILABLE' &&
-                useDispatchStore.getState().availability === 'AVAILABLE'
-              ) {
-                await loadDriverQueue(token, true);
-              } else {
-                clearDriverQueue();
-              }
-              const deliveries = await getActiveDeliveries(token).catch(() => null);
-              if (deliveries && !cancelled) {
-                setActiveDeliveries(deliveries);
-                await syncDeliveryTracking(
-                  token,
-                  deliveries.map((delivery) => delivery.id),
-                  useDispatchStore.getState().wantsToBeAvailable,
-                ).catch(() => undefined);
-              }
-            })
-            .catch(() => undefined);
+          // O bootstrap acabou de sincronizar tudo antes da primeira conexao.
+          // Repetir o mesmo pacote aqui dobrava as chamadas justamente quando
+          // o app abria. Em reconexoes reais, uma rotina unica recupera somente
+          // a oferta e as entregas que podem ter mudado enquanto o socket caiu.
+          if (!socketConnectedOnce) {
+            socketConnectedOnce = true;
+            mostrarOfertaPendente(token).catch(() => undefined);
+            return;
+          }
+          if (socketRecoveryRef.current) return;
+
+          const recovery = (async () => {
+            await mostrarOfertaPendente(token);
+            if (cancelled) return;
+
+            // A presenca pode ter expirado no servidor durante uma queda mais
+            // longa. Reafirme somente esse estado essencial; o restante do
+            // bootstrap (push, conclusoes e fila) nao precisa ser repetido.
+            const reconnectedPresence = await syncPresence(token);
+            await recoverDesiredOnlinePresence(token, reconnectedPresence);
+            if (cancelled) return;
+
+            const deliveries = await getActiveDeliveries(token).catch(() => null);
+            if (deliveries && !cancelled) {
+              setActiveDeliveries(deliveries);
+              await syncDeliveryTracking(
+                token,
+                deliveries.map((delivery) => delivery.id),
+                useDispatchStore.getState().wantsToBeAvailable,
+              ).catch(() => undefined);
+            }
+          })();
+
+          socketRecoveryRef.current = recovery;
+          recovery
+            .catch(() => undefined)
+            .finally(() => {
+              if (socketRecoveryRef.current === recovery) socketRecoveryRef.current = null;
+            });
         },
         onOffer: (offer) => {
           /**
@@ -1010,7 +1020,7 @@ export function HomeScreen({ navigation }: Props) {
        * mostrar: a que chegou com o aplicativo minimizado. Repetir a navegacao
        * para a tela ja focada nao empilha nada.
        */
-      navigation.navigate('IncomingOffer');
+      if (AppState.currentState === 'active') navigation.navigate('IncomingOffer');
     }
 
     bootstrap().catch(() => {
@@ -1024,6 +1034,7 @@ export function HomeScreen({ navigation }: Props) {
       cancelled = true;
       assinatura.remove();
       disconnectDriverSocket();
+      socketRecoveryRef.current = null;
     };
     // Esta tela e montada uma unica vez na sessao; callbacks do socket usam a store.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -31,6 +31,10 @@ const offerDropoffAddress = {
   zip: '36930000',
   referenceNote: null,
 };
+
+async function flushBackgroundTasks(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
 import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
 
 describe('DispatchService', () => {
@@ -307,6 +311,8 @@ describe('DispatchService', () => {
     });
 
     it('cria nova oferta para quem ja recebeu antes e faz socket e push tocarem', async () => {
+      const nowMs = Date.now();
+      const dateNow = jest.spyOn(Date, 'now').mockReturnValue(nowMs);
       prisma.delivery.findUnique.mockResolvedValue(awaitingDelivery());
       prisma.deliveryOffer.findFirst.mockResolvedValue(null);
       prisma.deliveryOffer.findMany.mockResolvedValue([
@@ -321,7 +327,7 @@ describe('DispatchService', () => {
         deliveryId: 'delivery-1',
         driverId: 'driver-1',
         response: 'PENDING',
-        offeredAt: new Date(),
+        offeredAt: new Date(nowMs - 5_000),
         respondedAt: null,
       });
 
@@ -330,6 +336,7 @@ describe('DispatchService', () => {
         adminName: 'Administrador',
         reason: 'Todos recusaram a primeira rodada.',
       });
+      dateNow.mockRestore();
 
       expect(result).toEqual({
         deliveryIds: ['delivery-1'],
@@ -341,7 +348,7 @@ describe('DispatchService', () => {
       expect(queue.add).toHaveBeenCalledWith(
         'offer-expire',
         { offerId: 'offer-new' },
-        expect.objectContaining({ jobId: 'expire-offer-new' }),
+        { delay: 55_000, jobId: 'expire-offer-new' },
       );
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith(
         'driver-1',
@@ -492,6 +499,8 @@ describe('DispatchService', () => {
     });
 
     it('cria a oferta pro motoboy disponível há mais tempo, agenda expiração e emite eventos', async () => {
+      const nowMs = Date.now();
+      const dateNow = jest.spyOn(Date, 'now').mockReturnValue(nowMs);
       prisma.delivery.findUnique.mockResolvedValue({
         id: 'delivery-1',
         status: 'AWAITING_DRIVER',
@@ -522,10 +531,11 @@ describe('DispatchService', () => {
         id: 'offer-1',
         deliveryId: 'delivery-1',
         driverId: 'driver-1',
-        offeredAt: new Date(),
+        offeredAt: new Date(nowMs - 5_000),
       });
 
       await service.dispatchDelivery('delivery-1');
+      dateNow.mockRestore();
 
       expect(tx.deliveryOffer.create).toHaveBeenCalledWith({
         data: { deliveryId: 'delivery-1', driverId: 'driver-1', response: 'PENDING' },
@@ -534,7 +544,7 @@ describe('DispatchService', () => {
       expect(queue.add).toHaveBeenCalledWith(
         'offer-expire',
         { offerId: 'offer-1' },
-        { delay: 90_000, jobId: 'expire-offer-1' },
+        { delay: 85_000, jobId: 'expire-offer-1' },
       );
       expect(realtimeGateway.emitToDriver).toHaveBeenCalledWith('driver-1', 'delivery:offer', {
         offerId: 'offer-1',
@@ -578,7 +588,7 @@ describe('DispatchService', () => {
             requiresReturn: true,
           },
         ],
-        expiresInSeconds: 90,
+        expiresInSeconds: 85,
         expiresAtEpochMs: expect.any(Number),
       });
       expect(realtimeGateway.emitAdminActivity).toHaveBeenCalled();
@@ -590,7 +600,7 @@ describe('DispatchService', () => {
           type: 'offer',
           offerId: 'offer-1',
           deliveryId: 'delivery-1',
-          expiresInSeconds: '90',
+          expiresInSeconds: '85',
           expiresAtEpochMs: expect.any(String),
         },
       });
@@ -1429,6 +1439,7 @@ describe('DispatchService', () => {
       });
 
       const result = await service.acceptOffer('offer-1', 'driver-1', 'user-1');
+      await flushBackgroundTasks();
 
       expect(tx.deliveryOffer.updateMany).toHaveBeenCalledWith({
         where: { id: 'offer-1', response: 'PENDING' },
@@ -1467,6 +1478,31 @@ describe('DispatchService', () => {
         }),
       );
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 9 });
+    });
+
+    it('responde o aceite confirmado sem esperar o envio ao Firebase', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      tx.delivery.findUniqueOrThrow.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        companyId: 'company-1',
+      });
+      push.sendToDriver.mockReturnValue(new Promise(() => undefined));
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+
+      expect(push.sendToDriver).toHaveBeenCalled();
+      expect(tx.deliveryOffer.updateMany).toHaveBeenCalled();
+      expect(tx.delivery.updateMany).toHaveBeenCalled();
     });
 
     it('mantem o aceite confirmado quando o Redis falha ao limpar o timeout', async () => {
@@ -1593,6 +1629,29 @@ describe('DispatchService', () => {
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
     });
 
+    it('devolve o aceite reconciliado sem esperar a limpeza auxiliar', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+        response: 'ACCEPTED',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        displayNumber: 9,
+        driverId: 'driver-1',
+        batchId: null,
+      });
+      prisma.deliveryOffer.findMany.mockReturnValue(new Promise(() => undefined));
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toEqual({
+        deliveryId: 'delivery-1',
+        displayNumber: 9,
+      });
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it('reconcilia o aceite quando perde a corrida para a própria primeira solicitação', async () => {
       prisma.deliveryOffer.findUnique
         .mockResolvedValueOnce({
@@ -1709,6 +1768,35 @@ describe('DispatchService', () => {
 
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-1');
       expect(queue.remove).toHaveBeenCalledWith('expire-offer-2');
+    });
+
+    it('responde o aceite do lote sem esperar o envio ao Firebase', async () => {
+      prisma.deliveryOffer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        driverId: 'driver-1',
+        deliveryId: 'delivery-1',
+      });
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        companyId: 'company-1',
+        batchId: 'batch-1',
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        { id: 'delivery-1', displayNumber: 7, companyId: 'company-1' },
+        { id: 'delivery-2', displayNumber: 8, companyId: 'company-1' },
+      ]);
+      prisma.deliveryOffer.findMany.mockResolvedValue([{ id: 'offer-1' }, { id: 'offer-2' }]);
+      tx.deliveryOffer.updateMany.mockResolvedValue({ count: 2 });
+      tx.delivery.updateMany.mockResolvedValue({ count: 2 });
+      push.sendToDriver.mockReturnValue(new Promise(() => undefined));
+
+      await expect(service.acceptOffer('offer-1', 'driver-1', 'user-1')).resolves.toMatchObject({
+        deliveryId: 'delivery-1',
+        deliveryIds: ['delivery-1', 'delivery-2'],
+      });
+
+      expect(push.sendToDriver).toHaveBeenCalled();
+      expect(tx.delivery.updateMany).toHaveBeenCalled();
     });
   });
 
