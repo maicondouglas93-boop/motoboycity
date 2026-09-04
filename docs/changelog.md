@@ -12138,3 +12138,42 @@ Arquivos alterados:
 
 Não houve mudança de API, contrato, schema, migration, proximidade, atomicidade
 do lote ou auditoria. Nenhum commit, push, deploy ou APK foi executado.
+
+## 2026-09-04 — Publicação da coleta rápida e release Android `pilot.22`
+
+A alteração foi consolidada no commit funcional `476813d`; a versão do
+aplicativo foi atualizada no commit `8255734`. Ambos foram enviados para `main`,
+acionando o deploy automático. Depois do push, a API pública respondeu
+`health=ok` e `ready=ready`.
+
+O APK foi compilado em uma worktree curta a partir de `8255734`, com JDK 21,
+ambiente de produção, API oficial, Firebase, Google Maps e a chave oficial. As
+senhas protegidas por DPAPI existiram somente na memória do processo e não foram
+exibidas.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.22-vc22.apk`
+
+- 75.169.313 bytes;
+- SHA-256 `0F49B3BF91E5B342E45157C9FE61C0C396B7E0AF98B0A06C1733B1EE82284952`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 22, `versionName`
+  `0.1.0-pilot.22`, minSdk 24 e targetSdk 36;
+- assinatura APK v2 válida, RSA 4096 e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- API de produção presente no bundle e URLs locais ausentes;
+- cópia oficial idêntica à saída do build pelo SHA-256.
+
+| Validação | Resultado |
+| --- | --- |
+| `pnpm install --frozen-lockfile` e build de validation | aprovados |
+| `clean assembleRelease --no-daemon` | aprovado em 7 min 41 s; 427 tarefas |
+| `aapt` | pacote, versões e SDKs aprovados |
+| `apksigner` | assinatura v2 e certificado oficial aprovados |
+| inspeção do bundle e comparação de hash | ambiente de produção e cópia oficial aprovados |
+| saúde pública da API | `health=ok` e `ready=ready` |
+
+A primeira tentativa de Gradle parou antes da compilação porque o PowerShell
+interpretou o parâmetro `-P` como nome de tarefa. A execução definitiva usou a
+variável de ambiente explícita para o `versionCode` e foi aprovada. O APK foi
+gerado e verificado, mas não foi instalado nem distribuído nesta sessão.

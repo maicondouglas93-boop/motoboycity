@@ -8,9 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-04**, depois de preparar localmente a resposta mais
-> rápida da coleta no Driver App. Essa alteração ainda não foi publicada nem
-> empacotada; o último APK oficial continua sendo o `pilot.21`.
+> Última revisão: **2026-09-04**, depois de publicar a resposta mais rápida da
+> coleta e gerar o APK oficial `pilot.22`.
 
 ## Como atualizar
 
@@ -29,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | correção funcional `8119c2b` enviada para `main` em 04/09/2026; o push acionou o deploy automático e a API respondeu `health=200` e `ready=200` |
+| Commit publicado | coleta rápida em `476813d` e versão `pilot.22` em `8255734`, enviados para `main` em 04/09/2026; o push acionou o deploy automático e a API respondeu `health=ok` e `ready=ready` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -52,12 +51,12 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.21-vc21.apk`
-SHA-256 `C8648C0930447153985C298C6FCF68F084227EBCE09E1C8DC2C8B95FE5DAAFDE`,
-75.167.465 bytes, `versionCode` 21, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.22-vc22.apk`
+SHA-256 `0F49B3BF91E5B342E45157C9FE61C0C396B7E0AF98B0A06C1733B1EE82284952`,
+75.169.313 bytes, `versionCode` 22, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.20` e versões anteriores.
+anteriores, então ele atualiza por cima de `pilot.21` e versões anteriores.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
@@ -216,7 +215,7 @@ Sem estes valores a operação não roda, e a falha aparece longe da causa:
 
 Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
-## Alteração local ainda não publicada
+## Resposta rápida da coleta no `pilot.22`
 
 Na confirmação de coleta, o aplicativo agora inicia a captura atual do GPS
 enquanto o motoboy lê o diálogo de confirmação. Depois que a API confirma a
@@ -225,16 +224,15 @@ própria resposta, sem aguardar quatro listagens operacionais e o detalhe de cad
 pedido. A captura atual, a validação da API, a atomicidade do lote e a auditoria
 continuam iguais; durante a espera o botão mostra `Confirmando coleta...`.
 
-O recorte está somente no worktree. Typecheck, lint focado e as 26 suítes / 188
-testes do Driver App passaram. Não houve mudança de API, contrato, banco,
-migration ou regra de proximidade. Ainda faltam commit, push, deploy e novo APK,
-caso sejam solicitados.
+O recorte foi publicado e empacotado no `pilot.22`. Typecheck, lint focado, as
+26 suítes / 188 testes do Driver App e o build Android de release passaram. Não
+houve mudança de API, contrato, banco, migration ou regra de proximidade.
 
 ## Limitações e próximos passos
 
 ### Pendente de ação humana
 
-1. **Instalar e testar o `pilot.19` em aparelho real.** Além de conferir que a
+1. **Instalar e testar o `pilot.22` em aparelho real.** Além de conferir que a
    tela e o botão de saque obedecem ao dia escolhido no ADM, permanecem os dois
    cenários ainda não exercitados: **negar "Permitir o tempo todo"** num
    Android 11+ e num Android 10, conferindo que o alerta oferece "Abrir ajustes"
@@ -363,10 +361,9 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Contém a alteração local de resposta da coleta em
-`DeliveryOperationScreen.tsx` e sua documentação. O último código publicado
-continua em `8119c2b`, e o último APK oficial continua sendo o `pilot.21`. A
-alteração local não foi commitada, enviada ou empacotada.
+Limpo depois da publicação da coleta rápida e da geração do APK oficial
+`pilot.22`. O código funcional está em `476813d`, a versão em `8255734` e este
+registro de release será o commit documental seguinte.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do
