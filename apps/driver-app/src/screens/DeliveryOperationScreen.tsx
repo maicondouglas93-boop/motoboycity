@@ -67,6 +67,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
 type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
 
 const IMMEDIATE_COMPLETION_SYNC_WAIT_MS = 2_500;
+const COLLECTION_LOCATION_WARMUP_MAX_AGE_MS = 10_000;
 
 /**
  * Converte o fix em payload, ou em payload VAZIO quando nao houve fix.
@@ -170,7 +171,32 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const previousPendingCompletionId = useRef<string | null>(null);
   const pendingRefreshVersion = useRef(0);
   const operationInFlight = useRef(false);
+  const collectionLocationWarmup = useRef<{
+    startedAt: number;
+    promise: Promise<{ ok: true; fix: LocationFix | null } | { ok: false; error: unknown }>;
+  } | null>(null);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
+
+  function startCollectionLocationWarmup(): void {
+    collectionLocationWarmup.current = {
+      startedAt: Date.now(),
+      promise: captureCompletionLocation().then(
+        (fix) => ({ ok: true as const, fix }),
+        (error: unknown) => ({ ok: false as const, error }),
+      ),
+    };
+  }
+
+  async function takeCollectionLocation(): Promise<LocationFix | null> {
+    const warmed = collectionLocationWarmup.current;
+    collectionLocationWarmup.current = null;
+    if (warmed && Date.now() - warmed.startedAt <= COLLECTION_LOCATION_WARMUP_MAX_AGE_MS) {
+      const result = await warmed.promise;
+      if (!result.ok) throw result.error;
+      return result.fix;
+    }
+    return captureCompletionLocation();
+  }
 
   const handleProtectedBack = useCallback(() => {
     // Nao desmonta a tela enquanto uma transicao esta sendo confirmada na API.
@@ -616,10 +642,28 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         const result = await deliveriesApi.collect(
           token,
           delivery.id,
-          posicaoParaEnvio(await captureCompletionLocation()),
+          posicaoParaEnvio(await takeCollectionLocation()),
         );
-        setDelivery(result.deliveries.find((item) => item.id === delivery.id) ?? null);
+        const confirmedDelivery = result.deliveries.find((item) => item.id === delivery.id);
+        if (!confirmedDelivery) {
+          throw new Error('A API confirmou a coleta sem devolver o pedido atualizado.');
+        }
+
+        setDelivery(confirmedDelivery);
+        const confirmedById = new Map(result.deliveries.map((item) => [item.id, item]));
+        setActiveDeliveries(
+          useDispatchStore.getState().activeDeliveries.map((activeDelivery) => {
+            const confirmed = confirmedById.get(activeDelivery.id);
+            return confirmed ? { ...activeDelivery, ...confirmed } : activeDelivery;
+          }),
+        );
         setSuccessMessage('O pedido foi marcado como coletado!');
+        // A resposta da coleta ja traz o lote atualizado. Recarregar quatro
+        // listagens e o detalhe de cada pedido aqui mantinha o botao girando
+        // mesmo depois da confirmacao do servidor. Os IDs rastreados nao mudam
+        // em ACCEPTED -> COLLECTED, portanto nenhuma sincronizacao adicional e
+        // necessaria neste ponto.
+        return;
       } else if (nextOperation === 'deliver') {
         // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
         // tentativa posterior nunca pode recapturar outra rua por engano.
@@ -884,8 +928,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               message: 'Confirme que a mercadoria retornou ao local de coleta.',
               label: 'Confirmar retorno',
             };
+    if (action === 'collect') startCollectionLocationWarmup();
     Alert.alert(confirmation.title, confirmation.message, [
-      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Cancelar',
+        style: 'cancel',
+        onPress: () => {
+          if (action === 'collect') collectionLocationWarmup.current = null;
+        },
+      },
       {
         text: confirmation.label,
         onPress: () => runOperation(action).catch(() => undefined),
@@ -1117,7 +1168,12 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
               ]}
             >
               {operationBusy ? (
-                <ActivityIndicator color={colors.actionText} />
+                <View style={styles.operationProgress}>
+                  <ActivityIndicator color={colors.actionText} />
+                  <Text style={styles.footerPrimaryText}>
+                    {operation === 'collect' ? 'Confirmando coleta...' : 'Confirmando...'}
+                  </Text>
+                </View>
               ) : (
                 <Text style={styles.footerPrimaryText}>{primaryActionLabel}</Text>
               )}
@@ -1532,6 +1588,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'center',
+  },
+  operationProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   warningButton: {
     width: 58,

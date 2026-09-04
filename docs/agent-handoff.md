@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-04**, depois de publicar a correção de latência do
-> aceite e recuperação leve de reconexão e gerar o APK oficial `pilot.21`.
+> Última revisão: **2026-09-04**, depois de preparar localmente a resposta mais
+> rápida da coleta no Driver App. Essa alteração ainda não foi publicada nem
+> empacotada; o último APK oficial continua sendo o `pilot.21`.
 
 ## Como atualizar
 
@@ -215,6 +216,20 @@ Sem estes valores a operação não roda, e a falha aparece longe da causa:
 
 Ver `architecture.md` §8 para o que pode e o que não pode ser desligado.
 
+## Alteração local ainda não publicada
+
+Na confirmação de coleta, o aplicativo agora inicia a captura atual do GPS
+enquanto o motoboy lê o diálogo de confirmação. Depois que a API confirma a
+transição, a tela e o estado local do lote são atualizados diretamente com a
+própria resposta, sem aguardar quatro listagens operacionais e o detalhe de cada
+pedido. A captura atual, a validação da API, a atomicidade do lote e a auditoria
+continuam iguais; durante a espera o botão mostra `Confirmando coleta...`.
+
+O recorte está somente no worktree. Typecheck, lint focado e as 26 suítes / 188
+testes do Driver App passaram. Não houve mudança de API, contrato, banco,
+migration ou regra de proximidade. Ainda faltam commit, push, deploy e novo APK,
+caso sejam solicitados.
+
 ## Limitações e próximos passos
 
 ### Pendente de ação humana
@@ -348,11 +363,10 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Limpo depois da publicação da correção de latência/aceite e da geração do APK
-oficial `pilot.21`. A correção funcional está em `8119c2b`; API build, 99 testes
-focados de dispatch, typecheck e 188 testes do Driver App, Kotlin debug e o
-release Android foram aprovados. O APK não foi instalado nem enviado aos
-aparelhos nesta sessão.
+Contém a alteração local de resposta da coleta em
+`DeliveryOperationScreen.tsx` e sua documentação. O último código publicado
+continua em `8119c2b`, e o último APK oficial continua sendo o `pilot.21`. A
+alteração local não foi commitada, enviada ou empacotada.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

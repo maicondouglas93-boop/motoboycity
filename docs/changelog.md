@@ -12107,3 +12107,34 @@ ao final.
 O APK foi gerado e verificado, mas não foi instalado nem enviado aos aparelhos
 nesta sessão. Não houve schema, migration, dado, dependência ou segredo
 alterado pelo release.
+
+## 2026-09-04 — Resposta mais rápida ao confirmar a coleta no Driver App
+
+O fluxo de coleta aguardava duas etapas evitáveis no caminho percebido pelo
+motoboy. A captura atual do GPS só começava depois do segundo toque no diálogo,
+e, mesmo após a API devolver o lote já coletado, o botão continuava carregando
+enquanto o aplicativo fazia quatro listagens de status e buscava novamente o
+detalhe de cada pedido ativo.
+
+A captura do GPS agora é preparada durante o diálogo de confirmação e só é
+reutilizada dentro de uma janela curta de dez segundos; depois disso, uma nova
+captura é obrigatória. A resposta confirmada da API atualiza imediatamente a
+tela e os itens do lote no estado local. Como `ACCEPTED -> COLLECTED` não muda os
+IDs rastreados, a recarga operacional redundante foi removida desse caminho. O
+botão mostra `Confirmando coleta...` enquanto GPS e servidor ainda estão sendo
+aguardados, sem projetar sucesso antes da confirmação real.
+
+Arquivos alterados:
+
+- `apps/driver-app/src/screens/DeliveryOperationScreen.tsx`;
+- `docs/agent-handoff.md`;
+- `docs/changelog.md`.
+
+| Validação | Resultado |
+| --- | --- |
+| Typecheck do Driver App | aprovado |
+| Jest completo do Driver App | 26 suítes / 188 testes aprovados |
+| ESLint focado na tela alterada | aprovado |
+
+Não houve mudança de API, contrato, schema, migration, proximidade, atomicidade
+do lote ou auditoria. Nenhum commit, push, deploy ou APK foi executado.
