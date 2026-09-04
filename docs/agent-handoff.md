@@ -8,9 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-04**, depois de preparar localmente a correção de
-> latência do aceite e recuperação leve de reconexão. Ela ainda não foi
-> publicada nem incluída em um novo APK.
+> Última revisão: **2026-09-04**, depois de publicar a correção de latência do
+> aceite e recuperação leve de reconexão e gerar o APK oficial `pilot.21`.
 
 ## Como atualizar
 
@@ -29,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | `main` publicado em 03/09/2026 até `fdf7e57`; o push aciona o deploy automático e o APK continua com distribuição manual |
+| Commit publicado | correção funcional `8119c2b` enviada para `main` em 04/09/2026; o push acionou o deploy automático e a API respondeu `health=200` e `ready=200` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -52,12 +51,12 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.20-vc20.apk`
-SHA-256 `62C7000394031D5A3BF6B05D492AFBFE9F4AF3A715FB5C0D95B1946A505A3210`,
-75.167.673 bytes, `versionCode` 20, minSdk 24, targetSdk 36, assinatura v2 /
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.21-vc21.apk`
+SHA-256 `C8648C0930447153985C298C6FCF68F084227EBCE09E1C8DC2C8B95FE5DAAFDE`,
+75.167.465 bytes, `versionCode` 21, minSdk 24, targetSdk 36, assinatura v2 /
 RSA 4096, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.19` e versões anteriores.
+anteriores, então ele atualiza por cima de `pilot.20` e versões anteriores.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
@@ -349,13 +348,11 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Há uma correção local, ainda sem commit, push, deploy ou APK, para reduzir a
-latência do aceite e a carga das reconexões. Ela altera `dispatch.service`, o
-`HomeScreen`, o cliente nativo de ofertas e seus testes/documentação. API build,
-99 testes focados de dispatch, typecheck e 188 testes do Driver App e compilação
-Kotlin foram aprovados. O pacote local está preparado como `pilot.21` /
-`versionCode` 21. O código que está em produção continua em `fdf7e57` e o APK
-oficial continua sendo o `pilot.20`.
+Limpo depois da publicação da correção de latência/aceite e da geração do APK
+oficial `pilot.21`. A correção funcional está em `8119c2b`; API build, 99 testes
+focados de dispatch, typecheck e 188 testes do Driver App, Kotlin debug e o
+release Android foram aprovados. O APK não foi instalado nem enviado aos
+aparelhos nesta sessão.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

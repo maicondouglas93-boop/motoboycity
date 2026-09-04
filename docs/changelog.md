@@ -12067,3 +12067,43 @@ Arquivos alterados:
 
 Não houve mudança de contrato, schema, migration, dado, dependência ou segredo.
 Nenhum commit, push, deploy ou APK foi executado neste recorte.
+
+## 2026-09-04 — Publicação da correção e release Android `pilot.21`
+
+A correção de latência do aceite e recuperação leve de reconexão foi consolidada
+no commit funcional `8119c2b` e enviada para `main`, acionando o deploy
+automático. Depois do push, os endpoints públicos `/health` e `/health/ready`
+responderam HTTP 200, com PostgreSQL e Redis prontos.
+
+O Driver App foi compilado a partir desse commit na worktree curta `C:\m21`, com
+JDK 21, ambiente de produção, API oficial, Firebase, Google Maps e a chave de
+assinatura oficial. As senhas protegidas por DPAPI foram abertas somente na
+memória do processo, nunca exibidas, e as variáveis do processo foram removidas
+ao final.
+
+### Artefato
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.21-vc21.apk`
+
+- 75.167.465 bytes;
+- SHA-256 `C8648C0930447153985C298C6FCF68F084227EBCE09E1C8DC2C8B95FE5DAAFDE`;
+- pacote `com.motoboycity.driverapp`, `versionCode` 21,
+  `versionName` `0.1.0-pilot.21`, minSdk 24 e targetSdk 36;
+- assinatura APK v2 válida e certificado oficial SHA-256
+  `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`;
+- bundle com `https://motoboycity-api.onrender.com` e sem `localhost:3333`,
+  `127.0.0.1` ou `10.0.2.2`;
+- cópia oficial conferida pelo mesmo SHA-256 da origem.
+
+| Validação | Resultado |
+| --- | --- |
+| `clean assembleRelease --no-daemon` | aprovado em 12 min 21 s; 427 tarefas |
+| `aapt` | pacote, `versionCode` 21, `versionName`, minSdk e targetSdk aprovados |
+| `apksigner` | assinatura v2 e certificado oficial aprovados |
+| inspeção do bundle | API de produção presente e URLs locais ausentes |
+| comparação SHA-256 | origem e cópia oficial idênticas |
+| saúde pública da API após o push | `/health` e `/health/ready` em HTTP 200 |
+
+O APK foi gerado e verificado, mas não foi instalado nem enviado aos aparelhos
+nesta sessão. Não houve schema, migration, dado, dependência ou segredo
+alterado pelo release.
