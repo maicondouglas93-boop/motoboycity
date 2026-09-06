@@ -18,6 +18,7 @@ export function ReportFilterCard({
   isFetching,
   error,
   description,
+  applyLabel = 'Aplicar filtros',
   children,
 }: {
   idPrefix: string;
@@ -30,6 +31,7 @@ export function ReportFilterCard({
   isFetching: boolean;
   error: string | null;
   description: string;
+  applyLabel?: string;
   children?: ReactNode;
 }) {
   return (
@@ -74,7 +76,7 @@ export function ReportFilterCard({
             </div>
             {children}
             <Button type="submit" disabled={isFetching}>
-              {isFetching ? 'Atualizando...' : 'Aplicar filtros'}
+              {isFetching ? 'Atualizando...' : applyLabel}
             </Button>
             <Button type="button" variant="outline" onClick={onClear} disabled={isFetching}>
               Limpar

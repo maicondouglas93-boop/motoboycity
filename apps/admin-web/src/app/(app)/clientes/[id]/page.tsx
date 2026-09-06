@@ -184,6 +184,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Link
+                href={`/relatorios/pedidos?empresa=${encodeURIComponent(companyId)}`}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-primary/20 px-3 text-sm font-medium text-primary hover:bg-admin-soft"
+              >
+                Consultar pedidos e valores
+              </Link>
+              <Link
                 href={`/clientes/${companyId}/faturas`}
                 className="inline-flex h-9 items-center gap-2 rounded-lg border border-primary/20 px-3 text-sm font-medium text-primary hover:bg-admin-soft"
               >

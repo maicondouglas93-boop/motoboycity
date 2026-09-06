@@ -259,6 +259,15 @@ valores fixos decididos.
 
 ## Faturamento da empresa
 
+Na consulta administrativa de pedidos, **em aberto** significa não pagos pela
+empresa, não pedidos em andamento. Inclui entregas `COMPLETED` com cobrança
+`BILLED` ainda sem fatura ou vinculadas a fatura `PENDING`/`OVERDUE`. O pagamento
+do destinatário não quita a cobrança da plataforma à empresa; pedidos `ONLINE`,
+cancelados ou ainda em andamento não compõem esse filtro. “Todos” consulta
+também outros estados: a soma dos preços dos pedidos não representa, nesse
+caso, saldo devedor. O intervalo pode considerar criação ou conclusão; neste
+último caso, somente pedidos concluídos têm data elegível.
+
 Cada empresa tem uma política própria de fechamento. O administrador pode
 escolher fechamento **manual**, executado quando quiser no detalhe da empresa,
 ou **automático**. No automático, a frequência pode ser semanal, com um dia da

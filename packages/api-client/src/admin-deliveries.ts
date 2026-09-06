@@ -1,5 +1,6 @@
-import type { DeliveryDetail } from '@motoboycity/types';
+import type { AdminOrderReportResult, DeliveryDetail } from '@motoboycity/types';
 import type {
+  AdminOrderReportQuery,
   CreateDeliveryPayload,
   ForceCompletePayload,
   AdminMarkFailedPayload,
@@ -34,6 +35,19 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
   }
 
   return {
+    async report(
+      accessToken: string,
+      filters: Partial<AdminOrderReportQuery> = {},
+    ): Promise<AdminOrderReportResult> {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== '') params.set(key, String(value));
+      }
+      const response = await apiFetch(`${baseUrl}/admin/deliveries/report?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return parseJsonOrThrow<AdminOrderReportResult>(response);
+    },
     async createForCompany(
       accessToken: string,
       companyId: string,

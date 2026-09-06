@@ -11,6 +11,7 @@ import type {
   AdminMarkFailedPayload,
   ManualDeliveryStagePayload,
   ReassignDriverPayload,
+  AdminOrderReportQuery,
 } from '@motoboycity/validation';
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
 import { DispatchService } from '../../dispatch/dispatch.service';
@@ -56,6 +57,10 @@ export class AdminDeliveriesService {
     private readonly pricingService: PricingService,
     private readonly dispatchService: DispatchService,
   ) {}
+
+  report(admin: User, query: AdminOrderReportQuery) {
+    return this.deliveriesService.adminOrderReport(admin, query);
+  }
 
   /**
    * Preco de um pedido cuja distancia so seria conhecida na entrega.

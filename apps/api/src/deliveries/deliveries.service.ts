@@ -22,6 +22,7 @@ import type {
   MarkFailedPayload,
   ReturnToQueuePayload,
   SearchDeliveriesQuery,
+  AdminOrderReportQuery,
 } from '@motoboycity/validation';
 import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type {
@@ -29,6 +30,7 @@ import type {
   DeliveryCompletionErrorCode,
   DeliveryStageTimesResult,
   DeliverySearchResult,
+  AdminOrderReportResult,
   DeliverySummaryResult,
   OperationalDeliveryItem,
   OperationalActivityType,
@@ -55,7 +57,8 @@ import {
 } from './retroactive-marking';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import { dateInSaoPaulo, endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
+import { orderFinancialStatus, orderFinancialWhere } from './order-financial-filter';
 import { deliveryActivityMessage } from '../common/status-labels';
 import { checkBusinessHours } from './business-hours';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
@@ -1117,6 +1120,83 @@ export class DeliveriesService {
       page: filters.page,
       pageSize: filters.pageSize,
       total,
+    };
+  }
+
+  async adminOrderReport(
+    user: User,
+    filters: AdminOrderReportQuery,
+  ): Promise<AdminOrderReportResult> {
+    if (user.type !== 'ADMIN') throw new ForbiddenException('Acesso restrito a administradores.');
+    const today = new Date(`${dateInSaoPaulo(new Date())}T00:00:00.000Z`);
+    const byCompletion = filters.dateField === 'COMPLETED';
+    const base = this.buildDeliveryWhere(
+      {},
+      {
+        ...filters,
+        ...(byCompletion && { from: undefined, to: undefined }),
+      },
+    );
+    // AND preserva busca textual, status e empresa; nenhum filtro pode sobrescrever outro.
+    const where: Prisma.DeliveryWhereInput = {
+      AND: [
+        base,
+        orderFinancialWhere(filters.financialStatus, today),
+        ...(byCompletion
+          ? [
+              {
+                status: 'COMPLETED' as const,
+                statusChangedAt: {
+                  ...(filters.from && { gte: this.startOfDay(filters.from) }),
+                  ...(filters.to && { lte: this.endOfDay(filters.to) }),
+                },
+              },
+            ]
+          : []),
+      ],
+    };
+    const [totals, deliveries] = await this.prisma.$transaction(
+      [
+        this.prisma.delivery.aggregate({
+          where,
+          _count: { _all: true, totalValue: true },
+          _sum: { totalValue: true },
+        }),
+        this.prisma.delivery.findMany({
+          where,
+          orderBy: [{ [byCompletion ? 'statusChangedAt' : 'createdAt']: 'desc' }, { id: 'desc' }],
+          skip: (filters.page - 1) * filters.pageSize,
+          take: filters.pageSize,
+          include: {
+            company: true,
+            serviceType: true,
+            invoice: { select: { id: true, number: true, status: true, dueDate: true } },
+          },
+        }),
+      ],
+      { isolationLevel: 'RepeatableRead' },
+    );
+    return {
+      items: deliveries.map((delivery) => ({
+        ...this.toListItem(delivery),
+        financialStatus: orderFinancialStatus(delivery, today),
+        invoice: delivery.invoice
+          ? {
+              id: delivery.invoice.id,
+              number: delivery.invoice.number,
+              status: delivery.invoice.status,
+            }
+          : null,
+        completedAt:
+          delivery.status === 'COMPLETED' ? delivery.statusChangedAt.toISOString() : null,
+      })),
+      total: totals._count._all,
+      page: filters.page,
+      pageSize: filters.pageSize,
+      summary: {
+        totalValue: Number(totals._sum.totalValue ?? 0),
+        unpricedCount: totals._count._all - totals._count.totalValue,
+      },
     };
   }
 

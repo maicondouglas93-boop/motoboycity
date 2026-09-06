@@ -155,6 +155,15 @@ depender do Google a cada pedido.
 
 ## 5. Onde o dinheiro passa
 
+A consulta de pedidos por situação financeira no ADM usa
+`GET /admin/deliveries/report`, protegida por JWT/`AdminOnlyGuard` e novamente
+por perfil no service. O relatório combina escopo de empresa, intervalo,
+criação/conclusão, status operacional e situação da cobrança com `AND`.
+Agregação decimal de todos os resultados e página limitada são lidas no mesmo
+snapshot `RepeatableRead`, sem carregar o histórico inteiro no navegador.
+Vencimento é comparado como dia civil de São Paulo sem atualizar registros.
+As rotas operacionais e seus consumidores company/mobile permanecem inalterados.
+
 **Todo preço sai de `PricingService.quote()`.** Não existe cálculo de valor fora
 dele — nem em intervenção administrativa, onde o admin informa a *distância* e a
 tabela decide o *preço*.

@@ -36,3 +36,12 @@ export const searchDeliveriesQuerySchema = z
 
 export type DeliveryOperationsQuery = z.infer<typeof deliveryOperationsQuerySchema>;
 export type SearchDeliveriesQuery = z.infer<typeof searchDeliveriesQuerySchema>;
+
+/** Consulta financeira administrativa; não modifica o contrato da busca operacional. */
+export const adminOrderReportQuerySchema = searchDeliveriesQuerySchema.safeExtend({
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  dateField: z.enum(['CREATED', 'COMPLETED']).default('CREATED'),
+  financialStatus: z.enum(['ALL', 'OPEN', 'UNBILLED', 'PENDING', 'OVERDUE', 'PAID']).default('ALL'),
+});
+export type AdminOrderReportQuery = z.infer<typeof adminOrderReportQuerySchema>;

@@ -1,9 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { DeliveryStatus } from '@motoboycity/types';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import type { DeliveryStatus, OrderFinancialStatus } from '@motoboycity/types';
+import type { AdminOrderReportQuery } from '@motoboycity/validation';
+import { adminOrderReportQuerySchema } from '@motoboycity/validation';
 import { Download, ListChecks } from 'lucide-react';
 import { StatusChip, STATUS_OPTIONS } from '@/components/orders/status-chip';
 import { ReportFilterCard } from '@/components/reports/report-filter-card';
@@ -27,37 +30,73 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { adminCompaniesApi, adminDriversApi, deliveriesApi } from '@/lib/api-client';
+import { adminCompaniesApi, adminDriversApi, adminDeliveriesApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { useMoney } from '@/lib/money';
 import { session } from '@/lib/session';
 
-type OrderFilters = {
-  q?: string;
-  status?: DeliveryStatus;
-  companyId?: string;
-  driverId?: string;
-  from?: string;
-  to?: string;
+type OrderFilters = Partial<Omit<AdminOrderReportQuery, 'page' | 'pageSize'>>;
+const FINANCIAL_FILTERS = {
+  ALL: 'Todos',
+  OPEN: 'Em aberto (não pagos)',
+  UNBILLED: 'Sem fatura',
+  PENDING: 'Fatura pendente',
+  OVERDUE: 'Fatura vencida',
+  PAID: 'Pagos',
+} as const;
+const FINANCIAL_LABELS: Record<OrderFinancialStatus, string> = {
+  UNBILLED: 'Em aberto · sem fatura',
+  PENDING: 'Em aberto · fatura pendente',
+  OVERDUE: 'Em aberto · fatura vencida',
+  PAID: 'Pago',
+  CANCELLED: 'Pedido cancelado',
+  NOT_APPLICABLE: 'Fora do faturamento',
+  NOT_READY: 'Aguardando conclusão',
+  INVOICE_CANCELLED: 'Fatura cancelada · conferir',
 };
 
-const dateTime = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+const dateTime = new Intl.DateTimeFormat('pt-BR', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+  timeZone: 'America/Sao_Paulo',
+});
 
 function csvNumber(value: number | null): string {
   return value === null ? '' : String(value).replace('.', ',');
 }
 
 export default function OrdersReportPage() {
+  return (
+    <Suspense fallback={<p>Carregando relatório...</p>}>
+      <OrdersReportRoute />
+    </Suspense>
+  );
+}
+
+function OrdersReportRoute() {
+  const searchParams = useSearchParams();
+  const companyId = searchParams.get('empresa') ?? '';
+  return <OrdersReportContent key={companyId} initialCompanyId={companyId} />;
+}
+
+function OrdersReportContent({ initialCompanyId }: { initialCompanyId: string }) {
   const token = session.getToken();
   const money = useMoney();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<DeliveryStatus | ''>('');
-  const [companyId, setCompanyId] = useState('');
+  const [companyId, setCompanyId] = useState(initialCompanyId);
+  const [financialStatus, setFinancialStatus] =
+    useState<AdminOrderReportQuery['financialStatus']>('ALL');
+  const [dateField, setDateField] = useState<AdminOrderReportQuery['dateField']>('CREATED');
   const [driverId, setDriverId] = useState('');
   const [filterError, setFilterError] = useState<string | null>(null);
-  const [appliedFilters, setAppliedFilters] = useState<OrderFilters>({});
+  const [appliedFilters, setAppliedFilters] = useState<OrderFilters>({
+    ...(initialCompanyId && { companyId: initialCompanyId }),
+    financialStatus: 'ALL',
+    dateField: 'CREATED',
+  });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -72,39 +111,46 @@ export default function OrdersReportPage() {
     enabled: Boolean(token),
   });
   const ordersQuery = useQuery({
-    queryKey: ['admin', 'orders-report', appliedFilters, page, pageSize],
-    queryFn: () => deliveriesApi.search(token as string, { ...appliedFilters, page, pageSize }),
+    queryKey: ['admin', 'financial', 'orders-report', appliedFilters, page, pageSize],
+    queryFn: () =>
+      adminDeliveriesApi.report(token as string, { ...appliedFilters, page, pageSize }),
     enabled: Boolean(token),
-    placeholderData: keepPreviousData,
   });
 
-  const pageSummary = useMemo(() => {
-    const items = ordersQuery.data?.items ?? [];
-    return {
-      pricedValue: items.reduce((sum, delivery) => sum + (delivery.totalValue ?? 0), 0),
-      pendingPrice: items.filter((delivery) => delivery.totalValue === null).length,
-    };
-  }, [ordersQuery.data?.items]);
+  const filtersChanged =
+    (appliedFilters.from ?? '') !== from ||
+    (appliedFilters.to ?? '') !== to ||
+    (appliedFilters.companyId ?? '') !== companyId ||
+    (appliedFilters.driverId ?? '') !== driverId ||
+    (appliedFilters.status ?? '') !== status ||
+    (appliedFilters.q ?? '') !== q.trim() ||
+    appliedFilters.financialStatus !== financialStatus ||
+    appliedFilters.dateField !== dateField;
 
   if (!token) {
     return <p className="text-sm text-muted-foreground">Faça login como administrador.</p>;
   }
 
   function applyFilters() {
-    if (from && to && from > to) {
-      setFilterError('A data inicial não pode ser posterior à data final.');
-      return;
-    }
-    setFilterError(null);
-    setPage(1);
-    setAppliedFilters({
+    const next: OrderFilters = {
       ...(q.trim() && { q: q.trim() }),
       ...(status && { status }),
       ...(companyId && { companyId }),
       ...(driverId && { driverId }),
       ...(from && { from }),
       ...(to && { to }),
-    });
+      financialStatus,
+      dateField,
+    };
+    const parsed = adminOrderReportQuerySchema.safeParse(next);
+    if (!parsed.success) {
+      setFilterError(parsed.error.issues[0]?.message ?? 'Confira os filtros informados.');
+      return;
+    }
+    setFilterError(null);
+    if (!filtersChanged && page === 1) void ordersQuery.refetch();
+    setPage(1);
+    setAppliedFilters(next);
   }
 
   function clearFilters() {
@@ -112,11 +158,17 @@ export default function OrdersReportPage() {
     setTo('');
     setQ('');
     setStatus('');
-    setCompanyId('');
+    setCompanyId(initialCompanyId);
+    setFinancialStatus('ALL');
+    setDateField('CREATED');
     setDriverId('');
     setFilterError(null);
     setPage(1);
-    setAppliedFilters({});
+    setAppliedFilters({
+      ...(initialCompanyId && { companyId: initialCompanyId }),
+      financialStatus: 'ALL',
+      dateField: 'CREATED',
+    });
   }
 
   const result = ordersQuery.data;
@@ -130,7 +182,10 @@ export default function OrdersReportPage() {
         'Empresa',
         'Modalidade',
         'Status',
+        'Situação financeira',
+        'Fatura',
         'Criado em',
+        'Concluído em',
         'Distância (km)',
         'Valor total',
         'Repasse',
@@ -142,7 +197,10 @@ export default function OrdersReportPage() {
         delivery.companyName,
         delivery.serviceTypeName,
         delivery.status,
+        FINANCIAL_LABELS[delivery.financialStatus],
+        delivery.invoice?.number ?? '',
         dateTime.format(new Date(delivery.createdAt)),
+        delivery.completedAt ? dateTime.format(new Date(delivery.completedAt)) : '',
         csvNumber(delivery.distanceKm),
         csvNumber(delivery.totalValue),
         csvNumber(delivery.driverValue),
@@ -157,13 +215,15 @@ export default function OrdersReportPage() {
       <ReportPageHeader
         icon={ListChecks}
         title="Relatório de pedidos"
-        description="Localize pedidos com filtros operacionais, acompanhe o status e navegue por grandes volumes com paginação feita no servidor."
+        description="Consulte pedidos por cliente, período e situação financeira. O valor total considera todos os resultados da busca."
         action={
           <Button
             type="button"
             variant="outline"
             onClick={exportCurrentPage}
-            disabled={orders.length === 0 || ordersQuery.isFetching}
+            disabled={
+              orders.length === 0 || ordersQuery.isFetching || ordersQuery.isError || filtersChanged
+            }
             title="Exporta somente os pedidos visíveis nesta página"
           >
             <Download className="size-4" aria-hidden="true" />
@@ -182,8 +242,36 @@ export default function OrdersReportPage() {
         onClear={clearFilters}
         isFetching={ordersQuery.isFetching}
         error={filterError}
-        description="Datas em branco consultam todo o histórico. A busca aceita o número do pedido, UUID exato ou número externo."
+        applyLabel="Buscar pedidos"
+        description="Escolha cliente, intervalo e situação financeira e clique em Buscar pedidos. Datas inclusivas no horário de Brasília; em branco, todo o histórico."
       >
+        <div className="min-w-44 flex-1 space-y-1.5 sm:max-w-56">
+          <Label htmlFor="orders-report-date-field">Data considerada</Label>
+          <select
+            id="orders-report-date-field"
+            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+            value={dateField}
+            onChange={(e) => setDateField(e.target.value as typeof dateField)}
+          >
+            <option value="CREATED">Criação do pedido</option>
+            <option value="COMPLETED">Conclusão da entrega</option>
+          </select>
+        </div>
+        <div className="min-w-52 flex-1 space-y-1.5 sm:max-w-64">
+          <Label htmlFor="orders-report-financial">Situação financeira</Label>
+          <select
+            id="orders-report-financial"
+            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+            value={financialStatus}
+            onChange={(e) => setFinancialStatus(e.target.value as typeof financialStatus)}
+          >
+            {Object.entries(FINANCIAL_FILTERS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="min-w-52 flex-[1.4] space-y-1.5 sm:max-w-72">
           <Label htmlFor="orders-report-query">Pedido</Label>
           <Input
@@ -195,7 +283,7 @@ export default function OrdersReportPage() {
           />
         </div>
         <div className="min-w-44 flex-1 space-y-1.5 sm:max-w-52">
-          <Label htmlFor="orders-report-status">Status</Label>
+          <Label htmlFor="orders-report-status">Status da entrega</Label>
           <select
             id="orders-report-status"
             className="h-9 w-full rounded-md border bg-background px-3 text-sm"
@@ -246,6 +334,32 @@ export default function OrdersReportPage() {
         </div>
       </ReportFilterCard>
 
+      <p className="text-sm text-muted-foreground">
+        Em aberto = entregas concluídas cobradas por fatura, ainda sem fatura ou com fatura
+        pendente/vencida. Não inclui pedidos cancelados, em andamento ou fora do faturamento.
+        “Conclusão” consulta somente entregas concluídas.
+      </p>
+      {filtersChanged && (
+        <p role="status" className="rounded-xl border border-primary/20 bg-admin-soft p-3 text-sm">
+          Filtros alterados. Clique em Buscar pedidos para atualizar a lista e o total abaixo.
+        </p>
+      )}
+      {(companiesQuery.isError || driversQuery.isError) && (
+        <p role="alert" className="text-sm text-destructive">
+          Não foi possível carregar todos os clientes ou entregadores.{' '}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              void companiesQuery.refetch();
+              void driversQuery.refetch();
+            }}
+          >
+            Tentar novamente
+          </button>
+        </p>
+      )}
+
       <ReportQueryState
         loading={ordersQuery.isLoading}
         error={ordersQuery.isError}
@@ -255,17 +369,18 @@ export default function OrdersReportPage() {
         }}
       />
 
-      {result && !ordersQuery.isError && (
+      {result && !ordersQuery.isError && !filtersChanged && (
         <div className="space-y-5">
-          {ordersQuery.isPlaceholderData && (
-            <p
-              role="status"
-              className="rounded-xl border border-primary/15 bg-admin-soft/40 px-4 py-3 text-sm text-muted-foreground"
-            >
-              Atualizando o recorte. Os dados anteriores permanecem visíveis, mas a exportação e a
-              paginação ficam bloqueadas até a nova consulta terminar.
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            Resultado aplicado:{' '}
+            {companiesQuery.data?.find((company) => company.id === appliedFilters.companyId)
+              ?.tradeName ??
+              (appliedFilters.companyId ? 'Cliente selecionado' : 'Todos os clientes')}{' '}
+            · {FINANCIAL_FILTERS[appliedFilters.financialStatus ?? 'ALL']} ·{' '}
+            {appliedFilters.dateField === 'COMPLETED' ? 'Conclusão' : 'Criação'}:{' '}
+            {appliedFilters.from?.split('-').reverse().join('/') || 'início do histórico'} até{' '}
+            {appliedFilters.to?.split('-').reverse().join('/') || 'fim do histórico'}.
+          </p>
           <section className="grid gap-4 sm:grid-cols-3">
             <StatCard
               label="Pedidos encontrados"
@@ -273,14 +388,14 @@ export default function OrdersReportPage() {
               hint="Total no filtro, considerando todas as páginas."
             />
             <StatCard
-              label="Valor conhecido nesta página"
-              value={money(pageSummary.pricedValue)}
-              hint="Não representa as demais páginas."
+              label="Valor total dos pedidos no filtro"
+              value={money(result.summary.totalValue)}
+              hint="Valores conhecidos de todas as páginas. Em Todos, inclui cancelados e não representa saldo a cobrar."
             />
             <StatCard
-              label="Aguardando cálculo nesta página"
-              value={pageSummary.pendingPrice}
-              hint="Pedidos cujo valor ainda depende do destino ou da conclusão."
+              label="Aguardando cálculo no filtro"
+              value={result.summary.unpricedCount}
+              hint="De todas as páginas; não entram no total até terem valor definido."
             />
           </section>
 
@@ -305,8 +420,10 @@ export default function OrdersReportPage() {
                         <TableRow>
                           <TableHead>Pedido</TableHead>
                           <TableHead>Cliente e modalidade</TableHead>
-                          <TableHead>Status</TableHead>
+                          <TableHead>Status da entrega</TableHead>
+                          <TableHead>Situação financeira</TableHead>
                           <TableHead>Criado em</TableHead>
+                          <TableHead>Concluído em</TableHead>
                           <TableHead className="text-right">Distância</TableHead>
                           <TableHead className="text-right">Valor</TableHead>
                           <TableHead className="text-right">Repasse</TableHead>
@@ -342,8 +459,24 @@ export default function OrdersReportPage() {
                             <TableCell>
                               <StatusChip status={delivery.status} />
                             </TableCell>
+                            <TableCell>
+                              <span>{FINANCIAL_LABELS[delivery.financialStatus]}</span>
+                              {delivery.invoice && (
+                                <Link
+                                  href={`/faturas/${delivery.invoice.id}`}
+                                  className="block text-xs text-primary underline"
+                                >
+                                  {delivery.invoice.number}
+                                </Link>
+                              )}
+                            </TableCell>
                             <TableCell className="whitespace-nowrap text-xs tabular-nums">
                               {dateTime.format(new Date(delivery.createdAt))}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs tabular-nums">
+                              {delivery.completedAt
+                                ? dateTime.format(new Date(delivery.completedAt))
+                                : '—'}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
                               {delivery.distanceKm === null

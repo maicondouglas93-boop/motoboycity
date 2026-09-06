@@ -12248,3 +12248,120 @@ usada no smoke não está nesses assets. A checagem pública não autentica nem
 consulta faturas reais. O CI geral do monorepo ainda estava em andamento na
 confirmação do deploy do ADM; não foi declarado aprovado. Nenhum APK ou comando
 manual de migration foi executado.
+
+## 2026-09-06 — Filtros e seleção de pedidos na fatura personalizada do ADM
+
+A pedido do responsável, a janela de fatura personalizada ganhou busca por
+número exato de pedido (um ou vários separados por vírgula), número externo
+parcial sem diferença entre maiúsculas/minúsculas, período inclusivo de
+conclusão no fuso `America/Sao_Paulo`, atalhos hoje/ontem/últimos 7 dias/este
+mês/mês anterior, modalidade, faixa de valor e selecionados/não selecionados.
+Os filtros são combinados; múltiplos números são alternativas dentro da busca.
+Ordenação por conclusão, número ou valor, paginação e somatórios em centavos
+completam a lista. Os valores respeitam a máscara financeira do painel.
+Os campos avançados ficam recolhidos em “Mais filtros”, indicando quantos estão
+ativos, para não ocupar toda a janela no uso de número/período.
+
+Selecionar/desmarcar resultados considera todas as páginas do filtro atual e
+preserva seleções fora dele, informando que estas também entram na prévia.
+“Ver seleção completa” limpa outros filtros; “Limpar seleção” é independente
+de limpar filtros. O limite de 500 já existente no contrato é conferido antes
+de alterar a seleção, sem truncar silenciosamente. Intervalos inválidos não
+retornam todos os pedidos por engano. Atualização da lista invalida a prévia e
+pedidos selecionados que saíram da elegibilidade bloqueiam a prévia até serem
+removidos. Troca de empresa e fechamento limpam o estado; campos/fechamento
+ficam bloqueados durante prévia/emissão para não trocar seu payload em voo.
+
+Arquivos: `apps/admin-web/src/components/finance/manual-invoice-dialog.tsx`,
+novo `manual-invoice-order-picker.tsx` na mesma pasta,
+`apps/admin-web/src/lib/manual-invoice-filters.ts`,
+`apps/admin-web/test/manual-invoice-filters.test.mjs` e handoff.
+
+Validação:
+
+- Typecheck, lint e build do Admin Web aprovados.
+- `pnpm --filter @motoboycity/admin-web test`: 26 testes aprovados, incluindo
+  9 novos para limites de datas/fuso, busca, filtros combinados, atalhos,
+  intervalos inválidos, ordenação sem mutar cache, seleção preservada e teto.
+- Navegador local com API de fixtures e sessão fictícia: busca por múltiplos
+  pedidos e externo, 13 pedidos em duas páginas, atalho mês anterior combinado
+  com modalidade/valor, intervalo monetário inválido, seleção individual e
+  de todas as páginas, seleção oculta preservada e 3 IDs exatos enviados à
+  prévia. Simulada a saída de um candidato: prévia bloqueada, remoção explícita
+  e recuperação verificadas. Troca para empresa sem pedidos e reabertura do
+  diálogo limparam a seleção. Screenshots revisadas; nenhum botão de emissão
+  foi acionado. Serviços temporários encerrados e fixture temporária removida.
+- `git diff --check`: aprovado. Avisos existentes de tipagem de módulo nos
+  testes Node não causaram falhas.
+
+Sem API, contrato, schema, migration, APK, commit, push ou deploy. O endpoint
+existente ainda retorna a lista integral de pedidos elegíveis da empresa;
+filtros e paginação são locais, sem requisições adicionais a cada interação.
+O servidor preserva o critério COMPLETED/BILLED/sem fatura e a revalidação
+atômica na emissão. Smoke visual com dados simulados, sem consultar banco ou
+alterar qualquer fatura real. O próximo passo de publicação depende de pedido
+explícito do responsável.
+
+## 2026-09-06 — Consulta de pedidos por cliente, período e situação financeira
+
+O responsável esclareceu que “em aberto” significa **não pagos**, e não
+pedidos em andamento. A consulta foi separada da criação de fatura, que deve
+continuar restrita a pedidos elegíveis ainda não faturados. Em
+`/relatorios/pedidos`, o ADM escolhe cliente, intervalo inclusivo (criação ou
+conclusão), situação financeira, status da entrega, entregador e busca; clica
+em “Buscar pedidos” e recebe lista paginada com valor total de **todos** os
+resultados. O detalhe do cliente recebeu atalho com empresa pré-selecionada.
+
+Situação financeira: todos, em aberto (concluídos `BILLED` sem fatura ou com
+fatura pendente/vencida), sem fatura, pendente, vencida e pagos. Pagamento do
+destinatário não se confunde com quitação da empresa. Cancelados, em andamento
+e `ONLINE` não são classificados como dívida em aberto. “Todos” mantém outros
+estados consultáveis e informa que a soma dos preços não representa saldo
+devedor. Valores nulos são contados à parte, não inventados. A listagem mostra
+situação financeira, fatura vinculada e data de conclusão, além dos campos
+operacionais. Exportação continua restrita à página, claramente identificada.
+
+Novo `GET /admin/deliveries/report`, JWT + AdminOnlyGuard e verificação de perfil
+no service, com schema/tipo/client compartilhados aditivos. Não modifica o
+contrato de `/deliveries/search` nem o tráfego das telas operacionais/mobile.
+Reutiliza a montagem da busca existente e combina filtros por `AND`, impedindo
+que status financeiro sobrescreva status operacional ou o `OR` de busca textual.
+`aggregate` e página limitada são lidos juntos em snapshot `RepeatableRead`;
+somatório usa decimal do banco e não a soma da página. Vencimento compara dia
+civil vigente em São Paulo e reconhece pendente já vencida sem executar writes.
+Os filtros validam datas reais e intervalo. Campo alterado oculta resultados
+anteriores até aplicar; erro não apresenta resumo zerado. Cache financeiro é
+invalidado pelos fluxos existentes de fatura.
+
+Arquivos: controller/service `admin/deliveries`, método somente leitura em
+`deliveries.service.ts`, helper/spec `order-financial-filter`, specs de service,
+schema `delivery-operations-query.schema.ts`, tipos `delivery.ts`, api-client
+`admin-deliveries.ts`, página do relatório e atalho em clientes, texto opcional
+do botão em `ReportFilterCard`, regras de negócio, arquitetura e handoff.
+
+Validação:
+
+- `pnpm --filter @motoboycity/validation build` e `pnpm typecheck`: aprovados
+  em todos os workspaces.
+- `pnpm lint`: aprovado, mantendo warning anterior `no-void` no apiClient mobile.
+- Jest focado `order-financial-filter.spec.ts deliveries.service.spec.ts
+  delivery-operational-validation.spec.ts`: 4 suites / 181 testes aprovados,
+  incluindo service administrativo por correspondência do nome. Novos casos
+  cobrem autorização, schema, dívida/online/cancelados, vencimento, datas/fuso,
+  filtros combinados sem sobrescrita, total fora da página, nulos e snapshot.
+- 26 testes ADM e builds da API/ADM aprovados.
+- Navegador com sessão/API fictícias em localhost: cliente pré-selecionado,
+  intervalo + OPEN no payload, 26 resultados e R$ 351,00 mesmo com página de
+  25 itens; página 2 preserva o total; pagos somam R$ 145,00; escolha de
+  conclusão envia `dateField=COMPLETED`; data invertida bloqueia envio; limpar
+  preserva cliente de origem; cliente sem pedidos mostra vazio; falha HTTP 503
+  mostra erro/retentativa e oculta os totais. Screenshot revisada. Serviços e
+  aba de smoke encerrados, fixture temporária removida. Sem consultar ou alterar
+  pedidos, faturas ou pagamentos reais.
+- `git diff --check`: aprovado. E2E com PostgreSQL não executado por ausência
+  de ambiente isolado confirmado; mocks e fixtures não comprovam performance
+  ou concorrência com banco real.
+
+Sem schema Prisma, migration, seed, APK, commit, push ou deploy. Publicação
+posterior exige API com a rota nova disponível antes do Admin Web. Alterações
+locais anteriores da fatura personalizada foram preservadas.

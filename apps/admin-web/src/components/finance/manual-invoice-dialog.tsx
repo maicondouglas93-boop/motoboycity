@@ -8,7 +8,7 @@ import type { ManualInvoicePayload } from '@motoboycity/validation';
 import { Building2, CalendarDays, FilePlus2, ReceiptText } from 'lucide-react';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { ManualInvoiceOrderPicker } from '@/components/finance/manual-invoice-order-picker';
 import {
   Dialog,
   DialogBody,
@@ -31,7 +31,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { adminCompaniesApi, adminInvoicesApi } from '@/lib/api-client';
-import { formatarDataHora, formatarNumero } from '@/lib/dinheiro';
+import { formatarNumero } from '@/lib/dinheiro';
+import { MANUAL_INVOICE_SELECTION_LIMIT } from '@/lib/manual-invoice-filters';
 import { useMoney } from '@/lib/money';
 
 function hojeNaOperacao(): string {
@@ -142,32 +143,32 @@ export function ManualInvoiceDialog({
     setError(null);
   }
 
-  function toggleDelivery(id: string, checked: boolean) {
-    setDeliveryIds((current) =>
-      checked ? [...current, id] : current.filter((deliveryId) => deliveryId !== id),
-    );
+  function changeSelection(ids: string[]) {
+    setDeliveryIds(ids);
     setPreview(null);
     setError(null);
   }
 
-  function toggleAll() {
-    setDeliveryIds(
-      deliveryIds.length === candidates.length ? [] : candidates.map((candidate) => candidate.id),
-    );
-    setPreview(null);
-    setError(null);
-  }
-
-  const allSelected = candidates.length > 0 && deliveryIds.length === candidates.length;
+  const candidateIds = new Set(candidates.map((candidate) => candidate.id));
   const canPreview =
-    Boolean(companyId) && deliveryIds.length > 0 && Boolean(issueDate) && Boolean(dueDate);
+    Boolean(companyId) &&
+    deliveryIds.length > 0 &&
+    deliveryIds.length <= MANUAL_INVOICE_SELECTION_LIMIT &&
+    candidatesQuery.isSuccess &&
+    !candidatesQuery.isFetching &&
+    deliveryIds.every((id) => candidateIds.has(id)) &&
+    Boolean(issueDate) &&
+    Boolean(dueDate) &&
+    issueDate <= today &&
+    dueDate >= issueDate;
   const busy = previewMutation.isPending || createMutation.isPending;
 
   return (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && !busy) reset();
+        if (busy) return;
+        if (!nextOpen) reset();
         setOpen(nextOpen);
       }}
     >
@@ -198,7 +199,7 @@ export function ManualInvoiceDialog({
                 items={companyLabels}
                 value={companyId}
                 onValueChange={changeCompany}
-                disabled={companiesQuery.isLoading || companiesQuery.isError}
+                disabled={busy || companiesQuery.isLoading || companiesQuery.isError}
               >
                 <SelectTrigger id="manual-invoice-company" className="w-full bg-card">
                   <SelectValue placeholder="Selecione a empresa" />
@@ -219,6 +220,7 @@ export function ManualInvoiceDialog({
               <Input
                 id="manual-invoice-issue-date"
                 type="date"
+                disabled={busy}
                 className="bg-card"
                 max={today}
                 value={issueDate}
@@ -230,6 +232,7 @@ export function ManualInvoiceDialog({
               <Input
                 id="manual-invoice-due-date"
                 type="date"
+                disabled={busy}
                 className="bg-card"
                 min={issueDate}
                 value={dueDate}
@@ -264,87 +267,27 @@ export function ManualInvoiceDialog({
           </div>
 
           {companyId && (
-            <section className="overflow-hidden rounded-2xl border border-border/80">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/35 px-4 py-3">
-                <div>
-                  <p className="font-medium">Pedidos disponíveis</p>
-                  <p className="text-xs text-muted-foreground">
-                    Somente concluídos, cobrados por fatura e ainda não faturados.
-                  </p>
-                </div>
-                {candidates.length > 0 && (
-                  <Button type="button" size="sm" variant="outline" onClick={toggleAll}>
-                    {allSelected ? 'Limpar selecao' : 'Selecionar todos'}
-                  </Button>
-                )}
-              </div>
-
-              {candidatesQuery.isLoading ? (
-                <div className="p-4">
-                  <QueryState compact kind="loading" title="Carregando pedidos faturáveis" />
-                </div>
-              ) : candidatesQuery.isError ? (
-                <div className="p-4">
-                  <QueryState
-                    compact
-                    kind="error"
-                    title="Não foi possível carregar os pedidos faturáveis"
-                    description="A lista não será mostrada como vazia enquanto a consulta estiver indisponível."
-                    onAction={() => void candidatesQuery.refetch()}
-                  />
-                </div>
-              ) : candidates.length === 0 ? (
-                <div className="p-4">
-                  <QueryState
-                    compact
-                    kind="empty"
-                    title="Nenhum pedido aguardando fatura"
-                    description="Esta empresa não possui entrega concluída e ainda não faturada."
-                  />
-                </div>
-              ) : (
-                <div className="max-h-72 divide-y divide-border overflow-y-auto">
-                  {candidates.map((candidate) => (
-                    <label
-                      key={candidate.id}
-                      className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-primary/5"
-                    >
-                      <Checkbox
-                        checked={deliveryIds.includes(candidate.id)}
-                        onCheckedChange={(checked) =>
-                          toggleDelivery(candidate.id, checked === true)
-                        }
-                        aria-label={`Selecionar pedido ${candidate.displayNumber}`}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <strong>Pedido #{candidate.displayNumber}</strong>
-                          <span className="text-xs text-muted-foreground">
-                            {candidate.serviceTypeName}
-                          </span>
-                          {candidate.externalOrderNumber && (
-                            <span className="text-xs text-muted-foreground">
-                              Externo {candidate.externalOrderNumber}
-                            </span>
-                          )}
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Concluído em {formatarDataHora(candidate.completedAt)}
-                        </span>
-                      </span>
-                      <span className="text-right">
-                        <strong className="block font-mono tabular-nums">
-                          {money(candidate.totalValue)}
-                        </strong>
-                        <span className="text-xs text-muted-foreground">
-                          repasse {money(candidate.driverValue)}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </section>
+            <ManualInvoiceOrderPicker
+              key={companyId}
+              candidates={candidates}
+              selectedIds={deliveryIds}
+              onSelectionChange={changeSelection}
+              loading={candidatesQuery.isLoading}
+              error={
+                candidatesQuery.isError
+                  ? explain(
+                      candidatesQuery.error,
+                      'Não foi possível consultar os pedidos. Tente novamente.',
+                    )
+                  : null
+              }
+              refreshing={candidatesQuery.isFetching}
+              disabled={busy}
+              onRefresh={() => {
+                setPreview(null);
+                void candidatesQuery.refetch();
+              }}
+            />
           )}
 
           {deliveryIds.length > 0 && !preview && (
@@ -374,8 +317,9 @@ export function ManualInvoiceDialog({
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                {formatarNumero(preview.deliveryCount)} pedido(s). A emissão será refeita de forma
-                atômica; se outro fechamento usar um deles antes, o sistema cancela toda a ação.
+                {formatarNumero(preview.deliveryCount)} pedido(s) selecionado(s), incluindo os que
+                estão fora do filtro. Se algum já tiver sido faturado ao confirmar, a emissão não
+                será realizada e você poderá revisar a seleção.
               </p>
             </section>
           )}
@@ -392,13 +336,21 @@ export function ManualInvoiceDialog({
         </DialogBody>
 
         <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-          <Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              reset();
+              setOpen(false);
+            }}
+          >
             Voltar
           </Button>
           {preview ? (
             <Button
               type="button"
-              disabled={createMutation.isPending}
+              disabled={busy || !canPreview}
               onClick={() => createMutation.mutate()}
             >
               <PendingButtonLabel

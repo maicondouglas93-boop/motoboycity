@@ -1080,6 +1080,121 @@ describe('DeliveriesService', () => {
     });
   });
 
+  describe('adminOrderReport', () => {
+    beforeEach(() => {
+      prisma.$transaction.mockImplementation(async (input: unknown[]) => Promise.all(input));
+      prisma.delivery.findMany.mockResolvedValue([]);
+      prisma.delivery.aggregate.mockResolvedValue({
+        _count: { _all: 0, totalValue: 0 },
+        _sum: { totalValue: null },
+      });
+    });
+
+    it.each([companyUser, driverUser])(
+      'recusa perfil $type antes de consultar o banco',
+      async (user) => {
+        await expect(
+          service.adminOrderReport(user, {
+            page: 1,
+            pageSize: 25,
+            financialStatus: 'ALL',
+            dateField: 'CREATED',
+          }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(prisma.delivery.aggregate).not.toHaveBeenCalled();
+        expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('soma todas as páginas no banco e usa o MESMO where e snapshot para valores e lista', async () => {
+      prisma.delivery.aggregate.mockResolvedValue({
+        _count: { _all: 51, totalValue: 49 },
+        _sum: { totalValue: { toString: () => '1234.56' } },
+      });
+      prisma.delivery.findMany.mockResolvedValue([
+        fullDeliveryRow({ status: 'COMPLETED', invoice: null }),
+      ]);
+      const result = await service.adminOrderReport(adminUser, {
+        page: 2,
+        pageSize: 25,
+        financialStatus: 'OPEN',
+        dateField: 'CREATED',
+        companyId: 'company-1',
+        q: '12',
+        from: '2026-09-01',
+        to: '2026-09-06',
+      });
+      const where = prisma.delivery.aggregate.mock.calls[0][0].where;
+      expect(where.AND[0]).toMatchObject({
+        companyId: 'company-1',
+        createdAt: {
+          gte: new Date('2026-09-01T03:00:00Z'),
+          lte: new Date('2026-09-07T02:59:59.999Z'),
+        },
+        OR: expect.any(Array),
+      });
+      expect(where.AND[1]).toMatchObject({
+        status: 'COMPLETED',
+        paymentMethod: 'BILLED',
+        OR: expect.any(Array),
+      });
+      expect(prisma.delivery.findMany.mock.calls[0][0]).toMatchObject({
+        where,
+        skip: 25,
+        take: 25,
+      });
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array), {
+        isolationLevel: 'RepeatableRead',
+      });
+      expect(result.total).toBe(51);
+      expect(result.summary).toEqual({ totalValue: 1234.56, unpricedCount: 2 });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({
+        financialStatus: 'UNBILLED',
+        invoice: null,
+        completedAt: '2026-01-01T00:00:00.000Z',
+      });
+    });
+
+    it('conclusão usa statusChangedAt e não sobrescreve status incompatível escolhido', async () => {
+      await service.adminOrderReport(adminUser, {
+        page: 1,
+        pageSize: 25,
+        financialStatus: 'OPEN',
+        dateField: 'COMPLETED',
+        status: 'CANCELLED',
+        from: '2026-09-01',
+        to: '2026-09-01',
+      });
+      const where = prisma.delivery.aggregate.mock.calls[0][0].where;
+      expect(where.AND[0]).toEqual({ status: 'CANCELLED' });
+      expect(where.AND[2]).toEqual({
+        status: 'COMPLETED',
+        statusChangedAt: {
+          gte: new Date('2026-09-01T03:00:00Z'),
+          lte: new Date('2026-09-02T02:59:59.999Z'),
+        },
+      });
+    });
+
+    it('todos preserva a consulta operacional e lista vazia tem total zero explícito', async () => {
+      const result = await service.adminOrderReport(adminUser, {
+        page: 1,
+        pageSize: 25,
+        financialStatus: 'ALL',
+        dateField: 'CREATED',
+      });
+      expect(prisma.delivery.aggregate.mock.calls[0][0].where).toEqual({ AND: [{}, {}] });
+      expect(result).toEqual({
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        summary: { totalValue: 0, unpricedCount: 0 },
+      });
+    });
+  });
+
   describe('summary', () => {
     beforeEach(() => {
       prisma.$transaction.mockImplementation(async (input: unknown) =>

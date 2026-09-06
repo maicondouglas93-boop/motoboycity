@@ -144,6 +144,31 @@ export interface DeliverySearchResult {
   total: number;
 }
 
+export type OrderFinancialStatus =
+  | 'UNBILLED'
+  | 'PENDING'
+  | 'OVERDUE'
+  | 'PAID'
+  | 'CANCELLED'
+  | 'NOT_APPLICABLE'
+  | 'NOT_READY'
+  | 'INVOICE_CANCELLED';
+
+export interface AdminOrderReportResult {
+  items: Array<
+    DeliveryListItem & {
+      invoice: DeliveryDetail['invoice'];
+      financialStatus: OrderFinancialStatus;
+      completedAt: string | null;
+    }
+  >;
+  page: number;
+  pageSize: number;
+  total: number;
+  /** Agregação de TODOS os resultados, não apenas da página retornada. */
+  summary: { totalValue: number; unpricedCount: number };
+}
+
 /** Agregados calculados no banco, sem transferir todo o historico ao cliente. */
 export interface DeliverySummaryResult {
   totalCount: number;

@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-04**, depois de publicar a resposta mais rápida da
-> coleta e gerar o APK oficial `pilot.22`.
+> Última revisão: **2026-09-06**, depois de publicar o histórico de faturas por
+> cliente e implementar localmente filtros da fatura personalizada e consulta
+> de pedidos por situação financeira no ADM.
 
 ## Como atualizar
 
@@ -145,7 +146,44 @@ domínio oficial. O bundle publicado não contém a URL da API fictícia do smok
 O teste autenticado do fluxo permanece o smoke local com fixtures; não houve
 consulta a faturas reais nesta publicação.
 
+### Filtros da fatura personalizada — local, sem publicação (2026-09-06)
+
+A janela em Financeiro → Faturas permite buscar número exato do pedido
+(inclusive vários separados por vírgula), número externo parcial, período
+inclusivo de conclusão em São Paulo, atalhos de período, modalidade, valores
+mínimo/máximo e selecionados/não selecionados. Há ordenação por conclusão,
+número ou valor, paginação local e resumo de quantidade/valor nos resultados.
+Modalidade, valores e seleção ficam em “Mais filtros”, com contador de ativos.
+
+“Selecionar resultados” atua em todas as páginas do filtro, preservando os
+selecionados fora dele e exibindo aviso explícito de que também entrarão na
+prévia. O teto existente de 500 é respeitado sem seleção parcial. Atualizar a
+lista invalida a prévia; selecionados que deixaram de estar disponíveis precisam
+ser removidos antes de prosseguir. Trocar empresa ou fechar limpa a seleção.
+Prévia/emissão mantêm a revalidação de elegibilidade e valores no servidor.
+
+Nenhuma rota, contrato ou regra financeira mudou. A API ainda retorna todos os
+candidatos elegíveis da empresa: os novos filtros não reduzem essa primeira
+consulta e não fazem requisições ao digitar. Typecheck, lint, build, 26 testes
+e smoke no navegador com API de fixtures local aprovados. Nenhuma fatura real
+foi emitida, nem houve commit/push/deploy deste recorte.
+
 ### Demais fluxos
+
+**Relatório de pedidos por situação financeira — local (2026-09-06):**
+`/relatorios/pedidos` permite cliente, intervalo inclusivo de criação/conclusão,
+situação financeira (todos/em aberto/sem fatura/pendente/vencida/pagos), status
+da entrega, busca e entregador. O detalhe do cliente tem “Consultar pedidos e
+valores” com empresa pré-selecionada. Clique em “Buscar pedidos” aplica os
+filtros; mudar campos oculta o resultado anterior até buscar. Total e quantidade
+sem preço abrangem todas as páginas, calculados na API por
+`GET /admin/deliveries/report`. “Em aberto” só considera concluídos `BILLED`
+sem fatura ou com fatura pendente/vencida; “Todos” não significa saldo devedor.
+Datas e vencimento usam São Paulo; nenhuma consulta quita ou altera fatura.
+Endpoint novo somente admin, contratos aditivos, busca operacional preservada,
+sem migration. Typecheck/lint raiz, 181 testes focados da API, 26 testes ADM,
+builds API/ADM e smoke local com fixtures aprovados. O lint mantém um warning
+anterior no mobile (`no-void`). Não homologado contra banco real; sem deploy.
 
 Autenticação e os três perfis; aprovação de empresas e entregadores; regiões,
 modalidades e tabelas de preço; criação de pedido individual e em lote, imediato
@@ -382,8 +420,12 @@ variáveis do processo são limpos ao final do build.
 ## Estado do worktree
 
 Histórico de faturas por cliente consolidado e enviado em `6b8c918`, incluindo
-testes e documentação. Este registro de publicação é a única atualização
-documental posterior. Nenhuma alteração funcional ficou pendente no worktree.
+testes e documentação; publicação registrada em `579bc98`. Os filtros da fatura
+personalizada e o relatório de pedidos por situação financeira estão locais,
+sem commit/push: UI, endpoint administrativo, contratos, testes e documentação.
+Para publicar o relatório, API nova deve estar disponível antes do painel.
+Não incluir mudanças de outras
+sessões em eventual publicação deste recorte.
 O APK permanece `pilot.22` (`8255734`), com registro de release em `969994b`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados

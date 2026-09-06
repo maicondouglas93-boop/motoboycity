@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Query, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import type { AdminOrderReportResult } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import {
   forceCompleteSchema,
@@ -6,6 +7,8 @@ import {
   adminMarkFailedSchema,
   manualDeliveryStageSchema,
   reassignDriverSchema,
+  adminOrderReportQuerySchema,
+  type AdminOrderReportQuery,
   type CreateDeliveryPayload,
   type ForceCompletePayload,
   type AdminMarkFailedPayload,
@@ -28,6 +31,14 @@ import { AdminDeliveriesService } from './admin-deliveries.service';
 @UseGuards(JwtAuthGuard, AdminOnlyGuard)
 export class AdminDeliveriesController {
   constructor(private readonly adminDeliveriesService: AdminDeliveriesService) {}
+
+  @Get('report')
+  report(
+    @Query(new ZodValidationPipe(adminOrderReportQuerySchema)) query: AdminOrderReportQuery,
+    @CurrentUser() user: User,
+  ): Promise<AdminOrderReportResult> {
+    return this.adminDeliveriesService.report(user, query);
+  }
 
   @Post('company/:companyId')
   createForCompany(
