@@ -28,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | coleta rápida em `476813d` e versão `pilot.22` em `8255734`, enviados para `main` em 04/09/2026; o push acionou o deploy automático e a API respondeu `health=ok` e `ready=ready` |
+| Commit publicado | ADM: histórico de faturas por cliente em `6b8c918`, enviado para `main` em 06/09/2026, deploy Vercel concluído e rota/bundle públicos confirmados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -127,7 +127,7 @@ chegar a nenhum aparelho.
 
 ## Fluxos implementados
 
-### Histórico de faturas por cliente no ADM — alteração local (2026-09-06)
+### Histórico de faturas por cliente no ADM — publicado (2026-09-06)
 
 `/clientes/[id]/faturas` reúne as faturas de uma única empresa, com acesso pelo
 card e detalhe do cliente, pelo nome da empresa em Financeiro e pelo detalhe de
@@ -139,7 +139,11 @@ Canceladas permanecem consultáveis, fora dos valores faturados e a receber.
 Filtros e paginação são locais sobre a lista daquela empresa; não disparam
 consultas adicionais. O cache usa o prefixo financeiro já invalidado pelas
 mutações de fatura. Há atualização manual e reconciliação em foco/reconexão.
-Implementação ainda sem commit, push ou deploy.
+Publicado em `6b8c918`: check `Vercel – motoboycity-admin-web` concluído com
+`success`, nova rota HTTP `200` e código do histórico confirmado nos assets do
+domínio oficial. O bundle publicado não contém a URL da API fictícia do smoke.
+O teste autenticado do fluxo permanece o smoke local com fixtures; não houve
+consulta a faturas reais nesta publicação.
 
 ### Demais fluxos
 
@@ -377,10 +381,10 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Contém a implementação local do histórico de faturas por cliente no Admin Web
-e seus testes/documentação (2026-09-06), ainda sem commit. A última publicação
-continua sendo a coleta rápida (`476813d`) e o APK `pilot.22` (`8255734`), com
-registro de release em `969994b`.
+Histórico de faturas por cliente consolidado e enviado em `6b8c918`, incluindo
+testes e documentação. Este registro de publicação é a única atualização
+documental posterior. Nenhuma alteração funcional ficou pendente no worktree.
+O APK permanece `pilot.22` (`8255734`), com registro de release em `969994b`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

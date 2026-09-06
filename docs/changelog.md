@@ -12230,3 +12230,21 @@ continua no navegador sobre a lista integral de faturas da empresa, conforme
 o contrato atual; não é paginação no servidor. O teste visual utilizou dados
 simulados, não homologou credenciais ou pagamentos reais. Alteração local,
 ainda sem commit/push.
+
+## 2026-09-06 — Publicação do histórico de faturas no ADM
+
+Mediante autorização explícita, os dez arquivos do recorte foram revisados,
+verificados por `git diff --cached --check` e varredura de padrões de segredos,
+consolidados em `6b8c918` (`feat(admin): add invoice history per client`) e
+enviados para `origin/main`, acionando os deploys automáticos do monorepo.
+Foram preservados os resultados já obtidos: 17 testes, typecheck, lint, build
+do ADM e smoke visual local aprovados; não houve nova mudança funcional.
+
+O status GitHub `Vercel – motoboycity-admin-web` confirmou `success` /
+`Deployment has completed`. No domínio `motoboycity-admin-web.vercel.app`, a
+nova rota respondeu HTTP `200` e os assets retornados contêm `company-history`
+e `Resumo no filtro`, confirmando a publicação do recurso. A URL da API fictícia
+usada no smoke não está nesses assets. A checagem pública não autentica nem
+consulta faturas reais. O CI geral do monorepo ainda estava em andamento na
+confirmação do deploy do ADM; não foi declarado aprovado. Nenhum APK ou comando
+manual de migration foi executado.
