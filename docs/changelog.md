@@ -12362,6 +12362,20 @@ Validação:
   de ambiente isolado confirmado; mocks e fixtures não comprovam performance
   ou concorrência com banco real.
 
-Sem schema Prisma, migration, seed, APK, commit, push ou deploy. Publicação
-posterior exige API com a rota nova disponível antes do Admin Web. Alterações
-locais anteriores da fatura personalizada foram preservadas.
+Sem schema Prisma, migration, seed ou APK. Alterações locais anteriores da
+fatura personalizada foram preservadas.
+
+## 2026-09-06 — Publicação dos filtros de fatura e relatório financeiro do ADM
+
+Os dois recortes foram revisados sem alterações adicionais, consolidados em
+`583f67b` (`feat(admin): add invoice and financial order filters`) e enviados
+para `main`. Não houve migration, seed, APK, consulta autenticada nem escrita em
+pedido, fatura ou pagamento real.
+
+As três publicações automáticas confirmaram `success`: Render da API no commit
+`583f67b`, Vercel do Admin Web e Vercel do Company Web. Sem credencial, o novo
+`GET /admin/deliveries/report` respondeu `401`; isso confirma que o controller
+novo está ativo e preserva a exigência de sessão administrativa. O painel do
+ADM respondeu HTTP `200`. A CI geral do monorepo permanecia em execução no
+momento da confirmação dos deploys, portanto não foi declarada aprovada por
+antecipação.

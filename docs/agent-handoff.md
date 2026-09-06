@@ -9,8 +9,8 @@
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
 > Última revisão: **2026-09-06**, depois de publicar o histórico de faturas por
-> cliente e implementar localmente filtros da fatura personalizada e consulta
-> de pedidos por situação financeira no ADM.
+> cliente, os filtros da fatura personalizada e a consulta de pedidos por
+> situação financeira no ADM.
 
 ## Como atualizar
 
@@ -29,7 +29,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | ADM: histórico de faturas por cliente em `6b8c918`, enviado para `main` em 06/09/2026, deploy Vercel concluído e rota/bundle públicos confirmados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
+| Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
@@ -146,7 +146,7 @@ domínio oficial. O bundle publicado não contém a URL da API fictícia do smok
 O teste autenticado do fluxo permanece o smoke local com fixtures; não houve
 consulta a faturas reais nesta publicação.
 
-### Filtros da fatura personalizada — local, sem publicação (2026-09-06)
+### Filtros da fatura personalizada — publicado (2026-09-06)
 
 A janela em Financeiro → Faturas permite buscar número exato do pedido
 (inclusive vários separados por vírgula), número externo parcial, período
@@ -166,11 +166,12 @@ Nenhuma rota, contrato ou regra financeira mudou. A API ainda retorna todos os
 candidatos elegíveis da empresa: os novos filtros não reduzem essa primeira
 consulta e não fazem requisições ao digitar. Typecheck, lint, build, 26 testes
 e smoke no navegador com API de fixtures local aprovados. Nenhuma fatura real
-foi emitida, nem houve commit/push/deploy deste recorte.
+foi emitida. O recorte foi publicado em `583f67b`; o deploy do Admin Web na
+Vercel concluiu com sucesso.
 
 ### Demais fluxos
 
-**Relatório de pedidos por situação financeira — local (2026-09-06):**
+**Relatório de pedidos por situação financeira — publicado (2026-09-06):**
 `/relatorios/pedidos` permite cliente, intervalo inclusivo de criação/conclusão,
 situação financeira (todos/em aberto/sem fatura/pendente/vencida/pagos), status
 da entrega, busca e entregador. O detalhe do cliente tem “Consultar pedidos e
@@ -183,7 +184,10 @@ Datas e vencimento usam São Paulo; nenhuma consulta quita ou altera fatura.
 Endpoint novo somente admin, contratos aditivos, busca operacional preservada,
 sem migration. Typecheck/lint raiz, 181 testes focados da API, 26 testes ADM,
 builds API/ADM e smoke local com fixtures aprovados. O lint mantém um warning
-anterior no mobile (`no-void`). Não homologado contra banco real; sem deploy.
+anterior no mobile (`no-void`). Não homologado contra banco real. Publicado em
+`583f67b`: Render (API), Admin Web e Company Web concluíram com `success`; a
+rota administrativa nova responde `401` sem sessão, confirmando que está ativa
+sem consultar nem alterar dados reais.
 
 Autenticação e os três perfis; aprovação de empresas e entregadores; regiões,
 modalidades e tabelas de preço; criação de pedido individual e em lote, imediato
@@ -419,13 +423,12 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Histórico de faturas por cliente consolidado e enviado em `6b8c918`, incluindo
-testes e documentação; publicação registrada em `579bc98`. Os filtros da fatura
-personalizada e o relatório de pedidos por situação financeira estão locais,
-sem commit/push: UI, endpoint administrativo, contratos, testes e documentação.
-Para publicar o relatório, API nova deve estar disponível antes do painel.
-Não incluir mudanças de outras
-sessões em eventual publicação deste recorte.
+Histórico de faturas por cliente foi consolidado em `6b8c918` e documentado em
+`579bc98`. Filtros da fatura personalizada e relatório de pedidos por situação
+financeira foram consolidados em `583f67b`, enviados para `main` e publicados
+com sucesso no Render e nas duas Vercel. O CI geral ainda estava em execução na
+confirmação dos deploys; não foi usado para declarar a publicação aprovada.
+Não incluir mudanças de outras sessões em eventual publicação futura.
 O APK permanece `pilot.22` (`8255734`), com registro de release em `969994b`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
