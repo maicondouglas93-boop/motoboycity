@@ -12177,3 +12177,56 @@ A primeira tentativa de Gradle parou antes da compilação porque o PowerShell
 interpretou o parâmetro `-P` como nome de tarefa. A execução definitiva usou a
 variável de ambiente explícita para o `versionCode` e foi aprovada. O APK foi
 gerado e verificado, mas não foi instalado nem distribuído nesta sessão.
+
+## 2026-09-06 — Histórico de faturas por cliente no ADM
+
+O ADM já possuía uma listagem básica abaixo dos pedidos do cliente. Foi criada
+uma página própria em `/clientes/[id]/faturas`, acessível diretamente pelo card
+ou detalhe do cliente, pelo nome da empresa na aba Financeiro/Faturas e pelo
+detalhe da fatura. A consulta usa exclusivamente a empresa selecionada no
+endpoint administrativo existente, protegido por JWT e `AdminOnlyGuard`.
+
+O histórico mostra número, emissão, vencimento, pagamento, quantidade de
+pedidos, valor e status, com acesso ao detalhe e à trilha de auditoria existente.
+Busca por número, status (inclusive canceladas), datas de emissão inclusivas e
+paginação são locais, sem repetir requisições ao filtrar. O resumo considera
+todos os resultados do filtro, antes da paginação: total faturado, pago, aberto
+(incluindo vencidas) e vencido. Canceladas continuam no histórico, mas não
+inflam os valores cobrados. A soma é feita em centavos e usa a máscara financeira
+do painel. Datas civis são exibidas sem deslocamento de fuso; a listagem antiga
+do detalhe do cliente também recebeu essa correção e a exclusão de canceladas
+do total faturado.
+
+O cache da nova consulta usa o prefixo financeiro já invalidado por emissão,
+baixa, alteração de vencimento e cancelamento. A tela permite atualizar
+manualmente e mantém a reconciliação padrão ao recuperar foco/conexão.
+Carregamento, erro com retentativa, cliente inexistente e lista vazia são
+distintos; uma falha não mostra indicadores zerados.
+
+Arquivos: nova página `clientes/[id]/faturas/page.tsx`, componente
+`companies/company-invoice-history.tsx`, helper `lib/invoice-history.ts`, teste
+`test/invoice-history.test.mjs`, atalhos nas páginas de clientes e detalhe de
+fatura e no componente `finance/faturas-tab.tsx`, além deste registro e handoff.
+
+Validação:
+
+- `pnpm --filter @motoboycity/admin-web typecheck`: aprovado.
+- `pnpm --filter @motoboycity/admin-web lint`: aprovado.
+- `pnpm --filter @motoboycity/admin-web test`: 17 testes aprovados, 6 novos
+  cobrindo filtros combinados, datas inclusivas/civis, canceladas e centavos.
+- `pnpm --filter @motoboycity/admin-web build`: aprovado, incluindo a nova rota.
+- Navegador local com API de fixtures isolada: login fictício, acesso pelo
+  cliente, 13 faturas em duas páginas, filtro de pagas, busca sem resultados,
+  período, intervalo inválido, detalhe/retorno ao mesmo cliente, cliente sem
+  faturas e erro HTTP 503 com mensagem/retentativa e sem resumo enganoso.
+  Screenshot revisada. O preenchimento automatizado de `input[type=date]`
+  exigiu interação por teclado para disparar o evento, após a qual o filtro
+  respondeu corretamente. Os serviços e o arquivo temporário foram removidos
+  ao encerrar o smoke; nenhum dado real foi consultado ou modificado.
+- `git diff --check`: aprovado.
+
+Sem mudança de API, contrato, schema, migration, APK ou deploy. A paginação
+continua no navegador sobre a lista integral de faturas da empresa, conforme
+o contrato atual; não é paginação no servidor. O teste visual utilizou dados
+simulados, não homologou credenciais ou pagamentos reais. Alteração local,
+ainda sem commit/push.

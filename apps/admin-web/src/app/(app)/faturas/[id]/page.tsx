@@ -155,6 +155,12 @@ export default function AdminInvoiceDetailPage() {
           <p className="text-sm text-muted-foreground">
             {invoice.companyName} · {invoice.deliveryCount} pedido(s)
           </p>
+          <Link
+            href={`/clientes/${invoice.companyId}/faturas`}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Voltar ao histórico deste cliente
+          </Link>
           <p className="mt-1 text-xs text-muted-foreground">
             Emitida em {formatarData(invoice.issueDate)} / Vencimento{' '}
             {formatarData(invoice.dueDate)}

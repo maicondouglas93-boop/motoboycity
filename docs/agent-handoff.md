@@ -127,6 +127,22 @@ chegar a nenhum aparelho.
 
 ## Fluxos implementados
 
+### Histórico de faturas por cliente no ADM — alteração local (2026-09-06)
+
+`/clientes/[id]/faturas` reúne as faturas de uma única empresa, com acesso pelo
+card e detalhe do cliente, pelo nome da empresa em Financeiro e pelo detalhe de
+uma fatura. Usa `GET /admin/financial/invoices?companyId=...`, já protegido por
+JWT e `AdminOnlyGuard`, sem API, contrato ou migration novos. A tela filtra
+número, status e período de emissão, mostra datas civis de emissão, vencimento
+e pagamento, pagina os resultados e resume faturado, pago, aberto e vencido.
+Canceladas permanecem consultáveis, fora dos valores faturados e a receber.
+Filtros e paginação são locais sobre a lista daquela empresa; não disparam
+consultas adicionais. O cache usa o prefixo financeiro já invalidado pelas
+mutações de fatura. Há atualização manual e reconciliação em foco/reconexão.
+Implementação ainda sem commit, push ou deploy.
+
+### Demais fluxos
+
 Autenticação e os três perfis; aprovação de empresas e entregadores; regiões,
 modalidades e tabelas de preço; criação de pedido individual e em lote, imediato
 ou agendado; despacho por fila com oferta, aceite, recusa, expiração e reoferta
@@ -361,9 +377,10 @@ variáveis do processo são limpos ao final do build.
 
 ## Estado do worktree
 
-Limpo depois da publicação da coleta rápida e da geração do APK oficial
-`pilot.22`. O código funcional está em `476813d`, a versão em `8255734` e este
-registro de release será o commit documental seguinte.
+Contém a implementação local do histórico de faturas por cliente no Admin Web
+e seus testes/documentação (2026-09-06), ainda sem commit. A última publicação
+continua sendo a coleta rápida (`476813d`) e o APK `pilot.22` (`8255734`), com
+registro de release em `969994b`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

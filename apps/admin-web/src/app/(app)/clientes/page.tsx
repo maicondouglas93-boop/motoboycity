@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyListItem, RegisterCompanyResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Building2, Check, Copy, PackagePlus } from 'lucide-react';
+import { Building2, Check, Copy, PackagePlus, ReceiptText } from 'lucide-react';
 import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
 import { CreateCompanyDeliveryDialog } from '@/components/deliveries/create-company-delivery-dialog';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
@@ -235,6 +235,12 @@ export default function ClientsPage() {
                     href={`/clientes/${company.id}`}
                   >
                     Ver detalhes
+                  </Link>
+                  <Link
+                    className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-primary/10 px-3 text-sm font-semibold text-primary transition-colors hover:bg-primary/15"
+                    href={`/clientes/${company.id}/faturas`}
+                  >
+                    <ReceiptText className="size-4" aria-hidden /> Histórico de faturas
                   </Link>
                 </CardContent>
               </Card>

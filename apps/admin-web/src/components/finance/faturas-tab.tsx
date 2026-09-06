@@ -202,7 +202,15 @@ export function FaturasTab({ token }: { token: string }) {
                   {faturas.map((fatura) => (
                     <tr key={fatura.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-2 font-mono">{fatura.number}</td>
-                      <td className="px-4 py-2 font-medium">{fatura.companyName}</td>
+                      <td className="px-4 py-2 font-medium">
+                        <Link
+                          href={`/clientes/${fatura.companyId}/faturas`}
+                          className="text-primary hover:underline"
+                          aria-label={`Histórico de faturas de ${fatura.companyName}`}
+                        >
+                          {fatura.companyName}
+                        </Link>
+                      </td>
                       <td className="px-4 py-2 text-muted-foreground">
                         {formatarData(fatura.issueDate)}
                       </td>

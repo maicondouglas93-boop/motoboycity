@@ -30,7 +30,7 @@ import { QueryState } from '@/components/ui/query-state';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi, adminInvoicesApi, deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
-import { somarDinheiro } from '@/lib/dinheiro';
+import { formatarData, somarDinheiro } from '@/lib/dinheiro';
 import { useMoney } from '@/lib/money';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -127,7 +127,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     const invoices = invoicesQuery.data;
     if (!invoices) return null;
     return {
-      total: somarDinheiro(invoices.map((invoice) => invoice.totalValue)),
+      total: somarDinheiro(
+        invoices
+          .filter((invoice) => invoice.status !== 'CANCELLED')
+          .map((invoice) => invoice.totalValue),
+      ),
       receivable: somarDinheiro(
         invoices
           .filter((invoice) => invoice.status === 'PENDING' || invoice.status === 'OVERDUE')
@@ -179,6 +183,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                href={`/clientes/${companyId}/faturas`}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-primary/20 px-3 text-sm font-medium text-primary hover:bg-admin-soft"
+              >
+                <WalletCards className="size-4" aria-hidden /> Histórico de faturas
+              </Link>
               <Badge
                 variant={
                   company.status === 'ACTIVE'
@@ -466,7 +476,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               <div>
                 <h2 className="font-semibold">Faturas</h2>
                 <p className="text-sm text-muted-foreground">
-                  Ciclo de cobrança auditável deste cliente.
+                  Ciclo de cobrança auditável deste cliente.{' '}
+                  <Link
+                    href={`/clientes/${companyId}/faturas`}
+                    className="font-medium text-primary underline"
+                  >
+                    Abrir histórico completo
+                  </Link>
                 </p>
               </div>
               <select
@@ -501,8 +517,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       <div>
                         <p className="font-medium">{invoice.number}</p>
                         <p className="text-muted-foreground">
-                          Emissão: {formatDate(invoice.issueDate)} · Vencimento:{' '}
-                          {formatDate(invoice.dueDate)} · {invoice.deliveryCount} pedido(s)
+                          Emissão: {formatarData(invoice.issueDate)} · Vencimento:{' '}
+                          {formatarData(invoice.dueDate)} · {invoice.deliveryCount} pedido(s)
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
