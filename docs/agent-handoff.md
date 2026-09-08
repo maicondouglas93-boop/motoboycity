@@ -28,7 +28,7 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 | | |
 |---|---|
-| Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
+| Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Reativação automática após baixa de fatura em `bd4fa05`, enviada para `main` em 08/09/2026, com deploys automáticos iniciados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |

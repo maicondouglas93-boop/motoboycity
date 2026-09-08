@@ -12399,4 +12399,5 @@ Validação executada: Jest focado de reativação, faturas, webhook Asaas e avi
 pagamento — 4 suítes / 63 testes aprovados; `pnpm typecheck` dos 8 workspaces,
 `pnpm lint` e build da API também aprovados. O lint mantém somente o warning
 preexistente `no-void` em `apps/driver-app/src/lib/apiClient.ts`. Não foi
-executado E2E, migration, commit, push ou deploy neste recorte.
+executado E2E ou migration. O recorte foi consolidado em `bd4fa05` e enviado
+para `main`, acionando o deploy automático.
