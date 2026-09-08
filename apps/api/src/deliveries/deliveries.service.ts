@@ -305,6 +305,11 @@ export class DeliveriesService {
     if (!company) {
       throw new ForbiddenException('Usuário não está vinculado a uma empresa.');
     }
+    if (company.status === 'SUSPENDED') {
+      throw new ForbiddenException(
+        'Sua empresa está suspensa e não pode chamar motoboy ou lançar pedidos.',
+      );
+    }
     if (company.status !== 'ACTIVE') {
       throw new ForbiddenException('Sua empresa precisa estar aprovada para lançar pedidos.');
     }
@@ -332,6 +337,11 @@ export class DeliveriesService {
     });
     if (!company) {
       throw new NotFoundException('Empresa não encontrada.');
+    }
+    if (company.status === 'SUSPENDED') {
+      throw new ForbiddenException(
+        'A empresa está suspensa e não pode chamar motoboy ou lançar pedidos.',
+      );
     }
     if (company.status !== 'ACTIVE') {
       throw new ForbiddenException('A empresa precisa estar ativa para lançar pedidos.');
@@ -786,6 +796,11 @@ export class DeliveriesService {
     const company = await this.findCompanyForUser(user);
     if (!company) {
       throw new ForbiddenException('Usuário não está vinculado a uma empresa.');
+    }
+    if (company.status === 'SUSPENDED') {
+      throw new ForbiddenException(
+        'Sua empresa está suspensa e não pode chamar motoboy ou lançar pedidos.',
+      );
     }
     if (company.status !== 'ACTIVE') {
       throw new ForbiddenException('Sua empresa precisa estar aprovada para lançar pedidos.');

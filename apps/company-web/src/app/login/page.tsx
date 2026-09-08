@@ -45,7 +45,7 @@ export default function LoginPage() {
       // Nunca deixa dados de outra empresa sobreviverem a uma troca de conta.
       queryClient.clear();
       session.setToken(result.accessToken);
-      if (result.company && result.company.status !== 'ACTIVE') {
+      if (result.company?.status === 'PENDING_APPROVAL') {
         router.push('/pending-approval');
         return;
       }

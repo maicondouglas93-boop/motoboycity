@@ -196,6 +196,12 @@ financeiro automático e não resta outra fatura que já alcance o prazo configu
 O marcador `invoiceOverdueBlockedAt` separa esse caso de uma suspensão manual,
 que nunca é desfeita por pagamento.
 
+`SUSPENDED` não revoga a sessão da empresa: ela precisa entrar para consultar a
+fatura e pagá-la. A trava vive na criação e no despacho: não cria pedido avulso,
+lote ou integração, não reoferta, não ativa pedido agendado e não exibe pedido
+na vitrine enquanto a empresa não volta a `ACTIVE`. Pedidos já aceitos ou
+coletados não são alterados pela suspensão.
+
 Os três registros persistem também `AsaasEnvironment`. Customers, cobranças,
 QR Codes e eventos do Sandbox e da Produção nunca compartilham namespace; as
 reservas são únicas por empresa/fatura e ambiente, e o webhook procura o

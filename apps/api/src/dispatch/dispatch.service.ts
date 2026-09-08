@@ -294,12 +294,16 @@ export class DispatchService {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
       include: {
-        company: { select: { regionId: true, tradeName: true } },
+        company: { select: { regionId: true, tradeName: true, status: true } },
         serviceType: { select: { name: true } },
         addresses: true,
       },
     });
-    if (!delivery || delivery.status !== 'AWAITING_DRIVER') {
+    if (
+      !delivery ||
+      delivery.status !== 'AWAITING_DRIVER' ||
+      delivery.company?.status === 'SUSPENDED'
+    ) {
       return;
     }
 
@@ -498,7 +502,7 @@ export class DispatchService {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
       include: {
-        company: { select: { regionId: true, tradeName: true } },
+        company: { select: { regionId: true, tradeName: true, status: true } },
         serviceType: { select: { name: true } },
         addresses: true,
       },
@@ -508,6 +512,9 @@ export class DispatchService {
     }
     if (delivery.status !== 'AWAITING_DRIVER' || delivery.driverId !== null) {
       throw new ConflictException('Somente pedidos buscando motoboy podem ser reenviados.');
+    }
+    if (delivery.company.status === 'SUSPENDED') {
+      throw new ConflictException('A empresa está suspensa e não pode chamar motoboy.');
     }
 
     const deliveries = delivery.batchId
@@ -692,7 +699,7 @@ export class DispatchService {
    * pra saber de antemão qual pedido (se algum) ele deveria pegar. */
   async dispatchAvailableDeliveries(): Promise<void> {
     const candidates = await this.prisma.delivery.findMany({
-      where: { status: 'AWAITING_DRIVER' },
+      where: { status: 'AWAITING_DRIVER', company: { status: 'ACTIVE' } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
@@ -722,7 +729,7 @@ export class DispatchService {
   async sweepStuckDeliveries(): Promise<void> {
     const agora = new Date();
     const agendados = await this.prisma.delivery.findMany({
-      where: { status: 'SCHEDULED' },
+      where: { status: 'SCHEDULED', company: { status: 'ACTIVE' } },
       orderBy: { scheduledAt: 'asc' },
       take: 200,
       select: { id: true, scheduledAt: true },
@@ -948,8 +955,15 @@ export class DispatchService {
   }
 
   async handleScheduledActivation(deliveryId: string): Promise<void> {
-    const delivery = await this.prisma.delivery.findUnique({ where: { id: deliveryId } });
-    if (!delivery || delivery.status !== 'SCHEDULED') {
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id: deliveryId },
+      include: { company: { select: { status: true } } },
+    });
+    if (
+      !delivery ||
+      delivery.status !== 'SCHEDULED' ||
+      delivery.company?.status === 'SUSPENDED'
+    ) {
       return;
     }
 
@@ -965,7 +979,7 @@ export class DispatchService {
      */
     const ativado = await this.prisma.$transaction(async (tx) => {
       const atualizada = await tx.delivery.updateMany({
-        where: { id: deliveryId, status: 'SCHEDULED' },
+        where: { id: deliveryId, status: 'SCHEDULED', company: { status: 'ACTIVE' } },
         data: { status: 'AWAITING_DRIVER', statusChangedAt: new Date() },
       });
       if (atualizada.count === 0) {
@@ -1560,11 +1574,13 @@ export class DispatchService {
 
           const lockedDeliveries = await tx.$queryRaw<Array<{ id: string }>>(
             Prisma.sql`
-              SELECT "id"
+              SELECT "deliveries"."id"
               FROM "deliveries"
-              WHERE "id" IN (${Prisma.join(deliveryIds)})
-                AND "status" = 'AWAITING_DRIVER'
-              ORDER BY "id"
+              INNER JOIN "companies" ON "companies"."id" = "deliveries"."companyId"
+              WHERE "deliveries"."id" IN (${Prisma.join(deliveryIds)})
+                AND "deliveries"."status" = 'AWAITING_DRIVER'
+                AND "companies"."status" = 'ACTIVE'
+              ORDER BY "deliveries"."id"
               FOR UPDATE
             `,
           );
@@ -1697,6 +1713,7 @@ export class DispatchService {
         driverId: null,
         company: {
           regionId: driver.regionId,
+          status: 'ACTIVE',
           driverBlocks: { none: { driverId } },
         },
         serviceTypeId: { in: serviceTypeIds },
@@ -1761,7 +1778,7 @@ export class DispatchService {
   ): Promise<AcceptOfferResult> {
     const alvo = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
-      include: { company: { select: { regionId: true } } },
+      include: { company: { select: { regionId: true, status: true } } },
     });
     if (!alvo) {
       throw new NotFoundException('Pedido não encontrado.');
@@ -1773,6 +1790,9 @@ export class DispatchService {
     }
     if (alvo.status !== 'AWAITING_DRIVER' || alvo.driverId !== null) {
       throw new ConflictException('Este pedido já não está mais disponível.');
+    }
+    if (alvo.company?.status === 'SUSPENDED') {
+      throw new ConflictException('Este pedido não está disponível enquanto a empresa está suspensa.');
     }
     await this.assertCompanyAllowed(driverId, [alvo.companyId]);
 
@@ -1860,7 +1880,12 @@ export class DispatchService {
         }
 
         const atualizadas = await tx.delivery.updateMany({
-          where: { id: { in: ids }, status: 'AWAITING_DRIVER', driverId: null },
+          where: {
+            id: { in: ids },
+            status: 'AWAITING_DRIVER',
+            driverId: null,
+            company: { status: 'ACTIVE' },
+          },
           data: {
             status: 'ACCEPTED',
             driverId,

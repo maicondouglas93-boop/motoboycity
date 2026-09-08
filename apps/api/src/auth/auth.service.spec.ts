@@ -445,7 +445,7 @@ describe('AuthService', () => {
       await expect(service.login(loginPayload)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
-    it('rejeita login de empresa suspensa', async () => {
+    it('permite login de empresa suspensa para consultar e regularizar a conta', async () => {
       const passwordHash = await bcrypt.hash(loginPayload.password, 4);
       prisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
@@ -458,7 +458,10 @@ describe('AuthService', () => {
         company: { id: 'company-1', status: 'SUSPENDED' },
       });
 
-      await expect(service.login(loginPayload)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.login(loginPayload)).resolves.toMatchObject({
+        accessToken: 'signed.jwt.token',
+        company: { id: 'company-1', status: 'SUSPENDED' },
+      });
     });
 
     const driverLoginPayload = { email: 'joao@motoboycity.com.br', password: 'senhaSegura123' };

@@ -25,11 +25,9 @@ describe('InvoiceService', () => {
     companyTeamMember: { findFirst: jest.fn() },
   };
   const clock = { now: jest.fn() };
-  const realtimeGateway = { disconnectUser: jest.fn() };
   const service = new InvoiceService(
     prisma as never,
     clock as FinancialClock,
-    realtimeGateway as never,
   );
   const admin = { id: 'admin-1' } as User;
 
@@ -272,8 +270,6 @@ describe('InvoiceService', () => {
         changedByUserId: null,
       }),
     });
-    expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-1');
-    expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('operator-1');
     expect(result.blockedCompanyIds).toEqual(['empresa-1']);
   });
 

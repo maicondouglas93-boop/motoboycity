@@ -358,7 +358,6 @@ export class AdminCompaniesService {
       where: { id: companyId },
       select: {
         status: true,
-        teamMembers: { where: { active: true }, select: { userId: true } },
       },
     });
     if (!company) {
@@ -403,12 +402,6 @@ export class AdminCompaniesService {
         },
       });
     });
-
-    if (nextStatus === 'SUSPENDED') {
-      for (const member of company.teamMembers) {
-        this.realtimeGateway.disconnectUser(member.userId);
-      }
-    }
 
     return this.detail(companyId);
   }

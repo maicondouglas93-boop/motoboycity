@@ -452,12 +452,25 @@ describe('DispatchService', () => {
       expect(prisma.deliveryOffer.create).not.toHaveBeenCalled();
     });
 
+    it('não chama novo motoboy quando a empresa foi suspensa', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        company: { regionId: 'region-1', tradeName: 'Empresa', status: 'SUSPENDED' },
+      });
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(platformSettingsService.get).not.toHaveBeenCalled();
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+    });
+
     it('não faz nada se já existe oferta pendente', async () => {
       prisma.delivery.findUnique.mockResolvedValue({
         id: 'delivery-1',
         companyId: 'company-1',
         status: 'AWAITING_DRIVER',
-        company: { regionId: 'region-1' },
+        company: { regionId: 'region-1', status: 'ACTIVE' },
         serviceTypeId: 'service-1',
       });
       prisma.deliveryOffer.findFirst.mockResolvedValue({ id: 'offer-existing' });
@@ -1061,7 +1074,7 @@ describe('DispatchService', () => {
       await service.sweepStuckDeliveries();
 
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
-        where: { id: 'delivery-1', status: 'SCHEDULED' },
+        where: { id: 'delivery-1', status: 'SCHEDULED', company: { status: 'ACTIVE' } },
         data: { status: 'AWAITING_DRIVER', statusChangedAt: expect.any(Date) },
       });
     });
@@ -1301,7 +1314,7 @@ describe('DispatchService', () => {
       await service.handleScheduledActivation('delivery-1');
 
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
-        where: { id: 'delivery-1', status: 'SCHEDULED' },
+        where: { id: 'delivery-1', status: 'SCHEDULED', company: { status: 'ACTIVE' } },
         data: { status: 'AWAITING_DRIVER', statusChangedAt: expect.any(Date) },
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
@@ -1325,6 +1338,20 @@ describe('DispatchService', () => {
       await service.handleScheduledActivation('delivery-1');
 
       expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
+    });
+
+    it('não ativa um pedido agendado quando a empresa está suspensa', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'SCHEDULED',
+        displayNumber: 3,
+        company: { status: 'SUSPENDED' },
+      });
+
+      await service.handleScheduledActivation('delivery-1');
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(realtimeGateway.emitDeliveryUpdated).not.toHaveBeenCalled();
     });
   });
@@ -1970,7 +1997,7 @@ describe('DispatchService', () => {
       expect(where).toMatchObject({
         status: 'AWAITING_DRIVER',
         driverId: null,
-        company: { regionId: 'region-1' },
+        company: { regionId: 'region-1', status: 'ACTIVE' },
         serviceTypeId: { in: ['st-1'] },
         // Se alguem esta com o pedido na mao agora, ele ainda nao esta livre.
         offers: { none: { response: 'PENDING' } },
@@ -2005,6 +2032,22 @@ describe('DispatchService', () => {
       await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
         'oferecido a outro motoboy',
       );
+    });
+
+    it('recusa a vitrine desatualizada quando a empresa está suspensa', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        batchId: null,
+        serviceTypeId: 'service-1',
+        company: { regionId: 'region-1', status: 'SUSPENDED' },
+      });
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'empresa está suspensa',
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('quem chega em segundo recebe conflito, e nao um aceite silencioso', async () => {
@@ -2052,7 +2095,12 @@ describe('DispatchService', () => {
 
       expect(result).toEqual({ deliveryId: 'delivery-1', displayNumber: 1234 });
       expect(tx.delivery.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['delivery-1'] }, status: 'AWAITING_DRIVER', driverId: null },
+        where: {
+          id: { in: ['delivery-1'] },
+          status: 'AWAITING_DRIVER',
+          driverId: null,
+          company: { status: 'ACTIVE' },
+        },
         data: {
           status: 'ACCEPTED',
           driverId: 'driver-1',

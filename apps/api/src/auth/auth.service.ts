@@ -321,10 +321,6 @@ export class AuthService {
         'Seu acesso à empresa não está ativo. Entre em contato com o suporte.',
       );
     }
-    if (company?.status === 'SUSPENDED') {
-      throw new ForbiddenException('Sua empresa está suspensa. Entre em contato com o suporte.');
-    }
-
     const driver = await this.findDriverForUser(user);
     if (driver?.approvalStatus === 'REJECTED') {
       throw new ForbiddenException(

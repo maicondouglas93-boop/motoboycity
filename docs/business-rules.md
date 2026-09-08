@@ -290,8 +290,13 @@ do Asaas é persistido para que reentregas não produzam duas baixas.
 
 O administrador também pode configurar, por empresa, a suspensão automática
 após 1 a 365 dias de atraso. Sem prazo configurado, o bloqueio fica desativado.
-A suspensão acontece quando uma fatura em aberto atinge o limite, desconecta os
-usuários da empresa e fica registrada no histórico de status. Pagamento não
+A suspensão acontece quando uma fatura em aberto atinge o limite e fica
+registrada no histórico de status. Ela **não encerra a sessão**:
+os membros ainda entram para consultar pedidos, faturas e regularizar o
+pagamento. Enquanto a empresa estiver suspensa, nenhum novo pedido pode ser
+criado — pela empresa, pelo administrador em seu nome ou por integração — e o
+despacho não gera nova oferta, não ativa agendado nem mostra pedido na vitrine.
+Pedido que já foi aceito ou coletado continua seu fluxo normal. Pagamento não
 reativa uma suspensão aplicada manualmente pelo administrador. Quando a
 suspensão foi automática por inadimplência, uma confirmação válida de pagamento
 reativa a empresa automaticamente somente se não restar outra fatura que já

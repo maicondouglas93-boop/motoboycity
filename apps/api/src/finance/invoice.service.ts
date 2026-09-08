@@ -17,7 +17,6 @@ import type {
 import { Prisma, type User } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { FinancialClock } from './financial-clock.service';
 import { reactivateCompanyAfterConfirmedInvoicePayment } from './company-payment-reactivation';
 import {
@@ -140,7 +139,6 @@ export class InvoiceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: FinancialClock,
-    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   async closeOpenInvoices(admin: User, payload: CloseInvoicesPayload): Promise<InvoiceListItem> {
@@ -795,7 +793,6 @@ export class InvoiceService {
       select: {
         id: true,
         invoiceOverdueBlockAfterDays: true,
-        teamMembers: { where: { active: true }, select: { userId: true } },
       },
     });
 
@@ -837,9 +834,6 @@ export class InvoiceService {
 
       if (!blocked) continue;
       blockedCompanyIds.push(company.id);
-      for (const member of company.teamMembers) {
-        this.realtimeGateway.disconnectUser(member.userId);
-      }
       this.logger.warn(`Empresa ${company.id} suspensa automaticamente por inadimplencia.`);
     }
 

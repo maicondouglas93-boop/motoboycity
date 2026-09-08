@@ -12401,3 +12401,29 @@ pagamento — 4 suítes / 63 testes aprovados; `pnpm typecheck` dos 8 workspaces
 preexistente `no-void` em `apps/driver-app/src/lib/apiClient.ts`. Não foi
 executado E2E ou migration. O recorte foi consolidado em `bd4fa05` e enviado
 para `main`, acionando o deploy automático.
+
+## 2026-09-08 — Suspensão financeira preserva acesso e bloqueia novo despacho
+
+Empresa `SUSPENDED` deixou de perder a sessão: tanto o login quanto a validação
+de token preservam o membro ativo, e o Company Web só redireciona para
+`/pending-approval` quando o cadastro ainda está `PENDING_APPROVAL`. Assim a
+empresa pode ver pedidos e faturas e gerar/pagar o Pix para regularizar a
+situação.
+
+A trava financeira continua no ponto que protege a operação: criação avulsa,
+lote, pedido criado pelo ADM em nome da empresa e integração permanecem
+recusados. O despacho também revalida `Company.status = ACTIVE` dentro da
+transação que cria oferta; a vitrine, a reoferta e a ativação de agendado não
+criam novo trabalho para uma empresa suspensa. Pedido já aceito ou coletado não
+é cancelado nem modificado pela suspensão.
+
+Foi removido o disconnect Socket.IO ao suspender, tanto pela rotina financeira
+quanto pelo ADM, pois desconectar contrariava o acesso necessário à
+regularização. A desativação de membro e a troca de senha continuam revogando a
+conexão do usuário afetado.
+
+Validação executada: 6 suítes Jest focadas (auth, empresa, pedidos, despacho e
+faturas), 310 testes aprovados; `pnpm typecheck` e `pnpm lint` dos 8 workspaces
+aprovados, com somente o warning preexistente `no-void` em
+`apps/driver-app/src/lib/apiClient.ts`; builds da API e do Company Web
+aprovados. Não foram executados E2E, migration, commit, push, deploy ou APK.

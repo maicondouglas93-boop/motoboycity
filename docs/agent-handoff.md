@@ -231,6 +231,11 @@ já alcance o prazo de bloqueio; suspensão manual nunca é reativada por pagame
 O histórico de status registra a reativação, com o ADM como autor na baixa manual
 ou autor nulo no webhook do Asaas.
 
+Em `SUSPENDED`, os membros da empresa continuam autenticando e o Company Web abre
+normalmente para consultar pedidos e pagar faturas. A suspensão bloqueia somente
+novo trabalho: criação avulsa/lote/admin/integração, reoferta, ativação de
+agendado e vitrine. Pedidos já aceitos ou coletados seguem sem alteração.
+
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e
 continua `PENDING` há mais de 6 h vira alerta, e 2 dias vira crítico — a régua é

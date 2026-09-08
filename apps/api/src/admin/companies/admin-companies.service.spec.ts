@@ -272,7 +272,7 @@ describe('AdminCompaniesService', () => {
       });
     });
 
-    it('suspende a empresa de forma condicional e encerra as sessoes ativas', async () => {
+    it('suspende a empresa de forma condicional sem encerrar as sessoes ativas', async () => {
       prisma.company.findUnique.mockResolvedValue({
         status: 'ACTIVE',
         teamMembers: [{ userId: 'owner-user-1' }, { userId: 'operator-user-1' }],
@@ -286,9 +286,7 @@ describe('AdminCompaniesService', () => {
         where: { id: 'company-1', status: 'ACTIVE' },
         data: { status: 'SUSPENDED', invoiceOverdueBlockedAt: null },
       });
-      expect(realtimeGateway.disconnectUser).toHaveBeenCalledTimes(2);
-      expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('owner-user-1');
-      expect(realtimeGateway.disconnectUser).toHaveBeenCalledWith('operator-user-1');
+      expect(realtimeGateway.disconnectUser).not.toHaveBeenCalled();
     });
 
     it('recusa suspender uma empresa que nao esta ativa', async () => {

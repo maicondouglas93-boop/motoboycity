@@ -391,6 +391,15 @@ describe('DeliveriesService', () => {
       await expect(service.create(companyUser, payload)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    it('mantém a trava de criação quando a empresa está suspensa', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1', 'SUSPENDED');
+
+      await expect(service.create(companyUser, payload)).rejects.toThrow(
+        'empresa está suspensa e não pode chamar motoboy ou lançar pedidos',
+      );
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
     it('rejeita quando a empresa não tem endereço de coleta cadastrado', async () => {
       prisma.companyAddress.findFirst.mockResolvedValue(null);
 
@@ -849,6 +858,15 @@ describe('DeliveriesService', () => {
       prisma.delivery.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
         Promise.resolve(fullDeliveryRow({ id: where.id, batchId: 'batch-id' })),
       );
+    });
+
+    it('mantém a trava de lote quando a empresa está suspensa', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1', 'SUSPENDED');
+
+      await expect(service.createBatch(companyUser, payload)).rejects.toThrow(
+        'empresa está suspensa e não pode chamar motoboy ou lançar pedidos',
+      );
+      expect(tx.delivery.create).not.toHaveBeenCalled();
     });
 
     it('recusa o lote quando o admin desligou o lançamento em lote', async () => {
