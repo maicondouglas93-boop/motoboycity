@@ -15,6 +15,7 @@ import { AsaasEnvironment, Prisma, type User } from '@prisma/client';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { dateInSaoPaulo } from '../finance-release.utils';
 import { FinancialClock } from '../financial-clock.service';
+import { reactivateCompanyAfterConfirmedInvoicePayment } from '../company-payment-reactivation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AsaasClient, AsaasProviderError, type AsaasPayment } from './asaas.client';
 import { readAsaasEnvironment, readAsaasWebhookToken } from './asaas.config';
@@ -294,6 +295,12 @@ export class AsaasBillingService {
             note: `Pagamento Pix confirmado pelo Asaas (evento ${envelope.id}).`,
           },
         });
+        await reactivateCompanyAfterConfirmedInvoicePayment(
+          tx,
+          charge.invoiceId,
+          this.clock.now(),
+          null,
+        );
       } else if (charge.invoice.status === 'CANCELLED') {
         this.logger.error(
           `Pagamento Asaas ${envelope.payment.id} recebido para fatura cancelada ${charge.invoiceId}.`,

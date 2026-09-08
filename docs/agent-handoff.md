@@ -8,9 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-06**, depois de publicar o histórico de faturas por
-> cliente, os filtros da fatura personalizada e a consulta de pedidos por
-> situação financeira no ADM.
+> Última revisão: **2026-09-08**, depois de implementar a reativação automática
+> de empresa bloqueada por inadimplência após a confirmação válida do pagamento.
 
 ## Como atualizar
 
@@ -223,6 +222,14 @@ e separa customer, cobrança, QR e evento do futuro ambiente real. A habilitaç�
 da Produção ainda depende da chave `$aact_prod_`, webhook próprio, troca conjunta
 das três variáveis `ASAAS_*` e smoke real controlado conforme
 `docs/asaas-pix.md`; os segredos não são verificáveis pelo repositório.
+
+Quando uma empresa foi suspensa automaticamente por fatura vencida, a confirmação
+válida de pagamento pelo Pix Asaas, pela baixa manual do ADM ou pela confirmação
+de “Já paguei” reativa a empresa na mesma transação. A guarda condicional exige
+o marcador financeiro `invoiceOverdueBlockedAt` e que não exista outra fatura que
+já alcance o prazo de bloqueio; suspensão manual nunca é reativada por pagamento.
+O histórico de status registra a reativação, com o ADM como autor na baixa manual
+ou autor nulo no webhook do Asaas.
 
 O sino do admin cobra dois silêncios. O de **repasse vencido e não liberado**
 (`admin:repasses:overdue`): crédito de motoboy que já deveria estar disponível e

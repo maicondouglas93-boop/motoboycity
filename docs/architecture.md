@@ -190,6 +190,12 @@ token em tempo constante. O navegador apenas inicia/exibe a cobrança: a baixa
 ocorre em transação no webhook `PAYMENT_RECEIVED`, depois de conferir pagamento,
 cliente, referência, modalidade e centavos.
 
+A mesma baixa de fatura que confirma um Pix, um pagamento manual no ADM ou um
+aviso “Já paguei” reativa a empresa somente quando ela foi suspensa pelo bloqueio
+financeiro automático e não resta outra fatura que já alcance o prazo configurado.
+O marcador `invoiceOverdueBlockedAt` separa esse caso de uma suspensão manual,
+que nunca é desfeita por pagamento.
+
 Os três registros persistem também `AsaasEnvironment`. Customers, cobranças,
 QR Codes e eventos do Sandbox e da Produção nunca compartilham namespace; as
 reservas são únicas por empresa/fatura e ambiente, e o webhook procura o

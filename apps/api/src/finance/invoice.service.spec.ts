@@ -277,6 +277,58 @@ describe('InvoiceService', () => {
     expect(result.blockedCompanyIds).toEqual(['empresa-1']);
   });
 
+  describe('baixa e reativação financeira', () => {
+    const payment = { paymentDate: '2026-08-26', paymentMethod: 'BILLED' as const };
+
+    beforeEach(() => {
+      clock.now.mockReturnValue(new Date('2026-08-26T12:00:00.000Z'));
+      tx.invoice.findUnique.mockResolvedValue({ companyId: 'empresa-1' });
+      tx.company.findUnique.mockResolvedValue({
+        id: 'empresa-1',
+        status: 'SUSPENDED',
+        invoiceOverdueBlockedAt: new Date('2026-08-20T12:00:00.000Z'),
+        invoiceOverdueBlockAfterDays: 3,
+      });
+    });
+
+    it('reativa automaticamente após a baixa manual da última dívida bloqueante', async () => {
+      await service.markPaidWithinTransaction(tx as never, admin, 'fatura-1', payment);
+
+      expect(tx.company.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'empresa-1',
+          status: 'SUSPENDED',
+          invoiceOverdueBlockedAt: { not: null },
+          invoiceOverdueBlockAfterDays: 3,
+          invoices: {
+            none: {
+              status: { in: ['PENDING', 'OVERDUE'] },
+              dueDate: { lte: new Date('2026-08-23T00:00:00.000Z') },
+            },
+          },
+        },
+        data: { status: 'ACTIVE', invoiceOverdueBlockedAt: null },
+      });
+      expect(tx.companyStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ changedByUserId: 'admin-1', toStatus: 'ACTIVE' }),
+      });
+    });
+
+    it('preserva a suspensão manual mesmo quando a fatura é baixada', async () => {
+      tx.company.findUnique.mockResolvedValue({
+        id: 'empresa-1',
+        status: 'SUSPENDED',
+        invoiceOverdueBlockedAt: null,
+        invoiceOverdueBlockAfterDays: 3,
+      });
+
+      await service.markPaidWithinTransaction(tx as never, admin, 'fatura-1', payment);
+
+      expect(tx.company.updateMany).not.toHaveBeenCalled();
+      expect(tx.companyStatusHistory.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fatura personalizada', () => {
     const payload = {
       companyId: 'empresa-1',

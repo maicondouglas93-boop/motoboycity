@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { FinancialClock } from './financial-clock.service';
+import { reactivateCompanyAfterConfirmedInvoicePayment } from './company-payment-reactivation';
 import {
   dateInSaoPaulo,
   invoiceClosingCutoff,
@@ -509,6 +510,8 @@ export class InvoiceService {
         note: `Pagamento manual confirmado em ${payload.paymentDate}.`,
       },
     });
+
+    await reactivateCompanyAfterConfirmedInvoicePayment(tx, invoiceId, this.clock.now(), admin.id);
   }
 
   /**

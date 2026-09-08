@@ -292,8 +292,12 @@ O administrador também pode configurar, por empresa, a suspensão automática
 após 1 a 365 dias de atraso. Sem prazo configurado, o bloqueio fica desativado.
 A suspensão acontece quando uma fatura em aberto atinge o limite, desconecta os
 usuários da empresa e fica registrada no histórico de status. Pagamento não
-reativa a empresa automaticamente: a reativação continua sendo decisão manual
-do administrador.
+reativa uma suspensão aplicada manualmente pelo administrador. Quando a
+suspensão foi automática por inadimplência, uma confirmação válida de pagamento
+reativa a empresa automaticamente somente se não restar outra fatura que já
+atinja o mesmo prazo de bloqueio. A reativação fica registrada no histórico de
+status; em confirmação manual, também conserva o administrador que confirmou a
+baixa como autor.
 
 No detalhe administrativo da fatura, o painel pode abrir o WhatsApp do
 responsável `OWNER` ativo com uma mensagem pré-preenchida contendo somente

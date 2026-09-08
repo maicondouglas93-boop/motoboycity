@@ -47,8 +47,21 @@ function subject(options?: { inserted?: number; invoiceStatus?: string; paymentV
       }),
       update: jest.fn().mockResolvedValue({}),
     },
-    invoice: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    invoice: {
+      findUnique: jest.fn().mockResolvedValue({ companyId: 'company-1' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     invoiceStatusHistory: { create: jest.fn().mockResolvedValue({}) },
+    company: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'company-1',
+        status: 'ACTIVE',
+        invoiceOverdueBlockedAt: null,
+        invoiceOverdueBlockAfterDays: 7,
+      }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    companyStatusHistory: { create: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
     $transaction: jest.fn(async (operation: (client: typeof tx) => Promise<unknown>) =>
@@ -122,6 +135,30 @@ describe('AsaasBillingService webhook', () => {
     expect(tx.asaasWebhookEvent.update).toHaveBeenLastCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'IGNORED' }) }),
     );
+  });
+
+  it('reativa a empresa bloqueada por inadimplência após o Pix validado', async () => {
+    const { service, tx, envelope } = subject();
+    tx.company.findUnique.mockResolvedValue({
+      id: 'company-1',
+      status: 'SUSPENDED',
+      invoiceOverdueBlockedAt: new Date('2026-08-20T12:00:00.000Z'),
+      invoiceOverdueBlockAfterDays: 7,
+    });
+
+    await service.receiveWebhook(WEBHOOK_TOKEN, envelope);
+
+    expect(tx.company.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'company-1',
+        status: 'SUSPENDED',
+        invoiceOverdueBlockedAt: { not: null },
+      }),
+      data: { status: 'ACTIVE', invoiceOverdueBlockedAt: null },
+    });
+    expect(tx.companyStatusHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ changedByUserId: null, toStatus: 'ACTIVE' }),
+    });
   });
 
   it('trata o mesmo id de evento uma unica vez', async () => {

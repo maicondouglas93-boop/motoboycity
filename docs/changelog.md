@@ -12379,3 +12379,24 @@ novo está ativo e preserva a exigência de sessão administrativa. O painel do
 ADM respondeu HTTP `200`. A CI geral do monorepo permanecia em execução no
 momento da confirmação dos deploys, portanto não foi declarada aprovada por
 antecipação.
+
+## 2026-09-08 — Baixa de fatura reativa suspensão financeira automaticamente
+
+O responsável confirmou a mudança de regra: pagamento confirmado deve retirar
+automaticamente a suspensão que a própria inadimplência criou. A alteração usa o
+marcador existente `Company.invoiceOverdueBlockedAt`, sem schema ou migration,
+para nunca reativar uma empresa suspensa manualmente pelo ADM.
+
+`apps/api/src/finance/company-payment-reactivation.ts` concentra a transição
+condicional e a aplica dentro da mesma transação da baixa manual
+(`InvoiceService.markPaidWithinTransaction`) e do webhook Pix validado
+(`AsaasBillingService.receiveWebhook`). A confirmação administrativa de “Já
+paguei” já delega para a mesma baixa manual, portanto também recebe o efeito.
+A empresa só volta a `ACTIVE` se não restar outra fatura `PENDING`/`OVERDUE` que
+já alcance o prazo atual de bloqueio; a reativação grava `CompanyStatusHistory`.
+
+Validação executada: Jest focado de reativação, faturas, webhook Asaas e aviso de
+pagamento — 4 suítes / 63 testes aprovados; `pnpm typecheck` dos 8 workspaces,
+`pnpm lint` e build da API também aprovados. O lint mantém somente o warning
+preexistente `no-void` em `apps/driver-app/src/lib/apiClient.ts`. Não foi
+executado E2E, migration, commit, push ou deploy neste recorte.
