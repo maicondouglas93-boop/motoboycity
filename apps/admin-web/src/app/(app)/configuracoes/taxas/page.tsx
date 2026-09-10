@@ -7,10 +7,8 @@ import { ApiError } from '@motoboycity/api-client';
 import type { SurchargeItem } from '@motoboycity/types';
 import type { UpsertSurchargePayload } from '@motoboycity/validation';
 import { Plus, Trash2 } from 'lucide-react';
-import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { CabecalhoDeConfiguracao } from '@/components/settings/estado-da-configuracao';
 import { CloudRain } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,8 +16,7 @@ import { Label } from '@/components/ui/label';
 import { adminSurchargesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
-import { RainAutomationStatus } from '@/components/settings/rain-automation-status';
-import { SurchargeActivationControls } from '@/components/settings/surcharge-activation-controls';
+import { SurchargeCard } from '@/components/settings/surcharge-card';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -229,7 +226,7 @@ export default function SurchargesPage() {
         icon={CloudRain}
         tom="alertas"
         titulo="Taxas adicionais"
-        descricao="Escolha Manual ou Automática (chuva) em cada taxa. No automático, somente o clima de Lajinha–MG decide. Desativar bloqueia a cobrança em qualquer modo. Preços já calculados não mudam."
+        descricao="Gerencie o valor e a ativação das taxas. Alterações valem para novas cotações; preços já calculados não mudam."
         situacao={
           valendoAgora === 0
             ? { estado: 'desligado', texto: 'Nenhuma taxa valendo agora' }
@@ -430,126 +427,40 @@ export default function SurchargesPage() {
         </CardContent>
       </Card>
 
-      <section className="space-y-2">
+      <section className="space-y-3">
         <h2 className="font-semibold">Taxas cadastradas</h2>
-        <p className="text-xs text-muted-foreground">
-          Clima automático: vincule o ID da taxa no servidor. Não é necessário geocoding recorrente.
-          A consulta usa estimativas de Lajinha–MG, não um sensor em cada rua. Fonte:{' '}
-          <a
-            href="https://open-meteo.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline"
-          >
-            Open-Meteo
-          </a>
-          .
+        <p className="text-sm text-muted-foreground">
+          Escolha como cada taxa é ativada. Desativar taxa interrompe a cobrança em qualquer modo.
         </p>
         {surcharges.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhuma taxa criada.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-4">
             {surcharges.map((surcharge) => (
-              <li key={surcharge.id} className="rounded-lg border bg-card p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <strong>{surcharge.name}</strong>
-                    <span className="text-sm text-muted-foreground">
-                      {surcharge.type === 'PERCENTAGE'
-                        ? `${surcharge.value}%`
-                        : money(surcharge.value)}{' '}
-                      · {surcharge.driverSharePercentage}% ao entregador
-                    </span>
-                    {/*
-                      "Valendo agora" e o unico estado que importa na operacao, e
-                      vem resolvido do servidor — o painel nao reavalia janela no
-                      fuso, ou duas copias da regra divergiriam.
-                    */}
-                    {surcharge.activeNow && (
-                      <Badge className="bg-colete text-asfalto">Valendo agora</Badge>
-                    )}
-                    {!surcharge.active && <Badge variant="secondary">Desativada</Badge>}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => startEditing(surcharge)}>
-                      Editar
-                    </Button>
-                    <ConfirmActionDialog
-                      title={`${surcharge.active ? 'Desativar' : 'Reativar'} ${surcharge.name}?`}
-                      description="Confirme a mudança desta taxa adicional."
-                      consequence={
-                        surcharge.active
-                          ? 'A taxa deixará de ser aplicada em novas cotações, inclusive pelo clima e por horários programados. Preços já calculados não mudam.'
-                          : 'A taxa voltará a participar das novas cotações conforme o modo selecionado: clima automático ou manual/horários.'
-                      }
-                      confirmLabel={surcharge.active ? 'Desativar taxa' : 'Reativar taxa'}
-                      pendingLabel={surcharge.active ? 'Desativando...' : 'Reativando...'}
-                      variant={surcharge.active ? 'destructive' : 'default'}
-                      onConfirm={() =>
-                        activeMutation.mutateAsync({ surcharge, on: !surcharge.active })
-                      }
-                    >
-                      <Button size="sm" variant="outline" disabled={activeMutation.isPending}>
-                        {surcharge.active ? 'Desativar' : 'Reativar'}
-                      </Button>
-                    </ConfirmActionDialog>
-                    <ConfirmActionDialog
-                      title={`Excluir ${surcharge.name}?`}
-                      description="Confirme a exclusão definitiva desta taxa adicional."
-                      consequence="A configuração e todas as suas janelas serão removidas. O histórico administrativo preservará quem fez a exclusão."
-                      confirmLabel="Excluir taxa"
-                      pendingLabel="Excluindo..."
-                      variant="destructive"
-                      onConfirm={() => removeMutation.mutateAsync(surcharge.id)}
-                    >
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-destructive hover:text-destructive"
-                        disabled={removeMutation.isPending}
-                      >
-                        Excluir
-                      </Button>
-                    </ConfirmActionDialog>
-                  </div>
-                </div>
-
-                <SurchargeActivationControls
+              <li key={surcharge.id}>
+                <SurchargeCard
                   surcharge={surcharge}
-                  pending={
-                    modeMutation.isPending || toggleMutation.isPending || activeMutation.isPending
+                  amount={
+                    surcharge.type === 'PERCENTAGE' ? `${surcharge.value}%` : money(surcharge.value)
                   }
+                  scheduleLabels={surcharge.schedules.map((schedule) => ({
+                    id: schedule.id,
+                    label: describeSchedule(schedule),
+                  }))}
+                  pending={
+                    modeMutation.isPending ||
+                    toggleMutation.isPending ||
+                    activeMutation.isPending ||
+                    removeMutation.isPending
+                  }
+                  onEdit={() => startEditing(surcharge)}
                   onModeChange={(enabled) => modeMutation.mutate({ surcharge, enabled })}
                   onManualChange={(on) => toggleMutation.mutate({ surcharge, on })}
+                  onActiveChange={() =>
+                    activeMutation.mutateAsync({ surcharge, on: !surcharge.active })
+                  }
+                  onRemove={() => removeMutation.mutateAsync(surcharge.id)}
                 />
-
-                <p className="mt-2 break-all text-xs text-muted-foreground">
-                  ID da taxa: {surcharge.id}
-                </p>
-                {surcharge.rainAutomation && (
-                  <RainAutomationStatus
-                    automation={surcharge.rainAutomation}
-                    enabled={surcharge.active}
-                    automaticEnabled={surcharge.automaticRainEnabled}
-                  />
-                )}
-
-                {surcharge.schedules.length > 0 && (
-                  <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-                    {surcharge.automaticRainEnabled && (
-                      <li>Horários guardados, sem efeito no modo automático:</li>
-                    )}
-                    {surcharge.schedules.map((schedule) => (
-                      <li key={schedule.id}>{describeSchedule(schedule)}</li>
-                    ))}
-                  </ul>
-                )}
-                {surcharge.manuallyActive && !surcharge.automaticRainEnabled && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Manual ligado: mantém a taxa mesmo sem chuva. Desligar o manual não interrompe
-                    horários cadastrados; para bloquear tudo, use Desativar.
-                  </p>
-                )}
               </li>
             ))}
           </ul>

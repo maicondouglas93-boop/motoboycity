@@ -12611,3 +12611,92 @@ variáveis de produção pelo agente.
 
 Checagem imediatamente antes do commit: Jest focado da API **142/142**, testes
 Node do ADM **42/42** e proteção de destino **3/3**, além de `git diff --check`.
+
+### 2026-09-10 — Cards de taxas: separar operação de detalhes técnicos
+
+Pedido: simplificar a tela confusa de taxas após introduzir o modo climático.
+Mudança limitada à apresentação no ADM: cabeçalho com nome, valor, repasse e
+estado confirmado pela API; Editar e Desativar/Reativar visíveis; duas áreas
+para modo de ativação e resumo do clima, empilhadas em telas estreitas.
+Informações repetidas reduzidas. ID, fonte/licença, horários detalhados e
+exclusão passam a **Detalhes e horários**, fechado inicialmente. A estimativa
+regional não é apresentada como confirmação de chuva na rua. No modo Manual,
+permanece explícito que horários podem cobrar mesmo com o interruptor desligado.
+
+Arquivos: `apps/admin-web/src/app/(app)/configuracoes/taxas/page.tsx`, novo
+`components/settings/surcharge-card.tsx`, componentes `surcharge-activation-controls.tsx`
+e `rain-automation-status.tsx`, testes `surcharge-card.test.mjs`,
+`surcharge-activation.test.mjs` e `rain-automation.test.mjs`; handoff/runbook.
+Skills web-integration e verification orientaram preservar estado confirmado,
+callbacks, erros e diálogos de confirmação. Sem alteração de API, schema,
+regras/limiares climáticos, preços, consultas de rede ou formulário de cadastro.
+
+Validação: `pnpm --filter @motoboycity/admin-web test` e repetição com
+`node --test --test-reporter=spec 'apps/admin-web/test/*.test.mjs'`: **47/47**;
+`pnpm --filter @motoboycity/admin-web typecheck`, `lint` e `run build`: aprovados,
+38 páginas no build. A primeira compilação detectou índice possivelmente
+ausente na lista de horários; corrigido para passar ID junto de cada rótulo e
+recompilado com sucesso. Avisos existentes do Node sobre tipo de módulo nos
+testes não foram alterados. `git diff --check` aprovado.
+
+Inspeção no navegador interno de prévia temporária local com componentes/CSS
+reais e dados fictícios: automático, manual com horário e desativado; layout
+largo e iframe de 390 px, abertura de detalhes aprovada. Não houve acesso à
+API nem mutações reais nessa prévia, que não substitui smoke autenticado.
+Sem banco, migrations, `.env`, APK, commit, push ou deploy neste recorte.
+
+### 2026-09-10 — Chuva: filtro de consistência mais conservador e cache v2
+
+Pedido: melhorar a precisão após indicação climática sem chuva local. Confirmado
+no código: a política anterior aceitava volume positivo **OU** código WMO
+chuvoso, inclusive garoa/temporal com zero mm. Não há amostra histórica do caso
+para afirmar que esse foi o motivo daquela indicação específica.
+
+Alteração mínima em `apps/api/src/weather/rain-policy.ts`: exigir volume de
+chuva+pancadas maior que zero **E** código compatível na mesma amostra; validar
+`current.interval=900` e usar a mesma condição ao validar snapshot. Nenhum
+limiar arbitrário de intensidade, modelo/provedor novo ou espera extra. A
+garoa com volume positivo compatível continua aceita. Os 30 minutos secos,
+validade, referências de Lajinha, bloqueio manual/geral e preços congelados
+foram preservados. Os sinais vêm do mesmo modelo: não são confirmações locais
+independentes nem prova de melhora estatística na cidade. Um filtro mais
+conservador também pode deixar passar chuva real não representada pelo modelo.
+
+`rain-weather.service.ts`: namespace Redis v2 e `policyVersion: 2` no snapshot,
+sem ler ativação/lock/espera da regra antiga. A primeira consulta válida após o
+deploy decide novamente; cache v1 expira por TTL, sem exclusão. Sem schema
+PostgreSQL, migrations, mudança de DTO/rotas/pacotes, APK ou consultas extras
+por pedido. Nominal permanece uma consulta/5 min compartilhada entre instâncias
+da mesma versão. Rollout completo e rollback com controle Manual/desativação
+documentados no runbook, sem execução de produção.
+
+Testes `rain-policy.spec.ts` e `rain-weather.service.spec.ts`: códigos isolados,
+volumes contraditórios, garoa válida, intervalo ausente/inválido, versionamento,
+restauração multi-instância, descarte de cache antigo, espera seca sem reiniciar,
+timeouts/staleness, bloqueios e caminho de preço. Comandos:
+`pnpm --filter @motoboycity/api exec jest --runInBand weather pricing
+admin/surcharges/admin-surcharges.service.spec.ts` → **154/154**, 7 suítes;
+`pnpm --filter @motoboycity/api typecheck`, `lint`, `run build` → aprovados;
+`git diff --check` aprovado. Sem ensaio HTTP autenticado/Redis real ou comparação
+com sensor local. Consulta direta do endpoint pela ferramenta de navegação não
+retornou payload; contrato validado contra documentação oficial e fixtures.
+
+Fontes oficiais consultadas: [Open-Meteo API](https://open-meteo.com/en/docs),
+seções Current Weather, 15-Minutely Parameter Definition e resposta current:
+passo de 15 minutos/interpolação fora das áreas de alta resolução e intervalo
+de acumulação do volume. Skills delivery-core, prisma-contracts e verification
+orientaram a preservação financeira, isolamento do cache e testes. Atualizados
+business-rules, architecture, runbook e handoff. Alterações visuais anteriores
+preservadas no worktree. Sem `.env`, assinatura paga, commit, push ou deploy.
+
+### 2026-09-10 — Publicação autorizada: organização das taxas e filtro de chuva
+
+O responsável solicitou commit e push dos dois recortes pendentes. `main` e
+`origin/main` conferidos com fetch, sem divergência antes da publicação.
+Repetidos os testes focados da API (**154/154**, 7 suítes) e os testes Node do
+ADM (**47/47**); `git diff --check` aprovado. Builds, typecheck e lint de ambos
+os aplicativos já aprovados nos recortes anteriores, sem alteração de código
+desde essas validações. Inclui somente os arquivos dos recortes e documentação;
+sem credenciais, migrations adicionais ou APK. Push para `main` aciona os
+deploys automáticos configurados, mas a conclusão do Render/Vercel não foi
+verificada neste passo. Conferir rollout completo da API para usar a política v2.

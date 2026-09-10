@@ -4,7 +4,7 @@
 
 1. Em **ADM → Configurações → Taxas adicionais**, mantenha/crie a taxa de chuva
    da região de Lajinha, com o valor e repasse aprovados. Copie o **ID da taxa**
-   mostrado no card. A integração não procura pelo nome nem altera valor,
+   em **Detalhes e horários** no card. A integração não procura pelo nome nem altera valor,
    repasse ou região. O modo de ativação é escolhido separadamente no card.
 2. Após autorização para publicar o código, faça deploy da API e do ADM.
    O controle pelo ADM exige primeiro a migration aditiva
@@ -88,14 +88,23 @@ visível; usa a API/cache existentes, sem mais chamadas climáticas/geocoding.
   verificadas no geocoding oficial e salvas no código. **Zero consultas de
   geocoding em operação**, nenhum GPS de empresa/entregador enviado ao provedor.
 - Consulta `/v1/forecast` a cada cinco minutos: `current=rain,showers,weather_code`,
-  unidade mm, tempo UNIX, fuso `America/Sao_Paulo`. Chuva/pancadas acima de zero
-  OU WMO de garoa, chuva/pancadas/temporal ativa a contribuição automática.
-  Nuvens, neblina e probabilidade de chuva futura não ativam.
+  unidade mm, tempo UNIX, fuso `America/Sao_Paulo`; `current.interval=900` validado.
+  Exige chuva/pancadas acima de zero **E** WMO de garoa, chuva/pancadas/temporal
+  na mesma amostra atual. Código isolado com volume zero e acumulado positivo
+  sem código compatível não iniciam a cobrança nem reiniciam a espera seca.
+  Nuvens, neblina e probabilidade futura não ativam. Não há novo limiar de
+  intensidade: garoa positiva compatível continua elegível, sem espera extra.
 - Após a primeira amostra seca, a ativação permanece até completar 30 minutos.
   Nova chuva cancela a contagem; polling repetido não reinicia esse prazo.
 - Open-Meteo usa **modelos meteorológicos**, não sensores de cada rua. Dados
   atuais têm passo de 15 minutos; consultar a cada cinco minutos não torna a
-  detecção instantânea nem comprova chuva em cada ponto da cidade.
+  detecção instantânea nem comprova chuva em cada ponto da cidade. Em regiões
+  fora das áreas de alta resolução de 15 minutos (como o Brasil), o provedor
+  interpola dados horários. O volume é acumulado no intervalo anterior; por
+  isso não é suficiente sozinho para indicar chuva ainda ocorrendo.
+  O filtro conservador pode deixar de ativar em chuva real mal representada
+  no modelo. Sem observações locais não há medição de ganho de precisão;
+  o controle Manual/Desativar permanece disponível.
 - Dados com 30 minutos ou mais, futuros, fora de ordem, de outra localização
   ou sem unidades/campos válidos não autorizam cobrança automática. Em falha,
   o último dado válido só vale até esse limite; falha não inventa chuva nem
@@ -122,6 +131,16 @@ automação não cobra. Timeout HTTP de cinco segundos e falhas não impedem a A
 de iniciar. Desabilitada, não abre conexão Redis adicional. Uso nominal:
 **288 chamadas de clima/dia**, independentemente do número de empresas,
 pedidos ou celulares. Nenhuma consulta de geocoding recorrente.
+
+O filtro conservador usa namespace Redis `motoboycity:rain:lajinha:v2:<id>` e
+`policyVersion: 2` no snapshot. O deploy da API recomeça sem herdar ativação ou
+espera seca da regra permissiva v1; exige nova resposta válida. O cache antigo
+expira sozinho em até duas horas, sem exclusão manual. Não há alteração de
+PostgreSQL, migration, backup especial ou APK neste recorte. Durante rollout
+misto, processos antigos ainda usam v1: confirmar atualização de todas as
+instâncias antes de considerar a nova regra aplicada por completo. Num rollback
+para a regra antiga, manter a taxa Manual/desativada para não retomar os
+gatilhos permissivos. Nenhuma dessas ações de produção foi executada aqui.
 
 Logs `rain_automation_changed` registram mudanças detectadas nas consultas,
 ID da taxa e amostra, sem chave nem autor administrador fictício. O adicional

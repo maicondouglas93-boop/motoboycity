@@ -63,6 +63,14 @@ divisão personalizada da tabela.
 O responsável aprovou ativar a taxa existente pela indicação de chuva atual
 do Open-Meteo usando Lajinha–MG como referência, e desligar o automático após
 30 minutos sem nova indicação de chuva. Probabilidade futura não ativa cobrança.
+Após o relato de indicação de chuva sem chuva local, o filtro foi tornado mais
+conservador: exige **volume de chuva/pancadas maior que zero E código WMO
+compatível**, na mesma amostra atual de 15 minutos. Código isolado com zero mm
+ou acumulado positivo com condição atual sem chuva não inicia a ativação nem
+reinicia a espera seca. Não foi definido um novo limiar mínimo de intensidade
+nem espera adicional para ligar: garoa com volume positivo compatível continua
+elegível. Isso filtra inconsistências do modelo, não comprova chuva na rua;
+a precisão real não foi medida contra observações locais.
 Valor e repasse continuam definidos pelo ADM; taxas não se acumulam. O ADM
 escolhe o modo por taxa: **Manual** (interruptor e horários opcionais existentes)
 ou **Automática (chuva)** (somente clima, ignorando manual e horários).

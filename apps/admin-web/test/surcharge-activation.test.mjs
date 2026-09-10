@@ -54,7 +54,7 @@ test('Manual e Automática ficam separados e somente um é selecionado', () => {
   assert.match(html, /O clima não interfere/);
   const automatic = render({ surcharge: { ...surcharge, automaticRainEnabled: true } });
   assert.equal((automatic.match(/aria-pressed="true"/g) ?? []).length, 1);
-  assert.match(automatic, /Só o clima de Lajinha ativa/);
+  assert.match(automatic, /Ativação pela estimativa de chuva em Lajinha/);
   assert.doesNotMatch(automatic, /Ligar manual|Desligar manual/);
 });
 
@@ -98,7 +98,7 @@ test('sem vínculo no servidor, automático fica indisponível e manual continua
     assert.equal(buttons(tree)[1].props.disabled, true);
     assert.match(
       render({ surcharge: { ...surcharge, rainAutomation } }),
-      /vincule o ID desta taxa/,
+      /Automática indisponível. Consulte os detalhes abaixo/,
     );
   }
 });
@@ -106,10 +106,10 @@ test('sem vínculo no servidor, automático fica indisponível e manual continua
 test('horários existentes não são escondidos como se Manual dependesse só do botão', () => {
   assert.match(
     render({ surcharge: { ...surcharge, schedules: [{}] } }),
-    /Existem horários cadastrados/,
+    /Controle pelo botão ou pelos horários cadastrados/,
   );
   assert.match(
     render({ surcharge: { ...surcharge, automaticRainEnabled: true, schedules: [{}] } }),
-    /horários ficam sem efeito/,
+    /Horários e controle manual são ignorados/,
   );
 });

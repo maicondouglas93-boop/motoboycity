@@ -5,6 +5,9 @@ export const LAJINHA = { latitude: -20.15139, longitude: -41.62278 } as const;
 export const RAIN_POLL_MS = 5 * 60_000;
 export const RAIN_DRY_DELAY_MS = 30 * 60_000;
 export const RAIN_MAX_AGE_MS = 30 * 60_000;
+/** Cache de outra regra nunca pode herdar uma ativação nem seu período de espera. */
+export const RAIN_POLICY_VERSION = 2;
+const CURRENT_INTERVAL_SECONDS = 15 * 60;
 
 const rainyCodes = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
 const weatherCodes = [0, 1, 2, 3, 45, 48, ...rainyCodes, 71, 73, 75, 77, 85, 86];
@@ -12,6 +15,11 @@ const weatherCode = z
   .number()
   .int()
   .refine((code) => weatherCodes.includes(code));
+
+/** Volume acumulado sem indicação atual pode ser chuva que já passou; código sem volume não basta. */
+function hasCurrentRain(rainMm: number, code: number): boolean {
+  return rainMm > 0 && rainyCodes.has(code);
+}
 
 const currentWeatherSchema = z.object({
   latitude: z.number().refine((value) => Math.abs(value - LAJINHA.latitude) < 0.25),
@@ -23,6 +31,8 @@ const currentWeatherSchema = z.object({
   }),
   current: z.object({
     time: z.number().int().positive(),
+    // Open-Meteo current é modelado em passos de 15 min, não uma medição instantânea.
+    interval: z.literal(CURRENT_INTERVAL_SECONDS),
     rain: z.number().nonnegative().max(1000),
     showers: z.number().nonnegative().max(1000),
     weather_code: weatherCode,
@@ -32,6 +42,7 @@ const currentWeatherSchema = z.object({
 const timestamp = z.number().int().positive().max(8_640_000_000_000_000);
 export const rainStateSchema = z
   .object({
+    policyVersion: z.literal(RAIN_POLICY_VERSION),
     observedAt: timestamp,
     checkedAt: timestamp,
     raining: z.boolean(),
@@ -48,7 +59,7 @@ export const rainStateSchema = z
       (state.raining
         ? state.drySince === null && state.activeSince !== null
         : state.drySince !== null) &&
-      state.raining === (state.rainMm > 0 || rainyCodes.has(state.weatherCode)),
+      state.raining === hasCurrentRain(state.rainMm, state.weatherCode),
   );
 export type RainState = z.infer<typeof rainStateSchema>;
 
@@ -83,9 +94,10 @@ export function advanceRainState(
     throw new Error('Clima fora de ordem.');
   }
   const rainMm = current.rain + current.showers;
-  const raining = rainMm > 0 || rainyCodes.has(current.weather_code);
+  const raining = hasCurrentRain(rainMm, current.weather_code);
   const wasActive = previous !== null && isAutomaticRainActive(previous, now, now);
   return {
+    policyVersion: RAIN_POLICY_VERSION,
     observedAt,
     checkedAt: now,
     raining,

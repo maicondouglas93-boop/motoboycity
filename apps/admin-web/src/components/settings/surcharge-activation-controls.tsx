@@ -18,16 +18,16 @@ export function SurchargeActivationControls({
   const weather = surcharge.rainAutomation;
   const configured = Boolean(weather && !['DISABLED', 'NOT_CONFIGURED'].includes(weather.status));
   const buttonClass =
-    'rounded-lg border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50';
+    'min-h-10 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50';
 
   return (
-    <fieldset className="mt-3 space-y-2 rounded-lg border p-3" disabled={pending}>
-      <legend className="px-1 text-sm font-medium">Modo de ativação</legend>
-      <div className="flex flex-wrap gap-2">
+    <fieldset className="min-w-0 space-y-3" disabled={pending}>
+      <legend className="mb-3 text-sm font-semibold">Modo de ativação</legend>
+      <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl bg-muted p-1">
         <button
           type="button"
           aria-pressed={!automatic}
-          className={`${buttonClass} ${!automatic ? 'bg-primary text-primary-foreground' : 'bg-background'}`}
+          className={`${buttonClass} ${!automatic ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-background'}`}
           onClick={() => {
             if (automatic) onModeChange(false);
           }}
@@ -38,7 +38,7 @@ export function SurchargeActivationControls({
           type="button"
           aria-pressed={automatic}
           disabled={!configured && !automatic}
-          className={`${buttonClass} ${automatic ? 'bg-primary text-primary-foreground' : 'bg-background'}`}
+          className={`${buttonClass} ${automatic ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-background'}`}
           onClick={() => {
             if (!automatic) onModeChange(true);
           }}
@@ -46,40 +46,36 @@ export function SurchargeActivationControls({
           Automática (chuva)
         </button>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm leading-relaxed text-muted-foreground">
         {automatic
-          ? 'Só o clima de Lajinha ativa esta taxa. O manual e os horários ficam sem efeito neste modo.'
-          : 'O clima não interfere. Use o botão abaixo para ligar ou desligar manualmente.'}
+          ? 'Ativação pela estimativa de chuva em Lajinha. Horários e controle manual são ignorados.'
+          : surcharge.schedules.length > 0
+            ? 'Controle pelo botão ou pelos horários cadastrados. O clima não interfere.'
+            : 'Você liga e desliga a cobrança. O clima não interfere.'}
       </p>
       {!automatic && surcharge.schedules.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Existem horários cadastrados: eles também podem ativar a taxa neste modo. Para bloquear
-          tudo, use Desativar.
+          Desligar o manual mantém os horários. Para bloquear tudo, use Desativar taxa.
         </p>
       )}
       {!configured && (
         <p className="text-xs text-muted-foreground">
-          Automática indisponível: habilite o Open-Meteo e vincule o ID desta taxa no servidor.
+          Automática indisponível. Consulte os detalhes abaixo.
         </p>
       )}
       {!surcharge.active ? (
         <p className="text-sm font-medium">
-          Taxa desativada: nenhum modo pode cobrar. Use Reativar para permitir o modo escolhido.
+          Reative a taxa para usar o modo escolhido. Enquanto desativada, nenhum modo pode cobrar.
         </p>
       ) : !automatic ? (
         <button
           type="button"
-          className={buttonClass}
+          className={`${buttonClass} border bg-background`}
           onClick={() => onManualChange(!surcharge.manuallyActive)}
         >
           {surcharge.manuallyActive ? 'Desligar manual' : 'Ligar manual'}
         </button>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          Para suspender a cobrança automática, use Desativar. Para assumir o controle, selecione
-          Manual.
-        </p>
-      )}
+      ) : null}
       {pending && (
         <p role="status" className="text-xs text-muted-foreground">
           Salvando configuração...

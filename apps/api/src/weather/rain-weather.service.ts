@@ -10,6 +10,7 @@ import {
   isRainFresh,
   LAJINHA,
   RAIN_POLL_MS,
+  RAIN_POLICY_VERSION,
   rainStateSchema,
   type RainState,
 } from './rain-policy';
@@ -109,7 +110,7 @@ export class RainWeatherService implements OnModuleInit, OnModuleDestroy {
   async refresh(): Promise<void> {
     if (!this.redis || this.stopped || this.refreshing || !this.enabled || !this.configured) return;
     this.refreshing = true;
-    const stateKey = `motoboycity:rain:lajinha:v1:${this.surchargeId}`;
+    const stateKey = `motoboycity:rain:lajinha:v${RAIN_POLICY_VERSION}:${this.surchargeId}`;
     const lockKey = `${stateKey}:poll`;
     try {
       const cached = await this.redis.get(stateKey);

@@ -2,12 +2,18 @@ import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { RainWeatherService } from './rain-weather.service';
-import { LAJINHA, RAIN_MAX_AGE_MS, RAIN_POLL_MS } from './rain-policy';
+import {
+  LAJINHA,
+  RAIN_MAX_AGE_MS,
+  RAIN_POLL_MS,
+  RAIN_POLICY_VERSION,
+  advanceRainState,
+} from './rain-policy';
 
 jest.mock('ioredis', () => ({ __esModule: true, default: jest.fn() }));
 const id = 'c64a8a14-1d71-45bd-a05d-ed11e005ee26';
 const start = Date.parse('2026-09-10T15:00:00Z');
-const stateKey = `motoboycity:rain:lajinha:v1:${id}`;
+const stateKey = `motoboycity:rain:lajinha:v${RAIN_POLICY_VERSION}:${id}`;
 const lockKey = `${stateKey}:poll`;
 
 describe('RainWeatherService', () => {
@@ -31,7 +37,7 @@ describe('RainWeatherService', () => {
         JSON.stringify({
           ...LAJINHA,
           current_units: { time: 'unixtime', rain: 'mm', showers: 'mm' },
-          current: { time: at / 1000, rain, showers: 0, weather_code: code },
+          current: { time: at / 1000, interval: 900, rain, showers: 0, weather_code: code },
         }),
     } as Response;
   }
@@ -176,6 +182,54 @@ describe('RainWeatherService', () => {
     await second.refresh();
     jest.setSystemTime(start + 45 * 60_000);
     expect(second.forSurcharge(id)).toMatchObject({ status: 'DRY', activeNow: false });
+  });
+
+  it.each([
+    [0, 61],
+    [1, 3],
+  ])(
+    'dados inconsistentes (volume %s, código %s) não ativam nem após reinício',
+    async (rain, code) => {
+      fetchMock.mockResolvedValue(response(start, rain, code));
+      const first = create();
+      await boot(first);
+      expect(first.forSurcharge(id)).toMatchObject({ status: 'DRY', activeNow: false });
+      const second = create();
+      await boot(second);
+      expect(second.forSurcharge(id)).toMatchObject({ status: 'DRY', activeNow: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('não herda ativação nem lock da política antiga após deploy', async () => {
+    const oldKey = `motoboycity:rain:lajinha:v1:${id}`;
+    const state = advanceRainState(JSON.parse(await response().text()), null, start);
+    values.set(oldKey, JSON.stringify({ ...state, policyVersion: 1, rainMm: 0 }));
+    values.set(`${oldKey}:poll`, 'old-owner');
+    expires.set(`${oldKey}:poll`, start + RAIN_POLL_MS);
+    fetchMock.mockResolvedValue(response(start, 0, 61));
+    const service = create();
+    await boot(service);
+    expect(redis.get).not.toHaveBeenCalledWith(oldKey);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(service.forSurcharge(id)).toMatchObject({ status: 'DRY', activeNow: false });
+    expect(JSON.parse(values.get(stateKey)!)).toMatchObject({
+      policyVersion: RAIN_POLICY_VERSION,
+      activeSince: null,
+    });
+  });
+
+  it('cache sem versão ou com versão anterior na chave nova não autoriza cobrança', async () => {
+    const state = advanceRainState(JSON.parse(await response().text()), null, start);
+    for (const policyVersion of [undefined, 1]) {
+      values.set(stateKey, JSON.stringify({ ...state, policyVersion }));
+      expires.clear();
+      fetchMock.mockRejectedValueOnce(new Error('offline'));
+      const service = create();
+      await boot(service);
+      expect(service.forSurcharge(id)).toMatchObject({ status: 'UNAVAILABLE', activeNow: false });
+      service.onModuleDestroy();
+    }
   });
 
   it.each(['timeout', 'http', 'invalid'])(

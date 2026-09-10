@@ -8,9 +8,12 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, controle Manual/Automática da taxa de chuva
-> validado no ADM/API e em PostgreSQL isolado; commit/push autorizados pelo
-> responsável. Conferir conclusão dos deploys automáticos no Render/Vercel.
+> Última revisão: **2026-09-10**, filtro climático conservador implementado na
+> API (volume positivo E código compatível; cache v2), 154 testes e build/
+> typecheck/lint aprovados. Reorganização visual anterior preservada (47 testes
+> ADM). Commit/push dos dois recortes autorizados pelo responsável; conferir o
+> resultado do rollout. Controle Manual/Automática enviado em `8a7b769`;
+> conferir conclusão dos deploys automáticos no Render/Vercel.
 
 ## Como atualizar
 
@@ -26,6 +29,23 @@ Não marque item como concluído sem evidência de código e teste. Não registr
 secrets nem conteúdo de `.env` em nenhum dos três.
 
 ## O que está em produção
+
+**Recorte da API com publicação autorizada:** filtro da chuva exige volume
+positivo e código WMO compatível na amostra atual de 15 min. Zero mm com código
+de chuva ou volume positivo com condição não chuvosa não inicia/reinicia a
+ativação. Os 30 min secos e a frequência das consultas foram mantidos; não há
+novo limiar de intensidade. Cache Redis v2 não herda ativação/espera v1, requer
+nova amostra após atualizar a API. Sem migration/APK/alteração de valores.
+Os 154 testes focados, typecheck, lint e build da API passaram. Precisão em campo
+ainda não medida; estimativa pode divergir da rua. Rollout/rollback no runbook.
+
+**Recorte visual com publicação autorizada:** cards em Taxas adicionais destacam
+nome/valor/estado e Desativar/Reativar taxa. Modo e resumo climático separados,
+empilhados em telas estreitas. ID, fonte/licença, horários detalhados e exclusão
+ficam em **Detalhes e horários** (recolhido). Confirmações e chamadas da API
+preservadas; nenhum ajuste no critério climático, valores, banco ou APK.
+Validação visual com componentes/CSS reais e dados fictícios, sem API; não foi
+um smoke autenticado de cobrança. Ver changelog para testes.
 
 **Integração de chuva publicada:** `6b12b94` enviado para `main`; habilitação/ID
 da taxa no Render e resultado do rollout não foram verificados nesta sessão.

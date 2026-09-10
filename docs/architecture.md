@@ -171,6 +171,13 @@ após 30 minutos secos cessa a contribuição automática. O motor ignora clima
 no modo Manual e ignora manual/horários no automático; o interruptor geral
 vence todos. Horários são preservados para o retorno ao modo Manual.
 
+A política climática v2 exige volume positivo **e** código WMO compatível na
+mesma amostra `current` de 900 segundos. Usa namespace/versionamento de snapshot
+próprios para não herdar ativações/espera seca da política v1 (volume OU código).
+Não acrescenta consultas, atraso de confirmação, limiar de intensidade nem
+dependência ao caminho de cotação. É filtro de consistência do modelo, não
+medição local ou comprovação de melhoria meteorológica em campo.
+
 `SurchargeItem.rainAutomation` expõe apenas estado e horários para a taxa
 vinculada, nunca chave. `PATCH /admin/surcharges/:id/rain-automation` recebe
 `{ enabled: boolean }`, valida o vínculo/habilitação ao ativar, altera modo e
