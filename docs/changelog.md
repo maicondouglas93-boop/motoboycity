@@ -12700,3 +12700,54 @@ desde essas validações. Inclui somente os arquivos dos recortes e documentaç�
 sem credenciais, migrations adicionais ou APK. Push para `main` aciona os
 deploys automáticos configurados, mas a conclusão do Render/Vercel não foi
 verificada neste passo. Conferir rollout completo da API para usar a política v2.
+
+### 2026-09-10 — Cupom térmico de entrega no painel da empresa
+
+Solicitação adaptada pelo responsável ao domínio real: **ignorar produtos,
+valores e troco**. Implementados links "Imprimir pedido" na lista e no detalhe,
+página autenticada `/pedidos/[id]/imprimir` em shell `(print)` sem menus e cupom
+de 80 mm (72 mm úteis, margens 2 mm). Usa loja/número/status/modalidade, snapshot
+de destinatário e endereço DROPOFF, observações, referência/agendamento/retorno,
+motoboy atual, conferente e data de Brasília. Ausências recebem linhas para
+caneta; bairro não existe no contrato e não foi inventado/migrado.
+
+Preservados contratos/API/banco/dispatch/lote/financeiro/mobile. Impressão usa
+GET de perfil e operations filtrado por deliveryId, ambos somente leitura;
+evitado detail, que pode gravar endereço enriquecido por geocodificação.
+Autorização existente de membro ativo/empresa conferida; dupla conferência de
+empresa na UI. Botões restritos à loja; dados são reconsultados em cada clique,
+com bloqueio síncrono de duplicação, erro sem impressão de cache antigo,
+verificação da sessão/desmontagem e espera do DOM/fontes. Sem impressão USB ou
+silenciosa: `window.print()` pelo driver local.
+
+Arquivos: páginas `pedidos/page.tsx`, `pedidos/[id]/page.tsx`, novo grupo
+`(print)` (layout/CSS/page), componentes `delivery-print-link`,
+`delivery-print-view` e `delivery-receipt` com CSS modules, dois arquivos de
+teste e fixture `src/test/delivery-print-fixture.ts`. Documentados architecture,
+handoff e `runbooks/company-order-printing.md`.
+
+Validações executadas: `pnpm --filter @motoboycity/company-web test` → **126/126**,
+28 suítes (20 casos novos); `typecheck`, `lint` e `run build` → aprovados;
+`git diff --check` → aprovado. Build local de QA apontou temporariamente
+`NEXT_PUBLIC_API_URL` para API de fixtures em loopback, só no processo, sem editar
+`.env`. Build normal repetido após encerrar QA para não deixar artefato local
+apontando para fixtures. Navegador interno: lista/detalhe, cupom completo/sem endereço/parcial, notas
+longas, responsável atualizado antes da reimpressão, medição ~72 mm e ausência
+de overflow. Estilos `@media print` e `@page` compilados conferidos; não houve
+diálogo de impressão inspecionável no navegador interno. Ensaio de paginação,
+folha extra e impressão/corte físicos na Elgin permanece pendente. Sem acesso
+a pedidos de produção, E2E com banco, migrations, commit, push ou deploy.
+Skills web/verification orientaram a shell isolada, leitura sem mutações e
+testes de autorização/reimpressão. Scripts/servidores temporários de QA removidos
+ao encerrar; apenas código/testes/documentação do recorte permanecem.
+
+### 2026-09-10 — Publicação autorizada: cupom de entrega da empresa
+
+O responsável solicitou commit e push. Conferidos `git status`, histórico,
+`git fetch origin` e `HEAD...origin/main`: sem divergência antes do commit.
+Este commit reúne exclusivamente impressão do Company Web, seus testes e
+documentação. Código sem alterações desde a validação anterior (126 testes,
+typecheck, lint e build aprovados); diff revisado, sem credenciais ou arquivos
+temporários. Push na `main` aciona os deploys automáticos configurados;
+conclusão do rollout não verificada neste passo. Ensaio físico na Elgin continua
+pendente, conforme runbook. Sem migration, mudança na API ou APK.

@@ -1,0 +1,17 @@
+.layout { flex: 1; }
+
+@media print {
+  /* Sem a altura mínima/flex da shell: evita uma folha vazia após o cupom. */
+  :global(html):has(.layout), :global(body):has(.layout) {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  :global(body):has(.layout) > :not(.layout) { display: none !important; }
+  .layout { display: block; page: deliveryReceipt; }
+  /* Carregamento/erro do AuthGate nunca deve ir para a bobina. */
+  .layout > :not(main) { display: none !important; }
+}

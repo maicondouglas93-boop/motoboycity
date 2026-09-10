@@ -1,0 +1,36 @@
+.receipt {
+  box-sizing: border-box;
+  width: 72mm;
+  max-width: 100%;
+  margin: 0 auto;
+  color: #000;
+  background: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.receipt p { margin: 0; }
+.receipt h1 { margin: 2mm 0; font-size: 20pt; font-weight: 800; line-height: 1.15; }
+.receipt h2 { margin: 0 0 2mm; font-size: 11pt; font-weight: 700; break-after: avoid; }
+.heading { text-align: center; padding-bottom: 3mm; }
+.store { font-size: 12pt; font-weight: 700; }
+.section { border-top: 1px dashed #000; padding-top: 3mm; margin-top: 3mm; }
+.receipt .field { margin: 1.5mm 0; break-inside: avoid; }
+.blank { display: inline-block; border-bottom: 1px solid #000; width: 34mm; max-width: 100%; height: 5mm; vertical-align: bottom; }
+.hint { font-size: 9pt; }
+.notes { white-space: pre-wrap; orphans: 3; widows: 3; }
+.driver { break-inside: avoid; }
+.driver p { font-size: 12pt; font-weight: 700; }
+.footer { border-top: 1px dashed #000; margin-top: 4mm; padding-top: 3mm; font-size: 8pt; break-inside: avoid; }
+
+@media print {
+  .receipt { margin: 0 auto; page: deliveryReceipt; }
+}
+
+/* Altura e bobina de 80 mm vêm do driver: “80mm auto” não é um size CSS válido. */
+@page deliveryReceipt {
+  size: auto;
+  margin: 2mm;
+}

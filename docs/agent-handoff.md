@@ -8,12 +8,12 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, filtro climático conservador implementado na
-> API (volume positivo E código compatível; cache v2), 154 testes e build/
-> typecheck/lint aprovados. Reorganização visual anterior preservada (47 testes
-> ADM). Commit/push dos dois recortes autorizados pelo responsável; conferir o
-> resultado do rollout. Controle Manual/Automática enviado em `8a7b769`;
-> conferir conclusão dos deploys automáticos no Render/Vercel.
+> Última revisão: **2026-09-10**, cupom de entrega de 80 mm implementado
+> no Company Web, sem produtos/valores/troco. 126 testes e
+> build/typecheck/lint aprovados. Commit e push autorizados pelo responsável;
+> conclusão do deploy automático ainda não verificada;
+> falta ensaio físico/driver na Elgin. Recortes climáticos anteriores
+> preservados; conferir rollout conforme seção de produção abaixo.
 
 ## Como atualizar
 
@@ -27,6 +27,19 @@ validação:
 
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
+
+## Recorte com publicação autorizada — conferir rollout
+
+**Cupom da loja:** botões na lista e detalhe de pedidos levam a
+`/pedidos/[id]/imprimir`. Página protegida, sem menus; consulta novamente o
+pedido/motoboy em cada impressão. Usa operations por ID (somente leitura), não
+detail que pode gravar geocodificação. Sem banco/API/APK/financeiro alterados.
+Prévia de 72 mm úteis conferida com dados fictícios no navegador, inclusive
+texto longo e endereço ausente/parcial. 20 testes novos, 126 totais aprovados.
+Impressão paginada e corte na Elgin i8/i9 ainda não validados em hardware.
+Orientações e evidências em `runbooks/company-order-printing.md`.
+Publicação por commit/push na `main` autorizada. Conferir o deploy automático
+do Company Web na Vercel; não há mudança de API, migration ou APK neste recorte.
 
 ## O que está em produção
 

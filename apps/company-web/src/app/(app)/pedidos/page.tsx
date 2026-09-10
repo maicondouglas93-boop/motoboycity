@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DeliveryStatus } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
+import { DeliveryPrintLink } from '@/components/orders/delivery-print-link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -306,6 +307,7 @@ function ConteudoPedidos() {
                         : 'Cancelar'}
                     </Button>
                   )}
+                  <DeliveryPrintLink deliveryId={delivery.id} companyId={delivery.companyId} className="col-span-2" />
                 </div>
               </CardContent>
             </Card>

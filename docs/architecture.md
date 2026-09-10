@@ -21,6 +21,17 @@ Monorepo PNPM/Turborepo com quatro aplicações e três pacotes compartilhados.
 | `packages/types` | formatos de resposta e payload |
 | `packages/api-client` | chamadas HTTP tipadas, usadas pelos três clientes |
 
+### Impressão operacional da empresa
+
+`/pedidos/[id]/imprimir` fica no grupo `(print)` do Company Web, com `AuthGate`,
+sem a shell `(app)` e sem menus na bobina. `DeliveryPrintView` reconsulta perfil
+e `deliveries.operations` filtrado por ID antes de `window.print()`;
+`DeliveryReceipt` renderiza o cupom térmico com 72 mm úteis e CSS de impressão.
+Reutiliza o escopo de empresa da API e o snapshot de destinatário/endereço do
+pedido. Não usa `detail` (que pode persistir enriquecimento de endereço GPS),
+não cria endpoint/schema e não imprime produtos/valores/troco. Guia e limites
+de validação em `runbooks/company-order-printing.md`.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

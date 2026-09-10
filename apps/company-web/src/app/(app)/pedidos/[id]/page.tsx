@@ -25,6 +25,7 @@ import {
 import { ApiError } from '@motoboycity/api-client';
 import { StatusChip, statusLabel, statusRailClass } from '@/components/orders/status-chip';
 import { ShareDeliveryTrackingButton } from '@/components/orders/share-delivery-tracking-button';
+import { DeliveryPrintLink } from '@/components/orders/delivery-print-link';
 import { CompletedDeliveryCustomerRegistration } from '@/components/customers/completed-delivery-customer-registration';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -182,8 +183,9 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
             Criado em {formatDate(delivery.createdAt)} · {delivery.serviceTypeName}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <StatusChip status={delivery.status} />
+          <DeliveryPrintLink deliveryId={delivery.id} companyId={delivery.companyId} />
           {companyCanShareTracking && (
             <ShareDeliveryTrackingButton
               token={token}
