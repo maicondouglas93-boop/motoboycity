@@ -1,22 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  DollarSign,
-  Eye,
-  EyeOff,
-  FileText,
-  LayoutDashboard,
-  ListOrdered,
-  Menu,
-  Settings,
-  Sparkles,
-  Truck,
-  Users,
-  type LucideIcon,
-} from 'lucide-react';
+import { Eye, EyeOff, Menu } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +24,7 @@ import { session } from '@/lib/session';
 type NavItem = {
   href: string;
   label: string;
-  icon: LucideIcon;
+  image: string;
 };
 
 type NavGroup = {
@@ -50,31 +38,31 @@ const NAV_GROUPS: readonly NavGroup[] = [
     label: 'Operação',
     tone: 'text-colete-escuro bg-colete/15',
     items: [
-      { href: '/', label: 'Visão geral', icon: LayoutDashboard },
-      { href: '/pedidos', label: 'Pedidos', icon: ListOrdered },
-      { href: '/entregadores', label: 'Entregadores', icon: Truck },
+      { href: '/', label: 'Visão geral', image: '/brand/navigation/visao-geral-v1.png' },
+      { href: '/pedidos', label: 'Pedidos', image: '/brand/navigation/pedidos-v1.png' },
+      { href: '/entregadores', label: 'Entregadores', image: '/brand/navigation/entregadores-v1.png' },
     ],
   },
   {
     label: 'Comercial',
     tone: 'text-status-entregue bg-status-entregue/10',
     items: [
-      { href: '/clientes', label: 'Clientes', icon: Users },
-      { href: '/financeiro', label: 'Financeiro', icon: DollarSign },
+      { href: '/clientes', label: 'Clientes', image: '/brand/navigation/clientes-v1.png' },
+      { href: '/financeiro', label: 'Financeiro', image: '/brand/navigation/financeiro-v1.png' },
     ],
   },
   {
     label: 'Análise',
     tone: 'text-status-pagamento bg-status-pagamento/10',
     items: [
-      { href: '/relatorios', label: 'Relatórios', icon: FileText },
-      { href: '/secretaria-virtual', label: 'Secretária IA', icon: Sparkles },
+      { href: '/relatorios', label: 'Relatórios', image: '/brand/navigation/relatorios-v1.png' },
+      { href: '/secretaria-virtual', label: 'Secretária IA', image: '/brand/navigation/secretaria-ia-v1.png' },
     ],
   },
   {
     label: 'Sistema',
     tone: 'text-primary bg-primary/10',
-    items: [{ href: '/configuracoes', label: 'Configurações', icon: Settings }],
+    items: [{ href: '/configuracoes', label: 'Configurações', image: '/brand/navigation/configuracoes-v1.png' }],
   },
 ];
 
@@ -84,10 +72,24 @@ function isNavItemActive(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
 }
 
+function NavArtwork({ image }: Pick<NavItem, 'image'>) {
+  return (
+    <Image
+      src={image}
+      alt=""
+      width={32}
+      height={32}
+      sizes="32px"
+      loading="eager"
+      className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+    />
+  );
+}
+
 /**
  * Sem botão de ação em âmbar aqui, ao contrário do painel da empresa: o admin
- * fiscaliza a operação, não põe motoboy na rua. A cor continua significando
- * movimento, e aqui ela só aparece nos status.
+ * fiscaliza a operação, não põe motoboy na rua. As artes usam a paleta da marca,
+ * sem transformar um destino de navegação em ação operacional.
  *
  * A etiqueta "Admin" ao lado da marca existe porque os dois painéis passaram a
  * dividir o mesmo wordmark — quem estiver com as duas abas abertas precisa
@@ -108,7 +110,7 @@ export function TopNav() {
 
   return (
     <header className="admin-topbar sticky top-0 z-40 border-b border-white/10 text-white">
-      <div className="flex min-h-16 items-center gap-2 px-4 py-2.5 xl:h-16 xl:gap-6 xl:px-8 xl:py-0">
+      <div className="flex min-h-16 items-center gap-2 px-4 py-2.5 xl:h-16 xl:gap-3 xl:px-8 xl:py-0 2xl:gap-6">
         <Link
           href="/"
           className="group flex shrink-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -120,21 +122,21 @@ export function TopNav() {
           </span>
         </Link>
 
-        <nav className="hidden min-w-0 flex-1 items-center justify-center gap-1 xl:flex">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+        <nav className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto xl:flex 2xl:justify-center">
+          {NAV_ITEMS.map(({ href, label, image }) => {
             const isActive = isNavItemActive(pathname, href);
             return (
               <Link
                 key={href}
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm transition-all ${
+                className={`group flex shrink-0 items-center gap-1.5 rounded-xl px-1.5 py-1 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-inset focus-visible:outline-none 2xl:px-2 2xl:text-sm ${
                   isActive
                     ? 'bg-white/12 font-semibold text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_8px_20px_-14px_rgba(53,184,178,0.8)]'
-                    : 'text-white/62 hover:bg-white/[0.06] hover:text-white'
+                    : 'text-white/80 hover:bg-white/[0.06] hover:text-white'
                 }`}
               >
-                <Icon className="size-4" aria-hidden="true" />
+                <NavArtwork image={image} />
                 {label}
               </Link>
             );
@@ -162,7 +164,7 @@ export function TopNav() {
                 <DropdownMenuLabel className="px-2 pt-2 text-[11px] font-bold tracking-[0.12em] uppercase">
                   {group.label}
                 </DropdownMenuLabel>
-                {group.items.map(({ href, label, icon: Icon }) => {
+                {group.items.map(({ href, label, image }) => {
                   const active = isNavItemActive(pathname, href);
                   return (
                     <DropdownMenuItem
@@ -174,7 +176,7 @@ export function TopNav() {
                       <span
                         className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${group.tone}`}
                       >
-                        <Icon className="size-4" aria-hidden="true" />
+                        <NavArtwork image={image} />
                       </span>
                       <span>{label}</span>
                       {active && (

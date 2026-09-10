@@ -18,7 +18,7 @@ function renderNav() {
   return render(<QueryClientProvider client={new QueryClient()}><TopNav /></QueryClientProvider>);
 }
 
-describe('TopNav — marca aiqfome', () => {
+describe('TopNav — navegação ilustrada', () => {
   beforeEach(() => { navigation.pathname = '/pedidos'; });
 
   it('substitui texto por imagem local mantendo destino e nome acessível', () => {
@@ -37,5 +37,26 @@ describe('TopNav — marca aiqfome', () => {
     renderNav();
     expect(screen.getByRole('link', { name: 'aiqfome — Integrações' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Financeiro' })).toHaveAttribute('href', '/financeiro');
+  });
+
+  it.each([
+    ['Pedidos', 'pedidos'],
+    ['Clientes', 'clientes'],
+    ['Relatórios', 'relatorios'],
+    ['Financeiro', 'financeiro'],
+  ])('mantém %s legível e acessível com arte local otimizada', (label, slug) => {
+    navigation.pathname = `/${slug}/detalhe`;
+    renderNav();
+    const link = screen.getByRole('link', { name: label });
+    expect(link).toHaveAttribute('href', `/${slug}`);
+    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(within(link).getByText(label)).toBeVisible();
+    const art = within(link).getByRole('presentation');
+    expect(art).toHaveAttribute('alt', '');
+    expect(art).toHaveAttribute('src', expect.stringContaining(`${slug}-v1.png`));
+    expect(art).toHaveAttribute('src', expect.stringContaining('/_next/image?'));
+    expect(art).toHaveAttribute('sizes', '32px');
+    expect(art).toHaveAttribute('width', '32');
+    expect(art).toHaveAttribute('height', '32');
   });
 });

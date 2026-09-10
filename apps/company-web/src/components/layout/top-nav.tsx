@@ -3,15 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import {
-  ClipboardList,
-  FileText,
-  LogOut,
-  PlugZap,
-  UserRound,
-  UsersRound,
-  Wallet,
-} from 'lucide-react';
+import { LogOut, UserRound } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -36,11 +28,11 @@ import { session } from '@/lib/session';
  * âmbar — a mesma cor que, na lista, significa entrega em movimento.
  */
 const NAV_ITEMS = [
-  { href: '/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { href: '/clientes', label: 'Clientes', icon: UsersRound },
-  { href: '/relatorios', label: 'Relatórios', icon: FileText },
-  { href: '/financeiro', label: 'Financeiro', icon: Wallet },
-  { href: '/integracoes', label: 'Integrações', icon: PlugZap },
+  { href: '/pedidos', label: 'Pedidos', image: '/brand/navigation/pedidos-v1.png' },
+  { href: '/clientes', label: 'Clientes', image: '/brand/navigation/clientes-v1.png' },
+  { href: '/relatorios', label: 'Relatórios', image: '/brand/navigation/relatorios-v1.png' },
+  { href: '/financeiro', label: 'Financeiro', image: '/brand/navigation/financeiro-v1.png' },
+  { href: '/integracoes', label: 'Integrações', image: '/brand/aiqfome.jpeg' },
 ];
 
 export function TopNav() {
@@ -77,7 +69,7 @@ export function TopNav() {
         </Link>
 
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 lg:order-none lg:w-auto lg:min-w-0 lg:flex-1 lg:pb-0">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          {NAV_ITEMS.map(({ href, label, image }) => {
             const isActive = pathname === href || pathname.startsWith(`${href}/`);
             const isAiqfome = href === '/integracoes';
             return (
@@ -87,15 +79,15 @@ export function TopNav() {
                 aria-current={isActive ? 'page' : undefined}
                 aria-label={isAiqfome ? 'aiqfome — Integrações' : undefined}
                 title={isAiqfome ? 'Integrações aiqfome' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-lg border text-sm transition-all ${isAiqfome ? 'px-2 py-1' : 'px-3 py-2'} ${
+                className={`group flex shrink-0 items-center gap-2 rounded-xl border px-2 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-inset focus-visible:outline-none ${
                   isActive
                     ? 'border-white/12 bg-white/12 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                    : 'border-transparent text-white/62 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
+                    : 'border-transparent text-white/80 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
                 {isAiqfome ? (
                   <Image
-                    src="/brand/aiqfome.jpeg"
+                    src={image}
                     alt="aiqfome"
                     width={576}
                     height={300}
@@ -104,7 +96,15 @@ export function TopNav() {
                   />
                 ) : (
                   <>
-                    <Icon className="size-4" aria-hidden="true" />
+                    <Image
+                      src={image}
+                      alt=""
+                      width={32}
+                      height={32}
+                      sizes="32px"
+                      loading="eager"
+                      className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                    />
                     {label}
                   </>
                 )}

@@ -12781,3 +12781,82 @@ TopNav, imagem local, três testes e documentação. Código sem mudanças desde
 os testes focados, typecheck, lint e build aprovados; `git diff --check` aprovado.
 Publicação na `main` aciona os deploys automáticos configurados, sem confirmação
 da conclusão do rollout neste passo. Sem alteração de API, banco ou APK.
+
+### 2026-09-10 — Mini-ilustrações leves no header da empresa
+
+Responsável pediu imagens com mais personalidade no menu do Company Web.
+Geradas quatro artes transparentes pelo recurso integrado image_gen, em estilo
+3D suave e paleta laranja/verde-petróleo/marfim: encomenda, clientes, relatório
+e carteira. Copiados os originais sem alteração para
+`apps/company-web/public/brand/navigation/*-v1.png`, preservando a marca aiqfome.
+`TopNav` renderiza com Next Image, 32 × 32 px reservados e `sizes="32px"`;
+nomes continuam visíveis, imagens decorativas têm alt vazio, links e estado
+ativo permanecem iguais. Melhorado contraste dos rótulos e foco por teclado;
+hover discreto respeita preferência por movimento reduzido. Nenhuma mudança
+em autenticação, notificações, CTA, API, financeiro, banco, mobile ou dependências.
+
+Arquivos: `components/layout/top-nav.tsx`, `top-nav.test.tsx`, quatro PNGs,
+`docs/design/company-nav-illustrations.md` (prompts integrais e medições),
+handoff e changelog. Skills imagegen/web/verificação orientaram transparência,
+otimização nativa e preservação de navegação/acessibilidade; skill browser
+orientou QA da UI real em prévia temporária isolada, sem dados de produção.
+
+Validação: `pnpm --filter @motoboycity/company-web test --
+src/components/layout/top-nav.test.tsx` **7/7**; typecheck, lint e build do painel
+aprovados; `git diff --check` aprovado. Typecheck inicialmente detectou opção
+`exact` inválida no teste; removida e typecheck/testes reexecutados com sucesso.
+Imagens carregadas no navegador, sem erros no console; layout conferido em
+1280, 1024 e 390 px, mantendo rolagem só no menu quando necessário.
+Respostas locais WebP somam 3.444 bytes em 32 px, 6.952 em 64 px e 10.826 em
+96 px para as quatro artes (sem contar headers HTTP ou demais recursos).
+Originais no repositório somam 3.758.261 bytes e não são baixados diretamente
+pelo componente. Prévia temporária removida, servidor encerrado e build final
+feito com configuração normal. Produção e dispositivos físicos não testados.
+Sem commit, push ou deploy solicitado neste recorte.
+
+### 2026-09-10 — Navegação ilustrada também no ADM
+
+Responsável ampliou o recorte para o painel administrativo e pediu gerar as artes
+faltantes. Reaproveitadas cópias idênticas das quatro artes Company; geradas
+Visão geral (dashboard), Entregadores (capacete), Secretária IA (robô) e
+Configurações (engrenagem), com transparência e mesma paleta. Geração integrada
+retornou limite após as duas primeiras; nova tentativa expressamente solicitada
+concluiu as duas restantes. Nenhuma pendência de geração e nenhum CLI pago usado.
+
+`apps/admin-web/src/components/layout/top-nav.tsx`: imagens locais Next Image
+de 32 px no header e menu compacto; rótulos, rotas, grupos, página ativa,
+notificações, ocultar valores e logout preservados. Ajustados padding/gaps e
+tipografia no breakpoint desktop para comportar os oito itens; foco de teclado
+explícito, texto com mais contraste e hover compatível com movimento reduzido.
+Oito PNGs em `apps/admin-web/public/brand/navigation`, onze testes novos em
+`apps/admin-web/test/top-nav.test.mjs`, prompts e tamanhos registrados em
+`docs/design/admin-nav-illustrations.md`; handoff atualizado. Sem dependências,
+API, autenticação, banco, fluxos operacionais ou APK alterados.
+
+Validação ADM: teste focado **11/11**, suíte completa **58/58**, typecheck, lint
+e build aprovados. Testes transpilem/renderizam o TopNav real com Image real e
+substitutos de navegação/primitivas/contexto; cobrem rótulos, oito destinos,
+estado ativo, assets iguais ao Company e callbacks do menu/valores/logout.
+QA com componente real em prévia temporária isolada: 1280 e 1536 px sem overflow
+horizontal da página/menu; 390 px com menu aberto e oito imagens/opções visíveis,
+sem erros no console. Ajustado padding após primeira prévia mostrar leve corte
+de Configurações em 1280 px. Sem login ou dados de produção.
+Corpos das oito respostas WebP locais: 7.440 B em 32 px, 15.128 B em 64 px e
+22.962 B em 96 px; originais maiores não são servidos diretamente pelo menu.
+Removida rota de prévia, encerrado servidor e feito build com configuração normal.
+Avisos existentes MODULE_TYPELESS_PACKAGE_JSON na suíte não impedem os testes.
+Skills imagegen/web/verificação e browser orientaram geração, escopo visual,
+preservação de ações e QA. `git diff --check` aprovado. Sem commit/push/deploy
+solicitado para as ilustrações de nenhum dos painéis.
+
+### 2026-09-10 — Publicação autorizada: ilustrações Company e ADM
+
+Responsável solicitou commit e push dos dois menus ilustrados. Conferidos
+status, histórico, diff e `git fetch origin`: `HEAD...origin/main` sem divergência.
+Recorte reúne somente TopNav dos painéis, testes, PNGs e documentação de design.
+Reexecutados os testes focados: ADM **11/11** e Company **7/7**, ambos aprovados;
+código sem mudanças desde typecheck/lint/build aprovados dos dois painéis e suíte
+completa ADM **58/58**. Diff revisado, sem secrets, arquivos de prévia ou backend.
+Skill de verificação orientou escopo, revisão e preservação das validações.
+Push na `main` aciona os deploys automáticos configurados; conclusão do rollout
+não verificada neste passo. Sem mudança em API, banco, regras de negócio ou APK.

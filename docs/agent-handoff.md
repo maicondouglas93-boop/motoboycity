@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, imagem aiqfome substitui o texto Integrações
-> no menu do Company Web, com commit e push autorizados; conferir rollout.
+> Última revisão: **2026-09-10**, mini-ilustrações nos menus Company Web e ADM,
+> validadas localmente, com commit/push autorizados; conferir rollout.
+> Marca aiqfome enviada em `1d9ae85`; conferir rollout.
 > Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
 > build/typecheck/lint aprovados; rollout e ensaio físico na Elgin ainda
 > não verificados. Recortes climáticos anteriores preservados.
@@ -27,14 +28,38 @@ validação:
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
 
-## Recorte visual com publicação autorizada
+## Recorte visual com publicação autorizada — navegação ilustrada Company e ADM
 
-Menu do Company Web: a imagem fornecida em Downloads substitui texto/ícone de
-Integrações, mantendo `/integracoes`, título interno e comportamento da página.
-Asset local `public/brand/aiqfome.jpeg`, nome acessível e destaque ativo preservados.
-Três testes focados, typecheck/lint e build aprovados; visual do componente real
-conferido em prévia local isolada, sem dados de produção. Commit/push na `main`
-autorizados; conclusão do deploy automático do Company Web ainda não verificada.
+ADM: oito itens ilustrados no desktop e no menu compacto. Reutilizadas as quatro
+artes do Company, com arquivos idênticos; geradas Visão geral, Entregadores,
+Secretária IA e Configurações. Todas concluídas após nova tentativa solicitada
+pelo responsável para as duas últimas, inicialmente impedidas por limite de uso.
+Next Image reserva 32 px e entrega WebP; oito artes somam 7,4 KB em 1x, 15,1 KB
+em 2x e 23 KB em 3x na medição local. PNGs em `apps/admin-web/public/brand/navigation`.
+Nomes, rotas, página ativa, grupos do menu, notificações, ocultar valores e logout
+preservados. Ajustados espaçamentos/tamanho do texto para caber no header.
+58 testes do ADM aprovados (11 novos do TopNav), typecheck/lint/build aprovados.
+QA local em 1280/1536/390 px: imagens carregadas e sem overflow da página,
+menu compacto aberto e oito opções visíveis, console sem erros. Prévia removida.
+Prompts e arquivos em `design/admin-nav-illustrations.md`.
+
+Menu do Company Web com quatro mini-ilustrações originais (Pedidos, Clientes,
+Relatórios e Financeiro), em laranja/verde-petróleo, preservando os nomes visíveis.
+PNGs transparentes locais em `public/brand/navigation`, servidos por Next Image
+em 32 px: quatro imagens somam 3,4 KB em 1x, 7 KB em 2x e 10,8 KB em 3x nos
+testes locais WebP. Não servir diretamente os PNGs originais maiores.
+Links, estado ativo, sessão, notificações e Chamar entregador preservados;
+foco de teclado explícito e movimento de hover respeitam movimento reduzido.
+Sete testes focados, typecheck/lint e build aprovados. Componente real conferido
+em prévia local sem produção: 1280/1024/390 px, sem overflow da página; menu
+mantém rolagem horizontal nas larguras menores. Prévia removida e servidor parado.
+Prompts e tamanhos em `design/company-nav-illustrations.md`.
+Commit/push na `main` autorizados. Conferir conclusão dos deploys automáticos
+dos dois painéis; rollout ainda não verificado. Sem alteração em API, banco ou APK.
+
+Marca aiqfome fornecida em Downloads continua em `/integracoes`, com nome
+acessível e destaque ativo; recorte anterior enviado em `1d9ae85`, rollout
+do deploy automático não verificado.
 
 ## Recorte com publicação autorizada — conferir rollout
 
