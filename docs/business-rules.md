@@ -58,6 +58,20 @@ O retorno continua 100% com o motoboy. Cada taxa adicional continua usando seu
 próprio `driverSharePercentage`; esses dois valores não são afetados pela
 divisão personalizada da tabela.
 
+## Taxa automática de chuva
+
+O responsável aprovou ativar a taxa existente pela indicação de chuva atual
+do Open-Meteo usando Lajinha–MG como referência, e desligar o automático após
+30 minutos sem nova indicação de chuva. Probabilidade futura não ativa cobrança.
+Valor e repasse continuam definidos pelo ADM; taxas não se acumulam. O manual
+permanece independente, e a desativação geral vence clima, manual e horários.
+O responsável pediu suporte ao endpoint público sem chave; a ativação é
+explícita e não dispensa conferir a licença de uso comercial do provedor.
+
+A automação não altera preços já calculados. Dado meteorológico desatualizado
+não autoriza cobrança automática; falha do provedor não bloqueia pedidos.
+O serviço estima o clima da cidade, não comprova chuva em cada rua.
+
 ## Cálculo de distância
 
 Rota real via Google Maps Routes API — explicitamente não é distância em

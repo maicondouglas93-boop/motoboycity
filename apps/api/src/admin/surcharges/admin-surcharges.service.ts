@@ -4,6 +4,7 @@ import type { UpsertSurchargePayload } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isSurchargeActiveAt } from '../../pricing/surcharge-window';
 import { AdminAuditService } from '../audit/admin-audit.service';
+import { RainWeatherService } from '../../weather/rain-weather.service';
 
 /**
  * As formas vêm de `@motoboycity/types` e não são redeclaradas aqui: uma cópia
@@ -35,6 +36,7 @@ export class AdminSurchargesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AdminAuditService,
+    private readonly rainWeather: RainWeatherService,
   ) {}
 
   async list(): Promise<SurchargeItem[]> {
@@ -239,6 +241,7 @@ export class AdminSurchargesService {
   }
 
   private toItem(surcharge: SurchargeRow, now: Date): SurchargeItem {
+    const rainAutomation = this.rainWeather.forSurcharge(surcharge.id, now);
     const schedules = surcharge.schedules.map((schedule) => ({
       id: schedule.id,
       weekday: schedule.weekday,
@@ -262,9 +265,15 @@ export class AdminSurchargesService {
        * cobra de verdade.
        */
       activeNow: isSurchargeActiveAt(
-        { active: surcharge.active, manuallyActive: surcharge.manuallyActive, schedules },
+        {
+          active: surcharge.active,
+          manuallyActive: surcharge.manuallyActive,
+          schedules,
+          weatherActive: rainAutomation?.activeNow ?? false,
+        },
         now,
       ),
+      rainAutomation,
       schedules,
       createdAt: surcharge.createdAt.toISOString(),
     };

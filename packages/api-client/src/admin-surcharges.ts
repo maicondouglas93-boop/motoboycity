@@ -25,6 +25,7 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
   }
 
   return {
+    /** Inclui o estado climático da taxa vinculada, sem consultar o provedor pelo navegador. */
     async list(accessToken: string): Promise<SurchargeItem[]> {
       const response = await apiFetch(`${baseUrl}/admin/surcharges`, {
         headers: withAuth(accessToken),

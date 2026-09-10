@@ -4,9 +4,8 @@ import { effectiveWeekday, rangeCoversMinute } from '../common/time-window';
 /**
  * Quando uma taxa adicional está valendo.
  *
- * Duas formas de valer, e basta uma: o interruptor manual, que o admin liga
- * quando começa a chover, ou uma janela agendada, para o que é previsível como
- * feriado e madrugada.
+ * Basta uma condição: o interruptor manual, uma janela agendada (feriado e
+ * madrugada) ou a decisão climática já validada. O interruptor geral vence todas.
  *
  * Tudo é avaliado no relógio da operação. Uma janela "sexta das 18h às 23h" é
  * sexta em Lajinha, não em UTC — em UTC essa faixa cai parcialmente no sábado.
@@ -25,6 +24,8 @@ export interface SurchargeScheduleWindow {
 export interface SurchargeRule {
   active: boolean;
   manuallyActive: boolean;
+  /** Decisão climática já validada pelo servidor; ausente nas regras legadas. */
+  weatherActive?: boolean;
   schedules: SurchargeScheduleWindow[];
 }
 
@@ -39,7 +40,7 @@ export function isSurchargeActiveAt(rule: SurchargeRule, at: Date): boolean {
   // O interruptor geral vem antes de tudo: desativada não vale nem manual nem
   // agendada.
   if (!rule.active) return false;
-  if (rule.manuallyActive) return true;
+  if (rule.manuallyActive || rule.weatherActive) return true;
 
   const parts = saoPauloDateParts(at);
   const minuteOfDay = parts.hour * 60 + parts.minute;

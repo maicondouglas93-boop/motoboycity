@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { adminSurchargesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
+import { RainAutomationStatus } from '@/components/settings/rain-automation-status';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -218,7 +219,7 @@ export default function SurchargesPage() {
         icon={CloudRain}
         tom="alertas"
         titulo="Taxas adicionais"
-        descricao="Acréscimos para chuva, feriado, madrugada — o nome e a regra são seus. Cada taxa vale pelo interruptor manual ou por uma janela agendada, e basta uma das duas."
+        descricao="Acréscimos para chuva, feriado ou madrugada. A taxa pode valer pelo controle manual, por horário ou pelo clima de Lajinha–MG, quando a automação estiver configurada. Desativar a taxa interrompe todas as formas de cobrança."
         situacao={
           valendoAgora === 0
             ? { estado: 'desligado', texto: 'Nenhuma taxa valendo agora' }
@@ -416,6 +417,19 @@ export default function SurchargesPage() {
 
       <section className="space-y-2">
         <h2 className="font-semibold">Taxas cadastradas</h2>
+        <p className="text-xs text-muted-foreground">
+          Clima automático: vincule o ID da taxa no servidor. Não é necessário geocoding recorrente.
+          A consulta usa estimativas de Lajinha–MG, não um sensor em cada rua. Fonte:{' '}
+          <a
+            href="https://open-meteo.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Open-Meteo
+          </a>
+          .
+        </p>
         {surcharges.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhuma taxa criada.</p>
         ) : (
@@ -450,7 +464,7 @@ export default function SurchargesPage() {
                           toggleMutation.mutate({ surcharge, on: !surcharge.manuallyActive })
                         }
                       >
-                        {surcharge.manuallyActive ? 'Desligar agora' : 'Ligar agora'}
+                        {surcharge.manuallyActive ? 'Desligar manual' : 'Ligar manual'}
                       </Button>
                     )}
                     <Button size="sm" variant="outline" onClick={() => startEditing(surcharge)}>
@@ -461,8 +475,8 @@ export default function SurchargesPage() {
                       description="Confirme a mudança desta taxa adicional."
                       consequence={
                         surcharge.active
-                          ? 'A taxa deixará de ser aplicada em novas cotações, inclusive quando uma janela programada estiver em vigor.'
-                          : 'A taxa voltará a participar das novas cotações conforme o interruptor manual e as janelas configuradas.'
+                          ? 'A taxa deixará de ser aplicada em novas cotações, inclusive pelo clima e por horários programados. Preços já calculados não mudam.'
+                          : 'A taxa voltará a participar das novas cotações conforme o controle manual, os horários e o clima, se configurado.'
                       }
                       confirmLabel={surcharge.active ? 'Desativar taxa' : 'Reativar taxa'}
                       pendingLabel={surcharge.active ? 'Desativando...' : 'Reativando...'}
@@ -496,6 +510,16 @@ export default function SurchargesPage() {
                   </div>
                 </div>
 
+                <p className="mt-2 break-all text-xs text-muted-foreground">
+                  ID da taxa: {surcharge.id}
+                </p>
+                {surcharge.rainAutomation && (
+                  <RainAutomationStatus
+                    automation={surcharge.rainAutomation}
+                    enabled={surcharge.active}
+                  />
+                )}
+
                 {surcharge.schedules.length > 0 && (
                   <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                     {surcharge.schedules.map((schedule) => (
@@ -505,7 +529,8 @@ export default function SurchargesPage() {
                 )}
                 {surcharge.manuallyActive && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Interruptor manual ligado — vale até você desligar.
+                    Manual ligado: mantém a taxa mesmo sem chuva. Desligar o manual não interrompe
+                    horários nem o clima; para bloquear tudo, use Desativar.
                   </p>
                 )}
               </li>

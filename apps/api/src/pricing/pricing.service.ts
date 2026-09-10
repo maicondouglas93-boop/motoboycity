@@ -3,6 +3,7 @@ import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-p
 import { PrismaService } from '../prisma/prisma.service';
 import { calculatePricing, type PricingCalculatorResult } from './pricing-calculator';
 import { isSurchargeActiveAt } from './surcharge-window';
+import { RainWeatherService } from '../weather/rain-weather.service';
 
 export interface PricingQuoteInput {
   /** Empresa dona do pedido, usada para resolver uma tabela personalizada. */
@@ -37,6 +38,7 @@ export class PricingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly platformSettingsService: AdminPlatformSettingsService,
+    private readonly rainWeather: RainWeatherService,
   ) {}
 
   async quote(input: PricingQuoteInput): Promise<PricingCalculatorResult> {
@@ -142,6 +144,7 @@ export class PricingService {
         {
           active: surcharge.active,
           manuallyActive: surcharge.manuallyActive,
+          weatherActive: this.rainWeather.forSurcharge(surcharge.id, at)?.activeNow ?? false,
           schedules: surcharge.schedules,
         },
         at,

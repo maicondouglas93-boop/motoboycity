@@ -12427,3 +12427,49 @@ faturas), 310 testes aprovados; `pnpm typecheck` e `pnpm lint` dos 8 workspaces
 aprovados, com somente o warning preexistente `no-void` em
 `apps/driver-app/src/lib/apiClient.ts`; builds da API e do Company Web
 aprovados. Não foram executados E2E, migration, commit, push, deploy ou APK.
+
+## 2026-09-10 — Taxa de chuva automática por Open-Meteo em Lajinha–MG
+
+Implementada a regra aprovada pelo responsável: indicação de chuva atual
+ativa uma taxa existente e 30 minutos sem nova indicação desligam a contribuição
+automática. Coordenadas de Lajinha verificadas e fixadas em código, sem geocoding
+recorrente. Após esclarecimento sobre chave/licença, o responsável pediu suporte
+sem chave: usa `api.open-meteo.com`; se houver chave configurada, usa
+`customer-api.open-meteo.com`, sem fallback após erro de autenticação. A restrição
+de licença comercial do endpoint gratuito foi informada e documentada.
+
+`apps/api/src/weather/` concentra validação dos dados/unidades/instantes,
+estado seco/chuvoso, consulta HTTP com timeout e cache Redis compartilhado.
+Lock com TTL limita consultas/retries a cada cinco minutos; a escrita verifica
+o dono do lock. Snapshot sobrevive a reinício, mas amostra com 30 minutos perde
+validade mesmo se o provedor/Redis falhar. Cotação/ADM leem somente memória:
+nenhum HTTP climático ou acesso extra ao banco no caminho de cada pedido.
+Não altera `Surcharge` persistida, valores, repasses ou entregas já precificadas.
+O interruptor geral vence clima, manual e horários; máximo uma taxa permanece.
+
+Integrações: `pricing.service.ts`, `surcharge-window.ts` e
+`admin-surcharges.service.ts`/módulos. `packages/types/src/pricing.ts` acrescenta
+`rainAutomation` às respostas existentes, consumidas pelo `api-client` e pelo
+ADM em `configuracoes/taxas/page.tsx`/`rain-automation-status.tsx`. Nenhum payload,
+rota, schema Zod de entrada ou schema Prisma mudou. ADM mostra ID da taxa,
+estado/horário climático em Brasília, atribuição ao Open-Meteo e desativação
+geral explícita. Uso e rollback em `docs/runbooks/open-meteo-rain.md`.
+
+Validação final: 7 suítes Jest focadas de clima, precificação e taxas,
+127 testes aprovados; 29 testes do ADM, incluindo renderização do componente;
+typecheck e lint dos 8 workspaces aprovados; builds API e ADM aprovados.
+O primeiro typecheck encontrou uma incompatibilidade no tipo do fixture dos
+testes; foi corrigida e a execução completa passou. Permanecem apenas o warning
+preexistente `no-void` no mobile e avisos de módulo dos testes Node existentes.
+Uma consulta pública pontual confirmou o formato real/unidades da resposta de
+clima e outra confirmou as coordenadas; não foram usados dados privados.
+
+Não houve E2E, Redis real, smoke autenticado, credencial comercial, migration,
+alteração de `.env`, commit, push, deploy ou APK. Automação desativada por padrão.
+Para ativar: publicar API/ADM mediante autorização e configurar ID da taxa de
+Lajinha mais `OPEN_METEO_RAIN_ENABLED=true`, observando a licença do provedor.
+
+Publicação autorizada em seguida pelo responsável: commit e push para `main`
+com deploy automático. As validações acima permanecem válidas; nenhuma mudança
+funcional adicional. Habilitação e ID da taxa no Render continuam pendentes,
+sem alteração de ambiente ou de dados de produção pelo agente.

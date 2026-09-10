@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingService } from './pricing.service';
+import { RainWeatherService } from '../weather/rain-weather.service';
 
 describe('PricingService', () => {
   let service: PricingService;
@@ -12,6 +13,7 @@ describe('PricingService', () => {
     surcharge: { findMany: jest.Mock };
   };
   let platformSettingsService: { get: jest.Mock };
+  let rainWeather: { forSurcharge: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -21,12 +23,14 @@ describe('PricingService', () => {
       surcharge: { findMany: jest.fn().mockResolvedValue([]) },
     };
     platformSettingsService = { get: jest.fn() };
+    rainWeather = { forSurcharge: jest.fn().mockReturnValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PricingService,
         { provide: PrismaService, useValue: prisma },
         { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
+        { provide: RainWeatherService, useValue: rainWeather },
       ],
     }).compile();
 
@@ -40,6 +44,84 @@ describe('PricingService', () => {
     distanceKm: 5,
     requiresReturn: false,
   };
+
+  describe('taxa automática de chuva', () => {
+    beforeEach(() => {
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });
+      prisma.pricingTable.findFirst.mockResolvedValue({
+        companyId: 'company-1',
+        driverCommissionPercentage: 80,
+        baseFee: 5,
+        includedDistanceKm: 0,
+        perKmFee: 1.5,
+        minimumFee: null,
+        returnFee: null,
+      });
+      prisma.surcharge.findMany.mockResolvedValue([
+        {
+          id: 'rain-1',
+          name: 'Chuva',
+          type: 'FIXED',
+          value: 3,
+          driverSharePercentage: 100,
+          active: true,
+          manuallyActive: false,
+          schedules: [],
+        },
+      ]);
+    });
+
+    it('aplica a taxa existente e preserva a soma entre entregador e plataforma', async () => {
+      rainWeather.forSurcharge.mockReturnValue({ activeNow: true });
+      const result = await service.quote(input);
+      expect(result.totalValue).toBe(15.5);
+      expect(result.surchargeValue).toBe(3);
+      expect(result.surchargeLabel).toBe('Chuva');
+      expect(result.driverValue).toBe(13);
+      expect(result.platformValue).toBe(2.5);
+      expect(result.driverValue + result.platformValue).toBe(result.totalValue);
+      expect(prisma.surcharge.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { regionId: 'region-1', active: true },
+        }),
+      );
+    });
+
+    it('clima sem dado ou fora da região não aplica taxa automática', async () => {
+      rainWeather.forSurcharge.mockReturnValue(null);
+      expect((await service.quote(input)).totalValue).toBe(12.5);
+    });
+
+    it('clima não vence a desativação geral e não empilha taxas', async () => {
+      rainWeather.forSurcharge.mockReturnValue({ activeNow: true });
+      prisma.surcharge.findMany.mockResolvedValue([
+        { id: 'disabled', name: 'Desativada', active: false, schedules: [], value: 99 },
+        {
+          id: 'manual',
+          name: 'Feriado',
+          active: true,
+          manuallyActive: true,
+          schedules: [],
+          value: 1,
+          type: 'FIXED',
+          driverSharePercentage: 0,
+        },
+        {
+          id: 'rain-1',
+          name: 'Chuva',
+          active: true,
+          manuallyActive: false,
+          schedules: [],
+          value: 3,
+          type: 'FIXED',
+          driverSharePercentage: 100,
+        },
+      ]);
+      const result = await service.quote(input);
+      expect(result.totalValue).toBe(13.5);
+      expect(result.surchargeLabel).toBe('Feriado');
+    });
+  });
 
   it('calcula o preço usando a tabela ativa e a comissão configurada', async () => {
     prisma.region.findFirst.mockResolvedValue({ id: 'region-1' });

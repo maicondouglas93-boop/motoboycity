@@ -8,8 +8,8 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-08**, depois de implementar a reativação automática
-> de empresa bloqueada por inadimplência após a confirmação válida do pagamento.
+> Última revisão: **2026-09-10**, publicação da integração de chuva por Open-Meteo
+> autorizada; habilitação depende das variáveis no Render.
 
 ## Como atualizar
 
@@ -25,6 +25,15 @@ Não marque item como concluído sem evidência de código e teste. Não registr
 secrets nem conteúdo de `.env` em nenhum dos três.
 
 ## O que está em produção
+
+**Recorte preparado para deploy automático:** Open-Meteo para taxa de chuva de
+Lajinha–MG, sem chave obrigatória e com coordenadas fixas (sem geocoding
+recorrente). Exige API + ADM e habilitação/ID da taxa no Render; sem migration
+ou APK. Consulta em background com cache Redis, sem HTTP climático no caminho
+de pedidos. Manual e desativação geral preservados. Ver
+`docs/runbooks/open-meteo-rain.md` para configuração, limites, licença e rollback.
+O resultado do rollout precisa ser conferido no Render/Vercel. Não houve
+habilitação da automação nem teste com Redis real neste recorte.
 
 | | |
 |---|---|

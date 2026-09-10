@@ -153,6 +153,26 @@ quem decide se a coordenada faz falta é a regra de proximidade, na entrega.
 vier em vez de geocodificar de novo: o endereço já conferido uma vez não volta a
 depender do Google a cada pedido.
 
+### Clima e taxa adicional
+
+`WeatherModule` compartilha `RainWeatherService` entre `PricingModule` e o ADM.
+As coordenadas de Lajinha–MG são fixas; não há geocoding recorrente nem envio
+de GPS dos usuários. O serviço consulta Open-Meteo em background a cada cinco
+minutos, público sem chave ou comercial com chave, mediante habilitação
+explícita e UUID da taxa no ambiente. Não altera `Surcharge` no banco.
+
+Snapshot e início do período seco ficam no Redis com TTL; um lock limita as
+consultas entre instâncias e uma escrita condicionada ao dono evita resposta
+atrasada. Cada instância sincroniza a memória a cada minuto. Pedidos e ADM
+leem essa memória sem chamada externa. Amostra com 30 minutos perde validade;
+após 30 minutos secos cessa a contribuição automática. Manual/horários seguem
+independentes e o interruptor geral vence todos.
+
+`SurchargeItem.rainAutomation` expõe apenas estado e horários para a taxa
+vinculada, nunca chave. O cálculo conserva prioridade de uma única taxa,
+valores e divisão existentes; nenhuma entrega precificada é reescrita.
+Configuração, operação e licença: `docs/runbooks/open-meteo-rain.md`.
+
 ## 5. Onde o dinheiro passa
 
 A consulta de pedidos por situação financeira no ADM usa

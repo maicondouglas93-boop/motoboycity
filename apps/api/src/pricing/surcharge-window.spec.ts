@@ -19,6 +19,13 @@ const noite = {
 };
 
 describe('isSurchargeActiveAt', () => {
+  it('chuva pode ativar sem manual e sem horário, mas não vence a desativação geral', () => {
+    expect(isSurchargeActiveAt(taxa({ weatherActive: true }), em(2026, 9, 10, 12))).toBe(true);
+    expect(
+      isSurchargeActiveAt(taxa({ weatherActive: true, active: false }), em(2026, 9, 10, 12)),
+    ).toBe(false);
+    expect(isSurchargeActiveAt(taxa({ weatherActive: false }), em(2026, 9, 10, 12))).toBe(false);
+  });
   describe('interruptor manual', () => {
     it('vale a qualquer hora quando ligado, mesmo sem janela nenhuma', () => {
       const chuva = taxa({ manuallyActive: true });

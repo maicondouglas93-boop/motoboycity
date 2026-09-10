@@ -2,10 +2,12 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminSurchargesService } from './admin-surcharges.service';
+import { RainWeatherService } from '../../weather/rain-weather.service';
 
 describe('AdminSurchargesService', () => {
   let service: AdminSurchargesService;
   let audit: { record: jest.Mock };
+  let rainWeather: { forSurcharge: jest.Mock };
   let tx: {
     surcharge: { create: jest.Mock; update: jest.Mock; delete: jest.Mock };
     surchargeSchedule: { deleteMany: jest.Mock };
@@ -39,16 +41,36 @@ describe('AdminSurchargesService', () => {
       $transaction: jest.fn().mockImplementation(async (callback) => callback(tx)),
     };
     audit = { record: jest.fn() };
+    rainWeather = { forSurcharge: jest.fn().mockReturnValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminSurchargesService,
         { provide: PrismaService, useValue: prisma },
         { provide: AdminAuditService, useValue: audit },
+        { provide: RainWeatherService, useValue: rainWeather },
       ],
     }).compile();
 
     service = module.get(AdminSurchargesService);
+  });
+
+  it('mostra no ADM a mesma ativação climática da precificação sem mudar o manual', async () => {
+    prisma.surcharge.findMany.mockResolvedValue([surchargeRow]);
+    rainWeather.forSurcharge.mockReturnValue({ activeNow: true, status: 'RAINING' });
+    const [result] = await service.list();
+    expect(result).toMatchObject({
+      activeNow: true,
+      manuallyActive: false,
+      rainAutomation: { activeNow: true, status: 'RAINING' },
+    });
+    expect(tx.surcharge.update).not.toHaveBeenCalled();
+  });
+
+  it('mostra taxa desativada mesmo com chuva', async () => {
+    prisma.surcharge.findMany.mockResolvedValue([{ ...surchargeRow, active: false }]);
+    rainWeather.forSurcharge.mockReturnValue({ activeNow: true, status: 'RAINING' });
+    expect((await service.list())[0]!.activeNow).toBe(false);
   });
 
   it('cria a taxa e a auditoria na mesma transação', async () => {

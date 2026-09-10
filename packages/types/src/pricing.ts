@@ -167,8 +167,23 @@ export interface SurchargeItem {
    * regra — e duas cópias de uma regra de dinheiro divergem.
    */
   activeNow: boolean;
+  /** Só a taxa explicitamente vinculada no servidor recebe o estado do clima. */
+  rainAutomation: SurchargeRainAutomation | null;
   schedules: SurchargeScheduleItem[];
   createdAt: string;
+}
+
+export interface SurchargeRainAutomation {
+  reference: 'Lajinha–MG';
+  accessMode: 'PUBLIC' | 'COMMERCIAL';
+  status: 'DISABLED' | 'NOT_CONFIGURED' | 'UNAVAILABLE' | 'RAINING' | 'DRYING' | 'DRY';
+  /** Contribuição automática; o interruptor geral da taxa sempre prevalece. */
+  activeNow: boolean;
+  observedAt: string | null;
+  checkedAt: string | null;
+  drySince: string | null;
+  /** Chuva + pancadas, em mm, no intervalo atual informado pelo modelo. */
+  rainMm: number | null;
 }
 
 export interface BusinessHourItem {
