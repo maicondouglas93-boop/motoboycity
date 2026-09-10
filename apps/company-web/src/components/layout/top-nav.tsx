@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   ClipboardList,
@@ -78,19 +79,35 @@ export function TopNav() {
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 lg:order-none lg:w-auto lg:min-w-0 lg:flex-1 lg:pb-0">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(`${href}/`);
+            const isAiqfome = href === '/integracoes';
             return (
               <Link
                 key={href}
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-all ${
+                aria-label={isAiqfome ? 'aiqfome — Integrações' : undefined}
+                title={isAiqfome ? 'Integrações aiqfome' : undefined}
+                className={`flex shrink-0 items-center gap-2 rounded-lg border text-sm transition-all ${isAiqfome ? 'px-2 py-1' : 'px-3 py-2'} ${
                   isActive
                     ? 'border-white/12 bg-white/12 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                     : 'border-transparent text-white/62 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
-                <Icon className="size-4" aria-hidden="true" />
-                {label}
+                {isAiqfome ? (
+                  <Image
+                    src="/brand/aiqfome.jpeg"
+                    alt="aiqfome"
+                    width={576}
+                    height={300}
+                    sizes="96px"
+                    className="h-8 w-24 rounded object-cover"
+                  />
+                ) : (
+                  <>
+                    <Icon className="size-4" aria-hidden="true" />
+                    {label}
+                  </>
+                )}
               </Link>
             );
           })}

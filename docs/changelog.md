@@ -12751,3 +12751,33 @@ typecheck, lint e build aprovados); diff revisado, sem credenciais ou arquivos
 temporários. Push na `main` aciona os deploys automáticos configurados;
 conclusão do rollout não verificada neste passo. Ensaio físico na Elgin continua
 pendente, conforme runbook. Sem migration, mudança na API ou APK.
+
+### 2026-09-10 — Marca aiqfome no menu da empresa
+
+A pedido do responsável, substituído o texto/ícone Integrações no `TopNav`
+pela imagem fornecida em Downloads, copiada sem alterar o original para
+`apps/company-web/public/brand/aiqfome.jpeg`. Renderização com Next Image,
+96 × 32 px, `sizes` explícito e enquadramento por CSS sem distorção. Mantidos
+`/integracoes`, nome acessível "aiqfome — Integrações", título descritivo,
+estado ativo da navegação, título interno da página e fluxo da integração.
+
+Arquivos: `components/layout/top-nav.tsx`, `top-nav.test.tsx`, asset JPEG e
+handoff/changelog. Sem contratos, API, banco, permissões, mobile ou variáveis
+alterados. Skills web/verificação orientaram a mudança estritamente visual e
+a preservação de navegação/acessibilidade.
+
+Validação Company Web: testes focados do TopNav **3/3**, typecheck, lint e
+build aprovados; `git diff --check` aprovado. Componente real visto no navegador
+em prévia local temporária, com imagem carregada e sem erros no console;
+rota e servidor de prévia removidos/encerrados após conferir. Sem ensaio
+autenticado em produção; comportamento do link/estado ativo coberto por testes.
+Sem commit, push ou deploy solicitado neste recorte.
+
+### 2026-09-10 — Publicação autorizada: marca aiqfome no menu
+
+Responsável solicitou commit e push. Conferidos diff, status, histórico e
+`git fetch origin`: `HEAD...origin/main` sem divergência. Recorte limitado ao
+TopNav, imagem local, três testes e documentação. Código sem mudanças desde
+os testes focados, typecheck, lint e build aprovados; `git diff --check` aprovado.
+Publicação na `main` aciona os deploys automáticos configurados, sem confirmação
+da conclusão do rollout neste passo. Sem alteração de API, banco ou APK.

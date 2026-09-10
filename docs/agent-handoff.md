@@ -8,12 +8,11 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, cupom de entrega de 80 mm implementado
-> no Company Web, sem produtos/valores/troco. 126 testes e
-> build/typecheck/lint aprovados. Commit e push autorizados pelo responsável;
-> conclusão do deploy automático ainda não verificada;
-> falta ensaio físico/driver na Elgin. Recortes climáticos anteriores
-> preservados; conferir rollout conforme seção de produção abaixo.
+> Última revisão: **2026-09-10**, imagem aiqfome substitui o texto Integrações
+> no menu do Company Web, com commit e push autorizados; conferir rollout.
+> Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
+> build/typecheck/lint aprovados; rollout e ensaio físico na Elgin ainda
+> não verificados. Recortes climáticos anteriores preservados.
 
 ## Como atualizar
 
@@ -27,6 +26,15 @@ validação:
 
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
+
+## Recorte visual com publicação autorizada
+
+Menu do Company Web: a imagem fornecida em Downloads substitui texto/ícone de
+Integrações, mantendo `/integracoes`, título interno e comportamento da página.
+Asset local `public/brand/aiqfome.jpeg`, nome acessível e destaque ativo preservados.
+Três testes focados, typecheck/lint e build aprovados; visual do componente real
+conferido em prévia local isolada, sem dados de produção. Commit/push na `main`
+autorizados; conclusão do deploy automático do Company Web ainda não verificada.
 
 ## Recorte com publicação autorizada — conferir rollout
 
