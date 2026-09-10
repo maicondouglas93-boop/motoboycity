@@ -49,3 +49,7 @@ export const upsertSurchargeSchema = z.object({
 
 export type UpsertSurchargePayload = z.infer<typeof upsertSurchargeSchema>;
 export type SurchargeSchedulePayload = z.infer<typeof surchargeScheduleSchema>;
+
+/** Escolha exclusiva de clima automático ou controle manual/horários. */
+export const setSurchargeRainAutomationSchema = z.object({ enabled: z.boolean() }).strict();
+export type SetSurchargeRainAutomationPayload = z.infer<typeof setSurchargeRainAutomationSchema>;

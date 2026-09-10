@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, publicação da integração de chuva por Open-Meteo
-> autorizada; habilitação depende das variáveis no Render.
+> Última revisão: **2026-09-10**, controle Manual/Automática da taxa de chuva
+> validado no ADM/API e em PostgreSQL isolado; commit/push autorizados pelo
+> responsável. Conferir conclusão dos deploys automáticos no Render/Vercel.
 
 ## Como atualizar
 
@@ -26,21 +27,39 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 
 ## O que está em produção
 
-**Recorte preparado para deploy automático:** Open-Meteo para taxa de chuva de
-Lajinha–MG, sem chave obrigatória e com coordenadas fixas (sem geocoding
-recorrente). Exige API + ADM e habilitação/ID da taxa no Render; sem migration
-ou APK. Consulta em background com cache Redis, sem HTTP climático no caminho
-de pedidos. Manual e desativação geral preservados. Ver
-`docs/runbooks/open-meteo-rain.md` para configuração, limites, licença e rollback.
-O resultado do rollout precisa ser conferido no Render/Vercel. Não houve
-habilitação da automação nem teste com Redis real neste recorte.
+**Integração de chuva publicada:** `6b12b94` enviado para `main`; habilitação/ID
+da taxa no Render e resultado do rollout não foram verificados nesta sessão.
+
+**Recorte com publicação autorizada:** seleção Manual/Automática (chuva)
+e desativação no ADM. Exige migration aditiva
+`20260910160000_surcharge_rain_admin_control`, API e ADM; **não precisa de APK**.
+O campo `automaticRainEnabled` começa `false`: manual/horários existentes são
+preservados e o ADM deve optar novamente pelo automático na taxa vinculada.
+No automático, manual/horários ficam sem efeito; desativar a taxa vence todos.
+Na home do ADM, aviso de chuva/espera aparece quando a taxa automática está
+ativa, com confirmação para desativar sem ir às configurações. A desativação
+é geral e persiste até o ADM reativar; clima não religa por conta própria.
+Consulta compartilhada com taxas a cada minuto, pausada em segundo plano.
+Migration validada em **PostgreSQL 17 efêmero**, com 51 migrations anteriores,
+dados fictícios e nova coluna aplicada pelo Prisma. Valores/horários preservados;
+modo persistido, rollback por falha de auditoria e 10 disputas reais entre
+manual/automático aprovados. Container temporário removido. O primeiro ensaio
+herdou `DIRECT_URL` local e aplicou a migration antiga pendente
+`20260831155700_asaas_environment_isolation` em `motoboycity_dev`; incidente
+informado e continuação autorizada, sem desfazer essa migration local. O teste
+foi corrigido para fixar ambas as URLs e conferir a identidade antes de migrar.
+No ensaio, a migration da chuva foi aplicada somente no PostgreSQL efêmero.
+O push autorizado publica API/ADM e permite ao Render aplicar a migration no
+build; resultado do rollout ainda precisa ser conferido. Não houve execução
+manual da migration em produção nem alteração de suas variáveis. Ver
+`docs/runbooks/open-meteo-rain.md` para sequência, limites e rollback.
 
 | | |
 |---|---|
 | Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Reativação automática após baixa de fatura em `bd4fa05`, enviada para `main` em 08/09/2026, com deploys automáticos iniciados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 51 migrations no repositório, aplicadas pelo Render no build |
+| Banco | PostgreSQL gerenciado; 52 migrations no repositório, incluindo a nova de chuva; confirmar aplicação pelo Render no build deste rollout |
 | APK nos aparelhos | O **`pilot.19`** já foi instalado em pelo menos um aparelho em 02/09/2026; a extensão do rollout não foi confirmada. Confira a versão de cada motoboy pelo heartbeat no painel (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -403,14 +422,19 @@ recorte publicado em paralelo criou `driver_company_blocks`, o
 `motoboycity_e2e_local` não acompanhou, e a suíte passou a dar 500 em toda
 criação de pedido — sintoma longe da causa. Antes de investigar uma quebra
 estranha, confira se a tabela nova existe lá. O CLI do Prisma ignora
-`DATABASE_URL` da linha de comando, então aplique com
+`DATABASE_URL` sozinho quando o schema usa `directUrl`, então aplique com
 `prisma db execute --url` e registre a linha em `_prisma_migrations`.
 
 ### Armadilhas do ambiente
 
-**O CLI do Prisma ignora `DATABASE_URL` da linha de comando** — ele lê
-`apps/api/.env` e esse valor vence. Para mirar outro banco use `--url` /
-`--shadow-database-url`. O Jest/Nest respeita o override.
+**Migrations usam também `DIRECT_URL`**: o schema tem `directUrl`, que prevalece
+sobre `url` no CLI de migrations. Sobrescrever só `DATABASE_URL` não isola o
+comando; imports da aplicação podem carregar variáveis locais antes do CLI.
+Use `--url` nas ferramentas que o aceitam ou um schema temporário com **url e
+directUrl literais para o mesmo destino isolado**, além de conferir o alvo
+antes da primeira escrita. `scripts/verify-rain-migration.cjs` demonstra a
+proteção com container próprio, banco fixo, porta exclusiva e identidade do
+cluster conferida por Prisma e Docker. O client em execução usa `url`.
 
 **`prisma migrate dev` está travado**: a migration
 `20260824105857_aviso_de_pagamento_da_loja` foi editada depois de aplicada, e o

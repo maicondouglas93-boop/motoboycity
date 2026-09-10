@@ -12473,3 +12473,141 @@ Publicação autorizada em seguida pelo responsável: commit e push para `main`
 com deploy automático. As validações acima permanecem válidas; nenhuma mudança
 funcional adicional. Habilitação e ID da taxa no Render continuam pendentes,
 sem alteração de ambiente ou de dados de produção pelo agente.
+
+## 2026-09-10 — escolha Manual/Automática da taxa de chuva no ADM
+
+Solicitação: separar os controles para o ADM escolher manual ou automático,
+ativando/desativando pela tela. `Surcharge.automaticRainEnabled` guarda o opt-in
+(default `false`). Modo Manual conserva interruptor/horários anteriores e ignora
+clima; Automática usa só clima, ignorando manual/horários. Desativação geral
+vence ambos; não altera preços/repasse nem pedidos já precificados. Horários
+ficam guardados e voltam a valer ao selecionar Manual, com aviso explícito na UI.
+
+Migration aditiva `20260910160000_surcharge_rain_admin_control` gerada pelo
+Prisma `migrate diff` entre schema anterior e novo, sem banco, após `prisma
+validate` do schema original. SQL revisado: somente `ADD COLUMN ... BOOLEAN
+NOT NULL DEFAULT false`. Schema temporário removido. `prisma generate` e
+`prisma validate` posteriores aprovados. Sem migration aplicada: `docker ps`
+confirmou daemon indisponível; falta ensaio com PostgreSQL isolado. Procedimento
+de backup, migration → API → ADM e rollback (desligar flag climática antes de
+voltar à API antiga) no runbook. Após rollout, ADM precisa optar novamente pelo
+automático; a migration não deduz nem habilita cobrança pelo ambiente.
+
+Arquivos: schema/migration Prisma; schema/tipo do novo comando em
+`packages/validation/src/admin/surcharge.schema.ts`; resposta em
+`packages/types/src/pricing.ts`; método `setRainAutomation` no api-client;
+controller/service/testes de `admin/surcharges`; motor/testes em `pricing`;
+página de taxas do ADM, `surcharge-activation-controls.tsx`, status climático
+e testes Node. Business rules, arquitetura, handoff e runbook atualizados.
+Rota `PATCH /admin/surcharges/:id/rain-automation` exige JWT + ADMIN e boolean
+explícito; ativar exige taxa vinculada e integração habilitada. Desativar não
+depende de clima disponível. Troca condicional e auditoria na mesma transação,
+sem duplicar auditoria ou apagar manual posterior ao repetir o mesmo modo.
+Escritas manuais protegidas contra troca concorrente de modo/desativação;
+conflito retorna 409, não falsa confirmação. Não adiciona HTTP, Redis ou
+consulta de configuração ao caminho de preços.
+
+Validação: `pnpm --filter @motoboycity/validation build`; Prisma validate /
+migrate diff / generate; Jest focado em `weather pricing
+admin/surcharges/admin-surcharges.service.spec.ts`: **7 suítes, 142 testes**;
+`pnpm --filter @motoboycity/admin-web test`: **35 testes**, incluindo cliques e
+renderização dos modos. `pnpm typecheck` e `pnpm lint` na raiz: **8 workspaces
+aprovados**. Builds API e ADM aprovados (38 páginas no ADM); `git diff --check`
+sem problemas. Prettier executado nos TS/TSX/MJS alterados pelo binário local
+após a primeira chamada via wrapper PNPM falhar ao receber a lista de arquivos.
+Permanecem avisos preexistentes de módulo nos testes Node, configuração Prisma
+legada e `no-void` no mobile; sem erros novos.
+
+Sem E2E/concorrência com banco real, smoke autenticado ou avaliação visual em
+navegador. Sem alteração de `.env`, banco/variáveis de produção, commit, push,
+deploy ou APK. Próximo passo: validar migration isolada e publicar mediante
+autorização. A documentação não declara este recorte em produção.
+
+## 2026-09-10 — aviso de taxa automática na home do ADM
+
+Solicitação adicional: aviso na home indicando chuva/taxa ativa, com ação para
+desativar quando a indicação estiver equivocada. Adicionados
+`apps/admin-web/src/components/operations/rain-home-notice.tsx` e
+`rain-home-notice-view.tsx`, montados na home `src/app/(app)/page.tsx` antes da
+grade operacional. Mostra somente taxa habilitada, em modo automático, com
+`activeNow` confirmado pela API e estado RAINING/DRYING ativo. Texto identifica
+estimativa do Open-Meteo e hora em Brasília, sem alegar medição local; período
+seco tem mensagem própria. Link para configurar, confirmação para desativar
+e mensagem de sucesso explicam que só o ADM poderá reativar a cobrança.
+
+Usa `adminSurchargesApi.list/deactivate`, sem nova rota/contrato/migration neste
+adendo. Query de taxas compartilhada com configurações a cada 60s, sem polling
+em segundo plano; nenhuma consulta extra ao Open-Meteo. Desativação existente
+mantém auditoria e bloqueia todos os modos; cache atualizado apenas após
+sucesso, seguido de invalidação. Erro da mutação exibido no diálogo e erro/
+pausa de consulta não apresenta estado antigo como confirmação. Não altera
+mapa, sockets, filas, preços congelados ou modo já selecionado. Handoff,
+arquitetura e runbook atualizados.
+
+Testes `test/rain-home-notice.test.mjs`: renderização, estados manuais/globais/
+climáticos, espera seca, alvo da confirmação, falha, sucesso confirmado,
+reativação e integração consulta/mutação/cache simuladas. Primeira execução
+encontrou export default incorreto no mock do Link, corrigido; suíte final
+do ADM **42/42** aprovada via Node test runner. Typecheck e build do ADM
+aprovados (38 páginas); lint reexecutado depois de remover dois avisos no mock
+do botão. Sem smoke autenticado ou ambiente PostgreSQL disponível. Continuação
+local do recorte anterior, ainda sem commit/push/deploy/APK ou escrita em produção.
+
+## 2026-09-10 — ensaio PostgreSQL da migration de chuva e correção do isolamento
+
+Após o usuário abrir o Docker, foi criado o teste reproduzível
+`apps/api/scripts/verify-rain-migration.cjs`. **Incidente no primeiro ensaio:**
+o script sobrescreveu `DATABASE_URL`/`url`, mas não `DIRECT_URL`/`directUrl`.
+Imports da aplicação carregaram o destino local e o CLI de migration usou
+`motoboycity_dev` em localhost:5434. A migration antiga pendente
+`20260831155700_asaas_environment_isolation` foi aplicada ali às
+13:55:59 UTC (10:55:59 Brasília), confirmado por leitura de `_prisma_migrations`.
+Ela acrescenta o ambiente SANDBOX/PRODUCTION às tabelas Asaas e adequa índices;
+foi mantida, sem rollback automático. A migration de chuva não chegou a ser
+copiada/aplicada naquele ensaio. O banco temporário sem tabelas revelou a falha.
+Execução interrompida; usuário informado e autorização explícita recebida para
+corrigir o isolamento e continuar. Produção não foi acessada ou modificada.
+
+Correção: helper `rain-migration-target.cjs` substitui o bloco datasource inteiro
+por `url` e `directUrl` literais, iguais, para o container próprio; elimina
+shadow/ambiente herdados. Recusa host remoto, banco distinto, porta não publicada
+e parâmetros extras. Ambas as variáveis são fixadas antes de imports/CLI.
+Identidade `pg_control_system().system_identifier` e nome do banco confirmados
+por Prisma e Docker **antes** de migrations; stdout do CLI e quantidade de
+migrations também conferidos. A primeira versão desta checagem usava tabela
+marcadora e recebeu P3005 (schema não vazio); substituída por identidade
+somente-leitura, sem baselining forçado. Nenhum alvo externo aceito.
+
+Ensaio final em container PostgreSQL 17 novo: 51 migrations anteriores + taxas
+e horário fictícios; migration `20260910160000_surcharge_rain_admin_control`;
+comparação exata dos registros anteriores (sem alterar preços, repasses,
+flags, timestamps ou horários); nova coluna booleana NOT NULL/default false;
+repetição de deploy sem pendências. Service/auditoria reais com Prisma/Postgres,
+clima simulado: modos separados, desativação geral, persistência na reconexão,
+seis seleções repetidas sem auditoria duplicada, rollback em FK inválida da
+auditoria e dez disputas reais manual vs automático aprovados.
+
+Comandos: build API aprovado; `node --test
+apps/api/scripts/rain-migration-target.test.cjs` (3/3); `node
+apps/api/scripts/verify-rain-migration.cjs` (todos os grupos PASS, exit 0).
+Container/banco fictício e diretório temporário removidos pelo teste após
+verificar alvo/label/caminho; os containers usuais continuam rodando.
+Handoff/runbook corrigidos para registrar resultado, incidente e precedência
+de DIRECT_URL. Schema/migrations funcionais não foram modificados neste recorte.
+Sem commit/push/deploy/APK. Falta apenas publicação autorizada e conferência
+do rollout; smoke HTTP autenticado/Redis/Open-Meteo reais não realizado.
+
+### Publicação autorizada — controle da chuva e aviso na home
+
+O responsável solicitou explicitamente commit e push. Recorte revisado para
+publicação em `main`, incluindo API/contratos, ADM, migration aditiva,
+documentação e scripts/testes de isolamento. Sem alteração funcional adicional
+ou inclusão de credenciais. Origin/main conferido antes do commit; ensaio
+PostgreSQL e builds anteriores permanecem válidos. Deploy automático esperado
+no Render/Vercel após push; o resultado deve ser conferido, não presumido.
+Após atualizar, selecionar Automática (chuva) no ADM para optar pela cobrança
+climática; o default da migration é Manual. Sem geração de APK ou ajuste de
+variáveis de produção pelo agente.
+
+Checagem imediatamente antes do commit: Jest focado da API **142/142**, testes
+Node do ADM **42/42** e proteção de destino **3/3**, além de `git diff --check`.

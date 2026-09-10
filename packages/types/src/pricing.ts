@@ -161,6 +161,7 @@ export interface SurchargeItem {
   active: boolean;
   /** O interruptor manual — o que o admin liga quando começa a chover. */
   manuallyActive: boolean;
+  automaticRainEnabled: boolean;
   /**
    * Se esta taxa está valendo AGORA, resolvido no servidor. Vem pronto porque
    * o painel não tem como avaliar janela no fuso da operação sem duplicar a

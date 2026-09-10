@@ -62,6 +62,7 @@ describe('PricingService', () => {
           id: 'rain-1',
           name: 'Chuva',
           type: 'FIXED',
+          automaticRainEnabled: true,
           value: 3,
           driverSharePercentage: 100,
           active: true,
@@ -90,6 +91,15 @@ describe('PricingService', () => {
     it('clima sem dado ou fora da região não aplica taxa automática', async () => {
       rainWeather.forSurcharge.mockReturnValue(null);
       expect((await service.quote(input)).totalValue).toBe(12.5);
+    });
+
+    it('trocar para manual impede cobrança pela chuva na cotação seguinte', async () => {
+      rainWeather.forSurcharge.mockReturnValue({ activeNow: true });
+      const [row] = await prisma.surcharge.findMany();
+      prisma.surcharge.findMany.mockResolvedValue([{ ...row, automaticRainEnabled: false }]);
+      expect((await service.quote(input)).surchargeValue).toBe(0);
+      prisma.surcharge.findMany.mockResolvedValue([{ ...row, automaticRainEnabled: true }]);
+      expect((await service.quote(input)).surchargeValue).toBe(3);
     });
 
     it('clima não vence a desativação geral e não empilha taxas', async () => {

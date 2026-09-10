@@ -65,6 +65,7 @@ import { CancelDeliveryDialog } from '@/components/operations/cancel-delivery-di
 import { CompanyQueues } from '@/components/operations/company-queues';
 import { DeliveryActionsMenu } from '@/components/operations/delivery-actions-menu';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
+import { RainHomeNotice } from '@/components/operations/rain-home-notice';
 import { DispatchQueue } from '@/components/operations/dispatch-queue';
 import { slaAlertMinutesFor } from '@/lib/sla';
 
@@ -564,6 +565,8 @@ export default function AdminDashboardPage() {
       {/* Acima da grade: e alerta, e alerta que some sozinho quando nao ha
           ninguem em silencio. Dentro de uma coluna ele passaria batido. */}
       <SilentDrivers />
+
+      <RainHomeNotice />
 
       <section className="grid min-h-[760px] w-full min-w-0 grid-cols-[minmax(0,1fr)] gap-4 2xl:grid-cols-[300px_minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">

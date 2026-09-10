@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { SurchargeItem } from '@motoboycity/types';
 import type { UpsertSurchargePayload } from '@motoboycity/validation';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isSurchargeActiveAt } from '../../pricing/surcharge-window';
 import { AdminAuditService } from '../audit/admin-audit.service';
@@ -20,6 +21,7 @@ type SurchargeRow = {
   driverSharePercentage: { toString(): string };
   active: boolean;
   manuallyActive: boolean;
+  automaticRainEnabled: boolean;
   createdAt: Date;
   schedules: Array<{
     id: string;
@@ -85,7 +87,10 @@ export class AdminSurchargesService {
     payload: UpsertSurchargePayload,
     actorUserId: string,
   ): Promise<SurchargeItem> {
-    await this.findOrThrow(id);
+    const current = await this.findOrThrow(id);
+    if (payload.manuallyActive && (current.automaticRainEnabled || !current.active)) {
+      throw new ConflictException('Selecione o modo manual e reative a taxa antes de ligá-la.');
+    }
 
     /**
      * As janelas são substituídas por inteiro, não sincronizadas item a item.
@@ -95,28 +100,78 @@ export class AdminSurchargesService {
      * sozinha. Trocar o conjunto inteiro é a operação que não tem esse estado
      * intermediário.
      */
+    const updated = await this.prisma
+      .$transaction(async (tx) => {
+        await tx.surchargeSchedule.deleteMany({ where: { surchargeId: id } });
+        const surcharge = await tx.surcharge.update({
+          where: {
+            id,
+            ...(payload.manuallyActive && { active: true, automaticRainEnabled: false }),
+          },
+          data: {
+            name: payload.name,
+            type: payload.type,
+            value: payload.value,
+            driverSharePercentage: payload.driverSharePercentage ?? 0,
+            ...(payload.active !== undefined && { active: payload.active }),
+            ...(payload.manuallyActive !== undefined && { manuallyActive: payload.manuallyActive }),
+            schedules: {
+              create: payload.schedules?.map((item) => this.toScheduleData(item)) ?? [],
+            },
+          },
+          include: { schedules: true },
+        });
+        await this.audit.record(
+          {
+            actorUserId,
+            action: 'SURCHARGE_UPDATED',
+            entityType: 'SURCHARGE',
+            entityId: surcharge.id,
+            summary: `Taxa adicional ${surcharge.name} atualizada.`,
+          },
+          tx,
+        );
+        return surcharge;
+      })
+      .catch((error: unknown) => this.rethrowConcurrentChange(error));
+    return this.toItem(updated, new Date());
+  }
+
+  /** Troca exclusiva de modo, sem misturar fontes nem reativar uma taxa. */
+  async setRainAutomation(
+    id: string,
+    enabled: boolean,
+    actorUserId: string,
+  ): Promise<SurchargeItem> {
+    await this.findOrThrow(id);
+    if (enabled) {
+      const weather = this.rainWeather.forSurcharge(id);
+      if (!weather || weather.status === 'DISABLED' || weather.status === 'NOT_CONFIGURED') {
+        throw new ConflictException(
+          'Vincule esta taxa ao Open-Meteo e habilite a integração no servidor antes de escolher o automático.',
+        );
+      }
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.surchargeSchedule.deleteMany({ where: { surchargeId: id } });
-      const surcharge = await tx.surcharge.update({
+      // A troca nunca religa um manual antigo. Não reativa uma taxa desativada.
+      const changed = await tx.surcharge.updateMany({
+        where: { id, automaticRainEnabled: !enabled },
+        data: { automaticRainEnabled: enabled, manuallyActive: false },
+      });
+      const surcharge = await tx.surcharge.findUniqueOrThrow({
         where: { id },
-        data: {
-          name: payload.name,
-          type: payload.type,
-          value: payload.value,
-          driverSharePercentage: payload.driverSharePercentage ?? 0,
-          ...(payload.active !== undefined && { active: payload.active }),
-          ...(payload.manuallyActive !== undefined && { manuallyActive: payload.manuallyActive }),
-          schedules: { create: payload.schedules?.map((item) => this.toScheduleData(item)) ?? [] },
-        },
         include: { schedules: true },
       });
+      // Retry do mesmo modo não apaga um manual acionado depois da primeira resposta.
+      if (changed.count === 0) return surcharge;
       await this.audit.record(
         {
           actorUserId,
           action: 'SURCHARGE_UPDATED',
           entityType: 'SURCHARGE',
-          entityId: surcharge.id,
-          summary: `Taxa adicional ${surcharge.name} atualizada.`,
+          entityId: id,
+          summary: `Taxa adicional ${surcharge.name}: modo ${enabled ? 'automático de chuva ativado' : 'manual/horários selecionado; automático desativado'}.`,
         },
         tx,
       );
@@ -125,7 +180,6 @@ export class AdminSurchargesService {
     return this.toItem(updated, new Date());
   }
 
-  /** O interruptor manual, isolado do resto para o admin ligar em um clique. */
   async setManuallyActive(
     id: string,
     manuallyActive: boolean,
@@ -135,25 +189,30 @@ export class AdminSurchargesService {
     if (!surcharge.active && manuallyActive) {
       throw new ConflictException('Reative a taxa antes de ligá-la.');
     }
+    if (surcharge.automaticRainEnabled && manuallyActive) {
+      throw new ConflictException('Selecione o modo manual antes de ligar a taxa manualmente.');
+    }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const surchargeUpdated = await tx.surcharge.update({
-        where: { id },
-        data: { manuallyActive },
-        include: { schedules: true },
-      });
-      await this.audit.record(
-        {
-          actorUserId,
-          action: manuallyActive ? 'SURCHARGE_TURNED_ON' : 'SURCHARGE_TURNED_OFF',
-          entityType: 'SURCHARGE',
-          entityId: surchargeUpdated.id,
-          summary: `Taxa adicional ${surchargeUpdated.name} ${manuallyActive ? 'ligada manualmente' : 'desligada manualmente'}.`,
-        },
-        tx,
-      );
-      return surchargeUpdated;
-    });
+    const updated = await this.prisma
+      .$transaction(async (tx) => {
+        const surchargeUpdated = await tx.surcharge.update({
+          where: { id, ...(manuallyActive && { active: true, automaticRainEnabled: false }) },
+          data: { manuallyActive },
+          include: { schedules: true },
+        });
+        await this.audit.record(
+          {
+            actorUserId,
+            action: manuallyActive ? 'SURCHARGE_TURNED_ON' : 'SURCHARGE_TURNED_OFF',
+            entityType: 'SURCHARGE',
+            entityId: surchargeUpdated.id,
+            summary: `Taxa adicional ${surchargeUpdated.name} ${manuallyActive ? 'ligada manualmente' : 'desligada manualmente'}.`,
+          },
+          tx,
+        );
+        return surchargeUpdated;
+      })
+      .catch((error: unknown) => this.rethrowConcurrentChange(error));
     return this.toItem(updated, new Date());
   }
 
@@ -201,6 +260,15 @@ export class AdminSurchargesService {
         tx,
       );
     });
+  }
+
+  private rethrowConcurrentChange(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      throw new ConflictException(
+        'A configuração da taxa mudou. Atualize a página e tente novamente.',
+      );
+    }
+    throw error;
   }
 
   private async findOrThrow(id: string) {
@@ -259,6 +327,7 @@ export class AdminSurchargesService {
       driverSharePercentage: Number(surcharge.driverSharePercentage),
       active: surcharge.active,
       manuallyActive: surcharge.manuallyActive,
+      automaticRainEnabled: surcharge.automaticRainEnabled,
       /**
        * Resolvido aqui e não no painel: avaliar janela exige o fuso da operação,
        * e uma segunda cópia dessa regra do lado do navegador divergiria da que
@@ -268,6 +337,7 @@ export class AdminSurchargesService {
         {
           active: surcharge.active,
           manuallyActive: surcharge.manuallyActive,
+          automaticRainEnabled: surcharge.automaticRainEnabled,
           schedules,
           weatherActive: rainAutomation?.activeNow ?? false,
         },

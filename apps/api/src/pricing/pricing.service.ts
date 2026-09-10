@@ -144,6 +144,7 @@ export class PricingService {
         {
           active: surcharge.active,
           manuallyActive: surcharge.manuallyActive,
+          automaticRainEnabled: surcharge.automaticRainEnabled,
           weatherActive: this.rainWeather.forSurcharge(surcharge.id, at)?.activeNow ?? false,
           schedules: surcharge.schedules,
         },

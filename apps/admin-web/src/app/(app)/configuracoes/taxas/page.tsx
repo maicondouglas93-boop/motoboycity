@@ -19,6 +19,7 @@ import { adminSurchargesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 import { RainAutomationStatus } from '@/components/settings/rain-automation-status';
+import { SurchargeActivationControls } from '@/components/settings/surcharge-activation-controls';
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -151,6 +152,15 @@ export default function SurchargesPage() {
     onError: (mutationError) => reportError(mutationError, 'Não foi possível mudar a taxa.'),
   });
 
+  const modeMutation = useMutation({
+    mutationFn: ({ surcharge, enabled }: { surcharge: SurchargeItem; enabled: boolean }) =>
+      adminSurchargesApi.setRainAutomation(token as string, surcharge.id, { enabled }),
+    onMutate: () => setError(null),
+    onSuccess: invalidate,
+    onError: (mutationError) =>
+      reportError(mutationError, 'Não foi possível mudar o modo da taxa.'),
+  });
+
   const removeMutation = useMutation({
     mutationFn: (id: string) => adminSurchargesApi.remove(token as string, id),
     onSuccess: () => {
@@ -219,7 +229,7 @@ export default function SurchargesPage() {
         icon={CloudRain}
         tom="alertas"
         titulo="Taxas adicionais"
-        descricao="Acréscimos para chuva, feriado ou madrugada. A taxa pode valer pelo controle manual, por horário ou pelo clima de Lajinha–MG, quando a automação estiver configurada. Desativar a taxa interrompe todas as formas de cobrança."
+        descricao="Escolha Manual ou Automática (chuva) em cada taxa. No automático, somente o clima de Lajinha–MG decide. Desativar bloqueia a cobrança em qualquer modo. Preços já calculados não mudam."
         situacao={
           valendoAgora === 0
             ? { estado: 'desligado', texto: 'Nenhuma taxa valendo agora' }
@@ -229,6 +239,12 @@ export default function SurchargesPage() {
               }
         }
       />
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -283,7 +299,7 @@ export default function SurchargesPage() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Janelas automáticas</Label>
+                <Label>Horários opcionais — somente no modo Manual</Label>
                 <Button
                   type="button"
                   size="sm"
@@ -296,7 +312,8 @@ export default function SurchargesPage() {
               </div>
               {schedules.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Sem janela, a taxa só vale quando você ligar o interruptor.
+                  No modo Manual, sem horários, a taxa só vale quando você ligar o interruptor. No
+                  modo Automática (chuva), os horários são ignorados.
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -399,8 +416,6 @@ export default function SurchargesPage() {
               </p>
             </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
-
             <div className="flex gap-2">
               <Button type="submit" disabled={saveMutation.isPending}>
                 {saveMutation.isPending ? 'Salvando...' : editingId ? 'Salvar' : 'Criar taxa'}
@@ -456,17 +471,6 @@ export default function SurchargesPage() {
                     {!surcharge.active && <Badge variant="secondary">Desativada</Badge>}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {surcharge.active && (
-                      <Button
-                        size="sm"
-                        variant={surcharge.manuallyActive ? 'default' : 'outline'}
-                        onClick={() =>
-                          toggleMutation.mutate({ surcharge, on: !surcharge.manuallyActive })
-                        }
-                      >
-                        {surcharge.manuallyActive ? 'Desligar manual' : 'Ligar manual'}
-                      </Button>
-                    )}
                     <Button size="sm" variant="outline" onClick={() => startEditing(surcharge)}>
                       Editar
                     </Button>
@@ -476,7 +480,7 @@ export default function SurchargesPage() {
                       consequence={
                         surcharge.active
                           ? 'A taxa deixará de ser aplicada em novas cotações, inclusive pelo clima e por horários programados. Preços já calculados não mudam.'
-                          : 'A taxa voltará a participar das novas cotações conforme o controle manual, os horários e o clima, se configurado.'
+                          : 'A taxa voltará a participar das novas cotações conforme o modo selecionado: clima automático ou manual/horários.'
                       }
                       confirmLabel={surcharge.active ? 'Desativar taxa' : 'Reativar taxa'}
                       pendingLabel={surcharge.active ? 'Desativando...' : 'Reativando...'}
@@ -510,6 +514,15 @@ export default function SurchargesPage() {
                   </div>
                 </div>
 
+                <SurchargeActivationControls
+                  surcharge={surcharge}
+                  pending={
+                    modeMutation.isPending || toggleMutation.isPending || activeMutation.isPending
+                  }
+                  onModeChange={(enabled) => modeMutation.mutate({ surcharge, enabled })}
+                  onManualChange={(on) => toggleMutation.mutate({ surcharge, on })}
+                />
+
                 <p className="mt-2 break-all text-xs text-muted-foreground">
                   ID da taxa: {surcharge.id}
                 </p>
@@ -517,20 +530,24 @@ export default function SurchargesPage() {
                   <RainAutomationStatus
                     automation={surcharge.rainAutomation}
                     enabled={surcharge.active}
+                    automaticEnabled={surcharge.automaticRainEnabled}
                   />
                 )}
 
                 {surcharge.schedules.length > 0 && (
                   <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                    {surcharge.automaticRainEnabled && (
+                      <li>Horários guardados, sem efeito no modo automático:</li>
+                    )}
                     {surcharge.schedules.map((schedule) => (
                       <li key={schedule.id}>{describeSchedule(schedule)}</li>
                     ))}
                   </ul>
                 )}
-                {surcharge.manuallyActive && (
+                {surcharge.manuallyActive && !surcharge.automaticRainEnabled && (
                   <p className="mt-2 text-xs text-muted-foreground">
                     Manual ligado: mantém a taxa mesmo sem chuva. Desligar o manual não interrompe
-                    horários nem o clima; para bloquear tudo, use Desativar.
+                    horários cadastrados; para bloquear tudo, use Desativar.
                   </p>
                 )}
               </li>

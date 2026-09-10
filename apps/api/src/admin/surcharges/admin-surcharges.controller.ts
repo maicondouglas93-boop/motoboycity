@@ -9,7 +9,12 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { upsertSurchargeSchema, type UpsertSurchargePayload } from '@motoboycity/validation';
+import {
+  upsertSurchargeSchema,
+  setSurchargeRainAutomationSchema,
+  type UpsertSurchargePayload,
+  type SetSurchargeRainAutomationPayload,
+} from '@motoboycity/validation';
 import type { SurchargeItem } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
@@ -45,7 +50,17 @@ export class AdminSurchargesController {
     return this.adminSurchargesService.update(id, body, admin.id);
   }
 
-  /** O interruptor manual, separado para ligar e desligar em um clique. */
+  /** Modo persistido e auditado; não altera valor, repasse ou habilitação geral. */
+  @Patch(':id/rain-automation')
+  setRainAutomation(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setSurchargeRainAutomationSchema))
+    body: SetSurchargeRainAutomationPayload,
+    @CurrentUser() admin: User,
+  ): Promise<SurchargeItem> {
+    return this.adminSurchargesService.setRainAutomation(id, body.enabled, admin.id);
+  }
+
   @Patch(':id/turn-on')
   turnOn(@Param('id') id: string, @CurrentUser() admin: User): Promise<SurchargeItem> {
     return this.adminSurchargesService.setManuallyActive(id, true, admin.id);

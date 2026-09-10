@@ -20,11 +20,43 @@ const noite = {
 
 describe('isSurchargeActiveAt', () => {
   it('chuva pode ativar sem manual e sem horário, mas não vence a desativação geral', () => {
-    expect(isSurchargeActiveAt(taxa({ weatherActive: true }), em(2026, 9, 10, 12))).toBe(true);
     expect(
-      isSurchargeActiveAt(taxa({ weatherActive: true, active: false }), em(2026, 9, 10, 12)),
+      isSurchargeActiveAt(
+        taxa({ automaticRainEnabled: true, weatherActive: true }),
+        em(2026, 9, 10, 12),
+      ),
+    ).toBe(true);
+    expect(
+      isSurchargeActiveAt(
+        taxa({ automaticRainEnabled: true, weatherActive: true, active: false }),
+        em(2026, 9, 10, 12),
+      ),
     ).toBe(false);
     expect(isSurchargeActiveAt(taxa({ weatherActive: false }), em(2026, 9, 10, 12))).toBe(false);
+  });
+  it('manual ignora chuva, inclusive quando o opt-in não existe em uma regra antiga', () => {
+    for (const automaticRainEnabled of [false, undefined]) {
+      expect(
+        isSurchargeActiveAt(
+          taxa({ automaticRainEnabled, weatherActive: true }),
+          em(2026, 9, 10, 12),
+        ),
+      ).toBe(false);
+    }
+  });
+  it('automático ignora manual e horários mesmo com flags antigas ligadas', () => {
+    const automatic = taxa({
+      automaticRainEnabled: true,
+      manuallyActive: true,
+      schedules: [noite],
+    });
+    expect(isSurchargeActiveAt(automatic, em(2026, 9, 10, 20))).toBe(false);
+    expect(isSurchargeActiveAt({ ...automatic, weatherActive: false }, em(2026, 9, 10, 20))).toBe(
+      false,
+    );
+    expect(isSurchargeActiveAt({ ...automatic, weatherActive: true }, em(2026, 9, 10, 20))).toBe(
+      true,
+    );
   });
   describe('interruptor manual', () => {
     it('vale a qualquer hora quando ligado, mesmo sem janela nenhuma', () => {

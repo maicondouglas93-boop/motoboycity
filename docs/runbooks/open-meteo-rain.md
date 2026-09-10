@@ -5,9 +5,11 @@
 1. Em **ADM → Configurações → Taxas adicionais**, mantenha/crie a taxa de chuva
    da região de Lajinha, com o valor e repasse aprovados. Copie o **ID da taxa**
    mostrado no card. A integração não procura pelo nome nem altera valor,
-   repasse, região, interruptor manual ou horários.
+   repasse ou região. O modo de ativação é escolhido separadamente no card.
 2. Após autorização para publicar o código, faça deploy da API e do ADM.
-   Não há migration, alteração de dados existentes ou necessidade de APK.
+   O controle pelo ADM exige primeiro a migration aditiva
+   `20260910160000_surcharge_rain_admin_control`, depois API e ADM.
+   Não precisa de APK. Consulte o procedimento de banco abaixo antes do rollout.
 3. Configure no serviço **API do Render**:
 
    | Variável | Valor |
@@ -19,11 +21,40 @@
 4. Reinicie/republique a API após mudar variáveis. No ADM, a taxa vinculada
    mostrará o estado climático e a hora do dado. Sem ID válido ou habilitação,
    não há consulta externa nem ativação automática. A chave NÃO é obrigatória.
-5. Deixe o **manual desligado** e retire horários que não deveriam cobrar
-   independentemente do clima. A taxa precisa estar **ativa**. Para parar
-   imediatamente toda cobrança desta taxa, use **Desativar** no ADM. Desligar
-   só o manual NÃO desliga clima nem horários. Reativar a taxa volta a permitir
-   todas as fontes, inclusive o clima ainda válido.
+5. No card, escolha **Automática (chuva)**. A taxa precisa estar **ativa** para
+   cobrar. O automático ignora o interruptor manual e os horários, sem apagá-los.
+   Para assumir o controle, escolha **Manual**: o clima deixa de aplicar a taxa
+   e os horários cadastrados voltam a valer; sem horários, use **Ligar manual**.
+   A troca de modo desliga o manual antigo. O mesmo clique reenviado não muda
+   novamente o interruptor nem duplica a auditoria.
+6. **Desativar** bloqueia qualquer cobrança desta taxa, conservando o modo
+   escolhido. **Reativar** permite novamente esse modo; não liga o manual por
+   conta própria. A escolha é salva no servidor e auditada; não exige redeploy.
+   Para suspender só a cobrança pelo clima, selecione Manual. A consulta do
+   clima continua em background para permitir voltar ao automático; desligar
+   também as consultas exige `OPEN_METEO_RAIN_ENABLED=false` no Render.
+
+### Migration, preservação e ordem do rollout
+
+- Adiciona somente `surcharges.automaticRainEnabled BOOLEAN NOT NULL DEFAULT false`.
+  Não modifica valores, repasses, horários, faturas ou entregas. Todas as taxas
+  começam no modo Manual: mesmo a taxa antes vinculada ao clima precisa de
+  **opt-in no ADM** após atualizar. A aplicação antiga ignora a nova coluna.
+- Gerada pelo Prisma 6.19.3 com `migrate diff --from-schema-datamodel
+  <schema anterior> --to-schema-datamodel prisma/schema.prisma --script`, sem
+  conexão ao banco, para evitar o reset exigido pelo histórico local antigo.
+  A cópia temporária do schema anterior foi removida após gerar/revisar o SQL.
+- Antes do rollout autorizado, confirmar backup/ponto de restauração do banco
+  gerenciado. Ensaio isolado aprovado em PostgreSQL 17: histórico de 51 migrations,
+  taxas fictícias anteriores, migration nova e repetição sem pendências.
+  Valores/repasse/horários/flags/timestamps preservados; controle e auditoria
+  testados no service real, inclusive concorrência e rollback. Banco de teste
+  removido. Não aplicado em produção nem no banco de desenvolvimento.
+- Publicar API somente depois da migration (o Render já executa migrations no
+  build). Atualizar ADM depois da API, conferir a taxa e selecionar o modo.
+  A migration aditiva fica no banco num rollback; não remover coluna ou dados.
+  Antes de voltar à API anterior, desligar `OPEN_METEO_RAIN_ENABLED` em **todas**
+  as instâncias: a versão antiga não respeita a escolha de modo do ADM.
 
 O endpoint público funciona sem chave, conforme solicitado pelo responsável.
 Isso não equivale a licença comercial: os termos do Open-Meteo restringem o
@@ -34,6 +65,22 @@ fallback silencioso para a API pública. Nunca colocar chave no Git, chat,
 mobile, Vercel ou variável `NEXT_PUBLIC_*`.
 
 Nenhuma configuração de produção foi alterada durante a implementação.
+
+## Aviso e desativação pela home do ADM
+
+Quando a taxa automática estiver ativa, a home mostra **Chuva indicada em
+Lajinha**, nome da taxa, horário do dado em Brasília e botão **Desativar taxa**.
+O texto deixa claro que é uma estimativa, não confirmação de chuva em cada rua.
+Se a indicação já estiver seca, informa a espera de 30 minutos em vez de dizer
+que ainda está chovendo. Sem cobrança automática ativa, não mostra alerta de chuva.
+
+Confirmar **Desativar taxa** usa a desativação geral auditada: para novas
+cotações deixa de cobrar, e o automático **não religa** até o ADM reativar em
+Configurações → Taxas adicionais. Preços existentes não são reescritos.
+A confirmação só aparece após sucesso da API; erro permanece no diálogo.
+Falha/offline na consulta exibe estado não confirmado, sem garantir cobrança
+ou desligamento com dados antigos. Consulta a cada minuto somente com a página
+visível; usa a API/cache existentes, sem mais chamadas climáticas/geocoding.
 
 ## Regra e limites
 
@@ -52,7 +99,8 @@ Nenhuma configuração de produção foi alterada durante a implementação.
 - Dados com 30 minutos ou mais, futuros, fora de ordem, de outra localização
   ou sem unidades/campos válidos não autorizam cobrança automática. Em falha,
   o último dado válido só vale até esse limite; falha não inventa chuva nem
-  contabiliza tempo seco. Manual e horários continuam independentes.
+  contabiliza tempo seco. No modo automático, falha não cai silenciosamente em
+  cobrança manual/horários; o ADM pode escolher Manual explicitamente.
 - O motor de preços existente continua escolhendo **no máximo uma taxa**, pela
   mesma prioridade de criação mais recente e divisão do adicional. Não há
   escrita em entregas existentes. Preços já congelados não mudam. Pedidos com
@@ -82,10 +130,32 @@ Logs climáticos não são um arquivo meteorológico permanente. A tela atribui
 os dados ao Open-Meteo e mostra quando se usa o endpoint público.
 
 Rollback: **Desativar** a taxa no ADM cessa todas as fontes imediatamente.
-Para desligar só o automático, definir `OPEN_METEO_RAIN_ENABLED=false` em todas
-as instâncias da API e republicar. Não apagar dados nem alterar pedidos/faturas.
+Para desligar só a cobrança automática, escolher **Manual** no card. Para
+desligar também o monitoramento, definir `OPEN_METEO_RAIN_ENABLED=false` em todas
+as instâncias e republicar. Não apagar dados nem alterar pedidos/faturas.
 
 ## Verificação de publicação
+
+Validação reproduzível (Docker aberto e imagem local `postgres:17-alpine`):
+
+```sh
+pnpm --filter @motoboycity/api run build
+node --test apps/api/scripts/rain-migration-target.test.cjs
+node apps/api/scripts/verify-rain-migration.cjs
+```
+
+O script cria container próprio em porta exclusiva de loopback, fixa `url` e
+`directUrl` no schema temporário e nas variáveis do subprocesso e confirma a
+identidade do cluster por Prisma e Docker antes de migrar. Não usa Compose,
+volumes do projeto ou URLs externas. Não gera cobranças reais nem consulta
+Open-Meteo; somente o clima é simulado nos testes do service.
+
+Incidente corrigido no primeiro ensaio: o wrapper antigo fixava apenas `url`
+e herdou `DIRECT_URL` de desenvolvimento. Aplicou a migration antiga pendente
+de isolamento do Asaas no banco local, **não** a migration da chuva. O usuário
+foi informado, autorizou continuar com isolamento corrigido e essa migration
+local não foi desfeita. Registro completo no changelog. Não reutilizar a
+versão antiga do script nem presumir que sobrescrever só `DATABASE_URL` basta.
 
 Conferir taxa correta, dado recente e estado no ADM. Sem chuva atual, o
 automático deve ficar desligado. Não forçar clima fictício ou criar cobranças

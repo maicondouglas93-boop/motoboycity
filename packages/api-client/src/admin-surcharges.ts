@@ -1,5 +1,8 @@
 import type { SurchargeItem } from '@motoboycity/types';
-import type { UpsertSurchargePayload } from '@motoboycity/validation';
+import type {
+  UpsertSurchargePayload,
+  SetSurchargeRainAutomationPayload,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -55,7 +58,20 @@ export function createAdminSurchargesApi({ baseUrl }: AdminSurchargesApiConfig) 
       return parseJsonOrThrow<SurchargeItem>(response);
     },
 
-    /** O interruptor manual — o que o admin liga quando começa a chover. */
+    /** Escolhe chuva automática ou manual/horários sem sobrescrever a taxa. */
+    async setRainAutomation(
+      accessToken: string,
+      id: string,
+      payload: SetSurchargeRainAutomationPayload,
+    ): Promise<SurchargeItem> {
+      const response = await apiFetch(`${baseUrl}/admin/surcharges/${id}/rain-automation`, {
+        method: 'PATCH',
+        headers: jsonHeaders(accessToken),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<SurchargeItem>(response);
+    },
+
     turnOn: (accessToken: string, id: string) => patch(accessToken, id, 'turn-on'),
     turnOff: (accessToken: string, id: string) => patch(accessToken, id, 'turn-off'),
     activate: (accessToken: string, id: string) => patch(accessToken, id, 'activate'),

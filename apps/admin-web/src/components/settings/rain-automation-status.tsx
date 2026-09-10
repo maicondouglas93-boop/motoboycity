@@ -4,7 +4,7 @@ const labels: Record<SurchargeRainAutomation['status'], string> = {
   DISABLED: 'Automação desligada no servidor.',
   NOT_CONFIGURED: 'Aguardando configuração da taxa no servidor.',
   UNAVAILABLE:
-    'Sem dados recentes. A cobrança automática não está ativa; o controle manual continua disponível.',
+    'Sem dados recentes. A cobrança automática não está ativa. Se precisar, selecione o modo Manual.',
   RAINING: 'Chuva indicada pelo modelo: ativação automática em vigor.',
   DRYING:
     'Sem nova indicação de chuva. Aguardando completar 30 minutos para desligar a ativação automática.',
@@ -14,9 +14,11 @@ const labels: Record<SurchargeRainAutomation['status'], string> = {
 export function RainAutomationStatus({
   automation,
   enabled,
+  automaticEnabled,
 }: {
   automation: SurchargeRainAutomation;
   enabled: boolean;
+  automaticEnabled: boolean;
 }) {
   return (
     <div className="mt-3 rounded-lg border bg-muted/40 p-3 text-sm" role="status">
@@ -28,9 +30,11 @@ export function RainAutomationStatus({
         </p>
       )}
       <p className="mt-1 text-muted-foreground">
-        {enabled
-          ? labels[automation.status]
-          : 'Taxa desativada pelo ADM. O clima não pode ligá-la.'}
+        {!enabled
+          ? 'Taxa desativada pelo ADM. O clima não pode ligá-la.'
+          : !automaticEnabled
+            ? 'Automática desativada no ADM. No modo Manual, o clima não aplica esta taxa.'
+            : labels[automation.status]}
       </p>
       {automation.observedAt && (
         <p className="mt-1 text-xs text-muted-foreground">

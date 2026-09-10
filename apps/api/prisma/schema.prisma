@@ -1683,6 +1683,10 @@ model Surcharge {
   /// Independente das janelas: qualquer um dos dois valendo aplica a taxa.
   manuallyActive Boolean @default(false)
 
+  /// Opt-in do ADM: quando ligado, somente o clima ativa esta taxa.
+  /// Manual e horários são ignorados; active=false continua bloqueando tudo.
+  automaticRainEnabled Boolean @default(false)
+
   region    Region              @relation(fields: [regionId], references: [id])
   schedules SurchargeSchedule[]
 

@@ -37,7 +37,12 @@ const automation = {
 };
 const render = (props = {}) =>
   renderToStaticMarkup(
-    createElement(RainAutomationStatus, { automation, enabled: true, ...props }),
+    createElement(RainAutomationStatus, {
+      automation,
+      enabled: true,
+      automaticEnabled: true,
+      ...props,
+    }),
   );
 
 test('ADM mostra Lajinha, acesso sem chave e hora de Brasília', () => {
@@ -59,4 +64,10 @@ test('falha e espera não são apresentadas como confirmação de chuva', () => 
     /Sem dados recentes/,
   );
   assert.match(render({ automation: { ...automation, status: 'DRYING' } }), /30 minutos/);
+});
+
+test('modo Manual não apresenta chuva como cobrança em vigor', () => {
+  const html = render({ automaticEnabled: false });
+  assert.match(html, /Automática desativada no ADM/);
+  assert.doesNotMatch(html, /ativação automática em vigor/);
 });

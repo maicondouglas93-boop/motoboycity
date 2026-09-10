@@ -159,19 +159,35 @@ depender do Google a cada pedido.
 As coordenadas de Lajinha–MG são fixas; não há geocoding recorrente nem envio
 de GPS dos usuários. O serviço consulta Open-Meteo em background a cada cinco
 minutos, público sem chave ou comercial com chave, mediante habilitação
-explícita e UUID da taxa no ambiente. Não altera `Surcharge` no banco.
+explícita e UUID da taxa no ambiente. O serviço climático não escreve taxas.
+O ADM persiste `Surcharge.automaticRainEnabled` (default `false`) para escolher
+se essa taxa usa o clima ou o controle manual/horários.
 
 Snapshot e início do período seco ficam no Redis com TTL; um lock limita as
 consultas entre instâncias e uma escrita condicionada ao dono evita resposta
 atrasada. Cada instância sincroniza a memória a cada minuto. Pedidos e ADM
 leem essa memória sem chamada externa. Amostra com 30 minutos perde validade;
-após 30 minutos secos cessa a contribuição automática. Manual/horários seguem
-independentes e o interruptor geral vence todos.
+após 30 minutos secos cessa a contribuição automática. O motor ignora clima
+no modo Manual e ignora manual/horários no automático; o interruptor geral
+vence todos. Horários são preservados para o retorno ao modo Manual.
 
 `SurchargeItem.rainAutomation` expõe apenas estado e horários para a taxa
-vinculada, nunca chave. O cálculo conserva prioridade de uma única taxa,
+vinculada, nunca chave. `PATCH /admin/surcharges/:id/rain-automation` recebe
+`{ enabled: boolean }`, valida o vínculo/habilitação ao ativar, altera modo e
+limpa manual atomicamente, com auditoria administrativa na mesma transação.
+Repetir o mesmo modo não altera o interruptor nem duplica a auditoria. A mudança
+usa as consultas de taxa existentes, sem cache extra no caminho da cotação.
+O cálculo conserva prioridade de uma única taxa,
 valores e divisão existentes; nenhuma entrega precificada é reescrita.
 Configuração, operação e licença: `docs/runbooks/open-meteo-rain.md`.
+
+A home do ADM usa `RainHomeNotice`/`RainHomeNoticeView`, compartilhando a query
+`['admin', 'surcharges']` com a tela de taxas. Consulta a cada minuto enquanto
+visível, sem chamada adicional ao provedor de clima. Só anuncia taxa automática
+ativa quando a API confirma habilitação, modo e chuva/espera. Desativação usa
+o endpoint administrativo existente com confirmação, atualiza o cache após
+sucesso e invalida a mesma query; erro de consulta não vira afirmação de taxa
+desligada. Clima em espera seca recebe texto próprio, sem alegar chuva atual.
 
 ## 5. Onde o dinheiro passa
 

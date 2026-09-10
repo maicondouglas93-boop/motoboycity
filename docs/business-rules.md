@@ -63,8 +63,13 @@ divisão personalizada da tabela.
 O responsável aprovou ativar a taxa existente pela indicação de chuva atual
 do Open-Meteo usando Lajinha–MG como referência, e desligar o automático após
 30 minutos sem nova indicação de chuva. Probabilidade futura não ativa cobrança.
-Valor e repasse continuam definidos pelo ADM; taxas não se acumulam. O manual
-permanece independente, e a desativação geral vence clima, manual e horários.
+Valor e repasse continuam definidos pelo ADM; taxas não se acumulam. O ADM
+escolhe o modo por taxa: **Manual** (interruptor e horários opcionais existentes)
+ou **Automática (chuva)** (somente clima, ignorando manual e horários).
+A troca de modo desliga o interruptor manual, sem apagar os horários; voltar
+ao Manual restaura a avaliação desses horários. A desativação geral vence tudo
+e preserva o modo escolhido para uma futura reativação. O automático exige
+opt-in no ADM, além de habilitação/vínculo da integração no servidor.
 O responsável pediu suporte ao endpoint público sem chave; a ativação é
 explícita e não dispensa conferir a licença de uso comercial do provedor.
 
