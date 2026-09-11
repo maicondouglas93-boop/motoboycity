@@ -6,7 +6,11 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import type { PublicDeliveryTracking, PublicDeliveryTrackingLink } from '@motoboycity/types';
+import type {
+  PublicDeliveryTracking,
+  PublicDeliveryTrackingLink,
+  ReportDeliveryLocationResult,
+} from '@motoboycity/types';
 import type {
   ListDeliveryTrackingQuery,
   ReportDeliveryLocationPayload,
@@ -20,6 +24,7 @@ import {
 import { PublicTrackingTokenService } from '../common/public-tracking-token.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { PickupArrivalService } from './pickup-arrival.service';
 import { endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../common/sao-paulo-time';
 
 // FAILED continua rastreavel: o motoboy esta voltando com a mercadoria, e e
@@ -68,13 +73,14 @@ export class DeliveryTrackingService {
     private readonly prisma: PrismaService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly publicTrackingTokens: PublicTrackingTokenService,
+    private readonly pickupArrival: PickupArrivalService,
   ) {}
 
   async report(
     user: User,
     deliveryId: string,
     payload: ReportDeliveryLocationPayload,
-  ): Promise<DeliveryTrackingPointItem> {
+  ): Promise<ReportDeliveryLocationResult> {
     if (user.type !== 'DRIVER') {
       throw new ForbiddenException('Apenas o motoboy da entrega pode transmitir localização.');
     }
@@ -87,7 +93,16 @@ export class DeliveryTrackingService {
 
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
-      select: { id: true, driverId: true, companyId: true, status: true },
+      select: {
+        id: true,
+        displayNumber: true,
+        driverId: true,
+        companyId: true,
+        status: true,
+        statusChangedAt: true,
+        pickupArrivalNotifiedAt: true,
+        addresses: { where: { type: 'PICKUP' }, take: 1, select: { lat: true, lng: true } },
+      },
     });
     if (!delivery) throw new NotFoundException('Pedido não encontrado.');
     if (delivery.driverId !== driver.id) {
@@ -135,7 +150,10 @@ export class DeliveryTrackingService {
         })
         .catch(() => undefined);
     }
-    return item;
+    const pickupArrivalCheck = await this.pickupArrival
+      .observe(delivery, payload)
+      .catch(() => undefined);
+    return pickupArrivalCheck ? { ...item, pickupArrivalCheck } : item;
   }
 
   async issuePublicLink(user: User, deliveryId: string): Promise<PublicDeliveryTrackingLink> {

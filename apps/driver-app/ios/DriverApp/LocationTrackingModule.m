@@ -10,6 +10,9 @@
 @property(nonatomic, strong) CLLocation *latestLocation;
 @property(nonatomic, strong) NSTimer *presenceTimer;
 @property(nonatomic, assign) BOOL presenceRecoveryInFlight;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, CLLocation *> *pickupTargets;
+@property(nonatomic, assign) BOOL arrivalProbe;
+@property(nonatomic, assign) NSTimeInterval lastProbeSentAt;
 @end
 
 @implementation LocationTrackingModule
@@ -41,12 +44,16 @@ RCT_REMAP_METHOD(start,
       return;
     }
 
+    if (![self.accessToken isEqualToString:accessToken]) self.pickupTargets = [NSMutableDictionary dictionary];
+    for (NSString *identifier in [self.pickupTargets.allKeys copy]) {
+      if (![validIds containsObject:identifier]) [self.pickupTargets removeObjectForKey:identifier];
+    }
     self.deliveryIds = [validIds copy];
     self.baseUrl = baseUrl;
     self.accessToken = accessToken;
     self.appVersion = appVersion;
     [self ensureLocationManager];
-    self.locationManager.distanceFilter = validIds.count > 0 ? 50.0 : 100.0;
+    [self refreshArrivalProbe];
 
     CLAuthorizationStatus authorization = self.locationManager.authorizationStatus;
     if (authorization == kCLAuthorizationStatusDenied || authorization == kCLAuthorizationStatusRestricted) {
@@ -108,6 +115,12 @@ RCT_REMAP_METHOD(stop,
   }
 
   self.latestLocation = location;
+  [self refreshArrivalProbe];
+  if (self.arrivalProbe) {
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.lastProbeSentAt > 0 && now - self.lastProbeSentAt < 9.5) return;
+    self.lastProbeSentAt = now;
+  }
   [self reportPresence:location];
   NSArray<NSString *> *trackedDeliveries = [self.deliveryIds copy];
   for (NSString *deliveryId in trackedDeliveries) {
@@ -146,6 +159,21 @@ RCT_REMAP_METHOD(stop,
     }
   }];
   [task resume];
+}
+
+- (void)refreshArrivalProbe
+{
+  BOOL near = NO;
+  for (NSString *identifier in self.pickupTargets) {
+    if (self.latestLocation && [self.deliveryIds containsObject:identifier] &&
+        [self.latestLocation distanceFromLocation:self.pickupTargets[identifier]] <= 150.0) {
+      near = YES;
+      break;
+    }
+  }
+  if (near != self.arrivalProbe) self.lastProbeSentAt = 0;
+  self.arrivalProbe = near;
+  self.locationManager.distanceFilter = near ? kCLDistanceFilterNone : (self.deliveryIds.count > 0 ? 50.0 : 100.0);
 }
 
 - (void)startPresenceTimer
@@ -222,6 +250,7 @@ RCT_REMAP_METHOD(stop,
 
 - (void)reportLocation:(CLLocation *)location forDelivery:(NSString *)deliveryId
 {
+  NSString *requestToken = [self.accessToken copy];
   NSString *escapedId = [deliveryId stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLPathAllowedCharacterSet]];
   NSString *normalizedBaseUrl = self.baseUrl;
   while ([normalizedBaseUrl hasSuffix:@"/"]) {
@@ -246,19 +275,40 @@ RCT_REMAP_METHOD(stop,
   if (location.horizontalAccuracy >= 0) {
     payload[@"accuracy"] = @(location.horizontalAccuracy);
   }
+  payload[@"sampledAt"] = @((long long)(location.timestamp.timeIntervalSince1970 * 1000));
+  if (location.speed >= 0 && isfinite(location.speed)) payload[@"speedMps"] = @(location.speed);
   NSError *serializationError;
   request.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&serializationError];
   if (serializationError != nil) {
     return;
   }
 
-  NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
+  NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, __unused NSError *error) {
     NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
     if (statusCode == 401 || statusCode == 403 || statusCode == 404 || statusCode == 409) {
       dispatch_async(dispatch_get_main_queue(), ^{
+        if (![self.accessToken isEqualToString:requestToken]) return;
         NSMutableArray<NSString *> *remaining = [self.deliveryIds mutableCopy];
         [remaining removeObject:deliveryId];
         self.deliveryIds = remaining;
+        [self.pickupTargets removeObjectForKey:deliveryId];
+        [self refreshArrivalProbe];
+      });
+    } else if (statusCode >= 200 && statusCode < 300 && data) {
+      id result = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![result isKindOfClass:[NSDictionary class]]) return;
+      id target = result[@"pickupArrivalCheck"];
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (![self.accessToken isEqualToString:requestToken] || ![self.deliveryIds containsObject:deliveryId]) return;
+        [self.pickupTargets removeObjectForKey:deliveryId];
+        if ([target isKindOfClass:[NSDictionary class]] &&
+            [target[@"lat"] isKindOfClass:[NSNumber class]] && [target[@"lng"] isKindOfClass:[NSNumber class]]) {
+          CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake([target[@"lat"] doubleValue], [target[@"lng"] doubleValue]);
+          if (CLLocationCoordinate2DIsValid(coordinate)) {
+            self.pickupTargets[deliveryId] = [[CLLocation alloc] initWithLatitude:coordinate.latitude longitude:coordinate.longitude];
+          }
+        }
+        [self refreshArrivalProbe];
       });
     }
   }];
@@ -267,6 +317,9 @@ RCT_REMAP_METHOD(stop,
 
 - (void)stopTracking
 {
+  [self.pickupTargets removeAllObjects];
+  self.arrivalProbe = NO;
+  self.lastProbeSentAt = 0;
   [self.locationManager stopUpdatingLocation];
   [self.presenceTimer invalidate];
   self.presenceTimer = nil;

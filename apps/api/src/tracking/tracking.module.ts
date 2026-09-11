@@ -6,6 +6,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
 import { LocationSilenceService } from './location-silence.service';
 import { DeliveryTrackingController } from './delivery-tracking.controller';
 import { DeliveryTrackingService } from './delivery-tracking.service';
+import { PickupArrivalService } from './pickup-arrival.service';
 import { PublicDeliveryTrackingController } from './public-delivery-tracking.controller';
 import { TRACKING_QUEUE, TrackingRetentionProcessor } from './tracking-retention.processor';
 import { TrackingRetentionScheduler } from './tracking-retention.scheduler';
@@ -20,6 +21,7 @@ import { TrackingRetentionScheduler } from './tracking-retention.scheduler';
   controllers: [DeliveryTrackingController, PublicDeliveryTrackingController],
   providers: [
     DeliveryTrackingService,
+    PickupArrivalService,
     LocationSilenceService,
     TrackingRetentionProcessor,
     TrackingRetentionScheduler,

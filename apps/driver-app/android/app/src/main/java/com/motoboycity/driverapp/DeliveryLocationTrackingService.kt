@@ -18,6 +18,9 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.Handler
+import android.os.SystemClock
+import org.json.JSONObject
 import android.provider.Settings
 import android.util.Log
 import java.io.OutputStreamWriter
@@ -39,6 +42,9 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private lateinit var locationManager: LocationManager
   private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
   private val deliveryIds = ConcurrentHashMap.newKeySet<String>()
+  private val pickupTargets = ConcurrentHashMap<String, Location>()
+  private var arrivalProbe = false
+  private var lastProbeSentAt = 0L
   private val pendingLocation = AtomicReference<Location?>(null)
   private val latestLocation = AtomicReference<Location?>(null)
   private val sendingLocation = AtomicBoolean(false)
@@ -86,10 +92,12 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   }
 
   private fun updateConfiguration(intent: Intent?) {
+    if (intent?.getStringExtra(EXTRA_ACCESS_TOKEN)?.let { it != accessToken } == true) pickupTargets.clear()
     val ids = intent?.getStringArrayListExtra(EXTRA_DELIVERY_IDS)
     if (ids != null) {
       deliveryIds.clear()
       deliveryIds.addAll(ids.filter { it.isNotBlank() })
+      pickupTargets.keys.retainAll(deliveryIds)
     }
     intent?.getStringExtra(EXTRA_BASE_URL)?.takeIf { it.isNotBlank() }?.let { baseUrl = it }
     intent?.getStringExtra(EXTRA_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }?.let { accessToken = it }
@@ -107,8 +115,9 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
 
     try {
       if (receivingUpdates) locationManager.removeUpdates(this)
-      val updateInterval = if (deliveryIds.isEmpty()) IDLE_UPDATE_INTERVAL_MS else ACTIVE_UPDATE_INTERVAL_MS
-      val updateDistance = if (deliveryIds.isEmpty()) IDLE_UPDATE_DISTANCE_METERS else ACTIVE_UPDATE_DISTANCE_METERS
+      arrivalProbe = isNearPickup(latestLocation.get())
+      val updateInterval = if (arrivalProbe) 10_000L else if (deliveryIds.isEmpty()) IDLE_UPDATE_INTERVAL_MS else ACTIVE_UPDATE_INTERVAL_MS
+      val updateDistance = if (arrivalProbe) 0f else if (deliveryIds.isEmpty()) IDLE_UPDATE_DISTANCE_METERS else ACTIVE_UPDATE_DISTANCE_METERS
       val enabledProviders =
         listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { provider ->
           runCatching { locationManager.isProviderEnabled(provider) }.getOrDefault(false)
@@ -141,8 +150,24 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   override fun onLocationChanged(location: Location) {
     refreshFloatingShortcut()
     latestLocation.set(Location(location))
+    refreshArrivalProbe()
+    if (arrivalProbe) {
+      val now = SystemClock.elapsedRealtime()
+      if (lastProbeSentAt != 0L && now - lastProbeSentAt < 9_500L) return
+      lastProbeSentAt = now
+    }
     pendingLocation.set(Location(location))
     drainLatestLocation()
+  }
+
+  private fun isNearPickup(location: Location?): Boolean = location != null &&
+    pickupTargets.any { (id, target) -> deliveryIds.contains(id) && location.distanceTo(target) <= 150f }
+
+  private fun refreshArrivalProbe() {
+    if (receivingUpdates && arrivalProbe != isNearPickup(latestLocation.get())) {
+      lastProbeSentAt = 0L
+      requestLocationUpdates(force = true)
+    }
   }
 
   /**
@@ -155,7 +180,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
    *
    * Este relogio renova a presenca com a ultima posicao valida. Os pontos das
    * entregas continuam sendo enviados somente quando chega uma localizacao
-   * nova, portanto ficar parado nao polui o historico da rota.
+   * nova. Perto da coleta, uma sonda temporaria envia fixes novos mesmo parado.
    */
   private fun startHeartbeatLoop() {
     if (heartbeatTask?.isCancelled == false && heartbeatTask?.isDone == false) return
@@ -248,6 +273,8 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
         status == HttpURLConnection.HTTP_CONFLICT
       ) {
         deliveryIds.remove(deliveryId)
+        pickupTargets.remove(deliveryId)
+        Handler(Looper.getMainLooper()).post { refreshArrivalProbe() }
       }
       if (status >= 500 || status == 429) break
     }
@@ -324,11 +351,25 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
 
   private fun sendLocation(baseUrl: String, token: String, deliveryId: String, location: Location): Int? {
     val accuracy = if (location.hasAccuracy()) ",\"accuracy\":${location.accuracy}" else ""
-    val payload = "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy}"
+    val speed = if (location.hasSpeed() && location.speed.isFinite() && location.speed >= 0f) ",\"speedMps\":${location.speed}" else ""
+    val payload = "{\"lat\":${location.latitude},\"lng\":${location.longitude}$accuracy$speed,\"sampledAt\":${location.time}}"
     return sendJson(
       "${baseUrl.trimEnd('/')}/tracking/driver/deliveries/$deliveryId/points",
       token,
       payload,
+      onSuccess = { body ->
+        val result = JSONObject(body).optJSONObject("pickupArrivalCheck")
+        val lat = result?.optDouble("lat") ?: Double.NaN
+        val lng = result?.optDouble("lng") ?: Double.NaN
+        Handler(Looper.getMainLooper()).post {
+          if (accessToken == token && this.baseUrl == baseUrl && deliveryIds.contains(deliveryId)) {
+            if (lat.isFinite() && lng.isFinite() && lat in -90.0..90.0 && lng in -180.0..180.0) {
+              pickupTargets[deliveryId] = Location("pickup").apply { latitude = lat; longitude = lng }
+            } else pickupTargets.remove(deliveryId)
+            refreshArrivalProbe()
+          }
+        }
+      },
     )
   }
 
@@ -337,6 +378,7 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
     token: String,
     payload: String,
     method: String = "POST",
+    onSuccess: ((String) -> Unit)? = null,
   ): Int? {
     return try {
       val connection = (URL(url).openConnection()
@@ -349,7 +391,13 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
         setRequestProperty("Content-Type", "application/json")
       }
       connection.outputStream.use { stream -> OutputStreamWriter(stream, Charsets.UTF_8).use { it.write(payload) } }
-      connection.responseCode.also { connection.disconnect() }
+      try {
+        val status = connection.responseCode
+        if (status in 200..299 && onSuccess != null) {
+          runCatching { connection.inputStream.bufferedReader().use { onSuccess(it.readText()) } }
+        }
+        status
+      } finally { connection.disconnect() }
     } catch (error: Exception) {
       Log.w(TAG, "Não foi possível enviar localização", error)
       null
@@ -359,6 +407,9 @@ class DeliveryLocationTrackingService : Service(), LocationListener {
   private fun escapeJson(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
 
   private fun stopTracking() {
+    pickupTargets.clear()
+    arrivalProbe = false
+    lastProbeSentAt = 0L
     floatingShortcut.hide()
     heartbeatTask?.cancel(false)
     heartbeatTask = null

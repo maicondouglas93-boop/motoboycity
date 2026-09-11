@@ -632,6 +632,16 @@ motoboy recebe o aviso de que ele voltou para a fila.
 
 ---
 
+## Aviso de proximidade da coleta (2026-09-11)
+
+Limites aprovados pelo responsavel: somente `ACCEPTED`, motoboy atribuido a ate
+50 m do snapshot da coleta, erro GPS ate 20 m e velocidade ate 5 km/h por pelo
+menos 20 segundos. Backend valida todas as condicoes. No maximo um aviso por
+pedido, inclusive se houver reatribuicao. A empresa recebe aviso visual e som
+quando habilitado no navegador; nao ha alteracao automatica do status, preco
+ou repasse. GPS indica proximidade, nao e prova de presenca na porta.
+Detalhes e limites de entrega do aviso em `pickup-arrival-alert.md`.
+
 Decisões confirmadas diretamente com o responsável do produto em sessões
 anteriores. Se uma regra aqui parecer desatualizada em relação ao código,
 trate o código (ou `docs/agent-handoff.md`) como mais atual e avise o

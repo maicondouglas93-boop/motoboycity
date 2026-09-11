@@ -6,6 +6,7 @@ import {
   type ReportDeliveryLocationPayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
+import type { ReportDeliveryLocationResult } from '@motoboycity/types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CompanyOnlyGuard } from '../auth/company-only.guard';
 import { DriverOnlyGuard } from '../auth/driver-only.guard';
@@ -15,7 +16,6 @@ import {
   DeliveryTrackingService,
   type ActiveDeliveryTrackingItem,
   type DeliveryTrackingDetail,
-  type DeliveryTrackingPointItem,
 } from './delivery-tracking.service';
 
 @Controller('tracking')
@@ -30,7 +30,7 @@ export class DeliveryTrackingController {
     @Body(new ZodValidationPipe(reportDeliveryLocationSchema))
     payload: ReportDeliveryLocationPayload,
     @CurrentUser() user: User,
-  ): Promise<DeliveryTrackingPointItem> {
+  ): Promise<ReportDeliveryLocationResult> {
     return this.deliveryTrackingService.report(user, deliveryId, payload);
   }
 

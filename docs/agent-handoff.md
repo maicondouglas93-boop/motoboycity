@@ -8,8 +8,10 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-10**, mini-ilustrações nos menus Company Web e ADM,
-> validadas localmente, com commit/push autorizados; conferir rollout.
+> Última revisão: **2026-09-11**, aviso GPS de proximidade da coleta implementado
+> com publicacao e APK `pilot.23` autorizados. Conferir resultado abaixo;
+> o app instalado precisa ser atualizado para participar da deteccao.
+> Mini-ilustrações Company e ADM enviadas em `1fa0a1f`; conferir rollout.
 > Marca aiqfome enviada em `1d9ae85`; conferir rollout.
 > Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
 > build/typecheck/lint aprovados; rollout e ensaio físico na Elgin ainda
@@ -27,6 +29,25 @@ validação:
 
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
+
+## Publicacao autorizada — aviso de chegada para a empresa
+
+Limites confirmados: `ACCEPTED`, raio 50 m, precisao ate 20 m, velocidade ate
+5 km/h, permanencia 20 s. Backend verifica fixes novos e faz claim condicional
+em `pickupArrivalNotifiedAt` antes de evento exclusivo para a empresa. Nao muda
+coleta/preco. Company tem botao de volume para habilitar/testar som e aviso
+visual. Android/iOS precisam desta nova versao para informar velocidade/tempo
+do fix e observar parada proximo da coleta. Nao gerar APK sem novo pedido.
+
+Migration `20260911120619_pickup_arrival_notification` criada/testada somente
+em PostgreSQL 17 descartavel autorizado. Produção e `.env` nao alterados.
+Antes de publicar: backup recuperavel, migration, API/Company e novo APK;
+ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
+contrato, testes e limitacoes em `pickup-arrival-alert.md` e `changelog.md`.
+Em 11/09 foi autorizada publicacao e geracao do APK `pilot.23` (versionCode 23).
+Backup local de 11/09 as 02:30 conferido por hash e `pg_restore --list`;
+backup GitHub/GCS da mesma data com job `dump` em success. Rollout e artefato
+serao registrados depois da confirmacao, sem confundir build com instalacao.
 
 ## Recorte visual com publicação autorizada — navegação ilustrada Company e ADM
 
@@ -125,7 +146,7 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 | Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Reativação automática após baixa de fatura em `bd4fa05`, enviada para `main` em 08/09/2026, com deploys automáticos iniciados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 52 migrations no repositório, incluindo a nova de chuva; confirmar aplicação pelo Render no build deste rollout |
+| Banco | PostgreSQL gerenciado; 53 migrations no repositório, incluindo chegada na coleta; confirmar aplicação pelo Render no build deste rollout |
 | APK nos aparelhos | O **`pilot.19`** já foi instalado em pelo menos um aparelho em 02/09/2026; a extensão do rollout não foi confirmada. Confira a versão de cada motoboy pelo heartbeat no painel (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é

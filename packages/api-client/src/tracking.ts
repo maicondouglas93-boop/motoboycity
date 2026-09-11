@@ -1,10 +1,11 @@
 import type {
   ActiveDeliveryTrackingItem,
   DeliveryTrackingDetail,
-  DeliveryTrackingPoint,
+  ReportDeliveryLocationResult,
   PublicDeliveryTracking,
   PublicDeliveryTrackingLink,
 } from '@motoboycity/types';
+import type { ReportDeliveryLocationPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -21,14 +22,17 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
     async reportLocation(
       accessToken: string,
       deliveryId: string,
-      payload: { lat: number; lng: number; accuracy?: number },
-    ): Promise<DeliveryTrackingPoint> {
-      const response = await apiFetch(`${baseUrl}/tracking/driver/deliveries/${deliveryId}/points`, {
-        method: 'POST',
-        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return parseJsonOrThrow<DeliveryTrackingPoint>(response);
+      payload: ReportDeliveryLocationPayload,
+    ): Promise<ReportDeliveryLocationResult> {
+      const response = await apiFetch(
+        `${baseUrl}/tracking/driver/deliveries/${deliveryId}/points`,
+        {
+          method: 'POST',
+          headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return parseJsonOrThrow<ReportDeliveryLocationResult>(response);
     },
 
     async detail(

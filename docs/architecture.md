@@ -480,6 +480,22 @@ entregador ao mesmo tempo gravavam duas linhas, cada uma nomeando um "anterior"
 já obsoleto: a auditoria deixava de permitir reconstruir a ordem. É outro motivo,
 além da corrida em si, para a condição viver no `where`.
 
+## Aviso GPS de proximidade da coleta
+
+`TrackingModule` inclui `PickupArrivalService`, chamado pelo rastreamento ja
+autenticado do motorista. Observacoes frescas de permanencia sao descartaveis
+em memoria; `Delivery.pickupArrivalNotifiedAt` e a trava persistente e atomica
+contra duplicacao. O evento `delivery:pickup-arrival` e exclusivo da sala da
+empresa proprietaria, sem broadcast publico. Nao e transicao de status.
+
+O contrato de tracking adiciona `sampledAt`/`speedMps` opcionais e retorna alvo
+opcional `pickupArrivalCheck`. Android/iOS usam o alvo para reduzir o filtro de
+deslocamento somente perto da coleta. `PickupArrivalAlerts`, montado na TopNav
+do Company, assina o evento globalmente, oferece habilitacao de som via gesto
+e aviso visual. Sem polling novo ou chamada de Maps. APKs antigos permanecem
+compativeis, mas nao confirmam os novos criterios. Regras, deploy e limites de
+confiabilidade em `pickup-arrival-alert.md`.
+
 ## 12. Dívidas estruturais conhecidas
 
 Registradas para não serem redescobertas:

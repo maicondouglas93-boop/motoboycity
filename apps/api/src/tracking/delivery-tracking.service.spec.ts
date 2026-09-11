@@ -35,15 +35,18 @@ describe('DeliveryTrackingService', () => {
     tokenFromIdentifier: jest.fn((identifier: string) => `${identifier}.signature`),
     identifierFromToken: jest.fn(),
   };
+  const pickupArrival = { observe: jest.fn().mockResolvedValue(undefined) };
   const service = new DeliveryTrackingService(
     prisma as never,
     realtimeGateway as never,
     publicTrackingTokens as never,
+    pickupArrival as never,
   );
   const driverUser = { id: 'user-driver', type: 'DRIVER' } as User;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    pickupArrival.observe.mockResolvedValue(undefined);
     prisma.$transaction.mockImplementation((callback: (client: typeof tx) => unknown) =>
       callback(tx),
     );
@@ -107,6 +110,49 @@ describe('DeliveryTrackingService', () => {
     });
 
     expect(prisma.delivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('devolve sonda opcional ao APK sem alterar o ponto de rastreamento', async () => {
+    prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
+    prisma.delivery.findUnique.mockResolvedValue({
+      id: 'delivery-1',
+      driverId: 'driver-1',
+      companyId: 'company-1',
+      status: 'ACCEPTED',
+    });
+    pickupArrival.observe.mockResolvedValue({ lat: -20.15, lng: -41.62 });
+    const result = await service.report(driverUser, 'delivery-1', { lat: -20.15, lng: -41.62 });
+    expect(result.pickupArrivalCheck).toEqual({ lat: -20.15, lng: -41.62 });
+    expect(result.id).toBe('point-1');
+  });
+
+  it('erro do detector nao interrompe o rastreamento', async () => {
+    prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1' });
+    prisma.delivery.findUnique.mockResolvedValue({
+      id: 'delivery-1',
+      driverId: 'driver-1',
+      companyId: 'company-1',
+      status: 'ACCEPTED',
+    });
+    pickupArrival.observe.mockRejectedValueOnce(new Error('indisponivel'));
+    await expect(
+      service.report(driverUser, 'delivery-1', { lat: 0, lng: 0 }),
+    ).resolves.toHaveProperty('id', 'point-1');
+  });
+
+  it('nao deixa outro motoboy transmitir pontos nem disparar chegada', async () => {
+    prisma.driver.findUnique.mockResolvedValue({ id: 'driver-outro' });
+    prisma.delivery.findUnique.mockResolvedValue({
+      id: 'delivery-1',
+      driverId: 'driver-1',
+      companyId: 'company-1',
+      status: 'ACCEPTED',
+    });
+    await expect(service.report(driverUser, 'delivery-1', { lat: 0, lng: 0 })).rejects.toThrow(
+      'Você não está atribuído',
+    );
+    expect(pickupArrival.observe).not.toHaveBeenCalled();
+    expect(tx.deliveryLocationPoint.create).not.toHaveBeenCalled();
   });
 
   it('cria o token uma unica vez com escrita condicional', async () => {

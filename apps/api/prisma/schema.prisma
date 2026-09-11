@@ -824,6 +824,9 @@ model Delivery {
   /// ainda nao configuraram esse limite.
   pickupDeadlineAt DateTime?
 
+  /// Aviso de proximidade da coleta emitido uma unica vez, sem alterar o status.
+  pickupArrivalNotifiedAt DateTime?
+
   /// Preenchidos apenas quando a entrega falha. `failureNote` e obrigatoria
   /// quando o motivo e OTHER — a validacao cuida disso.
   failureReason DeliveryFailureReason?

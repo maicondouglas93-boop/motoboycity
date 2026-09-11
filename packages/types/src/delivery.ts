@@ -234,6 +234,18 @@ export interface DeliveryTrackingPoint {
   capturedAt: string;
 }
 
+export interface ReportDeliveryLocationResult extends DeliveryTrackingPoint {
+  /** Sonda local do GPS perto da coleta. Ausente quando nao e necessaria. */
+  pickupArrivalCheck?: { lat: number; lng: number };
+}
+
+export interface PickupArrivalEvent {
+  deliveryId: string;
+  displayNumber: number;
+  driverId: string;
+  arrivedAt: string;
+}
+
 export interface DeliveryTrackingDetail {
   deliveryId: string;
   displayNumber: number;

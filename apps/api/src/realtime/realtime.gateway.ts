@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
-import type { OperationalActivityEvent, PublicDeliveryTrackingLocation } from '@motoboycity/types';
+import type {
+  OperationalActivityEvent,
+  PublicDeliveryTrackingLocation,
+  PickupArrivalEvent,
+} from '@motoboycity/types';
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -208,6 +212,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitDeliveryLocation(companyId: string, payload: unknown): void {
     this.server.to('admin').emit('delivery:location', payload);
     this.server.to(this.companyRoom(companyId)).emit('delivery:location', payload);
+  }
+
+  emitPickupArrival(companyId: string, payload: PickupArrivalEvent): void {
+    this.server.to(this.companyRoom(companyId)).emit('delivery:pickup-arrival', payload);
   }
 
   async emitPublicDeliveryLocation(

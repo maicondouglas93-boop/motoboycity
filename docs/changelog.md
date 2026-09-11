@@ -12860,3 +12860,100 @@ completa ADM **58/58**. Diff revisado, sem secrets, arquivos de prévia ou backe
 Skill de verificação orientou escopo, revisão e preservação das validações.
 Push na `main` aciona os deploys automáticos configurados; conclusão do rollout
 não verificada neste passo. Sem mudança em API, banco, regras de negócio ou APK.
+
+## 2026-09-11 — Aviso GPS de proximidade da coleta no Company
+
+Responsavel aprovou limites de 50 m, precisao ate 20 m, ate 5 km/h por 20 s,
+somente `ACCEPTED`, validacao no servidor e evento unico por pedido. Tambem
+autorizou migration em PostgreSQL temporario isolado. Skills de entregas,
+contratos, mobile, web e verificacao orientaram a separacao do aviso das
+transicoes/precos e a validacao da cadeia nativa/API/painel.
+
+Arquivos: novo `apps/api/src/tracking/pickup-arrival.service.ts`, ligacao em
+tracking service/controller/module, metodo exclusivo da sala da empresa em
+`realtime.gateway.ts`, contratos `packages/{types,validation,api-client}`, novo
+`components/layout/pickup-arrival-alerts.tsx` na TopNav Company e rastreamento
+nativo Android `DeliveryLocationTrackingService.kt`/iOS `LocationTrackingModule.m`.
+Schema e migration aditiva `20260911120619_pickup_arrival_notification` adicionam
+somente `Delivery.pickupArrivalNotifiedAt`. Atualizados testes, regras, arquitetura,
+handoff e runbook `docs/pickup-arrival-alert.md`.
+
+Deteccao exige fixes novos, frescos e distintos durante a permanencia; descarta
+observacoes invalidas, anteriores ao aceite, sem velocidade, fora de ordem ou
+com intervalo excessivo. Observacao em memoria e descartavel/limitada. Claim
+condicional no PostgreSQL valida status, motorista e versao de atribuicao;
+carimbo duravel nao e resetado, nem em reatribuicao. Evento exclusivo da empresa,
+sem mudanca de status, preco, dispatch ou repasse. Falha do detector nao rejeita
+o ponto normal. Sem promessa de entrega exatamente uma vez: desconexao do painel
+ou queda entre claim e emit pode perder o aviso; nao ha replay antigo.
+
+APKs antigos continuam rastreando. Nova versao envia tempo do fix e velocidade;
+resposta indica coordenadas da coleta. A ate 150 m ativa sonda temporaria com
+fixes novos aproximadamente a cada 10 s mesmo parado; o aviso continua exigindo
+50 m. Fora da area ou depois do aviso/coleta volta ao filtro anterior. Nenhum
+novo polling web ou consulta Maps. Heartbeat nao serve como evidencia de parada.
+
+Company: toque sintetizado por Web Audio apos gesto de habilitar/testar, mute,
+aviso visual com numero/link/fechar, expiracao e remocao quando sai de ACCEPTED.
+Deduplicacao sonora limitada por conta no localStorage + Web Locks quando
+disponivel. Uma aba muda nao consome o som de uma habilitada. Nao toca sem gesto,
+nao repete evento duplicado e continua mostrando aviso se audio falhar.
+
+Validacao executada:
+
+- `prisma validate` antes da edicao: aprovado. `migrate deploy` das 52 migrations
+  anteriores, `migrate dev --name pickup_arrival_notification --skip-seed` e
+  geracao do client: aprovados exclusivamente em PostgreSQL 17 descartavel,
+  porta local 55439, DATABASE_URL e DIRECT_URL sobrescritos. Sem banco compartilhado.
+- `pnpm --filter @motoboycity/validation build`: aprovado.
+- Jest API `pickup-arrival.service.spec delivery-tracking.service.spec
+  realtime.gateway.spec`: **62/62**. Inclui GPS invalido/ausente/stale/rapido,
+  permanencia, status, autoria, falha isolada e escopo da sala.
+- Jest `pickup-arrival.integration.spec` com opt-in e URL isolada verificada:
+  **1/1**, duas instancias disputando no PostgreSQL real: um carimbo/um emit,
+  valor e status preservados, reinicio nao repete.
+- Company Vitest `pickup-arrival-alerts.test.tsx top-nav.test.tsx`: **15/15**.
+  Lint inicialmente apontou mutacao do AudioContext; ajustada inscricao por
+  evento, com cleanup, e validado novamente.
+- Driver App Jest completo: **188/188**, 26 suites. Filtro inicial
+  `deliveryTracking` nao encontrou testes; nao foi contado como aprovacao.
+- `gradlew.bat :app:compileDebugKotlin --console=plain`, JDK 21: aprovado,
+  sem gerar APK/AAB; aviso existente de construtor Notification depreciado.
+- Typecheck/lint da raiz: aprovados nos oito pacotes, com um warning preexistente
+  `no-void` no mobile `apiClient.ts`. Builds API/Company aprovados.
+- Navegador interno em previa local com componente real e servidor Socket.IO
+  ficticio: ativacao do som refletida no botao, aviso/link/dismiss presentes,
+  layout desktop e viewport 390x844 sem overflow horizontal da pagina, sem erros
+  no console. Nao foi usado login, token ou pedido de producao; nao atesta som
+  fisicamente audivel no computador da loja. Previa removida e processos encerrados.
+  O build seguinte detectou tipos gerados antigos da rota temporaria. A limpeza
+  do cache via shell foi bloqueada; nenhum arquivo foi apagado por esse comando.
+  O proprio `next dev` regenerou os tipos a partir das rotas reais, e build/typecheck
+  foram repetidos. Container/banco sintetico descartavel removido; os testes podem
+  recria-lo. Nenhum dado real foi removido.
+
+Limites: GPS/aparelho fisico, bateria, rede real, iOS/macOS e rollout nao
+validados. Nenhum commit/push/deploy/APK solicitado neste recorte. Para usar na
+rua: backup recuperavel, migration antes da API nova, publicar API/Company,
+gerar/distribuir APK e ensaiar. Rollback de codigo preserva a coluna/carimbos.
+
+### 2026-09-11 — Publicacao autorizada e preparacao do `pilot.23`
+
+Responsavel solicitou colocar em producao e confirmou gerar o APK atualizado.
+VersionName passa a `0.1.0-pilot.23`, versionCode previsto 23, mantendo a chave
+oficial e o mesmo pacote. Sem mudanca visual no Driver App.
+
+Antes do push: `git fetch origin` confirmou main sem divergencia; recorte
+revisado, migration somente ADD COLUMN nullable. Render aplica `migrate deploy`
+no build antes da API nova; Vercel publica no mesmo push. Backup local de
+11/09/2026 02:30 (6.039.573 bytes) teve SHA-256 e archive conferidos por
+`pg_restore --list`; o job remoto `dump` de hoje tambem estava em success.
+Nao foi feita restauracao nem acessado o conteudo dos dados do dump.
+
+Reexecutados Jest API focado **62/62** e Company **15/15**, ambos aprovados.
+Mantidas evidencias anteriores de typecheck/lint dos oito pacotes, builds,
+188 testes mobile, compilacao Kotlin e teste de disputa no banco isolado.
+Sem nova alteracao funcional desde essas validacoes. Deploy/artefato ainda
+dependem dos resultados dos provedores e da compilacao assinada, registrados
+no fechamento do release. Nenhum aparelho sera considerado atualizado sem
+instalacao/confirmacao real.

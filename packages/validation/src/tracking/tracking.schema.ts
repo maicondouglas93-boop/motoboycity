@@ -8,6 +8,16 @@ export const reportDeliveryLocationSchema = z.object({
   lat: z.number().finite().min(-90).max(90),
   lng: z.number().finite().min(-180).max(180),
   accuracy: z.number().finite().min(0).max(10_000).optional(),
+  // Opcionais para manter APKs antigos compativeis; obrigatorios para detectar chegada.
+  sampledAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  speedMps: z.number().finite().min(0).max(200).optional(),
+});
+
+export const pickupArrivalEventSchema = z.object({
+  deliveryId: z.string().uuid(),
+  displayNumber: z.number().int().positive(),
+  driverId: z.string().uuid(),
+  arrivedAt: z.string().datetime(),
 });
 
 export const listDeliveryTrackingQuerySchema = z

@@ -275,6 +275,18 @@ describe('RealtimeGateway', () => {
   });
 
   describe('emitToDriver / emitAdminActivity', () => {
+    it('envia chegada somente a sala da empresa dona do pedido', () => {
+      const event = {
+        deliveryId: 'delivery',
+        displayNumber: 777,
+        driverId: 'driver',
+        arrivedAt: new Date().toISOString(),
+      };
+      gateway.emitPickupArrival('company-1', event);
+      expect(serverTo).toHaveBeenCalledTimes(1);
+      expect(serverTo).toHaveBeenCalledWith('company:company-1');
+      expect(serverEmit).toHaveBeenCalledWith('delivery:pickup-arrival', event);
+    });
     it('emitToDriver manda pra sala driver:{id}', () => {
       gateway.emitToDriver('driver-1', 'delivery:offer', { foo: 'bar' });
 
