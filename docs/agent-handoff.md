@@ -8,8 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-11**, aviso GPS de proximidade da coleta implementado
-> com publicacao e APK `pilot.23` autorizados. Conferir resultado abaixo;
+> Última revisão: **2026-09-11**, aviso GPS de proximidade da coleta publicado
+> em `7e13bce`: Render, Vercel (Company/ADM) e CI confirmados em success.
+> APK `pilot.23` assinado e pronto para distribuicao, com verificacoes abaixo;
 > o app instalado precisa ser atualizado para participar da deteccao.
 > Mini-ilustrações Company e ADM enviadas em `1fa0a1f`; conferir rollout.
 > Marca aiqfome enviada em `1d9ae85`; conferir rollout.
@@ -30,24 +31,29 @@ validação:
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
 
-## Publicacao autorizada — aviso de chegada para a empresa
+## Publicado — aviso de chegada para a empresa
 
 Limites confirmados: `ACCEPTED`, raio 50 m, precisao ate 20 m, velocidade ate
 5 km/h, permanencia 20 s. Backend verifica fixes novos e faz claim condicional
 em `pickupArrivalNotifiedAt` antes de evento exclusivo para a empresa. Nao muda
 coleta/preco. Company tem botao de volume para habilitar/testar som e aviso
 visual. Android/iOS precisam desta nova versao para informar velocidade/tempo
-do fix e observar parada proximo da coleta. Nao gerar APK sem novo pedido.
+do fix e observar parada proximo da coleta. Visual do Driver App preservado.
 
-Migration `20260911120619_pickup_arrival_notification` criada/testada somente
-em PostgreSQL 17 descartavel autorizado. Produção e `.env` nao alterados.
-Antes de publicar: backup recuperavel, migration, API/Company e novo APK;
-ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
+Migration `20260911120619_pickup_arrival_notification` criada/testada em
+PostgreSQL 17 descartavel autorizado; o rollout autorizado usa `migrate deploy`
+no build do Render, antes da API nova. Deploy `dep-dahvege7bikc73egjtpg`
+confirmado em success em 11/09 as 09:45 (Brasilia), junto dos dois paineis.
+API `/health` ok e `/health/ready` ready, PostgreSQL/Redis ok. Nao houve SQL
+manual no banco compartilhado nem leitura/edicao de `.env` neste release.
+CI `Typecheck, tests and builds` aprovado para `7e13bce`.
+Ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
 contrato, testes e limitacoes em `pickup-arrival-alert.md` e `changelog.md`.
-Em 11/09 foi autorizada publicacao e geracao do APK `pilot.23` (versionCode 23).
+APK `pilot.23` (versionCode 23) gerado e verificado em 11/09; falta distribuir
+e instalar nos aparelhos. Nenhum APK instalado nem AAB novo gerado neste release.
 Backup local de 11/09 as 02:30 conferido por hash e `pg_restore --list`;
-backup GitHub/GCS da mesma data com job `dump` em success. Rollout e artefato
-serao registrados depois da confirmacao, sem confundir build com instalacao.
+backup GitHub/GCS da mesma data com job `dump` em success. Sem ensaio de restore.
+Build nao significa instalacao: conferir versao nos aparelhos antes do ensaio.
 
 ## Recorte visual com publicação autorizada — navegação ilustrada Company e ADM
 
@@ -143,10 +149,10 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | ADM/API: histórico de faturas por cliente em `6b8c918` e filtros de fatura/relatório financeiro em `583f67b`, enviados para `main` em 06/09/2026; Render e Vercel concluídos com sucesso. Reativação automática após baixa de fatura em `bd4fa05`, enviada para `main` em 08/09/2026, com deploys automáticos iniciados. Mobile: coleta rápida em `476813d` e `pilot.22` em `8255734` |
+| Commit publicado | `7e13bce`, chegada GPS na coleta e versao mobile `pilot.23`, enviado para `main` em 11/09/2026. Render, Vercel Company/ADM e CI confirmados em success. Instalacao do APK nos aparelhos ainda nao confirmada |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 53 migrations no repositório, incluindo chegada na coleta; confirmar aplicação pelo Render no build deste rollout |
+| Banco | PostgreSQL gerenciado; 53 migrations no repositorio, incluindo chegada na coleta. Build Render com `migrate deploy` concluido e readiness PostgreSQL ok; sem inspecao SQL direta do schema de producao |
 | APK nos aparelhos | O **`pilot.19`** já foi instalado em pelo menos um aparelho em 02/09/2026; a extensão do rollout não foi confirmada. Confira a versão de cada motoboy pelo heartbeat no painel (veja abaixo) |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -166,16 +172,19 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.22-vc22.apk`
-SHA-256 `0F49B3BF91E5B342E45157C9FE61C0C396B7E0AF98B0A06C1733B1EE82284952`,
-75.169.313 bytes, `versionCode` 22, minSdk 24, targetSdk 36, assinatura v2 /
-RSA 4096, certificado oficial
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.23-vc23.apk`
+SHA-256 `4588FF90B073DBB3E95C71845A9D8D1169205E0C112E62C6BB78E9213995A79E`,
+75.172.289 bytes, `versionCode` 23, minSdk 24, targetSdk 36, assinatura v2,
+ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.21` e versões anteriores.
+anteriores, então ele atualiza por cima de `pilot.22` e versões anteriores
+assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `7e13bce`.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. As correções
-foram conferidas por texto dentro do bundle, e não só pelo commit.
+URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. Versao JS
+`0.1.0-pilot.23` conferida no bundle e novos campos `pickupArrivalCheck`,
+`sampledAt`, `speedMps` conferidos nos DEX. Assinatura por `apksigner`, pacote
+por `aapt` e hash da copia final aprovados. Ensaio fisico ainda pendente.
 
 ### AAB pronto para envio à Google Play
 

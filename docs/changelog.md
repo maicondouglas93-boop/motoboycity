@@ -12957,3 +12957,46 @@ Sem nova alteracao funcional desde essas validacoes. Deploy/artefato ainda
 dependem dos resultados dos provedores e da compilacao assinada, registrados
 no fechamento do release. Nenhum aparelho sera considerado atualizado sem
 instalacao/confirmacao real.
+
+### 2026-09-11 — Chegada GPS publicada e APK `pilot.23` pronto
+
+Commit funcional `7e13bce07403f630a0c0396e13291db163ecdc0e` enviado para `main`.
+Render `dep-dahvege7bikc73egjtpg` em success as 12:45:07 UTC (09:45 Brasilia);
+Vercel Company/ADM tambem em success, consultados pela API de deployments do
+GitHub. CI `Typecheck, tests and builds` concluido em success:
+`https://github.com/maicondouglas93-boop/motoboycity/actions/runs/34600330607`.
+GETs de producao `/health` e `/health/ready`: ok/ready, PostgreSQL/Redis ok.
+Build configurado do Render aplica `prisma migrate deploy` antes da API;
+sem consulta SQL direta ao schema nem migration manual no banco compartilhado.
+
+APK compilado a partir de `7e13bce` em worktree curto `C:\m23`, JDK 21:
+`pnpm install --frozen-lockfile`, build de validation, depois
+`gradlew.bat clean assembleRelease -Pmotoboycity.versionCode=23 --no-daemon --console=plain`.
+Build aprovado em **8 min 3 s**, 427 tarefas; avisos de APIs depreciadas e
+fallback de hardlink para copia entre discos nao impediram a compilacao.
+Primeira invocacao do helper de assinatura parou antes do Gradle por whitespace
+no texto protegido; `.Trim()` na leitura do helper resolveu, sem modificar nem
+exibir credenciais. Segredos usados so em memoria e removidos do ambiente ao sair.
+
+Artefato: `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.23-vc23.apk`,
+**75.172.289 bytes**, SHA-256
+`4588FF90B073DBB3E95C71845A9D8D1169205E0C112E62C6BB78E9213995A79E`.
+`apksigner verify --verbose --print-certs`: v2 valida, certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`.
+`aapt dump badging`: pacote `com.motoboycity.driverapp`, versionCode 23,
+versionName `0.1.0-pilot.23`, minSdk 24, targetSdk 36 e quatro ABIs.
+Bundle verificado em memoria: API oficial e versao corretas, sem URLs locais;
+DEX contem novos campos de rastreamento. Copia final confere SHA-256 do original.
+
+Atualizados `docs/agent-handoff.md` e `docs/pickup-arrival-alert.md` com rollout,
+artefato e limites. `git diff --check` e revisao de diff aprovados. Nenhum AAB
+novo, instalacao em aparelho ou ensaio real GPS/som/bateria realizado. Distribuir
+o APK por cima do anterior, habilitar o som no Company e realizar o ensaio do
+runbook antes de considerar o fluxo validado em campo. Sem mudanca visual mobile.
+
+Limpeza: Git retirou o registro do worktree temporario e os helpers, mas deixou
+residuos de dependencias/arquivos em `C:\m23` (Directory not empty). A tentativa
+de limpar esse caminho validado com PowerShell foi bloqueada pela ferramenta;
+nao foi contornada. Residuo temporario pode ser removido manualmente depois.
+APK distribuivel preservado em `I:\MOTOboyCity\releases`; repositorio original
+e chaves oficiais preservados. Fontes temporarias removidas recuperaveis pelo Git.

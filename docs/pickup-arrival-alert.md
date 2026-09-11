@@ -57,12 +57,18 @@ o som de uma aba habilitada; outros aparelhos/usuarios podem receber seu aviso.
 ## Publicacao e reversao
 
 1. Confirmar backup/snapshot recuperavel do banco de producao antes do rollout.
-   Nenhum backup, migration ou alteracao foi executado em producao neste recorte.
+   No rollout de 11/09, backup local das 02:30 conferido por hash e leitura do
+   indice do archive; job remoto `dump` em success. Nao foi ensaiado restore.
 2. Aplicar `20260911120619_pickup_arrival_notification` antes de subir a API nova.
    Adiciona somente coluna nullable; existentes permanecem nulos. Sem backfill.
 3. Publicar API e Company Web. Contrato continua compativel com APKs antigos.
+   `7e13bce` publicado em 11/09: Render e Vercel Company/ADM em success; CI
+   aprovado e health/readiness da API com PostgreSQL/Redis ok. O Render aplica
+   migrations no build; nenhuma migration foi executada manualmente na producao.
 4. Gerar/distribuir novo APK com este rastreamento e ensaiar em um aparelho real.
-   Nenhum APK/AAB foi gerado neste recorte. iOS exige compilacao e teste em macOS.
+   `pilot.23`/versionCode 23 gerado, assinado e verificado; artefato e hash em
+   `agent-handoff.md`. Instalacao/ensaio fisico pendentes; nenhum AAB novo.
+   iOS exige compilacao e teste em macOS.
 5. Testar loja em PC com som habilitado: aproximar, parar, aguardar; conferir um
    aviso; atualizar/reabrir nao pode repetir. Testar coleta antes de 20 s, passagem
    rapida, GPS impreciso, falta de rede, segundo pedido e reatribuicao.
