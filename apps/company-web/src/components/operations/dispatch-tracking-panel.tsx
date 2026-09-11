@@ -10,6 +10,7 @@ import { io } from 'socket.io-client';
 import { Button } from '@/components/ui/button';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
 import { StatusChip } from '@/components/orders/status-chip';
+import { DeliveryPrintLink } from '@/components/orders/delivery-print-link';
 import { apiBaseUrl, deliveriesApi } from '@/lib/api-client';
 import { DispatchRadar, type DispatchRadarState } from './dispatch-radar';
 
@@ -279,6 +280,12 @@ export function DispatchTrackingPanel({
               ) : null}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <DeliveryPrintLink
+                  deliveryId={delivery.id}
+                  companyId={delivery.companyId}
+                  openInNewTab
+                  className="h-8 px-3 text-xs"
+                />
                 {/*
                   A API so aceita cancelamento da empresa em SCHEDULED e
                   AWAITING_DRIVER. Mostrar o botao depois do aceite ofereceria

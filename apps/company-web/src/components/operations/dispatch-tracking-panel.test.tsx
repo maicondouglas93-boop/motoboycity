@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import type { DeliveryStatus, OperationalDeliveryItem } from '@motoboycity/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { authUserQueryKey } from '@/lib/auth-user-query';
+import { session } from '@/lib/session';
+import { printDelivery, printUser } from '@/test/delivery-print-fixture';
 import {
   deliveryUpdateTouchesTracking,
   DispatchTrackingPanel,
@@ -10,6 +13,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   operations: vi.fn(),
+  profile: vi.fn(),
   io: vi.fn(),
   socketOn: vi.fn(),
   socketDisconnect: vi.fn(),
@@ -20,6 +24,7 @@ vi.mock('socket.io-client', () => ({ io: mocks.io }));
 
 vi.mock('@/lib/api-client', () => ({
   apiBaseUrl: 'https://api.example.test',
+  companyProfileApi: { get: mocks.profile },
   deliveriesApi: {
     operations: mocks.operations,
     cancel: vi.fn(),
@@ -31,6 +36,7 @@ function pedido(id: string, status: DeliveryStatus, comEntregador = false) {
   return {
     id,
     displayNumber: Number(id.replace(/\D/g, '')) || 1,
+    companyId: printDelivery.companyId,
     status,
     batchId: 'lote-1',
     statusChangedAt: new Date().toISOString(),
@@ -49,6 +55,7 @@ function montar(props: {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  queryClient.setQueryData(authUserQueryKey, printUser);
   render(
     <QueryClientProvider client={queryClient}>
       <DispatchTrackingPanel
@@ -70,6 +77,8 @@ const ENCERRADO = 'Busca encerrada';
 
 describe('acompanhamento do despacho', () => {
   beforeEach(() => {
+    session.setToken('token');
+    mocks.profile.mockReset().mockResolvedValue({ companyId: printDelivery.companyId });
     mocks.operations.mockReset();
     mocks.io.mockReset();
     mocks.socketOn.mockReset();
@@ -123,6 +132,7 @@ describe('acompanhamento do despacho', () => {
     expect(screen.getByText('Enviando o pedido e iniciando a busca por um entregador...'));
     // Sem id ainda, não há o que consultar.
     expect(mocks.operations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'Imprimir pedido' })).not.toBeInTheDocument();
   });
 
   it('continua procurando enquanto o pedido está sem entregador', async () => {
@@ -148,6 +158,38 @@ describe('acompanhamento do despacho', () => {
     expect(await screen.findByRole('img', { name: ENCONTRADO })).toBeVisible();
     expect(screen.getByText('Entregador a caminho.')).toBeVisible();
     expect(screen.getByText('Zé da Moto')).toBeVisible();
+    const print = await screen.findByRole('link', { name: 'Imprimir pedido' });
+    expect(print).toHaveAttribute('href', '/pedidos/1/imprimir');
+    expect(print).toHaveAttribute('target', '_blank');
+    expect(print).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByRole('link', { name: 'Abrir detalhes' })).toBeVisible();
+  });
+
+  it('oferece impressao individual para cada pedido do lote sem alterar a busca', async () => {
+    mocks.operations.mockResolvedValue({
+      active: [pedido('1', 'ACCEPTED', true), pedido('2', 'AWAITING_DRIVER')],
+      recent: [], counts: {},
+    });
+    montar({ deliveryIds: ['1', '2'] });
+    expect(await screen.findAllByRole('link', { name: 'Imprimir pedido' })).toHaveLength(2);
+    const cards = screen.getAllByRole('listitem');
+    cards.forEach((card, index) => {
+      expect(within(card).getByRole('link', { name: 'Imprimir pedido' }))
+        .toHaveAttribute('href', `/pedidos/${index + 1}/imprimir`);
+    });
+    expect(screen.getByRole('img', { name: PROCURANDO })).toBeVisible();
+    expect(mocks.profile).toHaveBeenCalledTimes(1);
+  });
+
+  it('nao oferece impressao para pedido de outra empresa', async () => {
+    mocks.operations.mockResolvedValue({
+      active: [{ ...pedido('1', 'ACCEPTED', true), companyId: 'other-company' }],
+      recent: [], counts: {},
+    });
+    montar({ deliveryIds: ['1'] });
+    await screen.findByText('Zé da Moto');
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalled());
+    expect(screen.queryByRole('link', { name: 'Imprimir pedido' })).not.toBeInTheDocument();
   });
 
   it('refaz uma unica consulta quando o socket avisa do aceite em rajada', async () => {

@@ -19,11 +19,11 @@ const result: DeliveryOperationsResult = { active: [printDelivery], recent: [], 
 const assigned: DeliveryOperationsResult = { ...result, active: [{ ...printDelivery, status: 'ACCEPTED',
   driver: { id: 'driver-current', name: 'Novo motoboy', phone: '', avatarUrl: null } }] };
 
-function setup({ user = printUser, link = false, companyId = printDelivery.companyId } = {}) {
+function setup({ user = printUser, link = false, companyId = printDelivery.companyId, openInNewTab = false } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(authUserQueryKey, user);
   return render(<QueryClientProvider client={client}>
-    {link ? <DeliveryPrintLink deliveryId={printDelivery.id} companyId={companyId} />
+    {link ? <DeliveryPrintLink deliveryId={printDelivery.id} companyId={companyId} openInNewTab={openInNewTab} />
       : <DeliveryPrintView deliveryId={printDelivery.id} />}
   </QueryClientProvider>);
 }
@@ -133,6 +133,14 @@ describe('DeliveryPrintLink', () => {
   it('mostra ação somente quando o perfil da loja corresponde ao pedido', async () => {
     setup({ link: true });
     expect(await screen.findByRole('link', { name: 'Imprimir pedido' })).toHaveAttribute('href', `/pedidos/${printDelivery.id}/imprimir`);
+    expect(screen.getByRole('link', { name: 'Imprimir pedido' })).not.toHaveAttribute('target');
+  });
+
+  it('permite abrir em outra aba sem trocar a tela de acompanhamento', async () => {
+    setup({ link: true, openInNewTab: true });
+    const link = await screen.findByRole('link', { name: 'Imprimir pedido' });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('esconde ação para outra empresa', async () => {

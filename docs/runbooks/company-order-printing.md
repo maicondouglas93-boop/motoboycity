@@ -3,7 +3,10 @@
 ## Uso
 
 1. No painel da empresa, abra **Pedidos** e clique em **Imprimir pedido** na
-   lista ou nos detalhes. Apenas a loja responsável vê a ação.
+   lista ou nos detalhes. A janela **Acompanhando**, exibida depois de chamar
+   entregador, tambem oferece **Imprimir pedido** em cada pedido do lote;
+   nesse local a previa abre em nova aba sem fechar o acompanhamento.
+   Apenas a loja responsável vê a ação.
 2. Confira o cupom e clique em **Imprimir pedido** na prévia. O botão busca
    novamente os dados antes de chamar a janela padrão de impressão.
 3. Selecione a Elgin i8/i9 previamente instalada no sistema operacional, papel

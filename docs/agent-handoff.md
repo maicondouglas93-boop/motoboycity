@@ -95,10 +95,12 @@ do deploy automático não verificado.
 
 ## Recorte com publicação autorizada — conferir rollout
 
-**Cupom da loja:** botões na lista e detalhe de pedidos levam a
+**Cupom da loja:** botões na lista, detalhe e janela Acompanhando levam a
 `/pedidos/[id]/imprimir`. Página protegida, sem menus; consulta novamente o
 pedido/motoboy em cada impressão. Usa operations por ID (somente leitura), não
 detail que pode gravar geocodificação. Sem banco/API/APK/financeiro alterados.
+Atalho novo em Acompanhando abre outra aba, por pedido, preservando a janela;
+implementado em 11/09, com commit/push autorizados; conferir deploy automatico.
 Prévia de 72 mm úteis conferida com dados fictícios no navegador, inclusive
 texto longo e endereço ausente/parcial. 20 testes novos, 126 totais aprovados.
 Impressão paginada e corte na Elgin i8/i9 ainda não validados em hardware.

@@ -9,10 +9,11 @@ import { authUserQueryOptions } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
 
 /** A API continua sendo a autoridade; esta consulta só controla a ação visível. */
-export function DeliveryPrintLink({ deliveryId, companyId, className }: {
+export function DeliveryPrintLink({ deliveryId, companyId, className, openInNewTab = false }: {
   deliveryId: string;
   companyId: string;
   className?: string;
+  openInNewTab?: boolean;
 }) {
   const token = session.getToken();
   const user = useQuery(authUserQueryOptions(token));
@@ -31,6 +32,9 @@ export function DeliveryPrintLink({ deliveryId, companyId, className }: {
     <Link
       href={`/pedidos/${encodeURIComponent(deliveryId)}/imprimir`}
       prefetch={false}
+      target={openInNewTab ? '_blank' : undefined}
+      rel={openInNewTab ? 'noopener noreferrer' : undefined}
+      title={openInNewTab ? 'Abrir impressão do pedido em nova aba' : undefined}
       className={buttonVariants({ variant: 'outline', className })}
     >
       <Printer aria-hidden="true" /> Imprimir pedido

@@ -13037,3 +13037,42 @@ removidas por apply_patch, servidor parado e aba fechada; nenhum dado real usado
 Nao atesta volume fisico do computador da loja. Limites de autoplay conferidos
 na documentacao MDN Web Audio best practices. Push autorizado para `main`;
 deploy automatico decorrente deve ser acompanhado separadamente do build local.
+
+### 2026-09-11 — Imprimir pedido na janela Acompanhando da empresa
+
+Adicionado `DeliveryPrintLink` em cada card do `DispatchTrackingPanel` do
+Company, ao lado de Abrir detalhes. Cobre tanto Chamar entregador quanto o
+acompanhamento apos formulario completo. Em lote, um link por pedido, sem
+impressao agrupada implicita. So aparece depois de o pedido existir e o acesso
+da empresa ser confirmado pelo componente reutilizado.
+
+Prop local opcional `openInNewTab` em `DeliveryPrintLink`: neste contexto usa
+`target=_blank`, `rel=noopener noreferrer`, sem prefetch. Acompanhamento fica
+aberto na aba original; lista/detalhe preservam navegacao anterior na mesma aba.
+Reutiliza previa de 80 mm e autorizacao existentes. Sem alteracoes na API,
+ADM, banco, preco, status, dispatch, contratos compartilhados ou APK.
+
+Arquivos: dois componentes citados, `dispatch-tracking-panel.test.tsx`,
+`delivery-print-view.test.tsx`, handoff e runbook de impressao. Skills web e
+verificacao orientaram reuso do acesso existente e teste sem mutar pedidos.
+Vitest focado **29/29**, Company completo **152/152** em 30 arquivos; typecheck
+e lint Company e raiz aprovados (warning mobile `no-void` preexistente).
+Revisao de diff e `git diff --check` aprovados. Build novo nao necessario para
+esta composicao local; nenhum contrato/pacote/dependencia alterado.
+
+Navegador interno em previa Vite isolada, dados/identidade/socket ficticios:
+janela Acompanhando exibe Imprimir pedido; clique abre aba da URL do pedido,
+enquanto acompanhamento permanece aberto. Previa real de cupom conferida na
+aba nova. Nao chamou impressora nem API de producao. Arquivos temporarios de
+preview removidos por apply_patch, duas abas fechadas e servidor encerrado.
+Impressao/corte fisicos continuam dependendo de ensaio na loja. Nenhum commit,
+push, deploy ou APK solicitado para este recorte; alteracoes ficam locais.
+
+### 2026-09-11 — Publicacao autorizada do atalho de impressao
+
+Responsavel autorizou commit/push do atalho em Acompanhando. Diff revisado e
+`git diff --check` aprovado; apenas quatro arquivos Company e tres documentos
+do recorte incluidos. Mantidas evidencias de 152 testes, typecheck/lint e
+ensaio local em navegador, sem nova mudanca funcional depois deles. Push em
+`main` aciona o deploy automatico; conclusao do provedor nao verificada neste
+commit. Nenhuma migration, mudanca de API ou geracao de APK.
