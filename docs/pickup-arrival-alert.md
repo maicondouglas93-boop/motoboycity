@@ -44,9 +44,18 @@ backend continua exigindo 50 m. Fora dessa area, ou depois de confirmar/coletar,
 voltam os filtros anteriores. Nao reaproveita heartbeat como evidencia de parada
 nem inventa velocidade zero quando o sistema operacional nao informa velocidade.
 
-No Company, clicar no icone de volume **Ativar e testar som de chegada**.
-O toque de teste confirma habilitacao naquela pagina. Recarregar a pagina pode
-exigir nova ativacao. Som do computador/aba tambem deve estar ligado. Isso segue
+Na primeira entrada no Company, o modal **Ouça quando o motoboy chegar** oferece
+**Ativar e testar som** ou **Continuar sem som**. Fechar tambem salva desativado.
+A decisao fica em `motoboycity.pickup-arrival-sound.v1:<userId>` no localStorage,
+por usuario/navegador, sem credenciais. O icone de volume altera a preferencia;
+mudancas acompanham outras abas da conta. Limpar dados ou usar outro navegador
+volta a perguntar; storage bloqueado limita a escolha a esta montagem da tela.
+
+Ao reabrir com preferencia ativa, tenta preparar o audio sem toque de teste.
+Se autoplay estiver bloqueado, tenta novamente num clique/toque/tecla normal do
+painel, sem repetir chegadas antigas. Nao confundir preferencia salva com
+permissao irrestrita de autoplay: o tooltip indica quando falta liberar o audio.
+Som do computador/aba tambem deve estar ligado. Isso segue
 a [politica de audio dos navegadores](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices).
 O aviso visual independe do som, possui numero/link/fechar, some na coleta ou
 apos aproximadamente dois minutos. Validacao do payload e idade evita lixo/replay.

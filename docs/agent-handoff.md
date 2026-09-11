@@ -36,8 +36,13 @@ secrets nem conteúdo de `.env` em nenhum dos três.
 Limites confirmados: `ACCEPTED`, raio 50 m, precisao ate 20 m, velocidade ate
 5 km/h, permanencia 20 s. Backend verifica fixes novos e faz claim condicional
 em `pickupArrivalNotifiedAt` antes de evento exclusivo para a empresa. Nao muda
-coleta/preco. Company tem botao de volume para habilitar/testar som e aviso
-visual. Android/iOS precisam desta nova versao para informar velocidade/tempo
+coleta/preco. Company pergunta sobre som na primeira entrada; ativar testa o
+toque, recusar/fechar silencia. Escolha salva por usuario/navegador, sincronizada
+entre abas e alteravel pelo volume. Ao reabrir, tenta habilitar quem aceitou;
+se autoplay bloquear, um gesto normal no painel tenta liberar, sem tocar teste
+nem chegada antiga. Esta melhoria web tem commit/push autorizados; conferir
+rollout. Nao precisa de outro APK alem do `pilot.23` ja gerado.
+Aviso visual mantido. Android/iOS precisam desta nova versao para informar velocidade/tempo
 do fix e observar parada proximo da coleta. Visual do Driver App preservado.
 
 Migration `20260911120619_pickup_arrival_notification` criada/testada em

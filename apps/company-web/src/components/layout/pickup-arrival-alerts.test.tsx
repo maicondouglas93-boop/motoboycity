@@ -28,6 +28,7 @@ vi.mock('@/lib/api-client', () => ({ apiBaseUrl: 'http://127.0.0.1:3333' }));
 
 const startTone = vi.fn();
 const closeAudio = vi.fn();
+let allowAudio = true;
 class TestAudio {
   state = 'suspended';
   currentTime = 0;
@@ -37,6 +38,7 @@ class TestAudio {
     this.onstatechange = callback;
   }
   async resume() {
+    if (!allowAudio) return;
     this.state = 'running';
     this.onstatechange?.();
   }
@@ -77,19 +79,33 @@ const event = () => ({
 });
 const emit = (payload: unknown, index = 0) =>
   act(() => socketMock.clients[index]!.handlers['delivery:pickup-arrival']!(payload));
-const mount = (userId = 'company-user') =>
-  render(<PickupArrivalAlerts token="test-only" userId={userId} />);
+const preferenceKey = (userId = 'company-user') => `motoboycity.pickup-arrival-sound.v1:${userId}`;
+const mount = async (userId = 'company-user', firstVisit = false) => {
+  if (!firstVisit && !localStorage.getItem(preferenceKey(userId))) {
+    localStorage.setItem(preferenceKey(userId), 'enabled');
+  }
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(<PickupArrivalAlerts token="test-only" userId={userId} />); });
+  return view;
+};
+const testSound = () => {
+  const mute = screen.queryByRole('button', { name: 'Desativar som de chegada' });
+  if (mute) fireEvent.click(mute);
+  fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+};
 
 describe('PickupArrivalAlerts', () => {
   beforeEach(() => {
     socketMock.clients = [];
     startTone.mockClear();
     closeAudio.mockClear();
+    allowAudio = true;
     vi.stubGlobal('AudioContext', TestAudio);
   });
 
-  it('mostra aviso visual sem tocar antes da ativacao pelo usuario', () => {
-    mount();
+  it('mostra aviso visual sem tocar quando o navegador bloqueia autoplay', async () => {
+    allowAudio = false;
+    await mount();
     emit(event());
     expect(screen.getByText('Motoboy próximo da loja')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Ver pedido' })).toHaveAttribute(
@@ -101,9 +117,31 @@ describe('PickupArrivalAlerts', () => {
     expect(screen.queryByText('Motoboy próximo da loja')).not.toBeInTheDocument();
   });
 
+  it('inicia ativado e toca na chegada sem exigir clique no icone', async () => {
+    await mount();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Desativar som de chegada' }))
+      .toHaveAttribute('title', 'Desativar som de chegada'));
+    expect(startTone).not.toHaveBeenCalled();
+    emit(event());
+    expect(startTone).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['click', 'touchend', 'keydown'])('libera autoplay no gesto %s sem tocar teste nem chegada antiga', async (gesture) => {
+    allowAudio = false;
+    await mount();
+    emit(event());
+    allowAudio = true;
+    fireEvent(document.body, new Event(gesture, { bubbles: true }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Desativar som de chegada' }))
+      .toHaveAttribute('title', 'Desativar som de chegada'));
+    expect(startTone).not.toHaveBeenCalled();
+    emit({ ...event(), deliveryId: '010feae5-39b1-4c6c-a139-7a5362c6ba29' });
+    expect(startTone).toHaveBeenCalledTimes(3);
+  });
+
   it('testa som, toca uma vez por pedido e permite silenciar', async () => {
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    await mount();
+    testSound();
     await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
     const arrival = event();
     emit(arrival);
@@ -116,29 +154,32 @@ describe('PickupArrivalAlerts', () => {
         screen.getByRole('button', { name: 'Ativar e testar som de chegada' }),
       ).toHaveAttribute('aria-pressed', 'false'),
     );
+    fireEvent.click(document.body);
+    fireEvent.keyDown(document.body, { key: 'Enter' });
     emit({ ...event(), deliveryId: '010feae5-39b1-4c6c-a139-7a5362c6ba29' });
     expect(startTone).toHaveBeenCalledTimes(6);
   });
 
   it('nao deixa uma aba muda consumir o som de uma aba habilitada', async () => {
-    const muted = mount();
+    const muted = await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Desativar som de chegada' }));
     emit(event());
     muted.unmount();
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    await mount();
+    testSound();
     await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
     emit(event(), 1);
     expect(startTone).toHaveBeenCalledTimes(6);
   });
 
   it('mantem deduplicacao sonora ao remontar na mesma conta', async () => {
-    const view = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    const view = await mount();
+    testSound();
     await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
     emit(event());
     view.unmount();
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    await mount();
+    testSound();
     await waitFor(() => expect(startTone).toHaveBeenCalledTimes(9));
     emit(event(), 1);
     expect(startTone).toHaveBeenCalledTimes(9);
@@ -146,8 +187,8 @@ describe('PickupArrivalAlerts', () => {
     expect(socketMock.clients[0]!.disconnect).toHaveBeenCalled();
   });
 
-  it('ignora eventos invalidos, antigos e futuros', () => {
-    mount();
+  it('ignora eventos invalidos, antigos e futuros', async () => {
+    await mount();
     emit({ deliveryId: 'invalid' });
     emit({ ...event(), arrivedAt: new Date(Date.now() - 61_000).toISOString() });
     emit({ ...event(), arrivedAt: new Date(Date.now() + 10_000).toISOString() });
@@ -163,8 +204,9 @@ describe('PickupArrivalAlerts', () => {
         }
       },
     );
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    await mount();
+    expect(screen.queryByText(/Não foi possível ativar o som/)).not.toBeInTheDocument();
+    testSound();
     await screen.findByText(/Não foi possível ativar o som/);
     emit(event());
     expect(screen.getByText('Motoboy próximo da loja')).toBeVisible();
@@ -176,8 +218,8 @@ describe('PickupArrivalAlerts', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('remove aviso visual quando o pedido e coletado', () => {
-    mount();
+  it('remove aviso visual quando o pedido e coletado', async () => {
+    await mount();
     emit(event());
     act(() =>
       socketMock.clients[0]!.handlers['delivery:updated']!({
@@ -186,5 +228,47 @@ describe('PickupArrivalAlerts', () => {
       }),
     );
     expect(screen.queryByText('Motoboy próximo da loja')).not.toBeInTheDocument();
+  });
+
+  it('pede na primeira visita, testa e lembra autorizacao sem repetir modal ou teste', async () => {
+    const view = await mount('new-user', true);
+    expect(screen.getByRole('dialog', { name: 'Ouça quando o motoboy chegar' })).toBeVisible();
+    expect(startTone).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som' }));
+    await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
+    expect(localStorage.getItem(preferenceKey('new-user'))).toBe('enabled');
+    view.unmount();
+    await mount('new-user', true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(startTone).toHaveBeenCalledTimes(3);
+    emit(event(), 1);
+    expect(startTone).toHaveBeenCalledTimes(6);
+  });
+
+  it.each(['Continuar sem som', 'Fechar'])('lembra recusa via %s sem reativar em cliques normais', async (button) => {
+    const view = await mount('new-user', true);
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    expect(localStorage.getItem(preferenceKey('new-user'))).toBe('disabled');
+    view.unmount();
+    await mount('new-user', true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(document.body);
+    emit(event(), 1);
+    expect(startTone).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som de chegada' }));
+    await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
+    expect(localStorage.getItem(preferenceKey('new-user'))).toBe('enabled');
+  });
+
+  it('nao herda decisao de outra conta e acompanha desativacao em outra aba', async () => {
+    localStorage.setItem(preferenceKey('different-user'), 'enabled');
+    await mount('new-user', true);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Ativar e testar som' }));
+    await waitFor(() => expect(startTone).toHaveBeenCalledTimes(3));
+    fireEvent(window, new StorageEvent('storage', { key: preferenceKey('new-user'), newValue: 'disabled' }));
+    expect(screen.getByRole('button', { name: 'Ativar e testar som de chegada' })).toHaveAttribute('aria-pressed', 'false');
+    emit(event());
+    expect(startTone).toHaveBeenCalledTimes(3);
   });
 });

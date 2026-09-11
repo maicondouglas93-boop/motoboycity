@@ -13000,3 +13000,40 @@ de limpar esse caminho validado com PowerShell foi bloqueada pela ferramenta;
 nao foi contornada. Residuo temporario pode ser removido manualmente depois.
 APK distribuivel preservado em `I:\MOTOboyCity\releases`; repositorio original
 e chaves oficiais preservados. Fontes temporarias removidas recuperaveis pelo Git.
+
+### 2026-09-11 — Modal inicial e preferencia persistente do som de chegada
+
+Responsavel pediu som ativo por padrao com commit/push e, durante o recorte,
+refinou para pedir autorizacao em modal na primeira entrada e lembrar a escolha.
+O comportamento final pergunta antes de tocar; quem aceita passa a iniciar com
+som solicitado nas proximas entradas, sem repetir modal nem toque de teste.
+Recusar/fechar salva desativado. Icone de volume altera a escolha a qualquer hora.
+Chave local `motoboycity.pickup-arrival-sound.v1:<userId>`, sem token/coordenadas;
+evento storage acompanha outras abas da mesma conta. Outro navegador/limpeza
+de dados pergunta novamente. Storage indisponivel limita escolha a esta montagem.
+
+Preferencia nao substitui a politica de autoplay: tenta resume ao abrir e nos
+gestos normais de clique/toque/tecla somente para quem aceitou. Sem tocar aviso
+antigo ao desbloquear, sem consumir a deduplicacao de outra aba enquanto mudo.
+Tooltip distingue preferencia ativa de audio ainda bloqueado. Modal reutiliza
+Dialog acessivel do painel, com ativar/testar, continuar sem som e fechar.
+
+Arquivos: `apps/company-web/src/components/layout/pickup-arrival-alerts.tsx`,
+respectivo teste; handoff, arquitetura, regra de negocio e runbook atualizados.
+Sem alteracao de API, contratos compartilhados, migrations, pedidos ou APK.
+As skills web/verificacao orientaram isolamento da mudanca e validacao do fluxo.
+
+Validacao: Vitest focado **23/23**, suite Company completa **149/149** em 30
+arquivos; `pnpm typecheck` e `pnpm lint` aprovados nos oito pacotes (warning
+mobile `no-void` preexistente). Build Next Company aprovado. Primeira execucao
+de typecheck/build detectou opcao `exact` nao tipada no teste; removida e ambos
+repetidos com sucesso. Revisao do diff e `git diff --check` aprovados.
+
+QA no navegador interno, via previa local com componente/estilos reais e socket
+ficticio sem API: modal inicial, aceite, recarregar sem repetir modal, silenciar
+e recarregar continuando desligado. Primeira previa precisou resolver validation
+pelo fonte TS em vez do CJS; apenas configuracao temporaria. Fontes temporarias
+removidas por apply_patch, servidor parado e aba fechada; nenhum dado real usado.
+Nao atesta volume fisico do computador da loja. Limites de autoplay conferidos
+na documentacao MDN Web Audio best practices. Push autorizado para `main`;
+deploy automatico decorrente deve ser acompanhado separadamente do build local.

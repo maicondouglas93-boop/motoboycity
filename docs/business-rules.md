@@ -640,6 +640,10 @@ menos 20 segundos. Backend valida todas as condicoes. No maximo um aviso por
 pedido, inclusive se houver reatribuicao. A empresa recebe aviso visual e som
 quando habilitado no navegador; nao ha alteracao automatica do status, preco
 ou repasse. GPS indica proximidade, nao e prova de presenca na porta.
+Na primeira entrada, a empresa escolhe ativar/testar o som ou continuar sem som.
+Fechar o modal equivale a desativar. A escolha persiste por usuario neste
+navegador e pode ser alterada pelo icone de volume; o navegador ainda pode
+exigir um gesto para permitir audio depois de reabrir a pagina.
 Detalhes e limites de entrega do aviso em `pickup-arrival-alert.md`.
 
 Decisões confirmadas diretamente com o responsável do produto em sessões

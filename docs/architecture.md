@@ -491,8 +491,10 @@ empresa proprietaria, sem broadcast publico. Nao e transicao de status.
 O contrato de tracking adiciona `sampledAt`/`speedMps` opcionais e retorna alvo
 opcional `pickupArrivalCheck`. Android/iOS usam o alvo para reduzir o filtro de
 deslocamento somente perto da coleta. `PickupArrivalAlerts`, montado na TopNav
-do Company, assina o evento globalmente, oferece habilitacao de som via gesto
-e aviso visual. Sem polling novo ou chamada de Maps. APKs antigos permanecem
+do Company, assina o evento globalmente, oferece modal inicial de som e aviso
+visual. Preferencia por usuario no localStorage, sincronizada entre abas;
+autoplay bloqueado e retomado por gesto normal somente para quem autorizou.
+Sem polling novo ou chamada de Maps. APKs antigos permanecem
 compativeis, mas nao confirmam os novos criterios. Regras, deploy e limites de
 confiabilidade em `pickup-arrival-alert.md`.
 
