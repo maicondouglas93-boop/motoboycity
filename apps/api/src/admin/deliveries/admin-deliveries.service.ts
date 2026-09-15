@@ -12,6 +12,8 @@ import type {
   ManualDeliveryStagePayload,
   ReassignDriverPayload,
   AdminOrderReportQuery,
+  AdminCancelCompletedDeliveryPayload,
+  AdminUpdateCompletedDeliveryValuesPayload,
 } from '@motoboycity/validation';
 import { DeliveriesService, type DeliveryDetail } from '../../deliveries/deliveries.service';
 import { DispatchService } from '../../dispatch/dispatch.service';
@@ -569,6 +571,171 @@ export class AdminDeliveriesService {
       }
       throw error;
     }
+
+    const detail = await this.deliveriesService.detail(admin, deliveryId);
+    this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
+  }
+
+  async cancelCompleted(
+    admin: User,
+    deliveryId: string,
+    payload: AdminCancelCompletedDeliveryPayload,
+  ): Promise<DeliveryDetail> {
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const delivery = await tx.delivery.findUnique({
+        where: { id: deliveryId },
+        select: { id: true, status: true, invoiceId: true, totalValue: true, driverValue: true },
+      });
+      if (!delivery) throw new NotFoundException('Pedido n\u00e3o encontrado.');
+      if (delivery.status !== 'COMPLETED') {
+        throw new ConflictException('Apenas pedidos conclu\u00eddos podem ser ajustados por esta funcionalidade.');
+      }
+      if (delivery.invoiceId !== null) {
+        throw new ConflictException('Este pedido j\u00e1 foi faturado e n\u00e3o pode mais ser alterado.');
+      }
+
+      const repasse = await tx.walletTransaction.findUnique({
+        where: { idempotencyKey: `driver-repasse:${deliveryId}` },
+      });
+      if (!repasse) {
+        throw new ConflictException('Transa\u00e7\u00e3o de repasse n\u00e3o encontrada.');
+      }
+      if (repasse.status !== 'PENDING') {
+        throw new ConflictException('O repasse deste pedido j\u00e1 foi processado e n\u00e3o pode mais ser alterado.');
+      }
+
+      const updatedTx = await tx.walletTransaction.updateMany({
+        where: { id: repasse.id, status: 'PENDING', amount: repasse.amount },
+        data: { status: 'CANCELLED' },
+      });
+      if (updatedTx.count === 0) {
+        throw new ConflictException('O valor do repasse foi alterado por outro processo.');
+      }
+
+      await tx.wallet.update({
+        where: { id: repasse.walletId },
+        data: { cachedBlockedBalance: { decrement: repasse.amount } },
+      });
+
+      await tx.delivery.update({
+        where: { id: deliveryId },
+        data: { status: 'CANCELLED' },
+      });
+
+      await tx.deliveryStatusHistory.create({
+        data: {
+          deliveryId,
+          fromStatus: 'COMPLETED',
+          toStatus: 'CANCELLED',
+          changedByUserId: admin.id,
+          note: `Cancelado ap\u00f3s conclus\u00e3o pelo administrador. Motivo: ${payload.reason}`,
+        },
+      });
+
+      await tx.administrativeAudit.create({
+        data: {
+          actorUserId: admin.id,
+          action: 'ADMIN_CANCEL_COMPLETED_DELIVERY',
+          entityType: 'Delivery',
+          entityId: deliveryId,
+          summary: payload.reason.substring(0, 500),
+          metadata: {
+            beforeStatus: 'COMPLETED',
+            afterStatus: 'CANCELLED',
+            totalValue: delivery.totalValue ? delivery.totalValue.toNumber() : null,
+            driverValue: delivery.driverValue ? delivery.driverValue.toNumber() : null,
+            repasseAmount: repasse.amount.toNumber(),
+          },
+        },
+      });
+    });
+
+    const detail = await this.deliveriesService.detail(admin, deliveryId);
+    this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');
+    return detail;
+  }
+
+  async updateValues(
+    admin: User,
+    deliveryId: string,
+    payload: AdminUpdateCompletedDeliveryValuesPayload,
+  ): Promise<DeliveryDetail> {
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const delivery = await tx.delivery.findUnique({
+        where: { id: deliveryId },
+        select: { id: true, status: true, invoiceId: true, totalValue: true, driverValue: true },
+      });
+      if (!delivery) throw new NotFoundException('Pedido n\u00e3o encontrado.');
+      if (delivery.status !== 'COMPLETED') {
+        throw new ConflictException('Apenas pedidos conclu\u00eddos podem ser ajustados por esta funcionalidade.');
+      }
+      if (delivery.invoiceId !== null) {
+        throw new ConflictException('Este pedido j\u00e1 foi faturado e n\u00e3o pode mais ser alterado.');
+      }
+
+      const repasse = await tx.walletTransaction.findUnique({
+        where: { idempotencyKey: `driver-repasse:${deliveryId}` },
+      });
+      if (!repasse) {
+        throw new ConflictException('Transa\u00e7\u00e3o de repasse n\u00e3o encontrada.');
+      }
+      if (repasse.status !== 'PENDING') {
+        throw new ConflictException('O repasse deste pedido j\u00e1 foi processado e n\u00e3o pode mais ser alterado.');
+      }
+
+      const newDriverValue = new Prisma.Decimal(payload.driverValue);
+      const difference = newDriverValue.minus(repasse.amount);
+
+      const updatedTx = await tx.walletTransaction.updateMany({
+        where: { id: repasse.id, status: 'PENDING', amount: repasse.amount },
+        data: { amount: newDriverValue },
+      });
+      if (updatedTx.count === 0) {
+        throw new ConflictException('O valor do repasse foi alterado por outro processo.');
+      }
+
+      if (!difference.isZero()) {
+        const absDiff = difference.abs();
+        await tx.wallet.update({
+          where: { id: repasse.walletId },
+          data: {
+            cachedBlockedBalance: difference.isPositive()
+              ? { increment: absDiff }
+              : { decrement: absDiff },
+          },
+        });
+      }
+
+      await tx.delivery.update({
+        where: { id: deliveryId },
+        data: {
+          totalValue: payload.totalValue,
+          driverValue: payload.driverValue,
+        },
+      });
+
+      await tx.administrativeAudit.create({
+        data: {
+          actorUserId: admin.id,
+          action: 'ADMIN_UPDATE_COMPLETED_DELIVERY_VALUES',
+          entityType: 'Delivery',
+          entityId: deliveryId,
+          summary: payload.reason.substring(0, 500),
+          metadata: {
+            before: {
+              totalValue: delivery.totalValue ? delivery.totalValue.toNumber() : null,
+              driverValue: delivery.driverValue ? delivery.driverValue.toNumber() : null,
+            },
+            after: {
+              totalValue: payload.totalValue,
+              driverValue: payload.driverValue,
+            },
+            driverValueDifference: difference.toNumber(),
+          },
+        },
+      });
+    });
 
     const detail = await this.deliveriesService.detail(admin, deliveryId);
     this.deliveriesService.publishDeliveryUpdate(detail, 'DELIVERY_STATUS_CHANGED');

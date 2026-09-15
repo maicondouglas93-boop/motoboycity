@@ -6,6 +6,8 @@ import type {
   AdminMarkFailedPayload,
   ManualDeliveryStagePayload,
   ReassignDriverPayload,
+  AdminCancelCompletedDeliveryPayload,
+  AdminUpdateCompletedDeliveryValuesPayload,
 } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
@@ -83,5 +85,9 @@ export function createAdminDeliveriesApi({ baseUrl }: AdminDeliveriesApiConfig) 
 
     forceComplete: (accessToken: string, id: string, payload: ForceCompletePayload) =>
       patch(accessToken, id, 'force-complete', payload),
+    cancelCompleted: (accessToken: string, id: string, payload: AdminCancelCompletedDeliveryPayload) =>
+      patch(accessToken, id, 'cancel-completed', payload),
+    updateValues: (accessToken: string, id: string, payload: AdminUpdateCompletedDeliveryValuesPayload) =>
+      patch(accessToken, id, 'values', payload),
   };
 }

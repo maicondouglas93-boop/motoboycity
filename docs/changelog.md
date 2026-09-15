@@ -13076,3 +13076,19 @@ do recorte incluidos. Mantidas evidencias de 152 testes, typecheck/lint e
 ensaio local em navegador, sem nova mudanca funcional depois deles. Push em
 `main` aciona o deploy automatico; conclusao do provedor nao verificada neste
 commit. Nenhuma migration, mudanca de API ou geracao de APK.
+
+### 2026-09-15 - CRUD Administrativo de Pedidos Concluídos
+
+Implementado CRUD no painel do administrador para cancelar pedidos ou alterar seus valores mesmo após o status COMPLETED, desde que a fatura não tenha sido gerada (invoiceId === null) e o repasse não tenha sido creditado ou cancelado (status === PENDING). Atualizações e cancelamentos ocorrem dentro de uma transação atômica que ajusta o saldo bloqueado do motoboy usando cálculos seguros (Prisma.Decimal.minus/increment/decrement), prevenindo concorrência com optimistic locking via updateMany do WalletTransaction. As ações exigem um motivo e criam logs de auditoria detalhados (AdministrativeAudit e DeliveryStatusHistory).
+
+Arquivos modificados:
+- packages/validation/src/admin/delivery-override.schema.ts
+- packages/api-client/src/admin-deliveries.ts
+- packages/types/src/delivery.ts
+- apps/api/src/admin/deliveries/admin-deliveries.controller.ts
+- apps/api/src/admin/deliveries/admin-deliveries.service.ts
+- apps/api/src/deliveries/deliveries.service.ts
+- apps/admin-web/src/components/operations/admin-completed-delivery-actions.tsx
+- apps/admin-web/src/app/(app)/pedidos/[id]/page.tsx
+
+Comandos/Testes: Testes unitários Jest para as regras e rollbacks em desenvolvimento pelo subagente; builds e typechecks aprovados.

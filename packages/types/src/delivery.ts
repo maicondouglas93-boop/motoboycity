@@ -75,6 +75,10 @@ export interface DeliveryDetail extends DeliveryListItem {
     changedBy: { id: string; name: string } | null;
     note: string | null;
   }>;
+  financialAdjustment?: {
+    allowed: boolean;
+    blockedReason: 'INVOICED' | 'DRIVER_REPASSE_NOT_PENDING' | 'DELIVERY_NOT_COMPLETED' | null;
+  };
 }
 
 export interface DeliveryAddressInput {

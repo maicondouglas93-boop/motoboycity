@@ -1397,6 +1397,30 @@ export class DeliveriesService {
       }
     }
 
+    let financialAdjustment: DeliveryDetail['financialAdjustment'] = undefined;
+    if (user.type === 'ADMIN') {
+      if (delivery.status !== 'COMPLETED') {
+        financialAdjustment = { allowed: false, blockedReason: 'DELIVERY_NOT_COMPLETED' };
+      } else {
+        const repasse = await this.prisma.walletTransaction.findUnique({
+          where: { idempotencyKey: `driver-repasse:${id}` },
+          select: { status: true },
+        });
+
+        let blockedReason: DeliveryDetail['financialAdjustment']['blockedReason'] = null;
+        if (delivery.invoiceId !== null) {
+          blockedReason = 'INVOICED';
+        } else if (!repasse || repasse.status !== 'PENDING') {
+          blockedReason = 'DRIVER_REPASSE_NOT_PENDING';
+        }
+
+        financialAdjustment = {
+          allowed: blockedReason === null,
+          blockedReason,
+        };
+      }
+    }
+
     return {
       ...this.toListItem(delivery),
       addresses: delivery.addresses.map((address) => {
@@ -1441,6 +1465,7 @@ export class DeliveriesService {
           : null,
         note: entry.note,
       })),
+      financialAdjustment,
     };
   }
 

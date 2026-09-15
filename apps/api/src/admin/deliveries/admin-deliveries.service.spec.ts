@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { FinanceLedgerService } from '../../finance/finance-ledger.service';
 import { IntegrationOutboxRecorder } from '../../integrations/integration-outbox-recorder.service';
@@ -43,7 +43,10 @@ describe('AdminDeliveriesService', () => {
   };
   let tx: {
     $queryRaw: jest.Mock;
-    delivery: { update: jest.Mock; updateMany: jest.Mock };
+    delivery: { findUnique: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
+    walletTransaction: { findUnique: jest.Mock; updateMany: jest.Mock };
+    wallet: { update: jest.Mock };
+    administrativeAudit: { create: jest.Mock };
     deliveryStatusHistory: { create: jest.Mock; createMany: jest.Mock };
     driverCompanyBlock: { findUnique: jest.Mock };
   };
@@ -59,7 +62,10 @@ describe('AdminDeliveriesService', () => {
   beforeEach(async () => {
     tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 'driver-2' }]),
-      delivery: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      delivery: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      walletTransaction: { findUnique: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      wallet: { update: jest.fn() },
+      administrativeAudit: { create: jest.fn() },
       deliveryStatusHistory: { create: jest.fn(), createMany: jest.fn() },
       driverCompanyBlock: { findUnique: jest.fn().mockResolvedValue(null) },
     };
@@ -590,6 +596,194 @@ describe('AdminDeliveriesService', () => {
         service.markDelivered(admin, 'delivery-1', { reason: 'tentativa', distanceKm: 5 }),
       ).rejects.toThrow('já tem valor calculado');
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cancelCompleted', () => {
+    it('recusa se o status não for COMPLETED', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'DELIVERED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.cancelCompleted(admin, 'delivery-1', { reason: 'cancelamento' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se invoiceId não for nulo (faturado)', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: 'inv-1', totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.cancelCompleted(admin, 'delivery-1', { reason: 'cancelamento' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se transação de repasse não encontrada', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue(null);
+      
+      await expect(
+        service.cancelCompleted(admin, 'delivery-1', { reason: 'cancelamento' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se status do repasse não for PENDING', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'SETTLED', amount: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.cancelCompleted(admin, 'delivery-1', { reason: 'cancelamento' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se houver alteração concorrente do repasse (count === 0)', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 0 });
+      
+      await expect(
+        service.cancelCompleted(admin, 'delivery-1', { reason: 'cancelamento' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('cancela corretamente a entrega concluída', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', walletId: 'wallet-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 1 });
+      
+      const result = await service.cancelCompleted(admin, 'delivery-1', { reason: 'motivo de cancelamento' });
+      
+      expect(tx.walletTransaction.updateMany).toHaveBeenCalledWith({
+        where: { id: 'tx-1', status: 'PENDING', amount: expect.any(Prisma.Decimal) },
+        data: { status: 'CANCELLED' }
+      });
+      expect(tx.wallet.update).toHaveBeenCalledWith({
+        where: { id: 'wallet-1' },
+        data: { cachedBlockedBalance: { decrement: expect.any(Prisma.Decimal) } }
+      });
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { status: 'CANCELLED' }
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          fromStatus: 'COMPLETED',
+          toStatus: 'CANCELLED',
+          note: expect.stringContaining('motivo de cancelamento')
+        })
+      });
+      expect(tx.administrativeAudit.create).toHaveBeenCalled();
+      expect(result).toEqual({ id: 'delivery-1' });
+    });
+  });
+
+  describe('updateValues', () => {
+    it('recusa se o status não for COMPLETED', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'DELIVERED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se invoiceId não for nulo (faturado)', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: 'inv-1', totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se transação de repasse não encontrada', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue(null);
+      
+      await expect(
+        service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se status do repasse não for PENDING', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'SETTLED', amount: new Prisma.Decimal(8) });
+      
+      await expect(
+        service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('recusa se houver alteração concorrente do repasse (count === 0)', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 0 });
+      
+      await expect(
+        service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste' })
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('atualiza valores e incrementa saldo bloqueado se driverValue aumentar', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', walletId: 'wallet-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 1 });
+      
+      const result = await service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 10, reason: 'ajuste para mais' });
+      
+      expect(tx.walletTransaction.updateMany).toHaveBeenCalledWith({
+        where: { id: 'tx-1', status: 'PENDING', amount: expect.any(Prisma.Decimal) },
+        data: { amount: expect.any(Prisma.Decimal) }
+      });
+      expect(tx.wallet.update).toHaveBeenCalledWith({
+        where: { id: 'wallet-1' },
+        data: { cachedBlockedBalance: { increment: expect.any(Prisma.Decimal) } }
+      });
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { totalValue: 12, driverValue: 10 }
+      });
+      expect(tx.administrativeAudit.create).toHaveBeenCalled();
+      expect(result).toEqual({ id: 'delivery-1' });
+    });
+
+    it('atualiza valores e decrementa saldo bloqueado se driverValue diminuir', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', walletId: 'wallet-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 1 });
+      
+      const result = await service.updateValues(admin, 'delivery-1', { totalValue: 12, driverValue: 5, reason: 'ajuste para menos' });
+      
+      expect(tx.walletTransaction.updateMany).toHaveBeenCalledWith({
+        where: { id: 'tx-1', status: 'PENDING', amount: expect.any(Prisma.Decimal) },
+        data: { amount: expect.any(Prisma.Decimal) }
+      });
+      expect(tx.wallet.update).toHaveBeenCalledWith({
+        where: { id: 'wallet-1' },
+        data: { cachedBlockedBalance: { decrement: expect.any(Prisma.Decimal) } }
+      });
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { totalValue: 12, driverValue: 5 }
+      });
+      expect(tx.administrativeAudit.create).toHaveBeenCalled();
+      expect(result).toEqual({ id: 'delivery-1' });
+    });
+
+    it('atualiza valores mas não mexe na carteira se driverValue não mudar', async () => {
+      tx.delivery.findUnique.mockResolvedValue({ id: 'delivery-1', status: 'COMPLETED', invoiceId: null, totalValue: new Prisma.Decimal(10), driverValue: new Prisma.Decimal(8) });
+      tx.walletTransaction.findUnique.mockResolvedValue({ id: 'tx-1', walletId: 'wallet-1', status: 'PENDING', amount: new Prisma.Decimal(8) });
+      tx.walletTransaction.updateMany.mockResolvedValue({ count: 1 });
+      
+      const result = await service.updateValues(admin, 'delivery-1', { totalValue: 15, driverValue: 8, reason: 'ajuste apenas no total' });
+      
+      expect(tx.walletTransaction.updateMany).toHaveBeenCalledWith({
+        where: { id: 'tx-1', status: 'PENDING', amount: expect.any(Prisma.Decimal) },
+        data: { amount: expect.any(Prisma.Decimal) }
+      });
+      expect(tx.wallet.update).not.toHaveBeenCalled();
+      expect(tx.delivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: { totalValue: 15, driverValue: 8 }
+      });
+      expect(tx.administrativeAudit.create).toHaveBeenCalled();
+      expect(result).toEqual({ id: 'delivery-1' });
     });
   });
 });

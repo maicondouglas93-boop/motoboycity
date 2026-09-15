@@ -8,12 +8,16 @@ import {
   manualDeliveryStageSchema,
   reassignDriverSchema,
   adminOrderReportQuerySchema,
+  adminCancelCompletedDeliverySchema,
+  adminUpdateCompletedDeliveryValuesSchema,
   type AdminOrderReportQuery,
   type CreateDeliveryPayload,
   type ForceCompletePayload,
   type AdminMarkFailedPayload,
   type ManualDeliveryStagePayload,
   type ReassignDriverPayload,
+  type AdminCancelCompletedDeliveryPayload,
+  type AdminUpdateCompletedDeliveryValuesPayload,
 } from '@motoboycity/validation';
 import { AdminOnlyGuard } from '../../auth/admin-only.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
@@ -101,5 +105,23 @@ export class AdminDeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.adminDeliveriesService.forceComplete(user, id, body);
+  }
+
+  @Patch(':id/cancel-completed')
+  cancelCompleted(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminCancelCompletedDeliverySchema)) body: AdminCancelCompletedDeliveryPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.cancelCompleted(user, id, body);
+  }
+
+  @Patch(':id/values')
+  updateValues(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminUpdateCompletedDeliveryValuesSchema)) body: AdminUpdateCompletedDeliveryValuesPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDetail> {
+    return this.adminDeliveriesService.updateValues(user, id, body);
   }
 }

@@ -73,3 +73,15 @@ export type AdminMarkFailedPayload = z.infer<typeof adminMarkFailedSchema>;
 export type ReassignDriverPayload = z.infer<typeof reassignDriverSchema>;
 export type ForceCompletePayload = z.infer<typeof forceCompleteSchema>;
 export type ManualDeliveryStagePayload = z.infer<typeof manualDeliveryStageSchema>;
+
+export const adminCancelCompletedDeliverySchema = z.object({
+  reason: reasonSchema,
+});
+export type AdminCancelCompletedDeliveryPayload = z.infer<typeof adminCancelCompletedDeliverySchema>;
+
+export const adminUpdateCompletedDeliveryValuesSchema = z.object({
+  reason: reasonSchema,
+  totalValue: z.number().positive('O valor da empresa deve ser maior que zero.'),
+  driverValue: z.number().nonnegative('O valor do entregador não pode ser negativo.'),
+});
+export type AdminUpdateCompletedDeliveryValuesPayload = z.infer<typeof adminUpdateCompletedDeliveryValuesSchema>;

@@ -29,6 +29,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
 import { DeliveryOverrides } from '@/components/operations/delivery-overrides';
+import { AdminCompletedDeliveryActions } from '@/components/operations/admin-completed-delivery-actions';
 import { EditDeliveryDialog } from '@/components/deliveries/edit-delivery-dialog';
 import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -203,6 +204,9 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
               status={delivery.status}
               driverName={delivery.driver?.name}
             />
+          )}
+          {delivery.status === 'COMPLETED' && (
+            <AdminCompletedDeliveryActions token={token} delivery={delivery} />
           )}
         </div>
       </header>
