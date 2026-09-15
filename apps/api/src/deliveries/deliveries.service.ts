@@ -1411,7 +1411,7 @@ export class DeliveriesService {
           select: { status: true },
         });
 
-        let blockedReason: DeliveryDetail['financialAdjustment']['blockedReason'] = null;
+        let blockedReason: NonNullable<DeliveryDetail['financialAdjustment']>['blockedReason'] = null;
         if (delivery.invoiceId !== null) {
           blockedReason = 'INVOICED';
         } else if (!repasse || repasse.status !== 'PENDING') {
