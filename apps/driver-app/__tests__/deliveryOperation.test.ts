@@ -1,6 +1,7 @@
 import type { DeliveryAddressItem } from '@motoboycity/types';
 import {
   completeDeliveryRouteUrl,
+  deliverConfirmationSummary,
   deliveryOperationCopy,
   deliveryPaymentLabel,
   formatDeliveryAddress,
@@ -94,5 +95,45 @@ describe('apresentação da operação de entrega', () => {
         primaryActionLabel: 'Confirmar devolução na loja',
       }),
     );
+  });
+
+  it('mostra rua, valor e numero do pedido antes de confirmar a entrega', () => {
+    const summary = deliverConfirmationSummary({
+      displayNumber: 128,
+      companyName: 'Elite Pizzaria',
+      destinationKnownAtCreation: true,
+      driverValue: 9.5,
+      requiresReturn: false,
+      returnValue: null,
+      addresses: [
+        structuredAddress,
+        { ...structuredAddress, type: 'DROPOFF', street: 'Rua Macanaiba', number: '14' },
+      ],
+    });
+
+    expect(summary.orderLabel).toBe('#128 - Elite Pizzaria');
+    expect(summary.destination).toContain('Rua Macanaiba, 14');
+    expect(summary.driverValue.replace(/\s/g, ' ')).toBe('R$ 9,50');
+    expect(summary.returnValue).toBeNull();
+    expect(summary.gpsNotice).toBeNull();
+  });
+
+  it('avisa quando o destino e o valor so nascem no GPS da confirmacao', () => {
+    const summary = deliverConfirmationSummary({
+      displayNumber: 7,
+      companyName: 'Farmacia Central',
+      destinationKnownAtCreation: false,
+      driverValue: null,
+      requiresReturn: true,
+      returnValue: 4,
+      addresses: [structuredAddress],
+    });
+
+    expect(summary.destination).toBe(
+      'Endereço de entrega definido pela localização no momento da entrega',
+    );
+    expect(summary.gpsNotice).toContain('sua localização atual vira o destino');
+    expect(summary.driverValue).toBe('A calcular na entrega');
+    expect(summary.returnValue?.replace(/\s/g, ' ')).toBe('R$ 4,00');
   });
 });

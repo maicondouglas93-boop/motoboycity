@@ -1,6 +1,7 @@
 import { deliveriesApi } from '../src/lib/apiClient';
 import type { DeliveryListItem } from '@motoboycity/types';
 import {
+  decideAcceptedDeliveryOpening,
   findNewlyAcceptedDelivery,
   getActiveDeliveries,
   operationalStatuses,
@@ -151,5 +152,56 @@ describe('recuperação das entregas operacionais', () => {
     expect(
       findNewlyAcceptedDelivery(deliveries, new Set(deliveries.map((delivery) => delivery.id))),
     ).toBeUndefined();
+  });
+
+  describe('abertura automatica do pedido recem-aceito', () => {
+    const deliveries = [
+      { id: 'em-entrega', status: 'COLLECTED' },
+      { id: 'aceite-antigo', status: 'ACCEPTED' },
+      { id: 'aceite-novo', status: 'ACCEPTED' },
+    ] as DeliveryListItem[];
+
+    const cenarioBase = {
+      deliveries,
+      knownDeliveryIds: new Set(['em-entrega', 'aceite-antigo']),
+      knowsPreviousDeliveries: true,
+      handledDeliveryIds: new Set<string>(),
+      homeIsFocused: true,
+    };
+
+    it('abre o aceite novo quando o motoboy esta na Home', () => {
+      expect(decideAcceptedDeliveryOpening(cenarioBase)).toEqual({
+        delivery: expect.objectContaining({ id: 'aceite-novo' }),
+        open: true,
+      });
+    });
+
+    it('nao troca o pedido que o motoboy esta operando em outra tela', () => {
+      const decisao = decideAcceptedDeliveryOpening({ ...cenarioBase, homeIsFocused: false });
+
+      expect(decisao.open).toBe(false);
+      // O pedido continua sendo devolvido para a Home marcar como tratado:
+      // sem isso ele abriria sozinho na proxima volta ao primeiro plano.
+      expect(decisao.delivery?.id).toBe('aceite-novo');
+    });
+
+    it('nao reabre o mesmo aceite a cada volta ao primeiro plano', () => {
+      expect(
+        decideAcceptedDeliveryOpening({
+          ...cenarioBase,
+          handledDeliveryIds: new Set(['aceite-novo']),
+        }).open,
+      ).toBe(false);
+    });
+
+    it('nao chama de novo um pedido aceito antes da primeira listagem da sessao', () => {
+      expect(
+        decideAcceptedDeliveryOpening({
+          ...cenarioBase,
+          knownDeliveryIds: new Set<string>(),
+          knowsPreviousDeliveries: false,
+        }),
+      ).toEqual({ delivery: undefined, open: false });
+    });
   });
 });

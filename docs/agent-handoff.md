@@ -433,6 +433,38 @@ O recorte foi publicado e empacotado no `pilot.22`. Typecheck, lint focado, as
 26 suítes / 188 testes do Driver App e o build Android de release passaram. Não
 houve mudança de API, contrato, banco, migration ou regra de proximidade.
 
+## Confirmação da entrega com endereço e valor
+
+Marcar "Pedido entregue" não fecha mais o pedido em um toque. O aplicativo
+abre um modal com o número e a loja do pedido, o endereço de destino e o valor
+do entregador (mais o retorno quando existe), e só finaliza em "Confirmar
+entrega"; "Fechar" devolve o motoboy ao pedido sem mexer em nada. Pedido criado
+sem endereço usa o mesmo modal, mantendo o aviso de GPS e o rótulo "Confirmar
+com GPS". Nada mudou na API, no contrato ou nas transições — só a conferência
+antes do toque. Ainda não conferido em aparelho real.
+
+## Abertura automática do pedido recém-aceito
+
+Ao voltar ao primeiro plano, a Home só abre sozinha a operação de um pedido
+aceito quando **a própria Home está em foco**, quando já houve uma listagem
+anterior na sessão (sem ela não há como saber o que é novo) e **uma única vez**
+por pedido. Em qualquer outra tela o pedido novo apenas entra na lista: a tela
+de operação nunca mais troca de pedido sozinha, que era o caminho pelo qual o
+motoboy confirmava etapa no pedido errado. Oferta pendente continua abrindo
+`IncomingOffer` em qualquer tela, de propósito — oferta tem prazo. Ainda não
+ensaiado com dois pedidos reais em aparelho.
+
+## Fim de um pedido e identificação da tela
+
+Concluir um pedido **não emenda mais no próximo**: a tela concluída — com
+"Concluído", o aviso de sucesso e os botões "Ver detalhes e histórico" e
+"Voltar para o início" — passa a fechar qualquer pedido, e o próximo é aberto
+pelo motoboy na lista da Home. Só sai sozinho para a Home o caso excepcional
+de pedido encerrado por fora depois de uma coleta ou ocorrência. O cabeçalho da
+operação mostra `Pedido #128` com o nome da loja embaixo (`subtitle` novo e
+opcional do `SheetHeader`). Ainda não conferido em aparelho — inclusive a seta
+de voltar com o cabeçalho de duas linhas.
+
 ## Limitações e próximos passos
 
 ### Pendente de ação humana

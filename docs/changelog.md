@@ -13092,3 +13092,131 @@ Arquivos modificados:
 - apps/admin-web/src/app/(app)/pedidos/[id]/page.tsx
 
 Comandos/Testes: Testes unit�rios Jest para as regras e rollbacks em desenvolvimento pelo subagente; builds e typechecks aprovados.
+
+### 2026-09-20 — Confirmacao de entrega com endereco e valor no Driver App
+
+Pedido do responsavel pela operacao, trazido por audio dos motoboys: marcar
+"Pedido entregue" fechava o pedido em um toque e mandava para o historico, e a
+confirmacao so dizia "Confirme que o pedido foi entregue ao cliente". Rua
+errada ou valor errado so apareciam depois, com o pedido ja fechado. Agora
+toda entrega passa por um modal que mostra numero e loja do pedido, o endereco
+de destino e o valor do entregador (mais o retorno quando existe), com
+"Confirmar entrega" e "Fechar". O modal que ja existia para pedido sem
+endereco virou um caso deste mesmo modal, mantendo o aviso de GPS e o rotulo
+"Confirmar com GPS". Nenhuma mudanca de contrato, API ou status: a decisao
+continua sendo a mesma chamada, apenas conferida antes.
+
+Decisao de mostrar o numero do pedido junto: com varios pedidos abertos, a
+duvida relatada nao era so o endereco, era QUAL pedido estava sendo fechado. O
+modal tambem passa a fechar no `finally` da operacao, para que sucesso, fila
+local, recusa ou erro apareçam na tela sem um modal por cima.
+
+Arquivos: `apps/driver-app/src/lib/deliveryOperation.ts` (novos
+`deliverConfirmationSummary`, `formatDeliveryValue` e `destinationLabel`, este
+ultimo movido da tela para ficar testavel),
+`apps/driver-app/src/screens/DeliveryOperationScreen.tsx` (novo
+`DeliverConfirmationModal`, gatilho da confirmacao e estilos) e
+`apps/driver-app/__tests__/deliveryOperation.test.ts`.
+
+Comandos: `npx jest --runInBand` no driver-app **190/190 em 26 suites**;
+`npx tsc -p apps/driver-app/tsconfig.json --noEmit` sem erro; `npx eslint` nos
+tres arquivos sem aviso; `npx prettier --write` na tela. Nao executado: build
+nativo, APK ou ensaio em aparelho real — a checagem visual do modal na moto
+continua pendente. Nenhum commit ou push solicitado neste recorte.
+
+O conflito relatado no mesmo audio (aceitar um pedido novo troca a tela do
+pedido que o motoboy estava operando, levando a coletar/finalizar o pedido
+errado) NAO foi tratado aqui. Suspeitos ja localizados: `HomeScreen.tsx:975` e
+o `navigation.replace` de `DeliveryOperationScreen.tsx` quando a lista de
+ativos muda.
+
+### 2026-09-20 — Fim da troca de pedido embaixo do dedo do motoboy
+
+Mesmo relato de audio do recorte anterior, segunda queixa: com mais de um
+pedido em andamento, a tela de operacao virava outro pedido sozinha. O motoboy
+abria a Elite para dar coletado e a tela virava o pedido recem-aceito; a
+confirmacao ia para o pedido errado, e ele so descobria pelo painel.
+
+Causa: ao voltar ao primeiro plano, a Home chamava
+`navigation.navigate('DeliveryOperation', ...)` para o aceite novo sem olhar
+onde o motoboy estava. `navigate` para uma rota que JA esta em foco nao empilha
+tela nenhuma — so troca os parametros dela, e `DeliveryOperationScreen` recarrega
+pelo `route.params.deliveryId`. A troca acontecia sem transicao, no mesmo lugar
+onde o dedo ja estava indo.
+
+Tres condicoes novas, todas em `decideAcceptedDeliveryOpening`:
+
+- so abre com a Home em foco (`navigation.isFocused()`); em qualquer outra tela
+  o pedido novo espera na lista, sem atropelar a operacao em andamento;
+- so abre o que e mesmo novo: sem uma listagem anterior concluida na sessao nao
+  existe "antes" para comparar, e ai TODO pedido aceito parecia recem-aceito —
+  como a lista vem ordenada pelo aceite mais antigo, o aplicativo abria sozinho
+  o pedido mais VELHO ao voltar do segundo plano;
+- so abre uma vez por pedido; cada volta ao primeiro plano repetia o caminho, e
+  era isso que fazia a tela "vir sozinha tres vezes".
+
+O pedido detectado e marcado como tratado mesmo quando nao abre, senao voltaria
+a abrir na proxima ida ao primeiro plano.
+
+Nao alterado de proposito: a oferta pendente continua navegando para
+`IncomingOffer` em qualquer tela (oferta tem prazo e vira recusa automatica se
+nao for vista), e `DeliveryOperationScreen` continua usando `replace` para o
+proximo pedido ativo DEPOIS de concluir o atual — ali a troca e consequencia de
+uma acao do proprio motoboy, nao uma interrupcao. Se essa segunda quiser cair
+tambem, o caminho e levar para a Home, como ja faz a fila local de conclusoes.
+
+Arquivos: `apps/driver-app/src/lib/activeDeliveries.ts` (nova
+`decideAcceptedDeliveryOpening`; `findNewlyAcceptedDelivery` preservada por
+dentro), `apps/driver-app/src/screens/HomeScreen.tsx` (duas memorias de sessao
+por `useRef` e a decisao no retorno ao primeiro plano) e
+`apps/driver-app/__tests__/activeDeliveries.test.ts` (quatro casos).
+
+Comandos: `npx jest --runInBand` no driver-app **194/194 em 26 suites**;
+`npx tsc -p apps/driver-app/tsconfig.json --noEmit` sem erro; `npx eslint` nos
+tres arquivos com saida limpa; `npx prettier --write` em dois deles. Nao
+executado: build nativo, APK e ensaio com dois pedidos reais em aparelho — a
+prova final desta correcao depende desse ensaio. Nenhum commit ou push
+solicitado.
+
+### 2026-09-20 — Fim do pedido termina na tela concluida, e a loja no cabecalho
+
+Duas melhorias aceitas pelo responsavel depois da correcao do conflito, ambas
+sobre a mesma pergunta que derrubava o motoboy: "qual pedido e este aqui?".
+
+**A tela concluida agora fecha todo pedido.** Ao concluir, a tela era
+substituida pela operacao do proximo pedido ativo (`navigation.replace`): mesmo
+layout, outro endereco, sem ele ter escolhido nada — e o toque seguinte, que ele
+ja ia dar, caia no pedido errado. Quando era o ultimo pedido isso nunca
+acontecia, e por isso a tela concluida ("Concluido", aviso de sucesso e os
+botoes "Ver detalhes e historico" e "Voltar para o inicio") so aparecia nesse
+caso. As duas substituicoes sairam; a tela concluida passa a fechar qualquer
+pedido, e quem abre o proximo e o motoboy, pela lista da Home. O unico caminho
+que ainda sai sozinho e o excepcional: pedido que sumiu da lista ativa depois de
+uma coleta ou ocorrencia, ou seja, encerrado por fora — ali nao ha o que operar
+e a tela volta para a Home.
+
+**A loja entrou no cabecalho.** Era so `Pedido #128`; o motoboy chama o pedido
+pelo nome da loja ("a Elite", "a farmacia"), e duas telas de pedidos diferentes
+ficavam identicas de relance. `SheetHeader` ganhou um `subtitle` opcional, e a
+tela de operacao passa o `companyName`. A altura fixa virou minima, entao as
+telas que usam so o titulo continuam iguais.
+
+Tambem unificado: todo caminho que sai do pedido usa `voltarParaHome()`, que
+prefere `popToTop` (preserva a Home montada, com socket e presenca) e so recorre
+a `reset` quando a tela foi aberta como raiz, por notificacao. Antes o botao
+"Voltar para o inicio" chamava `popToTop` direto, que nesse caso nao tinha para
+onde voltar.
+
+Arquivos: `apps/driver-app/src/screens/DeliveryOperationScreen.tsx`,
+`apps/driver-app/src/components/SheetHeader.tsx`.
+
+Comandos: `npx jest --runInBand` no driver-app **194/194 em 26 suites**;
+`npx tsc -p tsconfig.json --noEmit` sem erro; `npx eslint` e
+`npx prettier --check` limpos nos dois arquivos. Nao executado: aparelho real —
+o cabecalho de duas linhas e a nova saida de cada pedido precisam de olho em
+tela de verdade, inclusive a seta de voltar com o cabecalho mais alto. Nenhum
+commit ou push solicitado.
+
+Efeito colateral aceito: com varios pedidos, concluir um passou a custar um
+toque a mais ("Voltar para o inicio") em troca de nunca mais cair em outro
+pedido sem querer.

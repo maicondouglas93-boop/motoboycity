@@ -1,6 +1,11 @@
-import type { DeliveryAddressItem, DeliveryStatus } from '@motoboycity/types';
+import type { DeliveryAddressItem, DeliveryDetail, DeliveryStatus } from '@motoboycity/types';
 
 const OPERATION_TIME_ZONE = 'America/Sao_Paulo';
+
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
 
 export type DeliveryOperationCopy = {
   statusLabel: string;
@@ -93,6 +98,26 @@ export function formatDeliveryAddress(address: DeliveryAddressItem | undefined):
   return 'Não informado';
 }
 
+/**
+ * Destino como o motoboy precisa ler. Pedido criado sem endereco nao tem
+ * destino ate a entrega acontecer; dizer isso e mais honesto do que repetir
+ * "nao informado" e deixar ele achar que faltou um dado.
+ */
+export function destinationLabel(
+  delivery: Pick<DeliveryDetail, 'destinationKnownAtCreation'>,
+  dropoff: DeliveryAddressItem | undefined,
+): string {
+  if (dropoff) return formatDeliveryAddress(dropoff);
+  if (!delivery.destinationKnownAtCreation) {
+    return 'Endereço de entrega definido pela localização no momento da entrega';
+  }
+  return 'Endereço de entrega não informado';
+}
+
+export function formatDeliveryValue(value: number | null): string {
+  return value === null ? 'A calcular na entrega' : currencyFormatter.format(value);
+}
+
 export function navigationDestination(address: DeliveryAddressItem | undefined): string | null {
   if (!address) return null;
   if (address.lat !== null && address.lng !== null) return `${address.lat},${address.lng}`;
@@ -139,4 +164,53 @@ export function completeDeliveryRouteUrl(
 
 export function deliveryPaymentLabel(paymentMethod: 'BILLED' | 'ONLINE'): string {
   return paymentMethod === 'BILLED' ? 'Faturado' : 'Pago online';
+}
+
+export type DeliverConfirmationSummary = {
+  /** "#128 - Elite Pizzaria": prova qual pedido esta sendo fechado. */
+  orderLabel: string;
+  destination: string;
+  /** Aviso de que o destino so nasce no toque de confirmar, pelo GPS. */
+  gpsNotice: string | null;
+  driverValue: string;
+  /** So aparece quando o pedido tem retorno com valor proprio. */
+  returnValue: string | null;
+};
+
+/**
+ * O que o motoboy confere ANTES de dar o pedido como entregue.
+ *
+ * Marcar entregue fecha o pedido e manda ele para o historico; ate aqui isso
+ * acontecia com um toque e um texto generico, entao rua errada ou valor
+ * errado so apareciam depois, com o pedido ja fechado. Este resumo mostra as
+ * duas coisas que decidem se a finalizacao esta certa — endereco e valor —
+ * junto do numero do pedido, porque com varios pedidos abertos a duvida
+ * costuma ser QUAL pedido esta sendo fechado.
+ */
+export function deliverConfirmationSummary(
+  delivery: Pick<
+    DeliveryDetail,
+    | 'displayNumber'
+    | 'companyName'
+    | 'destinationKnownAtCreation'
+    | 'driverValue'
+    | 'requiresReturn'
+    | 'returnValue'
+    | 'addresses'
+  >,
+): DeliverConfirmationSummary {
+  const dropoff = delivery.addresses.find((address) => address.type === 'DROPOFF');
+
+  return {
+    orderLabel: `#${delivery.displayNumber} - ${delivery.companyName}`,
+    destination: destinationLabel(delivery, dropoff),
+    gpsNotice: delivery.destinationKnownAtCreation
+      ? null
+      : 'Este pedido foi criado sem endereço de destino. Ao confirmar, sua localização atual vira o destino e define o valor da entrega.',
+    driverValue: formatDeliveryValue(delivery.driverValue),
+    returnValue:
+      delivery.requiresReturn && delivery.returnValue !== null
+        ? formatDeliveryValue(delivery.returnValue)
+        : null,
+  };
 }

@@ -103,3 +103,48 @@ export function findNewlyAcceptedDelivery(
     (delivery) => delivery.status === 'ACCEPTED' && !knownDeliveryIds.has(delivery.id),
   );
 }
+
+export type AcceptedDeliveryOpening = {
+  /** Aceite novo detectado. Fica marcado como tratado mesmo sem abrir. */
+  delivery: DeliveryListItem | undefined;
+  /** Abrir a operacao deste pedido agora. */
+  open: boolean;
+};
+
+/**
+ * Se um aceite novo pode ABRIR sozinho a tela de operacao.
+ *
+ * Abrir era incondicional, e isso trocava o pedido embaixo do dedo do motoboy:
+ * `navigate` para uma rota que ja esta em foco nao empilha tela nenhuma, so
+ * troca os parametros dela. Quem estava com a Elite aberta para dar coletado
+ * via aquela mesma tela virar o pedido recem-aceito — e confirmava a etapa no
+ * pedido errado, sem nunca ter saido de onde estava.
+ *
+ * Tres condicoes protegem o motoboy:
+ *
+ * - so abre com a Home em foco, porque ali nao existe operacao em andamento
+ *   para atropelar; em qualquer outra tela o pedido novo espera na lista;
+ * - so abre o que e mesmo novo: sem uma listagem anterior nesta sessao nao ha
+ *   "antes" para comparar, e todo pedido aceito parecia recem-aceito — o
+ *   aplicativo abria sozinho um pedido antigo ao voltar do segundo plano;
+ * - so abre uma vez por pedido, porque voltar ao primeiro plano dispara este
+ *   caminho de novo e a tela reaparecia a cada volta.
+ */
+export function decideAcceptedDeliveryOpening(params: {
+  deliveries: ReadonlyArray<ActiveDeliveryItem>;
+  knownDeliveryIds: ReadonlySet<string>;
+  /** Falso ate a primeira listagem concluida nesta sessao. */
+  knowsPreviousDeliveries: boolean;
+  handledDeliveryIds: ReadonlySet<string>;
+  homeIsFocused: boolean;
+}): AcceptedDeliveryOpening {
+  if (!params.knowsPreviousDeliveries) return { delivery: undefined, open: false };
+
+  const delivery = findNewlyAcceptedDelivery(params.deliveries, params.knownDeliveryIds);
+  if (!delivery) return { delivery: undefined, open: false };
+
+  return {
+    delivery,
+    open: params.homeIsFocused && !params.handledDeliveryIds.has(delivery.id),
+  };
+}

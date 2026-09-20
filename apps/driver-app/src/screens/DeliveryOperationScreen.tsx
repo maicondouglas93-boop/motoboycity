@@ -15,12 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type {
-  DeliveryAddressItem,
-  DeliveryDetail,
-  DeliveryStatus,
-  MarkDeliveredPayload,
-} from '@motoboycity/types';
+import type { DeliveryDetail, DeliveryStatus, MarkDeliveredPayload } from '@motoboycity/types';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
@@ -43,12 +38,16 @@ import {
   type PendingDeliveryCompletion,
 } from '../lib/deliveryCompletionOutbox';
 import {
+  deliverConfirmationSummary,
   deliveryOperationCopy,
   deliveryPaymentLabel,
+  destinationLabel,
   formatDeliveryAddress,
+  formatDeliveryValue,
   formatElapsedTime,
   formatOperationDateTime,
   navigationDestination,
+  type DeliverConfirmationSummary,
 } from '../lib/deliveryOperation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { getDriverProfile } from '../lib/driverProfileCache';
@@ -86,11 +85,6 @@ function posicaoParaEnvio(fix: LocationFix | null): {
   return { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy };
 }
 
-const currencyFormatter = new Intl.NumberFormat('pt-BR', {
-  style: 'currency',
-  currency: 'BRL',
-});
-
 function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): string {
   switch (method) {
     case 'PREPAID':
@@ -104,17 +98,6 @@ function customerPaymentLabel(method: DeliveryDetail['customerPaymentMethod']): 
     default:
       return 'Não informado';
   }
-}
-
-function destinationLabel(
-  delivery: DeliveryDetail,
-  dropoff: DeliveryAddressItem | undefined,
-): string {
-  if (dropoff) return formatDeliveryAddress(dropoff);
-  if (!delivery.destinationKnownAtCreation) {
-    return 'Endereço de entrega definido pela localização no momento da entrega';
-  }
-  return 'Endereço de entrega não informado';
 }
 
 function operationWasApplied(
@@ -396,6 +379,20 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     return deliveries;
   }
 
+  /**
+   * Saida deste pedido para a Home — nunca para outro pedido.
+   *
+   * `popToTop` preserva a Home ja montada, com socket e presenca; o `reset` so
+   * cobre a tela aberta como raiz, por notificacao, onde nao ha o que empilhar.
+   */
+  function voltarParaHome(): void {
+    if (navigation.canGoBack()) {
+      navigation.popToTop();
+      return;
+    }
+    navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+  }
+
   async function showConfirmedCompletion(
     token: string,
     projectedStatus: 'DELIVERED' | 'COMPLETED',
@@ -424,12 +421,17 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       useDispatchStore.getState().wantsToBeAvailable,
     ).catch(() => undefined);
 
-    if (!active.some((activeDelivery) => activeDelivery.id === delivery.id)) {
-      const nextDelivery = active[0];
-      if (nextDelivery) {
-        navigation.replace('DeliveryOperation', { deliveryId: nextDelivery.id });
-      }
-    }
+    /*
+      Sem emendar no proximo pedido ativo.
+
+      Com outro pedido em andamento, o pedido concluido era substituido pela
+      operacao do proximo: mesmo layout, outro endereco, sem o motoboy ter
+      escolhido nada — e o toque seguinte, que ele ja ia dar, caia no pedido
+      errado. Quando era o ultimo pedido isso nunca acontecia, e a tela
+      concluida — "Concluido", o aviso de sucesso e os botoes de detalhes e de
+      voltar ao inicio — so aparecia nesse caso. Agora ela fecha TODO pedido, e
+      quem abre o proximo e ele, pela lista da Home.
+    */
   }
 
   async function resolveOwnerUserId(token: string): Promise<string | null> {
@@ -755,11 +757,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         );
       });
 
+      // Coleta e ocorrencia mantem o pedido com o motoboy. Se mesmo assim ele
+      // sumiu da lista ativa, foi encerrado por fora — cancelado pela loja ou
+      // pela administracao — e nao ha mais o que operar nesta tela.
       if (!activeDeliveries.some((activeDelivery) => activeDelivery.id === delivery.id)) {
-        const nextDelivery = activeDeliveries[0];
-        if (nextDelivery) {
-          navigation.replace('DeliveryOperation', { deliveryId: nextDelivery.id });
-        }
+        voltarParaHome();
       }
     } catch (error) {
       if (!token) {
@@ -803,6 +805,10 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     } finally {
       operationInFlight.current = false;
       setOperation(null);
+      // A confirmacao ja cumpriu o papel dela. Qualquer desfecho — sucesso,
+      // fila local, recusa ou erro — e contado na propria tela, e o modal
+      // aberto por cima so esconderia esse aviso.
+      setDeliverConfirmationOpen(false);
     }
   }
 
@@ -867,10 +873,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const routeDestination = navigationDestination(routeAddress);
   const pickupDone = delivery.status !== 'ACCEPTED';
   const dropoffDone = delivery.status === 'DELIVERED' || delivery.status === 'COMPLETED';
-  const valueLabel =
-    delivery.driverValue === null
-      ? 'A calcular na entrega'
-      : currencyFormatter.format(delivery.driverValue);
+  const valueLabel = formatDeliveryValue(delivery.driverValue);
 
   async function openExternalNavigation() {
     if (!routeDestination) {
@@ -905,7 +908,9 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       runOperation('deliver').catch(() => undefined);
       return;
     }
-    if (action === 'deliver' && !currentDelivery.destinationKnownAtCreation) {
+    // Entregar fecha o pedido e o manda para o historico. Antes de perder essa
+    // chance, o motoboy le a rua e o valor no modal e confirma ali.
+    if (action === 'deliver') {
       setDeliverConfirmationOpen(true);
       return;
     }
@@ -917,17 +922,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             message: 'Confirme somente depois de receber todos os itens deste pedido na loja.',
             label: 'Confirmar coleta',
           }
-        : action === 'deliver'
-          ? {
-              title: 'Confirmar entrega?',
-              message: 'Confirme que o pedido foi entregue ao cliente.',
-              label: 'Confirmar entrega',
-            }
-          : {
-              title: 'Confirmar retorno?',
-              message: 'Confirme que a mercadoria retornou ao local de coleta.',
-              label: 'Confirmar retorno',
-            };
+        : {
+            title: 'Confirmar retorno?',
+            message: 'Confirme que a mercadoria retornou ao local de coleta.',
+            label: 'Confirmar retorno',
+          };
     if (action === 'collect') startCollectionLocationWarmup();
     Alert.alert(confirmation.title, confirmation.message, [
       {
@@ -948,7 +947,16 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safeArea}>
       <MapBackdrop />
       <BottomSheet style={styles.sheet}>
-        <SheetHeader title={`Pedido #${delivery.displayNumber}`} onBack={handleProtectedBack} />
+        {/*
+          A loja fica no cabecalho junto do numero porque e assim que o motoboy
+          chama o pedido: "a Elite", "a farmacia". So o numero deixava as telas
+          de dois pedidos identicas de relance.
+        */}
+        <SheetHeader
+          title={`Pedido #${delivery.displayNumber}`}
+          subtitle={delivery.companyName}
+          onBack={handleProtectedBack}
+        />
 
         {successMessage ? (
           <View style={styles.successBanner} accessibilityLiveRegion="polite">
@@ -1133,7 +1141,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
                 variant="outline"
                 onPress={() => navigation.navigate('OrderDetail', { orderId: delivery.id })}
               />
-              <PrimaryButton label="Voltar para o início" onPress={() => navigation.popToTop()} />
+              <PrimaryButton label="Voltar para o início" onPress={voltarParaHome} />
             </View>
           ) : null}
         </ScrollView>
@@ -1198,14 +1206,21 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         ) : null}
       </BottomSheet>
 
-      <ConfirmationModal
+      <DeliverConfirmationModal
         visible={deliverConfirmationOpen}
-        title="Confirme a entrega"
-        description="Este pedido foi criado sem endereço de destino. Ao confirmar, sua localização atual será registrada como destino e usada para calcular o valor da entrega."
-        confirmLabel={operationBusy ? 'Capturando GPS...' : 'Confirmar com GPS'}
+        summary={deliverConfirmationSummary(currentDelivery)}
+        confirmLabel={
+          currentDelivery.destinationKnownAtCreation
+            ? operationBusy
+              ? 'Confirmando...'
+              : 'Confirmar entrega'
+            : operationBusy
+              ? 'Capturando GPS...'
+              : 'Confirmar com GPS'
+        }
         disabled={controlsBusy}
         onConfirm={() => runOperation('deliver').catch(() => undefined)}
-        onCancel={() => setDeliverConfirmationOpen(false)}
+        onClose={() => setDeliverConfirmationOpen(false)}
       />
 
       <Modal
@@ -1365,6 +1380,87 @@ function ConfirmationModal({
               style={styles.modalButton}
               disabled={disabled}
               onPress={onCancel}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Confirmacao da entrega com o que decide se ela esta certa: rua e valor.
+ *
+ * O botao de fechar nao e o mesmo que cancelar uma acao ja em andamento — ele
+ * so devolve o motoboy para o pedido, sem mexer em nada, para ele conferir de
+ * novo ou abrir o pedido certo quando o numero nao for o que ele esperava.
+ */
+function DeliverConfirmationModal({
+  visible,
+  summary,
+  confirmLabel,
+  disabled,
+  onConfirm,
+  onClose,
+}: {
+  visible: boolean;
+  summary: DeliverConfirmationSummary;
+  confirmLabel: string;
+  disabled: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <View style={styles.confirmIcon}>
+            <Icon name="pin" size={30} color={colors.actionSoft} />
+          </View>
+          <Text style={styles.modalTitle}>Confirme antes de entregar</Text>
+          <Text style={styles.confirmOrder}>{summary.orderLabel}</Text>
+
+          <ScrollView
+            style={styles.confirmScroll}
+            contentContainerStyle={styles.confirmSummary}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.confirmBlock}>
+              <Text style={styles.confirmBlockLabel}>Endereço de entrega</Text>
+              <Text style={styles.confirmAddress}>{summary.destination}</Text>
+            </View>
+
+            <View style={styles.confirmBlock}>
+              <View style={styles.confirmValueRow}>
+                <Text style={styles.confirmBlockLabel}>Valor do entregador</Text>
+                <Text style={styles.confirmValue}>{summary.driverValue}</Text>
+              </View>
+              {summary.returnValue ? (
+                <View style={styles.confirmValueRow}>
+                  <Text style={styles.confirmBlockLabel}>Retorno</Text>
+                  <Text style={styles.confirmValue}>{summary.returnValue}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {summary.gpsNotice ? (
+              <Text style={styles.confirmNotice}>{summary.gpsNotice}</Text>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <PrimaryButton
+              label={confirmLabel}
+              style={styles.modalButton}
+              disabled={disabled}
+              onPress={onConfirm}
+            />
+            <PrimaryButton
+              label="Fechar"
+              variant="outline"
+              style={styles.modalButton}
+              disabled={disabled}
+              onPress={onClose}
             />
           </View>
         </View>
@@ -1666,4 +1762,30 @@ const styles = StyleSheet.create({
   dangerText: { color: colors.danger },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   modalButton: { flex: 1 },
+  confirmOrder: {
+    color: colors.inkSoft,
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  confirmScroll: { flexGrow: 0 },
+  confirmSummary: { gap: 10 },
+  confirmBlock: {
+    borderRadius: 12,
+    padding: 14,
+    gap: 6,
+    backgroundColor: colors.surfaceMuted,
+  },
+  confirmBlockLabel: { color: colors.inkMuted, fontSize: 13, fontWeight: '700' },
+  confirmAddress: { color: colors.ink, fontSize: 17, fontWeight: '700', lineHeight: 23 },
+  confirmValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  confirmValue: { color: colors.ink, fontSize: 18, fontWeight: '800' },
+  confirmNotice: {
+    borderRadius: 12,
+    padding: 12,
+    color: colors.ink,
+    fontSize: 13,
+    lineHeight: 19,
+    backgroundColor: colors.warningSoft,
+  },
 });

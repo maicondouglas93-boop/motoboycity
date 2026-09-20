@@ -34,7 +34,7 @@ import { SegmentedTabs } from '../components/SegmentedTabs';
 import { colors } from '../theme/colors';
 import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
-import { findNewlyAcceptedDelivery, getActiveDeliveries } from '../lib/activeDeliveries';
+import { decideAcceptedDeliveryOpening, getActiveDeliveries } from '../lib/activeDeliveries';
 import { activeDeliveryStops, pickupCountdownLabel } from '../lib/activeDeliveryPresentation';
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
@@ -202,6 +202,13 @@ export function HomeScreen({ navigation }: Props) {
   const acceptingPendingRef = useRef(false);
   const presenceRecoveryRef = useRef<Promise<DriverPresenceItem | null> | null>(null);
   const socketRecoveryRef = useRef<Promise<void> | null>(null);
+  /**
+   * Memoria da abertura automatica de pedido aceito, viva enquanto a sessao
+   * durar: o que ja foi listado uma vez (para saber o que e realmente novo) e
+   * o que ja foi aberto (para nao reabrir a cada volta ao primeiro plano).
+   */
+  const entregasAtivasConhecidas = useRef(false);
+  const aceitesJaTratados = useRef(new Set<string>());
   const pendingListVersionRef = useRef(0);
   const queueRequestVersionRef = useRef(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -712,6 +719,7 @@ export function HomeScreen({ navigation }: Props) {
 
       try {
         const deliveries = await getActiveDeliveries(token);
+        entregasAtivasConhecidas.current = true;
         if (!cancelled) {
           setActiveDeliveries(deliveries);
           try {
@@ -769,6 +777,7 @@ export function HomeScreen({ navigation }: Props) {
             if (cancelled) return;
 
             const deliveries = await getActiveDeliveries(token).catch(() => null);
+            if (deliveries) entregasAtivasConhecidas.current = true;
             if (deliveries && !cancelled) {
               setActiveDeliveries(deliveries);
               await syncDeliveryTracking(
@@ -953,6 +962,7 @@ export function HomeScreen({ navigation }: Props) {
           const previousDeliveryIds = new Set(
             useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
           );
+          const conheciaEntregasAtivas = entregasAtivasConhecidas.current;
           const deliveries = await getActiveDeliveries(atual).catch(() => null);
           if (deliveries && !cancelled) {
             setActiveDeliveries(deliveries);
@@ -970,9 +980,17 @@ export function HomeScreen({ navigation }: Props) {
                 ),
               );
 
-            const newlyAccepted = findNewlyAcceptedDelivery(deliveries, previousDeliveryIds);
-            if (newlyAccepted) {
-              navigation.navigate('DeliveryOperation', { deliveryId: newlyAccepted.id });
+            const abertura = decideAcceptedDeliveryOpening({
+              deliveries,
+              knownDeliveryIds: previousDeliveryIds,
+              knowsPreviousDeliveries: conheciaEntregasAtivas,
+              handledDeliveryIds: aceitesJaTratados.current,
+              homeIsFocused: navigation.isFocused(),
+            });
+            entregasAtivasConhecidas.current = true;
+            if (abertura.delivery) aceitesJaTratados.current.add(abertura.delivery.id);
+            if (abertura.open && abertura.delivery) {
+              navigation.navigate('DeliveryOperation', { deliveryId: abertura.delivery.id });
             }
           }
           await mostrarOfertaPendente(atual);

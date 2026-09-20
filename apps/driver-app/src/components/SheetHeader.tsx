@@ -13,10 +13,13 @@ import { colors } from '../theme/colors';
  */
 export function SheetHeader({
   title,
+  subtitle,
   icon,
   onBack,
 }: {
   title: string;
+  /** Segunda linha menor, para o que identifica a tela alem do titulo. */
+  subtitle?: string;
   icon?: IconName;
   onBack?: () => void;
 }) {
@@ -40,13 +43,21 @@ export function SheetHeader({
           {title}
         </Text>
       </View>
+
+      {subtitle ? (
+        <Text style={styles.subtitulo} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   cabecalho: {
-    height: 52,
+    // Altura minima em vez de fixa: a segunda linha, quando existe, cresce o
+    // cabecalho sem mudar a altura das telas que usam so o titulo.
+    minHeight: 52,
     justifyContent: 'center',
     paddingHorizontal: 18,
   },
@@ -54,4 +65,11 @@ const styles = StyleSheet.create({
   seta: { fontSize: 30, lineHeight: 34, color: colors.ink },
   titulo: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   textoTitulo: { fontSize: 24, fontWeight: '700', color: colors.ink },
+  subtitulo: {
+    marginTop: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.inkMuted,
+    textAlign: 'center',
+  },
 });
