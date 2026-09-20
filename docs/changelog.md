@@ -13220,3 +13220,51 @@ commit ou push solicitado.
 Efeito colateral aceito: com varios pedidos, concluir um passou a custar um
 toque a mais ("Voltar para o inicio") em troca de nunca mais cair em outro
 pedido sem querer.
+
+### 2026-09-20 — APK `pilot.24` assinado e verificado
+
+Publicacao autorizada pelo responsavel. Commit funcional `1bd88bc` e bump de
+versao `bb97b9d` enviados para `main`; `git push` em `b01bb51..1bd88bc` e o
+bump em seguida. Varredura de segredo no diff antes do push: nenhuma chave,
+token ou senha — so nomes de parametro `token: string`.
+
+APK compilado de `bb97b9d` em worktree curta `C:\m24`, JDK 21:
+`pnpm install --frozen-lockfile` (1m07), build de `@motoboycity/validation`,
+depois `gradlew.bat clean assembleRelease -Pmotoboycity.versionCode=24
+--no-daemon --console=plain`. **BUILD SUCCESSFUL em 9m08**, 427 tarefas, 408
+executadas. A primeira invocacao morreu antes do Gradle: o script tinha
+`$ErrorActionPreference = 'Stop'` e o PowerShell transforma cada linha de stderr
+de executavel nativo em ErrorRecord. Corrigido mandando o Gradle escrever num
+log pelo proprio `cmd`, sem o PowerShell ver stderr. Senhas abertas so na
+memoria do processo, a partir dos arquivos DPAPI criados pelo responsavel, com
+`.Trim()` na leitura; variaveis removidas no `finally`.
+
+Artefato: `I:\MOTOboyCityeleases\motoboycity-0.1.0-pilot.24-vc24.apk`,
+**75.176.353 bytes**, SHA-256
+`79EE1C4BC6E960859700EF46F3E8BD2080C420483346DC7532A0EED99C164084`, conferido
+igual entre origem e copia.
+
+Verificacoes: `apksigner verify --verbose --print-certs` com v2 valida e
+certificado oficial `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`,
+o mesmo dos APKs anteriores — atualiza por cima do `pilot.23`. `aapt dump
+badging`: pacote `com.motoboycity.driverapp`, versionCode 24, versionName
+`0.1.0-pilot.24`, minSdk 24, targetSdk 36, quatro ABIs. Bundle lido em memoria:
+`motoboycity-api.onrender.com` presente, `localhost:3333`, `127.0.0.1` e
+`10.0.2.2` ausentes. A unica ocorrencia de `localhost` no bundle esta no meio da
+tabela de strings do Hermes, sem esquema nem porta, entre textos sem relacao —
+nao e configuracao de URL. Worktree removida com `rmdir /s /q` e `git worktree
+prune`.
+
+**CI vermelho, e nao por causa deste recorte.** O run
+`https://github.com/maicondouglas93-boop/motoboycity/actions/runs/35515692039`
+falhou no Lint, com dois erros `react-hooks/rules-of-hooks` em
+`apps/admin-web/src/components/operations/admin-completed-delivery-actions.tsx`
+(`useMutation` chamado depois de early return). O CI ja falhava assim nos tres
+commits de 15/09; o ultimo verde e de 11/09. Como o Lint quebra cedo, os testes
+do Driver App **nao rodaram no CI** — os 194/194 em 26 suites sao locais. A
+correcao dos hooks nao foi feita: e codigo de outra sessao e nao houve pedido.
+
+Pendente de acao humana: instalar o `pilot.24` nos aparelhos e fazer o ensaio
+com dois pedidos abertos — aceitar um pedido novo com outro aberto e conferir
+que a tela nao troca, fechar um pedido pela tela concluida, e olhar o cabecalho
+de duas linhas com nome de loja longo. Nada disso foi exercitado em aparelho.

@@ -8,10 +8,13 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-11**, aviso GPS de proximidade da coleta publicado
+> Última revisão: **2026-09-20**, confirmação da entrega e fim da troca de
+> pedido sozinho publicadas em `1bd88bc`, empacotadas no APK `pilot.24`.
+> Antes disso, o aviso GPS de proximidade da coleta publicado
 > em `7e13bce`: Render, Vercel (Company/ADM) e CI confirmados em success.
-> APK `pilot.23` assinado e pronto para distribuicao, com verificacoes abaixo;
-> o app instalado precisa ser atualizado para participar da deteccao.
+> APK `pilot.24` assinado e pronto para distribuicao, com verificacoes abaixo;
+> ele **substitui o `pilot.23`**, que nunca chegou a ser distribuido, e o app
+> instalado precisa ser atualizado para participar da deteccao.
 > Mini-ilustrações Company e ADM enviadas em `1fa0a1f`; conferir rollout.
 > Marca aiqfome enviada em `1d9ae85`; conferir rollout.
 > Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
@@ -54,8 +57,10 @@ manual no banco compartilhado nem leitura/edicao de `.env` neste release.
 CI `Typecheck, tests and builds` aprovado para `7e13bce`.
 Ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
 contrato, testes e limitacoes em `pickup-arrival-alert.md` e `changelog.md`.
-APK `pilot.23` (versionCode 23) gerado e verificado em 11/09; falta distribuir
-e instalar nos aparelhos. Nenhum APK instalado nem AAB novo gerado neste release.
+APK `pilot.24` (versionCode 24) gerado e verificado em 20/09; falta distribuir
+e instalar nos aparelhos. Ele carrega tambem o que o `pilot.23` carregava, que
+nunca foi distribuido — instalar so o `pilot.24` basta. Nenhum APK instalado
+nem AAB novo gerado neste release.
 Backup local de 11/09 as 02:30 conferido por hash e `pg_restore --list`;
 backup GitHub/GCS da mesma data com job `dump` em success. Sem ensaio de restore.
 Build nao significa instalacao: conferir versao nos aparelhos antes do ensaio.
@@ -179,19 +184,21 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.23-vc23.apk`
-SHA-256 `4588FF90B073DBB3E95C71845A9D8D1169205E0C112E62C6BB78E9213995A79E`,
-75.172.289 bytes, `versionCode` 23, minSdk 24, targetSdk 36, assinatura v2,
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.24-vc24.apk`
+SHA-256 `79EE1C4BC6E960859700EF46F3E8BD2080C420483346DC7532A0EED99C164084`,
+75.176.353 bytes, `versionCode` 24, minSdk 24, targetSdk 36, assinatura v2,
 ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.22` e versões anteriores
-assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `7e13bce`.
+anteriores, então ele atualiza por cima de `pilot.23` e versões anteriores
+assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `bb97b9d`.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2`. Versao JS
-`0.1.0-pilot.23` conferida no bundle e novos campos `pickupArrivalCheck`,
-`sampledAt`, `speedMps` conferidos nos DEX. Assinatura por `apksigner`, pacote
-por `aapt` e hash da copia final aprovados. Ensaio fisico ainda pendente.
+URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2` — a unica
+ocorrencia de `localhost` no bundle e uma string solta da tabela do Hermes, sem
+esquema nem porta. Versao JS `0.1.0-pilot.24` conferida no bundle. Assinatura
+por `apksigner`, pacote por `aapt` e hash da copia final aprovados. Ensaio
+fisico ainda pendente, e agora ele cobre tambem a confirmacao da entrega, o
+cabecalho de duas linhas e o fim de pedido com dois pedidos abertos.
 
 ### AAB pronto para envio à Google Play
 
@@ -609,7 +616,7 @@ financeira foram consolidados em `583f67b`, enviados para `main` e publicados
 com sucesso no Render e nas duas Vercel. O CI geral ainda estava em execução na
 confirmação dos deploys; não foi usado para declarar a publicação aprovada.
 Não incluir mudanças de outras sessões em eventual publicação futura.
-O APK permanece `pilot.22` (`8255734`), com registro de release em `969994b`.
+O APK em `I:\MOTOboyCity\releases` e o `pilot.24`, compilado de `bb97b9d`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do
