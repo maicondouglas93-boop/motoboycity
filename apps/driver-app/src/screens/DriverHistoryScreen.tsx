@@ -19,6 +19,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { deliveriesApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia } from '../lib/format';
 import {
+  defaultHistoryPeriod,
   formatHistoryDate,
   normalizeHistoryPeriod,
   type HistoryPeriod,
@@ -66,7 +67,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
   const [deliveries, setDeliveries] = useState<DeliveryListItem[]>([]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [appliedPeriod, setAppliedPeriod] = useState<HistoryPeriod>({});
+  const [appliedPeriod, setAppliedPeriod] = useState<HistoryPeriod>(defaultHistoryPeriod);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);

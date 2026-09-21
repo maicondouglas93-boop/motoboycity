@@ -28,7 +28,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { RouteTimeline } from '../components/RouteTimeline';
 import { SheetHeader } from '../components/SheetHeader';
 import { deliveriesApi } from '../lib/apiClient';
-import { getActiveDeliveries } from '../lib/activeDeliveries';
+import { getActiveDeliveries, preliminaryDeliveryDetail } from '../lib/activeDeliveries';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionClosesDeliveryLocally,
@@ -78,6 +78,13 @@ import { colors } from '../theme/colors';
  */
 type ConferenciaDestino =
   | { estado: 'capturando' }
+  /**
+   * Coordenada em maos, rua ainda vindo. O confirmar JA LIBERA aqui: o que a
+   * entrega precisa para ser gravada e o fix, nao o nome da rua. Esperar as
+   * duas coisas juntas prendia o motoboy na porta do cliente por causa de uma
+   * consulta que e conferencia, nao requisito.
+   */
+  | { estado: 'identificando' }
   | { estado: 'conferido'; endereco: string }
   /** Houve coordenada, mas o Google nao devolveu rua utilizavel. */
   | { estado: 'semEndereco' }
@@ -254,6 +261,22 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   );
 
   const loadDelivery = useCallback(async () => {
+    /*
+      Abre com o que a Home ja sabe, em vez de cobrir a tela com spinner.
+
+      O cartao que ele acabou de tocar ja mostrava numero, loja, status, valor e
+      enderecos — segurar a tela para buscar de novo o mesmo dado so adiava o
+      trabalho dele. A chamada continua acontecendo logo abaixo e substitui isto
+      assim que responde.
+    */
+    const conhecido = useDispatchStore
+      .getState()
+      .activeDeliveries.find((item) => item.id === route.params.deliveryId);
+    if (conhecido) {
+      setDelivery(preliminaryDeliveryDetail(conhecido));
+      setLoading(false);
+    }
+
     const token = await session.getToken();
     if (!token) {
       setLoading(false);
@@ -428,6 +451,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       return;
     }
     fixConferido.current = fix;
+    setConferenciaDestino({ estado: 'identificando' });
 
     const token = await session.getToken();
     if (versao !== conferenciaVersao.current) return;
@@ -1303,7 +1327,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         conferencia={conferenciaDestino}
         confirmLabel={
           conferenciaDestino?.estado === 'capturando'
-            ? 'Buscando endereço...'
+            ? 'Buscando sua localização...'
             : operationBusy
               ? 'Confirmando...'
               : 'Confirmar entrega'
@@ -1539,7 +1563,14 @@ function DeliverConfirmationModal({
               ) : conferencia.estado === 'capturando' ? (
                 <View style={styles.confirmLoading}>
                   <ActivityIndicator color={colors.actionSoft} />
-                  <Text style={styles.confirmFallback}>Buscando o endereço onde você está...</Text>
+                  <Text style={styles.confirmFallback}>Buscando sua localização...</Text>
+                </View>
+              ) : conferencia.estado === 'identificando' ? (
+                <View style={styles.confirmLoading}>
+                  <ActivityIndicator color={colors.actionSoft} />
+                  <Text style={styles.confirmFallback}>
+                    Localização obtida. Identificando a rua — você já pode confirmar.
+                  </Text>
                 </View>
               ) : conferencia.estado === 'conferido' ? (
                 <Text style={styles.confirmAddress}>{conferencia.endereco}</Text>

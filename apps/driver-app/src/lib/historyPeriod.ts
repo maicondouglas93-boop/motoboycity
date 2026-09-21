@@ -42,3 +42,24 @@ export function formatHistoryDate(date: string): string {
   if (!match) return date;
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
+
+/** Quantos dias o historico mostra quando o motoboy nao pede um periodo. */
+export const HISTORY_DEFAULT_DAYS = 30;
+
+/**
+ * Periodo inicial do historico.
+ *
+ * Sem isto a tela abria com `{}` — ou seja, pedia a API TODAS as entregas
+ * concluidas que o motoboy ja fez, sem limite e sem data, e ficava no spinner
+ * de tela cheia ate a lista inteira chegar pelo 4G. Quanto mais tempo de casa,
+ * pior ficava, e o que ele quase sempre quer ver e o dinheiro recente.
+ *
+ * Nao esconde nada: os campos de data continuam na tela, e digitar uma data
+ * mais antiga busca o periodo que ele pedir.
+ */
+export function defaultHistoryPeriod(now: Date = new Date()): HistoryPeriod {
+  const inicio = new Date(now.getTime() - HISTORY_DEFAULT_DAYS * 24 * 60 * 60 * 1000);
+  const comoData = (value: Date) => value.toISOString().slice(0, 10);
+
+  return { from: comoData(inicio), to: comoData(now) };
+}

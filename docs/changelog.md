@@ -13446,3 +13446,154 @@ Pendente de acao humana: instalar o `pilot.25` em UM aparelho e fazer o ensaio
 antes de distribuir. Ele acumula tres recortes nunca testados em campo —
 confirmacao da entrega, fim da troca de pedido sozinho, endereco por GPS e
 etiqueta de urgente. Nenhum APK instalado ate aqui.
+
+### 2026-09-21 — A Home para de dizer que nao ha pedido enquanto carrega
+
+Levantamento pedido pelo responsavel: mapear onde o motoboy fica esperando. O
+pior achado nao era lentidao, era **mentira**. Com a lista de ativos ainda
+vazia, a Home caia no estado vazio e escrevia "Aguardando uma nova oferta" —
+com tres pedidos na bolsa, o aplicativo afirmava que ele nao tinha nenhum. E
+isso durava a corrente serial inteira do bootstrap: token, sessao nativa,
+checagem de notificacao, fila de conclusoes, presenca, e so entao as entregas.
+
+Duas mudancas.
+
+**A tela passa a separar "ainda nao carregou" de "nao tem pedido".** Estado
+novo `listaAtivaCarregada`; ate a primeira listagem concluir, a area mostra um
+indicador com "Carregando seus pedidos...". O estado vazio real continua igual.
+
+**Os cards aparecem uma viagem de rede mais cedo.** `getActiveDeliveries` faz 4
+listagens e DEPOIS um detalhe por pedido ativo — com tres pedidos sao 7
+requisicoes antes de qualquer pixel. Agora ele aceita um `onPartial`, chamado
+assim que as listagens respondem: numero, loja, status e valor ja estao ali, e
+`activeDeliveryStops` sabe desenhar sem endereco. Os detalhes continuam
+chegando e completam o card depois.
+
+O passo parcial vem sem `addresses`, e jogado direto na tela apagaria a rua que
+o motoboy ja estava lendo, para devolve-la um segundo depois. `preserveKnownAddresses`
+resolve: o dado novo manda em tudo, menos no endereco enquanto ele nao veio.
+Pedido que saiu da lista nao volta.
+
+Ligado nos tres caminhos que recarregam a lista: bootstrap, volta ao primeiro
+plano e recuperacao do socket.
+
+Nao medido: latencia real em aparelho. O ganho aqui e estrutural — tirar N
+viagens de rede do caminho ate o primeiro desenho — e nao um numero que eu
+tenha cronometrado.
+
+Arquivos: `apps/driver-app/src/lib/activeDeliveries.ts` (`onPartial` e
+`preserveKnownAddresses`), `apps/driver-app/src/screens/HomeScreen.tsx` e
+`apps/driver-app/__tests__/activeDeliveries.test.ts` (tres casos novos).
+
+Comandos: `tsc --noEmit` limpo; `npx jest --runInBand` **201/201 em 26 suites**;
+`eslint` limpo fora o aviso `no-void` preexistente. Diff conferido sem churn:
+o prettier reformatou linhas alheias em dois arquivos e elas foram restauradas.
+
+Nao chega nos motoboys sem um `pilot.26`: isto e tela, e tela so anda com APK
+novo. O `pilot.25` acabou de ser distribuido.
+
+### 2026-09-21 — Duas esperas a menos: o GPS do modal e o abrir do pedido
+
+Continuacao do mapa de carregamento. Os dois itens seguintes da lista.
+
+**O modal de entrega travava o confirmar esperando a RUA.** O que a entrega
+precisa para ser gravada e a COORDENADA; a rua e conferencia. Estavam no mesmo
+estado, entao o botao ficava desabilitado por toda a cadeia de GPS — ate 12s no
+pior caso, 8s da leitura precisa mais 4s da segunda tentativa — e ainda pela ida
+ao servidor. Agora sao dois estados: `capturando`, com o botao travado porque
+sem coordenada o servidor recusa mesmo, e `identificando`, em que o fix ja esta
+congelado, **o confirmar libera** e a tela diz "Localizacao obtida. Identificando
+a rua — voce ja pode confirmar". Quem tem pressa confirma; quem quer conferir
+espera mais um segundo.
+
+**Abrir um pedido cobria a tela com spinner** ate a API responder, mesmo com o
+aplicativo ja sabendo numero, loja, status, valor e enderecos daquele pedido —
+ele acabou de desenhar tudo isso no cartao que o motoboy tocou.
+`preliminaryDeliveryDetail` monta um detalhe provisorio com o que esta na store
+e a tela abre na hora; a chamada continua e substitui quando responde.
+
+Os campos que so o detalhe traz vem vazios de proposito. `statusHistory` foi o
+unico que exigiu conferencia: e usado so por `operationWasApplied`, que recebe o
+pedido recarregado da API e nunca este objeto. Isso esta escrito no comentario da
+funcao, porque um historico vazio tratado como verdade diria que nenhuma
+transicao aconteceu.
+
+Arquivos: `apps/driver-app/src/lib/activeDeliveries.ts`,
+`src/screens/DeliveryOperationScreen.tsx` e
+`__tests__/activeDeliveries.test.ts` (dois casos novos).
+
+Comandos: `tsc --noEmit` limpo; `npx jest --runInBand` **203/203 em 26 suites**;
+`eslint` limpo fora o `no-void` preexistente; diff conferido sem churn do
+prettier em linha alheia.
+
+Nao medido em aparelho. Nao chega nos motoboys sem um `pilot.26`.
+
+### 2026-09-21 — Ultimos dois itens do mapa: historico e bootstrap
+
+**O historico pedia a vida inteira.** `appliedPeriod` comecava `{}`, sem
+nenhuma data, entao a tela abria buscando TODAS as entregas concluidas que o
+motoboy ja fez — sem limite, sem paginacao, com spinner de tela cheia ate a
+lista inteira chegar pelo 4G. Quanto mais tempo de casa, pior. Agora abre nos
+ultimos 30 dias (`defaultHistoryPeriod`), e os campos de data continuam ali para
+ele pedir mais.
+
+Escolha deliberada: a alternativa era paginar de verdade, mas `GET /deliveries`
+nao tem `limit` nem `offset` no contrato e todo consumidor recebe o array
+inteiro. Criar paginacao ali e mudanca de contrato nos dois sistemas, e o
+default sensato resolve o caso real do motoboy sem isso. Fica anotado como o
+proximo passo se alguem precisar de historico longo.
+
+**O bootstrap esperava o que nao precisava esperar.** As entregas ativas so
+dependem do token, mas a consulta so comecava depois de sessao nativa,
+notificacao, fila de conclusoes, presenca e disponibilidade. Agora ela dispara
+assim que o token existe e e recolhida la embaixo, onde o resultado e usado; a
+corrente de presenca continua igual, em paralelo. Junto com o passo parcial de
+ontem, os cards aparecem sem esperar nada disso.
+
+Arquivos: `apps/driver-app/src/lib/historyPeriod.ts`,
+`src/screens/DriverHistoryScreen.tsx`, `src/screens/HomeScreen.tsx` e
+`__tests__/historyPeriod.test.ts` (dois casos novos).
+
+Comandos: `tsc --noEmit` limpo; `npx jest --runInBand` **205/205 em 26 suites**;
+`eslint` limpo fora o `no-void` preexistente. `prettier --write` NAO foi rodado
+em `historyPeriod.ts` e `DriverHistoryScreen.tsx`: os dois ja estavam fora do
+padrao antes deste recorte, e formatar agora encheria o diff de linha alheia.
+
+Efeito colateral aceito: quem quiser ver entrega de mais de 30 dias atras
+precisa digitar a data. Antes vinha tudo, e era justamente o problema.
+
+### 2026-09-21 — A autoria do sistema subiu para o alto do painel da loja
+
+Pedido do responsavel. O anuncio da FM Software ficava no RODAPE da tela
+principal do Company, depois do mapa e das tres colunas de pedidos: so via quem
+rolasse a pagina inteira, o que ninguem faz num painel operacional. Subiu para
+logo acima da area de trabalho, onde aparece sem rolagem.
+
+**Onde exatamente, e por que nao mais acima.** Entrou depois do cabecalho e
+depois de `ServiceClosedNotice` e dos avisos de falha de carga — esses ficam na
+frente. O proprio codigo ja explicava o motivo num comentario: com a operacao
+fechada, aquele aviso e a primeira coisa que muda o que o lojista vai fazer nos
+proximos minutos. Propaganda nao passa na frente disso.
+
+**A marca entrou como imagem.** O arquivo enviado tinha 1408x768 com margem
+branca enorme em volta; num banner compacto o desenho ficaria minusculo. Recortei
+no limite real do conteudo, detectando os pixels com luminancia abaixo de 215, e
+salvei em PNG **706x468** — agora o logo preenche o proprio quadro. O `Code2`
+generico do lucide saiu; quem identifica a marca e a marca.
+
+O PNG carrega o fundo claro original, entao ele vai com `mix-blend-multiply`
+para dissolver no cartao em vez de deixar um retangulo visivel. Isso so e seguro
+porque o Company nao tem tema escuro — se um dia tiver, esta linha quebra e o
+comentario no componente avisa.
+
+Arquivos: `apps/company-web/src/components/layout/fm-software-promo.tsx`,
+`src/app/(app)/page.tsx`, o teste do componente e
+`public/brand/fm-software.png` (novo).
+
+Comandos: `tsc --noEmit` limpo; `npx vitest run` **152/152 em 30 arquivos**;
+`eslint` limpo nos dois arquivos.
+
+**Nao conferido em tela.** O painel so mostra o dashboard com a API no ar e
+sessao de empresa, e a porta 3000 desta maquina esta ocupada por outro projeto
+do responsavel. Altura do logo (56px) e o resultado do `mix-blend-multiply` sao
+decisoes de codigo que ninguem olhou renderizadas ainda.

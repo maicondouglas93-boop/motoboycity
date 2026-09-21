@@ -3,6 +3,8 @@ import type { DeliveryListItem } from '@motoboycity/types';
 import {
   decideAcceptedDeliveryOpening,
   findNewlyAcceptedDelivery,
+  preliminaryDeliveryDetail,
+  preserveKnownAddresses,
   getActiveDeliveries,
   operationalStatuses,
   sortActiveDeliveries,
@@ -202,6 +204,93 @@ describe('recuperação das entregas operacionais', () => {
           knowsPreviousDeliveries: false,
         }),
       ).toEqual({ delivery: undefined, open: false });
+    });
+  });
+
+  it('entrega a listagem antes dos detalhes, para a tela desenhar mais cedo', async () => {
+    jest
+      .mocked(deliveriesApi.list)
+      .mockImplementation(async (_token, filters) =>
+        filters?.status === 'ACCEPTED'
+          ? ([{ id: 'delivery-1', status: 'ACCEPTED', createdAt: '2026-08-27T12:00:00Z' }] as never)
+          : [],
+      );
+    jest.mocked(deliveriesApi.detail).mockResolvedValue({
+      id: 'delivery-1',
+      status: 'ACCEPTED',
+      createdAt: '2026-08-27T12:00:00Z',
+      statusHistory: [],
+      addresses: [{ type: 'PICKUP', street: 'Rua da Loja' }],
+    } as never);
+
+    const parciais: string[][] = [];
+    const final = await getActiveDeliveries('token-1', (deliveries) => {
+      parciais.push(deliveries.map((delivery) => delivery.id));
+      // O detalhe ainda nao foi buscado quando o parcial chega.
+      expect(deliveriesApi.detail).not.toHaveBeenCalled();
+    });
+
+    expect(parciais).toEqual([['delivery-1']]);
+    expect(final[0]?.addresses).toHaveLength(1);
+  });
+
+  describe('aplicacao da listagem parcial', () => {
+    it('mantem o endereco que ja estava na tela quando o parcial vem sem ele', () => {
+      const anterior = [
+        { id: 'd1', status: 'COLLECTED', addresses: [{ type: 'PICKUP' }] },
+      ] as never as Parameters<typeof preserveKnownAddresses>[0];
+      const parcial = [{ id: 'd1', status: 'DELIVERED' }] as never as Parameters<
+        typeof preserveKnownAddresses
+      >[1];
+
+      const resultado = preserveKnownAddresses(anterior, parcial);
+
+      // O status novo vale; o endereco antigo sobrevive ate o detalhe chegar.
+      expect(resultado[0]).toEqual(
+        expect.objectContaining({ status: 'DELIVERED', addresses: [{ type: 'PICKUP' }] }),
+      );
+    });
+
+    it('nao ressuscita pedido que saiu da lista', () => {
+      const anterior = [{ id: 'd1' }, { id: 'd2' }] as never as Parameters<
+        typeof preserveKnownAddresses
+      >[0];
+      const parcial = [{ id: 'd2' }] as never as Parameters<typeof preserveKnownAddresses>[1];
+
+      expect(preserveKnownAddresses(anterior, parcial).map((item) => item.id)).toEqual(['d2']);
+    });
+  });
+
+  describe('detalhe provisorio para abrir o pedido sem spinner', () => {
+    it('aproveita o que a Home ja tem e zera so o que nao conhece', () => {
+      const detalhe = preliminaryDeliveryDetail({
+        id: 'd1',
+        displayNumber: 44,
+        companyName: 'Elite Pizzaria',
+        status: 'COLLECTED',
+        driverValue: 9.5,
+        addresses: [{ type: 'DROPOFF' }],
+      } as never);
+
+      expect(detalhe).toEqual(
+        expect.objectContaining({
+          displayNumber: 44,
+          companyName: 'Elite Pizzaria',
+          status: 'COLLECTED',
+          driverValue: 9.5,
+          addresses: [{ type: 'DROPOFF' }],
+        }),
+      );
+      // Historico vazio e o combinado: quem decide transicao usa o pedido
+      // recarregado da API, nunca este objeto.
+      expect(detalhe.statusHistory).toEqual([]);
+      expect(detalhe.driver).toBeNull();
+    });
+
+    it('nao quebra quando o pedido em memoria ainda nao tem enderecos', () => {
+      const detalhe = preliminaryDeliveryDetail({ id: 'd1', status: 'ACCEPTED' } as never);
+
+      expect(detalhe.addresses).toEqual([]);
     });
   });
 });

@@ -62,12 +62,24 @@ export function sortActiveDeliveries(
  * status explicitamente tambem evita que pedidos encerrados aparecam como
  * trabalho ativo quando o aplicativo e reaberto.
  */
-export async function getActiveDeliveries(accessToken: string): Promise<ActiveDeliveryItem[]> {
+export async function getActiveDeliveries(
+  accessToken: string,
+  /**
+   * Chamado assim que as listagens respondem, ANTES dos detalhes.
+   *
+   * A tela ja pode desenhar os cards com isso: numero, loja, status e valor
+   * estao todos aqui. So os enderecos faltam, e `activeDeliveryStops` sabe
+   * viver sem eles. Sem este passo o motoboy espera 4 listagens MAIS um
+   * detalhe por pedido para ver que tem pedido.
+   */
+  onPartial?: (deliveries: ActiveDeliveryItem[]) => void,
+): Promise<ActiveDeliveryItem[]> {
   const groups = await Promise.all(
     operationalStatuses.map((status) => deliveriesApi.list(accessToken, { status })),
   );
 
   const summaries = groups.flat();
+  onPartial?.(sortActiveDeliveries(summaries));
   const activeIds = new Set(summaries.map((delivery) => delivery.id));
   for (const deliveryId of acceptedAtByDeliveryId.keys()) {
     if (!activeIds.has(deliveryId)) acceptedAtByDeliveryId.delete(deliveryId);
@@ -146,5 +158,50 @@ export function decideAcceptedDeliveryOpening(params: {
   return {
     delivery,
     open: params.homeIsFocused && !params.handledDeliveryIds.has(delivery.id),
+  };
+}
+
+/**
+ * Aplica uma listagem nova sem perder o endereco que ja estava em memoria.
+ *
+ * O passo parcial de `getActiveDeliveries` vem sem `addresses`. Jogado direto
+ * na tela, ele trocaria a rua que o motoboy ja estava lendo pelo texto
+ * generico "Endereco de coleta" — e voltaria atras um segundo depois, quando
+ * os detalhes chegassem. Aqui o dado novo manda em tudo, menos no endereco
+ * quando ele ainda nao veio.
+ */
+export function preserveKnownAddresses(
+  previous: ReadonlyArray<ActiveDeliveryItem>,
+  incoming: ReadonlyArray<ActiveDeliveryItem>,
+): ActiveDeliveryItem[] {
+  const previousById = new Map(previous.map((delivery) => [delivery.id, delivery]));
+
+  return incoming.map((delivery) => {
+    const known = previousById.get(delivery.id);
+    if (!known?.addresses || delivery.addresses) return delivery;
+    return { ...delivery, addresses: known.addresses };
+  });
+}
+
+/**
+ * Versao provisoria do detalhe, montada com o que a Home ja tem em memoria.
+ *
+ * Abrir um pedido cobria a tela com um spinner ate a API responder, mesmo
+ * quando o aplicativo ja sabia numero, loja, status, valor e enderecos daquele
+ * pedido — ele acabou de desenhar tudo isso no cartao. O motoboy esperava de
+ * novo por dado que estava ali do lado.
+ *
+ * Os campos que so o detalhe traz vem VAZIOS de proposito: `statusHistory` e
+ * usado apenas por `operationWasApplied`, que recebe o pedido recarregado da
+ * API e nunca este objeto. Se isso mudar, esta funcao precisa mudar junto — um
+ * historico vazio tratado como verdade diria que nenhuma transicao aconteceu.
+ */
+export function preliminaryDeliveryDetail(item: ActiveDeliveryItem): DeliveryDetail {
+  return {
+    ...item,
+    addresses: item.addresses ?? [],
+    driver: null,
+    invoice: null,
+    statusHistory: [],
   };
 }

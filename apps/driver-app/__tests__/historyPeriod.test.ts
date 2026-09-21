@@ -1,4 +1,5 @@
 import {
+  defaultHistoryPeriod,
   formatHistoryDate,
   normalizeHistoryDate,
   normalizeHistoryPeriod,
@@ -24,5 +25,21 @@ describe('filtro de período do histórico do motoboy', () => {
 
   it('apresenta o período aplicado no formato brasileiro', () => {
     expect(formatHistoryDate('2026-08-27')).toBe('27/08/2026');
+  });
+});
+
+describe('periodo padrao do historico', () => {
+  it('abre nos ultimos 30 dias em vez de pedir a vida inteira', () => {
+    const periodo = defaultHistoryPeriod(new Date('2026-09-21T12:00:00Z'));
+
+    expect(periodo).toEqual({ from: '2026-08-22', to: '2026-09-21' });
+  });
+
+  it('usa datas que o proprio filtro da tela aceita', () => {
+    const periodo = defaultHistoryPeriod(new Date('2026-01-05T03:00:00Z'));
+
+    // Atravessa a virada de ano sem inventar data invalida.
+    expect(periodo.from).toBe('2025-12-06');
+    expect(normalizeHistoryPeriod(periodo.from ?? '', periodo.to ?? '')).toEqual(periodo);
   });
 });

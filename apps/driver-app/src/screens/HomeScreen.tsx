@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   AppState,
   BackHandler,
@@ -34,7 +35,12 @@ import { SegmentedTabs } from '../components/SegmentedTabs';
 import { colors } from '../theme/colors';
 import { deliveryOffersApi, driverPresenceApi } from '../lib/apiClient';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
-import { decideAcceptedDeliveryOpening, getActiveDeliveries } from '../lib/activeDeliveries';
+import {
+  decideAcceptedDeliveryOpening,
+  getActiveDeliveries,
+  preserveKnownAddresses,
+} from '../lib/activeDeliveries';
+import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
 import { activeDeliveryStops, pickupCountdownLabel } from '../lib/activeDeliveryPresentation';
 import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
@@ -216,6 +222,12 @@ export function HomeScreen({ navigation }: Props) {
   const [driverQueue, setDriverQueue] = useState<DriverDispatchQueueResult | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  /**
+   * Sem isto a lista vazia do primeiro instante era desenhada como
+   * "Aguardando uma nova oferta" — o aplicativo afirmava que ele nao tinha
+   * pedido nenhum enquanto os pedidos dele ainda estavam carregando.
+   */
+  const [listaAtivaCarregada, setListaAtivaCarregada] = useState(false);
   const [presenceLoading, setPresenceLoading] = useState(true);
   const [presenceError, setPresenceError] = useState<string | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
@@ -253,6 +265,14 @@ export function HomeScreen({ navigation }: Props) {
   const setWantsToBeAvailable = useDispatchStore((state) => state.setWantsToBeAvailable);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
+
+  /** Desenha os cards com a listagem, sem esperar o detalhe de cada pedido. */
+  function aplicarListagemParcial(parciais: ActiveDeliveryItem[]): void {
+    setActiveDeliveries(
+      preserveKnownAddresses(useDispatchStore.getState().activeDeliveries, parciais),
+    );
+    setListaAtivaCarregada(true);
+  }
 
   const isAvailable = availability === 'AVAILABLE';
   const queuedCompletionForBanner =
@@ -684,6 +704,18 @@ export function HomeScreen({ navigation }: Props) {
        * botoes Android que respondem quando o React Native esta suspenso.
        */
       await salvarSessaoNativa(API_BASE_URL, token);
+
+      /*
+        As entregas ativas nao dependem de presenca, de notificacao nem da fila
+        de conclusoes — so do token, que ja existe aqui. Esperar a corrente
+        inteira para so entao perguntar quais pedidos ele tem deixava a Home
+        vazia por toda a soma daquelas latencias. A consulta comeca agora e e
+        recolhida mais abaixo, onde o resultado e usado de fato.
+      */
+      const entregasAtivas = getActiveDeliveries(token, (parciais) => {
+        if (!cancelled) aplicarListagemParcial(parciais);
+      });
+      entregasAtivas.catch(() => undefined);
       const notificationReadiness = await verificarNotificacaoObrigatoria();
       // Uma finalizacao salva antes de o app fechar precisa ser enviada antes
       // de reconstruir a lista operacional vinda do servidor.
@@ -718,8 +750,9 @@ export function HomeScreen({ navigation }: Props) {
       }
 
       try {
-        const deliveries = await getActiveDeliveries(token);
+        const deliveries = await entregasAtivas;
         entregasAtivasConhecidas.current = true;
+        setListaAtivaCarregada(true);
         if (!cancelled) {
           setActiveDeliveries(deliveries);
           try {
@@ -776,7 +809,9 @@ export function HomeScreen({ navigation }: Props) {
             await recoverDesiredOnlinePresence(token, reconnectedPresence);
             if (cancelled) return;
 
-            const deliveries = await getActiveDeliveries(token).catch(() => null);
+            const deliveries = await getActiveDeliveries(token, aplicarListagemParcial).catch(
+              () => null,
+            );
             if (deliveries) entregasAtivasConhecidas.current = true;
             if (deliveries && !cancelled) {
               setActiveDeliveries(deliveries);
@@ -963,7 +998,9 @@ export function HomeScreen({ navigation }: Props) {
             useDispatchStore.getState().activeDeliveries.map((delivery) => delivery.id),
           );
           const conheciaEntregasAtivas = entregasAtivasConhecidas.current;
-          const deliveries = await getActiveDeliveries(atual).catch(() => null);
+          const deliveries = await getActiveDeliveries(atual, aplicarListagemParcial).catch(
+            () => null,
+          );
           if (deliveries && !cancelled) {
             setActiveDeliveries(deliveries);
             await syncDeliveryTracking(
@@ -1450,6 +1487,11 @@ export function HomeScreen({ navigation }: Props) {
                     }
                   />
                 ))
+              ) : !listaAtivaCarregada ? (
+                <View style={styles.carregandoLista}>
+                  <ActivityIndicator color={colors.actionSoft} />
+                  <Text style={styles.carregandoTexto}>Carregando seus pedidos...</Text>
+                </View>
               ) : (
                 <Vazio
                   mensagem={
@@ -1615,6 +1657,13 @@ const styles = StyleSheet.create({
   avisoAcao: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
   avisoContador: { color: colors.inkSoft, fontSize: 11, fontWeight: '700', marginTop: 6 },
 
+  carregandoLista: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 48,
+  },
+  carregandoTexto: { color: colors.inkMuted, fontSize: 15, fontWeight: '600' },
   lista: { flex: 1 },
   listaConteudo: { paddingBottom: 24 },
   listaPendentes: { gap: 10, paddingTop: 12 },
