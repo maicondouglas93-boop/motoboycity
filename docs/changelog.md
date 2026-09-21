@@ -13636,3 +13636,24 @@ memoria do processo e removidas no `finally`.
 Pendente de acao humana: **distribuir o `pilot.26`**. Ele nao foi enviado a
 ninguem ate aqui. Continua sem ensaio previo em aparelho — e agora sao dez
 mudancas acumuladas sem teste de campo, somando as quatro do `pilot.25`.
+
+### 2026-09-21 — `pilot.26` distribuido no mesmo dia do `pilot.25`
+
+O responsavel enviou o `pilot.26` aos motoboys poucas horas depois do
+`pilot.25`. Nenhum dos dois passou por ensaio em aparelho, e nenhum relato de
+campo chegou entre um e outro.
+
+Somando os dois, **dez mudancas de tela chegaram ao campo no mesmo dia**:
+confirmacao da entrega com endereco e valor, fim da troca de pedido sozinho,
+loja no cabecalho, tela concluida fechando o pedido, endereco por GPS no modal,
+etiqueta de urgente, Home separando carregando de vazio, cards antes dos
+detalhes, pedido abrindo sem spinner e historico em 30 dias.
+
+O que mais provavelmente vira pergunta, em ordem: **o historico**, que agora
+abre nos ultimos 30 dias e exige digitar data para ver mais antigo; e o
+**endereco aparecendo um instante depois** no cartao da Home, efeito do passo
+parcial. Nenhum dos dois e defeito, mas os dois mudam o que o motoboy via.
+
+Nao ha volta por APK: o Android recusa versionCode menor por cima, e desinstalar
+apagaria a fila local de finalizacoes pendentes. Correcao, se precisar, e para a
+frente num `pilot.27`.

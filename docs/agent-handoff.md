@@ -61,9 +61,9 @@ manual no banco compartilhado nem leitura/edicao de `.env` neste release.
 CI `Typecheck, tests and builds` aprovado para `7e13bce`.
 Ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
 contrato, testes e limitacoes em `pickup-arrival-alert.md` e `changelog.md`.
-APK `pilot.26` (versionCode 26) gerado e verificado em 21/09, **ainda nao
-distribuido**. O `pilot.25` saiu para os motoboys no mesmo dia, sem ensaio
-previo em aparelho. Ele carrega tambem o que
+APK `pilot.26` (versionCode 26) gerado, verificado e **enviado aos motoboys em
+21/09**, alguma horas depois do `pilot.25` e sem ensaio previo em aparelho.
+Dez mudancas de tela chegaram ao campo no mesmo dia, em dois APKs. Ele carrega tambem o que
 o `pilot.23` e o `pilot.24` carregavam, nenhum deles distribuido. Quatro
 mudancas de tela chegaram juntas ao campo: confirmacao da entrega, fim da troca
 de pedido sozinho, endereco por GPS no modal e etiqueta de urgente.
@@ -177,7 +177,7 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 53 migrations no repositorio, incluindo chegada na coleta. Build Render com `migrate deploy` concluido e readiness PostgreSQL ok; sem inspecao SQL direta do schema de producao |
-| APK nos aparelhos | O **`pilot.25`** foi enviado aos motoboys em 21/09/2026 pelo responsável. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo). Antes dele, o último instalado confirmado era o `pilot.19`, de 02/09 — `pilot.22`, `.23` e `.24` nunca foram distribuídos |
+| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de hoje |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
