@@ -13657,3 +13657,34 @@ parcial. Nenhum dos dois e defeito, mas os dois mudam o que o motoboy via.
 Nao ha volta por APK: o Android recusa versionCode menor por cima, e desinstalar
 apagaria a fila local de finalizacoes pendentes. Correcao, se precisar, e para a
 frente num `pilot.27`.
+
+### 2026-09-21 — Next 16.3.5: sai a vulnerabilidade critica dos paineis
+
+Avaliacao de seguranca pedida pelo responsavel. O `pnpm audit --prod` nunca
+tinha entrado na rotina, e apontou **26 vulnerabilidades conhecidas: 2 criticas
+e 13 altas**.
+
+A critica era o Next **16.3.0** nos dois paineis — execucao remota de codigo sem
+autenticacao, faixa vulneravel `>=16.0.0 <16.3.3`. Os paineis rodam em Vercel,
+Linux, e a falha e especifica de Windows; mas **a maquina de desenvolvimento e
+Windows**, entao `next dev` aqui estava exposto.
+
+Subidos `next` e `eslint-config-next` para **16.3.5** nos dois paineis — a mesma
+versao que o fork do Ligeirinho ja roda, entao nao e versao nova e sem uso. Apos
+o bump: **23 vulnerabilidades, nenhuma critica**.
+
+Um achado que virou correcao de mim mesmo, e nao de codigo: eu havia reportado
+que a rota de login nao tinha limite proprio de requisicao. **Tem.** As tres
+rotas de `auth` usam `AUTH_THROTTLE` de 5/min, e no Ligeirinho o login da
+plataforma tambem. A leitura anterior mostrou o corpo do metodo sem os
+decoradores acima dele. Nada foi alterado ali porque nada estava errado.
+
+Comandos: `tsc --noEmit` limpo nos dois paineis; `next build` concluido nos
+dois; Company **152/152 em 30 arquivos**. O `eslint` do ADM segue com os MESMOS
+dois erros de `react-hooks/rules-of-hooks` de 15/09, no mesmo arquivo e nas
+mesmas linhas — o bump nao trouxe erro novo.
+
+Continua em aberto: 12 vulnerabilidades altas, a maioria transitiva
+(`multer` por `@nestjs/platform-express`, `sharp`, `js-yaml`); token em
+`localStorage` valido por 7 dias sem refresh; e guarda de autenticacao por
+controller, que faz rota nova nascer publica se alguem esquecer o decorador.
