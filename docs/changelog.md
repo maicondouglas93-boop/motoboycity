@@ -13597,3 +13597,42 @@ Comandos: `tsc --noEmit` limpo; `npx vitest run` **152/152 em 30 arquivos**;
 sessao de empresa, e a porta 3000 desta maquina esta ocupada por outro projeto
 do responsavel. Altura do logo (56px) e o resultado do `mix-blend-multiply` sao
 decisoes de codigo que ninguem olhou renderizadas ainda.
+
+### 2026-09-21 — APK `pilot.26` com as melhorias de carregamento
+
+Publicacao autorizada. `dbd6422` (melhorias de carregamento), `d444189`
+(autoria da FM Software no alto do painel) e o bump `38a7773` enviados para
+`main`. Os dois paineis do Vercel ja subiram em success com `d444189`, entao a
+propaganda esta no ar; o deploy da API seguia em andamento na hora deste
+registro, com `/health/ready` respondendo ok e Postgres/Redis ok.
+
+Correcao de percurso no caminho: o primeiro commit juntou as melhorias do app e
+a propaganda do painel sob uma mensagem que so falava das melhorias. Foi
+desfeito com `reset --soft` e refeito em dois commits, cada um com o que a
+mensagem diz.
+
+APK compilado de `38a7773` em worktree curta `C:\m26`, JDK 21, mesma receita.
+**BUILD SUCCESSFUL em 8m17**, 427 tarefas. Artefato:
+`I:\MOTOboyCityeleases\motoboycity-0.1.0-pilot.26-vc26.apk`, **75.184.953
+bytes**, SHA-256
+`38CC19FC8A80F76FB2AD6B6C4072735808D1A5A6140B009F8858AB531F8ADCD9`, conferido
+igual entre origem e copia. `apksigner`: v2 valida com o certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`. `aapt`:
+versionCode 26, versionName `0.1.0-pilot.26`, minSdk 24, targetSdk 36, quatro
+ABIs. API oficial presente no bundle; `localhost:3333`, `127.0.0.1` e `10.0.2.2`
+ausentes.
+
+**Armadilha nova, documentada para a proxima vez.** A conferencia do bundle
+acusou "ausente" para `Identificando a rua` e `Buscando sua localizacao`, que
+estao no codigo. Nao era build velho: o Hermes guarda em **UTF-16** toda string
+com caractere nao-ASCII, e a busca lia o bundle como texto. Refeita nos bytes,
+nas duas codificacoes, as duas apareceram (offsets 438218 e 427290), enquanto
+`Carregando seus pedidos`, que nao tem acento, estava em UTF-8. Conferencia de
+texto acentuado em bundle Hermes **precisa ser feita nos bytes**.
+
+Worktree removida com `rmdir /s /q` e `git worktree prune`. Senhas abertas so na
+memoria do processo e removidas no `finally`.
+
+Pendente de acao humana: **distribuir o `pilot.26`**. Ele nao foi enviado a
+ninguem ate aqui. Continua sem ensaio previo em aparelho — e agora sao dez
+mudancas acumuladas sem teste de campo, somando as quatro do `pilot.25`.
