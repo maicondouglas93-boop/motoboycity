@@ -47,6 +47,8 @@ export interface DeliveryListItem {
   externalOrderNumber: string | null;
   driverNote: string | null;
   customerPaymentMethod: CustomerPaymentMethod | null;
+  /** Etiqueta de urgente, marcada pela loja na criacao. */
+  urgent: boolean;
   requiresDeliveryProof: boolean;
   requiresCollectionRecipient: boolean;
   pickupSurchargeChargedToDriver: boolean;
@@ -104,6 +106,7 @@ export interface CreateDeliveryPayload {
   driverNote?: string;
   customerPaymentMethod?: CustomerPaymentMethod;
   requiresReturn?: boolean;
+  urgent?: boolean;
   requiresDeliveryProof?: boolean;
   requiresCollectionRecipient?: boolean;
   pickupSurchargeChargedToDriver?: boolean;
@@ -197,6 +200,21 @@ export interface DeliveryDispatchAuditItem {
   offeredAt: string;
   respondedAt: string | null;
   response: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED';
+}
+
+/**
+ * Rua identificada para a coordenada que o motoboy vai gravar como destino.
+ *
+ * Existe para ele CONFERIR antes de confirmar, no pedido criado sem endereco.
+ * Todos os campos vem nulos quando o Google nao identifica a coordenada: isso
+ * nao impede a entrega, so tira a conferencia daquele caso.
+ */
+export interface DeliveryDestinationPreview {
+  street: string | null;
+  number: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
 }
 
 export interface MarkDeliveredPayload {
@@ -359,6 +377,7 @@ export interface AvailableDeliveryItem {
   distanceKm: number | null;
   driverValue: number | null;
   requiresReturn: boolean;
+  urgent: boolean;
   batchId: string | null;
   addresses: DeliveryAddressItem[];
   createdAt: string;

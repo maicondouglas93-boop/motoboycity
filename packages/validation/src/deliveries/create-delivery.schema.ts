@@ -37,6 +37,11 @@ export const createDeliverySchema = z
     driverNote: z.string().trim().min(1).max(500).optional(),
     customerPaymentMethod: z.enum(['PREPAID', 'CARD', 'CASH', 'PIX']).optional(),
     requiresReturn: z.boolean().optional().default(false),
+    /**
+     * Sinalizacao para o motoboy, marcada pela loja. NAO muda fila de
+     * despacho, ordem de oferta nem preco — so aparece como etiqueta.
+     */
+    urgent: z.boolean().optional().default(false),
     requiresDeliveryProof: z.boolean().optional().default(false),
     requiresCollectionRecipient: z.boolean().optional().default(false),
     pickupSurchargeChargedToDriver: z.boolean().optional().default(false),

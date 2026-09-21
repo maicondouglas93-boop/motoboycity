@@ -14,7 +14,7 @@ export const printDelivery: OperationalDeliveryItem = {
   requiresReturn: false, returnValue: null, paymentMethod: 'BILLED',
   recipientName: 'Cliente de exemplo', recipientPhone: '(33) 90000-0000',
   externalOrderNumber: 'LOJA-42', driverNote: 'Tocar a campainha.\nEntregar na portaria.',
-  customerPaymentMethod: 'CASH', requiresDeliveryProof: false,
+  customerPaymentMethod: 'CASH', urgent: false, requiresDeliveryProof: false,
   requiresCollectionRecipient: false, pickupSurchargeChargedToDriver: false,
   surchargeLabel: 'Taxa de teste', surchargeValue: 1,
   createdAt: '2026-09-10T15:30:00.000Z', statusChangedAt: '2026-09-10T15:30:00.000Z',

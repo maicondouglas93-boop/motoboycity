@@ -116,6 +116,7 @@ describe('AdminDeliveriesService', () => {
       serviceTypeId: 'service-1',
       destinationKnownAtCreation: false,
       requiresReturn: false,
+      urgent: false,
       requiresDeliveryProof: false,
       requiresCollectionRecipient: false,
       pickupSurchargeChargedToDriver: false,

@@ -92,6 +92,14 @@ coletar, entregar e retornar são atos físicos, sem sobreposição do admin:
 | `/deliveries/:id/fail` | por item, só depois da coleta |
 | `/deliveries/:id/complete-return` | filtra os itens do lote que exigem retorno |
 
+Ao lado delas existe uma **consulta**, `POST /deliveries/:id/destination-preview`,
+também `DriverOnlyGuard`: devolve a rua da coordenada onde o motoboy está para
+ele conferir antes de fechar um pedido criado sem endereço. Não grava nada, e é
+`POST` porque coordenada de pessoa não vai em query string. Só responde para o
+motoboy dono do pedido, com o pedido `COLLECTED` e sem endereço cadastrado — as
+três travas que impedem a rota de virar geocodificação livre paga pela chave do
+projeto. Quem grava o destino continua sendo `/deliver`.
+
 A proximidade do retorno é medida em **linha reta** (Haversine, não rota real)
 entre a posição informada e o endereço de coleta da empresa.
 

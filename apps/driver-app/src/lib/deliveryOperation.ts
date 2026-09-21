@@ -1,4 +1,9 @@
-import type { DeliveryAddressItem, DeliveryDetail, DeliveryStatus } from '@motoboycity/types';
+import type {
+  DeliveryAddressItem,
+  DeliveryDestinationPreview,
+  DeliveryDetail,
+  DeliveryStatus,
+} from '@motoboycity/types';
 
 const OPERATION_TIME_ZONE = 'America/Sao_Paulo';
 
@@ -206,11 +211,32 @@ export function deliverConfirmationSummary(
     destination: destinationLabel(delivery, dropoff),
     gpsNotice: delivery.destinationKnownAtCreation
       ? null
-      : 'Este pedido foi criado sem endereço de destino. Ao confirmar, sua localização atual vira o destino e define o valor da entrega.',
+      : 'Este pedido foi criado sem endereço. O endereço acima é onde você está agora: é ele que será gravado como destino e usado no valor da entrega.',
     driverValue: formatDeliveryValue(delivery.driverValue),
     returnValue:
       delivery.requiresReturn && delivery.returnValue !== null
         ? formatDeliveryValue(delivery.returnValue)
         : null,
   };
+}
+
+/**
+ * Endereco identificado para a coordenada onde o motoboy esta, formatado como
+ * o resto da tela formata endereco.
+ *
+ * Devolve `null` quando o Google nao identificou nada de util — e ai a tela diz
+ * isso com todas as letras, em vez de mostrar uma linha vazia que pareceria
+ * endereco conferido.
+ */
+export function capturedDestinationLabel(
+  preview: DeliveryDestinationPreview | null | undefined,
+): string | null {
+  if (!preview) return null;
+
+  const streetLine = [preview.street, preview.number].filter(Boolean).join(', ');
+  const placeLine = [preview.city, preview.state].filter(Boolean).join(' - ');
+  const placeWithZip = [placeLine, preview.zip].filter(Boolean).join(', ');
+  const lines = [streetLine, placeWithZip].filter(Boolean);
+
+  return lines.length > 0 ? lines.join('\n') : null;
 }

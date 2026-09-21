@@ -32,6 +32,7 @@ test('renderiza varios pendentes e mantém uma ação independente por pedido', 
           amountLabel="R$ 9,20"
           stops={stops}
           batch={false}
+          urgent={false}
           accepting={false}
           disabled={false}
           onAccept={acceptFirst}
@@ -45,6 +46,7 @@ test('renderiza varios pendentes e mantém uma ação independente por pedido', 
           amountLabel="R$ 11,00"
           stops={stops}
           batch={false}
+          urgent={false}
           accepting={false}
           disabled={false}
           onAccept={acceptSecond}
@@ -76,6 +78,7 @@ test('mostra o pedido em aceite e desabilita nova resposta', async () => {
         serviceTypeName="Motoboy"
         distanceLabel="2 km"
         amountLabel="R$ 15,00"
+        urgent={false}
         stops={stops}
         batch
         accepting

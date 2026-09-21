@@ -20,6 +20,7 @@ export interface DeliveryOfferItem {
   platformValue: number | null;
   distanceKm: number | null;
   requiresReturn: boolean;
+  urgent: boolean;
 }
 
 export interface DeliveryOfferPayload {
@@ -33,6 +34,8 @@ export interface DeliveryOfferPayload {
   platformValue: number | null;
   distanceKm: number | null;
   requiresReturn: boolean;
+  /** Verdadeiro quando QUALQUER pedido da oferta esta marcado como urgente. */
+  urgent: boolean;
   deliveries: DeliveryOfferItem[];
   batchId?: string | null;
   deliveryCount?: number;

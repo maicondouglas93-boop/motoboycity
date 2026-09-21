@@ -12,6 +12,7 @@ type PendingDeliveryCardProps = {
   amountLabel: string;
   stops: ReadonlyArray<RouteStop>;
   batch: boolean;
+  urgent: boolean;
   accepting: boolean;
   disabled: boolean;
   onAccept: () => void;
@@ -27,6 +28,7 @@ export function PendingDeliveryCard({
   amountLabel,
   stops,
   batch,
+  urgent,
   accepting,
   disabled,
   onAccept,
@@ -53,6 +55,7 @@ export function PendingDeliveryCard({
         <Text style={styles.service} numberOfLines={1}>
           {serviceTypeName}
         </Text>
+        {urgent ? <Text style={styles.urgente}>URGENTE</Text> : null}
         {batch ? <Text style={styles.batch}>Lote</Text> : null}
       </View>
 
@@ -95,6 +98,16 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   order: { color: colors.ink, fontSize: 12, fontWeight: '800' },
   service: { flex: 1, color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+  urgente: {
+    overflow: 'hidden',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 7,
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
   batch: {
     overflow: 'hidden',
     paddingHorizontal: 7,

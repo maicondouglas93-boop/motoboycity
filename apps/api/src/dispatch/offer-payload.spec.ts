@@ -21,6 +21,7 @@ function entrega(overrides: Record<string, unknown> = {}) {
     platformValue: 2,
     distanceKm: 3,
     requiresReturn: false,
+    urgent: false,
     batchId: null,
     serviceType: { name: 'Padrão' },
     addresses: [endereco],
@@ -151,5 +152,34 @@ describe('buildOfferPayload', () => {
     });
 
     expect(payload.requiresReturn).toBe(true);
+  });
+// O motoboy leva os dois pedidos juntos: a pressa de um manda no percurso
+  // inteiro, entao a etiqueta vale para a oferta toda.
+  it('marca a oferta inteira como urgente quando um pedido do lote esta urgente', () => {
+    const payload = buildOfferPayload({
+      offerId: 'offer-1',
+      principal: principal({ batchId: 'batch-1', urgent: false }),
+      entregas: [
+        entrega({ batchId: 'batch-1', urgent: false }),
+        entrega({ id: 'delivery-2', batchId: 'batch-1', urgent: true }),
+      ],
+      expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
+    });
+
+    expect(payload.urgent).toBe(true);
+    expect(payload.deliveries.map((item) => item.urgent)).toEqual([false, true]);
+  });
+
+  it('pedido avulso sem marcacao nao vira urgente', () => {
+    const payload = buildOfferPayload({
+      offerId: 'offer-1',
+      principal: principal(),
+      entregas: [entrega()],
+      expiresInSeconds: 120,
+      expiresAtEpochMs: 123_000,
+    });
+
+    expect(payload.urgent).toBe(false);
   });
 });

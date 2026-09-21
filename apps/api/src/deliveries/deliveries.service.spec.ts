@@ -56,6 +56,7 @@ const idempotencySinglePayload = {
   destinationKnownAtCreation: true,
   dropoffAddress: dropoffPayload,
   requiresReturn: false,
+  urgent: false,
   requiresDeliveryProof: false,
   requiresCollectionRecipient: false,
   pickupSurchargeChargedToDriver: false,
@@ -79,6 +80,7 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     serviceType: { name: 'Moto' },
     status: 'AWAITING_DRIVER',
     destinationKnownAtCreation: true,
+    urgent: false,
     distanceKm: { toString: () => '5.00' },
     totalValue: { toString: () => '12.50' },
     driverValue: { toString: () => '10.00' },
@@ -266,6 +268,7 @@ describe('DeliveriesService', () => {
       destinationKnownAtCreation: true,
       dropoffAddress: dropoffPayload,
       requiresReturn: false,
+      urgent: false,
       requiresDeliveryProof: false,
       requiresCollectionRecipient: false,
       pickupSurchargeChargedToDriver: false,
@@ -434,6 +437,7 @@ describe('DeliveriesService', () => {
         serviceTypeId: 'st-1',
         destinationKnownAtCreation: false,
         requiresReturn: false,
+        urgent: false,
         requiresDeliveryProof: false,
         requiresCollectionRecipient: false,
         pickupSurchargeChargedToDriver: false,
@@ -600,6 +604,7 @@ describe('DeliveriesService', () => {
       destinationKnownAtCreation: true,
       dropoffAddress: dropoffPayload,
       requiresReturn: false,
+      urgent: false,
       requiresDeliveryProof: false,
       requiresCollectionRecipient: false,
       pickupSurchargeChargedToDriver: false,
@@ -688,6 +693,7 @@ describe('DeliveriesService', () => {
       destinationKnownAtCreation: true,
       dropoffAddress: { ...dropoffPayload, number: '250' },
       requiresReturn: true,
+      urgent: false,
       requiresDeliveryProof: true,
       requiresCollectionRecipient: false,
       pickupSurchargeChargedToDriver: false,
@@ -824,6 +830,7 @@ describe('DeliveriesService', () => {
           destinationKnownAtCreation: true,
           dropoffAddress: dropoffPayload,
           requiresReturn: false,
+          urgent: false,
           requiresDeliveryProof: false,
           requiresCollectionRecipient: false,
           pickupSurchargeChargedToDriver: false,
@@ -833,6 +840,7 @@ describe('DeliveriesService', () => {
           destinationKnownAtCreation: true,
           dropoffAddress: { ...dropoffPayload, number: '201' },
           requiresReturn: true,
+          urgent: false,
           requiresDeliveryProof: false,
           requiresCollectionRecipient: false,
           pickupSurchargeChargedToDriver: false,
@@ -924,6 +932,7 @@ describe('DeliveriesService', () => {
         serviceTypeId: 'st-1',
         destinationKnownAtCreation: false,
         requiresReturn: false,
+        urgent: false,
         requiresDeliveryProof: false,
         requiresCollectionRecipient: false,
         pickupSurchargeChargedToDriver: false,
@@ -1325,6 +1334,7 @@ describe('DeliveriesService', () => {
           paymentMethod: 'BILLED',
           customerPaymentMethod: null,
           requiresReturn: false,
+          urgent: false,
           requiresDeliveryProof: false,
           requiresCollectionRecipient: false,
           destinationKnownAtCreation: true,
@@ -2345,6 +2355,103 @@ describe('DeliveriesService', () => {
       expect(tx.delivery.updateMany).not.toHaveBeenCalled();
       expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
       expect(pricingService.quote).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('destinationPreview', () => {
+    function pedidoSemEnderecoColetado() {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+        }),
+      );
+    }
+
+    it('identifica a rua da coordenada sem gravar nada', async () => {
+      pedidoSemEnderecoColetado();
+      googleMapsService.reverseGeocode.mockResolvedValue({
+        street: 'Rua Macanaiba',
+        number: '14',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).resolves.toEqual({
+        street: 'Rua Macanaiba',
+        number: '14',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+      expect(googleMapsService.reverseGeocode).toHaveBeenCalledWith({ lat: -20.13, lng: -41.6 });
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(prisma.deliveryAddress.updateMany).not.toHaveBeenCalled();
+    });
+
+    // A conferencia e um conforto; a entrega e o trabalho. Google fora do ar
+    // nao pode prender mercadoria na mao do motoboy.
+    it('devolve campos nulos quando o Google falha, em vez de estourar', async () => {
+      pedidoSemEnderecoColetado();
+      googleMapsService.reverseGeocode.mockRejectedValue(new Error('Google indisponivel'));
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).resolves.toEqual({ street: null, number: null, city: null, state: null, zip: null });
+    });
+
+    it('recusa pedido de outro motoboy', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-2',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+        }),
+      );
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(googleMapsService.reverseGeocode).not.toHaveBeenCalled();
+    });
+
+    // Sem esta trava a rota viraria geocodificacao livre para qualquer motoboy
+    // autenticado, paga pela chave do Google do projeto.
+    it('recusa pedido que ja tem endereco cadastrado', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: true,
+        }),
+      );
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(googleMapsService.reverseGeocode).not.toHaveBeenCalled();
+    });
+
+    it('recusa antes da coleta', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'ACCEPTED',
+          destinationKnownAtCreation: false,
+        }),
+      );
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

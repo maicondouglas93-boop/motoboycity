@@ -3,6 +3,7 @@ import {
   createDeliverySchema,
   createDeliveryBatchSchema,
   completeReturnSchema,
+  destinationPreviewSchema,
   markDeliveredSchema,
   markCollectedSchema,
   markFailedSchema,
@@ -26,8 +27,10 @@ import {
   type SearchDeliveriesQuery,
   type DeliverySummaryQuery,
   type MarkDeliveredPayload,
+  type DestinationPreviewPayload,
 } from '@motoboycity/validation';
 import type {
+  DeliveryDestinationPreview,
   DeliveryOperationsResult,
   DeliverySearchResult,
   DeliverySummaryResult,
@@ -196,6 +199,21 @@ export class DeliveriesController {
     @CurrentUser() user: User,
   ): Promise<DeliveryDetail> {
     return this.deliveriesService.markDelivered(user, id, body);
+  }
+
+  /**
+   * Consulta de leitura, sem transicao de status: qual rua corresponde a
+   * coordenada onde o motoboy esta. E `POST` por causa do corpo — coordenada
+   * de pessoa nao vai em query string, onde acabaria em log de acesso.
+   */
+  @Post(':id/destination-preview')
+  @UseGuards(DriverOnlyGuard)
+  destinationPreview(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(destinationPreviewSchema)) body: DestinationPreviewPayload,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDestinationPreview> {
+    return this.deliveriesService.destinationPreview(user, id, body);
   }
 
   @Patch(':id/complete-return')

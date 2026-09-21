@@ -18,6 +18,7 @@ import type {
   DeliveryStageTimesQuery,
   DeliverySummaryQuery,
   MarkDeliveredPayload,
+  DestinationPreviewPayload,
   MarkCollectedPayload,
   MarkFailedPayload,
   ReturnToQueuePayload,
@@ -26,6 +27,7 @@ import type {
 } from '@motoboycity/validation';
 import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type {
+  DeliveryDestinationPreview,
   DeliveryOperationsResult,
   DeliveryCompletionErrorCode,
   DeliveryStageTimesResult,
@@ -187,6 +189,7 @@ export interface DeliveryListItem {
   externalOrderNumber: string | null;
   driverNote: string | null;
   customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
+  urgent: boolean;
   requiresDeliveryProof: boolean;
   requiresCollectionRecipient: boolean;
   pickupSurchargeChargedToDriver: boolean;
@@ -547,6 +550,7 @@ export class DeliveriesService {
           externalOrderNumber: payload.externalOrderNumber ?? null,
           driverNote: payload.driverNote ?? null,
           customerPaymentMethod: payload.customerPaymentMethod ?? null,
+          urgent: payload.urgent ?? false,
           requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
           requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
           pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
@@ -723,6 +727,7 @@ export class DeliveriesService {
             externalOrderNumber: payload.externalOrderNumber,
             driverNote: payload.driverNote,
             customerPaymentMethod: payload.customerPaymentMethod,
+            urgent: payload.urgent ?? false,
             requiresDeliveryProof: payload.requiresDeliveryProof ?? false,
             requiresCollectionRecipient: payload.requiresCollectionRecipient ?? false,
             pickupSurchargeChargedToDriver: payload.pickupSurchargeChargedToDriver ?? false,
@@ -927,6 +932,7 @@ export class DeliveriesService {
               externalOrderNumber: item.externalOrderNumber,
               driverNote: item.driverNote,
               customerPaymentMethod: item.customerPaymentMethod,
+              urgent: item.urgent ?? false,
               requiresDeliveryProof: item.requiresDeliveryProof ?? false,
               requiresCollectionRecipient: item.requiresCollectionRecipient ?? false,
               pickupSurchargeChargedToDriver: item.pickupSurchargeChargedToDriver ?? false,
@@ -2260,6 +2266,76 @@ export class DeliveriesService {
     return `${labels[payload.reason]} (${where})${note}`;
   }
 
+  /**
+   * Rua da coordenada onde o motoboy esta, para ele conferir ANTES de fechar
+   * uma entrega criada sem endereco.
+   *
+   * Ate aqui essa rua so era identificada depois, quando o admin ou a empresa
+   * abria o pedido — de proposito, para nao por o Google no caminho critico do
+   * motoboy. Este metodo nao muda isso: ele nao grava nada, nao altera status
+   * nem preco, e falha em silencio devolvendo campos nulos. Uma chave vencida
+   * ou uma coordenada que o Google nao conhece tira a conferencia daquela
+   * entrega; nunca impede a entrega de ser fechada.
+   *
+   * Quem grava o destino continua sendo `markDelivered`, com a MESMA coordenada
+   * que o aplicativo mostrou aqui — e o aplicativo que congela o fix entre a
+   * conferencia e a confirmacao.
+   */
+  async destinationPreview(
+    user: User,
+    id: string,
+    payload: DestinationPreviewPayload,
+  ): Promise<DeliveryDestinationPreview> {
+    const vazio: DeliveryDestinationPreview = {
+      street: null,
+      number: null,
+      city: null,
+      state: null,
+      zip: null,
+    };
+
+    const driver = await this.findDriverForUser(user);
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      select: { driverId: true, status: true, destinationKnownAtCreation: true },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (delivery.driverId !== driver.id) {
+      throw new ForbiddenException('Este pedido não está atribuído a este motoboy.');
+    }
+    if (delivery.destinationKnownAtCreation) {
+      throw new ConflictException('Este pedido já tem endereço de entrega cadastrado.');
+    }
+    if (delivery.status !== 'COLLECTED') {
+      throw new ConflictException(
+        'O pedido precisa estar coletado para conferir o endereço da entrega.',
+      );
+    }
+
+    try {
+      const resolvido = await this.googleMapsService.reverseGeocode({
+        lat: payload.lat,
+        lng: payload.lng,
+      });
+      if (!resolvido) return vazio;
+
+      return {
+        street: resolvido.street,
+        number: resolvido.number,
+        city: resolvido.city,
+        state: resolvido.state,
+        zip: resolvido.zip,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao identificar o endereco atual do motoboy na entrega ${id}: ${String(error)}`,
+      );
+      return vazio;
+    }
+  }
+
   async markDelivered(
     user: User,
     id: string,
@@ -3327,6 +3403,7 @@ export class DeliveriesService {
     externalOrderNumber: string | null;
     driverNote: string | null;
     customerPaymentMethod: 'PREPAID' | 'CARD' | 'CASH' | 'PIX' | null;
+    urgent: boolean;
     requiresDeliveryProof: boolean;
     requiresCollectionRecipient: boolean;
     pickupSurchargeChargedToDriver: boolean;
@@ -3363,6 +3440,7 @@ export class DeliveriesService {
       externalOrderNumber: delivery.externalOrderNumber,
       driverNote: delivery.driverNote,
       customerPaymentMethod: delivery.customerPaymentMethod,
+      urgent: delivery.urgent,
       requiresDeliveryProof: delivery.requiresDeliveryProof,
       requiresCollectionRecipient: delivery.requiresCollectionRecipient,
       pickupSurchargeChargedToDriver: delivery.pickupSurchargeChargedToDriver,

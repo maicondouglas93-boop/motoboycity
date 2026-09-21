@@ -15,7 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
-import type { DeliveryDetail, DeliveryStatus, MarkDeliveredPayload } from '@motoboycity/types';
+import type {
+  DeliveryDestinationPreview,
+  DeliveryDetail,
+  DeliveryStatus,
+  MarkDeliveredPayload,
+} from '@motoboycity/types';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
@@ -38,6 +43,7 @@ import {
   type PendingDeliveryCompletion,
 } from '../lib/deliveryCompletionOutbox';
 import {
+  capturedDestinationLabel,
   deliverConfirmationSummary,
   deliveryOperationCopy,
   deliveryPaymentLabel,
@@ -61,6 +67,22 @@ import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { useDispatchStore } from '../store/dispatchStore';
 import { colors } from '../theme/colors';
+
+/**
+ * Conferencia do endereco no pedido criado sem destino.
+ *
+ * O motoboy entrega, para no ponto e toca em "Pedido entregue": e ali que a
+ * coordenada nasce. O modal mostra a rua DESSA coordenada, e a mesma que vai
+ * ser gravada — por isso o fix fica congelado entre a conferencia e a
+ * confirmacao, em vez de ser capturado de novo no toque.
+ */
+type ConferenciaDestino =
+  | { estado: 'capturando' }
+  | { estado: 'conferido'; endereco: string }
+  /** Houve coordenada, mas o Google nao devolveu rua utilizavel. */
+  | { estado: 'semEndereco' }
+  /** Nao houve coordenada: sem ela o servidor recusa esta entrega. */
+  | { estado: 'semLocalizacao' };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
 type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
@@ -134,6 +156,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [problemOpen, setProblemOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [deliverConfirmationOpen, setDeliverConfirmationOpen] = useState(false);
+  const [conferenciaDestino, setConferenciaDestino] = useState<ConferenciaDestino | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [loading, setLoading] = useState(true);
@@ -154,6 +177,13 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const previousPendingCompletionId = useRef<string | null>(null);
   const pendingRefreshVersion = useRef(0);
   const operationInFlight = useRef(false);
+  /**
+   * Fix mostrado no modal, guardado para ser O GRAVADO. Recapturar no toque
+   * de confirmar registraria uma rua diferente da que ele acabou de conferir.
+   */
+  const fixConferido = useRef<LocationFix | null>(null);
+  /** Descarta resposta de uma conferencia que o motoboy ja abandonou. */
+  const conferenciaVersao = useRef(0);
   const collectionLocationWarmup = useRef<{
     startedAt: number;
     promise: Promise<{ ok: true; fix: LocationFix | null } | { ok: false; error: unknown }>;
@@ -377,6 +407,52 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     const deliveries = await getActiveDeliveries(token);
     setActiveDeliveries(deliveries);
     return deliveries;
+  }
+
+  /**
+   * Captura onde o motoboy esta e pergunta ao servidor que rua e essa.
+   *
+   * Roda ao ABRIR o modal, nao ao confirmar: o ponto que interessa e onde ele
+   * parou para entregar. A consulta nao grava nada e nunca impede a entrega —
+   * falhar aqui so tira a conferencia, e o aviso diz isso na tela.
+   */
+  async function conferirDestinoAtual(deliveryId: string): Promise<void> {
+    const versao = ++conferenciaVersao.current;
+    fixConferido.current = null;
+    setConferenciaDestino({ estado: 'capturando' });
+
+    const fix = await captureCompletionLocation({ improveImpreciseFix: true }).catch(() => null);
+    if (versao !== conferenciaVersao.current) return;
+    if (!fix) {
+      setConferenciaDestino({ estado: 'semLocalizacao' });
+      return;
+    }
+    fixConferido.current = fix;
+
+    const token = await session.getToken();
+    if (versao !== conferenciaVersao.current) return;
+    if (!token) {
+      setConferenciaDestino({ estado: 'semEndereco' });
+      return;
+    }
+
+    const preview = await deliveriesApi
+      .destinationPreview(token, deliveryId, {
+        lat: fix.lat,
+        lng: fix.lng,
+        ...(fix.accuracy !== undefined && { accuracy: fix.accuracy }),
+      })
+      .catch(() => null as DeliveryDestinationPreview | null);
+    if (versao !== conferenciaVersao.current) return;
+
+    const endereco = capturedDestinationLabel(preview);
+    setConferenciaDestino(endereco ? { estado: 'conferido', endereco } : { estado: 'semEndereco' });
+  }
+
+  function encerrarConferencia(): void {
+    conferenciaVersao.current += 1;
+    fixConferido.current = null;
+    setConferenciaDestino(null);
   }
 
   /**
@@ -669,10 +745,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       } else if (nextOperation === 'deliver') {
         // O fix e congelado ANTES de salvar a acao. Se ele define o preco, uma
         // tentativa posterior nunca pode recapturar outra rua por engano.
+        //
+        // No pedido sem endereco o fix ja foi congelado quando o modal abriu, e
+        // e ELE que vai: foi essa rua que o motoboy leu e confirmou. Capturar de
+        // novo aqui poderia gravar outra, alguns metros e uma esquina adiante.
         const payload = posicaoParaEnvio(
-          await captureCompletionLocation({
-            improveImpreciseFix: !delivery.destinationKnownAtCreation,
-          }),
+          fixConferido.current ??
+            (await captureCompletionLocation({
+              improveImpreciseFix: !delivery.destinationKnownAtCreation,
+            })),
         );
         const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
         if (queued === undefined) return;
@@ -809,6 +890,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       // fila local, recusa ou erro — e contado na propria tela, e o modal
       // aberto por cima so esconderia esse aviso.
       setDeliverConfirmationOpen(false);
+      encerrarConferencia();
     }
   }
 
@@ -904,7 +986,10 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
 
   function handlePrimaryAction() {
     if (!action || primaryBusy) return;
-    if (canRetryDeliveryGps) {
+    // Tentar o GPS de novo captura outra posicao — e outra posicao pode ser
+    // outra rua. Tambem passa pela conferencia, senao ele repetiria a acao sem
+    // ver o endereco que ela vai gravar desta vez.
+    if (canRetryDeliveryGps && currentDelivery.destinationKnownAtCreation) {
       runOperation('deliver').catch(() => undefined);
       return;
     }
@@ -912,6 +997,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     // chance, o motoboy le a rua e o valor no modal e confirma ali.
     if (action === 'deliver') {
       setDeliverConfirmationOpen(true);
+      if (!currentDelivery.destinationKnownAtCreation) {
+        conferirDestinoAtual(currentDelivery.id).catch(() => {
+          setConferenciaDestino({ estado: 'semLocalizacao' });
+        });
+      }
       return;
     }
 
@@ -1028,6 +1118,7 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             <Text style={styles.brand}>motoboy</Text>
           </View>
 
+          {delivery.urgent ? <Text style={styles.urgentLabel}>PEDIDO URGENTE</Text> : null}
           {delivery.batchId ? <Text style={styles.batchLabel}>Pedido em lote</Text> : null}
 
           {delivery.status === 'ACCEPTED' ? (
@@ -1209,18 +1300,29 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       <DeliverConfirmationModal
         visible={deliverConfirmationOpen}
         summary={deliverConfirmationSummary(currentDelivery)}
+        conferencia={conferenciaDestino}
         confirmLabel={
-          currentDelivery.destinationKnownAtCreation
-            ? operationBusy
+          conferenciaDestino?.estado === 'capturando'
+            ? 'Buscando endereço...'
+            : operationBusy
               ? 'Confirmando...'
               : 'Confirmar entrega'
-            : operationBusy
-              ? 'Capturando GPS...'
-              : 'Confirmar com GPS'
         }
-        disabled={controlsBusy}
+        disabled={
+          primaryBusy ||
+          conferenciaDestino?.estado === 'capturando' ||
+          conferenciaDestino?.estado === 'semLocalizacao'
+        }
+        onRetry={() => {
+          conferirDestinoAtual(currentDelivery.id).catch(() => {
+            setConferenciaDestino({ estado: 'semLocalizacao' });
+          });
+        }}
         onConfirm={() => runOperation('deliver').catch(() => undefined)}
-        onClose={() => setDeliverConfirmationOpen(false)}
+        onClose={() => {
+          setDeliverConfirmationOpen(false);
+          encerrarConferencia();
+        }}
       />
 
       <Modal
@@ -1398,15 +1500,20 @@ function ConfirmationModal({
 function DeliverConfirmationModal({
   visible,
   summary,
+  conferencia,
   confirmLabel,
   disabled,
+  onRetry,
   onConfirm,
   onClose,
 }: {
   visible: boolean;
   summary: DeliverConfirmationSummary;
+  /** Preenchido so no pedido sem endereco, onde a rua vem do GPS de agora. */
+  conferencia: ConferenciaDestino | null;
   confirmLabel: string;
   disabled: boolean;
+  onRetry: () => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -1427,7 +1534,29 @@ function DeliverConfirmationModal({
           >
             <View style={styles.confirmBlock}>
               <Text style={styles.confirmBlockLabel}>Endereço de entrega</Text>
-              <Text style={styles.confirmAddress}>{summary.destination}</Text>
+              {conferencia === null ? (
+                <Text style={styles.confirmAddress}>{summary.destination}</Text>
+              ) : conferencia.estado === 'capturando' ? (
+                <View style={styles.confirmLoading}>
+                  <ActivityIndicator color={colors.actionSoft} />
+                  <Text style={styles.confirmFallback}>Buscando o endereço onde você está...</Text>
+                </View>
+              ) : conferencia.estado === 'conferido' ? (
+                <Text style={styles.confirmAddress}>{conferencia.endereco}</Text>
+              ) : conferencia.estado === 'semEndereco' ? (
+                <Text style={styles.confirmFallback}>
+                  Não foi possível identificar a rua deste ponto. Sua localização será registrada
+                  como destino mesmo assim.
+                </Text>
+              ) : (
+                <View style={styles.confirmRetry}>
+                  <Text style={styles.confirmFallback}>
+                    Não foi possível obter sua localização, e sem ela este pedido não pode ser
+                    fechado. Vá para um lugar aberto e tente de novo.
+                  </Text>
+                  <PrimaryButton label="Tentar de novo" variant="outline" onPress={onRetry} />
+                </View>
+              )}
             </View>
 
             <View style={styles.confirmBlock}>
@@ -1443,7 +1572,8 @@ function DeliverConfirmationModal({
               ) : null}
             </View>
 
-            {summary.gpsNotice ? (
+            {/* O aviso fala "o endereço acima": so vale quando existe um. */}
+            {summary.gpsNotice && conferencia?.estado === 'conferido' ? (
               <Text style={styles.confirmNotice}>{summary.gpsNotice}</Text>
             ) : null}
           </ScrollView>
@@ -1537,6 +1667,18 @@ const styles = StyleSheet.create({
   statusGroup: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   statusText: { color: colors.ink, fontSize: 18, fontWeight: '700' },
   brand: { color: colors.danger, fontSize: 19, fontWeight: '800' },
+  urgentLabel: {
+    alignSelf: 'center',
+    overflow: 'hidden',
+    marginTop: -6,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '800',
+    backgroundColor: colors.dangerSoft,
+  },
   batchLabel: {
     alignSelf: 'center',
     marginTop: -10,
@@ -1778,6 +1920,9 @@ const styles = StyleSheet.create({
   },
   confirmBlockLabel: { color: colors.inkMuted, fontSize: 13, fontWeight: '700' },
   confirmAddress: { color: colors.ink, fontSize: 17, fontWeight: '700', lineHeight: 23 },
+  confirmLoading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  confirmRetry: { gap: 10 },
+  confirmFallback: { flex: 1, color: colors.inkSoft, fontSize: 14, lineHeight: 20 },
   confirmValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   confirmValue: { color: colors.ink, fontSize: 18, fontWeight: '800' },
   confirmNotice: {

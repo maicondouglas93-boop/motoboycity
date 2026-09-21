@@ -3,6 +3,7 @@ import type {
   CreateDeliveryBatchPayload,
   CreateDeliveryPayload,
   DeliveryBatchDetail,
+  DeliveryDestinationPreview,
   DeliveryDetail,
   DeliveryGroupResult,
   DeliveryListItem,
@@ -14,6 +15,7 @@ import type {
   MarkCollectedPayload,
   MarkDeliveredPayload,
 } from '@motoboycity/types';
+import type { DestinationPreviewPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -281,6 +283,23 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
         body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
+    /**
+     * Identifica a rua da coordenada atual do motoboy, sem gravar nada. E uma
+     * consulta: o `deliver` continua sendo quem define destino e preco.
+     */
+    async destinationPreview(
+      accessToken: string,
+      id: string,
+      payload: DestinationPreviewPayload,
+    ): Promise<DeliveryDestinationPreview> {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/destination-preview`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DeliveryDestinationPreview>(response);
     },
 
     async completeReturn(

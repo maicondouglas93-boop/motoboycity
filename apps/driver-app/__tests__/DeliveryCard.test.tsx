@@ -76,3 +76,33 @@ test('mostra a tag Coletado quando o pedido segue para a entrega', async () => {
     expect.arrayContaining(['#25', 'Loja Bairro', 'Coletado', 'Faturado']),
   );
 });
+
+test('mostra a etiqueta de urgente ao lado do numero do pedido', async () => {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+
+  await ReactTestRenderer.act(() => {
+    renderer = ReactTestRenderer.create(
+      <DeliveryCard
+        displayNumber={31}
+        companyName="Loja Centro"
+        deliveryStatus="ACCEPTED"
+        urgent
+        stops={basicStops}
+      />,
+    );
+  });
+
+  expect(labels(renderer)).toEqual(expect.arrayContaining(['#31', 'URGENTE']));
+});
+
+test('pedido sem marcacao nao mostra etiqueta de urgente', async () => {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+
+  await ReactTestRenderer.act(() => {
+    renderer = ReactTestRenderer.create(
+      <DeliveryCard displayNumber={32} companyName="Loja Centro" stops={basicStops} />,
+    );
+  });
+
+  expect(labels(renderer)).not.toContain('URGENTE');
+});

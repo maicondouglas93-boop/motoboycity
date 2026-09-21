@@ -69,6 +69,7 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
   const [requiresReturn, setRequiresReturn] = useState(false);
   const [requiresCollectionRecipient, setRequiresCollectionRecipient] = useState(false);
   const [requiresDeliveryProof, setRequiresDeliveryProof] = useState(false);
+  const [urgent, setUrgent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * Os pedidos lançados nesta sessão do modal.
@@ -190,6 +191,7 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
       driverNote: driverNote || undefined,
       requiresReturn,
       requiresCollectionRecipient,
+      urgent,
       requiresDeliveryProof,
       pickupSurchargeChargedToDriver: false,
       scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
@@ -478,6 +480,13 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
                         onCheckedChange={(value) => setRequiresDeliveryProof(Boolean(value))}
                       />
                       Exigir comprovante
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-destructive p-3 font-medium text-destructive">
+                      <Checkbox
+                        checked={urgent}
+                        onCheckedChange={(value) => setUrgent(Boolean(value))}
+                      />
+                      Marcar como URGENTE
                     </label>
                   </div>
                 </>

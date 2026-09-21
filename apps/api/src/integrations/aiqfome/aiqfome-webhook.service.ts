@@ -488,6 +488,7 @@ export function mapAiqfomeOrderToDeliveryPayload(
       ? ('PREPAID' as const)
       : classifyPayment(order.payment_method.name),
     requiresReturn: !prePaid,
+    urgent: false,
     requiresDeliveryProof: false,
     requiresCollectionRecipient: false,
     pickupSurchargeChargedToDriver: false,

@@ -45,6 +45,7 @@ export * from './deliveries/create-delivery.schema';
 export * from './deliveries/list-deliveries-query.schema';
 export * from './deliveries/delivery-operations-query.schema';
 export * from './deliveries/delivery-summary-query.schema';
+export * from './deliveries/destination-preview.schema';
 export * from './deliveries/mark-delivered.schema';
 export * from './deliveries/complete-return.schema';
 export * from './deliveries/stage-times-query.schema';

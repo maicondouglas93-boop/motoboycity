@@ -72,6 +72,7 @@ export function EditDeliveryDialog({
   const [requiresDeliveryProof, setRequiresDeliveryProof] = useState(
     delivery.requiresDeliveryProof,
   );
+  const [urgent, setUrgent] = useState(delivery.urgent);
   const [error, setError] = useState<string | null>(null);
 
   const serviceTypesQuery = useQuery({
@@ -134,6 +135,7 @@ export function EditDeliveryDialog({
       driverNote: driverNote || undefined,
       requiresReturn,
       requiresCollectionRecipient,
+      urgent,
       requiresDeliveryProof,
       pickupSurchargeChargedToDriver: delivery.pickupSurchargeChargedToDriver,
       scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
@@ -316,6 +318,10 @@ export function EditDeliveryDialog({
                   onCheckedChange={(value) => setRequiresDeliveryProof(Boolean(value))}
                 />{' '}
                 Exigir comprovante
+              </label>
+              <label className="flex items-center gap-2 rounded-xl border border-destructive p-3 font-medium text-destructive">
+                <Checkbox checked={urgent} onCheckedChange={(value) => setUrgent(Boolean(value))} />{' '}
+                Marcar como URGENTE
               </label>
             </div>
             {error && (

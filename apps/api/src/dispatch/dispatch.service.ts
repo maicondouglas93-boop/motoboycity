@@ -1746,6 +1746,7 @@ export class DispatchService {
       distanceKm: delivery.distanceKm === null ? null : Number(delivery.distanceKm),
       driverValue: delivery.driverValue === null ? null : Number(delivery.driverValue),
       requiresReturn: delivery.requiresReturn,
+      urgent: delivery.urgent,
       batchId: delivery.batchId,
       addresses: delivery.addresses.map((address) => ({
         type: address.type,

@@ -24,6 +24,8 @@ export type DeliveryCardProps = {
   /** Texto do estado do pedido, como "Faturado" ou "Em entrega". */
   statusLabel?: string;
   deliveryStatus?: DeliveryStatus;
+  /** Marcado pela loja na criacao: etiqueta vermelha ao lado do numero. */
+  urgent?: boolean;
   supportingLabel?: string;
   distanceLabel?: string;
   amountLabel?: string;
@@ -49,6 +51,7 @@ export function DeliveryCard({
   companyName,
   statusLabel,
   deliveryStatus,
+  urgent,
   supportingLabel,
   distanceLabel,
   amountLabel,
@@ -73,9 +76,14 @@ export function DeliveryCard({
       accessibilityLabel={accessibilityLabel}
     >
       <View style={styles.linhaPedido}>
-        <Text style={styles.numeroPedido}>
-          {displayNumber ? `#${displayNumber}` : 'Pedido'}
-        </Text>
+        <View style={styles.identificacaoPedido}>
+          <Text style={styles.numeroPedido}>{displayNumber ? `#${displayNumber}` : 'Pedido'}</Text>
+          {urgent ? (
+            <View style={[styles.tag, styles.tagUrgente]}>
+              <Text style={[styles.tagTexto, styles.tagTextoUrgente]}>URGENTE</Text>
+            </View>
+          ) : null}
+        </View>
         {stage ? (
           <View
             style={[
@@ -155,6 +163,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingLeft: 44,
   },
+  identificacaoPedido: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   numeroPedido: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   topo: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   hora: { width: 38, paddingTop: 1, fontSize: 13, fontWeight: '800', color: colors.ink },
@@ -185,9 +194,11 @@ const styles = StyleSheet.create({
   },
   tagSucesso: { borderColor: colors.success, backgroundColor: colors.successSoft },
   tagAtencao: { borderColor: colors.warning, backgroundColor: colors.warningSoft },
+  tagUrgente: { borderColor: colors.danger, backgroundColor: colors.dangerSoft },
   tagTexto: { fontSize: 10, fontWeight: '800', color: colors.actionSoft },
   tagTextoSucesso: { color: colors.success },
   tagTextoAtencao: { color: colors.warning },
+  tagTextoUrgente: { color: colors.danger },
   rota: { marginTop: 3, paddingLeft: 8 },
   detalhes: { alignSelf: 'flex-end' },
   detalhesTexto: {

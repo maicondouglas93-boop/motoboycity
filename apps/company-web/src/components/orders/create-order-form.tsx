@@ -42,6 +42,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
   const [zip, setZip] = useState('');
 
   const [requiresReturn, setRequiresReturn] = useState(false);
+  const [urgent, setUrgent] = useState(false);
   const [pickupSurchargeChargedToDriver, setPickupSurchargeChargedToDriver] = useState(false);
   const [requiresCollectionRecipient, setRequiresCollectionRecipient] = useState(false);
   const [requiresDeliveryProof, setRequiresDeliveryProof] = useState(false);
@@ -68,6 +69,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
           },
         }),
         requiresReturn,
+        urgent,
         pickupSurchargeChargedToDriver,
         requiresCollectionRecipient,
         requiresDeliveryProof,
@@ -254,6 +256,10 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       )}
 
       <div className="space-y-2">
+        <label className="flex items-center gap-2 text-xs font-medium text-destructive">
+          <Checkbox checked={urgent} onCheckedChange={(checked) => setUrgent(Boolean(checked))} />
+          Marcar como URGENTE
+        </label>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           <Checkbox
             checked={requiresReturn}

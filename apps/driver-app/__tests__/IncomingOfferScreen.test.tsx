@@ -10,6 +10,7 @@ const offer: DeliveryOfferPayload = {
   deliveryId: 'delivery-1',
   displayNumber: 501,
   companyName: 'Empresa teste',
+  urgent: false,
   paymentMethod: 'BILLED',
   totalValue: 10,
   driverValue: 8,
@@ -47,6 +48,7 @@ const offer: DeliveryOfferPayload = {
       platformValue: 2,
       distanceKm: 1.5,
       requiresReturn: false,
+      urgent: false,
     },
   ],
 };

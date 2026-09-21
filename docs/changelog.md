@@ -13268,3 +13268,136 @@ Pendente de acao humana: instalar o `pilot.24` nos aparelhos e fazer o ensaio
 com dois pedidos abertos — aceitar um pedido novo com outro aberto e conferir
 que a tela nao troca, fechar um pedido pela tela concluida, e olhar o cabecalho
 de duas linhas com nome de loja longo. Nada disso foi exercitado em aparelho.
+
+### 2026-09-21 — O modal mostra a rua onde o motoboy esta
+
+Pedido do responsavel depois de ver o modal anterior: no pedido criado SEM
+endereco, o modal so dizia "endereco definido pela localizacao no momento da
+entrega" — ou seja, a unica entrega em que conferir o endereco importa de
+verdade era justamente a que nao tinha endereco para conferir. O fluxo que ele
+descreveu: o motoboy sai com a entrega sem destino, entrega, para no ponto, vai
+finalizar, e o modal mostra o endereco daquele ponto.
+
+Rota nova, de LEITURA: `POST /deliveries/:id/destination-preview`, com
+`DriverOnlyGuard`, devolvendo `DeliveryDestinationPreview` (rua, numero, cidade,
+estado, CEP, todos anulaveis). Nao grava nada, nao muda status nem preco. Tres
+travas: so o motoboy dono do pedido, so com o pedido `COLLECTED`, so quando
+`destinationKnownAtCreation` e falso — sem elas a rota viraria geocodificacao
+livre para qualquer motoboy autenticado, paga pela chave do projeto. E `POST`
+porque coordenada de pessoa nao vai em query string, onde terminaria em log de
+acesso. Falha do Google devolve campos nulos e um `logger.warn`: a conferencia e
+um conforto, a entrega e o trabalho — Google fora do ar nao prende mercadoria na
+mao do motoboy.
+
+Isto NAO move a geocodificacao existente para o caminho critico. O
+enriquecimento do endereco no `detail()` continua acontecendo quando o admin ou
+a empresa abre o pedido, como antes; a consulta nova e outra coisa, disparada
+pelo proprio motoboy e descartavel.
+
+No aplicativo, o fix e capturado quando o MODAL ABRE, nao no toque de confirmar,
+e fica congelado ate a confirmacao — a rua que ele leu e a rua que vai ser
+gravada. Recapturar no toque poderia gravar outra, alguns metros e uma esquina
+adiante. "Tentar GPS novamente" tambem passa a abrir o modal pelo mesmo motivo:
+outra posicao pode ser outra rua. O `disabled` do confirmar mudou de
+`controlsBusy` para `primaryBusy`, que ja abre excecao para a retentativa —
+`controlsBusy` travaria justamente o caso em que ele precisa tentar de novo.
+Sem rua identificada, o modal diz isso e deixa confirmar; sem localizacao
+nenhuma, o confirmar fica desabilitado com "Tentar de novo", porque sem
+coordenada o servidor recusa essa entrega de qualquer jeito.
+
+Arquivos: `packages/validation/src/deliveries/destination-preview.schema.ts`
+(novo) e `index.ts`, `packages/types/src/delivery.ts`,
+`packages/api-client/src/deliveries.ts`,
+`apps/api/src/deliveries/deliveries.controller.ts` e `deliveries.service.ts`,
+`apps/driver-app/src/lib/deliveryOperation.ts` e
+`src/screens/DeliveryOperationScreen.tsx`, mais os dois arquivos de teste e
+`docs/architecture.md`.
+
+Comandos: `tsc --noEmit` no driver-app e na API, os dois sem erro; `npx eslint`
+limpo nos seis arquivos de codigo; `prettier --write` apenas no driver-app, que
+e o unico pacote com configuracao propria — na raiz nao existe `.prettierrc`, e
+rodar o prettier padrao (80 colunas) ali reformataria arquivos inteiros escritos
+em 100. Driver App **196/196 em 26 suites**. `src/deliveries` da API: **190
+passaram, 2 falharam**.
+
+As duas falhas sao ANTERIORES a este recorte — conferidas com `git stash`, em
+HEAD o mesmo arquivo ja dava 128 passando e 2 falhando. Sao testes de `detail`
+que morrem em `prisma.walletTransaction.findUnique` porque o mock do spec nao
+tem `walletTransaction`; vieram do CRUD administrativo de 15/09, cujo registro
+no changelog diz que os testes ficaram "em desenvolvimento pelo subagente". Os 5
+testes novos de `destinationPreview` passam.
+
+Nao executado: e2e, ensaio em aparelho e novo APK. Nenhum commit ou push
+solicitado para este recorte. Quando for publicar, **API antes do APK**: com o
+aplicativo novo contra a API antiga a consulta falha e o modal cai no texto de
+"nao foi possivel identificar a rua" — degrada sem travar, mas sem conferencia.
+
+### 2026-09-21 — Pedido urgente: marcacao na criacao e etiqueta para o motoboy
+
+Pedido do responsavel: a loja marca o pedido como urgente na criacao, e o
+motoboy ve uma etiqueta de urgente no pedido.
+
+Campo novo `urgent Boolean @default(false)` em `Delivery`, com migration
+ADITIVA `20260921091703_pedido_urgente` gerada por
+`prisma migrate diff --from-schema-datamodel ... --to-schema-datamodel ...`,
+que nao toca banco nenhum. **A migration NAO foi aplicada**: o deploy do Render
+roda `migrate deploy` antes da API e aplica sozinho. Coluna com default em
+tabela existente, sem backfill e sem reescrita de linha.
+
+**Escopo deliberado: isto e SINALIZACAO, nao regra.** Um pedido urgente nao
+muda a fila de despacho, a ordem da oferta, o prazo nem o preco. Nada disso foi
+pedido, e inventar prioridade de fila mudaria silenciosamente quem recebe
+corrida — decisao de negocio que nao e minha. O comentario no schema e no
+schema Zod diz isso, para o proximo agente nao assumir o contrario.
+
+Onde o motoboy ve, os quatro lugares em que ele decide ou opera:
+
+- na OFERTA (`IncomingOfferScreen`), que e onde ele aceita ou recusa;
+- no cartao da Home (`DeliveryCard`), ao lado do numero do pedido;
+- na vitrine de pedidos livres (`PendingDeliveryCard`), junto do "Lote";
+- na tela da operacao (`DeliveryOperationScreen`), abaixo do cabecalho.
+
+No lote, basta UM pedido urgente para a oferta inteira vir marcada: o motoboy
+leva os dois juntos, entao a pressa de um manda no percurso todo. O item
+continua trazendo a marcacao individual.
+
+Onde a loja marca: `create-order-form` do Company. O ADM tambem cria e edita
+pedidos pela mesma rota, entao os dois dialogos dele receberam o campo —
+sem isso, pedido criado pelo ADM nunca poderia ser urgente, e a edicao antes do
+aceite nao conseguiria corrigir uma marcacao errada. `updateBeforeAcceptance` ja
+grava o campo. Integracao aiqfome entra com `urgent: false`: nao ha quem marque
+urgencia num pedido que chega por webhook.
+
+Arquivos: `apps/api/prisma/schema.prisma` e a migration nova;
+`packages/validation/src/deliveries/create-delivery.schema.ts`;
+`packages/types/src/delivery.ts` e `delivery-offer.ts`;
+`apps/api/src/deliveries/deliveries.service.ts`,
+`apps/api/src/dispatch/dispatch.service.ts` e `offer-payload.ts`,
+`apps/api/src/integrations/aiqfome/aiqfome-webhook.service.ts`;
+`apps/company-web/src/components/orders/create-order-form.tsx`;
+`apps/admin-web/src/components/deliveries/create-company-delivery-dialog.tsx` e
+`edit-delivery-dialog.tsx`; no Driver App `DeliveryCard`,
+`PendingDeliveryCard`, `IncomingOfferScreen`, `DeliveryOperationScreen` e
+`HomeScreen`; mais oito arquivos de teste e fixture.
+
+Nota de manutencao: `.default(false)` no Zod torna o campo OBRIGATORIO no tipo
+de saida, entao todo fixture que monta `CreateDeliveryPayload` precisou do
+campo. Foi o que causou a maior parte do diff de teste — nao houve mudanca de
+comportamento nesses testes.
+
+Comandos: `tsc --noEmit` limpo nos quatro clientes e na API. API **1227
+passaram, 2 falharam, 1 pulado** em 95 suites; Driver App **198/198 em 26
+suites**; Company **152/152 em 30 arquivos**. `eslint` limpo em API, ADM,
+Company e Driver App (fora o aviso `no-void` preexistente em `apiClient.ts`).
+`prettier --write` so no Driver App, o unico pacote com configuracao propria.
+
+As 2 falhas da API sao ANTERIORES a este recorte, as mesmas de ontem: testes de
+`detail` que morrem em `prisma.walletTransaction.findUnique` porque o mock do
+spec nao tem `walletTransaction`, vindas do CRUD administrativo de 15/09.
+
+Nao executado: e2e, migration aplicada, ensaio em aparelho e APK novo. Nenhum
+commit ou push solicitado. Para publicar: **API primeiro** (que aplica a
+migration), depois os paineis, e o APK por ultimo.
+
+Em aberto para o responsavel: se "urgente" deve algum dia furar a fila, ter
+prazo mais curto ou preco diferente. Hoje nao faz nada disso, de proposito.

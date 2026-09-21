@@ -1,5 +1,6 @@
 import type { DeliveryAddressItem } from '@motoboycity/types';
 import {
+  capturedDestinationLabel,
   completeDeliveryRouteUrl,
   deliverConfirmationSummary,
   deliveryOperationCopy,
@@ -132,8 +133,27 @@ describe('apresentação da operação de entrega', () => {
     expect(summary.destination).toBe(
       'Endereço de entrega definido pela localização no momento da entrega',
     );
-    expect(summary.gpsNotice).toContain('sua localização atual vira o destino');
+    expect(summary.gpsNotice).toContain('onde você está agora');
     expect(summary.driverValue).toBe('A calcular na entrega');
     expect(summary.returnValue?.replace(/\s/g, ' ')).toBe('R$ 4,00');
+  });
+
+  it('formata o endereco identificado no ponto onde o motoboy esta', () => {
+    expect(
+      capturedDestinationLabel({
+        street: 'Rua Arnaldo Leite Ribeiro',
+        number: '212',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      }),
+    ).toBe('Rua Arnaldo Leite Ribeiro, 212\nLajinha - MG, 36980-000');
+  });
+
+  it('nao finge endereco conferido quando o Google nao identificou a coordenada', () => {
+    expect(capturedDestinationLabel(null)).toBeNull();
+    expect(
+      capturedDestinationLabel({ street: null, number: null, city: null, state: null, zip: null }),
+    ).toBeNull();
   });
 });

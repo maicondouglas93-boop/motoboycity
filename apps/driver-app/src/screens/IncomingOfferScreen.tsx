@@ -234,6 +234,8 @@ export function IncomingOfferScreen({ navigation }: Props) {
             </View>
           </View>
 
+          {offer.urgent ? <Text style={styles.urgente}>URGENTE</Text> : null}
+
           <View style={styles.identificacao}>
             <Icon name="person" size={22} color={colors.actionSoft} />
             <Text style={styles.empresa} numberOfLines={1}>
@@ -322,6 +324,19 @@ const styles = StyleSheet.create({
   valor: { fontSize: 28, fontWeight: '700', color: colors.success },
   quantidade: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   quantidadeTexto: { fontSize: 21, fontWeight: '700', color: colors.ink },
+  urgente: {
+    alignSelf: 'center',
+    overflow: 'hidden',
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 999,
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    backgroundColor: colors.dangerSoft,
+  },
   identificacao: {
     flexDirection: 'row',
     alignItems: 'center',

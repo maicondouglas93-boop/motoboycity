@@ -20,6 +20,7 @@ type EntregaDaOferta = {
   platformValue: unknown;
   distanceKm: unknown;
   requiresReturn: boolean;
+  urgent: boolean;
   batchId: string | null;
   serviceType: { name: string };
   addresses: Endereco[];
@@ -98,6 +99,9 @@ export function buildOfferPayload(input: {
     requiresReturn: emLote
       ? entregas.some((item) => item.requiresReturn)
       : principal.requiresReturn,
+    // No lote basta UM urgente para a etiqueta valer: o motoboy leva os dois
+    // juntos, entao a pressa de um manda no percurso inteiro.
+    urgent: emLote ? entregas.some((item) => item.urgent) : principal.urgent,
     deliveries: entregas.map((item) => ({
       deliveryId: item.id,
       displayNumber: item.displayNumber,
@@ -112,6 +116,7 @@ export function buildOfferPayload(input: {
       platformValue: numero(item.platformValue),
       distanceKm: numero(item.distanceKm),
       requiresReturn: item.requiresReturn,
+      urgent: item.urgent,
     })),
     expiresInSeconds,
     expiresAtEpochMs,

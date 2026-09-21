@@ -865,6 +865,9 @@ model Delivery {
   driverNote            String?
   customerPaymentMethod CustomerPaymentMethod?
 
+  /// Marcado pela loja na criacao. Hoje e SINALIZACAO: aparece como etiqueta
+  /// para o motoboy e nao altera fila de despacho, ordem de oferta nem preco.
+  urgent                         Boolean @default(false)
   requiresDeliveryProof          Boolean @default(false)
   requiresCollectionRecipient    Boolean @default(false)
   pickupSurchargeChargedToDriver Boolean @default(false)

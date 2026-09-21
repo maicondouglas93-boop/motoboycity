@@ -445,10 +445,22 @@ houve mudança de API, contrato, banco, migration ou regra de proximidade.
 Marcar "Pedido entregue" não fecha mais o pedido em um toque. O aplicativo
 abre um modal com o número e a loja do pedido, o endereço de destino e o valor
 do entregador (mais o retorno quando existe), e só finaliza em "Confirmar
-entrega"; "Fechar" devolve o motoboy ao pedido sem mexer em nada. Pedido criado
-sem endereço usa o mesmo modal, mantendo o aviso de GPS e o rótulo "Confirmar
-com GPS". Nada mudou na API, no contrato ou nas transições — só a conferência
-antes do toque. Ainda não conferido em aparelho real.
+entrega"; "Fechar" devolve o motoboy ao pedido sem mexer em nada.
+
+**No pedido criado sem endereço o modal mostra a rua onde ele está.** Ao abrir o
+modal — no ponto em que ele acabou de entregar — o app captura o GPS e pergunta
+a rua ao servidor (`POST /deliveries/:id/destination-preview`, consulta que não
+grava nada). O fix fica **congelado** entre a conferência e a confirmação: o
+endereço mostrado é o mesmo que vai ser gravado, inclusive quando ele usa
+"Tentar GPS novamente", que também passa pelo modal. Sem rua identificada, o
+modal diz isso e deixa confirmar; sem localização nenhuma, o confirmar fica
+desabilitado com "Tentar de novo", porque sem coordenada o servidor recusa esse
+pedido de qualquer forma.
+
+Ordem de publicação importa: **API antes do APK**. Com o APK novo contra uma API
+antiga, a consulta falha e o modal cai no texto de "não foi possível identificar
+a rua" — degrada sem travar a entrega, mas tira a conferência. Ainda não
+conferido em aparelho real.
 
 ## Abertura automática do pedido recém-aceito
 
@@ -471,6 +483,24 @@ de pedido encerrado por fora depois de uma coleta ou ocorrência. O cabeçalho d
 operação mostra `Pedido #128` com o nome da loja embaixo (`subtitle` novo e
 opcional do `SheetHeader`). Ainda não conferido em aparelho — inclusive a seta
 de voltar com o cabeçalho de duas linhas.
+
+## Pedido urgente
+
+A loja (e o ADM) marcam o pedido como **URGENTE** na criação, e a etiqueta
+aparece para o motoboy na oferta, no cartão da Home, na vitrine e na tela da
+operação. Em lote, um pedido urgente marca a oferta inteira.
+
+**É sinalização, não regra**: não muda fila de despacho, ordem de oferta, prazo
+nem preço. Se um dia precisar mudar, é decisão de negócio — não assuma pelo nome
+do campo.
+
+⚠️ **A migration `20260921091703_pedido_urgente` ainda NÃO foi aplicada.** É
+aditiva (coluna com default, sem backfill) e o `migrate deploy` do build do
+Render aplica sozinho no próximo deploy da API, antes de a API nova subir.
+Como Render e Vercel disparam juntos no mesmo push, existe uma janela de alguns
+minutos em que os painéis já mostram o campo e a API ainda é a antiga: nessa
+janela o Zod descarta a chave desconhecida e o pedido nasce sem a marcação.
+Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 
 ## Limitações e próximos passos
 

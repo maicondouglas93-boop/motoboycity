@@ -1431,6 +1431,7 @@ export function HomeScreen({ navigation }: Props) {
                     displayNumber={delivery.displayNumber}
                     companyName={delivery.companyName}
                     deliveryStatus={delivery.status}
+                    urgent={delivery.urgent}
                     supportingLabel={deliveryPaymentLabel(delivery.paymentMethod)}
                     distanceLabel={
                       delivery.distanceKm === null
@@ -1466,6 +1467,7 @@ export function HomeScreen({ navigation }: Props) {
                   time={formatarHora(delivery.createdAt)}
                   companyName={delivery.companyName}
                   serviceTypeName={delivery.serviceTypeName}
+                  urgent={delivery.urgent}
                   distanceLabel={
                     delivery.destinationKnownAtCreation
                       ? formatarDistancia(delivery.distanceKm) || 'Distância a calcular'
