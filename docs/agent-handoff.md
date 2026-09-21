@@ -8,13 +8,16 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-20**, confirmação da entrega e fim da troca de
+> Última revisão: **2026-09-21**, endereço conferido por GPS no modal de
+> entrega e marcação de pedido urgente publicados em `ebf029f`, empacotados
+> no APK `pilot.25`. Render, Vercel Company e Vercel ADM em success.
+> Antes disso, confirmação da entrega e fim da troca de
 > pedido sozinho publicadas em `1bd88bc`, empacotadas no APK `pilot.24`.
 > Antes disso, o aviso GPS de proximidade da coleta publicado
 > em `7e13bce`: Render, Vercel (Company/ADM) e CI confirmados em success.
-> APK `pilot.24` assinado e pronto para distribuicao, com verificacoes abaixo;
-> ele **substitui o `pilot.23`**, que nunca chegou a ser distribuido, e o app
-> instalado precisa ser atualizado para participar da deteccao.
+> APK `pilot.25` assinado e pronto para distribuicao, com verificacoes abaixo;
+> ele **substitui o `pilot.23` e o `pilot.24`**, nenhum dos dois distribuido, e
+> o app instalado precisa ser atualizado para participar da deteccao.
 > Mini-ilustrações Company e ADM enviadas em `1fa0a1f`; conferir rollout.
 > Marca aiqfome enviada em `1d9ae85`; conferir rollout.
 > Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
@@ -57,9 +60,9 @@ manual no banco compartilhado nem leitura/edicao de `.env` neste release.
 CI `Typecheck, tests and builds` aprovado para `7e13bce`.
 Ensaio real ainda necessario. iOS nao compilado neste Windows. Detalhes de
 contrato, testes e limitacoes em `pickup-arrival-alert.md` e `changelog.md`.
-APK `pilot.24` (versionCode 24) gerado e verificado em 20/09; falta distribuir
-e instalar nos aparelhos. Ele carrega tambem o que o `pilot.23` carregava, que
-nunca foi distribuido — instalar so o `pilot.24` basta. Nenhum APK instalado
+APK `pilot.25` (versionCode 25) gerado e verificado em 21/09; falta distribuir
+e instalar nos aparelhos. Ele carrega tambem o que o `pilot.23` e o `pilot.24`
+carregavam, nenhum deles distribuido — instalar so o `pilot.25` basta. Nenhum APK instalado
 nem AAB novo gerado neste release.
 Backup local de 11/09 as 02:30 conferido por hash e `pg_restore --list`;
 backup GitHub/GCS da mesma data com job `dump` em success. Sem ensaio de restore.
@@ -184,18 +187,19 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.24-vc24.apk`
-SHA-256 `79EE1C4BC6E960859700EF46F3E8BD2080C420483346DC7532A0EED99C164084`,
-75.176.353 bytes, `versionCode` 24, minSdk 24, targetSdk 36, assinatura v2,
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.25-vc25.apk`
+SHA-256 `44BFC19CB0C51F4C779BABDFB8602EE94475DF9890E779952FCA2BDE3A046628`,
+75.182.793 bytes, `versionCode` 25, minSdk 24, targetSdk 36, assinatura v2,
 ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.23` e versões anteriores
-assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `bb97b9d`.
+anteriores, então ele atualiza por cima de `pilot.24` e versões anteriores
+assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `3a95432`.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
 URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2` — a unica
 ocorrencia de `localhost` no bundle e uma string solta da tabela do Hermes, sem
-esquema nem porta. Versao JS `0.1.0-pilot.24` conferida no bundle. Assinatura
+esquema nem porta. Versao JS `0.1.0-pilot.25` conferida no bundle, junto de
+`destination-preview`, `URGENTE` e `Confirme antes de entregar`. Assinatura
 por `apksigner`, pacote por `aapt` e hash da copia final aprovados. Ensaio
 fisico ainda pendente, e agora ele cobre tambem a confirmacao da entrega, o
 cabecalho de duas linhas e o fim de pedido com dois pedidos abertos.
@@ -494,7 +498,8 @@ operação. Em lote, um pedido urgente marca a oferta inteira.
 nem preço. Se um dia precisar mudar, é decisão de negócio — não assuma pelo nome
 do campo.
 
-⚠️ **A migration `20260921091703_pedido_urgente` ainda NÃO foi aplicada.** É
+✅ **A migration `20260921091703_pedido_urgente` foi aplicada em produção** pelo
+`migrate deploy` do build do Render em 21/09, junto do deploy `ebf029f`. É
 aditiva (coluna com default, sem backfill) e o `migrate deploy` do build do
 Render aplica sozinho no próximo deploy da API, antes de a API nova subir.
 Como Render e Vercel disparam juntos no mesmo push, existe uma janela de alguns
@@ -646,7 +651,7 @@ financeira foram consolidados em `583f67b`, enviados para `main` e publicados
 com sucesso no Render e nas duas Vercel. O CI geral ainda estava em execução na
 confirmação dos deploys; não foi usado para declarar a publicação aprovada.
 Não incluir mudanças de outras sessões em eventual publicação futura.
-O APK em `I:\MOTOboyCity\releases` e o `pilot.24`, compilado de `bb97b9d`.
+O APK em `I:\MOTOboyCity\releases` e o `pilot.25`, compilado de `3a95432`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

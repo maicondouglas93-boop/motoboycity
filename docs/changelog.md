@@ -13401,3 +13401,48 @@ migration), depois os paineis, e o APK por ultimo.
 
 Em aberto para o responsavel: se "urgente" deve algum dia furar a fila, ter
 prazo mais curto ou preco diferente. Hoje nao faz nada disso, de proposito.
+
+### 2026-09-21 — Publicacao autorizada e APK `pilot.25`
+
+Responsavel autorizou a publicacao dos dois recortes do dia. Commit funcional
+`ebf029f` e bump `3a95432` enviados para `main`; varredura de segredo no diff
+antes do push, sem nenhuma ocorrencia.
+
+Deploys de `ebf029f`, conferidos pela API de deployments do GitHub: Render
+(`main - motoboycity-api`), Vercel Company e Vercel ADM, os tres em **success**.
+GETs de producao `/health` -> ok e `/health/ready` -> ready, com PostgreSQL e
+Redis ok. A migration `20260921091703_pedido_urgente` foi aplicada pelo
+`migrate deploy` do build do Render — o deploy so chega a success depois dele.
+O passo "Apply database migrations" do CI tambem aplicou a migration no
+PostgreSQL isolado, o que valida o SQL a parte. Sem consulta SQL direta ao banco
+compartilhado e sem migration manual.
+
+APK compilado de `3a95432` em worktree curta `C:\m25`, JDK 21, mesma receita do
+`pilot.24`. **BUILD SUCCESSFUL em 8m27**, 427 tarefas, 418 executadas.
+Artefato: `I:\MOTOboyCityeleases\motoboycity-0.1.0-pilot.25-vc25.apk`,
+**75.182.793 bytes**, SHA-256
+`44BFC19CB0C51F4C779BABDFB8602EE94475DF9890E779952FCA2BDE3A046628`, conferido
+igual entre origem e copia. `apksigner`: v2 valida, certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`. `aapt`:
+pacote `com.motoboycity.driverapp`, versionCode 25, versionName
+`0.1.0-pilot.25`, minSdk 24, targetSdk 36, quatro ABIs. Bundle lido em memoria:
+API oficial presente; `localhost:3333`, `127.0.0.1` e `10.0.2.2` ausentes; e
+`destination-preview`, `URGENTE` e "Confirme antes de entregar" presentes, o que
+prova que os dois recortes entraram no pacote. Worktree removida com
+`rmdir /s /q` e `git worktree prune`. Senhas abertas so na memoria do processo e
+removidas no `finally`.
+
+**CI vermelho pelo sexto push seguido, e sempre pelo mesmo motivo alheio.** Run
+`https://github.com/maicondouglas93-boop/motoboycity/actions/runs/35600046453`:
+Typecheck passou, Lint falhou com os dois `react-hooks/rules-of-hooks` em
+`apps/admin-web/src/components/operations/admin-completed-delivery-actions.tsx`
+(linhas 51 e 61), os mesmos desde 15/09. Os dois dialogos do ADM alterados neste
+recorte passaram limpos no eslint local. Como o Lint quebra cedo, **os testes do
+Driver App, os testes da API e os tres builds nao rodaram no CI** nesta
+publicacao: os numeros reportados sao todos locais. A correcao foi oferecida
+duas vezes e nao foi autorizada — e codigo de outra sessao.
+
+Pendente de acao humana: instalar o `pilot.25` em UM aparelho e fazer o ensaio
+antes de distribuir. Ele acumula tres recortes nunca testados em campo —
+confirmacao da entrega, fim da troca de pedido sozinho, endereco por GPS e
+etiqueta de urgente. Nenhum APK instalado ate aqui.
