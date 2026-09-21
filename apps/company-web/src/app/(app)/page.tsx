@@ -286,6 +286,8 @@ function ConteudoHome() {
         </p>
       )}
 
+      <FmSoftwarePromo />
+
       <section className="grid min-h-[720px] gap-5 xl:grid-cols-[360px_minmax(0,1fr)_340px]">
         <Card className="premium-panel max-h-[calc(100vh-150px)] overflow-hidden">
           <CardHeader className="border-b border-portal/10 bg-gradient-to-r from-portal-soft/75 to-card py-4">
@@ -437,8 +439,6 @@ function ConteudoHome() {
           </Card>
         </div>
       </section>
-
-      <FmSoftwarePromo />
 
       <Dialog
         open={customerCandidates.length > 0}

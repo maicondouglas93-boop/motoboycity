@@ -1,20 +1,43 @@
-import { Code2, MessageCircle } from 'lucide-react';
+import Image from 'next/image';
+import { MessageCircle } from 'lucide-react';
 
 const whatsappMessage = encodeURIComponent(
   'Olá, Franklim! Vi seu contato no MOTOboyCity e gostaria de conhecer os serviços da FM Software.',
 );
 const whatsappUrl = `https://wa.me/5519997050303?text=${whatsappMessage}`;
 
+/**
+ * Anúncio de autoria do desenvolvedor, no alto do painel.
+ *
+ * Ficava no rodapé da tela, abaixo do mapa e das colunas de pedidos — ou seja,
+ * só era visto por quem rolasse a página inteira, o que quase ninguém faz num
+ * painel operacional. Subiu para logo abaixo do cabeçalho, onde aparece sem
+ * rolagem, mas ainda **depois** dos avisos de operação fechada e de falha de
+ * carga: propaganda não passa na frente do que muda o trabalho do lojista nos
+ * próximos minutos.
+ */
 export function FmSoftwarePromo() {
   return (
     <aside
       aria-label="Desenvolvimento do sistema"
-      className="flex flex-col gap-3 overflow-hidden rounded-2xl border border-portal/15 bg-gradient-to-r from-card via-card to-portal-soft/55 px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-portal/20 bg-gradient-to-r from-card via-card to-portal-soft/60 px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-portal/10 text-portal">
-          <Code2 className="size-5" aria-hidden="true" />
-        </span>
+      <div className="flex min-w-0 items-center gap-4">
+        {/*
+          O arquivo tem fundo claro próprio, recortado no limite do desenho. O
+          `mix-blend-multiply` dissolve esse fundo no cartão em vez de deixar um
+          retângulo visível — seguro aqui porque este painel não tem tema
+          escuro.
+        */}
+        <Image
+          src="/brand/fm-software.png"
+          alt="FM Software"
+          width={706}
+          height={468}
+          priority
+          className="h-14 w-auto shrink-0 mix-blend-multiply"
+        />
+
         <div className="min-w-0">
           <p className="text-xs font-semibold tracking-[0.14em] text-portal uppercase">
             Soluções em software

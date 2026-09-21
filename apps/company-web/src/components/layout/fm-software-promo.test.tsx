@@ -11,6 +11,9 @@ describe('FmSoftwarePromo', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('(19) 99705-0303')).toBeInTheDocument();
 
+    // A marca entrou como imagem; sem o alt, quem usa leitor de tela perde a autoria.
+    expect(screen.getByAltText('FM Software')).toBeInTheDocument();
+
     const link = screen.getByRole('link', { name: /FM Software pelo WhatsApp/i });
     expect(link).toHaveAttribute('href', expect.stringContaining('https://wa.me/5519997050303'));
     expect(decodeURIComponent(link.getAttribute('href') ?? '')).toContain(
