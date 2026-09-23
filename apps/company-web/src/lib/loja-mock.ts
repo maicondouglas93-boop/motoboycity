@@ -10,6 +10,42 @@
  * sobre o que está integrado.
  */
 
+import type { TemaDaLoja } from '@/lib/contraste';
+
+/**
+ * O perfil da loja, como o cliente a vê na página de pedidos.
+ *
+ * As cores e o tema são os mesmos que a empresa escolhe em
+ * `/loja/configuracoes` — esta é a tela onde eles finalmente aparecem.
+ */
+export interface LojaDeExemplo {
+  slug: string;
+  nome: string;
+  tema: TemaDaLoja;
+  corDaMarca: string;
+  corDeAcao: string;
+  aberta: boolean;
+  /** Frase curta de horário, do jeito que o cliente lê. */
+  horario: string;
+  minutosDePreparo: number;
+  /** `null` quando a loja não cobra a entrega na página. */
+  taxaDeEntrega: number | null;
+  pagamentos: string[];
+}
+
+export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
+  slug: 'minha-loja',
+  nome: 'Açaí do Centro',
+  tema: 'CLARO',
+  corDaMarca: '#c2410c',
+  corDeAcao: '#15803d',
+  aberta: true,
+  horario: 'Hoje até 22h',
+  minutosDePreparo: 20,
+  taxaDeEntrega: 8,
+  pagamentos: ['Pix', 'Dinheiro', 'Cartão na entrega'],
+};
+
 export interface CategoriaDeExemplo {
   id: string;
   nome: string;
@@ -220,7 +256,23 @@ export const PRODUTOS_DE_EXEMPLO: ProdutoDeExemplo[] = [
     precoUnico: 24,
     situacao: 'publicado',
     tamanhos: [],
-    grupos: [],
+    grupos: [
+      /*
+       * Grupo obrigatório SATISFAZÍVEL, ao contrário do que está no X-Burguer.
+       * É o par que faz a regra ser conferível dos dois lados: aqui o cliente
+       * escolhe e conclui; lá o painel avisa que ninguém consegue comprar.
+       */
+      {
+        id: 'g4',
+        nome: 'Ponto da carne',
+        minimo: 1,
+        maximo: 1,
+        escolhas: [
+          { id: 'e9', nome: 'Ao ponto', preco: 0, disponivel: true },
+          { id: 'e10', nome: 'Bem passada', preco: 0, disponivel: true },
+        ],
+      },
+    ],
   },
   {
     id: 'p3',

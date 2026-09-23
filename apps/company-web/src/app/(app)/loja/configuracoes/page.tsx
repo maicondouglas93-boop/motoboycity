@@ -53,7 +53,12 @@ export default function LojaConfiguracoesPage() {
   const [copiado, setCopiado] = useState(false);
 
   const [tema, setTema] = useState<TemaDaLoja>('CLARO');
-  const [corDaMarca, setCorDaMarca] = useState('#f97316');
+  /*
+   * O padrão tem que PASSAR na própria verificação da tela. O laranja anterior
+   * (#f97316) dava 2,8 sobre branco e disparava o aviso antes de a lojista
+   * tocar em nada — e um aviso que já nasce aceso ensina a ignorá-lo.
+   */
+  const [corDaMarca, setCorDaMarca] = useState('#c2410c');
   const [corDeAcao, setCorDeAcao] = useState('#16a34a');
 
   const [asaasConfigurado] = useState(false);

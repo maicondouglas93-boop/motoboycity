@@ -129,7 +129,9 @@ depois, se pedirem.
 
 ### 4. Interface do PWA sem cara de front feito por IA
 
-> **Não começado.** Depende do PWA existir, e ele ainda não existe.
+> **Primeira fatia feita em 2026-09-23:** catálogo e folha do produto, em
+> `/pedir/[slug]`. Falta sacola, checkout e o PWA propriamente dito (manifest,
+> service worker, instalação).
 
 Requisito de acabamento da loja que o cliente abre.
 
@@ -154,6 +156,24 @@ grande.
 
 **Referência honesta:** a comparação útil é com iFood, aiqfome e Rappi, que são
 o que o cliente da loja já sabe usar — e não com dribbble.
+
+## A loja do cliente, como está
+
+`/pedir/[slug]` — em produção o endereço é `pedidos.…/{slug}`; aqui a rota tem
+prefixo porque `/loja` já é a área do painel neste mesmo app.
+
+Feito: cabeçalho com identidade, barra de categorias grudada no topo, cardápio
+em linhas com miniatura, folha do produto (tamanho, grupos, quantidade) e barra
+de sacola. Tudo lendo `loja-mock.ts`.
+
+**O painel decide o que o cliente vê.** Só aparece produto `publicado` e sem
+pendência que impeça vender. Nos dados de exemplo isso some com dois itens: o
+X-Burguer (grupo obrigatório sem escolha disponível) e o Refrigerante
+(pausado). Oferecer um produto que não fecha o pedido seria justamente o
+problema que o aviso do painel existe para evitar.
+
+Falta: sacola, checkout (com telefone e endereço estruturado, item 1),
+manifest, service worker e instalação — sem eles é uma página, não um PWA.
 
 ## Ordem sugerida
 

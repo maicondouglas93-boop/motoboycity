@@ -14143,3 +14143,59 @@ Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
 `company-web` passando. Conferido no navegador: as três situações de cadastro
 aparecem com a ação certa; o modo manual troca aviso, etiqueta, contagem e
 filtro; o campo de valor só aparece com a cobrança marcada.
+
+## 2026-09-23 — A loja que o cliente abre, primeira fatia
+
+Criada `/pedir/[slug]`: cabeçalho com a identidade da loja, barra de categorias
+grudada no topo, cardápio e folha do produto. Em produção o endereço é
+`pedidos.…/{slug}`; a rota tem prefixo porque `/loja` já é a área do painel
+neste mesmo app. Ainda lê `loja-mock.ts`.
+
+**Desenhada como cardápio, não como landing page.** O cliente veio escolher
+comida, e cada rolagem a mais é um item que ele não viu: linha com miniatura de
+76px à direita em vez de cartão com foto grande, divisória em vez de sombra,
+nenhum bloco de boas-vindas antes do primeiro produto, e os três fatos que
+decidem o pedido (tempo, taxa, formas de pagamento) juntos e acima do cardápio.
+A cor da marca entra numa faixa de 1px e nos títulos de seção, e não num
+cabeçalho inteiro colorido que roubaria a leitura do primeiro produto.
+
+**O painel decide o que o cliente vê.** A loja mostra só produto `publicado` e
+sem pendência que impeça vender. Nos dados de exemplo isso remove dois itens —
+o X-Burguer, pelo grupo obrigatório sem escolha disponível, e o Refrigerante,
+pausado. É a mesma regra dos dois lados: o painel avisa que ninguém consegue
+comprar, e a loja não oferece.
+
+A folha do produto aplica o mínimo do grupo do lado de quem compra, e **diz
+qual grupo falta** em vez de só desabilitar o botão. Grupo de máximo 1 troca a
+escolha em vez de recusar o toque; recusar faria o cliente desmarcar antes de
+marcar, sem nada na tela explicando. Escolha indisponível aparece esmaecida com
+"Indisponível", em vez de sumir — o cliente sabe que o item existe e acabou.
+
+Para a regra poder ser conferida dos dois lados, o X-Salada ganhou um grupo
+obrigatório **satisfazível** ("Ponto da carne", duas escolhas disponíveis), ao
+lado do X-Burguer, que continua sendo o caso quebrado.
+
+**Defeito corrigido de caminho:** a tela de Configurações nascia com
+`#f97316` como cor da marca, que dá 2,8 sobre branco e disparava o próprio
+aviso antes de a lojista tocar em qualquer coisa. Um aviso que já nasce aceso
+ensina a ser ignorado. O padrão passou a `#c2410c`, contraste 5,2.
+
+**Observação do teste do tema escuro:** `#c2410c` sobre o fundo escuro dá 3,6 e
+reprova pela régua de texto. O sistema está coerente — o aviso do painel diria
+"escolha um tom mais claro" —, mas vale registrar que trocar o tema obriga a
+reescolher a cor, e que hoje o painel **avisa sem impedir** salvar assim.
+
+Arquivos: `apps/company-web/src/app/pedir/[slug]/page.tsx` (novo),
+`src/components/loja-online/folha-do-produto.tsx` e `paleta.ts` (novos),
+`src/lib/loja-mock.ts`, `src/app/(app)/loja/configuracoes/page.tsx`,
+`docs/plano-loja-online.md`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. Conferido no navegador a 375px e em largura de
+computador: o cardápio some com os dois produtos certos; escolher 500ml mais
+morango leva o total de R$ 12,00 a R$ 21,00 e a R$ 42,00 com quantidade 2; o
+grupo obrigatório do X-Salada trava o botão e nomeia o que falta; o tema escuro
+repinta fundo, texto e superfícies.
+
+Falta para ser um PWA de fato: sacola, checkout, manifest, service worker e
+instalação.
