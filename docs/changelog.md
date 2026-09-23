@@ -13897,3 +13897,82 @@ lista de empresas — antes que este código suba.
 
 Pendente nas telas: gerenciar categorias (criar, editar, excluir), reordenação,
 separação entre rascunho e publicado, e o aviso de pendências do produto.
+
+## 2026-09-23 — Loja: categorias, ordem, publicação e pendências
+
+Segundo recorte das telas de demonstração da Loja, ainda sem backend. Fecha o
+que tinha ficado em aberto no recorte anterior: gerenciar categorias,
+reordenação, separação entre rascunho e publicado, e o aviso de pendências.
+
+**Três situações no lugar de `ativo: boolean`.** "Ainda não terminei de
+cadastrar" e "acabou o estoque hoje" são coisas diferentes, e um booleano faz as
+duas parecerem a mesma na lista. Agora o produto é `publicado`, `rascunho` ou
+`pausado`. O formulário deixou de ter a caixa "Produto ativo": a saída dele é a
+decisão de publicar ou guardar como rascunho, e pausar depois é assunto da
+lista.
+
+**O alarme conta só os publicados que travam a venda.** Um rascunho sem preço
+não é problema — rascunho é justamente o produto inacabado. Se o aviso somasse
+os dois, dispararia o tempo todo para uma situação normal e ninguém o leria no
+dia em que um produto no ar quebrasse. A pendência também é separada entre a que
+impede vender e a que é só recomendação: dar a "sem foto" o mesmo destaque de
+"sem preço" faria as duas serem ignoradas juntas.
+
+**A pendência que mais importa é a menos óbvia:** um grupo obrigatório sem
+escolhas disponíveis em número suficiente trava o carrinho. O produto aparece
+normalmente na loja e o cliente simplesmente não consegue concluir — a loja só
+descobriria pela venda que não entra. Está nos dados de exemplo (X-Burguer, com
+"Ponto da carne" exigindo 1 e sem nenhuma escolha disponível) para a tela poder
+ser conferida com o caso real na frente.
+
+**Categoria virou referência por id.** Com o nome, renomear "Lanches" para
+"Salgados" deixaria todo produto apontando para uma categoria inexistente — e
+renomear é exatamente o que a tela nova permite.
+
+**Ordenar ganhou tela própria (`/loja/produtos/organizar`).** Ordenar dentro de
+uma lista filtrada é uma armadilha: "mover para cima" trocaria de lugar com o
+vizinho **visível**, e não com o real, e o resultado na loja seria outro. A tela
+de organizar não tem busca nem filtro — o que se vê ali é a ordem que o cliente
+vê. A ordem é a posição no array; um campo `ordem` exigiria renumerar tudo a
+cada movimento e permitiria dois itens com o mesmo número.
+
+Excluir categoria com produto dentro fica bloqueado, porque deixaria todos eles
+sem seção — invisíveis na loja, sem a loja perceber. Produtos órfãos aparecem
+num bloco "Fora de qualquer seção" no fim da tela.
+
+**Correção de classificação feita ao desenhar a tela de organizar.** "Sem
+categoria" estava marcada como recomendação. Está errado: a loja é dividida em
+seções e cada seção é uma categoria, então produto sem categoria não tem onde
+aparecer — o cliente nunca chega nele, o que na prática é não estar à venda.
+Passou a impedir a publicação.
+
+**Dois textos corrigidos no formulário.** O plural saía como "0 escolha(s)
+disponível(is)"; e o aviso de grupo vazio dizia "não aparece para o cliente",
+que para um grupo **obrigatório** é falso — ele não some, ele impede concluir o
+pedido. Cada caso tem agora a frase certa.
+
+**Rótulo ambíguo encontrado no teste.** Categoria e produto de mesmo nome
+geravam dois botões "Subir Açaí", indistinguíveis em leitor de tela. Viraram
+"Subir a categoria Açaí" e "Subir o produto Açaí".
+
+Arquivos:
+
+- `apps/company-web/src/lib/loja-mock.ts` — `SituacaoDoProduto`,
+  `CategoriaDeExemplo`, `GrupoDeExemplo`, `pendenciasDoProduto`;
+- `apps/company-web/src/app/(app)/loja/produtos/page.tsx` — filtros por
+  situação, aviso, publicar/pausar;
+- `apps/company-web/src/app/(app)/loja/produtos/organizar/page.tsx` (novo);
+- `apps/company-web/src/app/(app)/loja/produtos/novo/page.tsx` — cartão
+  Publicação, nome e categoria controlados.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. Conferido no navegador em `localhost:3001`: o aviso
+aparece com o X-Burguer e some ao pausá-lo; "Publicar" fica travado no rascunho
+com pendência; mover categoria e mover produto respeitam os limites (conferido
+pelo estado `disabled` de todos os botões); criar e excluir categoria funcionam
+e a exclusão continua bloqueada nas que têm produto; o cartão Publicação vira
+"Pronto para publicar" ao preencher nome, categoria e preço, e volta a acusar ao
+marcar um grupo como obrigatório sem escolhas.
+
+O aviso do deploy continua valendo, e agora está registrado no
+`agent-handoff.md`: o item "Loja" está no menu que as empresas de produção usam.

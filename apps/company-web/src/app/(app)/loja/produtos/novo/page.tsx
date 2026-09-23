@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ImagePlus, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronLeft, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -56,10 +56,11 @@ function descreverGrupo(grupo: GrupoDeEscolhas): string {
 }
 
 export default function NovoProdutoPage() {
+  const [nome, setNome] = useState('');
+  const [categoriaId, setCategoriaId] = useState('');
   const [precoUnico, setPrecoUnico] = useState('');
   const [tamanhos, setTamanhos] = useState<LinhaDeTamanho[]>([]);
   const [grupos, setGrupos] = useState<GrupoDeEscolhas[]>([]);
-  const [ativo, setAtivo] = useState(true);
 
   /**
    * Ou o produto tem preço único, ou tem tamanhos — nunca os dois.
@@ -69,6 +70,55 @@ export default function NovoProdutoPage() {
    * produto só, e o tamanho é uma escolha dentro dele.
    */
   const usaTamanhos = tamanhos.length > 0;
+
+  /**
+   * O que impede PUBLICAR — e não o que impede salvar.
+   *
+   * Rascunho aceita tudo pela metade, que é para isso que ele serve. A lista
+   * abaixo é só o que faria o cliente abrir o produto na loja e não conseguir
+   * comprar; falta de foto ou de descrição não entra aqui.
+   */
+  const bloqueios: string[] = [];
+
+  if (nome.trim() === '') {
+    bloqueios.push('falta o nome');
+  }
+  if (categoriaId === '') {
+    bloqueios.push('falta a categoria — sem ela o produto não aparece em nenhuma seção da loja');
+  }
+  if (!usaTamanhos && precoUnico.trim() === '') {
+    bloqueios.push('falta o preço');
+  }
+
+  const tamanhosIncompletos = tamanhos.filter(
+    (tamanho) => tamanho.nome.trim() === '' || tamanho.preco.trim() === '',
+  );
+  if (tamanhosIncompletos.length > 0) {
+    bloqueios.push(
+      tamanhosIncompletos.length === 1
+        ? '1 tamanho sem nome ou sem preço'
+        : `${tamanhosIncompletos.length} tamanhos sem nome ou sem preço`,
+    );
+  }
+
+  /*
+   * Um grupo obrigatório sem escolhas disponíveis em número suficiente trava o
+   * carrinho: o produto aparece na loja e o cliente não consegue concluir.
+   */
+  for (const grupo of grupos) {
+    const minimo = Number(grupo.minimo) || 0;
+    if (minimo < 1) continue;
+    const disponiveis = grupo.escolhas.filter(
+      (escolha) => escolha.disponivel && escolha.nome.trim() !== '',
+    ).length;
+    if (disponiveis < minimo) {
+      bloqueios.push(
+        `"${grupo.nome.trim() || 'grupo sem nome'}" exige ${minimo} e só tem ${disponiveis} ${
+          disponiveis === 1 ? 'escolha disponível' : 'escolhas disponíveis'
+        }`,
+      );
+    }
+  }
 
   function acrescentarTamanho() {
     setTamanhos((atual) => [...atual, { id: novoId(), nome: '', preco: '', disponivel: true }]);
@@ -167,7 +217,13 @@ export default function NovoProdutoPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="nome">Nome</Label>
-            <Input id="nome" name="nome" placeholder="Açaí" />
+            <Input
+              id="nome"
+              name="nome"
+              value={nome}
+              onChange={(event) => setNome(event.target.value)}
+              placeholder="Açaí"
+            />
             <p className="text-xs text-muted-foreground">
               O nome do item, sem o tamanho. Os tamanhos entram abaixo.
             </p>
@@ -188,13 +244,14 @@ export default function NovoProdutoPage() {
               <select
                 id="categoria"
                 name="categoria"
-                defaultValue=""
+                value={categoriaId}
+                onChange={(event) => setCategoriaId(event.target.value)}
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
               >
                 <option value="">Sem categoria</option>
-                {CATEGORIAS_DE_EXEMPLO.map((nome) => (
-                  <option key={nome} value={nome}>
-                    {nome}
+                {CATEGORIAS_DE_EXEMPLO.map((categoria) => (
+                  <option key={categoria.id} value={categoria.id}>
+                    {categoria.nome}
                   </option>
                 ))}
               </select>
@@ -422,8 +479,14 @@ export default function NovoProdutoPage() {
                 ))}
 
                 {grupo.escolhas.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Grupo vazio não aparece para o cliente.
+                  <p
+                    className={`text-xs ${
+                      (Number(grupo.minimo) || 0) >= 1 ? 'text-amber-700' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {(Number(grupo.minimo) || 0) >= 1
+                      ? 'Grupo obrigatório e vazio: o cliente abre o produto e não consegue concluir o pedido.'
+                      : 'Grupo vazio não aparece para o cliente.'}
                   </p>
                 )}
 
@@ -445,33 +508,55 @@ export default function NovoProdutoPage() {
         </CardContent>
       </Card>
 
+      {/* Substitui o antigo "Produto ativo".
+          Um booleano fazia "ainda não terminei" e "acabou hoje" caírem no mesmo
+          estado. Aqui a saída do formulário é a decisão de publicar ou não, e
+          pausar depois é assunto da lista. */}
       <Card>
-        <CardContent className="py-4">
-          <label className="flex items-start gap-2.5 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={ativo}
-              onCheckedChange={(valor) => setAtivo(valor === true)}
-            />
-            <span>
-              Produto ativo
-              <span className="block text-xs text-muted-foreground">
-                Desmarque para tirar do cardápio sem apagar o cadastro.
-              </span>
-            </span>
-          </label>
+        <CardHeader>
+          <CardTitle>Publicação</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {bloqueios.length === 0 ? (
+            <p className="flex items-start gap-2 text-sm text-emerald-700">
+              <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              Pronto para publicar. Assim que salvar, o produto aparece na loja.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Falta para poder publicar:</p>
+              <ul className="space-y-1">
+                {bloqueios.map((texto) => (
+                  <li key={texto} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <AlertCircle
+                      className="mt-0.5 size-4 shrink-0 text-amber-600"
+                      aria-hidden="true"
+                    />
+                    {texto}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                Nada disso impede salvar como rascunho — o cadastro fica guardado e não vai para a
+                loja.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled>
-          Cadastrar produto
+          Publicar produto
+        </Button>
+        <Button type="button" variant="outline" disabled>
+          Salvar rascunho
         </Button>
         <Link href="/loja/produtos" className="inline-flex items-center px-3 text-sm">
           Cancelar
         </Link>
-        <span className="self-center text-xs text-muted-foreground">
-          Desativado enquanto a tela não está ligada ao sistema.
+        <span className="text-xs text-muted-foreground">
+          Salvar está desativado enquanto a tela não está ligada ao sistema.
         </span>
       </div>
     </form>

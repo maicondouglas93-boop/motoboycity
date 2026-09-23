@@ -10,6 +10,11 @@
  * sobre o que está integrado.
  */
 
+export interface CategoriaDeExemplo {
+  id: string;
+  nome: string;
+}
+
 export interface TamanhoDeExemplo {
   id: string;
   nome: string;
@@ -18,24 +23,50 @@ export interface TamanhoDeExemplo {
   disponivel: boolean;
 }
 
-export interface AdicionalDeExemplo {
+export interface EscolhaDeExemplo {
   id: string;
   nome: string;
   preco: number;
   disponivel: boolean;
 }
 
+export interface GrupoDeExemplo {
+  id: string;
+  nome: string;
+  minimo: number;
+  /** `null` é "sem limite". */
+  maximo: number | null;
+  escolhas: EscolhaDeExemplo[];
+}
+
+/**
+ * Três estados, e não um `ativo: boolean`.
+ *
+ * "Ainda não terminei de cadastrar" e "acabou o estoque hoje" são coisas
+ * diferentes, e um booleano faz as duas parecerem a mesma na lista. A lojista
+ * precisa distinguir o que exige trabalho do que exige só um clique quando
+ * chegar mercadoria.
+ */
+export type SituacaoDoProduto = 'publicado' | 'rascunho' | 'pausado';
+
 export interface ProdutoDeExemplo {
   id: string;
   nome: string;
   descricao: string;
-  categoria: string;
+  /**
+   * Referência por id, e não o nome da categoria.
+   *
+   * Com o nome, renomear "Lanches" para "Salgados" deixaria todo produto
+   * apontando para uma categoria que não existe mais. A tela de organizar
+   * permite renomear, então o modelo tem que aguentar isso.
+   */
+  categoriaId: string | null;
   imagemUrl: string | null;
   /** Usado quando o produto não tem tamanhos; com tamanhos, o preço vem deles. */
   precoUnico: number | null;
-  ativo: boolean;
+  situacao: SituacaoDoProduto;
   tamanhos: TamanhoDeExemplo[];
-  adicionais: AdicionalDeExemplo[];
+  grupos: GrupoDeExemplo[];
 }
 
 export interface ItemDeVenda {
@@ -70,65 +101,126 @@ export interface VendaDeExemplo {
   minutosParaDespachar: number | null;
 }
 
-export const CATEGORIAS_DE_EXEMPLO = ['Açaí', 'Sorvetes', 'Lanches', 'Bebidas'];
+/**
+ * A ORDEM DO ARRAY é a ordem em que as seções aparecem na loja. Não há campo
+ * `ordem`: ele exigiria renumerar tudo a cada movimento e abriria espaço para
+ * dois itens com o mesmo número. A tela de organizar move elementos no array.
+ */
+export const CATEGORIAS_DE_EXEMPLO: CategoriaDeExemplo[] = [
+  { id: 'c1', nome: 'Açaí' },
+  { id: 'c2', nome: 'Lanches' },
+  { id: 'c3', nome: 'Sorvetes' },
+  { id: 'c4', nome: 'Bebidas' },
+];
 
 export const PRODUTOS_DE_EXEMPLO: ProdutoDeExemplo[] = [
   {
     id: 'p1',
     nome: 'Açaí',
     descricao: 'Açaí cremoso batido na hora, com opção de adicionais.',
-    categoria: 'Açaí',
+    categoriaId: 'c1',
     imagemUrl: null,
     precoUnico: null,
-    ativo: true,
+    situacao: 'publicado',
     tamanhos: [
       { id: 't1', nome: '300ml', preco: 12, disponivel: true },
       { id: 't2', nome: '500ml', preco: 18, disponivel: true },
       { id: 't3', nome: '700ml', preco: 24, disponivel: true },
     ],
-    adicionais: [
-      { id: 'a1', nome: 'Leite condensado', preco: 2, disponivel: true },
-      { id: 'a2', nome: 'Leite em pó', preco: 2, disponivel: true },
-      { id: 'a3', nome: 'Morango', preco: 3, disponivel: true },
-      { id: 'a4', nome: 'Paçoca', preco: 2, disponivel: false },
+    grupos: [
+      {
+        id: 'g1',
+        nome: 'Adicionais',
+        minimo: 0,
+        maximo: null,
+        escolhas: [
+          { id: 'e1', nome: 'Leite condensado', preco: 2, disponivel: true },
+          { id: 'e2', nome: 'Leite em pó', preco: 2, disponivel: true },
+          { id: 'e3', nome: 'Morango', preco: 3, disponivel: true },
+          { id: 'e4', nome: 'Paçoca', preco: 2, disponivel: false },
+        ],
+      },
     ],
   },
   {
     id: 'p2',
     nome: 'X-Burguer',
     descricao: 'Pão, hambúrguer 180g, queijo e salada.',
-    categoria: 'Lanches',
+    categoriaId: 'c2',
     imagemUrl: null,
     precoUnico: 22,
-    ativo: true,
+    situacao: 'publicado',
     tamanhos: [],
-    adicionais: [
-      { id: 'a5', nome: 'Bacon', preco: 4, disponivel: true },
-      { id: 'a6', nome: 'Ovo', preco: 2, disponivel: true },
-      { id: 'a7', nome: 'Cheddar', preco: 3, disponivel: true },
+    grupos: [
+      {
+        id: 'g2',
+        nome: 'Adicionais',
+        minimo: 0,
+        maximo: 3,
+        escolhas: [
+          { id: 'e5', nome: 'Bacon', preco: 4, disponivel: true },
+          { id: 'e6', nome: 'Ovo', preco: 2, disponivel: true },
+          { id: 'e7', nome: 'Cheddar', preco: 3, disponivel: true },
+        ],
+      },
+      /*
+       * O caso que justifica o aviso de pendências existir: um grupo
+       * OBRIGATÓRIO cuja única escolha foi marcada como indisponível. O produto
+       * está no ar e ninguém consegue comprá-lo — a loja só descobriria pela
+       * venda que não entra.
+       */
+      {
+        id: 'g3',
+        nome: 'Ponto da carne',
+        minimo: 1,
+        maximo: 1,
+        escolhas: [{ id: 'e8', nome: 'Ao ponto', preco: 0, disponivel: false }],
+      },
     ],
+  },
+  {
+    id: 'p6',
+    nome: 'X-Salada',
+    descricao: 'Pão, hambúrguer 180g, queijo, alface e tomate.',
+    categoriaId: 'c2',
+    imagemUrl: null,
+    precoUnico: 24,
+    situacao: 'publicado',
+    tamanhos: [],
+    grupos: [],
   },
   {
     id: 'p3',
     nome: 'Sorvete casquinha',
     descricao: 'Sorvete tradicional na casquinha.',
-    categoria: 'Sorvetes',
+    categoriaId: 'c3',
     imagemUrl: null,
     precoUnico: 6,
-    ativo: true,
+    situacao: 'publicado',
     tamanhos: [],
-    adicionais: [],
+    grupos: [],
   },
   {
     id: 'p4',
     nome: 'Refrigerante 350ml',
     descricao: 'Diversos sabores.',
-    categoria: 'Bebidas',
+    categoriaId: 'c4',
     imagemUrl: null,
     precoUnico: 7,
-    ativo: false,
+    situacao: 'pausado',
     tamanhos: [],
-    adicionais: [],
+    grupos: [],
+  },
+  {
+    id: 'p5',
+    nome: 'Milkshake',
+    descricao: '',
+    categoriaId: null,
+    imagemUrl: null,
+    precoUnico: null,
+    situacao: 'rascunho',
+    tamanhos: [],
+    grupos: [],
   },
 ];
 
@@ -232,4 +324,71 @@ export function faixaDePreco(produto: ProdutoDeExemplo): string {
   const menor = Math.min(...precos);
   const maior = Math.max(...precos);
   return menor === maior ? moeda(menor) : `${moeda(menor)} a ${moeda(maior)}`;
+}
+
+export interface Pendencia {
+  texto: string;
+  /**
+   * Separa "o cliente não consegue comprar" de "ficaria melhor assim".
+   *
+   * Sem essa distinção, faltar foto e faltar preço aparecem com o mesmo peso —
+   * e um aviso que grita por tudo deixa de ser lido justamente quando importa.
+   */
+  impedeVender: boolean;
+}
+
+export function pendenciasDoProduto(produto: ProdutoDeExemplo): Pendencia[] {
+  const lista: Pendencia[] = [];
+
+  if (produto.nome.trim() === '') {
+    lista.push({ texto: 'sem nome', impedeVender: true });
+  }
+
+  const semPrecoUnico = produto.precoUnico === null || produto.precoUnico <= 0;
+  if (produto.tamanhos.length === 0 && semPrecoUnico) {
+    lista.push({ texto: 'sem preço', impedeVender: true });
+  }
+
+  const tamanhosSemPreco = produto.tamanhos.filter((tamanho) => tamanho.preco <= 0);
+  if (tamanhosSemPreco.length > 0) {
+    const nomes = tamanhosSemPreco.map((tamanho) => tamanho.nome || 'sem nome').join(', ');
+    lista.push({ texto: `tamanho sem preço: ${nomes}`, impedeVender: true });
+  }
+
+  /*
+   * A pendência mais séria, e a menos óbvia: um grupo obrigatório sem escolhas
+   * disponíveis em número suficiente trava o carrinho. O produto aparece
+   * normalmente na loja e simplesmente não dá para concluir o pedido.
+   */
+  for (const grupo of produto.grupos) {
+    if (grupo.minimo < 1) continue;
+    const disponiveis = grupo.escolhas.filter((escolha) => escolha.disponivel).length;
+    if (disponiveis < grupo.minimo) {
+      const plural = disponiveis === 1 ? 'disponível' : 'disponíveis';
+      lista.push({
+        texto: `"${grupo.nome}" exige ${grupo.minimo} e só tem ${disponiveis} ${plural} — o cliente não fecha o pedido`,
+        impedeVender: true,
+      });
+    }
+  }
+
+  /*
+   * Bloqueia, e não é só recomendação: a loja é organizada em seções, e cada
+   * seção é uma categoria. Um produto sem categoria não tem onde aparecer — o
+   * cliente nunca chega nele, o que na prática é o mesmo que não estar à venda.
+   */
+  if (produto.categoriaId === null) {
+    lista.push({
+      texto: 'sem categoria — não aparece em nenhuma seção da loja',
+      impedeVender: true,
+    });
+  }
+  if (produto.imagemUrl === null) {
+    lista.push({ texto: 'sem foto', impedeVender: false });
+  }
+  if (produto.descricao.trim() === '') {
+    lista.push({ texto: 'sem descrição', impedeVender: false });
+  }
+
+  return lista;
 }

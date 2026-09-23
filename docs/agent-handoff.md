@@ -544,6 +544,26 @@ minutos em que os painéis já mostram o campo e a API ainda é a antiga: nessa
 janela o Zod descarta a chave desconhecida e o pedido nasce sem a marcação.
 Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 
+## Loja online — telas de demonstração dentro do painel
+
+O menu do `company-web` tem um item **Loja**, com as telas Vendas, Produtos
+(mais Organizar e Cadastrar) e Configurações. **Nada disso está integrado.** Os
+dados vêm de `apps/company-web/src/lib/loja-mock.ts` e vivem na memória do
+navegador; toda tela traz um aviso dizendo isso, e todo botão de salvar está
+desativado. Existem para aprovar o desenho antes de escrever backend.
+
+**Trava que falta antes do próximo deploy.** O item "Loja" aparece para
+qualquer empresa que abra o painel. Sem flag de ambiente, permissão ou lista de
+empresas liberadas, um deploy mostra vendas falsas às empresas de produção.
+Quem for publicar o `company-web` precisa resolver isso ou remover o item do
+menu.
+
+Quem for ligar à API deve **apagar** `loja-mock.ts`, e não adaptá-lo. As
+decisões de modelo que as telas assumem (três situações do produto em vez de um
+booleano, categoria por id, ordem pela posição no array, pendência que impede
+vender separada da que é só recomendação) estão comentadas no próprio arquivo e
+registradas no `changelog.md` de 2026-09-23.
+
 ## Limitações e próximos passos
 
 ### Pendente de ação humana
