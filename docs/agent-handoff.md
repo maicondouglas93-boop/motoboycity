@@ -8,7 +8,11 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-21**, seis melhorias de carregamento do Driver App
+> Última revisão: **2026-09-23**, liberar pedido agendado antes da hora
+> (empresa e ADM) e valor mostrado ao motoboy antes de confirmar a entrega sem
+> endereço, publicados em `378ca74` (Render e as duas Vercel em success) e
+> empacotados no APK `pilot.27`, compilado de `f2d1795` e ainda não enviado.
+> Antes disso, seis melhorias de carregamento do Driver App
 > e a autoria da FM Software no alto do painel da loja, publicadas em
 > `dbd6422` e `d444189` e empacotadas no APK `pilot.26`. Antes disso, endereço
 > conferido por GPS no modal de entrega e marcação de pedido urgente em
@@ -17,8 +21,8 @@
 > pedido sozinho publicadas em `1bd88bc`, empacotadas no APK `pilot.24`.
 > Antes disso, o aviso GPS de proximidade da coleta publicado
 > em `7e13bce`: Render, Vercel (Company/ADM) e CI confirmados em success.
-> APK `pilot.26` assinado e pronto para distribuicao, com verificacoes abaixo.
-> O `pilot.25` foi enviado aos motoboys em 21/09; o `.26` vem por cima dele.
+> APK `pilot.27` assinado e pronto para distribuicao, com verificacoes abaixo.
+> O `pilot.26` foi enviado aos motoboys em 21/09; o `.27` vem por cima dele.
 > Mini-ilustrações Company e ADM enviadas em `1fa0a1f`; conferir rollout.
 > Marca aiqfome enviada em `1d9ae85`; conferir rollout.
 > Cupom de entrega de 80 mm enviado em `3d2dd41`, com 126 testes e
@@ -173,11 +177,11 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `7e13bce`, chegada GPS na coleta e versao mobile `pilot.23`, enviado para `main` em 11/09/2026. Render, Vercel Company/ADM e CI confirmados em success. Instalacao do APK nos aparelhos ainda nao confirmada |
+| Commit publicado | `378ca74`, liberar agendado antes da hora e valor antes de confirmar, enviado para `main` em 23/09/2026. Render e Vercel Company/ADM em success; API nova conferida pela rota nova (404 → 401) e `/health/ready` com PostgreSQL/Redis ok. CI vermelho desde 21/09 por falha anterior (item 3 das pendências) |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 53 migrations no repositorio, incluindo chegada na coleta. Build Render com `migrate deploy` concluido e readiness PostgreSQL ok; sem inspecao SQL direta do schema de producao |
-| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de hoje |
+| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -196,26 +200,28 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.26-vc26.apk`
-SHA-256 `38CC19FC8A80F76FB2AD6B6C4072735808D1A5A6140B009F8858AB531F8ADCD9`,
-75.184.953 bytes, `versionCode` 26, minSdk 24, targetSdk 36, assinatura v2,
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.27-vc27.apk`
+SHA-256 `DE92D7FAFDB2AFDA012EEC94791DF6AC3206C05D0957EAF08FEF33557ABBB709`,
+75.187.653 bytes, `versionCode` 27, minSdk 24, targetSdk 36, assinatura v2,
 ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.25` e versões anteriores
-assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `38a7773`.
+anteriores, então ele atualiza por cima de `pilot.26` e versões anteriores
+assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `f2d1795`.
+O `pilot.26` (`38a7773`) continua na mesma pasta.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-URL HTTP/HTTPS/WebSocket em `localhost`, `127.0.0.1` ou `10.0.2.2` — a unica
-ocorrencia de `localhost` no bundle e uma string solta da tabela do Hermes, sem
-esquema nem porta. Versao JS `0.1.0-pilot.26` conferida no bundle, junto de
-`Carregando seus pedidos`, `Buscando sua localiza...` e `Identificando a rua`.
+`localhost:3333`, `127.0.0.1` ou `10.0.2.2`. Versao JS `0.1.0-pilot.27`
+conferida no bundle, junto de `Calculando o valor...`, `Calculado ao confirmar`,
+`Seu GPS está impreciso agora` e `Não deu para calcular o valor agora` (as duas
+últimas em UTF-16, como previsto).
 
 **Armadilha ao conferir o bundle:** o Hermes guarda em UTF-16 toda string que
 tenha caractere nao-ASCII. Procurar texto acentuado lendo o bundle como texto
 devolve "ausente" para strings que ESTAO la. Procure nos bytes, nas duas
 codificacoes — foi o que aconteceu na conferencia do `pilot.26`. Assinatura
 por `apksigner`, pacote por `aapt` e hash da copia final aprovados. Ensaio
-fisico ainda pendente, e agora ele cobre tambem a confirmacao da entrega, o
+fisico ainda pendente, e agora ele cobre tambem o valor no modal de
+confirmacao (item 2 das pendências), a confirmacao da entrega, o
 cabecalho de duas linhas e o fim de pedido com dois pedidos abertos.
 
 ### AAB pronto para envio à Google Play
@@ -326,7 +332,7 @@ Vercel concluiu com sucesso.
 
 ### Demais fluxos
 
-**Liberar pedido agendado antes da hora — implementado, não publicado
+**Liberar pedido agendado antes da hora — publicado em `378ca74`
 (2026-09-23):** empresa (na lista e no detalhe do pedido, "Chamar agora") e ADM
 (menu de ações, "Liberar agora") tiram um pedido `SCHEDULED` do agendamento e o
 mandam para a busca na hora — o caso típico é o pedido do aiqfome esperando o
@@ -495,7 +501,7 @@ chuva/horário virando no meio. O confirmar passou a **esperar o valor**, com te
 de 8 s — passado disso libera e avisa que o valor sai na confirmação. GPS
 impreciso bloqueia o confirmar com "Tentar de novo". A reserva já vale para o
 `pilot.26` depois do deploy da API (ele já chama a consulta); só **mostrar** o
-valor exige o APK novo.
+valor exige o `pilot.27`.
 
 ## Abertura automática do pedido recém-aceito
 
@@ -553,9 +559,9 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
    **aceitar → coletar → entregar** não mostra o aviso antigo do pedido #547.
    No próximo APK, testar também o #777 com **Tentar GPS novamente**, um aceite
    durante oscilação de rede e uma oferta recebida perto do fim do prazo.
-2. **APK novo com o valor antes de confirmar** (recorte de 23/09/2026; ainda não
-   compilado nem conferido em aparelho). Publicar a API primeiro. Testar num
-   pedido sem endereço: o modal mostra o valor e o confirmar espera por ele; o
+2. **Enviar e testar o `pilot.27`, com o valor antes de confirmar** (recorte de
+   23/09/2026; API publicada, APK compilado e conferido, ainda não enviado nem
+   testado em aparelho). Testar num pedido sem endereço: o modal mostra o valor e o confirmar espera por ele; o
    valor na carteira depois é o mesmo; GPS impreciso bloqueia com "Tentar de
    novo"; e sem internet o modal libera em até 8 s com "Calculado ao confirmar",
    sem travar a entrega.
@@ -684,6 +690,24 @@ lidas apenas de arquivos DPAPI criados pelo responsável em `%TEMP%`, usadas no
 processo e **nunca exibidas** nem versionadas. Os valores em memória e as
 variáveis do processo são limpos ao final do build.
 
+Os arquivos são `%TEMP%\motoboycity-store-password.dpapi` e
+`%TEMP%\motoboycity-key-password.dpapi`. O responsável os cria colando, **no
+PowerShell** (não dentro de `powershell -Command "..."`, que expande o `$`):
+
+```powershell
+Read-Host 'Senha do keystore' -AsSecureString | ConvertFrom-SecureString | Set-Content -Encoding utf8 "$env:TEMP\motoboycity-store-password.dpapi"
+Read-Host 'Senha da chave (alias motoboycity)' -AsSecureString | ConvertFrom-SecureString | Set-Content -Encoding utf8 "$env:TEMP\motoboycity-key-password.dpapi"
+```
+
+O DPAPI amarra o arquivo ao usuário do Windows: só esta conta nesta máquina
+consegue abrir, e o agente usa a senha sem nunca vê-la. No build, o script lê
+com `ConvertTo-SecureString`, passa por variável de ambiente ao Gradle e apaga
+as variáveis no `finally`. O Gradle roda pelo `cmd` com saída num log — com
+`$ErrorActionPreference = 'Stop'`, o PowerShell mata o build no primeiro stderr.
+Chame o `gradlew.bat` pelo **caminho absoluto**: o ambiente do agente define
+`NoDefaultCurrentDirectoryInExePath`, e aí o `cmd` responde "'gradlew.bat' não é
+reconhecido" mesmo dentro da pasta certa (visto no `pilot.27`).
+
 ## Estado do worktree
 
 Histórico de faturas por cliente foi consolidado em `6b8c918` e documentado em
@@ -692,7 +716,7 @@ financeira foram consolidados em `583f67b`, enviados para `main` e publicados
 com sucesso no Render e nas duas Vercel. O CI geral ainda estava em execução na
 confirmação dos deploys; não foi usado para declarar a publicação aprovada.
 Não incluir mudanças de outras sessões em eventual publicação futura.
-O APK em `I:\MOTOboyCity\releases` e o `pilot.26`, compilado de `38a7773`.
+O APK mais novo em `I:\MOTOboyCity\releases` e o `pilot.27`, compilado de `f2d1795`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do

@@ -13778,3 +13778,56 @@ depois de um `return` — além de reprovar o lint, é crash latente de "Rendere
 more hooks". Como o Lint falha primeiro, testes e builds do CI não rodam há
 dias. Os dois testes do `detail` falhariam logo em seguida. Não corrigido aqui;
 deixado como tarefa separada.
+
+## 2026-09-23 — Publicação do recorte e APK `pilot.27`
+
+Publicação autorizada ("pode por em producao"). `378ca74` enviado para `main`.
+O Render trocou a API em cerca de 3 minutos — conferido pela rota nova
+`PATCH /deliveries/:id/release-scheduled`, que respondia 404 na versão antiga e
+passou a responder 401 sem token — e `/health/ready` respondeu ready com
+PostgreSQL e Redis ok. Os deployments do GitHub para `378ca74` ficaram em
+success na API, no Company e no ADM. O CI continua vermelho pela falha anterior
+de lint no ADM (achado fora do escopo da entrada acima); não foi usado para
+declarar a publicação aprovada.
+
+A partir desse deploy o `pilot.26` já ganha a **reserva** do valor (ele já chama
+a consulta do destino), mas só o `pilot.27` **mostra** o valor ao motoboy.
+
+APK compilado do bump `f2d1795` em worktree curta `C:\m27`, JDK 21, mesma
+receita, senhas lidas dos arquivos DPAPI criados pelo responsável.
+**BUILD SUCCESSFUL em 7m55**, 427 tarefas. Artefato:
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.27-vc27.apk`, **75.187.653
+bytes**, SHA-256
+`DE92D7FAFDB2AFDA012EEC94791DF6AC3206C05D0957EAF08FEF33557ABBB709`, conferido
+igual entre origem e cópia. `apksigner`: v2 válida com o certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`. `aapt`:
+pacote `com.motoboycity.driverapp`, versionCode 27, versionName
+`0.1.0-pilot.27`, minSdk 24, targetSdk 36, quatro ABIs. No bundle, conferido
+nos bytes: API oficial, versão JS `0.1.0-pilot.27`, `Calculando o valor...`,
+`Calculado ao confirmar` e ` de retorno` em UTF-8, `Seu GPS está impreciso
+agora` e `Não deu para calcular o valor agora` em UTF-16; `localhost:3333`,
+`127.0.0.1` e `10.0.2.2` ausentes.
+
+**Armadilha nova no build.** A primeira tentativa parou em "'gradlew.bat' não é
+reconhecido", dentro da pasta certa. O ambiente do agente define
+`NoDefaultCurrentDirectoryInExePath`, e com ela o `cmd` não executa programa da
+pasta atual pelo nome sozinho. Resolvido chamando o `gradlew.bat` pelo caminho
+absoluto; registrado no runbook "Compilar o APK" do handoff, junto dos nomes dos
+arquivos DPAPI e do comando para criá-los.
+
+**Incidente de exposição local.** Na investigação da falha, o agente exibiu na
+sessão o `apps/driver-app/android/local.properties` da worktree, que tem a
+chave do Maps e duas linhas com as senhas do keystore em texto puro. O arquivo
+é ignorado pelo Git e nunca foi versionado; nenhum valor foi para commit, log
+ou documento. O `build.gradle` lê desse arquivo só a chave do Maps — as duas
+linhas de senha não são usadas pelo build. Recomendado ao responsável apagá-las
+do arquivo original; não foram editadas sem autorização.
+
+Worktree removida com `rmdir /s /q` e `git worktree prune` (a cópia do
+`local.properties` saiu junto). Senhas abertas só na memória do processo e
+removidas no `finally`.
+
+Pendente de ação humana: **enviar o `pilot.27`** e testar num pedido sem
+endereço o valor no modal, o confirmar esperando o valor, o valor igual na
+carteira depois, GPS impreciso bloqueando com "Tentar de novo" e, sem internet,
+a liberação em até 8 s com "Calculado ao confirmar".
