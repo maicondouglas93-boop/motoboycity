@@ -558,6 +558,10 @@ demonstração, um item no menu mostraria vendas falsas às empresas de produç�
 primeiro deploy. O motivo está comentado no próprio `top-nav.tsx`, junto do
 `NAV_ITEMS` — quem ligar a loja à API acrescenta o item ali no mesmo recorte.
 
+O plano do que falta — backend inteiro, PWA do cliente e os quatro pedidos de
+2026-09-23 — está em `docs/plano-loja-online.md`, que é a referência atual da
+loja neste repositório.
+
 Quem for ligar à API deve **apagar** `loja-mock.ts`, e não adaptá-lo. As
 decisões de modelo que as telas assumem (três situações do produto em vez de um
 booleano, categoria por id, ordem pela posição no array, pendência que impede

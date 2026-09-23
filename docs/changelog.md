@@ -14046,3 +14046,45 @@ Arquivos: `apps/company-web/src/components/layout/top-nav.tsx`,
 Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
 `company-web` passando. Conferido no navegador: o menu voltou a ter cinco itens,
 sem "Loja", e `/loja/produtos` continua abrindo pela URL.
+
+## 2026-09-23 — Plano da loja online passa a existir neste repositório
+
+As decisões da loja estavam só no `changelog.md`, que o próprio cabeçalho diz
+ser história e não referência. O plano equivalente vive no Ligeirinho e está
+descontinuado desde que o trabalho migrou para cá. Resultado: não havia onde ler
+o que vale hoje sem reconstituir quatro recortes de histórico.
+
+Criado `docs/plano-loja-online.md`, com o que existe (telas de demonstração,
+sem backend), as nove decisões já tomadas e o que falta. O `agent-handoff.md`
+passa a apontar para ele.
+
+Acrescentados ao plano os quatro pedidos do usuário de hoje:
+
+1. **Salvar o cliente com os dados do pedido do PWA.** Conferindo o contrato que
+   já existe (`packages/types/src/company-customer.ts`), `CompanyCustomer` exige
+   `phone` não-nulo e endereço **estruturado** (`street`, `number`, `complement`,
+   `city`, `state`, `zip`). Isso vira requisito do checkout do PWA: pedir
+   endereço num campo de texto único inviabilizaria a funcionalidade, porque
+   alguém teria que redigitar tudo no painel — o trabalho que ela existe para
+   poupar. Registrado também que são três situações, e não um botão: telefone
+   novo, cadastrado com o mesmo endereço, e cadastrado com endereço diferente —
+   este último usa `CompanyCustomerSavedAddress`, que já guarda vários endereços
+   por cliente, em vez de criar cliente duplicado.
+2. **Checkbox de agendado automático.** Registrado o que precisa vir junto,
+   senão o modo manual vira armadilha: pedido parado sem ninguém olhando a tela;
+   a janela de cancelamento **deixa de existir** no modo manual, porque ela é o
+   preparo correndo antes do despacho; e Pix online já pago exige definir de quem
+   é o estorno.
+3. **Valor da taxa de entrega.** A tela já tem o checkbox de cobrar, e não tem
+   onde pôr o valor. Registrada a distinção que não pode se perder: o que a loja
+   cobra do cliente é independente do que a central cobra da loja na fatura.
+   Sugerido começar com valor fixo. Lido "comprar" como "cobrar", com a ressalva
+   anotada no plano.
+4. **Interface do PWA sem cara de front feito por IA.** Listado o que denuncia
+   (gradiente roxo, vidro fosco, emoji de seção, tudo com o mesmo raio e a mesma
+   sombra, texto de enchimento) e o que usar no lugar: a identidade que a
+   Configurações já coleta, densidade de cardápio e não de landing page.
+
+Arquivos: `docs/plano-loja-online.md` (novo), `docs/agent-handoff.md`.
+
+Nenhuma alteração de código neste recorte.
