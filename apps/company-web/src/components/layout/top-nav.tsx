@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, UserRound } from 'lucide-react';
+import { LogOut, Store, UserRound, type LucideIcon } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -28,11 +28,16 @@ import { session } from '@/lib/session';
  * não um destino de navegação como os outros. Ela vira botão à direita, em
  * âmbar — a mesma cor que, na lista, significa entrega em movimento.
  */
-const NAV_ITEMS = [
+/**
+ * `image` e `icon` são alternativas: os itens antigos têm arte própria, e um
+ * item novo não precisa esperar por arte para existir no menu.
+ */
+const NAV_ITEMS: Array<{ href: string; label: string; image?: string; icon?: LucideIcon }> = [
   { href: '/pedidos', label: 'Pedidos', image: '/brand/navigation/pedidos-v1.png' },
   { href: '/clientes', label: 'Clientes', image: '/brand/navigation/clientes-v1.png' },
   { href: '/relatorios', label: 'Relatórios', image: '/brand/navigation/relatorios-v1.png' },
   { href: '/financeiro', label: 'Financeiro', image: '/brand/navigation/financeiro-v1.png' },
+  { href: '/loja', label: 'Loja', icon: Store },
   { href: '/integracoes', label: 'Integrações', image: '/brand/aiqfome.jpeg' },
 ];
 
@@ -70,7 +75,7 @@ export function TopNav() {
         </Link>
 
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 lg:order-none lg:w-auto lg:min-w-0 lg:flex-1 lg:pb-0">
-          {NAV_ITEMS.map(({ href, label, image }) => {
+          {NAV_ITEMS.map(({ href, label, image, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(`${href}/`);
             const isAiqfome = href === '/integracoes';
             return (
@@ -86,7 +91,7 @@ export function TopNav() {
                     : 'border-transparent text-white/80 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
-                {isAiqfome ? (
+                {isAiqfome && image ? (
                   <Image
                     src={image}
                     alt="aiqfome"
@@ -97,15 +102,24 @@ export function TopNav() {
                   />
                 ) : (
                   <>
-                    <Image
-                      src={image}
-                      alt=""
-                      width={32}
-                      height={32}
-                      sizes="32px"
-                      loading="eager"
-                      className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
-                    />
+                    {image ? (
+                      <Image
+                        src={image}
+                        alt=""
+                        width={32}
+                        height={32}
+                        sizes="32px"
+                        loading="eager"
+                        className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                      />
+                    ) : (
+                      Icon && (
+                        <Icon
+                          aria-hidden="true"
+                          className="size-8 shrink-0 p-1 motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                        />
+                      )
+                    )}
                     {label}
                   </>
                 )}

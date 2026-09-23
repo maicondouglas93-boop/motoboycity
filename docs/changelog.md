@@ -13831,3 +13831,69 @@ Pendente de ação humana: **enviar o `pilot.27`** e testar num pedido sem
 endereço o valor no modal, o confirmar esperando o valor, o valor igual na
 carteira depois, GPS impreciso bloqueando com "Tentar de novo" e, sem internet,
 a liberação em até 8 s com "Calculado ao confirmar".
+
+## 2026-09-23 — Loja online: telas de demonstração, sem backend
+
+Desenho das telas da loja online antes de qualquer API, para o recorte de
+interface ser aprovado primeiro. **Nada aqui está integrado**: os dados vivem
+em `apps/company-web/src/lib/loja-mock.ts`, na memória do navegador, e somem ao
+recarregar. O arquivo abre com um aviso pedindo que seja **apagado** — e não
+adaptado — por quem for ligar à API: manter um caminho de exemplo ao lado do
+caminho real é como as telas acabam mentindo sobre o que está integrado.
+
+A Loja é uma **área dentro do painel** que a empresa já usa, e não um painel
+novo ao lado. Dashboard e Relatórios do desenho original ficaram de fora porque
+repetiriam o que o painel já tem. Sobraram Vendas, Produtos e Configurações.
+
+**Vendas.** O pedido entra `agendado` e vira entrega sozinho quando o tempo de
+preparo vence — a loja não aprova nada. O que ela precisa saber é que existe
+uma janela para cancelar e quanto dela resta, então isso é o aviso mais
+destacado da tela, com contagem por pedido. O troco aparece em negrito: é o que
+o motoboy precisa levar na mão, e enterrado numa observação ele se perde. As
+situações reusam as palavras do painel de pedidos; vocabulário novo obrigaria o
+mesmo atendente a aprender duas linguagens para a mesma operação.
+
+**Produtos.** O campo de preço único **desaparece** quando o primeiro tamanho é
+adicionado (`usaTamanhos = tamanhos.length > 0`), porque os dois juntos criam a
+pergunta de qual vale. Cada tamanho guarda o preço **cheio**, não o acréscimo
+sobre uma base. Os grupos de escolhas têm mínimo e máximo, e a regra é traduzida
+para português na tela (`descreverGrupo`): "Obrigatório, escolha 1", "Opcional,
+até 3" — a lojista não deveria precisar ler dois números para saber o que
+configurou.
+
+**Configurações.** Link da loja, identidade visual, formas de pagamento,
+recebimento Asaas, tempo de preparo e taxa de entrega. Só entrou o que não
+existe em outro lugar do painel.
+
+**Correção de um aviso que nunca disparava.** A verificação de contraste media
+"o melhor entre texto preto e branco sobre a cor escolhida". Com as duas opções
+disponíveis, **toda** cor passa de 4.5:1 — o aviso existia e jamais apareceu.
+Agora cada cor é medida contra o fundo da página no uso real: a cor da marca
+vira TEXTO (régua 4.5), a de ação vira FUNDO de botão, cujo texto por cima é
+calculado e nunca falha (régua 3). Verificado no navegador: `#ffe066` no tema
+claro dá 1,3 e dispara.
+
+**Tema claro/escuro.** O seletor vem antes das cores de propósito: é ele que
+define o fundo contra o qual elas são medidas. Medir sempre contra branco
+aprovaria a cor que some no tema escuro. A régua inverte junto — o texto do
+aviso pede tom "mais claro" ou "mais escuro" conforme o tema, e dizer "mais
+escuro" para quem usa fundo escuro seria exatamente o conselho errado.
+
+Arquivos:
+
+- `apps/company-web/src/lib/loja-mock.ts` e `src/lib/contraste.ts` (novos);
+- `apps/company-web/src/app/(app)/loja/` — `layout.tsx`, `page.tsx`,
+  `vendas/`, `produtos/`, `produtos/novo/`, `configuracoes/` (novos);
+- `apps/company-web/src/components/layout/top-nav.tsx` — item "Loja".
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. As telas foram percorridas no navegador em
+`localhost:3001`, incluindo os dois sentidos do aviso de contraste.
+
+**Risco a considerar antes do próximo deploy.** O item "Loja" foi acrescentado
+ao menu que as empresas de produção usam. Do jeito que está, um deploy mostra a
+elas uma aba com vendas falsas. Falta uma trava — flag de ambiente, permissão ou
+lista de empresas — antes que este código suba.
+
+Pendente nas telas: gerenciar categorias (criar, editar, excluir), reordenação,
+separação entre rascunho e publicado, e o aviso de pendências do produto.
