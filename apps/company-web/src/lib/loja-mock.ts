@@ -79,6 +79,37 @@ export interface ItemDeVenda {
   total: number;
 }
 
+/**
+ * Espelha `CompanyCustomerAddress` de `packages/types`, que é o que o cadastro
+ * de clientes do painel já exige: campos separados, e não uma linha de texto.
+ *
+ * Por isso o checkout do PWA tem que coletar assim. Se ele pedir "endereço"
+ * num campo só, salvar o cliente a partir da venda deixa de ser possível sem
+ * alguém redigitar tudo no painel — o trabalho que a funcionalidade existe
+ * para poupar.
+ *
+ * O contrato não tem bairro. Mantido igual de propósito: divergir aqui só
+ * adiaria a descoberta para a hora de integrar.
+ */
+export interface EnderecoDaEntrega {
+  rua: string;
+  numero: string;
+  complemento: string | null;
+  cidade: string;
+  estado: string;
+  cep: string;
+  referencia: string | null;
+}
+
+/**
+ * O que a loja já sabe deste cliente, conferido pelo TELEFONE.
+ *
+ * `enderecoNovo` existe porque `CompanyCustomerSavedAddress` já guarda vários
+ * endereços por cliente. Sem esse terceiro estado, quem pedisse do trabalho em
+ * vez de casa viraria um cliente duplicado.
+ */
+export type CadastroDoCliente = 'novo' | 'jaCadastrado' | 'enderecoNovo';
+
 export interface VendaDeExemplo {
   id: string;
   numero: number;
@@ -87,10 +118,12 @@ export interface VendaDeExemplo {
   total: number;
   situacao: 'agendado' | 'preparo' | 'rota' | 'entregue' | 'cancelado';
   itens: ItemDeVenda[];
+  telefone: string;
   pagamento: string;
   /** Preenchido só quando o cliente paga em dinheiro. */
   trocoPara: number | null;
-  endereco: string;
+  entrega: EnderecoDaEntrega;
+  cadastro: CadastroDoCliente;
   /**
    * Minutos que faltam para o pedido entrar no despacho e chamar o motoboy.
    *
@@ -233,8 +266,18 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
     total: 32.9,
     situacao: 'agendado',
     pagamento: 'Dinheiro na entrega',
+    telefone: '(35) 99841-2207',
     trocoPara: 50,
-    endereco: 'Rua Arnaldo Leite Ribeiro, 212 - Centro',
+    entrega: {
+      rua: 'Rua Arnaldo Leite Ribeiro',
+      numero: '212',
+      complemento: null,
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '36980-000',
+      referencia: 'Portão azul, ao lado da padaria',
+    },
+    cadastro: 'novo',
     minutosParaDespachar: 6,
     itens: [
       {
@@ -255,8 +298,18 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
     total: 45,
     situacao: 'preparo',
     pagamento: 'Pix pago na loja',
+    telefone: '(35) 99712-6680',
     trocoPara: null,
-    endereco: 'Rua das Flores, 45',
+    entrega: {
+      rua: 'Rua das Flores',
+      numero: '45',
+      complemento: 'Apto 302',
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '36980-000',
+      referencia: null,
+    },
+    cadastro: 'enderecoNovo',
     minutosParaDespachar: null,
     itens: [
       {
@@ -276,8 +329,18 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
     total: 27.5,
     situacao: 'rota',
     pagamento: 'Cartão na entrega',
+    telefone: '(35) 99655-1143',
     trocoPara: null,
-    endereco: 'Av. Principal, 900',
+    entrega: {
+      rua: 'Av. Principal',
+      numero: '900',
+      complemento: null,
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '36980-000',
+      referencia: null,
+    },
+    cadastro: 'jaCadastrado',
     minutosParaDespachar: null,
     itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '700ml', escolhas: [], total: 24 }],
   },
@@ -289,8 +352,18 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
     total: 18,
     situacao: 'entregue',
     pagamento: 'Pix pago na loja',
+    telefone: '(35) 99655-1143',
     trocoPara: null,
-    endereco: 'Rua do Comércio, 77',
+    entrega: {
+      rua: 'Rua do Comércio',
+      numero: '77',
+      complemento: null,
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '36980-000',
+      referencia: null,
+    },
+    cadastro: 'jaCadastrado',
     minutosParaDespachar: null,
     itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '500ml', escolhas: [], total: 18 }],
   },
@@ -302,8 +375,18 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
     total: 52.9,
     situacao: 'cancelado',
     pagamento: 'Dinheiro na entrega',
+    telefone: '(35) 99420-7781',
     trocoPara: 60,
-    endereco: 'Rua Sete, 310',
+    entrega: {
+      rua: 'Rua Sete',
+      numero: '310',
+      complemento: null,
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '36980-000',
+      referencia: null,
+    },
+    cadastro: 'novo',
     minutosParaDespachar: null,
     itens: [{ nome: 'X-Burguer', quantidade: 2, tamanho: null, escolhas: [], total: 44 }],
   },
@@ -391,4 +474,16 @@ export function pendenciasDoProduto(produto: ProdutoDeExemplo): Pendencia[] {
   }
 
   return lista;
+}
+
+/**
+ * Monta a linha do endereço a partir das partes.
+ *
+ * Guardar também uma versão pronta em texto criaria duas fontes de verdade, e
+ * a que aparece na tela iria divergir da que vai para o cadastro do cliente.
+ */
+export function enderecoEmLinha(entrega: EnderecoDaEntrega): string {
+  const inicio = `${entrega.rua}, ${entrega.numero}`;
+  const com = entrega.complemento ? `${inicio} — ${entrega.complemento}` : inicio;
+  return `${com} · ${entrega.cidade}/${entrega.estado}`;
 }

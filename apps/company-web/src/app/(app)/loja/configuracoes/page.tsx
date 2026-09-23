@@ -59,7 +59,9 @@ export default function LojaConfiguracoesPage() {
   const [asaasConfigurado] = useState(false);
   const [formas, setFormas] = useState<FormaDePagamento[]>(['DINHEIRO']);
   const [cobraEntrega, setCobraEntrega] = useState(false);
+  const [valorDaEntrega, setValorDaEntrega] = useState('8,00');
   const [preparo, setPreparo] = useState('20');
+  const [entradaAutomatica, setEntradaAutomatica] = useState(true);
 
   const url = `${DOMINIO}/${slug}`;
 
@@ -394,7 +396,50 @@ export default function LojaConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      {/* 5. Preparo: é a janela em que a loja pode cancelar antes do despacho. */}
+      {/* 5. Entrada dos pedidos. Vem antes do preparo de propósito: o preparo
+          só significa "janela para cancelar" quando a entrada é automática. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Entrada dos pedidos</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="flex items-start gap-2.5 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={entradaAutomatica}
+              onCheckedChange={(valor) => setEntradaAutomatica(valor === true)}
+            />
+            <span>
+              Aceitar os pedidos automaticamente
+              <span className="block text-xs text-muted-foreground">
+                O pedido entra na fila sozinho e o motoboy é chamado quando o preparo vence.
+              </span>
+            </span>
+          </label>
+
+          {entradaAutomatica ? (
+            <p className="text-xs text-muted-foreground">
+              Ninguém precisa ficar olhando a tela. Se não for dar conta de um pedido, você tem o
+              tempo de preparo para cancelar.
+            </p>
+          ) : (
+            /* O modo manual troca um problema por outro, e a tela diz qual. */
+            <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+              <p>
+                <strong>Cada pedido vai esperar você confirmar.</strong> Se ninguém estiver olhando
+                a tela, o cliente espera sem saber — e o motoboy só é chamado depois da sua
+                confirmação.
+              </p>
+              <p>
+                Você deixa de ter a janela de cancelamento: ela é o preparo correndo antes do
+                despacho, e aqui nada corre até você confirmar.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 6. Preparo. */}
       <Card>
         <CardHeader>
           <CardTitle>Tempo de preparo</CardTitle>
@@ -411,8 +456,9 @@ export default function LojaConfiguracoesPage() {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            O pedido entra na fila e o motoboy só é chamado quando esse tempo vence. É também a
-            janela em que você consegue cancelar — depois dela, o pedido já virou entrega.
+            {entradaAutomatica
+              ? 'O pedido entra na fila e o motoboy só é chamado quando esse tempo vence. É também a janela em que você consegue cancelar — depois dela, o pedido já virou entrega.'
+              : 'O motoboy é chamado esse tempo depois de você confirmar o pedido. É o que o cliente vê como previsão na página.'}
           </p>
           <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">
             Sua página só aceita pedido dentro do horário de funcionamento. Sem isso, um pedido de
@@ -421,7 +467,7 @@ export default function LojaConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      {/* 6. Taxa de entrega: escolha da loja, que a plataforma não impõe. */}
+      {/* 7. Taxa de entrega: escolha da loja, que a plataforma não impõe. */}
       <Card>
         <CardHeader>
           <CardTitle>Taxa de entrega</CardTitle>
@@ -440,10 +486,35 @@ export default function LojaConfiguracoesPage() {
               </span>
             </span>
           </label>
+
+          {/* O campo só existe quando a cobrança está marcada: um valor à vista
+              com a cobrança desligada sugere que ele vale para alguma coisa. */}
+          {cobraEntrega && (
+            <div className="max-w-40 space-y-2">
+              <Label htmlFor="valorEntrega">Valor cobrado</Label>
+              <Input
+                id="valorEntrega"
+                inputMode="decimal"
+                value={valorDaEntrega}
+                onChange={(event) => setValorDaEntrega(event.target.value)}
+              />
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Desmarcado, a entrega continua só na fatura que a central cobra de você no fim do
             período — que é como funciona hoje.
           </p>
+
+          {/* Confundir os dois valores é o erro provável, e ele custa dinheiro
+              da loja em toda entrega. */}
+          {cobraEntrega && (
+            <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+              Este valor é o que <strong>você cobra do cliente</strong>, e não o que a central cobra
+              de você. São dois números independentes: cobre mais, menos ou nada, que a entrega
+              continua entrando na sua fatura do mesmo jeito.
+            </p>
+          )}
         </CardContent>
       </Card>
 

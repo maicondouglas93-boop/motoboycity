@@ -53,6 +53,8 @@ Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
 
 ### 1. Salvar o cliente com os dados do pedido do PWA
 
+> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+
 Na venda, oferecer o cadastro do cliente no registro que o painel já usa, para
 que ele deixe de ser comprador avulso e possa receber entrega pelo fluxo normal.
 
@@ -87,6 +89,8 @@ automaticamente encheria a lista de clientes de uma vez só.
 
 ### 2. A empresa decide se o pedido entra em agendado automaticamente
 
+> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+
 Checkbox em `/loja/configuracoes`. Marcado (padrão), vale a decisão 2 acima: o
 pedido entra `agendado` e o motoboy é chamado quando o preparo vence.
 Desmarcado, o pedido fica esperando alguém da loja confirmar.
@@ -105,6 +109,8 @@ Desmarcado, o pedido fica esperando alguém da loja confirmar.
 
 ### 3. A empresa configura o valor da taxa de entrega cobrada no PWA
 
+> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+
 A tela de Configurações já tem o checkbox "cobrar a entrega do cliente na
 página", mas **não tem onde pôr o valor**. Falta o campo.
 
@@ -122,6 +128,8 @@ tenta conter. Sugestão: começar com **valor fixo**, e por faixa de distância
 depois, se pedirem.
 
 ### 4. Interface do PWA sem cara de front feito por IA
+
+> **Não começado.** Depende do PWA existir, e ele ainda não existe.
 
 Requisito de acabamento da loja que o cliente abre.
 

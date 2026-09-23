@@ -14088,3 +14088,58 @@ Acrescentados ao plano os quatro pedidos do usuário de hoje:
 Arquivos: `docs/plano-loja-online.md` (novo), `docs/agent-handoff.md`.
 
 Nenhuma alteração de código neste recorte.
+
+## 2026-09-23 — Loja: cadastro do cliente, entrada do pedido e valor da entrega
+
+Três dos quatro pedidos de hoje, desenhados nas telas de demonstração. O quarto
+(interface do PWA) depende do PWA existir e não foi começado.
+
+**Salvar o cliente a partir da venda.** O `VendaDeExemplo` ganhou `telefone` e
+`entrega` estruturada, espelhando `CompanyCustomerAddress` — que é o que o
+cadastro de clientes do painel já exige. Manter o endereço como linha de texto
+teria deixado a tela bonita e a funcionalidade impossível: na integração,
+alguém teria que redigitar tudo no painel. O `endereco: string` saiu, e a linha
+exibida é montada por `enderecoEmLinha()`; guardar as duas formas criaria duas
+fontes de verdade, e a da tela divergiria da que vai para o cadastro.
+
+São **três situações**, não um botão: telefone novo ("Salvar cliente"),
+cadastrado com o mesmo endereço (nada a fazer) e cadastrado com endereço
+diferente ("Salvar este endereço no cliente"). O terceiro existe porque
+`CompanyCustomerSavedAddress` já guarda vários endereços por cliente — sem ele,
+quem pedisse do trabalho em vez de casa viraria cliente duplicado.
+
+Observação para a integração: `CompanyCustomerAddress` **não tem bairro**. O
+mock foi mantido igual de propósito; divergir aqui só adiaria a descoberta.
+
+**Entrada automática do pedido.** Checkbox em Configurações, e o modo manual
+muda a tela de Vendas inteira: o aviso do topo deixa de falar em contagem e
+passa a dizer que nada anda sem confirmação, o cartão troca a contagem
+regressiva por um botão "Confirmar", e a etiqueta vira "Aguardando confirmação".
+A tela de Configurações diz, no próprio modo manual, o que se perde — a janela
+de cancelamento é o preparo correndo antes do despacho, e sem despacho
+automático ela não existe.
+
+Como as duas telas não compartilham estado sem backend, Vendas tem um controle
+de demonstração espelhando o checkbox. Sem ele não haveria como conferir o modo
+manual, que é justamente o que muda a tela.
+
+**Valor da taxa de entrega.** Campo que faltava, visível só quando a cobrança
+está marcada — um valor à vista com a cobrança desligada sugere que ele vale
+para alguma coisa. Junto, o aviso de que esse valor é o que a loja cobra do
+cliente, e **não** o que a central cobra da loja: confundir os dois é o erro
+provável, e custa dinheiro da loja em toda entrega.
+
+**Inconsistência encontrada no teste:** com o modo manual ligado, o cartão dizia
+"Aguardando confirmação" e o filtro do mesmo estado continuava dizendo
+"Aguardando preparo" — duas palavras para o mesmo estado, na mesma tela. O
+rótulo do filtro passou a acompanhar o modo.
+
+Arquivos: `apps/company-web/src/lib/loja-mock.ts`,
+`apps/company-web/src/app/(app)/loja/vendas/page.tsx`,
+`apps/company-web/src/app/(app)/loja/configuracoes/page.tsx`,
+`docs/plano-loja-online.md`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. Conferido no navegador: as três situações de cadastro
+aparecem com a ação certa; o modo manual troca aviso, etiqueta, contagem e
+filtro; o campo de valor só aparece com a cobrança marcada.
