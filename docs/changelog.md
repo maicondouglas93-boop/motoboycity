@@ -14019,3 +14019,30 @@ categoria, os três tamanhos com preço em `12,00`/`18,00`/`24,00`, o grupo
 um tamanho troca o cartão e o botão para "Salvar e tirar do ar"; `p1` a `p6`
 apontam para a rota certa; um id inexistente cai na tela de não encontrado; e o
 cadastro continua abrindo vazio com "Publicar produto" e "Salvar rascunho".
+
+## 2026-09-23 — Loja sai do menu enquanto for demonstração
+
+O item "Loja" no `top-nav.tsx` aparecia para qualquer empresa que abrisse o
+painel. Como as telas são demonstração com dados de exemplo, o primeiro deploy
+do `company-web` mostraria vendas falsas às empresas de produção. O aviso ficou
+registrado nos três recortes anteriores; agora está resolvido.
+
+Das opções possíveis — flag de ambiente, liberação por empresa, ou tirar do menu
+— o usuário escolheu **tirar do menu**. É a que não custa configuração nenhuma
+e não pode falhar por esquecimento: não existe variável para lembrar de ligar
+nem campo de banco para preencher. As rotas continuam respondendo, então o
+desenho segue sendo revisado pela URL direta, e nenhuma empresa esbarra nelas.
+
+O `top-nav.tsx` voltou ao estado anterior ao primeiro recorte, e junto foi
+removida a tipagem `image?`/`icon?` que eu havia criado para o item da Loja: com
+o item fora, ela ficaria sendo abstração sem nenhum consumidor. O arquivo fica
+com um comentário de oito linhas no `NAV_ITEMS` explicando que a ausência é
+deliberada e quando acrescentar o item — sem ele, quem for ligar a loja à API
+leria a omissão como esquecimento.
+
+Arquivos: `apps/company-web/src/components/layout/top-nav.tsx`,
+`docs/agent-handoff.md`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. Conferido no navegador: o menu voltou a ter cinco itens,
+sem "Loja", e `/loja/produtos` continua abrindo pela URL.

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Store, UserRound, type LucideIcon } from 'lucide-react';
+import { LogOut, UserRound } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -29,15 +29,18 @@ import { session } from '@/lib/session';
  * âmbar — a mesma cor que, na lista, significa entrega em movimento.
  */
 /**
- * `image` e `icon` são alternativas: os itens antigos têm arte própria, e um
- * item novo não precisa esperar por arte para existir no menu.
+ * A **Loja** existe em `/loja` e NÃO entra aqui de propósito.
+ *
+ * As telas dela são demonstração com dados de exemplo (`lib/loja-mock.ts`) e
+ * não têm backend. Enquanto estiverem assim, um item no menu mostraria vendas
+ * falsas às empresas de produção no primeiro deploy. Quem for ligar a loja à
+ * API acrescenta o item aqui junto; até lá, chega-se nela pela URL.
  */
-const NAV_ITEMS: Array<{ href: string; label: string; image?: string; icon?: LucideIcon }> = [
+const NAV_ITEMS = [
   { href: '/pedidos', label: 'Pedidos', image: '/brand/navigation/pedidos-v1.png' },
   { href: '/clientes', label: 'Clientes', image: '/brand/navigation/clientes-v1.png' },
   { href: '/relatorios', label: 'Relatórios', image: '/brand/navigation/relatorios-v1.png' },
   { href: '/financeiro', label: 'Financeiro', image: '/brand/navigation/financeiro-v1.png' },
-  { href: '/loja', label: 'Loja', icon: Store },
   { href: '/integracoes', label: 'Integrações', image: '/brand/aiqfome.jpeg' },
 ];
 
@@ -75,7 +78,7 @@ export function TopNav() {
         </Link>
 
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 lg:order-none lg:w-auto lg:min-w-0 lg:flex-1 lg:pb-0">
-          {NAV_ITEMS.map(({ href, label, image, icon: Icon }) => {
+          {NAV_ITEMS.map(({ href, label, image }) => {
             const isActive = pathname === href || pathname.startsWith(`${href}/`);
             const isAiqfome = href === '/integracoes';
             return (
@@ -91,7 +94,7 @@ export function TopNav() {
                     : 'border-transparent text-white/80 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
-                {isAiqfome && image ? (
+                {isAiqfome ? (
                   <Image
                     src={image}
                     alt="aiqfome"
@@ -102,24 +105,15 @@ export function TopNav() {
                   />
                 ) : (
                   <>
-                    {image ? (
-                      <Image
-                        src={image}
-                        alt=""
-                        width={32}
-                        height={32}
-                        sizes="32px"
-                        loading="eager"
-                        className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
-                      />
-                    ) : (
-                      Icon && (
-                        <Icon
-                          aria-hidden="true"
-                          className="size-8 shrink-0 p-1 motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
-                        />
-                      )
-                    )}
+                    <Image
+                      src={image}
+                      alt=""
+                      width={32}
+                      height={32}
+                      sizes="32px"
+                      loading="eager"
+                      className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                    />
                     {label}
                   </>
                 )}
