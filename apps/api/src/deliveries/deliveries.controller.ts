@@ -141,6 +141,16 @@ export class DeliveriesController {
     return this.deliveriesService.cancel(user, id, payload.reason);
   }
 
+  /**
+   * Antecipa um pedido agendado: ele entra na busca por motoboy agora, em vez
+   * de esperar a hora marcada. Empresa (só os dela) e administração; o
+   * motoboy é recusado no serviço, não aqui, junto com as demais regras.
+   */
+  @Patch(':id/release-scheduled')
+  releaseScheduled(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryDetail> {
+    return this.deliveriesService.releaseScheduled(user, id);
+  }
+
   @Patch(':id/redispatch')
   redispatch(@Param('id') id: string, @CurrentUser() user: User): Promise<DeliveryDetail> {
     return this.deliveriesService.redispatch(user, id);

@@ -213,6 +213,19 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     },
 
     /**
+     * Antecipa um pedido agendado para a busca por motoboy agora. Empresa (só
+     * os dela) e administração. Repetir é seguro: se já saiu para a busca, a
+     * resposta é o próprio pedido.
+     */
+    async releaseScheduled(accessToken: string, id: string): Promise<DeliveryDetail> {
+      const response = await apiFetch(`${baseUrl}/deliveries/${id}/release-scheduled`, {
+        method: 'PATCH',
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<DeliveryDetail>(response);
+    },
+
+    /**
      * `occurredAt` so aparece quando o motoboy esqueceu de tocar na hora e esta
      * informando o horario. Sem ele, nao manda corpo nenhum — e o caminho da
      * esmagadora maioria das coletas.

@@ -1,5 +1,6 @@
 import type {
   DeliveryAddressItem,
+  DeliveryCompletionQuote,
   DeliveryDestinationPreview,
   DeliveryDetail,
   DeliveryStatus,
@@ -218,6 +219,72 @@ export function deliverConfirmationSummary(
         ? formatDeliveryValue(delivery.returnValue)
         : null,
   };
+}
+
+/**
+ * O valor da entrega sem endereco, visto ANTES de confirmar.
+ *
+ * Pedido do cliente em 23/09/2026: o motoboy confirmava e so descobria o valor
+ * na carteira, com o pedido ja fechado. O servidor calcula com o ponto que o
+ * aplicativo congelou e RESERVA esse numero para a confirmacao — entao o que
+ * aparece aqui e o que ele recebe, e nao uma estimativa.
+ */
+export type ValorConferido =
+  | { estado: 'calculando' }
+  | { estado: 'calculado'; quote: DeliveryCompletionQuote }
+  /** O ponto e impreciso demais: a confirmacao com ele seria recusada. */
+  | { estado: 'gpsImpreciso' }
+  /** O calculo falhou agora; a confirmacao ainda calcula por conta propria. */
+  | { estado: 'indisponivel' };
+
+/**
+ * Le a resposta do servidor sem confiar que ela traz o valor.
+ *
+ * `quote` so existe numa API que ja recebeu este recorte. Um servidor antigo
+ * responde sem o campo, e isso tem que virar "indisponivel" — nunca um erro
+ * que tire o motoboy do modal.
+ */
+export function valorConferidoDoPreview(
+  preview: DeliveryDestinationPreview | null | undefined,
+): ValorConferido {
+  if (preview?.quote) return { estado: 'calculado', quote: preview.quote };
+  if (preview?.quoteUnavailableReason === 'IMPRECISE_LOCATION') return { estado: 'gpsImpreciso' };
+  return { estado: 'indisponivel' };
+}
+
+/** As linhas de valor do modal, para cada estado da conferencia. */
+export function linhasDoValorConferido(valor: ValorConferido): {
+  valor: string;
+  retorno: string | null;
+  aviso: string | null;
+} {
+  switch (valor.estado) {
+    case 'calculando':
+      return { valor: 'Calculando...', retorno: null, aviso: null };
+    case 'calculado':
+      return {
+        valor: currencyFormatter.format(valor.quote.driverValue),
+        retorno:
+          valor.quote.returnValue !== null
+            ? `inclui ${currencyFormatter.format(valor.quote.returnValue)} de retorno`
+            : null,
+        aviso: null,
+      };
+    case 'gpsImpreciso':
+      return {
+        valor: '—',
+        retorno: null,
+        aviso:
+          'Seu GPS está impreciso agora, e com ele a entrega não pode ser fechada. Vá para um lugar aberto e toque em tentar de novo.',
+      };
+    case 'indisponivel':
+      return {
+        valor: 'Calculado ao confirmar',
+        retorno: null,
+        aviso:
+          'Não deu para calcular o valor agora. Ele é calculado quando você confirmar e aparece na carteira.',
+      };
+  }
 }
 
 /**

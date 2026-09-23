@@ -955,16 +955,48 @@ export class DispatchService {
   }
 
   async handleScheduledActivation(deliveryId: string): Promise<void> {
+    await this.activateScheduled(deliveryId, null);
+  }
+
+  /**
+   * Libera AGORA um pedido agendado, a pedido da loja ou da administração.
+   *
+   * É a mesma ativação do job agendado, com duas diferenças: registra quem
+   * pediu no histórico, e devolve se ativou. Quem chama precisa distinguir
+   * "liberei" de "já não estava agendado" para responder à tela.
+   *
+   * O job da hora marcada NÃO precisa ser cancelado para a correção: ele relê
+   * o status e a escrita exige `SCHEDULED`, então vira nada sozinho. Ele é
+   * removido mesmo assim, depois de ativar, para não deixar na fila um job
+   * que só existe para não fazer nada — e a remoção é best-effort, porque o
+   * pedido já está buscando motoboy e isso não pode falhar por causa de uma
+   * limpeza.
+   */
+  async releaseScheduledNow(
+    deliveryId: string,
+    actor: { userId: string; note: string },
+  ): Promise<boolean> {
+    const ativado = await this.activateScheduled(deliveryId, actor);
+    if (ativado) {
+      await this.cancelScheduledActivation(deliveryId).catch((error: unknown) => {
+        this.logger.warn(
+          `Pedido ${deliveryId} liberado, mas o job agendado nao saiu da fila: ${String(error)}`,
+        );
+      });
+    }
+    return ativado;
+  }
+
+  private async activateScheduled(
+    deliveryId: string,
+    actor: { userId: string; note: string } | null,
+  ): Promise<boolean> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id: deliveryId },
       include: { company: { select: { status: true } } },
     });
-    if (
-      !delivery ||
-      delivery.status !== 'SCHEDULED' ||
-      delivery.company?.status === 'SUSPENDED'
-    ) {
-      return;
+    if (!delivery || delivery.status !== 'SCHEDULED' || delivery.company?.status === 'SUSPENDED') {
+      return false;
     }
 
     /**
@@ -976,6 +1008,9 @@ export class DispatchService {
      * a fila e era ofertado — a loja via ressuscitar o que tinha acabado de
      * cancelar, e o historico registrava uma transicao que partiu de outro
      * estado.
+     *
+     * A mesma guarda cobre a liberacao manual concorrendo com o job da hora
+     * marcada: so um dos dois escreve, e o outro ve `count === 0`.
      */
     const ativado = await this.prisma.$transaction(async (tx) => {
       const atualizada = await tx.delivery.updateMany({
@@ -986,7 +1021,12 @@ export class DispatchService {
         return false;
       }
       await tx.deliveryStatusHistory.create({
-        data: { deliveryId, fromStatus: 'SCHEDULED', toStatus: 'AWAITING_DRIVER' },
+        data: {
+          deliveryId,
+          fromStatus: 'SCHEDULED',
+          toStatus: 'AWAITING_DRIVER',
+          ...(actor && { changedByUserId: actor.userId, note: actor.note }),
+        },
       });
       return true;
     });
@@ -994,11 +1034,13 @@ export class DispatchService {
       this.logger.debug(
         `Pedido ${deliveryId} saiu de SCHEDULED antes da ativacao; nada foi enfileirado.`,
       );
-      return;
+      return false;
     }
 
     this.realtimeGateway.emitAdminActivity(
-      `Pedido #${delivery.displayNumber} agendado entrou na fila.`,
+      actor
+        ? `Pedido #${delivery.displayNumber} agendado foi liberado antes da hora.`
+        : `Pedido #${delivery.displayNumber} agendado entrou na fila.`,
     );
     this.realtimeGateway.emitDeliveryUpdated(delivery.companyId, {
       deliveryId,
@@ -1007,6 +1049,7 @@ export class DispatchService {
       status: 'AWAITING_DRIVER',
     });
     await this.dispatchDelivery(deliveryId);
+    return true;
   }
 
   async cancelOfferTimeout(offerId: string): Promise<void> {

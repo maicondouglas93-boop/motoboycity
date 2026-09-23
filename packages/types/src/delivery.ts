@@ -209,12 +209,40 @@ export interface DeliveryDispatchAuditItem {
  * Todos os campos vem nulos quando o Google nao identifica a coordenada: isso
  * nao impede a entrega, so tira a conferencia daquele caso.
  */
+/**
+ * Quanto o motoboy recebe por esta entrega, calculado com o ponto em que ele
+ * está AGORA — o mesmo que o aplicativo congela e manda na confirmação.
+ *
+ * Não é estimativa: o servidor guarda este cálculo amarrado a esse ponto
+ * exato, e a confirmação com o mesmo ponto usa exatamente estes números. Uma
+ * taxa adicional que ligue ou desligue entre o motoboy ler e tocar em
+ * confirmar não muda o que ele leu.
+ */
+export interface DeliveryCompletionQuote {
+  distanceKm: number;
+  /** Já inclui o retorno, quando o pedido exige volta à coleta. */
+  driverValue: number;
+  /** A parte de `driverValue` que é retorno. `null` sem retorno. */
+  returnValue: number | null;
+}
+
 export interface DeliveryDestinationPreview {
   street: string | null;
   number: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
+  /** `null` quando o valor não pôde ser calculado — ver `quoteUnavailableReason`. */
+  quote: DeliveryCompletionQuote | null;
+  /**
+   * Por que `quote` veio vazio.
+   *
+   * `IMPRECISE_LOCATION`: o ponto é impreciso demais para virar destino, e a
+   * confirmação com ele será recusada — o motoboy precisa tentar o GPS de novo.
+   * `UNAVAILABLE`: o cálculo falhou agora (rede, Google); a confirmação ainda
+   * calcula por conta própria, e o valor aparece na carteira depois.
+   */
+  quoteUnavailableReason: 'IMPRECISE_LOCATION' | 'UNAVAILABLE' | null;
 }
 
 export interface MarkDeliveredPayload {

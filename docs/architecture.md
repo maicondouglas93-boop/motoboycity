@@ -333,6 +333,21 @@ ativa o agendado vencido, reagenda o job que sumiu **antes de o pedido atrasar**
 e varre a fila. Cada passo reusa um caminho que já confere o estado, então rodar
 duas vezes junto não duplica nada.
 
+**Liberar agendado antes da hora** (`PATCH /deliveries/:id/release-scheduled`)
+reusa a mesma ativação do job da hora marcada (`DispatchService.releaseScheduledNow`
+→ `activateScheduled`), com o autor gravado no histórico. A escrita exige
+`SCHEDULED`, então a liberação manual e o job concorrendo produzem uma única
+transição; o job sai da fila depois de ativar, em modo best-effort.
+
+**Valor reservado da entrega sem endereço.** `POST /deliveries/:id/destination-preview`
+calcula distância e preço com o ponto congelado pelo aplicativo e guarda o
+resultado no Redis (`motoboycity:completion-quote:<deliveryId>`, TTL de 20 min,
+`DeliveryCompletionQuoteStore`, conexão própria no `DeliveriesModule`).
+`markDelivered` com o **mesmo ponto exato** usa esse valor em vez de recalcular;
+qualquer outro caso recalcula como antes. O cálculo vive num método só
+(`cotarDestinoCapturado`) para o preview e a confirmação nunca divergirem.
+Redis indisponível vira "sem reserva" — nunca falha de entrega.
+
 Nos radares de criação dos dois painéis, `delivery:updated` é o gatilho primário
 para atualizar o pedido. Uma coalescência curta transforma a rajada de eventos
 de um lote em uma consulta; o polling de 30 s existe apenas para reconciliar

@@ -8,7 +8,9 @@ import {
   formatDeliveryAddress,
   formatElapsedTime,
   formatOperationDateTime,
+  linhasDoValorConferido,
   navigationDestination,
+  valorConferidoDoPreview,
 } from '../src/lib/deliveryOperation';
 
 const structuredAddress: DeliveryAddressItem = {
@@ -146,6 +148,8 @@ describe('apresentação da operação de entrega', () => {
         city: 'Lajinha',
         state: 'MG',
         zip: '36980-000',
+        quote: null,
+        quoteUnavailableReason: null,
       }),
     ).toBe('Rua Arnaldo Leite Ribeiro, 212\nLajinha - MG, 36980-000');
   });
@@ -153,7 +157,81 @@ describe('apresentação da operação de entrega', () => {
   it('nao finge endereco conferido quando o Google nao identificou a coordenada', () => {
     expect(capturedDestinationLabel(null)).toBeNull();
     expect(
-      capturedDestinationLabel({ street: null, number: null, city: null, state: null, zip: null }),
+      capturedDestinationLabel({
+        street: null,
+        number: null,
+        city: null,
+        state: null,
+        zip: null,
+        quote: null,
+        quoteUnavailableReason: null,
+      }),
     ).toBeNull();
+  });
+
+  /**
+   * O valor da entrega sem endereco, visto antes de confirmar. Pedido do
+   * cliente em 23/09/2026: antes o motoboy so via o valor na carteira.
+   */
+  describe('valor conferido antes de confirmar', () => {
+    const semRua = { street: null, number: null, city: null, state: null, zip: null };
+
+    it('mostra o valor que o servidor reservou para este ponto', () => {
+      const valor = valorConferidoDoPreview({
+        ...semRua,
+        quote: { distanceKm: 4.19, driverValue: 8.88, returnValue: null },
+        quoteUnavailableReason: null,
+      });
+
+      expect(valor).toEqual({
+        estado: 'calculado',
+        quote: { distanceKm: 4.19, driverValue: 8.88, returnValue: null },
+      });
+      expect(linhasDoValorConferido(valor).valor.replace(/\s/g, ' ')).toBe('R$ 8,88');
+      expect(linhasDoValorConferido(valor).retorno).toBeNull();
+    });
+
+    /** O valor ja inclui o retorno; a linha diz quanto dele e retorno. */
+    it('no pedido com retorno, diz quanto do valor é retorno', () => {
+      const linhas = linhasDoValorConferido({
+        estado: 'calculado',
+        quote: { distanceKm: 3, driverValue: 11, returnValue: 3 },
+      });
+
+      expect(linhas.valor.replace(/\s/g, ' ')).toBe('R$ 11,00');
+      expect(linhas.retorno?.replace(/\s/g, ' ')).toBe('inclui R$ 3,00 de retorno');
+    });
+
+    it('GPS impreciso vira aviso, e não um valor que a confirmação recusaria', () => {
+      const valor = valorConferidoDoPreview({
+        ...semRua,
+        quote: null,
+        quoteUnavailableReason: 'IMPRECISE_LOCATION',
+      });
+
+      expect(valor).toEqual({ estado: 'gpsImpreciso' });
+      expect(linhasDoValorConferido(valor).aviso).toContain('impreciso');
+    });
+
+    /**
+     * Servidor antigo (sem este recorte) responde SEM `quote`. Isso tem que
+     * virar "calculado ao confirmar" — nunca um erro que tire o motoboy do
+     * modal na porta do cliente.
+     */
+    it('servidor antigo, sem o campo, vira "calculado ao confirmar"', () => {
+      const valor = valorConferidoDoPreview(semRua as never);
+
+      expect(valor).toEqual({ estado: 'indisponivel' });
+      expect(linhasDoValorConferido(valor).valor).toBe('Calculado ao confirmar');
+      expect(valorConferidoDoPreview(null)).toEqual({ estado: 'indisponivel' });
+    });
+
+    it('enquanto calcula, não afirma valor nenhum', () => {
+      expect(linhasDoValorConferido({ estado: 'calculando' })).toEqual({
+        valor: 'Calculando...',
+        retorno: null,
+        aviso: null,
+      });
+    });
   });
 });

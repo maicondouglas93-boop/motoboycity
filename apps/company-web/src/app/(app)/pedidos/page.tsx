@@ -84,6 +84,24 @@ function ConteudoPedidos() {
     enabled: Boolean(token),
   });
 
+  /**
+   * Antecipa o agendado: ele passa a buscar motoboy agora. O valor ja estava
+   * calculado desde a criacao e nao muda. Fora do horario de funcionamento a
+   * API recusa, com a mensagem de quando reabre.
+   */
+  const releaseMutation = useMutation({
+    mutationFn: (id: string) => deliveriesApi.releaseScheduled(token as string, id),
+    onSuccess: () => {
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+    },
+    onError: (error) => {
+      setActionError(
+        error instanceof ApiError ? error.message : 'Não foi possível chamar o pedido agora.',
+      );
+    },
+  });
+
   const cancelMutation = useMutation({
     mutationFn: (id: string) => deliveriesApi.cancel(token as string, id),
     onSuccess: () => {
@@ -307,7 +325,31 @@ function ConteudoPedidos() {
                         : 'Cancelar'}
                     </Button>
                   )}
-                  <DeliveryPrintLink deliveryId={delivery.id} companyId={delivery.companyId} className="col-span-2" />
+                  {delivery.status === 'SCHEDULED' && (
+                    <Button
+                      size="sm"
+                      className="col-span-2 w-full"
+                      disabled={releaseMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Chamar um motoboy agora para o pedido #${delivery.displayNumber}, sem esperar o horário agendado?`,
+                          )
+                        ) {
+                          releaseMutation.mutate(delivery.id);
+                        }
+                      }}
+                    >
+                      {releaseMutation.isPending && releaseMutation.variables === delivery.id
+                        ? 'Chamando...'
+                        : 'Chamar agora'}
+                    </Button>
+                  )}
+                  <DeliveryPrintLink
+                    deliveryId={delivery.id}
+                    companyId={delivery.companyId}
+                    className="col-span-2"
+                  />
                 </div>
               </CardContent>
             </Card>

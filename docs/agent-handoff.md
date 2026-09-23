@@ -326,6 +326,13 @@ Vercel concluiu com sucesso.
 
 ### Demais fluxos
 
+**Liberar pedido agendado antes da hora — implementado, não publicado
+(2026-09-23):** empresa (na lista e no detalhe do pedido, "Chamar agora") e ADM
+(menu de ações, "Liberar agora") tiram um pedido `SCHEDULED` do agendamento e o
+mandam para a busca na hora — o caso típico é o pedido do aiqfome esperando o
+tempo de preparo. Valor inalterado; a empresa respeita o horário de
+funcionamento e o ADM passa por cima. Regras em `business-rules.md`.
+
 **Relatório de pedidos por situação financeira — publicado (2026-09-06):**
 `/relatorios/pedidos` permite cliente, intervalo inclusivo de criação/conclusão,
 situação financeira (todos/em aberto/sem fatura/pendente/vencida/pagos), status
@@ -468,7 +475,7 @@ entrega"; "Fechar" devolve o motoboy ao pedido sem mexer em nada.
 **No pedido criado sem endereço o modal mostra a rua onde ele está.** Ao abrir o
 modal — no ponto em que ele acabou de entregar — o app captura o GPS e pergunta
 a rua ao servidor (`POST /deliveries/:id/destination-preview`, consulta que não
-grava nada). O fix fica **congelado** entre a conferência e a confirmação: o
+grava nada no pedido). O fix fica **congelado** entre a conferência e a confirmação: o
 endereço mostrado é o mesmo que vai ser gravado, inclusive quando ele usa
 "Tentar GPS novamente", que também passa pelo modal. Sem rua identificada, o
 modal diz isso e deixa confirmar; sem localização nenhuma, o confirmar fica
@@ -479,6 +486,16 @@ Ordem de publicação importa: **API antes do APK**. Com o APK novo contra uma A
 antiga, a consulta falha e o modal cai no texto de "não foi possível identificar
 a rua" — degrada sem travar a entrega, mas tira a conferência. Ainda não
 conferido em aparelho real.
+
+**Desde 23/09/2026 o modal também mostra o VALOR no pedido sem endereço** (pedido
+do cliente: o motoboy só descobria na carteira). A mesma consulta calcula
+distância e preço com o ponto congelado e **reserva** o valor no Redis por 20
+minutos; a confirmação com o mesmo ponto cobra exatamente ele, mesmo com taxa de
+chuva/horário virando no meio. O confirmar passou a **esperar o valor**, com teto
+de 8 s — passado disso libera e avisa que o valor sai na confirmação. GPS
+impreciso bloqueia o confirmar com "Tentar de novo". A reserva já vale para o
+`pilot.26` depois do deploy da API (ele já chama a consulta); só **mostrar** o
+valor exige o APK novo.
 
 ## Abertura automática do pedido recém-aceito
 
@@ -536,11 +553,21 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
    **aceitar → coletar → entregar** não mostra o aviso antigo do pedido #547.
    No próximo APK, testar também o #777 com **Tentar GPS novamente**, um aceite
    durante oscilação de rede e uma oferta recebida perto do fim do prazo.
-2. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
+2. **APK novo com o valor antes de confirmar** (recorte de 23/09/2026; ainda não
+   compilado nem conferido em aparelho). Publicar a API primeiro. Testar num
+   pedido sem endereço: o modal mostra o valor e o confirmar espera por ele; o
+   valor na carteira depois é o mesmo; GPS impreciso bloqueia com "Tentar de
+   novo"; e sem internet o modal libera em até 8 s com "Calculado ao confirmar",
+   sem travar a entrega.
+3. **CI vermelho no `main` desde 21/09** — o Lint falha em
+   `admin-completed-delivery-actions.tsx` (hook depois de `return`), e por isso
+   testes e builds do CI nem rodam. Há também dois testes do `detail` falhando
+   no `main` por mock sem `walletTransaction`. Deixado como tarefa separada.
+4. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
-3. **Rotação dos segredos** registrada no changelog da integração aiqfome.
-4. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+5. **Rotação dos segredos** registrada no changelog da integração aiqfome.
+6. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

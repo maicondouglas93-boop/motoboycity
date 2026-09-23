@@ -13,6 +13,7 @@ import {
   PackageX,
   Truck,
   UserCog,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,7 +45,17 @@ import { statusLabel } from '@/components/orders/status-chip';
 type FailureReason = 'RECIPIENT_ABSENT' | 'ADDRESS_NOT_FOUND' | 'RECIPIENT_REFUSED' | 'OTHER';
 
 type DeliveryAction =
-  'reoffer' | 'reassign' | 'collect' | 'deliver' | 'fail' | 'cancel' | 'complete';
+  'release' | 'reoffer' | 'reassign' | 'collect' | 'deliver' | 'fail' | 'cancel' | 'complete';
+
+/** "19:30", no relógio da operação — o painel pode estar aberto em outro fuso. */
+function horaAgendada(scheduledAt: string | null): string | null {
+  if (!scheduledAt) return null;
+  return new Date(scheduledAt).toLocaleTimeString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 const REASSIGNABLE: DeliveryStatus[] = ['ACCEPTED', 'COLLECTED', 'DELIVERED', 'FAILED'];
 const CANCELLABLE: DeliveryStatus[] = [
@@ -60,6 +71,17 @@ const FORCE_COMPLETABLE: DeliveryStatus[] = ['DELIVERED', 'FAILED'];
 
 function actionCopy(action: DeliveryAction, order: OperationalDeliveryItem) {
   switch (action) {
+    case 'release': {
+      const hora = horaAgendada(order.scheduledAt);
+      return {
+        title: `Liberar pedido #${order.displayNumber} agora`,
+        description: hora
+          ? `O pedido sai do agendamento das ${hora} e começa a buscar motoboy agora. O valor não muda.`
+          : 'O pedido sai do agendamento e começa a buscar motoboy agora. O valor não muda.',
+        confirm: 'Liberar agora',
+        pending: 'Liberando...',
+      };
+    }
     case 'reoffer':
       return {
         title: `Reenviar pedido #${order.displayNumber} para um motoboy`,
@@ -132,6 +154,7 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
   const [error, setError] = useState<string | null>(null);
 
   const canReassign = REASSIGNABLE.includes(order.status);
+  const canRelease = order.status === 'SCHEDULED';
   const canReoffer = order.status === 'AWAITING_DRIVER';
   const canCollect = order.status === 'ACCEPTED';
   /**
@@ -198,6 +221,8 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
       const payload = { reason: reason.trim() };
       const distancia = distanceKm.trim() ? Number(distanceKm.trim().replace(',', '.')) : undefined;
       switch (action) {
+        case 'release':
+          return deliveriesApi.releaseScheduled(token, order.id);
         case 'reoffer':
           return adminOperationsApi.reofferDelivery(token, order.id, {
             driverId,
@@ -241,8 +266,16 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
 
   const copy = action ? actionCopy(action, order) : null;
   const needsDriver = action === 'reassign' || action === 'reoffer';
+  /**
+   * Liberar nao pede motivo: nao ha o que justificar em antecipar um pedido
+   * que ja ia sair sozinho. O historico grava quem liberou e qual era a hora
+   * marcada, que e o que alguem vai querer saber depois.
+   */
+  const needsReason = action !== 'release';
   const canSubmit =
-    Boolean(action) && reason.trim().length >= 5 && (!needsDriver || Boolean(driverId));
+    Boolean(action) &&
+    (!needsReason || reason.trim().length >= 5) &&
+    (!needsDriver || Boolean(driverId));
 
   return (
     <>
@@ -254,6 +287,15 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
           <EllipsisVertical className="size-4" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
+          {/*
+            So aparece no agendado, e no topo: ali e a acao que importa. Nos
+            outros estados o item nao faria sentido nem desabilitado.
+          */}
+          {canRelease ? (
+            <DropdownMenuItem onClick={() => openAction('release')}>
+              <Zap /> Liberar agora
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             disabled={!canReoffer}
             onClick={() => openAction('reoffer')}
@@ -397,21 +439,23 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
                 </div>
               ) : null}
 
-              <div className="space-y-1.5">
-                <Label htmlFor={`delivery-${order.id}-reason`}>Motivo da alteração</Label>
-                <textarea
-                  id={`delivery-${order.id}-reason`}
-                  rows={3}
-                  maxLength={300}
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  placeholder="Ex.: confirmado por telefone com a loja ou entregador"
-                  className="w-full rounded-xl border border-input bg-card/90 px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
-                />
-                <p className="text-xs text-muted-foreground">
-                  O motivo e seu usuário ficam gravados no histórico do pedido.
-                </p>
-              </div>
+              {needsReason ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`delivery-${order.id}-reason`}>Motivo da alteração</Label>
+                  <textarea
+                    id={`delivery-${order.id}-reason`}
+                    rows={3}
+                    maxLength={300}
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    placeholder="Ex.: confirmado por telefone com a loja ou entregador"
+                    className="w-full rounded-xl border border-input bg-card/90 px-3 py-2 text-sm shadow-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/15"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    O motivo e seu usuário ficam gravados no histórico do pedido.
+                  </p>
+                </div>
+              ) : null}
 
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
             </div>

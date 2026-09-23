@@ -45,6 +45,9 @@ import {
 import {
   capturedDestinationLabel,
   deliverConfirmationSummary,
+  linhasDoValorConferido,
+  valorConferidoDoPreview,
+  type ValorConferido,
   deliveryOperationCopy,
   deliveryPaymentLabel,
   destinationLabel,
@@ -79,22 +82,46 @@ import { colors } from '../theme/colors';
 type ConferenciaDestino =
   | { estado: 'capturando' }
   /**
-   * Coordenada em maos, rua ainda vindo. O confirmar JA LIBERA aqui: o que a
-   * entrega precisa para ser gravada e o fix, nao o nome da rua. Esperar as
-   * duas coisas juntas prendia o motoboy na porta do cliente por causa de uma
-   * consulta que e conferencia, nao requisito.
+   * Coordenada em maos, rua e valor ainda vindo.
+   *
+   * Ate 23/09/2026 o confirmar ja liberava aqui: esperar a rua prendia o
+   * motoboy na porta por uma consulta que era so conferencia. O cliente pediu
+   * o contrario — ver o VALOR antes de fechar. O confirmar agora espera, mas
+   * com teto (`TETO_DA_CONFERENCIA_MS`): passado dele, libera e avisa que o
+   * valor sai na confirmacao. A preocupacao antiga continua respeitada; so
+   * deixou de valer "sem esperar nada".
    */
   | { estado: 'identificando' }
-  | { estado: 'conferido'; endereco: string }
+  | { estado: 'conferido'; endereco: string; valor: ValorConferido }
   /** Houve coordenada, mas o Google nao devolveu rua utilizavel. */
-  | { estado: 'semEndereco' }
+  | { estado: 'semEndereco'; valor: ValorConferido }
   /** Nao houve coordenada: sem ela o servidor recusa esta entrega. */
   | { estado: 'semLocalizacao' };
+
+/**
+ * O valor da conferencia neste momento. `null` fora do pedido sem endereco —
+ * ali o valor ja veio congelado da criacao e o modal mostra o do pedido.
+ */
+function valorDaConferencia(conferencia: ConferenciaDestino | null): ValorConferido | null {
+  if (conferencia === null || conferencia.estado === 'semLocalizacao') return null;
+  if (conferencia.estado === 'capturando' || conferencia.estado === 'identificando') {
+    return { estado: 'calculando' };
+  }
+  return conferencia.valor;
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeliveryOperation'>;
 type Operation = 'collect' | 'deliver' | 'return' | 'fail' | 'cancel' | 'return-to-queue' | null;
 
 const IMMEDIATE_COMPLETION_SYNC_WAIT_MS = 2_500;
+/**
+ * Quanto o confirmar espera o valor antes de liberar mesmo sem ele.
+ *
+ * O calculo costuma voltar em um ou dois segundos. Oito cobrem rede lenta sem
+ * prender o motoboy na porta do cliente — e a resposta que chegar depois
+ * ainda aparece na tela, se ele nao tiver tocado.
+ */
+const TETO_DA_CONFERENCIA_MS = 8_000;
 const COLLECTION_LOCATION_WARMUP_MAX_AGE_MS = 10_000;
 
 /**
@@ -456,9 +483,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     const token = await session.getToken();
     if (versao !== conferenciaVersao.current) return;
     if (!token) {
-      setConferenciaDestino({ estado: 'semEndereco' });
+      setConferenciaDestino({ estado: 'semEndereco', valor: { estado: 'indisponivel' } });
       return;
     }
+
+    let respondeu = false;
+    const teto = setTimeout(() => {
+      if (respondeu || versao !== conferenciaVersao.current) return;
+      setConferenciaDestino({ estado: 'semEndereco', valor: { estado: 'indisponivel' } });
+    }, TETO_DA_CONFERENCIA_MS);
 
     const preview = await deliveriesApi
       .destinationPreview(token, deliveryId, {
@@ -467,10 +500,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         ...(fix.accuracy !== undefined && { accuracy: fix.accuracy }),
       })
       .catch(() => null as DeliveryDestinationPreview | null);
+    respondeu = true;
+    clearTimeout(teto);
     if (versao !== conferenciaVersao.current) return;
 
     const endereco = capturedDestinationLabel(preview);
-    setConferenciaDestino(endereco ? { estado: 'conferido', endereco } : { estado: 'semEndereco' });
+    const valor = valorConferidoDoPreview(preview);
+    setConferenciaDestino(
+      endereco ? { estado: 'conferido', endereco, valor } : { estado: 'semEndereco', valor },
+    );
   }
 
   function encerrarConferencia(): void {
@@ -1328,14 +1366,18 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         confirmLabel={
           conferenciaDestino?.estado === 'capturando'
             ? 'Buscando sua localização...'
-            : operationBusy
-              ? 'Confirmando...'
-              : 'Confirmar entrega'
+            : conferenciaDestino?.estado === 'identificando'
+              ? 'Calculando o valor...'
+              : operationBusy
+                ? 'Confirmando...'
+                : 'Confirmar entrega'
         }
         disabled={
           primaryBusy ||
           conferenciaDestino?.estado === 'capturando' ||
-          conferenciaDestino?.estado === 'semLocalizacao'
+          conferenciaDestino?.estado === 'identificando' ||
+          conferenciaDestino?.estado === 'semLocalizacao' ||
+          valorDaConferencia(conferenciaDestino)?.estado === 'gpsImpreciso'
         }
         onRetry={() => {
           conferirDestinoAtual(currentDelivery.id).catch(() => {
@@ -1590,18 +1632,47 @@ function DeliverConfirmationModal({
               )}
             </View>
 
-            <View style={styles.confirmBlock}>
-              <View style={styles.confirmValueRow}>
-                <Text style={styles.confirmBlockLabel}>Valor do entregador</Text>
-                <Text style={styles.confirmValue}>{summary.driverValue}</Text>
-              </View>
-              {summary.returnValue ? (
-                <View style={styles.confirmValueRow}>
-                  <Text style={styles.confirmBlockLabel}>Retorno</Text>
-                  <Text style={styles.confirmValue}>{summary.returnValue}</Text>
+            {(() => {
+              const valor = valorDaConferencia(conferencia);
+              // Pedido com endereco: o valor e o do pedido, congelado na criacao.
+              if (valor === null) {
+                return (
+                  <View style={styles.confirmBlock}>
+                    <View style={styles.confirmValueRow}>
+                      <Text style={styles.confirmBlockLabel}>Valor do entregador</Text>
+                      <Text style={styles.confirmValue}>{summary.driverValue}</Text>
+                    </View>
+                    {summary.returnValue ? (
+                      <View style={styles.confirmValueRow}>
+                        <Text style={styles.confirmBlockLabel}>Retorno</Text>
+                        <Text style={styles.confirmValue}>{summary.returnValue}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              }
+              // Pedido sem endereco: o valor calculado AGORA, com este ponto.
+              const linhas = linhasDoValorConferido(valor);
+              return (
+                <View style={styles.confirmBlock}>
+                  <View style={styles.confirmValueRow}>
+                    <Text style={styles.confirmBlockLabel}>Valor do entregador</Text>
+                    {valor.estado === 'calculando' ? (
+                      <ActivityIndicator color={colors.actionSoft} />
+                    ) : (
+                      <Text style={styles.confirmValue}>{linhas.valor}</Text>
+                    )}
+                  </View>
+                  {linhas.retorno ? (
+                    <Text style={styles.confirmFallback}>{linhas.retorno}</Text>
+                  ) : null}
+                  {linhas.aviso ? <Text style={styles.confirmFallback}>{linhas.aviso}</Text> : null}
+                  {valor.estado === 'gpsImpreciso' ? (
+                    <PrimaryButton label="Tentar de novo" variant="outline" onPress={onRetry} />
+                  ) : null}
                 </View>
-              ) : null}
-            </View>
+              );
+            })()}
 
             {/* O aviso fala "o endereço acima": so vale quando existe um. */}
             {summary.gpsNotice && conferencia?.estado === 'conferido' ? (

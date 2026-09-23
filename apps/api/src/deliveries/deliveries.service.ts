@@ -63,6 +63,10 @@ import { dateInSaoPaulo, endOfDayInSaoPaulo, startOfDayInSaoPaulo } from '../com
 import { orderFinancialStatus, orderFinancialWhere } from './order-financial-filter';
 import { deliveryActivityMessage } from '../common/status-labels';
 import { checkBusinessHours } from './business-hours';
+import {
+  DeliveryCompletionQuoteStore,
+  type ReservedCompletionQuote,
+} from './delivery-completion-quote.store';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 
 const COMPANY_CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
@@ -139,11 +143,27 @@ const DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW: DeliveryCompletionErrorCode =
  * preco. Sem essa frase, o motoboy le "800m e demais" com um raio de 5000m
  * configurado na tela e conclui, com razao, que o sistema se contradiz.
  */
+/**
+ * O ponto e preciso o bastante para virar destino e preco?
+ *
+ * Predicado separado da recusa para o preview usar a MESMA regra sem lancar:
+ * se os dois caminhos tivessem cada um a sua, o motoboy poderia ler um valor
+ * no modal e tomar recusa de GPS ao confirmar o mesmo ponto.
+ */
+function accuracyTooLowForCapturedDestination(
+  accuracy: number | undefined,
+  limitMeters: number,
+): boolean {
+  return accuracy !== undefined && accuracy > limitMeters;
+}
+
 function assertAccuracyForCapturedDestination(
   accuracy: number | undefined,
   limitMeters: number,
 ): void {
-  if (accuracy === undefined || accuracy <= limitMeters) return;
+  if (accuracy === undefined || !accuracyTooLowForCapturedDestination(accuracy, limitMeters)) {
+    return;
+  }
   throw new ConflictException({
     code: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
     message:
@@ -305,6 +325,7 @@ export class DeliveriesService {
     private readonly platformSettingsService: AdminPlatformSettingsService,
     private readonly realtimeGateway: RealtimeGateway,
     private readonly integrationOutbox: IntegrationOutboxRecorder,
+    private readonly completionQuotes: DeliveryCompletionQuoteStore,
   ) {}
 
   async create(user: User, payload: CreateDeliveryPayload): Promise<DeliveryDetail> {
@@ -1515,6 +1536,92 @@ export class DeliveriesService {
    * aplicativo em segundos; o painel do admin pede, porque quem cancela
    * entrega dos outros precisa deixar dito por que.
    */
+  /**
+   * Libera AGORA um pedido agendado — a loja dona dele ou a administração.
+   *
+   * O pedido já tinha preço e destino desde a criação; liberar só antecipa a
+   * busca por motoboy. Não reprecifica nada.
+   *
+   * Duplo clique, ou a hora marcada chegando junto com o toque, não vira erro:
+   * se o pedido já saiu de `SCHEDULED` para a busca, a resposta é o próprio
+   * pedido. Qualquer outro estado — cancelado, já com motoboy — é recusado,
+   * porque "liberar" ali não significa nada.
+   */
+  async releaseScheduled(user: User, id: string): Promise<DeliveryDetail> {
+    if (user.type !== 'COMPANY_MEMBER' && user.type !== 'ADMIN') {
+      throw new ForbiddenException('Somente a empresa ou a administração liberam pedido agendado.');
+    }
+    const delivery = await this.prisma.delivery.findUnique({
+      where: { id },
+      include: { company: { select: { regionId: true, status: true } } },
+    });
+    if (!delivery) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    await this.assertCanAccess(user, delivery);
+
+    if (delivery.status === 'AWAITING_DRIVER') {
+      return this.detail(user, id);
+    }
+    if (delivery.status !== 'SCHEDULED') {
+      throw new ConflictException('Só pedido agendado pode ser liberado antes da hora.');
+    }
+    if (delivery.company.status !== 'ACTIVE') {
+      throw new ConflictException('A empresa deste pedido não está ativa.');
+    }
+    /**
+     * Lote não pode ser agendado hoje (o schema recusa `scheduledAt` em lote),
+     * então isto não deveria acontecer. A guarda fica porque liberar UM item de
+     * um lote deixaria os irmãos agendados, e o despacho recusa lote com item
+     * fora da busca — o pedido ficaria parado sem ninguém ver por quê.
+     */
+    if (delivery.batchId) {
+      throw new ConflictException('Pedido em lote não pode ser liberado individualmente.');
+    }
+
+    /**
+     * A loja respeita o horário de funcionamento: liberar agora equivale a
+     * lançar agora, e fora do expediente não há operação para atender. A
+     * administração passa por cima de propósito, como nas outras intervenções
+     * dela — é quem decide abrir uma exceção.
+     */
+    if (user.type === 'COMPANY_MEMBER') {
+      await this.assertWithinBusinessHours(delivery.company.regionId);
+    }
+
+    const horaMarcada = delivery.scheduledAt
+      ? delivery.scheduledAt.toLocaleTimeString('pt-BR', {
+          timeZone: 'America/Sao_Paulo',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : null;
+    const quem = user.type === 'ADMIN' ? 'pela administração' : 'pela empresa';
+    const liberado = await this.dispatchService.releaseScheduledNow(id, {
+      userId: user.id,
+      note: horaMarcada
+        ? `Liberado ${quem} antes do horário agendado (${horaMarcada}).`
+        : `Liberado ${quem} antes do horário agendado.`,
+    });
+
+    if (!liberado) {
+      // Algo tirou o pedido de SCHEDULED entre a leitura e a escrita: a hora
+      // chegou, alguém cancelou. Relê para responder com o estado real.
+      const atual = await this.prisma.delivery.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (atual?.status !== 'AWAITING_DRIVER') {
+        throw new ConflictException('Este pedido já não está mais agendado.');
+      }
+    }
+
+    // Sem `publishDeliveryUpdate`: a ativacao no dispatch ja emitiu o pedido
+    // atualizado e a linha na atividade do admin. Emitir de novo duplicaria a
+    // linha no feed da administracao.
+    return this.detail(user, id);
+  }
+
   async cancel(user: User, id: string, reason?: string): Promise<DeliveryDetail> {
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
@@ -1866,6 +1973,83 @@ export class DeliveriesService {
    *
    * Pedido que ja nasceu com retorno nao recebe a taxa novamente.
    */
+  /**
+   * Distancia e preco de uma entrega sem endereco, calculados com o ponto em
+   * que o motoboy esta.
+   *
+   * Um metodo so para o preview e para a confirmacao: com duas copias, uma
+   * correcao em uma delas faria o motoboy ler um valor no modal que a
+   * confirmacao nunca cobraria. As falhas saem ja traduzidas — quem confirma
+   * mostra a mensagem; quem so esta conferindo engole e segue sem valor.
+   */
+  private async cotarDestinoCapturado(
+    delivery: Pick<
+      Delivery,
+      'id' | 'displayNumber' | 'companyId' | 'serviceTypeId' | 'requiresReturn'
+    > & { company: { regionId: string } },
+    lat: number,
+    lng: number,
+  ): Promise<ReservedCompletionQuote> {
+    const pickupAddress = await this.prisma.companyAddress.findFirst({
+      where: { companyId: delivery.companyId, isPrimary: true },
+    });
+    if (!pickupAddress) {
+      throw new ConflictException('A empresa não tem mais um endereço de coleta cadastrado.');
+    }
+
+    let distance: { distanceKm: number };
+    try {
+      distance = await this.getDistanceToCapturedDestination(
+        this.formatAddress(pickupAddress),
+        lat,
+        lng,
+        pickupAddress.lat !== null && pickupAddress.lng !== null
+          ? { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) }
+          : undefined,
+      );
+    } catch (error) {
+      const failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      this.logger.warn(
+        `Pedido #${delivery.displayNumber}: falha ao calcular a distancia na conclusao (${failure}).`,
+      );
+      if (error instanceof GoogleMapsNotConfiguredError) {
+        throw new InternalServerErrorException(
+          'Cálculo de distância não está configurado. Contate o suporte.',
+        );
+      }
+      if (this.isNoRouteError(error)) {
+        throw new UnprocessableEntityException(
+          'O Google não encontrou uma rota viária para este destino. O pedido precisa de revisão.',
+        );
+      }
+      throw new ServiceUnavailableException(
+        'Não foi possível calcular a distância desta entrega agora. Tente novamente em instantes.',
+      );
+    }
+
+    const quoteInput = {
+      companyId: delivery.companyId,
+      regionId: delivery.company.regionId,
+      serviceTypeId: delivery.serviceTypeId,
+      distanceKm: distance.distanceKm,
+    };
+    const quote = delivery.requiresReturn
+      ? await this.quoteRequiredReturn(quoteInput)
+      : await this.pricingService.quote({ ...quoteInput, requiresReturn: false });
+
+    return {
+      lat,
+      lng,
+      distanceKm: distance.distanceKm,
+      totalValue: quote.totalValue,
+      driverValue: quote.driverValue,
+      platformValue: quote.platformValue,
+      returnValue: quote.returnValue,
+      surchargeLabel: quote.surchargeLabel,
+      surchargeValue: quote.surchargeValue,
+    };
+  }
+
   private async quoteRequiredReturn(input: Omit<PricingQuoteInput, 'requiresReturn'>) {
     try {
       return await this.pricingService.quote({ ...input, requiresReturn: true });
@@ -2267,37 +2451,32 @@ export class DeliveriesService {
   }
 
   /**
-   * Rua da coordenada onde o motoboy esta, para ele conferir ANTES de fechar
-   * uma entrega criada sem endereco.
+   * O que o motoboy confere ANTES de fechar uma entrega criada sem endereco:
+   * a rua e o valor do ponto em que ele esta.
    *
-   * Ate aqui essa rua so era identificada depois, quando o admin ou a empresa
-   * abria o pedido — de proposito, para nao por o Google no caminho critico do
-   * motoboy. Este metodo nao muda isso: ele nao grava nada, nao altera status
-   * nem preco, e falha em silencio devolvendo campos nulos. Uma chave vencida
-   * ou uma coordenada que o Google nao conhece tira a conferencia daquela
-   * entrega; nunca impede a entrega de ser fechada.
-   *
-   * Quem grava o destino continua sendo `markDelivered`, com a MESMA coordenada
-   * que o aplicativo mostrou aqui — e o aplicativo que congela o fix entre a
-   * conferencia e a confirmacao.
+   * Nao grava pedido, status nem preco — a unica escrita e a reserva do valor
+   * no Redis, para a confirmacao cobrar o que ele leu. As duas metades falham
+   * em silencio; ver `ruaDoPontoAtual` e `valorDoPontoAtual`.
    */
   async destinationPreview(
     user: User,
     id: string,
     payload: DestinationPreviewPayload,
   ): Promise<DeliveryDestinationPreview> {
-    const vazio: DeliveryDestinationPreview = {
-      street: null,
-      number: null,
-      city: null,
-      state: null,
-      zip: null,
-    };
-
     const driver = await this.findDriverForUser(user);
     const delivery = await this.prisma.delivery.findUnique({
       where: { id },
-      select: { driverId: true, status: true, destinationKnownAtCreation: true },
+      select: {
+        id: true,
+        displayNumber: true,
+        companyId: true,
+        serviceTypeId: true,
+        requiresReturn: true,
+        driverId: true,
+        status: true,
+        destinationKnownAtCreation: true,
+        company: { select: { regionId: true } },
+      },
     });
     if (!delivery) {
       throw new NotFoundException('Pedido não encontrado.');
@@ -2314,6 +2493,37 @@ export class DeliveriesService {
       );
     }
 
+    /**
+     * Rua e valor em paralelo: sao chamadas independentes ao Google, e o
+     * motoboy esta parado na porta esperando as duas.
+     */
+    const [endereco, valor] = await Promise.all([
+      this.ruaDoPontoAtual(id, payload),
+      this.valorDoPontoAtual(delivery, payload),
+    ]);
+    return { ...endereco, ...valor };
+  }
+
+  /**
+   * Rua da coordenada onde o motoboy esta, para ele conferir ANTES de fechar
+   * uma entrega criada sem endereco.
+   *
+   * Ate aqui essa rua so era identificada depois, quando o admin ou a empresa
+   * abria o pedido — de proposito, para nao por o Google no caminho critico do
+   * motoboy. Este metodo nao muda isso: ele nao grava nada, nao altera status
+   * nem preco, e falha em silencio devolvendo campos nulos. Uma chave vencida
+   * ou uma coordenada que o Google nao conhece tira a conferencia daquela
+   * entrega; nunca impede a entrega de ser fechada.
+   *
+   * Quem grava o destino continua sendo `markDelivered`, com a MESMA coordenada
+   * que o aplicativo mostrou aqui — e o aplicativo que congela o fix entre a
+   * conferencia e a confirmacao.
+   */
+  private async ruaDoPontoAtual(
+    id: string,
+    payload: DestinationPreviewPayload,
+  ): Promise<Pick<DeliveryDestinationPreview, 'street' | 'number' | 'city' | 'state' | 'zip'>> {
+    const vazio = { street: null, number: null, city: null, state: null, zip: null };
     try {
       const resolvido = await this.googleMapsService.reverseGeocode({
         lat: payload.lat,
@@ -2333,6 +2543,51 @@ export class DeliveriesService {
         `Falha ao identificar o endereco atual do motoboy na entrega ${id}: ${String(error)}`,
       );
       return vazio;
+    }
+  }
+
+  /**
+   * Quanto o motoboy recebe se confirmar NESTE ponto — e a reserva desse valor.
+   *
+   * Pedido do cliente em 23/09/2026: o motoboy confirmava a entrega e so via o
+   * valor depois, na carteira. Agora ele le antes. A reserva e o que torna a
+   * leitura verdadeira: a confirmacao com o mesmo ponto usa este calculo, e
+   * uma taxa adicional que vire no meio nao muda o numero que ele leu.
+   *
+   * Mesma filosofia da rua: falhar tira o valor do modal, nunca a entrega. A
+   * unica falha com nome proprio e o GPS impreciso, porque ali a confirmacao
+   * com este ponto SERA recusada — melhor dizer antes do toque.
+   */
+  private async valorDoPontoAtual(
+    delivery: Parameters<DeliveriesService['cotarDestinoCapturado']>[0],
+    payload: DestinationPreviewPayload,
+  ): Promise<Pick<DeliveryDestinationPreview, 'quote' | 'quoteUnavailableReason'>> {
+    try {
+      const settings = await this.platformSettingsService.get();
+      if (
+        accuracyTooLowForCapturedDestination(
+          payload.accuracy,
+          settings.deferredDestinationMaxAccuracyMeters ?? MAX_LOCATION_ACCURACY_METERS,
+        )
+      ) {
+        return { quote: null, quoteUnavailableReason: 'IMPRECISE_LOCATION' };
+      }
+
+      const cotacao = await this.cotarDestinoCapturado(delivery, payload.lat, payload.lng);
+      await this.completionQuotes.reserve(delivery.id, cotacao);
+      return {
+        quote: {
+          distanceKm: cotacao.distanceKm,
+          driverValue: cotacao.driverValue,
+          returnValue: cotacao.returnValue > 0 ? cotacao.returnValue : null,
+        },
+        quoteUnavailableReason: null,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao calcular o valor da entrega ${delivery.id} antes da confirmacao: ${String(error)}`,
+      );
+      return { quote: null, quoteUnavailableReason: 'UNAVAILABLE' };
     }
   }
 
@@ -2399,6 +2654,7 @@ export class DeliveriesService {
         )
       : { kind: 'DESLIGADA' };
     let notaDeDistanciaZero: string | null = null;
+    let notaDoValorConferido: string | null = null;
     const deliveryHistoryNote = [
       occurredAt
         ? `Entrega marcada depois — declarada para ${describeDeclaredTime(occurredAt)}.`
@@ -2441,52 +2697,17 @@ export class DeliveriesService {
         payload.accuracy,
         settings.deferredDestinationMaxAccuracyMeters ?? MAX_LOCATION_ACCURACY_METERS,
       );
-      const pickupAddress = await this.prisma.companyAddress.findFirst({
-        where: { companyId: delivery.companyId, isPrimary: true },
-      });
-      if (!pickupAddress) {
-        throw new ConflictException('A empresa não tem mais um endereço de coleta cadastrado.');
+      /**
+       * O valor que o motoboy leu no modal, se ele confirmou o MESMO ponto.
+       * Sem reserva (expirou, Redis fora, aplicativo antigo, ponto diferente),
+       * calcula aqui como sempre foi — a reserva nunca e condicao para fechar.
+       */
+      const reservado = await this.completionQuotes.find(delivery.id, payload.lat, payload.lng);
+      const cotacao =
+        reservado ?? (await this.cotarDestinoCapturado(delivery, payload.lat, payload.lng));
+      if (reservado) {
+        notaDoValorConferido = 'Valor conferido pelo motoboy antes de confirmar a entrega.';
       }
-
-      let distance: { distanceKm: number };
-      try {
-        distance = await this.getDistanceToCapturedDestination(
-          this.formatAddress(pickupAddress),
-          payload.lat,
-          payload.lng,
-          pickupAddress.lat !== null && pickupAddress.lng !== null
-            ? { lat: Number(pickupAddress.lat), lng: Number(pickupAddress.lng) }
-            : undefined,
-        );
-      } catch (error) {
-        const failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-        this.logger.warn(
-          `Pedido #${delivery.displayNumber}: falha ao calcular a distancia na conclusao (${failure}).`,
-        );
-        if (error instanceof GoogleMapsNotConfiguredError) {
-          throw new InternalServerErrorException(
-            'Cálculo de distância não está configurado. Contate o suporte.',
-          );
-        }
-        if (this.isNoRouteError(error)) {
-          throw new UnprocessableEntityException(
-            'O Google não encontrou uma rota viária para este destino. O pedido precisa de revisão.',
-          );
-        }
-        throw new ServiceUnavailableException(
-          'Não foi possível calcular a distância desta entrega agora. Tente novamente em instantes.',
-        );
-      }
-
-      const quoteInput = {
-        companyId: delivery.companyId,
-        regionId: delivery.company.regionId,
-        serviceTypeId: delivery.serviceTypeId,
-        distanceKm: distance.distanceKm,
-      };
-      const quote = delivery.requiresReturn
-        ? await this.quoteRequiredReturn(quoteInput)
-        : await this.pricingService.quote({ ...quoteInput, requiresReturn: false });
 
       /**
        * Entrega concluida a ZERO quilometro.
@@ -2497,19 +2718,19 @@ export class DeliveriesService {
        * fechou no mesmo ponto da coleta, em vez de descobrir um valor sem
        * explicacao.
        */
-      if (distance.distanceKm === 0) {
+      if (cotacao.distanceKm === 0) {
         notaDeDistanciaZero =
           'Entrega concluída no mesmo ponto da coleta — distância calculada: 0 km. ' +
           'Cobrada pela taxa base da tabela.';
       }
 
-      distanceKm = distance.distanceKm;
-      totalValue = quote.totalValue;
-      driverValue = quote.driverValue;
-      platformValue = quote.platformValue;
-      returnValue = quote.returnValue > 0 ? quote.returnValue : null;
-      surchargeLabel = quote.surchargeLabel;
-      surchargeValue = quote.surchargeValue > 0 ? quote.surchargeValue : null;
+      distanceKm = cotacao.distanceKm;
+      totalValue = cotacao.totalValue;
+      driverValue = cotacao.driverValue;
+      platformValue = cotacao.platformValue;
+      returnValue = cotacao.returnValue > 0 ? cotacao.returnValue : null;
+      surchargeLabel = cotacao.surchargeLabel;
+      surchargeValue = cotacao.surchargeValue > 0 ? cotacao.surchargeValue : null;
       capturedLat = payload.lat;
       capturedLng = payload.lng;
     }
@@ -2561,7 +2782,7 @@ export class DeliveriesService {
             changedByUserId: user.id,
             ...(occurredAt && { occurredAt }),
             ...(() => {
-              const nota = [deliveryHistoryNote, notaDeDistanciaZero]
+              const nota = [deliveryHistoryNote, notaDeDistanciaZero, notaDoValorConferido]
                 .filter((parte): parte is string => Boolean(parte))
                 .join(' ');
               return nota ? { note: nota } : {};
@@ -2601,6 +2822,11 @@ export class DeliveriesService {
         }
       }
       throw error;
+    }
+
+    if (!delivery.destinationKnownAtCreation) {
+      // Entrega fechada: a reserva do valor nao serve para mais nada.
+      await this.completionQuotes.discard(delivery.id);
     }
 
     const detail = await this.detail(user, delivery.id);

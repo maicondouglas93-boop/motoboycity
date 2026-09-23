@@ -1371,6 +1371,72 @@ describe('DispatchService', () => {
     });
   });
 
+  /**
+   * A loja ou o admin antecipando um agendado. E a mesma ativacao do job da
+   * hora marcada — o que estes testes garantem e o que muda: quem pediu fica
+   * no historico, o resultado volta para quem chamou, e o job da hora marcada
+   * sai da fila so DEPOIS de ativar.
+   */
+  describe('releaseScheduledNow', () => {
+    const quem = {
+      userId: 'user-loja',
+      note: 'Liberado pela empresa antes do horário agendado (19:30).',
+    };
+
+    it('ativa, registra quem pediu e tira o job da hora marcada da fila', async () => {
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce({ id: 'delivery-1', status: 'SCHEDULED', displayNumber: 3 })
+        .mockResolvedValueOnce(null); // pro dispatchDelivery interno
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(service.releaseScheduledNow('delivery-1', quem)).resolves.toBe(true);
+
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'SCHEDULED',
+          toStatus: 'AWAITING_DRIVER',
+          changedByUserId: 'user-loja',
+          note: quem.note,
+        },
+      });
+      expect(queue.remove).toHaveBeenCalledWith('activate-delivery-1');
+    });
+
+    /**
+     * A hora marcada chegando junto com o toque: o job ativou primeiro. A
+     * liberacao manual ve `count === 0`, nao escreve historico duplicado e nao
+     * mexe na fila.
+     */
+    it('perde a corrida para o job da hora marcada sem duplicar nada', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'SCHEDULED',
+        displayNumber: 3,
+      });
+      tx.delivery.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.releaseScheduledNow('delivery-1', quem)).resolves.toBe(false);
+
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+      expect(queue.remove).not.toHaveBeenCalled();
+    });
+
+    /**
+     * O pedido ja esta buscando motoboy quando a limpeza da fila falha. Nao ha
+     * o que desfazer, e o job que sobrou vira nada sozinho na hora marcada.
+     */
+    it('não falha a liberação quando a limpeza da fila falha', async () => {
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce({ id: 'delivery-1', status: 'SCHEDULED', displayNumber: 3 })
+        .mockResolvedValueOnce(null);
+      tx.delivery.updateMany.mockResolvedValue({ count: 1 });
+      queue.remove.mockRejectedValueOnce(new Error('redis fora'));
+
+      await expect(service.releaseScheduledNow('delivery-1', quem)).resolves.toBe(true);
+    });
+  });
+
   describe('cancelOfferTimeout', () => {
     it('remove o job de expiração pelo jobId derivado da oferta', async () => {
       await service.cancelOfferTimeout('offer-1');

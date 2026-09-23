@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 import { DeliveriesService } from './deliveries.service';
+import { DeliveryCompletionQuoteStore } from './delivery-completion-quote.store';
 
 const companyUser = { id: 'user-company-1', type: 'COMPANY_MEMBER' } as User;
 const otherCompanyUser = { id: 'user-company-2', type: 'COMPANY_MEMBER' } as User;
@@ -160,8 +161,10 @@ describe('DeliveriesService', () => {
     scheduleActivation: jest.Mock;
     cancelPendingOfferForDelivery: jest.Mock;
     cancelScheduledActivation: jest.Mock;
+    releaseScheduledNow: jest.Mock;
   };
   let platformSettingsService: { get: jest.Mock };
+  let completionQuotes: { reserve: jest.Mock; find: jest.Mock; discard: jest.Mock };
   let financeLedgerService: { creditDriverRepasse: jest.Mock };
   let realtimeGateway: {
     emitToDriver: jest.Mock;
@@ -223,6 +226,7 @@ describe('DeliveriesService', () => {
       scheduleActivation: jest.fn().mockResolvedValue(undefined),
       cancelPendingOfferForDelivery: jest.fn().mockResolvedValue(undefined),
       cancelScheduledActivation: jest.fn().mockResolvedValue(undefined),
+      releaseScheduledNow: jest.fn().mockResolvedValue(true),
     };
     platformSettingsService = { get: jest.fn() };
     // Padrao do ambiente: bloqueio de horario desligado. Os testes que precisam
@@ -230,6 +234,13 @@ describe('DeliveriesService', () => {
     // causa dele.
     platformSettingsService.get.mockResolvedValue({ businessHoursEnabled: false });
     financeLedgerService = { creditDriverRepasse: jest.fn().mockResolvedValue(undefined) };
+    // Padrao: nenhum valor reservado. Os testes antigos da confirmacao seguem
+    // exercitando o calculo normal; os da reserva sobrescrevem `find`.
+    completionQuotes = {
+      reserve: jest.fn().mockResolvedValue(undefined),
+      find: jest.fn().mockResolvedValue(null),
+      discard: jest.fn().mockResolvedValue(undefined),
+    };
     realtimeGateway = {
       emitToDriver: jest.fn(),
       emitDeliveryUpdated: jest.fn(),
@@ -247,6 +258,7 @@ describe('DeliveriesService', () => {
         { provide: AdminPlatformSettingsService, useValue: platformSettingsService },
         { provide: RealtimeGateway, useValue: realtimeGateway },
         { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
+        { provide: DeliveryCompletionQuoteStore, useValue: completionQuotes },
       ],
     }).compile();
 
@@ -1650,6 +1662,123 @@ describe('DeliveriesService', () => {
     });
   });
 
+  /**
+   * Antecipar um agendado. O pedido ja tem preco e destino desde a criacao;
+   * o que esta em jogo e QUEM pode antecipar, QUANDO, e que tocar duas vezes
+   * nao vire erro.
+   */
+  describe('releaseScheduled', () => {
+    const agendado = (extra: Record<string, unknown> = {}) =>
+      fullDeliveryRow({
+        status: 'SCHEDULED',
+        scheduledAt: new Date('2026-09-23T22:30:00.000Z'), // 19:30 em São Paulo
+        company: { tradeName: 'Loja Teste', regionId: 'region-1', status: 'ACTIVE' },
+        ...extra,
+      });
+
+    it('a loja dona libera, e o histórico diz quem e qual era a hora marcada', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(agendado());
+
+      await service.releaseScheduled(companyUser, 'delivery-1');
+
+      expect(dispatchService.releaseScheduledNow).toHaveBeenCalledWith('delivery-1', {
+        userId: companyUser.id,
+        note: 'Liberado pela empresa antes do horário agendado (19:30).',
+      });
+    });
+
+    it('o admin libera o pedido de qualquer loja', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(agendado());
+
+      await service.releaseScheduled(adminUser, 'delivery-1');
+
+      expect(dispatchService.releaseScheduledNow).toHaveBeenCalledWith(
+        'delivery-1',
+        expect.objectContaining({ note: expect.stringContaining('pela administração') }),
+      );
+    });
+
+    it('recusa loja que não é dona do pedido', async () => {
+      mockCompanyMembership(otherCompanyUser.id, 'company-2');
+      prisma.delivery.findUnique.mockResolvedValue(agendado());
+
+      await expect(service.releaseScheduled(otherCompanyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(dispatchService.releaseScheduledNow).not.toHaveBeenCalled();
+    });
+
+    it('recusa o motoboy', async () => {
+      await expect(service.releaseScheduled(driverUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.delivery.findUnique).not.toHaveBeenCalled();
+    });
+
+    /** Duplo toque, ou a hora marcada chegando junto: o pedido já está buscando. */
+    it('pedido que já saiu para a busca responde o próprio pedido, sem erro', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(agendado({ status: 'AWAITING_DRIVER' }));
+
+      await expect(service.releaseScheduled(companyUser, 'delivery-1')).resolves.toBeDefined();
+      expect(dispatchService.releaseScheduledNow).not.toHaveBeenCalled();
+    });
+
+    it.each(['ACCEPTED', 'COLLECTED', 'COMPLETED', 'CANCELLED'] as const)(
+      'recusa liberar um pedido em %s',
+      async (status) => {
+        mockCompanyMembership(companyUser.id, 'company-1');
+        prisma.delivery.findUnique.mockResolvedValue(agendado({ status }));
+
+        await expect(service.releaseScheduled(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        expect(dispatchService.releaseScheduledNow).not.toHaveBeenCalled();
+      },
+    );
+
+    /**
+     * Liberar agora e lancar agora: fora do expediente a loja e recusada como
+     * seria ao criar. O admin passa por cima, como nas outras intervencoes.
+     */
+    it('fora do horário, recusa a loja e deixa o admin passar', async () => {
+      platformSettingsService.get.mockResolvedValue({ businessHoursEnabled: true });
+      // Faixa de largura zero: `rangeCoversMinute` nunca a considera aberta,
+      // entao o teste nao depende do dia nem da hora em que roda.
+      prisma.businessHour.findMany.mockResolvedValue([
+        { weekday: 0, startMinute: 600, endMinute: 600 },
+      ]);
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(agendado());
+
+      await expect(service.releaseScheduled(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(dispatchService.releaseScheduledNow).not.toHaveBeenCalled();
+
+      await service.releaseScheduled(adminUser, 'delivery-1');
+      expect(dispatchService.releaseScheduledNow).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * O job da hora marcada ganhou a corrida entre a leitura e a escrita. Se o
+     * pedido esta buscando, deu certo do mesmo jeito; se foi cancelado, a
+     * resposta tem que dizer que nao esta mais agendado.
+     */
+    it('perdendo a corrida, relê o estado real para responder', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      dispatchService.releaseScheduledNow.mockResolvedValue(false);
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce(agendado())
+        .mockResolvedValueOnce({ status: 'CANCELLED' });
+
+      await expect(service.releaseScheduled(companyUser, 'delivery-1')).rejects.toThrow(
+        'já não está mais agendado',
+      );
+    });
+  });
+
   describe('cancel', () => {
     it('retorna 404 quando o pedido não existe', async () => {
       prisma.delivery.findUnique.mockResolvedValue(null);
@@ -2359,18 +2488,30 @@ describe('DeliveriesService', () => {
   });
 
   describe('destinationPreview', () => {
-    function pedidoSemEnderecoColetado() {
+    function pedidoSemEnderecoColetado(extra: Record<string, unknown> = {}) {
       prisma.driver.findUnique.mockResolvedValue(driverRow);
       prisma.delivery.findUnique.mockResolvedValue(
         fullDeliveryRow({
           driverId: 'driver-1',
           status: 'COLLECTED',
           destinationKnownAtCreation: false,
+          requiresReturn: false,
+          ...extra,
         }),
       );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 3, durationMinutes: 12 });
+      pricingService.quote.mockResolvedValue({
+        totalValue: 10,
+        driverValue: 8,
+        platformValue: 2,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
     }
 
-    it('identifica a rua da coordenada sem gravar nada', async () => {
+    it('identifica a rua e o valor, e reserva o valor para a confirmação', async () => {
       pedidoSemEnderecoColetado();
       googleMapsService.reverseGeocode.mockResolvedValue({
         street: 'Rua Macanaiba',
@@ -2388,21 +2529,104 @@ describe('DeliveriesService', () => {
         city: 'Lajinha',
         state: 'MG',
         zip: '36980-000',
+        quote: { distanceKm: 3, driverValue: 8, returnValue: null },
+        quoteUnavailableReason: null,
       });
       expect(googleMapsService.reverseGeocode).toHaveBeenCalledWith({ lat: -20.13, lng: -41.6 });
+      // A reserva guarda o PONTO junto: e ele que amarra o valor a confirmacao.
+      expect(completionQuotes.reserve).toHaveBeenCalledWith('delivery-1', {
+        lat: -20.13,
+        lng: -41.6,
+        distanceKm: 3,
+        totalValue: 10,
+        driverValue: 8,
+        platformValue: 2,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
+      // Conferir nao e fechar: nada do pedido e gravado.
       expect(tx.delivery.updateMany).not.toHaveBeenCalled();
       expect(prisma.deliveryAddress.updateMany).not.toHaveBeenCalled();
     });
 
     // A conferencia e um conforto; a entrega e o trabalho. Google fora do ar
     // nao pode prender mercadoria na mao do motoboy.
-    it('devolve campos nulos quando o Google falha, em vez de estourar', async () => {
+    it('devolve a rua vazia quando o Google falha, em vez de estourar', async () => {
       pedidoSemEnderecoColetado();
       googleMapsService.reverseGeocode.mockRejectedValue(new Error('Google indisponivel'));
 
       await expect(
         service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
-      ).resolves.toEqual({ street: null, number: null, city: null, state: null, zip: null });
+      ).resolves.toMatchObject({ street: null, number: null, city: null, state: null, zip: null });
+    });
+
+    /**
+     * Rua e valor sao independentes: a falha de um nao pode apagar o outro.
+     * Sem valor, a confirmacao calcula sozinha como sempre calculou.
+     */
+    it('sem conseguir calcular o valor, mantém a rua e diz que o valor ficou indisponível', async () => {
+      pedidoSemEnderecoColetado();
+      googleMapsService.reverseGeocode.mockResolvedValue({
+        street: 'Rua Macanaiba',
+        number: '14',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36980-000',
+      });
+      googleMapsService.getDistance.mockRejectedValue(new Error('Routes indisponivel'));
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).resolves.toMatchObject({
+        street: 'Rua Macanaiba',
+        quote: null,
+        quoteUnavailableReason: 'UNAVAILABLE',
+      });
+      expect(completionQuotes.reserve).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A confirmacao com um ponto impreciso SERA recusada. Mostrar um valor
+     * para ela seria prometer uma corrida que nao fecha — melhor o modal
+     * pedir o GPS de novo antes do toque. E nem chega a gastar a rota paga.
+     */
+    it('com GPS impreciso não calcula nem reserva, e diz o motivo', async () => {
+      pedidoSemEnderecoColetado();
+      platformSettingsService.get.mockResolvedValue({
+        businessHoursEnabled: false,
+        deferredDestinationMaxAccuracyMeters: 100,
+      });
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', {
+          lat: -20.13,
+          lng: -41.6,
+          accuracy: 250,
+        }),
+      ).resolves.toMatchObject({ quote: null, quoteUnavailableReason: 'IMPRECISE_LOCATION' });
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+      expect(completionQuotes.reserve).not.toHaveBeenCalled();
+    });
+
+    /** O valor do motoboy ja inclui o retorno; a parte do retorno vem separada. */
+    it('no pedido com retorno, mostra quanto do valor é retorno', async () => {
+      pedidoSemEnderecoColetado({ requiresReturn: true });
+      pricingService.quote.mockResolvedValue({
+        totalValue: 14,
+        driverValue: 11,
+        platformValue: 3,
+        returnValue: 3,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
+
+      await expect(
+        service.destinationPreview(driverUser, 'delivery-1', { lat: -20.13, lng: -41.6 }),
+      ).resolves.toMatchObject({ quote: { distanceKm: 3, driverValue: 11, returnValue: 3 } });
+      expect(pricingService.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ requiresReturn: true }),
+      );
     });
 
     it('recusa pedido de outro motoboy', async () => {
@@ -2476,6 +2700,105 @@ describe('DeliveriesService', () => {
      * conseguia nem ver, nem ajustar — e a mensagem nao explicava por que ele e
      * mais rigido que o raio configurado na mesma tela.
      */
+    /**
+     * O valor que o motoboy leu no modal e o que ele recebe. Pedido do cliente
+     * em 23/09/2026: antes, ele so via o valor na carteira, depois de fechar.
+     */
+    describe('valor reservado no preview', () => {
+      const reservado = {
+        lat: -20.15,
+        lng: -41.74,
+        distanceKm: 3,
+        totalValue: 10,
+        driverValue: 8,
+        platformValue: 2,
+        returnValue: 0,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      };
+
+      function pedidoDiferidoColetado() {
+        prisma.driver.findUnique.mockResolvedValue(driverRow);
+        prisma.delivery.findUnique.mockResolvedValue(
+          fullDeliveryRow({
+            driverId: 'driver-1',
+            status: 'COLLECTED',
+            destinationKnownAtCreation: false,
+            requiresReturn: false,
+            distanceKm: null,
+            driverValue: null,
+          }),
+        );
+        prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+        googleMapsService.getDistance.mockResolvedValue({ distanceKm: 3, durationMinutes: 12 });
+      }
+
+      /**
+       * O caso que justifica a reserva: entre o motoboy ler e tocar, uma taxa
+       * adicional ligou e a tabela passaria a dar R$ 11. Ele leu R$ 8, e e
+       * R$ 8 que ele recebe — sem recalcular, sem chamar o Google de novo.
+       */
+      it('confirmando o mesmo ponto, cobra o que o motoboy leu mesmo se o preço mudou', async () => {
+        pedidoDiferidoColetado();
+        completionQuotes.find.mockResolvedValue(reservado);
+        pricingService.quote.mockResolvedValue({
+          totalValue: 14,
+          driverValue: 11,
+          platformValue: 3,
+          returnValue: 0,
+          surchargeLabel: 'Chuva',
+          surchargeValue: 4,
+        });
+
+        await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+        expect(completionQuotes.find).toHaveBeenCalledWith('delivery-1', -20.15, -41.74);
+        expect(pricingService.quote).not.toHaveBeenCalled();
+        expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+        expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ driverValue: 8, totalValue: 10, distanceKm: 3 }),
+          }),
+        );
+        expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              note: expect.stringContaining('Valor conferido pelo motoboy'),
+            }),
+          }),
+        );
+        expect(completionQuotes.discard).toHaveBeenCalledWith('delivery-1');
+      });
+
+      /**
+       * Sem reserva — expirou, Redis fora, aplicativo antigo que nao mostra
+       * valor, ponto diferente — a confirmacao calcula como sempre calculou.
+       * A reserva nunca e condicao para fechar a entrega.
+       */
+      it('sem reserva para o ponto, calcula como antes e fecha normalmente', async () => {
+        pedidoDiferidoColetado();
+        pricingService.quote.mockResolvedValue({
+          totalValue: 10,
+          driverValue: 8,
+          platformValue: 2,
+          returnValue: 0,
+          surchargeLabel: null,
+          surchargeValue: 0,
+        });
+
+        await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+        expect(pricingService.quote).toHaveBeenCalled();
+        expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.not.objectContaining({
+              note: expect.stringContaining('Valor conferido pelo motoboy'),
+            }),
+          }),
+        );
+      });
+    });
+
     describe('precisão exigida quando a posição define o destino', () => {
       function pedidoDiferidoColetado() {
         prisma.driver.findUnique.mockResolvedValue(driverRow);

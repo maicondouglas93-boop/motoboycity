@@ -466,6 +466,27 @@ dia anterior:
 - pedidos manuais continuam funcionando em paralelo e nenhuma rota AiqEntrega
   deve ser usada.
 
+## Liberar pedido agendado antes da hora
+
+Decisão de 2026-09-23. Um pedido `SCHEDULED` — agendado pela loja ou importado
+do aiqfome esperando o tempo de preparo — pode ser **liberado agora**: sai do
+agendamento e começa a buscar motoboy imediatamente
+(`PATCH /deliveries/:id/release-scheduled`).
+
+- podem liberar: a **empresa dona** do pedido e a **administração**. O motoboy
+  não;
+- **o valor não muda**. Preço, destino e taxa já foram congelados na criação;
+  liberar só antecipa a busca;
+- a empresa respeita o **horário de funcionamento** — liberar agora equivale a
+  lançar agora. A administração passa por cima, como nas demais intervenções
+  dela;
+- tocar duas vezes, ou a hora marcada chegando junto com o toque, não é erro: se
+  o pedido já está buscando motoboy, a resposta é o próprio pedido. Qualquer
+  outro estado (aceito, cancelado, concluído) é recusado;
+- o histórico registra quem liberou e qual era a hora marcada. O job da hora
+  marcada sai da fila e, se sobrar por falha de limpeza, vira no-op sozinho;
+- não vale para lote: lote não pode ser agendado nesta versão.
+
 ## Arquitetura de sessão/token
 
 Revisitada em 2026-08-09 e mantida como está, deliberadamente: JWT em
@@ -503,6 +524,22 @@ pedido entrar em `FAILED`, já incluindo a taxa de retorno. Sem essa coordenada
 o insucesso não é registrado, evitando uma devolução sem valor. A confirmação
 posterior na loja não recalcula o preço; se o raio de retorno estiver
 configurado, ela exige proximidade da empresa.
+
+**O motoboy vê o valor antes de confirmar** (decisão de 2026-09-23). Antes, ele
+confirmava a entrega e só descobria quanto ia receber na carteira, com o pedido
+já fechado. Agora o modal de confirmação mostra o valor calculado com o ponto em
+que ele está — o mesmo ponto que o aplicativo congela e manda na confirmação.
+
+O valor mostrado é **reservado** no servidor por 20 minutos, amarrado a esse
+ponto exato. A confirmação com o mesmo ponto cobra **exatamente** esse valor,
+mesmo que uma taxa adicional (faixa de horário, chuva) tenha ligado ou desligado
+entre ele ler e tocar. Sem reserva — expirou, ponto diferente, aplicativo antigo
+— a confirmação calcula como sempre calculou. A reserva nunca é condição para
+fechar a entrega.
+
+Se o GPS estiver impreciso demais para virar destino, o modal não mostra valor e
+bloqueia a confirmação, pedindo para tentar de novo: a confirmação com aquele
+ponto seria recusada de qualquer forma.
 
 Fechamento: item sem `requiresReturn` fecha sozinho (`COMPLETED`) assim que
 marcado entregue. Item com `requiresReturn=true` fica em `DELIVERED` até o

@@ -13688,3 +13688,93 @@ Continua em aberto: 12 vulnerabilidades altas, a maioria transitiva
 (`multer` por `@nestjs/platform-express`, `sharp`, `js-yaml`); token em
 `localStorage` valido por 7 dias sem refresh; e guarda de autenticacao por
 controller, que faz rota nova nascer publica se alguem esquecer o decorador.
+
+## 2026-09-23 — Liberar agendado antes da hora, e o valor visto antes de confirmar
+
+Dois pedidos do cliente, recebidos juntos por WhatsApp.
+
+### 1. Empresa e ADM liberam o pedido agendado na hora
+
+"Esse vai tocar automático — tem que ter uma opção da empresa chamar ele de uma
+vez, e eu aqui também." O caso real é o pedido do aiqfome: todo pedido importado
+nasce `SCHEDULED` e espera o tempo de preparo. Quando a loja termina antes, ela
+não tinha como antecipar.
+
+`PATCH /deliveries/:id/release-scheduled`. O serviço confere quem pode (empresa
+dona e ADM; motoboy recusado), o estado e o horário de funcionamento — a empresa
+respeita, o ADM passa por cima, como nas outras intervenções. A transição reusa
+a ativação do job da hora marcada, extraída para `activateScheduled` em
+`DispatchService`: a escrita exige `SCHEDULED`, então liberação manual e job
+concorrendo geram UMA transição. O histórico ganha autor e a hora que estava
+marcada. O job da hora marcada sai da fila depois de ativar, em modo
+best-effort — se sobrar, ele vira no-op sozinho.
+
+Duplo toque não é erro: pedido que já está buscando responde o próprio pedido.
+Lote fica de fora por guarda explícita, embora o schema já impeça lote agendado.
+
+Telas: "Chamar agora" na lista e no detalhe do pedido da empresa; "Liberar agora"
+no topo do menu de ações do ADM, sem exigir motivo (o histórico já grava quem e
+quando).
+
+### 2. O motoboy vê o valor antes de confirmar a entrega sem endereço
+
+"Do jeito que tá, ele confirmando a entrega já finaliza e vai para carteira, e
+para ele ver se está certo ele tem que ir na carteira ver."
+
+O modal já existia desde 21/09 e já chamava `destination-preview` com o fix
+congelado. A consulta agora devolve também `quote` (distância, valor do motoboy,
+parte de retorno) e `quoteUnavailableReason`.
+
+**A decisão que importa: o valor é reservado, não estimado.** O preço depende da
+taxa adicional vigente, que liga e desliga sozinha. Recalculando na confirmação,
+uma virada entre ler e tocar faria o motoboy ver um valor e receber outro — o
+contrário do pedido. O preview grava o cálculo no Redis
+(`DeliveryCompletionQuoteStore`, TTL 20 min) amarrado ao ponto exato, e
+`markDelivered` com o mesmo ponto usa esse valor. Não há confiança no cliente: o
+valor é do servidor, e o ponto é o mesmo que ele já mandaria para virar destino.
+Qualquer falha do Redis vira "sem reserva" e a confirmação calcula como antes.
+
+O cálculo saiu do `markDelivered` para `cotarDestinoCapturado`, usado pelos dois
+caminhos — duas cópias divergiriam na primeira correção. A regra de precisão do
+GPS virou um predicado compartilhado pelo mesmo motivo: com GPS impreciso o
+preview não calcula, e o modal bloqueia o confirmar com "Tentar de novo".
+
+Conferi a cadeia de coordenadas por leitura, porque a reserva depende de
+igualdade exata: nenhum dos dois schemas arredonda (`z.number()` puro), o app
+manda `fix.lat` sem transformar nos dois pedidos, e a fila offline guarda o
+payload em JSON — ida e volta de JSON preserva o double.
+
+**Uma decisão de 21/09 foi revista de propósito.** O confirmar liberava enquanto
+a rua carregava, porque esperar prendia o motoboy na porta. O pedido agora é
+ver o valor ANTES de finalizar, então o confirmar espera — com teto de 8 s.
+Passado dele, libera com "Calculado ao confirmar", e a resposta tardia ainda
+aparece se ele não tiver tocado.
+
+Compatibilidade: o `pilot.26` já chama a consulta, então depois do deploy da API
+ele já ganha a reserva; ele só não mostra o valor. Um servidor antigo sem o
+campo novo vira "Calculado ao confirmar" no app novo, nunca erro.
+
+### Validações
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 workspaces) | aprovado |
+| `pnpm lint` | admin-web reprova por erro **pré-existente** (ver abaixo); os demais aprovados |
+| `apps/api` — `jest` | **1250** passaram, 2 falharam — as duas **pré-existentes**, provadas no `main` com `git stash` |
+| `apps/driver-app` — `jest` | 26 suítes, **210** testes |
+| `apps/company-web` — `vitest` | 30 arquivos, **152** testes |
+| `apps/admin-web` — `node --test` | **58** testes |
+| Teste da reserva com o uso desligado de propósito | falhou, como esperado |
+| API subindo sem banco | as duas rotas mapeadas e nenhuma falha de injeção de dependência |
+
+Não verificado: nenhuma chamada real contra Redis e Google (Docker estava
+desligado), e nada em aparelho. O APK com o valor no modal não foi compilado.
+
+### Achado fora do escopo
+
+O CI do `main` está vermelho desde 21/09 no passo de Lint:
+`admin-completed-delivery-actions.tsx` (commit `3a41548`) chama `useMutation`
+depois de um `return` — além de reprovar o lint, é crash latente de "Rendered
+more hooks". Como o Lint falha primeiro, testes e builds do CI não rodam há
+dias. Os dois testes do `detail` falhariam logo em seguida. Não corrigido aqui;
+deixado como tarefa separada.

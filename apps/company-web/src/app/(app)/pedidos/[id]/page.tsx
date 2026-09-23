@@ -142,6 +142,14 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
       void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
     },
   });
+  /** Antecipa o agendado para a busca por motoboy agora; o valor não muda. */
+  const releaseMutation = useMutation({
+    mutationFn: () => deliveriesApi.releaseScheduled(token as string, id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['company', 'delivery', id] });
+      void queryClient.invalidateQueries({ queryKey: ['deliveries'] });
+    },
+  });
 
   if (!token) {
     return <p className="text-sm text-muted-foreground">Faça login para consultar este pedido.</p>;
@@ -196,6 +204,22 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
               status={delivery.status}
             />
           )}
+          {delivery.status === 'SCHEDULED' && (
+            <Button
+              disabled={releaseMutation.isPending}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Chamar um motoboy agora para o pedido #${delivery.displayNumber}, sem esperar o horário agendado?`,
+                  )
+                ) {
+                  releaseMutation.mutate();
+                }
+              }}
+            >
+              {releaseMutation.isPending ? 'Chamando...' : 'Chamar agora'}
+            </Button>
+          )}
           {companyCanCancel && (
             <Button
               variant="outline"
@@ -211,6 +235,14 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
           )}
         </div>
       </header>
+
+      {releaseMutation.isError && (
+        <p className="text-sm text-destructive">
+          {releaseMutation.error instanceof ApiError
+            ? releaseMutation.error.message
+            : 'Não foi possível chamar o pedido agora.'}
+        </p>
+      )}
 
       {cancelMutation.isError && (
         <p className="text-sm text-destructive">
