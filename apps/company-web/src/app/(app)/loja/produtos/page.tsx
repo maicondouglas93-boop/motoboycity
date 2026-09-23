@@ -297,9 +297,13 @@ export default function LojaProdutosPage() {
                       {produto.situacao === 'rascunho' ? 'Publicar' : 'Voltar a vender'}
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" aria-label={`Editar ${produto.nome}`}>
+                  <Link
+                    href={`/loja/produtos/${produto.id}/editar`}
+                    aria-label={`Editar ${produto.nome}`}
+                    className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                  >
                     <Pencil className="size-4" />
-                  </Button>
+                  </Link>
                 </div>
               </CardContent>
             </Card>

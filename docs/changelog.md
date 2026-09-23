@@ -13976,3 +13976,46 @@ marcar um grupo como obrigatório sem escolhas.
 
 O aviso do deploy continua valendo, e agora está registrado no
 `agent-handoff.md`: o item "Loja" está no menu que as empresas de produção usam.
+
+## 2026-09-23 — Loja: editar produto, com um formulário só
+
+O lápis da lista de produtos não levava a lugar nenhum: existia a tela de
+cadastro e nenhuma de edição. Agora `/loja/produtos/[id]/editar` abre o produto
+com tudo preenchido.
+
+**Um componente para as duas telas**, e não duas telas parecidas. Separadas,
+elas divergiriam: uma regra nova entraria na de cadastro e seria esquecida na de
+edição, e o produto editado passaria a aceitar o que o recém-criado recusa. O
+formulário saiu de `novo/page.tsx` para
+`src/components/loja/formulario-de-produto.tsx`; as duas rotas agora só o
+chamam, com ou sem produto.
+
+**O caso que só existe na edição:** mexer num produto que está no ar e deixá-lo
+sem poder ser comprado. Impedir de salvar prenderia o trabalho pela metade;
+salvar e manter no ar entregaria ao cliente um produto quebrado. A escolha foi
+sair do ar — e o botão diz isso antes de ser clicado, virando "Salvar e tirar
+do ar", com o cartão de publicação explicando que o trabalho fica guardado e
+que basta republicar depois de resolver.
+
+Preço volta ao campo em formato brasileiro (`precoParaTexto`). Sem isso, quem
+cadastrou "18,50" abriria a edição e veria "18.5" — e concluiria, com razão, que
+o sistema estragou o preço dele.
+
+Id inexistente tem caminho próprio ("Produto não encontrado", com o aviso de que
+nada foi alterado e um link de volta), em vez de quebrar com erro de React.
+
+Arquivos:
+
+- `apps/company-web/src/components/loja/formulario-de-produto.tsx` (novo);
+- `apps/company-web/src/app/(app)/loja/produtos/novo/page.tsx` — reduzido a
+  cinco linhas;
+- `apps/company-web/src/app/(app)/loja/produtos/[id]/editar/page.tsx` (novo);
+- `apps/company-web/src/app/(app)/loja/produtos/page.tsx` — o lápis virou link.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando. Conferido no navegador: o Açaí abre com nome, descrição,
+categoria, os três tamanhos com preço em `12,00`/`18,00`/`24,00`, o grupo
+"Adicionais" com as quatro escolhas e a Paçoca já desmarcada; apagar o preço de
+um tamanho troca o cartão e o botão para "Salvar e tirar do ar"; `p1` a `p6`
+apontam para a rota certa; um id inexistente cai na tela de não encontrado; e o
+cadastro continua abrindo vazio com "Publicar produto" e "Salvar rascunho".

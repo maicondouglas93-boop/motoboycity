@@ -547,7 +547,7 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas de demonstração dentro do painel
 
 O menu do `company-web` tem um item **Loja**, com as telas Vendas, Produtos
-(mais Organizar e Cadastrar) e Configurações. **Nada disso está integrado.** Os
+(mais Organizar, Cadastrar e Editar) e Configurações. **Nada disso está integrado.** Os
 dados vêm de `apps/company-web/src/lib/loja-mock.ts` e vivem na memória do
 navegador; toda tela traz um aviso dizendo isso, e todo botão de salvar está
 desativado. Existem para aprovar o desenho antes de escrever backend.
