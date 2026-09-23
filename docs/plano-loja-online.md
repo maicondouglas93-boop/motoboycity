@@ -163,8 +163,15 @@ o que o cliente da loja já sabe usar — e não com dribbble.
 prefixo porque `/loja` já é a área do painel neste mesmo app.
 
 Feito: cabeçalho com identidade, barra de categorias grudada no topo, cardápio
-em linhas com miniatura, folha do produto (tamanho, grupos, quantidade) e barra
-de sacola. Tudo lendo `loja-mock.ts`.
+em linhas com miniatura, folha do produto (tamanho, grupos, quantidade), sacola
+com checkout e lista de "Meus pedidos". O catálogo lê `loja-mock.ts`; a sacola
+e os pedidos ficam no `localStorage` do aparelho.
+
+**Sem barra de abas no rodapé, e isso foi decidido.** Ela brigaria com a barra
+da sacola, que é a mais importante da tela; "Home" e "Cardápio" seriam a mesma
+tela; e "Perfil" pressupõe conta, que é uma etapa a mais antes de pedir. O único
+destino que se justificava — "Meus pedidos" — virou um link no cabeçalho que
+**só aparece depois do primeiro pedido naquele aparelho**.
 
 **O painel decide o que o cliente vê.** Só aparece produto `publicado` e sem
 pendência que impeça vender. Nos dados de exemplo isso some com dois itens: o
@@ -172,8 +179,9 @@ X-Burguer (grupo obrigatório sem escolha disponível) e o Refrigerante
 (pausado). Oferecer um produto que não fecha o pedido seria justamente o
 problema que o aviso do painel existe para evitar.
 
-Falta: sacola, checkout (com telefone e endereço estruturado, item 1),
-manifest, service worker e instalação — sem eles é uma página, não um PWA.
+Falta: manifest, service worker e instalação — sem eles é um site, não um PWA.
+E o backend inteiro: hoje o pedido termina no `localStorage` e a loja nunca
+fica sabendo dele.
 
 ## Ordem sugerida
 

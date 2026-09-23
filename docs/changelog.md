@@ -14199,3 +14199,62 @@ repinta fundo, texto e superfícies.
 
 Falta para ser um PWA de fato: sacola, checkout, manifest, service worker e
 instalação.
+
+## 2026-09-23 — Loja: sacola, checkout e "Meus pedidos"
+
+Fecha o fluxo de compra na página do cliente: `/pedir/[slug]/sacola` e
+`/pedir/[slug]/pedidos`. O pedido ainda termina no aparelho — não há backend, e
+a loja não fica sabendo dele.
+
+**Decisão sobre navegação: não há barra de abas no rodapé.** A pergunta era
+colocar Home / Pedidos / Perfil. Não, por três motivos: a barra brigaria com a
+da sacola, que é a mais importante da tela e ocupa a mesma faixa; "Home" e
+"Cardápio" seriam a mesma tela numa loja só; e "Perfil" pressupõe conta, que é
+uma etapa a mais antes de pedir, e cada etapa é gente que desiste. O único
+destino que se justificava — "Meus pedidos" — virou um link que **só existe
+depois do primeiro pedido naquele aparelho**. Uma aba vazia para todo visitante
+novo ocuparia a faixa que decide a venda sem dizer nada.
+
+**Sacola e checkout na mesma página.** Separar em duas etapas acrescenta um
+toque e uma tela a quem já decidiu comprar.
+
+O checkout pede **campos separados** de endereço, e não uma caixa de texto: é o
+formato que `CompanyCustomerAddress` exige, e sem ele o "salvar cliente" do
+painel exigiria redigitar tudo. Quem já pediu nesta loja encontra os campos
+preenchidos a partir do pedido anterior — a mesma ideia, vista do outro lado.
+
+**Correção encontrada testando:** adicionar a mesma configuração duas vezes
+criava duas linhas iguais na sacola. Duas linhas "Açaí · 300ml" parecem erro do
+site; o cliente não tem como saber que uma veio de um toque e a outra de outro.
+Agora soma a quantidade quando produto, tamanho e escolhas coincidem, e
+continua separando quando a configuração difere.
+
+**Armazenamento reescrito com `useSyncExternalStore`.** A primeira versão lia o
+`localStorage` num `useEffect` que chamava `setState`, e o `eslint`
+(`react-hooks/set-state-in-effect`) reprovou — com razão: o `localStorage` é um
+sistema externo, que é o caso para o qual esse primitivo existe. Ele resolve o
+instantâneo do servidor, a hidratação e a notificação sem a cascata de
+renderizações. A página da sacola passou a esperar a hidratação antes de montar
+o conteúdo, para os campos **nascerem** preenchidos em vez de piscarem vazios.
+
+**Defeito de layout corrigido:** o link "Meus pedidos" como chip ao lado do nome
+truncava a loja para "Açaí do Cen…". A identidade não perde para um atalho que
+a maioria nunca usa — o link foi para uma linha própria.
+
+**Byte NUL removido do fonte.** A assinatura que compara itens da sacola usava
+`\0` como separador e um NUL literal acabou gravado no arquivo. Passou por
+`tsc` e por Prettier sem reclamar, porque string JS aceita NUL, mas o Git e o
+`grep` passaram a tratar o arquivo como binário. Trocado por separador legível.
+
+Arquivos: `apps/company-web/src/app/pedir/[slug]/sacola/page.tsx` e
+`pedidos/page.tsx` (novos), `src/components/loja-online/armazenamento.ts`
+(novo), `src/app/pedir/[slug]/page.tsx`, `docs/plano-loja-online.md`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 152 testes do
+`company-web` passando e `next build` concluído com as três rotas `/pedir`
+registradas. Conferido no navegador a 375px, do zero: sem pedido não há link
+nem barra; dois toques no mesmo açaí viram uma linha de quantidade 2; a sacola
+soma R$ 30,00 + R$ 8,00 = R$ 38,00; o botão lista o que falta preencher; o
+estado vira maiúsculo sozinho; escolher dinheiro revela o campo de troco; o
+pedido #1601 aparece confirmado com previsão, endereço e troco; e o pedido
+seguinte já abre com tudo preenchido.

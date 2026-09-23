@@ -1,7 +1,8 @@
 'use client';
 
 import { use, useMemo, useState } from 'react';
-import { Clock, ImageOff } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronRight, Clock, ImageOff, Receipt } from 'lucide-react';
 import {
   CATEGORIAS_DE_EXEMPLO,
   LOJA_DE_EXEMPLO,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/loja-mock';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
+import { usePedidos, useSacola } from '@/components/loja-online/armazenamento';
 
 /**
  * A página que o cliente abre — a loja, e não o painel.
@@ -23,13 +25,38 @@ import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta
  * Em produção o endereço é `pedidos.…/{slug}`; aqui a rota é `/pedir/{slug}`
  * porque `/loja` já é a área do painel neste mesmo app.
  */
+/**
+ * Soma a quantidade quando a configuração é a MESMA, em vez de acrescentar uma
+ * linha igual à anterior.
+ *
+ * Duas linhas "Açaí · 300ml" na sacola parecem erro do site: o cliente não tem
+ * como saber que uma veio de um toque e a outra de outro. Configuração
+ * diferente — outro tamanho, outro adicional — continua sendo linha separada,
+ * porque aí são coisas diferentes mesmo.
+ */
+function juntarNaSacola(atual: ItemEscolhido[], novo: ItemEscolhido): ItemEscolhido[] {
+  const assinatura = (item: ItemEscolhido) =>
+    `${item.produtoId}|${item.tamanho ?? ''}|${[...item.escolhas].sort().join(', ')}`;
+
+  const igual = atual.findIndex((item) => assinatura(item) === assinatura(novo));
+  if (igual === -1) return [...atual, novo];
+
+  return atual.map((item, indice) =>
+    indice === igual ? { ...item, quantidade: item.quantidade + novo.quantidade } : item,
+  );
+}
+
 export default function LojaPublicaPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const loja = LOJA_DE_EXEMPLO;
 
   const paleta = paletaDoTema(loja.tema);
   const [aberto, setAberto] = useState<ProdutoDeExemplo | null>(null);
-  const [carrinho, setCarrinho] = useState<ItemEscolhido[]>([]);
+
+  // A sacola sobrevive ao recarregamento: quem fecha a página sem querer volta
+  // e encontra o que tinha escolhido, em vez de recomeçar do zero.
+  const { itens: carrinho, setItens: setCarrinho } = useSacola(slug);
+  const pedidos = usePedidos(slug);
 
   /*
    * O cliente só vê o que dá para comprar. Rascunho e pausado somem, e produto
@@ -110,6 +137,22 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             </span>
             <span style={{ color: paleta.suave }}>{loja.pagamentos.join(' · ')}</span>
           </div>
+
+          {/* Linha própria, e não um chip ao lado do nome: espremido ali ele
+              truncava o nome da loja, e a identidade não perde para um atalho
+              que a maioria nunca usa. Só existe para quem já pediu neste
+              aparelho. */}
+          {pedidos.length > 0 && (
+            <Link
+              href={`/pedir/${slug}/pedidos`}
+              className="mt-2 flex items-center gap-1.5 text-sm font-medium"
+              style={{ color: loja.corDaMarca }}
+            >
+              <Receipt className="size-4 shrink-0" aria-hidden="true" />
+              Meus pedidos
+              <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+            </Link>
+          )}
         </header>
 
         {!loja.aberta && (
@@ -215,8 +258,8 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           rouba altura de tela no celular sem dizer nada. */}
         {itens > 0 && (
           <div className="fixed inset-x-0 bottom-0 z-20 p-3">
-            <button
-              type="button"
+            <Link
+              href={`/pedir/${slug}/sacola`}
               className="mx-auto flex h-13 w-full max-w-lg items-center justify-between rounded-xl px-4 text-sm font-semibold shadow-lg"
               style={{ backgroundColor: loja.corDeAcao, color: textoSobre(loja.corDeAcao) }}
             >
@@ -224,7 +267,7 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
                 {itens} {itens === 1 ? 'item' : 'itens'}
               </span>
               <span>Ver sacola · {moeda(total)}</span>
-            </button>
+            </Link>
           </div>
         )}
       </div>
@@ -237,7 +280,7 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           aberta={loja.aberta}
           onFechar={() => setAberto(null)}
           onAdicionar={(item) => {
-            setCarrinho((atual) => [...atual, item]);
+            setCarrinho((atual) => juntarNaSacola(atual, item));
             setAberto(null);
           }}
         />
