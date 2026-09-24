@@ -14295,3 +14295,149 @@ Validação:
 - `pnpm --filter @motoboycity/company-web test` (166 testes passando, incluindo novos testes de sessão de proteção);
 - `pnpm --filter @motoboycity/api run build` e `pnpm --filter @motoboycity/company-web run build` finalizados com sucesso (código 0);
 - ESLint limpo com 0 erros e 0 warnings no código modificado.
+
+## 2026-09-24 — Loja: login com Clerk, exigido para comprar
+
+Decisão do usuário: a loja passa a exigir conta para fechar pedido. Eu tinha
+levantado que cada etapa antes do pedido é gente que desiste; ele decidiu o
+contrário, e o endereço salvo por conta — pedido no mesmo recorte — é o que
+compensa parte desse custo.
+
+**O `clerk init` foi desfeito em dois pontos, e o segundo era sério.** Ele não
+instalou `@clerk/nextjs` (nem em `package.json` nem em `node_modules`), então o
+app não compilava; instalado com pnpm. E pôs o `ClerkProvider` no layout RAIZ
+com matcher cobrindo o app inteiro — este app também serve o painel que as
+empresas usam em produção, com autenticação própria. Um segundo middleware de
+autenticação por cima dele é risco sem contrapartida.
+
+No lugar, um grupo de rotas `src/app/(loja)/` — que não altera URL nenhuma —
+contendo `/pedir`, `/sign-in` e `/sign-up`, com `ClerkProvider` só ali, e o
+matcher de `src/proxy.ts` restrito a esses caminhos mais `/__clerk`. Conferido
+no navegador: `/login` do painel carrega com **zero scripts do Clerk**.
+
+**Onde o endereço fica.** Não no Clerk, por decisão do usuário: o Clerk guarda
+quem a pessoa é, e o resto fica no `localStorage` enquanto não há banco. As
+chaves não são todas iguais, e a diferença importa:
+
+- **sacola por APARELHO** — ela é montada antes do login; por conta, sumiria no
+  instante em que a pessoa entra, perdendo o trabalho que a trouxe até ali;
+- **pedidos e endereço por CONTA** — num celular emprestado, sem a conta na
+  chave, quem entrasse depois veria nome, telefone e onde o anterior mora.
+
+Limite que a conta TORNA PIOR e está dito no código: quem entra com login espera
+achar o endereço no celular e no computador, e `localStorage` não atravessa
+aparelho. Só o banco resolve, no mesmo formato de `CompanyCustomerAddress`.
+
+**Bug encontrado testando a compra de verdade.** O formulário voltava vazio
+mesmo com o endereço salvo: `useState` só olha o valor inicial na primeira
+renderização, e nela o Clerk ainda não tinha carregado — `usuarioId` era `null`,
+igual a "ninguém entrou". Separado em `useConta(): { carregada, usuarioId }`, e
+a página só monta o conteúdo quando o React hidratou **e** o Clerk carregou.
+
+A porteira de login fica no fim, com a sacola visível atrás: ver o cardápio e
+montar o pedido não exige conta; fechar exige.
+
+**Turnstile 600010.** O CAPTCHA do cadastro não renderiza nesta instância —
+script carrega, container existe, nenhum iframe é criado. Conferido que falha
+igual no modal e na página dedicada, ou seja, não é o código. Resolve-se no
+dashboard do Clerk (Attack protection, só na instância de desenvolvimento) ou
+entrando pelo Google, que não passa pelo Turnstile. Em produção a proteção deve
+continuar ligada.
+
+**Nota sobre este registro.** Uma primeira versão desta entrada e da seção do
+Clerk no `agent-handoff.md` foi escrita no working tree e perdida antes do
+commit, quando outra sessão no mesmo checkout commitou `24d1794` (proteção de
+páginas por senha) e sobrescreveu esses dois arquivos. Nenhum código da loja foi
+afetado; os textos foram refeitos a partir da sessão original.
+
+Arquivos: `apps/company-web/src/app/(loja)/layout.tsx`, `src/proxy.ts`,
+`src/components/loja-online/conta.tsx` (novos), as três páginas movidas para
+`(loja)/pedir/[slug]`, `src/components/loja-online/armazenamento.ts`,
+`package.json`, `pnpm-lock.yaml`.
+
+As 20 skills do Clerk instaladas por `npx skills add clerk/skills`
+(`.agents/skills/clerk-*`, `.claude/skills/`, `skills-lock.json`) **não** entram
+neste commit: 15 delas são para stacks que o repositório não usa, e decidir
+entre apagar ou ignorar é do usuário.
+
+## 2026-09-24 — Loja: horário, bairros, retirada, observação e avisos
+
+Recorte de configuração pedido pelo usuário, com dois itens que eu acrescentei
+por dependência das telas que já existiam.
+
+**Horário por dia, com mais de uma faixa.** Almoço e janta é o comum, não a
+exceção: com uma faixa só, quem fecha das 14h às 18h seria obrigado a declarar
+um horário que não pratica e receberia pedido com a cozinha apagada. A tela
+acusa faixa cujo fechar não é depois do abrir — sem isso a loja fica declarada
+aberta num intervalo vazio e não recebe pedido, sem nada explicando.
+
+**Bairros com taxa, no lugar da taxa única.** Resolve mais do que preço: bairro
+fora da lista não aparece para o cliente, e é assim que a loja limita a área.
+Antes, a cidade era texto livre e alguém a quarenta quilômetros podia pedir.
+
+**Consequência de contrato.** Taxa por bairro obriga o checkout a ter bairro, e
+`CompanyCustomerAddress` **não tem esse campo**. Acrescentado em
+`EnderecoDaEntrega` com aviso no código: integrar exige alterar
+`packages/types`, a validação e o cadastro de clientes do painel.
+
+**Ponto de coleta: não era campo novo.** Conferido antes de assumir. O
+`CompanyAddress` com `isPrimary` já existe, o `deliveries.service` recusa criar
+entrega sem ele, e a tela inicial do painel bloqueia a empresa até cadastrá-lo.
+Virou um cartão que **mostra** qual endereço o motoboy usa — e a retirada
+precisava dele para dizer ao cliente onde buscar.
+
+**Retirada na loja.** A escolha vem antes do endereço: quem vai retirar não deve
+ver campos que não vai preencher. Sem taxa, sem bairro exigido, e nenhum motoboy
+chamado.
+
+**Observação do cliente.** "Sem cebola" não tinha onde ir. No painel ela aparece
+destacada acima do endereço — quem prepara não pode ter que caçá-la no texto
+cinza.
+
+**Feriados**, por cima do horário semanal, com o motivo aparecendo para o
+cliente não achar que a página quebrou. E **fechar a loja agora**, que é a
+exceção que o horário não cobre e o botão mais usado numa noite ruim.
+
+**Pedido mínimo**, acrescentado porque o absurdo estava vivo na demonstração:
+sorvete de R$ 6,00 com R$ 8,00 de entrega. Conta só os itens — somar a taxa
+faria ela ajudar a atingir o mínimo, o contrário do que o mínimo protege.
+
+**Avisos de pedido novo**, com a tela dizendo o que ainda não existe em vez de
+oferecer um botão que não faz nada: o push que o sistema tem é FCM para o app
+Android do motoboy; avisar o painel é Web Push no navegador, com service worker
+que o `company-web` não tem. Há um alerta específico para a combinação
+perigosa — aceitação automática desligada e push desligado —, em que todo pedido
+espera confirmação e ninguém é avisado quando chega.
+
+**Nove testes para `situacaoDaLoja`** (`src/lib/loja-situacao.test.ts`), que
+decide se a página aceita pedido: feriado, pausa manual, intervalo entre almoço
+e janta, virada para o dia seguinte, domingo sem horário, semana inteira vazia e
+o limite exato do fechamento (13:59 aberto, 14:00 fechado). São os casos que não
+dá para conferir no navegador — não se espera até o Natal nem até as três da
+manhã.
+
+**Limitação conhecida:** o cálculo roda no navegador, sem relógio correndo. Uma
+loja que fecha às 22h só aparece fechada quando a página é recarregada. Na
+versão real quem decide é o servidor, no momento do checkout; está comentado no
+código.
+
+Arquivos: `apps/company-web/src/lib/loja-mock.ts`,
+`src/lib/loja-situacao.test.ts` (novo), `src/app/(app)/loja/configuracoes/
+page.tsx`, `src/app/(app)/loja/vendas/page.tsx`,
+`src/app/(loja)/pedir/[slug]/page.tsx` e `sacola/page.tsx`,
+`src/components/loja-online/armazenamento.ts`, `docs/plano-loja-online.md`.
+
+Validação, rodada de novo sobre `24d1794`: `tsc --noEmit` limpo,
+`eslint` limpo, **166 testes em 32 arquivos** passando e `next build` compila.
+
+Os 166 incluem os 9 deste recorte, e são o mesmo número que `24d1794`
+registra — porque a outra sessão rodou os testes neste mesmo checkout, com
+`loja-situacao.test.ts` já presente e ainda não commitado. O total daquele
+commit, portanto, contava um arquivo que não está nele.
+
+As verificações no navegador foram feitas ao fim do recorte, antes de
+`24d1794`, que não tocou em nenhum arquivo da loja: faixa invertida em Quarta
+dispara o aviso; escolher Alto da Serra leva a entrega a R$ 14,00; o mínimo
+trava o botão dizendo que faltam R$ 9,00 mesmo com o total em R$ 20,00;
+retirada zera a taxa, esconde o endereço e mostra onde buscar; e a observação
+"Sem granola, por favor." aparece destacada no painel.

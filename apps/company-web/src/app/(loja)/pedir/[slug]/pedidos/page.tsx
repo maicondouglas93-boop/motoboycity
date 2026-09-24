@@ -11,6 +11,7 @@ import {
   usePedidos,
   type PedidoGuardado,
 } from '@/components/loja-online/armazenamento';
+import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
 
 /**
  * Onde o cliente responde sozinho a pergunta que ele faria à loja no WhatsApp:
@@ -46,8 +47,12 @@ export default function PedidosPage({ params }: { params: Promise<{ slug: string
 function Conteudo({ slug }: { slug: string }) {
   const loja = LOJA_DE_EXEMPLO;
   const paleta = paletaDoTema(loja.tema);
-  const pedidos = usePedidos(slug);
-  const hidratado = useHidratado();
+  const conta = useConta();
+  const usuarioId = conta.usuarioId;
+  const pedidos = usePedidos(slug, usuarioId);
+  // Mesma razão da sacola: enquanto o Clerk carrega, `usuarioId` é null e a
+  // tela mostraria a porteira de login para quem já entrou.
+  const pronto = useHidratado() && conta.carregada;
 
   const novo = Number(useSearchParams().get('novo')) || null;
 
@@ -66,9 +71,20 @@ function Conteudo({ slug }: { slug: string }) {
           <h1 className="text-lg font-bold">Meus pedidos</h1>
         </header>
 
-        {hidratado && pedidos.length === 0 && (
+        {/* Pedido é da conta: sem entrar, não há o que mostrar — e mostrar
+            os pedidos de quem usou o celular antes seria pior ainda. */}
+        {pronto && usuarioId === null && (
+          <PorteiraDeLogin
+            paleta={paleta}
+            corDeAcao={loja.corDeAcao}
+            textoDoBotao="Entrar para ver"
+            resumo="Seus pedidos ficam guardados na sua conta."
+          />
+        )}
+
+        {pronto && usuarioId !== null && pedidos.length === 0 && (
           <p className="px-4 py-16 text-center text-sm" style={{ color: paleta.suave }}>
-            Você ainda não pediu nada nesta loja neste aparelho.
+            Você ainda não pediu nada nesta loja.
           </p>
         )}
 
@@ -141,10 +157,10 @@ function Conteudo({ slug }: { slug: string }) {
         })}
 
         {/* O limite do armazenamento no aparelho, dito onde ele importa. */}
-        {hidratado && pedidos.length > 0 && (
+        {pronto && pedidos.length > 0 && (
           <p className="px-4 py-4 text-xs" style={{ color: paleta.suave }}>
-            Esta lista fica guardada neste aparelho e neste navegador. Trocar de celular ou limpar
-            os dados do site apaga o histórico — o pedido em si continua com a loja.
+            Esta lista está na sua conta, mas ainda guardada neste navegador: trocar de celular ou
+            limpar os dados do site apaga o histórico daqui. O pedido em si continua com a loja.
           </p>
         )}
       </div>

@@ -1,7 +1,17 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, MapPin, Phone, Timer, UserPlus } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MapPin,
+  MessageSquare,
+  Phone,
+  Store,
+  Timer,
+  UserPlus,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -324,17 +334,39 @@ export default function LojaVendasPage() {
                       )}
                     </div>
 
-                    <div className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
-                      <p className="flex items-start gap-1.5">
-                        <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                        <span>
-                          {enderecoEmLinha(venda.entrega)}
-                          {venda.entrega.referencia && (
-                            // Referência é o que faz o motoboy achar a casa.
-                            <span className="block">{venda.entrega.referencia}</span>
-                          )}
-                        </span>
+                    {/* O que o cliente escreveu vai para quem prepara, e por
+                        isso não pode virar texto cinza no meio do resto. */}
+                    {venda.observacao && (
+                      <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+                        <MessageSquare
+                          className="mt-0.5 size-4 shrink-0 text-amber-700"
+                          aria-hidden="true"
+                        />
+                        {venda.observacao}
                       </p>
+                    )}
+
+                    <div className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
+                      {venda.retirarNaLoja ? (
+                        /* Retirada não gera entrega: ninguém vai buscar, e
+                           mostrar um endereço aqui faria a loja chamar motoboy
+                           à toa. */
+                        <p className="flex items-start gap-1.5 font-medium text-foreground">
+                          <Store className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />O cliente
+                          retira na loja — sem entrega.
+                        </p>
+                      ) : (
+                        <p className="flex items-start gap-1.5">
+                          <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                          <span>
+                            {enderecoEmLinha(venda.entrega)}
+                            {venda.entrega.referencia && (
+                              // Referência é o que faz o motoboy achar a casa.
+                              <span className="block">{venda.entrega.referencia}</span>
+                            )}
+                          </span>
+                        </p>
+                      )}
                       <p>
                         Pagamento: {venda.pagamento}
                         {venda.trocoPara !== null && (

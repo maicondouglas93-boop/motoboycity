@@ -5,15 +5,20 @@ import type { EnderecoDaEntrega } from '@/lib/loja-mock';
 import type { ItemEscolhido } from './folha-do-produto';
 
 /**
- * A sacola e os pedidos vivem no APARELHO do cliente, e não em conta.
+ * Onde a loja guarda sacola, pedidos e endereço enquanto não há backend.
  *
- * Pedir um açaí não deveria exigir criar login: cada etapa antes do pedido é
- * gente que desiste. Sem conta, o lugar onde a sacola sobrevive ao
- * recarregamento é o próprio navegador.
+ * A identidade de quem compra é do Clerk; o que essa pessoa comprou e para
+ * onde, não. Fica aqui, no navegador, separado por conta — ver as chaves
+ * abaixo, que não são todas iguais de propósito.
  *
- * Isso tem um limite que precisa ficar dito: trocar de aparelho, limpar os
- * dados do site ou abrir numa janela anônima faz tudo sumir. Nada aqui é a
- * fonte de verdade do pedido — quando houver backend, ela é a API.
+ * Isso tem um limite que precisa ficar dito, e que a conta TORNA PIOR: quem
+ * entra com login espera achar o endereço dele no celular e no computador. O
+ * `localStorage` não atravessa aparelho nenhum. Enquanto não há backend, esta
+ * é a melhor aproximação; na integração, o endereço vai para o banco, no mesmo
+ * formato que `CompanyCustomerAddress` já usa.
+ *
+ * Nada aqui é a fonte de verdade do pedido — quando houver backend, ela é a
+ * API.
  *
  * Lido com `useSyncExternalStore`, e não com `useEffect` que chama `setState`.
  * O `localStorage` É um sistema externo, que é exatamente o caso para o qual
@@ -21,8 +26,24 @@ import type { ItemEscolhido } from './folha-do-produto';
  * a notificação de mudança sem a cascata de renderizações que o efeito causa.
  */
 
+/**
+ * A SACOLA é do aparelho, e não da conta.
+ *
+ * O cliente escolhe primeiro e só entra na hora de fechar. Se a sacola fosse
+ * por conta, tudo o que ele montou antes de entrar sumiria no instante do
+ * login — perdendo justamente o trabalho que o fez chegar até ali.
+ */
 const chaveDaSacola = (slug: string) => `loja:${slug}:sacola`;
-const chaveDosPedidos = (slug: string) => `loja:${slug}:pedidos`;
+
+/**
+ * PEDIDOS e ENDEREÇO são da conta.
+ *
+ * Num celular emprestado, sem a conta na chave, quem entrasse depois veria os
+ * pedidos e o endereço de quem usou antes — nome, telefone e onde a pessoa
+ * mora. A conta na chave é o que separa uma coisa da outra.
+ */
+const chaveDosPedidos = (slug: string, usuarioId: string) => `loja:${slug}:${usuarioId}:pedidos`;
+const chaveDoCliente = (slug: string, usuarioId: string) => `loja:${slug}:${usuarioId}:cliente`;
 
 /** Referência estável: `useSyncExternalStore` compara por identidade. */
 const VAZIO: never[] = [];
@@ -116,6 +137,8 @@ export interface PedidoGuardado {
   telefone: string;
   entrega: EnderecoDaEntrega;
   minutosDePreparo: number;
+  observacao: string | null;
+  retirarNaLoja: boolean;
 }
 
 type Atualizacao = ItemEscolhido[] | ((atual: ItemEscolhido[]) => ItemEscolhido[]);
@@ -140,19 +163,35 @@ export function useSacola(slug: string) {
   return { itens, setItens };
 }
 
-export function usePedidos(slug: string) {
-  const chave = chaveDosPedidos(slug);
+/** Sem conta não há pedido para listar: a loja exige login para comprar. */
+export function usePedidos(slug: string, usuarioId: string | null) {
+  const chave = usuarioId === null ? null : chaveDosPedidos(slug, usuarioId);
   return useSyncExternalStore(
     assinar,
-    () => instantaneo<PedidoGuardado[]>(chave, VAZIO),
+    () => (chave === null ? (VAZIO as PedidoGuardado[]) : instantaneo(chave, VAZIO)),
     () => VAZIO as PedidoGuardado[],
   );
 }
 
-/** Grava o pedido na frente da lista e esvazia a sacola. */
-export function guardarPedido(slug: string, pedido: PedidoGuardado): void {
-  const atuais = ler<PedidoGuardado[]>(chaveDosPedidos(slug), VAZIO);
-  gravar(chaveDosPedidos(slug), [pedido, ...atuais].slice(0, 20));
+export interface ClienteSalvo {
+  nome: string;
+  telefone: string;
+  entrega: EnderecoDaEntrega;
+}
+
+/** Grava o pedido, guarda o endereço na conta e esvazia a sacola. */
+export function guardarPedido(slug: string, usuarioId: string, pedido: PedidoGuardado): void {
+  const chave = chaveDosPedidos(slug, usuarioId);
+  gravar(chave, [pedido, ...ler<PedidoGuardado[]>(chave, VAZIO)].slice(0, 20));
+
+  // Guardado à parte, e não lido do último pedido: assim continua valendo se o
+  // histórico for podado, e é o registro que vai para o banco na integração.
+  gravar(chaveDoCliente(slug, usuarioId), {
+    nome: pedido.nome,
+    telefone: pedido.telefone,
+    entrega: pedido.entrega,
+  });
+
   gravar(chaveDaSacola(slug), []);
 }
 
@@ -160,16 +199,12 @@ export function guardarPedido(slug: string, pedido: PedidoGuardado): void {
  * Número visível do pedido. No sistema de verdade quem numera é o servidor —
  * aqui é só para a tela de demonstração ter o que mostrar.
  */
-export function proximoNumero(slug: string): number {
-  const atuais = ler<PedidoGuardado[]>(chaveDosPedidos(slug), VAZIO);
+export function proximoNumero(slug: string, usuarioId: string): number {
+  const atuais = ler<PedidoGuardado[]>(chaveDosPedidos(slug, usuarioId), VAZIO);
   return atuais.reduce((maximo, pedido) => Math.max(maximo, pedido.numero), 1600) + 1;
 }
 
-/** O que a última compra deixou preenchido, para o checkout não pedir de novo. */
-export function ultimoCliente(
-  slug: string,
-): Pick<PedidoGuardado, 'nome' | 'telefone' | 'entrega'> | null {
-  const ultimo = ler<PedidoGuardado[]>(chaveDosPedidos(slug), VAZIO)[0];
-  if (!ultimo) return null;
-  return { nome: ultimo.nome, telefone: ultimo.telefone, entrega: ultimo.entrega };
+/** O endereço que a conta já deixou salvo, para o checkout não pedir de novo. */
+export function clienteSalvo(slug: string, usuarioId: string): ClienteSalvo | null {
+  return ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
 }

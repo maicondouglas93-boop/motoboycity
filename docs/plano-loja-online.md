@@ -54,6 +54,8 @@ Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
 ### 1. Salvar o cliente com os dados do pedido do PWA
 
 > **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+> O checkout já coleta telefone e endereço estruturado, e o endereço fica
+> salvo por conta do Clerk.
 
 Na venda, oferecer o cadastro do cliente no registro que o painel já usa, para
 que ele deixe de ser comprador avulso e possa receber entrega pelo fluxo normal.
@@ -179,9 +181,22 @@ X-Burguer (grupo obrigatório sem escolha disponível) e o Refrigerante
 (pausado). Oferecer um produto que não fecha o pedido seria justamente o
 problema que o aviso do painel existe para evitar.
 
+**Login exigido para comprar** (decisão de 2026-09-23). Navegar e montar a
+sacola não exige conta; fechar exige. A identidade é do Clerk, escopado ao grupo
+de rotas `(loja)` — ver `agent-handoff.md` para por que ele não toca o painel.
+
+A loja respeita horário por dia com mais de uma faixa, feriados, pausa manual,
+bairros com taxa própria, pedido mínimo e retirada no local. O checkout tem
+observação do cliente.
+
 Falta: manifest, service worker e instalação — sem eles é um site, não um PWA.
-E o backend inteiro: hoje o pedido termina no `localStorage` e a loja nunca
-fica sabendo dele.
+Falta o Web Push para avisar a loja de pedido novo (o que existe é FCM para o
+app Android do motoboy). E falta o backend inteiro: hoje o pedido termina no
+`localStorage` e a loja nunca fica sabendo dele.
+
+**Contrato a alterar na integração:** `CompanyCustomerAddress` não tem bairro, e
+a taxa por bairro obriga o checkout a coletá-lo. Mexe em `packages/types`, na
+validação e no cadastro de clientes do painel.
 
 ## Ordem sugerida
 

@@ -562,7 +562,33 @@ demonstração, um item no menu mostraria vendas falsas às empresas de produç�
 primeiro deploy. O motivo está comentado no próprio `top-nav.tsx`, junto do
 `NAV_ITEMS` — quem ligar a loja à API acrescenta o item ali no mesmo recorte.
 
-O plano do que falta — backend inteiro, PWA do cliente e os quatro pedidos de
+### Clerk: uma SEGUNDA autenticação neste app, e por que ela não toca o painel
+
+O `company-web` agora tem duas autenticações. O painel continua com a dele
+(`lib/session.ts`, JWT próprio) e a **loja do cliente** usa Clerk
+(`@clerk/nextjs`). Elas não se enxergam, e é assim que deve ser: quem compra um
+açaí não é usuário do sistema de entregas.
+
+O `clerk init` põe o `ClerkProvider` no layout RAIZ e um matcher que cobre o app
+inteiro. Isso foi desfeito de propósito: rodar um segundo middleware de
+autenticação por cima do painel que está em produção é risco sem contrapartida.
+No lugar:
+
+- as rotas da loja vivem no grupo `src/app/(loja)/` — que **não aparece na
+  URL** —, e só o layout desse grupo tem `ClerkProvider`;
+- `src/proxy.ts` tem matcher restrito a `/pedir`, `/sign-in`, `/sign-up` e
+  `/__clerk`.
+
+**Conferido:** `/login` do painel carrega com zero scripts do Clerk. Quem mexer
+aqui deve conferir isso de novo antes de subir — em especial quem acrescentar
+rotas ao painel, porque o matcher do proxy é uma lista de caminhos da loja.
+
+As chaves ficam em `apps/company-web/.env.local`, que é ignorado pelo Git. Só
+existe instância de **desenvolvimento**; produção não está configurada, e quando
+estiver, as chaves vão no Render como variáveis de ambiente — nunca no
+repositório, que é público.
+
+O plano do que falta — backend inteiro, PWA do cliente e os pedidos de
 2026-09-23 — está em `docs/plano-loja-online.md`, que é a referência atual da
 loja neste repositório.
 

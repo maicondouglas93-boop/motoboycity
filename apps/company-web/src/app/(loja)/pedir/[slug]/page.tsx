@@ -8,11 +8,13 @@ import {
   LOJA_DE_EXEMPLO,
   PRODUTOS_DE_EXEMPLO,
   pendenciasDoProduto,
+  situacaoDaLoja,
   type ProdutoDeExemplo,
 } from '@/lib/loja-mock';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
-import { usePedidos, useSacola } from '@/components/loja-online/armazenamento';
+import { useHidratado, usePedidos, useSacola } from '@/components/loja-online/armazenamento';
+import { ControleDaConta, useUsuarioId } from '@/components/loja-online/conta';
 
 /**
  * A página que o cliente abre — a loja, e não o painel.
@@ -56,7 +58,22 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
   // A sacola sobrevive ao recarregamento: quem fecha a página sem querer volta
   // e encontra o que tinha escolhido, em vez de recomeçar do zero.
   const { itens: carrinho, setItens: setCarrinho } = useSacola(slug);
-  const pedidos = usePedidos(slug);
+  const usuarioId = useUsuarioId();
+  const pedidos = usePedidos(slug, usuarioId);
+
+  /*
+   * A situação depende da hora, e o servidor não sabe a hora de quem abriu a
+   * página: calcular antes da hidratação põe um texto no HTML e outro na tela.
+   * Antes dela a loja é tratada como fechada — errar para o lado de não deixar
+   * pedir é melhor do que aceitar pedido com a cozinha apagada.
+   *
+   * Sem relógio correndo aqui de propósito. Quando houver backend, quem decide
+   * se dá para pedir é o servidor, no momento do checkout.
+   */
+  const hidratado = useHidratado();
+  const situacao = hidratado ? situacaoDaLoja(loja, new Date()) : { aberta: false, texto: '' };
+
+  const taxas = loja.bairros.map((bairro) => bairro.taxa);
 
   /*
    * O cliente só vê o que dá para comprar. Rascunho e pausado somem, e produto
@@ -107,15 +124,18 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             <div className="min-w-0">
               <h1 className="truncate text-xl leading-tight font-bold">{loja.nome}</h1>
               <p className="mt-0.5 text-sm" style={{ color: paleta.suave }}>
-                {loja.aberta ? (
-                  <>
-                    <span style={{ color: loja.corDeAcao }}>Aberto</span> · {loja.horario}
-                  </>
+                {situacao.aberta ? (
+                  <span style={{ color: loja.corDeAcao }}>{situacao.texto}</span>
                 ) : (
-                  <span className="font-medium">Fechado agora · {loja.horario}</span>
+                  <span className="font-medium">{situacao.texto}</span>
                 )}
               </p>
             </div>
+
+            {/* Navegar não exige conta; comprar exige. O controle fica visível
+                desde o começo para quem já tem login entrar antes, em vez de
+                esbarrar na exigência só no fim, com a sacola cheia. */}
+            <ControleDaConta paleta={paleta} />
           </div>
 
           {/* Os três fatos que decidem o pedido, juntos e antes do cardápio. */}
@@ -129,10 +149,17 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             </span>
             <span>
               Entrega{' '}
-              {loja.taxaDeEntrega === null ? (
+              {taxas.length === 0 ? (
                 <strong>a combinar</strong>
+              ) : Math.min(...taxas) === Math.max(...taxas) ? (
+                <strong>{moeda(taxas[0]!)}</strong>
               ) : (
-                <strong>{moeda(loja.taxaDeEntrega)}</strong>
+                /* Faixa, e não um número só: a taxa depende do bairro, e
+                   mostrar apenas a menor faria o total do checkout parecer
+                   engano. */
+                <strong>
+                  {moeda(Math.min(...taxas))} a {moeda(Math.max(...taxas))}
+                </strong>
               )}
             </span>
             <span style={{ color: paleta.suave }}>{loja.pagamentos.join(' · ')}</span>
@@ -155,12 +182,12 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           )}
         </header>
 
-        {!loja.aberta && (
+        {hidratado && !situacao.aberta && (
           <p
             className="mx-4 mb-3 rounded-lg px-3 py-2 text-sm"
             style={{ backgroundColor: paleta.superficie }}
           >
-            Dá para ver o cardápio, mas só dá para pedir quando a loja abrir.
+            {situacao.texto}. Dá para ver o cardápio, mas só dá para pedir quando ela abrir.
           </p>
         )}
 
@@ -277,7 +304,7 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           produto={aberto}
           paleta={paleta}
           corDeAcao={loja.corDeAcao}
-          aberta={loja.aberta}
+          aberta={situacao.aberta}
           onFechar={() => setAberto(null)}
           onAdicionar={(item) => {
             setCarrinho((atual) => juntarNaSacola(atual, item));

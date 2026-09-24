@@ -18,19 +18,94 @@ import type { TemaDaLoja } from '@/lib/contraste';
  * As cores e o tema são os mesmos que a empresa escolhe em
  * `/loja/configuracoes` — esta é a tela onde eles finalmente aparecem.
  */
+/** `HH:MM`, em 24h. */
+export type Relogio = string;
+
+export interface FaixaDeHorario {
+  abre: Relogio;
+  fecha: Relogio;
+}
+
+/**
+ * Mais de uma faixa por dia porque isso é o comum, e não a exceção: lanchonete
+ * que serve almoço e volta à noite fecharia das 14h às 18h. Com uma faixa só,
+ * ela seria obrigada a declarar um horário que não pratica — e receberia
+ * pedido com a cozinha apagada.
+ */
+export interface DiaDeFuncionamento {
+  /** 0 = domingo, igual a `Date.getDay()`. */
+  dia: number;
+  faixas: FaixaDeHorario[];
+}
+
+export interface BairroAtendido {
+  id: string;
+  nome: string;
+  taxa: number;
+}
+
+/**
+ * Um dia em que a loja não abre, por cima do horário semanal.
+ *
+ * O horário da semana não sabe o que é 25 de dezembro. Sem esta lista, a única
+ * forma de fechar num feriado seria apagar o horário do dia e lembrar de
+ * recolocar depois — e quem esquece recebe pedido com a porta fechada.
+ */
+export interface DiaFechado {
+  /** `AAAA-MM-DD`. */
+  data: string;
+  motivo: string;
+}
+
+/**
+ * O endereço de onde o motoboy retira.
+ *
+ * NÃO é configuração da loja online: é o `CompanyAddress` com `isPrimary` que
+ * a empresa já cadastra no painel, e sem o qual o próprio `deliveries.service`
+ * recusa criar entrega. A loja só mostra qual é — e precisa dele também para
+ * dizer ao cliente onde retirar, quando a retirada estiver ligada.
+ */
+export interface PontoDeColeta {
+  rua: string;
+  numero: string;
+  complemento: string | null;
+  bairro: string;
+  cidade: string;
+  estado: string;
+}
+
 export interface LojaDeExemplo {
   slug: string;
   nome: string;
   tema: TemaDaLoja;
   corDaMarca: string;
   corDeAcao: string;
-  aberta: boolean;
-  /** Frase curta de horário, do jeito que o cliente lê. */
-  horario: string;
+  /**
+   * Fechar a loja AGORA, por cima do horário.
+   *
+   * O horário diz a regra; isto diz a exceção — acabou o ingrediente, a
+   * cozinha entupiu, está chovendo demais para o motoboy. Sem esse botão, a
+   * única saída seria editar o horário e depois lembrar de desfazer.
+   */
+  pausadaManualmente: boolean;
+  semana: DiaDeFuncionamento[];
   minutosDePreparo: number;
-  /** `null` quando a loja não cobra a entrega na página. */
-  taxaDeEntrega: number | null;
+  /**
+   * Taxa por bairro. Vazio quer dizer que a loja não cobra entrega na página,
+   * e aí ela continua só na fatura que a central cobra da empresa.
+   */
+  bairros: BairroAtendido[];
+  /** `null` quando a loja não exige valor mínimo. */
+  pedidoMinimo: number | null;
   pagamentos: string[];
+  diasFechados: DiaFechado[];
+  pontoDeColeta: PontoDeColeta;
+  /** Deixar o cliente buscar na loja, sem entrega e sem taxa. */
+  aceitaRetirada: boolean;
+  /** Tocar um som no painel quando entra pedido, com a aba aberta. */
+  avisoSonoro: boolean;
+  /** Notificação do navegador, que chega com a aba fechada. */
+  avisoPush: boolean;
 }
 
 export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
@@ -39,12 +114,144 @@ export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
   tema: 'CLARO',
   corDaMarca: '#c2410c',
   corDeAcao: '#15803d',
-  aberta: true,
-  horario: 'Hoje até 22h',
+  pausadaManualmente: false,
+  semana: [
+    { dia: 0, faixas: [] },
+    {
+      dia: 1,
+      faixas: [
+        { abre: '11:00', fecha: '14:00' },
+        { abre: '18:00', fecha: '22:00' },
+      ],
+    },
+    {
+      dia: 2,
+      faixas: [
+        { abre: '11:00', fecha: '14:00' },
+        { abre: '18:00', fecha: '22:00' },
+      ],
+    },
+    {
+      dia: 3,
+      faixas: [
+        { abre: '11:00', fecha: '14:00' },
+        { abre: '18:00', fecha: '22:00' },
+      ],
+    },
+    {
+      dia: 4,
+      faixas: [
+        { abre: '11:00', fecha: '14:00' },
+        { abre: '18:00', fecha: '22:00' },
+      ],
+    },
+    {
+      dia: 5,
+      faixas: [
+        { abre: '11:00', fecha: '14:00' },
+        { abre: '18:00', fecha: '23:00' },
+      ],
+    },
+    { dia: 6, faixas: [{ abre: '11:00', fecha: '23:00' }] },
+  ],
   minutosDePreparo: 20,
-  taxaDeEntrega: 8,
+  bairros: [
+    { id: 'b1', nome: 'Centro', taxa: 6 },
+    { id: 'b2', nome: 'Sagrada Família', taxa: 8 },
+    { id: 'b3', nome: 'Vila Nova', taxa: 10 },
+    { id: 'b4', nome: 'Alto da Serra', taxa: 14 },
+  ],
+  pedidoMinimo: 15,
   pagamentos: ['Pix', 'Dinheiro', 'Cartão na entrega'],
+  diasFechados: [{ data: '2026-12-25', motivo: 'Natal' }],
+  pontoDeColeta: {
+    rua: 'Rua Coronel Pedro Alves',
+    numero: '140',
+    complemento: null,
+    bairro: 'Centro',
+    cidade: 'Lajinha',
+    estado: 'MG',
+  },
+  aceitaRetirada: true,
+  avisoSonoro: true,
+  avisoPush: false,
 };
+
+export const DIAS_DA_SEMANA = [
+  'Domingo',
+  'Segunda',
+  'Terça',
+  'Quarta',
+  'Quinta',
+  'Sexta',
+  'Sábado',
+];
+
+function emMinutos(relogio: Relogio): number {
+  const [hora, minuto] = relogio.split(':');
+  return Number(hora) * 60 + Number(minuto);
+}
+
+export interface SituacaoDaLoja {
+  aberta: boolean;
+  /** Frase curta, do jeito que o cliente lê. */
+  texto: string;
+}
+
+/**
+ * Se dá para pedir agora, e o que dizer ao cliente.
+ *
+ * A pausa manual vence o horário: é para isso que ela existe. Depois dela, o
+ * que manda é a faixa do dia — e quando está fechado, a tela diz QUANDO abre,
+ * porque "fechado" sozinho só faz a pessoa sair sem saber se volta em dez
+ * minutos ou amanhã.
+ */
+export function situacaoDaLoja(loja: LojaDeExemplo, agora: Date): SituacaoDaLoja {
+  if (loja.pausadaManualmente) {
+    return { aberta: false, texto: 'Fechada no momento' };
+  }
+
+  const dataDeHoje = [
+    agora.getFullYear(),
+    String(agora.getMonth() + 1).padStart(2, '0'),
+    String(agora.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  // O feriado vence o horário da semana, e dizer o motivo evita o cliente
+  // achar que a página quebrou.
+  const fechadoHoje = loja.diasFechados.find((dia) => dia.data === dataDeHoje);
+  if (fechadoHoje) {
+    return { aberta: false, texto: `Fechado hoje · ${fechadoHoje.motivo}` };
+  }
+
+  const minutoDeAgora = agora.getHours() * 60 + agora.getMinutes();
+  const hoje = loja.semana.find((item) => item.dia === agora.getDay());
+
+  const faixaAberta = hoje?.faixas.find(
+    (faixa) => minutoDeAgora >= emMinutos(faixa.abre) && minutoDeAgora < emMinutos(faixa.fecha),
+  );
+  if (faixaAberta) {
+    return { aberta: true, texto: `Aberto até ${faixaAberta.fecha}` };
+  }
+
+  const proximaHoje = hoje?.faixas.find((faixa) => emMinutos(faixa.abre) > minutoDeAgora);
+  if (proximaHoje) {
+    return { aberta: false, texto: `Fechado · abre às ${proximaHoje.abre}` };
+  }
+
+  // Procura o próximo dia com faixa, dando a volta na semana.
+  for (let passo = 1; passo <= 7; passo += 1) {
+    const dia = (agora.getDay() + passo) % 7;
+    const adiante = loja.semana.find((item) => item.dia === dia);
+    const primeira = adiante?.faixas[0];
+    if (primeira) {
+      const quando = passo === 1 ? 'amanhã' : DIAS_DA_SEMANA[dia]?.toLowerCase();
+      return { aberta: false, texto: `Fechado · abre ${quando} às ${primeira.abre}` };
+    }
+  }
+
+  return { aberta: false, texto: 'Fechada' };
+}
 
 export interface CategoriaDeExemplo {
   id: string;
@@ -124,13 +331,19 @@ export interface ItemDeVenda {
  * alguém redigitar tudo no painel — o trabalho que a funcionalidade existe
  * para poupar.
  *
- * O contrato não tem bairro. Mantido igual de propósito: divergir aqui só
- * adiaria a descoberta para a hora de integrar.
+ * ATENÇÃO, contrato: `CompanyCustomerAddress` NÃO tem bairro, e aqui tem.
+ *
+ * A divergência é consequência da taxa por bairro, que a empresa configura em
+ * `/loja/configuracoes`: se o preço da entrega depende do bairro, o checkout
+ * tem que perguntar o bairro, e ele passa a fazer parte do endereço. Integrar
+ * isso exige acrescentar o campo em `packages/types`, na validação e no
+ * cadastro de clientes do painel — não dá para resolver só nesta tela.
  */
 export interface EnderecoDaEntrega {
   rua: string;
   numero: string;
   complemento: string | null;
+  bairro: string;
   cidade: string;
   estado: string;
   cep: string;
@@ -160,6 +373,15 @@ export interface VendaDeExemplo {
   trocoPara: number | null;
   entrega: EnderecoDaEntrega;
   cadastro: CadastroDoCliente;
+  /**
+   * O que o cliente escreveu: "sem cebola", "troca o refri por suco".
+   *
+   * Vai junto para a cozinha e, quando é sobre a entrega, para o motoboy. Sem
+   * um campo, isso ia parar no telefone da loja — ou em lugar nenhum.
+   */
+  observacao: string | null;
+  /** Retirada não gera entrega: o cliente busca no balcão. */
+  retirarNaLoja: boolean;
   /**
    * Minutos que faltam para o pedido entrar no despacho e chamar o motoboy.
    *
@@ -324,12 +546,15 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
       rua: 'Rua Arnaldo Leite Ribeiro',
       numero: '212',
       complemento: null,
+      bairro: 'Centro',
       cidade: 'Lajinha',
       estado: 'MG',
       cep: '36980-000',
       referencia: 'Portão azul, ao lado da padaria',
     },
     cadastro: 'novo',
+    observacao: 'Sem granola, por favor.',
+    retirarNaLoja: false,
     minutosParaDespachar: 6,
     itens: [
       {
@@ -356,12 +581,15 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
       rua: 'Rua das Flores',
       numero: '45',
       complemento: 'Apto 302',
+      bairro: 'Sagrada Família',
       cidade: 'Lajinha',
       estado: 'MG',
       cep: '36980-000',
       referencia: null,
     },
     cadastro: 'enderecoNovo',
+    observacao: null,
+    retirarNaLoja: false,
     minutosParaDespachar: null,
     itens: [
       {
@@ -387,12 +615,15 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
       rua: 'Av. Principal',
       numero: '900',
       complemento: null,
+      bairro: 'Vila Nova',
       cidade: 'Lajinha',
       estado: 'MG',
       cep: '36980-000',
       referencia: null,
     },
     cadastro: 'jaCadastrado',
+    observacao: 'Apartamento no fundo, interfone quebrado.',
+    retirarNaLoja: false,
     minutosParaDespachar: null,
     itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '700ml', escolhas: [], total: 24 }],
   },
@@ -410,12 +641,15 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
       rua: 'Rua do Comércio',
       numero: '77',
       complemento: null,
+      bairro: 'Centro',
       cidade: 'Lajinha',
       estado: 'MG',
       cep: '36980-000',
       referencia: null,
     },
     cadastro: 'jaCadastrado',
+    observacao: null,
+    retirarNaLoja: false,
     minutosParaDespachar: null,
     itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '500ml', escolhas: [], total: 18 }],
   },
@@ -433,12 +667,15 @@ export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
       rua: 'Rua Sete',
       numero: '310',
       complemento: null,
+      bairro: 'Vila Nova',
       cidade: 'Lajinha',
       estado: 'MG',
       cep: '36980-000',
       referencia: null,
     },
     cadastro: 'novo',
+    observacao: null,
+    retirarNaLoja: false,
     minutosParaDespachar: null,
     itens: [{ nome: 'X-Burguer', quantidade: 2, tamanho: null, escolhas: [], total: 44 }],
   },
@@ -537,5 +774,11 @@ export function pendenciasDoProduto(produto: ProdutoDeExemplo): Pendencia[] {
 export function enderecoEmLinha(entrega: EnderecoDaEntrega): string {
   const inicio = `${entrega.rua}, ${entrega.numero}`;
   const com = entrega.complemento ? `${inicio} — ${entrega.complemento}` : inicio;
-  return `${com} · ${entrega.cidade}/${entrega.estado}`;
+  return `${com} · ${entrega.bairro}, ${entrega.cidade}/${entrega.estado}`;
+}
+
+/** A taxa do bairro escolhido. `null` quando a loja não cobra entrega. */
+export function taxaDoBairro(loja: LojaDeExemplo, bairroId: string | null): number | null {
+  if (loja.bairros.length === 0) return null;
+  return loja.bairros.find((bairro) => bairro.id === bairroId)?.taxa ?? null;
 }
