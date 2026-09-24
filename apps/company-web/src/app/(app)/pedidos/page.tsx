@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { deliveriesApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 import { useCompanyActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
+import { PageProtectionBoundary } from '@/components/page-protection/page-protection-boundary';
 
 const CANCELLABLE_STATUSES: DeliveryStatus[] = ['SCHEDULED', 'AWAITING_DRIVER'];
 const PAGE_SIZE = 25;
@@ -49,7 +50,9 @@ export default function CompanyOrdersPage() {
     // `useSearchParams` exige limite de Suspense no App Router: sem ele a
     // pagina inteira vira renderizacao dinamica no cliente.
     <Suspense fallback={<p className="text-sm text-muted-foreground">Carregando pedidos...</p>}>
-      <ConteudoPedidos />
+      <PageProtectionBoundary routeKey="PEDIDOS">
+        <ConteudoPedidos />
+      </PageProtectionBoundary>
     </Suspense>
   );
 }

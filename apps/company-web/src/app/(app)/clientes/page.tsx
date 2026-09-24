@@ -8,6 +8,7 @@ import type { CompanyCustomer } from '@motoboycity/types';
 import { Eye, MapPin, Pencil, Phone, Plus, Search, Trash2, UserRound } from 'lucide-react';
 import { CustomerForm } from '@/components/customers/customer-form';
 import { CustomerRanking } from '@/components/customers/customer-ranking';
+import { PageProtectionBoundary } from '@/components/page-protection/page-protection-boundary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -93,8 +94,9 @@ export default function CompanyCustomersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <PageProtectionBoundary routeKey="CLIENTES">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight text-portal-deep">
             Clientes
@@ -309,5 +311,6 @@ export default function CompanyCustomersPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </PageProtectionBoundary>
   );
 }

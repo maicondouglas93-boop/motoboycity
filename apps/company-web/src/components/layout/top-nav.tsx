@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, UserRound } from 'lucide-react';
+import { LogOut, Shield, UserRound } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -174,6 +174,10 @@ export function TopNav() {
               <DropdownMenuItem onClick={() => router.push('/perfil')}>
                 <UserRound aria-hidden="true" />
                 Meu perfil
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/configuracoes')}>
+                <Shield aria-hidden="true" />
+                Proteção de páginas
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

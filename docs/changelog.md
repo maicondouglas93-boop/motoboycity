@@ -14258,3 +14258,40 @@ soma R$ 30,00 + R$ 8,00 = R$ 38,00; o botão lista o que falta preencher; o
 estado vira maiúsculo sozinho; escolher dinheiro revela o campo de troco; o
 pedido #1601 aparece confirmado com previsão, endereço e troco; e o pedido
 seguinte já abre com tudo preenchido.
+
+## 2026-09-24 — Proteção individual de páginas por senha para empresas
+
+Implementada a funcionalidade de proteção individual de páginas por senha, permitindo que cada empresa cliente configure senhas adicionais para áreas e dados confidenciais do seu painel (`/financeiro`, `/relatorios`, `/pedidos`, `/clientes`).
+
+- **Banco de Dados e Multi-tenancy**:
+  - Nova tabela aditiva `company_page_protections` com constraint única `(company_id, route_key)` e índice em `company_id`.
+  - Senha armazenada via hash seguro (`bcrypt`, custo 10) e campo `version` incrementado a cada alteração de senha.
+  - Multi-tenancy absoluto: todas as operações derivam a empresa diretamente do `companyTeamMember` ativo do usuário autenticado no token JWT. Não há parâmetros externos de identificação de empresa (prevenção total de IDOR).
+- **Backend (NestJS)**:
+  - Novo módulo `PageProtectionModule` (`apps/api/src/company/page-protection/`) com `PageProtectionService`, `PageProtectionController` e `PageProtectionGuard`.
+  - Endpoint de verificação `/company/page-protection/verify` protegido contra ataques de força bruta com rate limit restrito (`@Throttle(5 req / 60s)`).
+  - Emissão de token temporário assinado JWT (`x-page-unlock-token`) com validade de 30 minutos e versionamento ativo. Ao alterar a senha, autorizações antigas são rejeitadas imediatamente.
+  - Proteção real de API: `PageProtectionGuard` aplicado em `CompanyFinancialController` (`@RequirePageProtection('FINANCEIRO')`) e `CompanyReportsController` (`@RequirePageProtection('RELATORIOS')`), barrando requisições diretas sem autorização prévia.
+- **Frontend (`company-web`)**:
+  - Nova tela de gerenciamento em `/configuracoes` e no perfil da empresa (`/perfil`), permitindo proteger, alterar senha, desativar e reativar proteções por página.
+  - Interceptor HTTP transparente em `@motoboycity/api-client` fornecendo automaticamente o header `x-page-unlock-token` quando ativo na sessão do navegador.
+  - Componente `<PageProtectionBoundary>` encapsulando telas sensíveis (`/financeiro`, `/relatorios`, `/pedidos`, `/clientes`), exigindo autenticação em acessos diretos por URL, recarregamentos e navegação interna, com desbloqueio temporário sem atrito a cada clique.
+
+Arquivos modificados / criados:
+- `apps/api/prisma/schema.prisma` e migration `20260924093000_company_page_protection/migration.sql`;
+- `packages/types/src/page-protection.ts` e `packages/types/src/index.ts`;
+- `packages/validation/src/company/page-protection.schema.ts` e `packages/validation/src/index.ts`;
+- `packages/api-client/src/company-page-protection.ts`, `packages/api-client/src/http.ts` e `packages/api-client/src/index.ts`;
+- `apps/api/src/company/page-protection/*` e `apps/api/src/app.module.ts`;
+- `apps/api/src/finance/company-financial.controller.ts` e `apps/api/src/finance/finance.module.ts`;
+- `apps/api/src/company/reports/company-reports.controller.ts` e `apps/api/src/company/reports/company-reports.module.ts`;
+- `apps/company-web/src/lib/page-protection-session.ts`, `apps/company-web/src/lib/api-client.ts`;
+- `apps/company-web/src/components/page-protection/*`;
+- `apps/company-web/src/app/(app)/configuracoes/page.tsx`, `apps/company-web/src/app/(app)/financeiro/page.tsx`, `apps/company-web/src/app/(app)/relatorios/page.tsx`, `apps/company-web/src/app/(app)/pedidos/page.tsx`, `apps/company-web/src/app/(app)/clientes/page.tsx`, `apps/company-web/src/app/(app)/perfil/page.tsx`, `apps/company-web/src/components/layout/top-nav.tsx`.
+
+Validação:
+- `pnpm typecheck` limpo em todos os 8 pacotes/apps;
+- `pnpm --filter @motoboycity/api exec jest page-protection --runInBand` (15 testes passando);
+- `pnpm --filter @motoboycity/company-web test` (166 testes passando, incluindo novos testes de sessão de proteção);
+- `pnpm --filter @motoboycity/api run build` e `pnpm --filter @motoboycity/company-web run build` finalizados com sucesso (código 0);
+- ESLint limpo com 0 erros e 0 warnings no código modificado.

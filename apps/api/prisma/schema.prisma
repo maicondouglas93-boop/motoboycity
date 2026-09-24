@@ -483,6 +483,7 @@ model Company {
   statusHistory  CompanyStatusHistory[]
   driverBlocks   DriverCompanyBlock[]
   asaasCustomers AsaasCustomer[]
+  pageProtections CompanyPageProtection[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -566,6 +567,26 @@ model CompanyCustomer {
   @@index([companyId, normalizedName])
   @@index([companyId, createdAt])
   @@map("company_customers")
+}
+
+/// Protecao de paginas sensiveis por senha individual por empresa.
+/// A senha e armazenada em hash (bcrypt); a versao e incrementada a cada
+/// troca para invalidar autorizacoes temporarias antigas.
+model CompanyPageProtection {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  routeKey     String   @map("route_key") @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  enabled      Boolean  @default(true)
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, routeKey], name: "company_page_protection_unique")
+  @@index([companyId])
+  @@map("company_page_protections")
 }
 
 /// Enderecos reutilizaveis de um cliente. O endereco principal continua

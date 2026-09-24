@@ -14,10 +14,13 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CompanyOnlyGuard } from '../auth/company-only.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PageProtectionGuard } from '../company/page-protection/page-protection.guard';
+import { RequirePageProtection } from '../company/page-protection/page-protection.decorator';
 import { CompanyFinancialService } from './company-financial.service';
 
 @Controller('company/financial')
-@UseGuards(JwtAuthGuard, CompanyOnlyGuard)
+@UseGuards(JwtAuthGuard, CompanyOnlyGuard, PageProtectionGuard)
+@RequirePageProtection('FINANCEIRO')
 export class CompanyFinancialController {
   constructor(private readonly companyFinancialService: CompanyFinancialService) {}
 

@@ -7,6 +7,7 @@ import { FinanceTabs, type FinanceTab } from '@/components/finance/finance-tabs'
 import { FaturasTab } from '@/components/finance/faturas-tab';
 import { PedidosTab } from '@/components/finance/pedidos-tab';
 import { ResumoTab } from '@/components/finance/resumo-tab';
+import { PageProtectionBoundary } from '@/components/page-protection/page-protection-boundary';
 import { session } from '@/lib/session';
 
 const TABS: ReadonlyArray<FinanceTab> = [
@@ -29,7 +30,9 @@ export default function CompanyFinancePage() {
     <Suspense
       fallback={<p className="text-sm text-muted-foreground">Carregando financeiro...</p>}
     >
-      <ConteudoFinanceiro />
+      <PageProtectionBoundary routeKey="FINANCEIRO">
+        <ConteudoFinanceiro />
+      </PageProtectionBoundary>
     </Suspense>
   );
 }

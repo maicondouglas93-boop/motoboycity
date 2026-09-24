@@ -25,6 +25,7 @@ import { AsaasClient } from './asaas/asaas.client';
 import { AsaasBillingService } from './asaas/asaas-billing.service';
 import { AsaasWebhookController, CompanyInvoicePixController } from './asaas/asaas.controller';
 import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-platform-settings.module';
+import { PageProtectionModule } from '../company/page-protection/page-protection.module';
 
 @Module({
   // `AdminPlatformSettingsModule` porque o ciclo de repasse e saque virou
@@ -35,6 +36,7 @@ import { AdminPlatformSettingsModule } from '../admin/platform-settings/admin-pl
     BullModule.registerQueue({ name: FINANCE_QUEUE }),
     RealtimeModule,
     AdminPlatformSettingsModule,
+    PageProtectionModule,
   ],
   controllers: [
     DriverWalletController,

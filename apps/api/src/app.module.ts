@@ -18,6 +18,7 @@ import { CompanyBusinessHoursModule } from './company/business-hours/company-bus
 import { CompanyProfileModule } from './company/profile/company-profile.module';
 import { CompanyCustomersModule } from './company/customers/company-customers.module';
 import { CompanyReportsModule } from './company/reports/company-reports.module';
+import { PageProtectionModule } from './company/page-protection/page-protection.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
 import { FinanceModule } from './finance/finance.module';
@@ -87,6 +88,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     CompanyProfileModule,
     CompanyCustomersModule,
     CompanyReportsModule,
+    PageProtectionModule,
     DispatchModule,
     DriverPresenceModule,
     DeliveriesModule,

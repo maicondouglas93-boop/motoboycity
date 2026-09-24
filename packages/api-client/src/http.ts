@@ -32,6 +32,7 @@ const DEFAULT_TIMEOUT_MS = 0;
 
 let timeoutMs = DEFAULT_TIMEOUT_MS;
 let unauthorizedHandler: (() => void) | null = null;
+let pageUnlockTokenProvider: ((url: string) => string | null) | null = null;
 
 /**
  * Requisicao que estourou o prazo local.
@@ -60,11 +61,16 @@ export interface ApiClientOptions {
    * funcionando como deveria.
    */
   onUnauthorized?: (() => void) | null;
+  /**
+   * Provedor de token temporario de autorizacao de pagina por URL.
+   */
+  getPageUnlockToken?: ((url: string) => string | null) | null;
 }
 
 export function configureApiClient(options: ApiClientOptions): void {
   if (options.timeoutMs !== undefined) timeoutMs = options.timeoutMs;
   if (options.onUnauthorized !== undefined) unauthorizedHandler = options.onUnauthorized;
+  if (options.getPageUnlockToken !== undefined) pageUnlockTokenProvider = options.getPageUnlockToken;
 }
 
 /** Usado por `parseJsonOrThrow`; nunca deixa o erro do handler derrubar a chamada. */
@@ -79,12 +85,26 @@ export function notifyUnauthorized(): void {
 }
 
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  if (timeoutMs <= 0) return fetch(input, init);
+  let headers = init.headers;
+  if (pageUnlockTokenProvider) {
+    const unlockToken = pageUnlockTokenProvider(input);
+    if (unlockToken) {
+      const h = new Headers(headers);
+      if (!h.has('x-page-unlock-token')) {
+        h.set('x-page-unlock-token', unlockToken);
+        headers = h;
+      }
+    }
+  }
+
+  const finalInit: RequestInit = { ...init, headers };
+
+  if (timeoutMs <= 0) return fetch(input, finalInit);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetch(input, { ...finalInit, signal: controller.signal });
   } catch (error) {
     // `AbortError` e a mesma excecao para "estourou o prazo" e para "alguem
     // cancelou". Aqui so existe o primeiro caso, porque o controller e local.

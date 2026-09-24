@@ -13,9 +13,16 @@ import {
   createPaymentNoticeApi,
   createCompanyIntegrationsApi,
   createNotificationsApi,
+  createCompanyPageProtectionApi,
+  configureApiClient,
 } from '@motoboycity/api-client';
+import { pageProtectionSession } from './page-protection-session';
 
 export const apiBaseUrl = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3333';
+
+configureApiClient({
+  getPageUnlockToken: (url: string) => pageProtectionSession.getUnlockTokenForUrl(url),
+});
 
 export const authApi = createAuthApi({ baseUrl: apiBaseUrl });
 export const companyAddressApi = createCompanyAddressApi({ baseUrl: apiBaseUrl });
@@ -31,3 +38,4 @@ export const serviceTypesApi = createServiceTypesApi({ baseUrl: apiBaseUrl });
 export const paymentNoticeApi = createPaymentNoticeApi({ baseUrl: apiBaseUrl });
 export const companyIntegrationsApi = createCompanyIntegrationsApi({ baseUrl: apiBaseUrl });
 export const notificationsApi = createNotificationsApi({ baseUrl: apiBaseUrl });
+export const companyPageProtectionApi = createCompanyPageProtectionApi({ baseUrl: apiBaseUrl });

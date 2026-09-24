@@ -8,11 +8,14 @@ import {
 import { CompanyOnlyGuard } from '../../auth/company-only.guard';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { PageProtectionGuard } from '../page-protection/page-protection.guard';
+import { RequirePageProtection } from '../page-protection/page-protection.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CompanyReportsService } from './company-reports.service';
 
 @Controller('company/reports')
-@UseGuards(JwtAuthGuard, CompanyOnlyGuard)
+@UseGuards(JwtAuthGuard, CompanyOnlyGuard, PageProtectionGuard)
+@RequirePageProtection('RELATORIOS')
 export class CompanyReportsController {
   constructor(private readonly companyReportsService: CompanyReportsService) {}
 

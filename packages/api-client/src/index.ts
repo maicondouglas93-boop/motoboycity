@@ -32,3 +32,4 @@ export * from './delivery-offers';
 export * from './push-tokens';
 export * from './company-integrations';
 export * from './notifications';
+export * from './company-page-protection';

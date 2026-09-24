@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -10,6 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { PageProtectionBoundary } from '@/components/page-protection/page-protection-boundary';
 
 type ReportLink = {
   title: string;
@@ -121,36 +124,38 @@ function ReportCard({ report }: { report: ReportLink }) {
 
 export default function ReportsHubPage() {
   return (
-    <div className="mx-auto w-full max-w-[1480px] space-y-9 pb-12">
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-portal-deep">
-            Central de relatórios
-          </h1>
-          <Badge variant="outline" className="gap-1.5">
-            <ShieldCheck className="size-3.5" aria-hidden="true" />
-            Somente dados da sua empresa
-          </Badge>
-        </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Escolha uma análise para entender seus pedidos e os tempos da operação. Todos os
-          relatórios disponíveis consultam a API real e respeitam a empresa vinculada ao seu acesso.
-        </p>
-      </header>
+    <PageProtectionBoundary routeKey="RELATORIOS">
+      <div className="mx-auto w-full max-w-[1480px] space-y-9 pb-12">
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-heading text-2xl font-semibold tracking-tight text-portal-deep">
+              Central de relatórios
+            </h1>
+            <Badge variant="outline" className="gap-1.5">
+              <ShieldCheck className="size-3.5" aria-hidden="true" />
+              Somente dados da sua empresa
+            </Badge>
+          </div>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+            Escolha uma análise para entender seus pedidos e os tempos da operação. Todos os
+            relatórios disponíveis consultam a API real e respeitam a empresa vinculada ao seu acesso.
+          </p>
+        </header>
 
-      {reportGroups.map((group) => (
-        <section key={group.title} className="space-y-4">
-          <div>
-            <h2 className="font-heading text-lg font-semibold text-portal-deep">{group.title}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {group.reports.map((report) => (
-              <ReportCard key={report.title} report={report} />
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
+        {reportGroups.map((group) => (
+          <section key={group.title} className="space-y-4">
+            <div>
+              <h2 className="font-heading text-lg font-semibold text-portal-deep">{group.title}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{group.description}</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {group.reports.map((report) => (
+                <ReportCard key={report.title} report={report} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </PageProtectionBoundary>
   );
 }

@@ -289,6 +289,10 @@ chegar a nenhum aparelho.
 
 ## Fluxos implementados
 
+### Proteção individual de páginas por senha no painel da empresa (2026-09-24)
+
+Empresas podem configurar proteção individual por senha para páginas e dados confidenciais (`/financeiro`, `/relatorios`, `/pedidos`, `/clientes`). Gerenciável em `/configuracoes` e `/perfil`. Senhas em hash `bcrypt`, isolamento multi-tenant absoluto (empresa resolvida do token JWT sem IDOR), autorização temporária de 30 min via header assinado `x-page-unlock-token`, e proteção real de API no backend via `PageProtectionGuard` em rotas financeiras e de relatórios.
+
 ### Histórico de faturas por cliente no ADM — publicado (2026-09-06)
 
 `/clientes/[id]/faturas` reúne as faturas de uma única empresa, com acesso pelo

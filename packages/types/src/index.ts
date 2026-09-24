@@ -14,3 +14,4 @@ export * from './administrative-audit.js';
 export * from './region.js';
 export * from './integration.js';
 export * from './notifications.js';
+export * from './page-protection.js';

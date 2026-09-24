@@ -12,6 +12,7 @@ import {
   companyProfileQueryKey,
 } from '@/components/profile/company-data-form';
 import { ChangePasswordForm } from '@/components/profile/change-password-form';
+import { ManagePageProtectionsCard } from '@/components/page-protection/manage-page-protections-card';
 import { authApi, companyProfileApi } from '@/lib/api-client';
 import { authUserQueryKey, authUserQueryOptions } from '@/lib/auth-user-query';
 import { session } from '@/lib/session';
@@ -272,6 +273,8 @@ export default function CompanyProfilePage() {
           profile={companyProfileQuery.data}
         />
       )}
+
+      {user && <ManagePageProtectionsCard />}
     </div>
   );
 }
