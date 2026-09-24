@@ -189,6 +189,18 @@ A loja respeita horário por dia com mais de uma faixa, feriados, pausa manual,
 bairros com taxa própria, pedido mínimo e retirada no local. O checkout tem
 observação do cliente.
 
+**Pagamento em dois grupos** (decisão de 2026-09-24): online pelo Asaas — Pix,
+crédito e débito — ou na entrega — dinheiro, e Pix, crédito e débito na
+maquininha. Crédito e débito online passam pela página do próprio Asaas, e
+nenhum campo de cartão existe na loja: o débito só é aceito lá, e o crédito pela
+API poria o número do cartão no nosso sistema. Sem conta Asaas, o grupo online
+inteiro some.
+
+**Movimento com função**, com a biblioteca Motion escopada à loja: cascata de
+entrada, indicador de categoria que acompanha a rolagem, folhas que sobem de
+baixo, o item voando até a sacola e a confirmação desenhada. Vocabulário em
+`components/loja-online/movimento.tsx`.
+
 Falta: manifest, service worker e instalação — sem eles é um site, não um PWA.
 Falta o Web Push para avisar a loja de pedido novo (o que existe é FCM para o
 app Android do motoboy). E falta o backend inteiro: hoje o pedido termina no

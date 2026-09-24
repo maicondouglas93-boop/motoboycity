@@ -143,6 +143,53 @@ export interface PedidoGuardado {
 
 type Atualizacao = ItemEscolhido[] | ((atual: ItemEscolhido[]) => ItemEscolhido[]);
 
+/**
+ * O que torna duas linhas da sacola "a mesma": produto, tamanho e escolhas.
+ *
+ * Serve de regra para somar e também de `key` estável nas listas animadas — a
+ * posição no array não serve, porque muda quando uma linha acima sai, e a
+ * animação de saída acabaria rodando na linha errada.
+ */
+export function assinaturaDoItem(item: ItemEscolhido): string {
+  return `${item.produtoId}|${item.tamanho ?? ''}|${[...item.escolhas].sort().join(', ')}`;
+}
+
+/**
+ * Soma a quantidade quando a configuração é a MESMA, em vez de acrescentar uma
+ * linha igual à anterior.
+ *
+ * Duas linhas "Açaí · 300ml" na sacola parecem erro do site: o cliente não tem
+ * como saber que uma veio de um toque e a outra de outro. Configuração
+ * diferente — outro tamanho, outro adicional — continua sendo linha separada,
+ * porque aí são coisas diferentes mesmo.
+ */
+export function juntarNaSacola(atual: ItemEscolhido[], novo: ItemEscolhido): ItemEscolhido[] {
+  const igual = atual.findIndex((item) => assinaturaDoItem(item) === assinaturaDoItem(novo));
+  if (igual === -1) return [...atual, novo];
+
+  return atual.map((item, indice) =>
+    indice === igual ? { ...item, quantidade: item.quantidade + novo.quantidade } : item,
+  );
+}
+
+/**
+ * Mais um, menos um. Chegando a zero, a linha sai da sacola.
+ *
+ * Um lugar só para essa regra porque agora há duas telas que ajustam
+ * quantidade — a folha da sacola, no cardápio, e o checkout.
+ */
+export function ajustarQuantidade(
+  atual: ItemEscolhido[],
+  indice: number,
+  passo: number,
+): ItemEscolhido[] {
+  return atual
+    .map((item, i) =>
+      i === indice ? { ...item, quantidade: Math.max(0, item.quantidade + passo) } : item,
+    )
+    .filter((item) => item.quantidade > 0);
+}
+
 export function useSacola(slug: string) {
   const chave = chaveDaSacola(slug);
 

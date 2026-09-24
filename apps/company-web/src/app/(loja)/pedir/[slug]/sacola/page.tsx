@@ -1,12 +1,24 @@
 'use client';
 
 import { use, useMemo, useState } from 'react';
+import { AnimatePresence, m } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, Minus, Plus, Trash2 } from 'lucide-react';
-import { LOJA_DE_EXEMPLO, situacaoDaLoja, type EnderecoDaEntrega } from '@/lib/loja-mock';
+import {
+  FORMAS_DE_PAGAMENTO,
+  GRUPOS_DE_PAGAMENTO,
+  LOJA_DE_EXEMPLO,
+  descricaoDaForma,
+  formasOferecidas,
+  rotuloDoPagamento,
+  situacaoDaLoja,
+  type EnderecoDaEntrega,
+  type FormaDePagamento,
+} from '@/lib/loja-mock';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import {
+  ajustarQuantidade,
   clienteSalvo,
   guardarPedido,
   proximoNumero,
@@ -14,6 +26,7 @@ import {
   useSacola,
 } from '@/components/loja-online/armazenamento';
 import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
+import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
 
 /**
  * Sacola e checkout na MESMA página.
@@ -80,7 +93,8 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
   const [nome, setNome] = useState(anterior?.nome ?? '');
   const [telefone, setTelefone] = useState(anterior?.telefone ?? '');
   const [entrega, setEntrega] = useState<EnderecoDaEntrega>(anterior?.entrega ?? ENDERECO_VAZIO);
-  const [pagamento, setPagamento] = useState(loja.pagamentos[0] ?? '');
+  const oferecidas = formasOferecidas(loja);
+  const [pagamento, setPagamento] = useState<FormaDePagamento>(oferecidas[0] ?? 'DINHEIRO');
   const [trocoPara, setTrocoPara] = useState('');
   const [observacao, setObservacao] = useState('');
   const [retirar, setRetirar] = useState(false);
@@ -100,7 +114,8 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
   // Retirada não tem entrega, logo não tem taxa: o cliente busca no balcão.
   const taxa = retirar ? 0 : (bairroEscolhido?.taxa ?? 0);
   const total = subtotal + taxa;
-  const emDinheiro = pagamento.toLowerCase().includes('dinheiro');
+  const emDinheiro = pagamento === 'DINHEIRO';
+  const pagaOnline = descricaoDaForma(pagamento).grupo === 'ONLINE';
 
   // O mínimo conta só os itens: somar a entrega faria a taxa ajudar a atingir
   // o mínimo, que é o contrário do que o mínimo existe para proteger.
@@ -119,13 +134,7 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
   }
 
   function alterarQuantidade(indice: number, passo: number) {
-    setItens((atual) =>
-      atual
-        .map((item, i) =>
-          i === indice ? { ...item, quantidade: Math.max(0, item.quantidade + passo) } : item,
-        )
-        .filter((item) => item.quantidade > 0),
-    );
+    setItens((atual) => ajustarQuantidade(atual, indice, passo));
   }
 
   function confirmar() {
@@ -138,7 +147,7 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
       subtotal,
       taxaDeEntrega: taxa,
       total,
-      pagamento,
+      pagamento: rotuloDoPagamento(pagamento),
       trocoPara: emDinheiro && trocoPara.trim() !== '' ? Number(trocoPara.replace(',', '.')) : null,
       nome: nome.trim(),
       telefone: telefone.trim(),
@@ -169,7 +178,7 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
           <Link href={`/pedir/${slug}`} aria-label="Voltar ao cardápio" className="-ml-1 p-1">
             <ChevronLeft className="size-5" />
           </Link>
-          <h1 className="text-lg font-bold">Sua sacola</h1>
+          <h1 className="text-lg font-bold">Finalizar pedido</h1>
         </header>
 
         {itens.length === 0 ? (
@@ -272,14 +281,42 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
               />
             ) : (
               <>
-                {/*
-                 * Campos SEPARADOS, e não uma caixa de "endereço".
-                 *
-                 * É o formato que o cadastro de clientes do painel exige
-                 * (`CompanyCustomerAddress`). Pedir tudo numa linha só deixaria a
-                 * loja sem como salvar este cliente sem redigitar — que é a
-                 * funcionalidade inteira indo embora por causa de um campo.
-                 */}
+                {/* Nome e telefone ficam FORA da parte que recolhe: são
+                    obrigatórios também para retirar. Uma versão anterior os
+                    guardava junto do endereço, e quem escolhia retirada via
+                    "falta preencher o telefone" sem campo nenhum na tela. */}
+                <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
+                  <h2 className="px-4 pb-2 text-base font-bold">Seus dados</h2>
+                  <div className="space-y-3 px-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Campo
+                        id="nome"
+                        rotulo="Seu nome"
+                        valor={nome}
+                        aoMudar={setNome}
+                        estilo={campo}
+                        paleta={paleta}
+                        className="col-span-2"
+                      />
+                      <Campo
+                        id="telefone"
+                        rotulo="Telefone"
+                        valor={telefone}
+                        aoMudar={setTelefone}
+                        estilo={campo}
+                        paleta={paleta}
+                        inputMode="tel"
+                        dica={
+                          retirar
+                            ? 'É por ele que a loja avisa se precisar falar com você.'
+                            : 'É por ele que o motoboy liga se não achar o endereço.'
+                        }
+                        className="col-span-2"
+                      />
+                    </div>
+                  </div>
+                </section>
+
                 {/* A escolha vem ANTES do endereço: quem vai retirar não deve
                 nem ver os campos que não vai preencher. */}
                 {loja.aceitaRetirada && (
@@ -311,166 +348,228 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                       </label>
                     ))}
 
-                    {retirar && (
-                      <p className="px-4 pt-3 text-sm">
-                        Retire em{' '}
-                        <strong>
-                          {loja.pontoDeColeta.rua}, {loja.pontoDeColeta.numero}
-                        </strong>
-                        <span className="block text-xs" style={{ color: paleta.suave }}>
-                          {loja.pontoDeColeta.bairro}, {loja.pontoDeColeta.cidade}/
-                          {loja.pontoDeColeta.estado}
-                        </span>
-                      </p>
-                    )}
+                    <AnimatePresence initial={false}>
+                      {retirar && (
+                        <m.p
+                          key="retire"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                          className="overflow-hidden px-4 text-sm"
+                        >
+                          <span className="block pt-3">
+                            Retire em{' '}
+                            <strong>
+                              {loja.pontoDeColeta.rua}, {loja.pontoDeColeta.numero}
+                            </strong>
+                            <span className="block text-xs" style={{ color: paleta.suave }}>
+                              {loja.pontoDeColeta.bairro}, {loja.pontoDeColeta.cidade}/
+                              {loja.pontoDeColeta.estado}
+                            </span>
+                          </span>
+                        </m.p>
+                      )}
+                    </AnimatePresence>
                   </section>
                 )}
 
-                <section
-                  className={retirar ? 'hidden' : 'border-t pt-4'}
-                  style={{ borderColor: paleta.linha }}
-                >
-                  <h2 className="px-4 pb-2 text-base font-bold">Entrega</h2>
-                  <div className="space-y-3 px-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Campo
-                        id="nome"
-                        rotulo="Seu nome"
-                        valor={nome}
-                        aoMudar={setNome}
-                        estilo={campo}
-                        paleta={paleta}
-                        className="col-span-2"
-                      />
-                      <Campo
-                        id="telefone"
-                        rotulo="Telefone"
-                        valor={telefone}
-                        aoMudar={setTelefone}
-                        estilo={campo}
-                        paleta={paleta}
-                        inputMode="tel"
-                        dica="É por ele que o motoboy liga se não achar o endereço."
-                        className="col-span-2"
-                      />
-                      <Campo
-                        id="rua"
-                        rotulo="Rua"
-                        valor={entrega.rua}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
-                        estilo={campo}
-                        paleta={paleta}
-                        className="col-span-2"
-                      />
-                      <Campo
-                        id="numero"
-                        rotulo="Número"
-                        valor={entrega.numero}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
-                        estilo={campo}
-                        paleta={paleta}
-                      />
-                      <Campo
-                        id="complemento"
-                        rotulo="Complemento"
-                        valor={entrega.complemento ?? ''}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, complemento: v || null }))}
-                        estilo={campo}
-                        paleta={paleta}
-                      />
-                      {/* Lista, e não campo livre: o bairro define a taxa e
+                {/*
+                 * Campos SEPARADOS, e não uma caixa de "endereço".
+                 *
+                 * É o formato que o cadastro de clientes do painel exige
+                 * (`CompanyCustomerAddress`). Pedir tudo numa linha só deixaria a
+                 * loja sem como salvar este cliente sem redigitar — que é a
+                 * funcionalidade inteira indo embora por causa de um campo.
+                 */}
+                {/* Logo abaixo da escolha, para causa e efeito ficarem
+                    lado a lado: tocou em "retirar", o endereço recolhe ali
+                    mesmo. Os valores ficam guardados no estado da página, então
+                    voltar para entrega traz tudo de volta como estava. */}
+                <AnimatePresence initial={false}>
+                  {!retirar && (
+                    <m.section
+                      key="endereco"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mt-4 border-t pt-4" style={{ borderColor: paleta.linha }}>
+                        <h2 className="px-4 pb-2 text-base font-bold">Endereço de entrega</h2>
+                        <div className="space-y-3 px-4">
+                          <div className="grid grid-cols-2 gap-3">
+                            <Campo
+                              id="rua"
+                              rotulo="Rua"
+                              valor={entrega.rua}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
+                              estilo={campo}
+                              paleta={paleta}
+                              className="col-span-2"
+                            />
+                            <Campo
+                              id="numero"
+                              rotulo="Número"
+                              valor={entrega.numero}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
+                              estilo={campo}
+                              paleta={paleta}
+                            />
+                            <Campo
+                              id="complemento"
+                              rotulo="Complemento"
+                              valor={entrega.complemento ?? ''}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, complemento: v || null }))}
+                              estilo={campo}
+                              paleta={paleta}
+                            />
+                            {/* Lista, e não campo livre: o bairro define a taxa e
                           delimita a área que a loja atende. */}
-                      <div className="col-span-2">
-                        <label htmlFor="bairro" className="mb-1 block text-xs font-medium">
-                          Bairro
-                        </label>
-                        <select
-                          id="bairro"
-                          value={entrega.bairro}
-                          onChange={(evento) =>
-                            setEntrega((e) => ({ ...e, bairro: evento.target.value }))
-                          }
-                          className="h-11 w-full rounded-lg border px-3 text-sm"
-                          style={campo}
-                        >
-                          <option value="">Escolha o bairro</option>
-                          {loja.bairros.map((bairro) => (
-                            <option key={bairro.id} value={bairro.nome}>
-                              {bairro.nome} — {moeda(bairro.taxa)}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-xs" style={{ color: paleta.suave }}>
-                          {loja.bairros.length === 0
-                            ? 'Esta loja ainda não cadastrou bairros de entrega.'
-                            : 'Não achou o seu? A loja não entrega nele por enquanto.'}
-                        </p>
-                      </div>
+                            <div className="col-span-2">
+                              <label htmlFor="bairro" className="mb-1 block text-xs font-medium">
+                                Bairro
+                              </label>
+                              <select
+                                id="bairro"
+                                value={entrega.bairro}
+                                onChange={(evento) =>
+                                  setEntrega((e) => ({ ...e, bairro: evento.target.value }))
+                                }
+                                className="h-11 w-full rounded-lg border px-3 text-sm"
+                                style={campo}
+                              >
+                                <option value="">Escolha o bairro</option>
+                                {loja.bairros.map((bairro) => (
+                                  <option key={bairro.id} value={bairro.nome}>
+                                    {bairro.nome} — {moeda(bairro.taxa)}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="mt-1 text-xs" style={{ color: paleta.suave }}>
+                                {loja.bairros.length === 0
+                                  ? 'Esta loja ainda não cadastrou bairros de entrega.'
+                                  : 'Não achou o seu? A loja não entrega nele por enquanto.'}
+                              </p>
+                            </div>
 
-                      <Campo
-                        id="cidade"
-                        rotulo="Cidade"
-                        valor={entrega.cidade}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
-                        estilo={campo}
-                        paleta={paleta}
-                      />
-                      <Campo
-                        id="estado"
-                        rotulo="Estado"
-                        valor={entrega.estado}
-                        aoMudar={(v) =>
-                          setEntrega((e) => ({ ...e, estado: v.toUpperCase().slice(0, 2) }))
-                        }
-                        estilo={campo}
-                        paleta={paleta}
-                      />
-                      <Campo
-                        id="cep"
-                        rotulo="CEP"
-                        valor={entrega.cep}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
-                        estilo={campo}
-                        paleta={paleta}
-                        inputMode="numeric"
-                        className="col-span-2"
-                      />
-                      <Campo
-                        id="referencia"
-                        rotulo="Ponto de referência"
-                        valor={entrega.referencia ?? ''}
-                        aoMudar={(v) => setEntrega((e) => ({ ...e, referencia: v || null }))}
-                        estilo={campo}
-                        paleta={paleta}
-                        dica="Portão, cor da casa, o que ajudar a achar."
-                        className="col-span-2"
-                      />
-                    </div>
-                  </div>
-                </section>
+                            <Campo
+                              id="cidade"
+                              rotulo="Cidade"
+                              valor={entrega.cidade}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
+                              estilo={campo}
+                              paleta={paleta}
+                            />
+                            <Campo
+                              id="estado"
+                              rotulo="Estado"
+                              valor={entrega.estado}
+                              aoMudar={(v) =>
+                                setEntrega((e) => ({ ...e, estado: v.toUpperCase().slice(0, 2) }))
+                              }
+                              estilo={campo}
+                              paleta={paleta}
+                            />
+                            <Campo
+                              id="cep"
+                              rotulo="CEP"
+                              valor={entrega.cep}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
+                              estilo={campo}
+                              paleta={paleta}
+                              inputMode="numeric"
+                              className="col-span-2"
+                            />
+                            <Campo
+                              id="referencia"
+                              rotulo="Ponto de referência"
+                              valor={entrega.referencia ?? ''}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, referencia: v || null }))}
+                              estilo={campo}
+                              paleta={paleta}
+                              dica="Portão, cor da casa, o que ajudar a achar."
+                              className="col-span-2"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </m.section>
+                  )}
+                </AnimatePresence>
 
                 <section className="mt-4 border-t pt-4" style={{ borderColor: paleta.linha }}>
                   <h2 className="px-4 pb-2 text-base font-bold">Pagamento</h2>
-                  {loja.pagamentos.map((forma) => (
-                    <label
-                      key={forma}
-                      className="flex items-center gap-3 border-b px-4 py-3 text-sm"
-                      style={{ borderColor: paleta.linha }}
-                    >
-                      <input
-                        type="radio"
-                        name="pagamento"
-                        className="size-4"
-                        style={{ accentColor: loja.corDeAcao }}
-                        checked={pagamento === forma}
-                        onChange={() => setPagamento(forma)}
-                      />
-                      <span>{forma}</span>
-                    </label>
-                  ))}
+                  {(['ONLINE', 'ENTREGA'] as const).map((grupo) => {
+                    const doGrupo = FORMAS_DE_PAGAMENTO.filter(
+                      (forma) => forma.grupo === grupo && oferecidas.includes(forma.valor),
+                    );
+                    // Grupo sem forma nenhuma não aparece: um título sem opções
+                    // embaixo faria o cliente procurar o que não existe.
+                    if (doGrupo.length === 0) return null;
 
-                  {/* Troco perguntado aqui, e não na porta: é o que o motoboy
-                  precisa levar na mão, e ele sai antes de alguém ligar. */}
+                    return (
+                      <div
+                        key={grupo}
+                        role="radiogroup"
+                        aria-label={GRUPOS_DE_PAGAMENTO[grupo].titulo}
+                      >
+                        <p
+                          className="px-4 pt-3 pb-1 text-xs font-semibold tracking-wide uppercase"
+                          style={{ color: paleta.suave }}
+                        >
+                          {GRUPOS_DE_PAGAMENTO[grupo].titulo}
+                        </p>
+                        {doGrupo.map((forma) => (
+                          <label
+                            key={forma.valor}
+                            className="flex items-start gap-3 border-b px-4 py-3 text-sm"
+                            style={{ borderColor: paleta.linha }}
+                          >
+                            <input
+                              type="radio"
+                              name="pagamento"
+                              className="mt-0.5 size-4"
+                              style={{ accentColor: loja.corDeAcao }}
+                              checked={pagamento === forma.valor}
+                              onChange={() => setPagamento(forma.valor)}
+                            />
+                            <span>
+                              {forma.titulo}
+                              <span className="block text-xs" style={{ color: paleta.suave }}>
+                                {forma.detalhe}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+
+                  {/* Nenhum campo de cartão nesta tela, de propósito: crédito e
+                      débito online são digitados na página do Asaas. Nesta
+                      demonstração não há Asaas por trás, e a tela diz isso em
+                      vez de fingir uma cobrança. */}
+                  <AnimatePresence initial={false}>
+                    {pagaOnline && (
+                      <m.p
+                        key="aviso-online"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                        className="overflow-hidden px-4 text-xs"
+                        style={{ color: paleta.suave }}
+                      >
+                        <span className="block pt-3">
+                          Na versão final, ao confirmar você vai para a página segura do Asaas para
+                          pagar. Nesta demonstração o pedido é registrado direto, sem cobrança.
+                        </span>
+                      </m.p>
+                    )}
+                  </AnimatePresence>
+
                   {/* O que o cliente escreve tem que caber em algum lugar, senão
                       vira ligação para a loja — ou pedido errado. */}
                   <div className="px-4 pt-3">
@@ -489,20 +588,33 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                     />
                   </div>
 
-                  {emDinheiro && (
-                    <div className="px-4 pt-3">
-                      <Campo
-                        id="troco"
-                        rotulo="Precisa de troco para quanto?"
-                        valor={trocoPara}
-                        aoMudar={setTrocoPara}
-                        estilo={campo}
-                        paleta={paleta}
-                        inputMode="decimal"
-                        dica="Deixe em branco se tiver o valor certo."
-                      />
-                    </div>
-                  )}
+                  {/* Troco perguntado aqui, e não na porta: é o que o motoboy
+                      precisa levar na mão, e ele sai antes de alguém ligar. */}
+                  <AnimatePresence initial={false}>
+                    {emDinheiro && (
+                      <m.div
+                        key="troco"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                        className="overflow-hidden px-4"
+                      >
+                        <div className="pt-3">
+                          <Campo
+                            id="troco"
+                            rotulo="Precisa de troco para quanto?"
+                            valor={trocoPara}
+                            aoMudar={setTrocoPara}
+                            estilo={campo}
+                            paleta={paleta}
+                            inputMode="decimal"
+                            dica="Deixe em branco se tiver o valor certo."
+                          />
+                        </div>
+                      </m.div>
+                    )}
+                  </AnimatePresence>
                 </section>
               </>
             )}
@@ -518,25 +630,52 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
           <div className="mx-auto max-w-lg">
             {/* O mínimo vem antes do resto: não adianta a pessoa preencher o
                 endereço inteiro para descobrir no fim que falta R$ 9,00. */}
-            {faltaParaOMinimo > 0 && (
-              <p className="mb-2 text-xs font-medium">
-                Pedido mínimo de {moeda(loja.pedidoMinimo ?? 0)} em itens. Faltam{' '}
-                {moeda(faltaParaOMinimo)}.
-              </p>
-            )}
-            {faltaParaOMinimo === 0 && faltando.length > 0 && (
-              <p className="mb-2 text-xs" style={{ color: paleta.suave }}>
-                Falta preencher: {faltando.join(', ')}.
-              </p>
-            )}
+            {/* O aviso entra e sai recolhendo, em vez de aparecer de uma vez:
+                sem isso o botão pula para cima ou para baixo justamente quando
+                o polegar está indo nele. */}
+            <AnimatePresence initial={false} mode="popLayout">
+              {faltaParaOMinimo > 0 ? (
+                <m.p
+                  key="minimo"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                  className="overflow-hidden text-xs font-medium"
+                >
+                  <span className="block pb-2">
+                    Pedido mínimo de {moeda(loja.pedidoMinimo ?? 0)} em itens. Faltam{' '}
+                    {moeda(faltaParaOMinimo)}.
+                  </span>
+                </m.p>
+              ) : faltando.length > 0 ? (
+                <m.p
+                  key="faltando"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                  className="overflow-hidden text-xs"
+                  style={{ color: paleta.suave }}
+                >
+                  <span className="block pb-2">Falta preencher: {faltando.join(', ')}.</span>
+                </m.p>
+              ) : null}
+            </AnimatePresence>
             <button
               type="button"
               disabled={!situacao.aberta || faltando.length > 0 || faltaParaOMinimo > 0}
               onClick={confirmar}
-              className="flex h-13 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
+              className="flex h-13 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold transition-opacity duration-200 disabled:opacity-40"
               style={{ backgroundColor: loja.corDeAcao, color: textoSobre(loja.corDeAcao) }}
             >
-              <span>{situacao.aberta ? 'Fazer pedido' : situacao.texto}</span>
+              <span>
+                {!situacao.aberta
+                  ? situacao.texto
+                  : pagaOnline
+                    ? 'Ir para o pagamento'
+                    : 'Fazer pedido'}
+              </span>
               <span>{moeda(total)}</span>
             </button>
           </div>

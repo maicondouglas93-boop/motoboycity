@@ -1,20 +1,45 @@
 'use client';
 
-import { use, useMemo, useState } from 'react';
+import { use, useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
+import { AnimatePresence, m, useReducedMotion } from 'motion/react';
 import { ChevronRight, Clock, ImageOff, Receipt } from 'lucide-react';
 import {
   CATEGORIAS_DE_EXEMPLO,
   LOJA_DE_EXEMPLO,
   PRODUTOS_DE_EXEMPLO,
+  formasOferecidas,
   pendenciasDoProduto,
+  resumoDosPagamentos,
   situacaoDaLoja,
   type ProdutoDeExemplo,
 } from '@/lib/loja-mock';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
-import { useHidratado, usePedidos, useSacola } from '@/components/loja-online/armazenamento';
+import {
+  ajustarQuantidade,
+  juntarNaSacola,
+  useHidratado,
+  usePedidos,
+  useSacola,
+} from '@/components/loja-online/armazenamento';
 import { ControleDaConta, useUsuarioId } from '@/components/loja-online/conta';
+import { BarraDeCategorias } from '@/components/loja-online/barra-de-categorias';
+import { BarraDaSacola, type BarraDaSacolaApi } from '@/components/loja-online/barra-da-sacola';
+import { FolhaDaSacola } from '@/components/loja-online/folha-da-sacola';
+import { VooParaASacola } from '@/components/loja-online/voo-para-a-sacola';
+import { NumeroRolante } from '@/components/loja-online/numero-rolante';
+import { CURVA_ENTRADA, DURACAO } from '@/components/loja-online/movimento';
+import estilos from '@/components/loja-online/loja.module.css';
+
+/** Da nona linha em diante, todas entram juntas: ninguém espera pela décima. */
+const TETO_DA_CASCATA = 8;
+
+interface Voo {
+  id: number;
+  de: DOMRect;
+  rotulo: string;
+}
 
 /**
  * A página que o cliente abre — a loja, e não o painel.
@@ -24,36 +49,24 @@ import { ControleDaConta, useUsuarioId } from '@/components/loja-online/conta';
  * miniatura à direita em vez de cartão com foto grande, divisória em vez de
  * sombra, e nenhum bloco de boas-vindas antes do primeiro produto.
  *
+ * O movimento segue a mesma regra: só onde diz alguma coisa. As linhas entram
+ * em ordem de leitura; o indicador de categoria mostra onde se está; o item
+ * adicionado voa até a sacola, ligando o toque ao lugar onde ele foi parar. O
+ * cabeçalho e os preços ficam parados — nada ali muda de sentido ao se mexer.
+ *
  * Em produção o endereço é `pedidos.…/{slug}`; aqui a rota é `/pedir/{slug}`
  * porque `/loja` já é a área do painel neste mesmo app.
  */
-/**
- * Soma a quantidade quando a configuração é a MESMA, em vez de acrescentar uma
- * linha igual à anterior.
- *
- * Duas linhas "Açaí · 300ml" na sacola parecem erro do site: o cliente não tem
- * como saber que uma veio de um toque e a outra de outro. Configuração
- * diferente — outro tamanho, outro adicional — continua sendo linha separada,
- * porque aí são coisas diferentes mesmo.
- */
-function juntarNaSacola(atual: ItemEscolhido[], novo: ItemEscolhido): ItemEscolhido[] {
-  const assinatura = (item: ItemEscolhido) =>
-    `${item.produtoId}|${item.tamanho ?? ''}|${[...item.escolhas].sort().join(', ')}`;
-
-  const igual = atual.findIndex((item) => assinatura(item) === assinatura(novo));
-  if (igual === -1) return [...atual, novo];
-
-  return atual.map((item, indice) =>
-    indice === igual ? { ...item, quantidade: item.quantidade + novo.quantidade } : item,
-  );
-}
-
 export default function LojaPublicaPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const loja = LOJA_DE_EXEMPLO;
 
   const paleta = paletaDoTema(loja.tema);
   const [aberto, setAberto] = useState<ProdutoDeExemplo | null>(null);
+  const [sacolaAberta, setSacolaAberta] = useState(false);
+  const [voo, setVoo] = useState<Voo | null>(null);
+  const barra = useRef<BarraDaSacolaApi>(null);
+  const reduzir = useReducedMotion();
 
   // A sacola sobrevive ao recarregamento: quem fecha a página sem querer volta
   // e encontra o que tinha escolhido, em vez de recomeçar do zero.
@@ -90,13 +103,66 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
     [],
   );
 
-  const secoes = CATEGORIAS_DE_EXEMPLO.map((categoria) => ({
-    categoria,
-    produtos: vendaveis.filter((produto) => produto.categoriaId === categoria.id),
-  })).filter((secao) => secao.produtos.length > 0);
+  const secoes = useMemo(
+    () =>
+      CATEGORIAS_DE_EXEMPLO.map((categoria) => ({
+        categoria,
+        produtos: vendaveis.filter((produto) => produto.categoriaId === categoria.id),
+      })).filter((secao) => secao.produtos.length > 0),
+    [vendaveis],
+  );
+
+  const categorias = useMemo(
+    () => secoes.map(({ categoria }) => ({ id: categoria.id, nome: categoria.nome })),
+    [secoes],
+  );
+
+  // Posição de cada produto no cardápio inteiro, e não dentro da seção: a
+  // cascata de entrada acompanha a leitura de cima para baixo.
+  const ordem = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const { produtos } of secoes) {
+      for (const produto of produtos) mapa.set(produto.id, mapa.size);
+    }
+    return mapa;
+  }, [secoes]);
+
+  // Quanto de cada produto já está na sacola — o selo na miniatura.
+  const naSacola = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const item of carrinho) {
+      mapa.set(item.produtoId, (mapa.get(item.produtoId) ?? 0) + item.quantidade);
+    }
+    return mapa;
+  }, [carrinho]);
 
   const itens = carrinho.reduce((soma, item) => soma + item.quantidade, 0);
   const total = carrinho.reduce((soma, item) => soma + item.unitario * item.quantidade, 0);
+
+  // Estáveis, porque o voo não pode recomeçar a cada renderização da página.
+  const medirAlvo = useCallback(() => barra.current?.alvo() ?? null, []);
+  const aoChegar = useCallback(() => {
+    setVoo(null);
+    barra.current?.receber();
+  }, []);
+
+  function adicionar(item: ItemEscolhido, origem: DOMRect | null) {
+    setCarrinho((atual) => juntarNaSacola(atual, item));
+    setAberto(null);
+    // Sem voo para quem pediu menos movimento: a confirmação vem pelos números
+    // da barra, que trocam sem deslocamento.
+    if (!reduzir && origem) {
+      setVoo({ id: Date.now(), de: origem, rotulo: `+${item.quantidade}` });
+    }
+  }
+
+  function ajustar(indice: number, passo: number) {
+    const esvazia = carrinho.length === 1 && (carrinho[0]?.quantidade ?? 0) + passo <= 0;
+    setCarrinho((atual) => ajustarQuantidade(atual, indice, passo));
+    // Tirou o último item: a folha fecha junto, em vez de ficar aberta
+    // mostrando uma sacola vazia.
+    if (esvazia) setSacolaAberta(false);
+  }
 
   return (
     <div
@@ -162,7 +228,9 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
                 </strong>
               )}
             </span>
-            <span style={{ color: paleta.suave }}>{loja.pagamentos.join(' · ')}</span>
+            <span style={{ color: paleta.suave }}>
+              {resumoDosPagamentos(formasOferecidas(loja))}
+            </span>
           </div>
 
           {/* Linha própria, e não um chip ao lado do nome: espremido ali ele
@@ -191,86 +259,107 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           </p>
         )}
 
-        {/* Barra de categorias grudada no topo: em cardápio longo, é ela que
-          evita a rolagem infinita até achar bebida. */}
-        <nav
-          aria-label="Categorias"
-          className="sticky top-0 z-10 flex gap-2 overflow-x-auto border-b px-4 py-2"
-          style={{ backgroundColor: paleta.fundo, borderColor: paleta.linha }}
-        >
-          {secoes.map(({ categoria }) => (
-            <a
-              key={categoria.id}
-              href={`#secao-${categoria.id}`}
-              className="rounded-full border px-3 py-1 text-sm whitespace-nowrap"
-              style={{ borderColor: paleta.linha, color: paleta.texto }}
-            >
-              {categoria.nome}
-            </a>
-          ))}
-        </nav>
+        {/* Grudada no topo: em cardápio longo, é ela que evita a rolagem
+            infinita até achar bebida. */}
+        <BarraDeCategorias secoes={categorias} paleta={paleta} corDaMarca={loja.corDaMarca} />
 
         <main className={itens > 0 ? 'pb-24' : 'pb-10'}>
           {secoes.map(({ categoria, produtos }) => (
-            <section key={categoria.id} id={`secao-${categoria.id}`} className="scroll-mt-12">
+            <section key={categoria.id} id={`secao-${categoria.id}`} className="scroll-mt-14">
               <h2 className="px-4 pt-5 pb-2 text-base font-bold" style={{ color: loja.corDaMarca }}>
                 {categoria.nome}
               </h2>
 
-              {produtos.map((produto) => (
-                <button
-                  key={produto.id}
-                  type="button"
-                  onClick={() => setAberto(produto)}
-                  className="flex w-full items-start gap-3 border-b px-4 py-3 text-left"
-                  style={{ borderColor: paleta.linha }}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] leading-snug font-medium">
-                      {produto.nome}
-                    </span>
-                    {produto.descricao && (
-                      <span
-                        className="mt-0.5 line-clamp-2 block text-[13px] leading-snug"
-                        style={{ color: paleta.suave }}
-                      >
-                        {produto.descricao}
-                      </span>
-                    )}
-                    <span className="mt-1.5 block text-[15px] font-semibold">
-                      {produto.tamanhos.length > 0 ? (
-                        <>
-                          <span className="text-[13px] font-normal" style={{ color: paleta.suave }}>
-                            a partir de{' '}
-                          </span>
-                          {moeda(Math.min(...produto.tamanhos.map((t) => t.preco)))}
-                        </>
-                      ) : (
-                        moeda(produto.precoUnico ?? 0)
-                      )}
-                    </span>
-                  </span>
-
-                  {/* Miniatura à direita, e um bloco discreto quando não há foto:
-                    produto sem imagem continua uma linha legível em vez de
-                    virar um buraco cinza no meio do cardápio. */}
-                  <span
-                    className="flex size-[76px] shrink-0 items-center justify-center overflow-hidden rounded-lg"
-                    style={{ backgroundColor: paleta.superficie }}
+              {produtos.map((produto) => {
+                const quantidade = naSacola.get(produto.id) ?? 0;
+                return (
+                  <button
+                    key={produto.id}
+                    type="button"
+                    onClick={() => setAberto(produto)}
+                    className={`${estilos['entradaDaLinha']} flex w-full items-start gap-3 border-b px-4 py-3 text-left`}
+                    style={
+                      {
+                        borderColor: paleta.linha,
+                        '--ordem': Math.min(ordem.get(produto.id) ?? 0, TETO_DA_CASCATA),
+                      } as CSSProperties
+                    }
                   >
-                    {produto.imagemUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={produto.imagemUrl} alt="" className="size-full object-cover" />
-                    ) : (
-                      <ImageOff
-                        className="size-5"
-                        style={{ color: paleta.suave, opacity: 0.5 }}
-                        aria-hidden="true"
-                      />
-                    )}
-                  </span>
-                </button>
-              ))}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] leading-snug font-medium">
+                        {produto.nome}
+                      </span>
+                      {produto.descricao && (
+                        <span
+                          className="mt-0.5 line-clamp-2 block text-[13px] leading-snug"
+                          style={{ color: paleta.suave }}
+                        >
+                          {produto.descricao}
+                        </span>
+                      )}
+                      <span className="mt-1.5 block text-[15px] font-semibold">
+                        {produto.tamanhos.length > 0 ? (
+                          <>
+                            <span
+                              className="text-[13px] font-normal"
+                              style={{ color: paleta.suave }}
+                            >
+                              a partir de{' '}
+                            </span>
+                            {moeda(Math.min(...produto.tamanhos.map((t) => t.preco)))}
+                          </>
+                        ) : (
+                          moeda(produto.precoUnico ?? 0)
+                        )}
+                      </span>
+                    </span>
+
+                    <span className="relative shrink-0">
+                      {/* Miniatura à direita, e um bloco discreto quando não há
+                          foto: produto sem imagem continua uma linha legível em
+                          vez de virar um buraco cinza no meio do cardápio. */}
+                      <span
+                        className="flex size-[76px] items-center justify-center overflow-hidden rounded-lg"
+                        style={{ backgroundColor: paleta.superficie }}
+                      >
+                        {produto.imagemUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={produto.imagemUrl} alt="" className="size-full object-cover" />
+                        ) : (
+                          <ImageOff
+                            className="size-5"
+                            style={{ color: paleta.suave, opacity: 0.5 }}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </span>
+
+                      {/* Quanto deste produto já está na sacola. É o retorno que
+                          fica: o voo passa em meio segundo, o selo continua ali
+                          enquanto o cliente segue escolhendo. */}
+                      <AnimatePresence initial={false}>
+                        {quantidade > 0 && (
+                          <m.span
+                            key="selo"
+                            initial={{ scale: 0.6, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.6, opacity: 0 }}
+                            transition={{ duration: DURACAO.instante, ease: CURVA_ENTRADA }}
+                            className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-bold shadow-sm"
+                            style={{
+                              backgroundColor: loja.corDeAcao,
+                              color: textoSobre(loja.corDeAcao),
+                            }}
+                          >
+                            <NumeroRolante valor={quantidade} />
+                            <span className="sr-only"> na sacola</span>
+                          </m.span>
+                        )}
+                      </AnimatePresence>
+                    </span>
+                  </button>
+                );
+              })}
             </section>
           ))}
 
@@ -280,36 +369,60 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             </p>
           )}
         </main>
-
-        {/* Barra do carrinho só existe quando há carrinho. Uma barra vazia fixa
-          rouba altura de tela no celular sem dizer nada. */}
-        {itens > 0 && (
-          <div className="fixed inset-x-0 bottom-0 z-20 p-3">
-            <Link
-              href={`/pedir/${slug}/sacola`}
-              className="mx-auto flex h-13 w-full max-w-lg items-center justify-between rounded-xl px-4 text-sm font-semibold shadow-lg"
-              style={{ backgroundColor: loja.corDeAcao, color: textoSobre(loja.corDeAcao) }}
-            >
-              <span>
-                {itens} {itens === 1 ? 'item' : 'itens'}
-              </span>
-              <span>Ver sacola · {moeda(total)}</span>
-            </Link>
-          </div>
-        )}
       </div>
 
-      {aberto && (
-        <FolhaDoProduto
-          produto={aberto}
-          paleta={paleta}
-          corDeAcao={loja.corDeAcao}
-          aberta={situacao.aberta}
-          onFechar={() => setAberto(null)}
-          onAdicionar={(item) => {
-            setCarrinho((atual) => juntarNaSacola(atual, item));
-            setAberto(null);
-          }}
+      {/* Barra da sacola só existe quando há sacola. Uma barra vazia fixa rouba
+          altura de tela no celular sem dizer nada. */}
+      <AnimatePresence>
+        {itens > 0 && (
+          <BarraDaSacola
+            key="barra"
+            ref={barra}
+            itens={itens}
+            total={total}
+            corDeAcao={loja.corDeAcao}
+            onAbrir={() => setSacolaAberta(true)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {aberto && (
+          <FolhaDoProduto
+            key={aberto.id}
+            produto={aberto}
+            paleta={paleta}
+            corDeAcao={loja.corDeAcao}
+            aberta={situacao.aberta}
+            onFechar={() => setAberto(null)}
+            onAdicionar={adicionar}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {sacolaAberta && itens > 0 && (
+          <FolhaDaSacola
+            key="sacola"
+            itens={carrinho}
+            total={total}
+            slug={slug}
+            paleta={paleta}
+            corDeAcao={loja.corDeAcao}
+            onAjustar={ajustar}
+            onFechar={() => setSacolaAberta(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {voo && (
+        <VooParaASacola
+          key={voo.id}
+          de={voo.de}
+          alvo={medirAlvo}
+          rotulo={voo.rotulo}
+          cor={loja.corDeAcao}
+          onChegou={aoChegar}
         />
       )}
     </div>

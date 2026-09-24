@@ -1,0 +1,36 @@
+/*
+ * Entrada das linhas do cardápio, em cascata pela posição.
+ *
+ * Em CSS, e não em Motion, por um motivo só: esta lista vem renderizada do
+ * servidor. O `initial` do Motion iria para o HTML como `opacity: 0`, e o
+ * cardápio ficaria invisível até o JavaScript carregar — num celular de entrada,
+ * segundos de tela vazia. A animação em CSS começa quando o estilo chega, antes
+ * da hidratação, e roda no compositor.
+ *
+ * `--ordem` é a posição da linha no cardápio inteiro, com teto na página: a
+ * décima linha não espera mais do que a oitava. A cascata inteira cabe em meio
+ * segundo.
+ */
+.entradaDaLinha {
+  animation: entradaDaLinha 220ms cubic-bezier(0, 0, 0.2, 1) both;
+  animation-delay: calc(var(--ordem, 0) * 35ms);
+}
+
+@keyframes entradaDaLinha {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Quem pediu menos movimento vê o cardápio pronto, sem espera nenhuma. */
+@media (prefers-reduced-motion: reduce) {
+  .entradaDaLinha {
+    animation: none;
+  }
+}

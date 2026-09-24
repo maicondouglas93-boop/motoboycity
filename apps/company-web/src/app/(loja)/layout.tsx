@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ClerkProvider } from '@clerk/nextjs';
 import { ptBR } from '@clerk/localizations';
+import { MovimentoDaLoja } from '@/components/loja-online/movimento';
 
 /**
  * O Clerk vale SÓ para a loja do cliente, e não para o painel.
@@ -15,7 +16,14 @@ import { ptBR } from '@clerk/localizations';
  * Este grupo de rotas `(loja)` não aparece na URL: `/pedir/...`, `/sign-in` e
  * `/sign-up` continuam exatamente onde estavam. O que ele delimita é até onde
  * o Clerk vai. O matcher do `proxy.ts` acompanha esse mesmo recorte.
+ *
+ * O mesmo vale para a biblioteca de animação: ela só carrega aqui. O painel,
+ * que não anima nada disso, não paga o peso dela.
  */
 export default function LojaLayout({ children }: { children: ReactNode }) {
-  return <ClerkProvider localization={ptBR}>{children}</ClerkProvider>;
+  return (
+    <ClerkProvider localization={ptBR}>
+      <MovimentoDaLoja>{children}</MovimentoDaLoja>
+    </ClerkProvider>
+  );
 }

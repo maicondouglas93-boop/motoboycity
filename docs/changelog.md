@@ -14441,3 +14441,136 @@ dispara o aviso; escolher Alto da Serra leva a entrega a R$ 14,00; o mínimo
 trava o botão dizendo que faltam R$ 9,00 mesmo com o total em R$ 20,00;
 retirada zera a taxa, esconde o endereço e mostra onde buscar; e a observação
 "Sem granola, por favor." aparece destacada no painel.
+
+## 2026-09-24 — Loja: movimento com função, e um bug do checkout
+
+Pedido do usuário: um sistema de animação ligado às ações e à hierarquia da
+loja do cliente, e não animação genérica em tudo. Nove itens: entrada dos
+produtos em cascata, transição entre categorias, sacola como folha de baixo,
+item voando até a sacola, retorno de item adicionado, quantidade atualizando,
+rolagem onde fizesse sentido, estados do checkout e confirmação do pedido.
+
+**Biblioteca: Motion 13** (o antigo Framer Motion), que não estava instalada.
+Carregada com `LazyMotion` e o pacote `domMax` — necessário para arrastar a
+folha e para os layouts animados —, e **só no grupo `(loja)`**. Conferido no
+navegador: `/login` do painel carrega zero scripts de Motion.
+
+Os tempos e curvas vivem num arquivo só, `components/loja-online/movimento.tsx`,
+com três regras: nada passa de ~450ms, sem quique, e só `transform` e `opacity`
+sempre que dá. `MotionConfig reducedMotion="user"` tira deslocamentos e escalas
+de quem pediu menos movimento no sistema; o voo nem é montado para essa pessoa, e
+o check da confirmação aparece já desenhado.
+
+**A entrada das linhas é em CSS, e não em Motion.** O cardápio vem renderizado
+do servidor, e o `initial` do Motion iria para o HTML como `opacity: 0`: o
+cardápio ficaria invisível até o JavaScript carregar — num celular de entrada,
+segundos. O `@keyframes` começa quando o estilo chega, antes da hidratação.
+
+**Três leituras do pedido, ditas antes de implementar:**
+
+- "Transição entre categorias" virou um indicador que desliza de uma categoria
+  a outra acompanhando a rolagem. A página continua uma rolagem só; trocar por
+  abas mudaria o fluxo, que o pedido mandava preservar.
+- A sacola como folha de baixo acrescenta um toque antes do checkout. O ganho é
+  conferir e ajustar sem sair do cardápio.
+- Rolagem: só o indicador de categoria e a sombra da barra quando ela descola do
+  topo. Nenhuma linha "revela" ao rolar.
+
+**Verificado no navegador, medindo:** a folha sobe de 150px a 0 em ~380ms; o item
+adicionado sai do botão, sobe 72px em arco e **pousa a 3px do ícone da sacola** —
+na primeira adição, em que a barra ainda está entrando e o destino tem de ser
+onde ela vai parar —, em 30 quadros em 470ms; tocar numa categoria distante leva
+o indicador direto até ela, sem piscar nas do meio; a linha removida da sacola
+recolhe em ~200ms; o troco abre de 46 a 96px; o endereço recolhe de 141 a 0 na
+retirada; o círculo da confirmação se desenha até ~340ms e o check até ~540ms, a
+60 quadros por segundo.
+
+**Defeitos encontrados testando:**
+
+- **A última categoria nunca ficava ativa** quando era curta: ela não alcança a
+  faixa do topo porque não sobra página para rolar. No fim da página, a última
+  vence — numa decisão só, chamada pelo observador e pela rolagem, para os dois
+  não disputarem o indicador.
+- **O negrito na categoria ativa empurrava as vizinhas** alguns pixels a cada
+  troca. Ficou só a troca de cor.
+- **Bug do recorte anterior, no checkout:** nome e telefone estavam dentro da
+  seção que some na retirada, mas são obrigatórios também para retirar. Um
+  cliente novo que escolhesse retirada via "falta preencher o telefone" sem campo
+  nenhum na tela — no teste anterior não apareceu porque o endereço vinha salvo da
+  conta. Separado em "Seus dados", sempre visível, e o endereço, que recolhe logo
+  abaixo da escolha entre entrega e retirada.
+
+As regras da sacola — somar configuração igual, ajustar quantidade, a assinatura
+que identifica uma linha — saíram da página do cardápio para
+`armazenamento.ts`, porque agora duas telas ajustam quantidade. O comportamento
+não mudou. A assinatura também passou a ser a `key` das linhas animadas: a
+posição no array muda quando uma linha acima sai, e a animação de saída rodaria
+na linha errada.
+
+O título do checkout virou "Finalizar pedido": com a folha chamada "Sua sacola",
+duas telas com o mesmo nome fariam o toque em "Continuar" parecer não ter feito
+nada.
+
+**Não verificado:** o modo "reduzir movimento" em si. O painel de navegador usado
+nos testes não simula essa preferência; a regra CSS e o código que desliga o voo
+estão lá, mas não foram vistos rodando.
+
+## 2026-09-24 — Loja: formas de pagamento em dois grupos
+
+Pedido do usuário: pagar agora, online pelo Asaas — Pix, crédito e débito —, ou
+pagar na entrega — dinheiro, e Pix, crédito e débito na maquininha.
+
+**As duas telas tinham listas diferentes.** A Configurações usava códigos
+próprios; a loja, uma lista de textos soltos; e elas já não batiam. Agora há um
+catálogo só em `loja-mock.ts` (`FORMAS_DE_PAGAMENTO`), que as duas leem.
+
+**Débito online pelo Asaas: conferido na documentação, e muda o desenho.** Eu
+supunha que o Asaas não cobrasse débito online; cobra, mas só na página da
+cobrança dele — a documentação diz que os dados de cartão de débito não podem
+ser enviados pela API, e que o cliente deve ser levado à `invoiceUrl`. O crédito
+poderia ir pela API, mas aí o número do cartão passaria pelo nosso sistema, e a
+loja entraria no escopo das regras de segurança de cartão. **Crédito e débito
+online vão os dois para a página do Asaas**, e nenhum campo de cartão existe na
+nossa tela — o teste conferiu zero.
+
+**Sem conta Asaas, o grupo online inteiro fica fora.** Antes só o Pix dependia
+dela. A loja confere de novo (`formasOferecidas`), além do painel: mostrar Pix
+online sem conta seria aceitar um pedido cujo pagamento não teria para onde ir.
+
+**O antigo "Pix na entrega" saiu.** Nele o cliente mostrava um comprovante na
+porta, e o risco de golpe era da loja. No lugar, Pix na maquininha, que confirma
+o pagamento na hora.
+
+Com pagamento online, o botão do checkout diz "Ir para o pagamento", e a tela
+avisa que nesta demonstração o pedido é registrado sem cobrança — em vez de
+fingir uma.
+
+Sete testes em `src/lib/loja-pagamentos.test.ts`, com a regra do Asaas na
+frente.
+
+**Em aberto, para o usuário e para a integração:**
+
+- **Quem leva a maquininha.** O motoboy é da central e a máquina é da loja. A
+  Configurações avisa que ela tem de ir com a entrega e voltar; como isso
+  funciona na operação é decisão de negócio.
+- **Crédito e débito online abrem a mesma página no Asaas.** Não confirmei se a
+  loja consegue oferecer só um dos dois ali.
+
+**Verificado no navegador:** o checkout (com o usuário logado) mostra os dois
+grupos com as formas certas, Pix online pré-selecionado com o aviso, o botão
+"Ir para o pagamento", e ao trocar para dinheiro o aviso fecha, o troco abre e o
+botão vira "Fazer pedido". O resumo no cabeçalho da loja lê "Online: Pix,
+crédito · Na entrega: dinheiro, Pix, débito". **A tela de Configurações não foi
+vista:** o painel exige login, e a senha quem digita é o usuário.
+
+Arquivos dos dois recortes: `apps/company-web/src/components/loja-online/`
+(`movimento.tsx`, `folha-de-baixo.tsx`, `folha-da-sacola.tsx`,
+`barra-da-sacola.tsx`, `barra-de-categorias.tsx`, `voo-para-a-sacola.tsx`,
+`numero-rolante.tsx`, `confirmacao.tsx`, `loja.module.css` — novos;
+`armazenamento.ts`, `folha-do-produto.tsx`), as três páginas de
+`(loja)/pedir/[slug]`, `(loja)/layout.tsx`, `(app)/loja/configuracoes/page.tsx`,
+`src/lib/loja-mock.ts`, `src/lib/loja-pagamentos.test.ts` (novo),
+`package.json` e `pnpm-lock.yaml`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo nos arquivos
+tocados, **173 testes** passando, `next build` compila.

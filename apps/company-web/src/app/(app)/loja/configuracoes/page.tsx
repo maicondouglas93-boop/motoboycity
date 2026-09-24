@@ -17,7 +17,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { DIAS_DA_SEMANA, LOJA_DE_EXEMPLO, type DiaFechado } from '@/lib/loja-mock';
+import {
+  DIAS_DA_SEMANA,
+  FORMAS_DE_PAGAMENTO,
+  GRUPOS_DE_PAGAMENTO,
+  LOJA_DE_EXEMPLO,
+  type DiaFechado,
+  type FormaDePagamento,
+} from '@/lib/loja-mock';
 import {
   MINIMO_PARA_BOTAO,
   MINIMO_PARA_TEXTO,
@@ -55,31 +62,6 @@ const TEMAS: Array<{ valor: TemaDaLoja; texto: string }> = [
   { valor: 'ESCURO', texto: 'Escuro' },
 ];
 
-type FormaDePagamento = 'PIX_ONLINE' | 'DINHEIRO' | 'CARTAO_ENTREGA' | 'PIX_ENTREGA';
-
-const FORMAS: Array<{ valor: FormaDePagamento; titulo: string; detalhe: string }> = [
-  {
-    valor: 'PIX_ONLINE',
-    titulo: 'Pix online, pago antes',
-    detalhe: 'O cliente paga na hora do pedido, direto na sua conta Asaas.',
-  },
-  {
-    valor: 'DINHEIRO',
-    titulo: 'Dinheiro na entrega',
-    detalhe: 'O cliente informa para quanto precisa de troco.',
-  },
-  {
-    valor: 'CARTAO_ENTREGA',
-    titulo: 'Cartão na entrega',
-    detalhe: 'Exige maquininha indo junto com o motoboy.',
-  },
-  {
-    valor: 'PIX_ENTREGA',
-    titulo: 'Pix na entrega',
-    detalhe: 'O cliente mostra o comprovante na porta. O risco de golpe é seu.',
-  },
-];
-
 export default function LojaConfiguracoesPage() {
   const [slug, setSlug] = useState('minha-loja');
   const [copiado, setCopiado] = useState(false);
@@ -93,8 +75,13 @@ export default function LojaConfiguracoesPage() {
   const [corDaMarca, setCorDaMarca] = useState('#c2410c');
   const [corDeAcao, setCorDeAcao] = useState('#16a34a');
 
-  const [asaasConfigurado] = useState(false);
-  const [formas, setFormas] = useState<FormaDePagamento[]>(['DINHEIRO']);
+  const asaasConfigurado = LOJA_DE_EXEMPLO.asaasConfigurado;
+  const [formas, setFormas] = useState<FormaDePagamento[]>(LOJA_DE_EXEMPLO.pagamentos);
+  const efetivas = formas.filter(
+    (valor) =>
+      asaasConfigurado ||
+      FORMAS_DE_PAGAMENTO.find((forma) => forma.valor === valor)?.grupo !== 'ONLINE',
+  );
   const [preparo, setPreparo] = useState('20');
   const [entradaAutomatica, setEntradaAutomatica] = useState(true);
   const [pausada, setPausada] = useState(false);
@@ -429,47 +416,80 @@ export default function LojaConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      {/* 3. Formas de pagamento, com as regras do plano valendo na tela. */}
+      {/* 3. Formas de pagamento, em dois grupos: pagar agora ou pagar na
+          entrega. A mesma lista que o checkout mostra ao cliente. */}
       <Card>
         <CardHeader>
           <CardTitle>Formas de pagamento</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {FORMAS.map((forma) => {
-            const exigeAsaas = forma.valor === 'PIX_ONLINE';
-            const bloqueada = exigeAsaas && !asaasConfigurado;
-            const marcada = formas.includes(forma.valor);
-            const ultima = marcada && formas.length === 1;
+        <CardContent className="space-y-5">
+          {(['ONLINE', 'ENTREGA'] as const).map((grupo) => {
+            const doGrupo = FORMAS_DE_PAGAMENTO.filter((forma) => forma.grupo === grupo);
+            // O grupo online inteiro depende da conta Asaas: sem ela, não há
+            // para onde o dinheiro ir. Um aviso para o grupo, e não um por forma.
+            const grupoBloqueado = grupo === 'ONLINE' && !asaasConfigurado;
 
             return (
-              <label
-                key={forma.valor}
-                className={`flex items-start gap-2.5 rounded-lg border p-3 text-sm ${
-                  bloqueada ? 'opacity-60' : 'cursor-pointer hover:bg-muted/50'
-                }`}
-              >
-                <Checkbox
-                  className="mt-0.5"
-                  checked={marcada}
-                  disabled={bloqueada || ultima}
-                  onCheckedChange={() => alternarForma(forma.valor)}
-                />
-                <span>
-                  {forma.titulo}
-                  <span className="block text-xs text-muted-foreground">{forma.detalhe}</span>
-                  {bloqueada && (
-                    <span className="mt-1 block text-xs text-amber-700">
-                      Cadastre sua conta Asaas abaixo para poder oferecer esta forma.
-                    </span>
-                  )}
-                  {ultima && (
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      Pelo menos uma forma precisa ficar marcada, senão o cliente não consegue
-                      fechar o pedido.
-                    </span>
-                  )}
-                </span>
-              </label>
+              <fieldset key={grupo} className="space-y-2">
+                <legend className="mb-1">
+                  <span className="block text-sm font-semibold">
+                    {GRUPOS_DE_PAGAMENTO[grupo].titulo}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {GRUPOS_DE_PAGAMENTO[grupo].detalhe}
+                  </span>
+                </legend>
+
+                {grupoBloqueado && (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+                    Cadastre sua conta Asaas abaixo para poder receber online.
+                  </p>
+                )}
+
+                {doGrupo.map((forma) => {
+                  const marcada = formas.includes(forma.valor);
+                  // Conta só as formas que valem de verdade: online marcada com
+                  // o Asaas desligado não chega ao cliente, e contá-la deixaria
+                  // desmarcar a última forma que ele de fato enxerga.
+                  const ultima = marcada && !grupoBloqueado && efetivas.length === 1;
+
+                  return (
+                    <label
+                      key={forma.valor}
+                      className={`flex items-start gap-2.5 rounded-lg border p-3 text-sm ${
+                        grupoBloqueado ? 'opacity-60' : 'cursor-pointer hover:bg-muted/50'
+                      }`}
+                    >
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={marcada && !grupoBloqueado}
+                        disabled={grupoBloqueado || ultima}
+                        onCheckedChange={() => alternarForma(forma.valor)}
+                      />
+                      <span>
+                        {forma.titulo}
+                        <span className="block text-xs text-muted-foreground">{forma.detalhe}</span>
+                        {ultima && (
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            Pelo menos uma forma precisa ficar marcada, senão o cliente não consegue
+                            fechar o pedido.
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
+
+                {/* A maquininha é da loja, e o motoboy é da central. Quem marca
+                    essas opções precisa saber que a máquina sai com a entrega —
+                    e tem que voltar. */}
+                {grupo === 'ENTREGA' && formas.some((forma) => forma.endsWith('_MAQUININHA')) && (
+                  <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+                    As opções na maquininha exigem que a sua máquina vá com o motoboy até o cliente
+                    — e volte com ele para a loja.
+                  </p>
+                )}
+              </fieldset>
             );
           })}
         </CardContent>
@@ -487,10 +507,19 @@ export default function LojaConfiguracoesPage() {
             entregas na fatura, como hoje — o dinheiro da venda nunca passa por ela.
           </p>
 
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-            Nenhuma conta cadastrada. Sem ela, o Pix online fica indisponível e você recebe na
-            entrega, em dinheiro ou maquininha.
-          </p>
+          {asaasConfigurado ? (
+            /* A chave nunca volta para a tela depois de salva: aparece só o
+               ambiente e o final, para a loja reconhecer qual conta é. */
+            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
+              Conta cadastrada · ambiente Sandbox · chave terminando em ••••a1b2. Para trocar, cole
+              uma chave nova abaixo.
+            </p>
+          ) : (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+              Nenhuma conta cadastrada. Sem ela, nenhuma forma online fica disponível e você recebe
+              só na entrega, em dinheiro ou maquininha.
+            </p>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">

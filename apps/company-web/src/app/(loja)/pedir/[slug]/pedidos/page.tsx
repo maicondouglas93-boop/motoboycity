@@ -3,15 +3,16 @@
 import { Suspense, use } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Check, ChevronLeft, Clock, MapPin } from 'lucide-react';
+import { ChevronLeft, Clock, MapPin } from 'lucide-react';
 import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
-import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
+import { moeda, paletaDoTema } from '@/components/loja-online/paleta';
 import {
   useHidratado,
   usePedidos,
   type PedidoGuardado,
 } from '@/components/loja-online/armazenamento';
 import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
+import { ConfirmacaoDoPedido } from '@/components/loja-online/confirmacao';
 
 /**
  * Onde o cliente responde sozinho a pergunta que ele faria à loja no WhatsApp:
@@ -97,15 +98,7 @@ function Conteudo({ slug }: { slug: string }) {
               className="border-b px-4 py-4"
               style={{ borderColor: paleta.linha }}
             >
-              {recemFeito && (
-                <p
-                  className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                  style={{ backgroundColor: loja.corDeAcao, color: textoSobre(loja.corDeAcao) }}
-                >
-                  <Check className="size-4 shrink-0" aria-hidden="true" />
-                  Pedido enviado para a loja.
-                </p>
-              )}
+              {recemFeito && <ConfirmacaoDoPedido cor={loja.corDeAcao} />}
 
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="font-semibold">Pedido #{pedido.numero}</span>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
 import type { GrupoDeExemplo, ProdutoDeExemplo, TamanhoDeExemplo } from '@/lib/loja-mock';
+import { FolhaDeBaixo } from './folha-de-baixo';
 import { moeda, textoSobre, type Paleta } from './paleta';
 
 /**
@@ -10,6 +11,9 @@ import { moeda, textoSobre, type Paleta } from './paleta';
  *
  * A loja é aberta no celular, com uma mão. O que o polegar alcança é a parte
  * de baixo da tela, e é lá que ficam a quantidade e o botão de adicionar.
+ *
+ * O movimento (subir, descer, arrastar para fechar) vem de `FolhaDeBaixo`,
+ * compartilhado com a sacola. Este componente só cuida do conteúdo.
  */
 
 export interface ItemEscolhido {
@@ -49,7 +53,12 @@ export function FolhaDoProduto({
   /** Loja fechada: dá para olhar o cardápio, não dá para pedir. */
   aberta: boolean;
   onFechar: () => void;
-  onAdicionar: (item: ItemEscolhido) => void;
+  /**
+   * `origem` é onde estava o botão no instante do toque, para a animação do
+   * item voando até a sacola saber de onde partir. Não interfere no que entra
+   * na sacola — é só a coordenada de uma animação.
+   */
+  onAdicionar: (item: ItemEscolhido, origem: DOMRect | null) => void;
 }) {
   const disponiveis = produto.tamanhos.filter((tamanho) => tamanho.disponivel);
   const [tamanhoId, setTamanhoId] = useState<string | null>(disponiveis[0]?.id ?? null);
@@ -90,22 +99,13 @@ export function FolhaDoProduto({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <button
-        type="button"
-        aria-label="Fechar"
-        onClick={onFechar}
-        className="absolute inset-0 bg-black/50"
-      />
-
-      <div
-        role="dialog"
-        aria-label={produto.nome}
-        className="relative flex max-h-[88vh] w-full max-w-lg flex-col rounded-t-2xl"
-        style={{ backgroundColor: paleta.fundo, color: paleta.texto }}
-      >
+    <FolhaDeBaixo
+      rotulo={produto.nome}
+      paleta={paleta}
+      onFechar={onFechar}
+      cabecalho={
         <div
-          className="flex items-start gap-3 border-b px-4 py-3"
+          className="flex items-start gap-3 border-b px-4 pt-1 pb-3"
           style={{ borderColor: paleta.linha }}
         >
           <div className="min-w-0 flex-1">
@@ -126,89 +126,8 @@ export function FolhaDoProduto({
             <X className="size-5" />
           </button>
         </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {disponiveis.length > 0 && (
-            <section>
-              <SecaoTitulo paleta={paleta} titulo="Tamanho" regra="Escolha 1" obrigatorio />
-              {produto.tamanhos.map((item) => (
-                <label
-                  key={item.id}
-                  className="flex items-center gap-3 border-b px-4 py-3 text-sm"
-                  style={{
-                    borderColor: paleta.linha,
-                    opacity: item.disponivel ? 1 : 0.45,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="tamanho"
-                    className="size-4 shrink-0"
-                    style={{ accentColor: corDeAcao }}
-                    checked={tamanhoId === item.id}
-                    disabled={!item.disponivel}
-                    onChange={() => setTamanhoId(item.id)}
-                  />
-                  <span className="flex-1">{item.nome}</span>
-                  <span style={{ color: paleta.suave }}>
-                    {item.disponivel ? moeda(item.preco) : 'Indisponível'}
-                  </span>
-                </label>
-              ))}
-            </section>
-          )}
-
-          {produto.grupos.map((grupo) => {
-            const regra = regraDoGrupo(grupo);
-            const agora = marcadas[grupo.id] ?? [];
-            const cheio = grupo.maximo !== null && grupo.maximo > 1 && agora.length >= grupo.maximo;
-
-            return (
-              <section key={grupo.id}>
-                <SecaoTitulo
-                  paleta={paleta}
-                  titulo={grupo.nome}
-                  regra={regra.texto}
-                  obrigatorio={regra.obrigatorio}
-                />
-                {grupo.escolhas.map((escolha) => {
-                  const marcada = agora.includes(escolha.id);
-                  const travada = !escolha.disponivel || (cheio && !marcada);
-
-                  return (
-                    <label
-                      key={escolha.id}
-                      className="flex items-center gap-3 border-b px-4 py-3 text-sm"
-                      style={{
-                        borderColor: paleta.linha,
-                        opacity: escolha.disponivel ? 1 : 0.45,
-                      }}
-                    >
-                      <input
-                        type={grupo.maximo === 1 ? 'radio' : 'checkbox'}
-                        name={grupo.maximo === 1 ? `grupo-${grupo.id}` : undefined}
-                        className="size-4 shrink-0"
-                        style={{ accentColor: corDeAcao }}
-                        checked={marcada}
-                        disabled={travada}
-                        onChange={() => alternar(grupo, escolha.id)}
-                      />
-                      <span className="flex-1">{escolha.nome}</span>
-                      <span style={{ color: paleta.suave }}>
-                        {!escolha.disponivel
-                          ? 'Indisponível'
-                          : escolha.preco > 0
-                            ? `+ ${moeda(escolha.preco)}`
-                            : ''}
-                      </span>
-                    </label>
-                  );
-                })}
-              </section>
-            );
-          })}
-        </div>
-
+      }
+      rodape={
         <div className="border-t px-4 py-3" style={{ borderColor: paleta.linha }}>
           {faltando.length > 0 && (
             <p className="mb-2 text-xs" style={{ color: paleta.suave }}>
@@ -244,15 +163,18 @@ export function FolhaDoProduto({
             <button
               type="button"
               disabled={!aberta || faltando.length > 0}
-              onClick={() =>
-                onAdicionar({
-                  produtoId: produto.id,
-                  nome: produto.nome,
-                  tamanho: tamanho?.nome ?? null,
-                  escolhas: escolhidas.map((escolha) => escolha.nome),
-                  quantidade,
-                  unitario,
-                })
+              onClick={(evento) =>
+                onAdicionar(
+                  {
+                    produtoId: produto.id,
+                    nome: produto.nome,
+                    tamanho: tamanho?.nome ?? null,
+                    escolhas: escolhidas.map((escolha) => escolha.nome),
+                    quantidade,
+                    unitario,
+                  },
+                  evento.currentTarget.getBoundingClientRect(),
+                )
               }
               className="flex h-12 flex-1 items-center justify-between rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
               style={{ backgroundColor: corDeAcao, color: textoSobre(corDeAcao) }}
@@ -262,8 +184,88 @@ export function FolhaDoProduto({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      }
+    >
+      {disponiveis.length > 0 && (
+        <section>
+          <SecaoTitulo paleta={paleta} titulo="Tamanho" regra="Escolha 1" obrigatorio />
+          {produto.tamanhos.map((item) => (
+            <label
+              key={item.id}
+              className="flex items-center gap-3 border-b px-4 py-3 text-sm"
+              style={{
+                borderColor: paleta.linha,
+                opacity: item.disponivel ? 1 : 0.45,
+              }}
+            >
+              <input
+                type="radio"
+                name="tamanho"
+                className="size-4 shrink-0"
+                style={{ accentColor: corDeAcao }}
+                checked={tamanhoId === item.id}
+                disabled={!item.disponivel}
+                onChange={() => setTamanhoId(item.id)}
+              />
+              <span className="flex-1">{item.nome}</span>
+              <span style={{ color: paleta.suave }}>
+                {item.disponivel ? moeda(item.preco) : 'Indisponível'}
+              </span>
+            </label>
+          ))}
+        </section>
+      )}
+
+      {produto.grupos.map((grupo) => {
+        const regra = regraDoGrupo(grupo);
+        const agora = marcadas[grupo.id] ?? [];
+        const cheio = grupo.maximo !== null && grupo.maximo > 1 && agora.length >= grupo.maximo;
+
+        return (
+          <section key={grupo.id}>
+            <SecaoTitulo
+              paleta={paleta}
+              titulo={grupo.nome}
+              regra={regra.texto}
+              obrigatorio={regra.obrigatorio}
+            />
+            {grupo.escolhas.map((escolha) => {
+              const marcada = agora.includes(escolha.id);
+              const travada = !escolha.disponivel || (cheio && !marcada);
+
+              return (
+                <label
+                  key={escolha.id}
+                  className="flex items-center gap-3 border-b px-4 py-3 text-sm"
+                  style={{
+                    borderColor: paleta.linha,
+                    opacity: escolha.disponivel ? 1 : 0.45,
+                  }}
+                >
+                  <input
+                    type={grupo.maximo === 1 ? 'radio' : 'checkbox'}
+                    name={grupo.maximo === 1 ? `grupo-${grupo.id}` : undefined}
+                    className="size-4 shrink-0"
+                    style={{ accentColor: corDeAcao }}
+                    checked={marcada}
+                    disabled={travada}
+                    onChange={() => alternar(grupo, escolha.id)}
+                  />
+                  <span className="flex-1">{escolha.nome}</span>
+                  <span style={{ color: paleta.suave }}>
+                    {!escolha.disponivel
+                      ? 'Indisponível'
+                      : escolha.preco > 0
+                        ? `+ ${moeda(escolha.preco)}`
+                        : ''}
+                  </span>
+                </label>
+              );
+            })}
+          </section>
+        );
+      })}
+    </FolhaDeBaixo>
   );
 }
 

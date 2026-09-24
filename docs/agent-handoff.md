@@ -588,6 +588,12 @@ existe instância de **desenvolvimento**; produção não está configurada, e q
 estiver, as chaves vão no Render como variáveis de ambiente — nunca no
 repositório, que é público.
 
+A biblioteca de animação da loja (`motion`) segue o mesmo recorte: é carregada
+pelo `LazyMotion` no layout de `(loja)` e não chega ao painel — conferido, zero
+scripts dela em `/login`. Tempos e curvas ficam em
+`components/loja-online/movimento.tsx`; animação nova da loja deve tirá-los de
+lá, e não de números soltos.
+
 O plano do que falta — backend inteiro, PWA do cliente e os pedidos de
 2026-09-23 — está em `docs/plano-loja-online.md`, que é a referência atual da
 loja neste repositório.
