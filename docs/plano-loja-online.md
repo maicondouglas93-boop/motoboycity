@@ -201,7 +201,10 @@ entrada, indicador de categoria que acompanha a rolagem, folhas que sobem de
 baixo, o item voando até a sacola e a confirmação desenhada. Vocabulário em
 `components/loja-online/movimento.tsx`.
 
-Falta: manifest, service worker e instalação — sem eles é um site, não um PWA.
+**É um app instalável** (2026-09-24): manifest por loja, ícones com a cor da
+marca, barra do navegador na cor da marca e service worker escopado à loja. Não
+verificado ainda: o comportamento sem internet e a instalação em aparelho real.
+
 Falta o Web Push para avisar a loja de pedido novo (o que existe é FCM para o
 app Android do motoboy). E falta o backend inteiro: hoje o pedido termina no
 `localStorage` e a loja nunca fica sabendo dele.

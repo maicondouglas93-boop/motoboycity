@@ -14574,3 +14574,59 @@ Arquivos dos dois recortes: `apps/company-web/src/components/loja-online/`
 
 Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo nos arquivos
 tocados, **173 testes** passando, `next build` compila.
+
+## 2026-09-24 — Loja: vira um app instalável
+
+A loja do cliente era um site. O plano marcava manifest, service worker e
+instalação como o que faltava para ser PWA — e a tela de Configurações já
+prometia algo falso: que a cor da marca viraria a barra do navegador e a tela de
+abertura quando o cliente instalasse a loja.
+
+**Manifest por loja** (`/pedir/{slug}/manifest.webmanifest`), com nome, cor da
+marca, fundo do tema e `id` próprio: instalar uma segunda loja não substitui a
+primeira no celular. **Ícones gerados** (`/pedir/{slug}/icone/{180,192,512}`)
+com a inicial na cor da marca; qualquer outro tamanho dá 404, para o endereço
+não gerar imagem do tamanho que se pedir. **Barra do navegador na cor da
+marca**, pelo `theme-color`.
+
+**Título da aba corrigido.** A loja do cliente herdava o do layout raiz,
+"MOTOboyCity — Empresa" — o cliente via o nome do painel da central onde deveria
+ver o da loja. O layout novo de `pedir/[slug]` resolve isso junto com o resto
+dos metadados, inclusive as marcas que o iPhone exige à parte do manifest.
+
+**Service worker** (`public/loja-sw.js`), com cuidado de sobra, porque o mesmo
+app serve o painel de produção:
+
+- guarda os arquivos do Next com hash e a última cópia de cada página DESTA
+  loja; login do Clerk, pagamento, API e outras lojas passam direto;
+- o escopo é `/pedir/{slug}` sem barra no fim, porque o Next redireciona
+  `/pedir/acai/` para `/pedir/acai` e a barra deixaria a própria página fora do
+  app. O preço é que o escopo casa também com `/pedir/acai-do-centro`, que é
+  outra loja — por isso toda requisição confere o caminho exato antes de ser
+  tocada;
+- registrado em qualquer escopo que não seja `/pedir/<slug>` — a raiz, que é o
+  painel —, ele se desregistra na primeira ativação;
+- só é registrado em produção: em desenvolvimento serviria código antigo depois
+  de cada edição.
+
+**Verificado num build de produção local** (`next start`, porta 3011): o worker
+registra com escopo `/pedir/minha-loja`, ativa e controla a página, e é o único
+registro do site; **o painel não tem registro nenhum**; a página de
+`minha-loja-2` não foi guardada; o registro forçado na raiz **se desfez
+sozinho**; depois de recarregar, a cópia guardada contém o cardápio. O
+registro e o cache do teste foram removidos no fim.
+
+**Não verificado:** o comportamento sem internet — a cópia guardada ou o aviso
+"Sem conexão" —, porque o navegador dos testes não simula a rede caindo; e a
+instalação em aparelho de verdade. O teste real é num celular em modo avião.
+
+A letra do ícone sai no peso regular: o gerador de imagem do Next só traz esse
+peso da fonte. Quando a loja enviar logo, é ele que deve entrar.
+
+Arquivos: `apps/company-web/public/loja-sw.js`,
+`src/app/(loja)/pedir/[slug]/layout.tsx`, `manifest.webmanifest/route.ts` e
+`icone/[tamanho]/route.tsx`, `src/components/loja-online/registro-do-app.tsx`
+— todos novos.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 173 testes
+passando, `next build` compila com as rotas do manifest e dos ícones.

@@ -594,6 +594,24 @@ scripts dela em `/login`. Tempos e curvas ficam em
 `components/loja-online/movimento.tsx`; animação nova da loja deve tirá-los de
 lá, e não de números soltos.
 
+### Service worker da loja — leia antes de estranhar cache
+
+`apps/company-web/public/loja-sw.js`, registrado por
+`components/loja-online/registro-do-app.tsx` **só em produção** e com escopo
+`/pedir/<slug>`. Guarda os arquivos `/_next/static/` e a última cópia das páginas
+daquela loja; todo o resto passa direto.
+
+- **Nunca registre esse arquivo com escopo mais largo.** Ele mora na raiz porque
+  o app é o mesmo do painel, e na raiz controlaria o painel de produção. Ele se
+  desregistra sozinho se isso acontecer, mas a primeira defesa é não fazer.
+- O escopo não tem barra no fim, então casa também com lojas cujo slug começa
+  igual; o `fetch` confere o caminho exato. Mexeu na lógica de rotas? Mantenha
+  essa conferência.
+- Mudou a estratégia de cache? Troque `VERSAO` no topo do arquivo: a ativação
+  apaga os caches `loja-*` de outras versões.
+- "Minha mudança na loja não aparece" num build de produção: DevTools →
+  Application → Service workers → Unregister, e recarregar.
+
 O plano do que falta — backend inteiro, PWA do cliente e os pedidos de
 2026-09-23 — está em `docs/plano-loja-online.md`, que é a referência atual da
 loja neste repositório.
