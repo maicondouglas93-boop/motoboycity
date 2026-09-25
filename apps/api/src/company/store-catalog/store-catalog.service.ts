@@ -6,7 +6,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { StoreCatalog, StoreCategory, StoreProduct } from '@motoboycity/types';
+import type {
+  PublicStoreProduct,
+  StoreCatalog,
+  StoreCategory,
+  StoreProduct,
+} from '@motoboycity/types';
 import {
   storeProductIssues,
   type ReorderStoreCategoriesPayload,
@@ -144,6 +149,46 @@ export class StoreCatalogService {
     return {
       categories: categorias.map(({ id, name }) => ({ id, name })),
       products: ordenados.map(paraProduto),
+    };
+  }
+
+  /**
+   * O cardápio que o cliente vê: só o que dá para comprar, e só as seções com
+   * algo à venda, na ordem da loja.
+   *
+   * Publicado já é comprável — o servidor recusa publicar o que não é —, mas a
+   * regra pode ficar mais exigente depois de o produto ir ao ar, e aí ele sai
+   * daqui antes de alguém tentar pedir. Sem empresa no parâmetro de fora: quem
+   * chama já resolveu a loja pelo link.
+   */
+  async publicCatalog(
+    companyId: string,
+  ): Promise<{ categories: StoreCategory[]; products: PublicStoreProduct[] }> {
+    const [categorias, produtos] = await Promise.all([
+      this.prisma.storeCategory.findMany({ where: { companyId }, orderBy: ORDEM }),
+      this.prisma.storeProduct.findMany({
+        where: { companyId, status: 'PUBLISHED', categoryId: { not: null } },
+        include: PRODUTO_COMPLETO,
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      }),
+    ]);
+
+    const ordemDaCategoria = new Map(categorias.map((categoria, indice) => [categoria.id, indice]));
+    const vendaveis = produtos
+      .map(paraProduto)
+      .filter((produto) => !storeProductIssues(produto).some((pendencia) => pendencia.blocking))
+      .sort(
+        (a, b) =>
+          (ordemDaCategoria.get(a.categoryId ?? '') ?? categorias.length) -
+          (ordemDaCategoria.get(b.categoryId ?? '') ?? categorias.length),
+      );
+    const comProduto = new Set(vendaveis.map((produto) => produto.categoryId));
+
+    return {
+      categories: categorias
+        .filter((categoria) => comProduto.has(categoria.id))
+        .map(({ id, name }) => ({ id, name })),
+      products: vendaveis.map(({ status: _status, updatedAt: _editado, ...publico }) => publico),
     };
   }
 

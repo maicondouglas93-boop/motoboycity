@@ -557,9 +557,15 @@ Configurações, e o status da loja no alto da barra lateral.
 **Produtos, Organizar, Cadastrar e Editar gravam na API desde 2026-09-25**
 (rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`).
 As demais são demonstração, com dados de `apps/company-web/src/lib/loja-mock.ts`
-e um aviso na tela. **A página do cliente (`/pedir/[slug]`) ainda mostra o
-cardápio de exemplo** — não existe o catálogo público por `slug` —, e a lista de
-Produtos diz isso à loja. O que quem mexer no catálogo do painel precisa saber:
+e um aviso na tela. **O link da loja também grava** (Configurações → "Link da
+sua loja"), e `/pedir/<link>` abre a loja de verdade como **vitrine**: o
+cardápio publicado, sem pedido, sem horário, taxa ou pagamento (ainda não estão
+no banco). A página é de servidor (`lib/loja-publica.ts` busca
+`GET /public/stores/:slug`); link antigo redireciona, com 307 de propósito — a
+loja pode voltar a um link que já foi dela. Empresa pendente ou suspensa
+responde "Loja não encontrada". **`/pedir/minha-loja` é a demonstração**, com o
+fluxo inteiro no `localStorage`; o link é reservado. O que quem mexer no
+catálogo do painel precisa saber:
 
 - Uma consulta só para as quatro telas: `useCatalogo`, em
   `components/loja/catalogo.ts`.
@@ -591,7 +597,8 @@ aberta no mesmo navegador, e aceitar um pedido muda o "Meus pedidos" dele. É
 demonstração, e não sincronização — nada sai do aparelho. Quem integrar apaga
 `loja-demo.ts` junto com `loja-mock.ts`; as regras de `lib/loja-horario.ts`,
 `loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts` ficam, porque o
-servidor vai precisar delas. Configurações continua sem salvar nada.
+servidor vai precisar delas. Em Configurações, só o link grava; o resto da
+tela é demonstração.
 
 **Quem faz a entrega e a comanda** (2026-09-25, ainda na demonstração). A
 loja escolhe em Tipos de pedido se entrega pelo MOTOboyCity ou com entregador

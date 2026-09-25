@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertCircle, Check, Copy, ImagePlus, Link2, MapPin, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, ImagePlus, MapPin, Plus, Trash2 } from 'lucide-react';
+import { LinkDaLoja } from '@/components/loja/link-da-loja';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -22,8 +23,6 @@ import {
   textoSobre,
 } from '@/lib/contraste';
 
-const DOMINIO = 'pedidos.motoboycity.com.br';
-
 interface LinhaDeBairro {
   id: string;
   nome: string;
@@ -40,9 +39,6 @@ const TEMAS: Array<{ valor: TemaDaLoja; texto: string }> = [
 ];
 
 export default function LojaConfiguracoesPage() {
-  const [slug, setSlug] = useState('minha-loja');
-  const [copiado, setCopiado] = useState(false);
-
   const [tema, setTema] = useState<TemaDaLoja>('CLARO');
   /*
    * O padrão tem que PASSAR na própria verificação da tela. O laranja anterior
@@ -74,8 +70,6 @@ export default function LojaConfiguracoesPage() {
       atual.map((bairro) => (bairro.id === id ? { ...bairro, [campo]: valor } : bairro)),
     );
   }
-
-  const url = `${DOMINIO}/${slug}`;
 
   function alternarForma(valor: FormaDePagamento) {
     setFormas((atual) =>
@@ -119,57 +113,14 @@ export default function LojaConfiguracoesPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          Tela de demonstração. Nada é salvo — serve para aprovar o desenho antes de ligar ao
-          sistema.
+          O link já é salvo no sistema. Identidade visual, pagamento e área de entrega, abaixo,
+          ainda são demonstração: nada deles é salvo.
         </CardContent>
       </Card>
 
-      {/* 1. O link é o que a loja divulga. É o campo mais consequente da tela. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Link da sua loja</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="slug">Endereço</Label>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">{DOMINIO}/</span>
-              <Input
-                id="slug"
-                value={slug}
-                onChange={(event) => setSlug(event.target.value.toLowerCase())}
-                autoCapitalize="none"
-                className="max-w-56"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  navigator.clipboard
-                    ?.writeText(`https://${url}`)
-                    .then(() => setCopiado(true))
-                    .catch(() => setCopiado(false));
-                }}
-              >
-                {copiado ? <Check className="size-4" /> : <Copy className="size-4" />}
-                {copiado ? 'Copiado' : 'Copiar'}
-              </Button>
-            </div>
-          </div>
-
-          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-            <Link2 className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />É este endereço que
-            você manda no WhatsApp, põe no QR da mesa e na bio do Instagram.
-          </p>
-
-          {/* A lição que o código da central já deu: slug sem troca vira papel
-              morto quando a loja muda de nome. */}
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-            Se você trocar o endereço, o antigo continua funcionando e redireciona para o novo — seu
-            panfleto e seu QR não deixam de valer.
-          </p>
-        </CardContent>
-      </Card>
+      {/* 1. O link é o que a loja divulga. É o campo mais consequente da tela,
+          e o primeiro que grava no sistema. */}
+      <LinkDaLoja />
 
       {/* 2. Identidade visual: duas cores livres, o resto calculado. */}
       <Card>

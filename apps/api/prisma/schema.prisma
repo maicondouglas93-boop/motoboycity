@@ -486,6 +486,8 @@ model Company {
   pageProtections CompanyPageProtection[]
   storeCategories StoreCategory[]
   storeProducts   StoreProduct[]
+  storeSettings   StoreSettings?
+  storeSlugs      StoreSlug[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2023,4 +2025,37 @@ model StoreOption {
 
   @@index([groupId, position])
   @@map("store_options")
+}
+
+/// A loja online da empresa: por enquanto, o link e o nome que o cliente vê.
+/// Nasce no primeiro "salvar" do link, nas Configurações da loja; antes disso a
+/// empresa não tem loja aberta ao público.
+model StoreSettings {
+  companyId String @id
+  /// O link atual. Os anteriores ficam em `StoreSlug` e redirecionam para ele.
+  slug      String @unique @db.VarChar(40)
+  name      String @db.VarChar(80)
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  current StoreSlug @relation("LinkAtual", fields: [slug], references: [slug], onDelete: NoAction)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("store_settings")
+}
+
+/// Todo link que uma loja já usou. A chave é o próprio endereço, e ele tem um
+/// dono só, para sempre: trocar de link não libera o antigo para outra loja —
+/// senão o QR impresso da primeira passaria a abrir a segunda.
+model StoreSlug {
+  slug      String   @id @db.VarChar(40)
+  companyId String
+  createdAt DateTime @default(now())
+
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  currentOf StoreSettings? @relation("LinkAtual")
+
+  @@index([companyId])
+  @@map("store_slugs")
 }

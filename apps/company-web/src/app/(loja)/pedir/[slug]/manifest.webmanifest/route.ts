@@ -1,5 +1,5 @@
 import { fundoDoTema } from '@/lib/contraste';
-import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
+import { identidadeDoLink } from '@/lib/loja-publica';
 
 /**
  * O manifest de UMA loja — o que o celular usa quando o cliente a instala.
@@ -12,12 +12,12 @@ import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
  * `id` distinto por loja é o que impede o celular de achar que instalar a
  * segunda loja é atualizar a primeira.
  *
- * Nesta demonstração toda loja responde com os dados de exemplo; com backend,
- * a loja vem do `slug`.
+ * O nome vem da loja do link; a cor, por enquanto, é a de exemplo.
  */
 export async function GET(_pedido: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const loja = LOJA_DE_EXEMPLO;
+  const loja = await identidadeDoLink(slug);
+  if (!loja) return new Response('Loja não encontrada', { status: 404 });
   const base = `/pedir/${slug}`;
 
   const manifest = {

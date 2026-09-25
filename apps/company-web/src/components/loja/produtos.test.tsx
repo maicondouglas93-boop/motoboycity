@@ -81,9 +81,9 @@ describe('Produtos', () => {
     );
   });
 
-  it('diz que a página do cliente ainda não usa o cadastro', async () => {
+  it('diz que a página do cliente mostra o cardápio, mas ainda não recebe pedido', async () => {
     renderizar({ categories: [LANCHES], products: [produto({ id: 'X-Burger' })] });
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalled());
-    expect(screen.getByText(/ainda mostra o cardápio de exemplo/)).toBeInTheDocument();
+    expect(screen.getByText(/A página ainda não recebe pedidos/)).toBeInTheDocument();
   });
 });

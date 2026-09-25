@@ -148,12 +148,12 @@ export default function LojaProdutosPage() {
         </div>
       </header>
 
-      {/* O cadastro é de verdade; a página do cliente ainda não. Ver AGENTS.md,
-          regra 8: nada de apresentar como integrado o que não está. */}
+      {/* A página do cliente mostra o cardápio, mas ainda não recebe pedido. Ver
+          AGENTS.md, regra 8: nada de apresentar como integrado o que não está. */}
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          O cadastro fica salvo no sistema. A página de pedidos que o cliente abre ainda mostra o
-          cardápio de exemplo — ela passa a usar estes produtos numa próxima etapa.
+          Os produtos publicados aparecem na página da sua loja, no link que você cria em
+          Configurações. A página ainda não recebe pedidos.
         </CardContent>
       </Card>
 

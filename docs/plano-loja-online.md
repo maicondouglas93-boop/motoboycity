@@ -41,17 +41,22 @@ são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
 rotas `/company/store/*`, e os contratos em `packages/*`
 (`store-catalog.schema.ts`, `store-catalog.ts`, `company-store-catalog.ts`). A
 regra de "dá para publicar?" (`storeProductIssues`) mora no pacote de
-validação, para o painel e o servidor não discordarem. **A página do cliente
-ainda lê o cardápio de exemplo**: o que se cadastra no painel só aparece para o
-cliente quando existir o catálogo público por `slug` — e a lista de Produtos
-avisa isso.
+validação, para o painel e o servidor não discordarem.
+
+**O link da loja e a vitrine** (2026-09-25): a loja cria o link em
+Configurações (`store_settings` e `store_slugs`, migration
+`20260925190000_loja_link`), e `/pedir/<link>` mostra o cardápio publicado,
+pela rota pública `GET /public/stores/:slug`. É **vitrine**: sem pedido, e sem
+horário, taxa ou pagamento, que ainda não estão no banco. Link antigo leva ao
+atual; empresa pendente ou suspensa não aparece. `/pedir/minha-loja` continua
+sendo a demonstração inteira, com os dados de exemplo.
 
 A foto do produto sobe pelo painel desde 2026-09-25, para o ImageKit, como o
 avatar.
 
-Não existe ainda: a configuração da loja no banco (link, identidade, horário,
-tipos de pedido, avisos), o pedido da loja, o catálogo público por `slug` e o
-PWA ligado à API.
+Não existe ainda: o resto da configuração da loja no banco (identidade,
+horário, tipos de pedido, avisos, pagamento, bairros), o pedido da loja e o
+checkout ligado à API.
 
 ## Decisões já tomadas
 
@@ -292,8 +297,9 @@ validação e no cadastro de clientes do painel.
 3. Ligar as telas do painel que já existem — ~~Produtos e Organizar~~, feito
    em 2026-09-25. Faltam as que dependem da configuração da loja e do pedido no
    banco; **apagar** o `loja-mock.ts` quando a última tela deixar de usá-lo.
-4. O PWA do cliente: catálogo, carrinho, checkout (com telefone e endereço
-   estruturado, por causa do item 1).
+4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
+   carrinho, checkout (com telefone e endereço estruturado, por causa do item
+   1).
 5. Pedido da loja virando entrega, com o aceite do item 2 — só para a loja que
    entrega pelo MOTOboyCity (decisão 15): as etapas até "Pronto" são do pedido;
    "Saiu para entrega" e "Entregue" vêm da corrida.

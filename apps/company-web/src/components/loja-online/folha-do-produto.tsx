@@ -44,6 +44,7 @@ export function FolhaDoProduto({
   paleta,
   corDeAcao,
   aberta,
+  rotuloFechada = 'Loja fechada',
   onFechar,
   onAdicionar,
 }: {
@@ -52,6 +53,8 @@ export function FolhaDoProduto({
   corDeAcao: string;
   /** Loja fechada: dá para olhar o cardápio, não dá para pedir. */
   aberta: boolean;
+  /** O que o botão diz quando não dá para pedir. */
+  rotuloFechada?: string;
   onFechar: () => void;
   /**
    * `origem` é onde estava o botão no instante do toque, para a animação do
@@ -179,7 +182,7 @@ export function FolhaDoProduto({
               className="flex h-12 flex-1 items-center justify-between rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
               style={{ backgroundColor: corDeAcao, color: textoSobre(corDeAcao) }}
             >
-              <span>{aberta ? 'Adicionar' : 'Loja fechada'}</span>
+              <span>{aberta ? 'Adicionar' : rotuloFechada}</span>
               <span>{moeda(unitario * quantidade)}</span>
             </button>
           </div>

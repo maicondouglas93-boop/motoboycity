@@ -33,6 +33,7 @@ export * from './company/update-company-profile.schema';
 export * from './company/company-customer.schema';
 export * from './company/page-protection.schema';
 export * from './company/store-catalog.schema';
+export * from './company/store-settings.schema';
 export * from './driver/set-driver-presence.schema';
 export * from './driver/register-device-token.schema';
 export * from './finance/list-wallet-transactions-query.schema';

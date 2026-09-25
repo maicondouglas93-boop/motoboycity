@@ -32,6 +32,21 @@ pedido. Não usa `detail` (que pode persistir enriquecimento de endereço GPS),
 não cria endpoint/schema e não imprime produtos/valores/troco. Guia e limites
 de validação em `runbooks/company-order-printing.md`.
 
+### Link da loja online
+
+`store_settings` (1:1 com a empresa: o link atual e o nome) e `store_slugs`
+(todo link que a loja já usou, com a loja como dona — a chave é o próprio
+endereço). Trocar de link não libera o antigo: ele continua da loja e leva ao
+atual, e nenhuma outra loja pode pegá-lo. O link atual referencia `store_slugs`
+com `NO ACTION`, para a exclusão da empresa levar os dois em cascata.
+
+Módulo `company/store-settings`: `GET` e `PUT /company/store/settings[/link]`
+no painel, e `GET /public/stores/:slug` aberto, sem login, só para empresa
+ativa — devolve a loja com o cardápio vendável (`publicCatalog`, do serviço do
+catálogo) ou `{ kind: 'moved' }` para link antigo. No `company-web`, a página
+`/pedir/[slug]` é de servidor e decide entre demonstração, vitrine,
+redirecionamento e "não encontrada" (`lib/loja-publica.ts`).
+
 ### Catálogo da loja online
 
 O cardápio que a empresa vende na própria página de pedidos. Tabelas `store_*`

@@ -7,5 +7,6 @@ import { StoreCatalogService } from './store-catalog.service';
   imports: [ImageKitModule],
   controllers: [StoreCatalogController],
   providers: [StoreCatalogService],
+  exports: [StoreCatalogService],
 })
 export class StoreCatalogModule {}

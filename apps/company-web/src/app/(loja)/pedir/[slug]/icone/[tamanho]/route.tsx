@@ -1,6 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { textoSobre } from '@/lib/contraste';
-import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
+import { identidadeDoLink } from '@/lib/loja-publica';
 
 /**
  * O ícone da loja na tela inicial do celular, gerado com a inicial e a cor da
@@ -19,13 +19,14 @@ export async function GET(
   _pedido: Request,
   { params }: { params: Promise<{ slug: string; tamanho: string }> },
 ) {
-  const { tamanho } = await params;
+  const { slug, tamanho } = await params;
   const lado = Number(tamanho);
   if (!TAMANHOS.has(lado)) {
     return new Response('Tamanho não suportado', { status: 404 });
   }
 
-  const loja = LOJA_DE_EXEMPLO;
+  const loja = await identidadeDoLink(slug);
+  if (!loja) return new Response('Loja não encontrada', { status: 404 });
 
   return new ImageResponse(
     <div

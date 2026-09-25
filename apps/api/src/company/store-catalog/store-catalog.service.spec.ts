@@ -521,6 +521,32 @@ describe('StoreCatalogService', () => {
     });
   });
 
+  describe('cardápio público', () => {
+    it('só o que dá para comprar, só as seções com produto, sem situação nem data', async () => {
+      prisma.storeCategory.findMany.mockResolvedValue([
+        { id: CATEGORIA_A, name: 'Açaí' },
+        { id: CATEGORIA_B, name: 'Sem nada à venda' },
+      ]);
+      const esgotado = produtoGravado().sizes.map((tamanho) => ({ ...tamanho, available: false }));
+      prisma.storeProduct.findMany.mockResolvedValue([
+        produtoGravado({ status: 'PUBLISHED' }),
+        produtoGravado({ id: 'sem-tamanho-disponivel', status: 'PUBLISHED', sizes: esgotado }),
+      ]);
+
+      const cardapio = await service.publicCatalog(EMPRESA);
+
+      expect(prisma.storeProduct.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { companyId: EMPRESA, status: 'PUBLISHED', categoryId: { not: null } },
+        }),
+      );
+      expect(cardapio.categories).toEqual([{ id: CATEGORIA_A, name: 'Açaí' }]);
+      expect(cardapio.products.map((produto) => produto.id)).toEqual([PRODUTO]);
+      expect(cardapio.products[0]).not.toHaveProperty('status');
+      expect(cardapio.products[0]).not.toHaveProperty('updatedAt');
+    });
+  });
+
   describe('foto do produto', () => {
     // Um JPEG mínimo de 1 x 1: começo, quadro com as dimensões, e fim.
     const jpeg = Buffer.from([

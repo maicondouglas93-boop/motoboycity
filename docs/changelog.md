@@ -15224,3 +15224,113 @@ módulo e teste); `apps/api/test/store-catalog.e2e-spec.ts`;
 ALTER TABLE "store_products" DROP COLUMN "imageExternalFileId";
 DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925160000_loja_foto_do_produto';
 ```
+
+## 2026-09-25 — Loja online: link da loja e cardápio de verdade na página do cliente
+
+Pedido do usuário ("continue", depois do push da foto do produto). Era o passo
+anunciado: a página do cliente mostrar o cardápio cadastrado no painel, o que
+pede um link próprio da loja no banco.
+
+**Banco** — migration `20260925190000_loja_link`, só criação:
+
+- `store_settings` (a loja da empresa: o link atual e o nome que o cliente vê);
+- `store_slugs` (todo link que a loja já usou, com a loja como dona; a chave é o
+  próprio endereço). Trocar de link não libera o antigo — ele continua da loja
+  e leva ao atual, como a tela de Configurações já prometia ("seu panfleto e seu
+  QR não deixam de valer"), e nenhuma outra loja pode pegá-lo;
+- o link atual referencia `store_slugs` com `NO ACTION`, e não `RESTRICT`: com
+  `RESTRICT`, excluir a empresa podia falhar conforme a ordem das cascatas. O
+  E2E exclui empresas com link e passa.
+
+**API** — módulo `company/store-settings`:
+
+- `GET /company/store/settings` (link e nome; sem loja ainda, a sugestão pelo
+  nome fantasia) e `PUT /company/store/settings/link` (409 `STORE_SLUG_TAKEN`
+  quando o link é, ou já foi, de outra loja — inclusive na corrida de duas
+  lojas pedindo o mesmo ao mesmo tempo);
+- `GET /public/stores/:slug`, aberto e sem login (120 por minuto): a loja com o
+  cardápio vendável — só publicado, com seção e sem pendência que impeça
+  vender, e só as seções com produto — ou `{ kind: 'moved' }` para link antigo.
+  **Empresa pendente ou suspensa não aparece** (404). O produto público não leva
+  situação nem data de edição;
+- o link aceita minúsculas sem acento, números e hífen (3 a 40); há endereços
+  reservados, entre eles `minha-loja`, o da demonstração.
+
+**Contratos:** `packages/types/src/store-settings.ts`,
+`packages/validation/src/company/store-settings.schema.ts` (com
+`suggestStoreSlug`) e, em `packages/api-client`,
+`createCompanyStoreSettingsApi` e `createPublicStoreApi`.
+
+**Painel:** em Configurações, o card "Link da sua loja" grava de verdade —
+nome, endereço, "Copiar" e "Abrir a loja". O endereço mostrado é o que funciona
+hoje (`…/pedir/<link>`), e não `pedidos.motoboycity.com.br`, que ainda não
+existe. O resto da tela continua demonstração, e o aviso diz isso. A lista de
+Produtos passou a dizer que os publicados aparecem na página da loja, que ainda
+não recebe pedidos.
+
+**Página do cliente:** `/pedir/[slug]` virou página de servidor
+(`lib/loja-publica.ts`), e a tela foi para `components/loja-online/loja-publica.tsx`.
+
+- Loja de verdade abre como **vitrine**: o cardápio publicado, com as fotos, e
+  o aviso de que a loja ainda não recebe pedidos por ali. Somem horário, taxa,
+  pagamento, conta e "Meus pedidos" — são dados de exemplo, e não da loja —, e
+  o botão da folha do produto diz "Pedidos em breve". Receber pedido de
+  verdade, sem que ele chegue à loja, perderia o cliente.
+- Link antigo redireciona com 307, de propósito: a loja pode voltar a um link
+  que já foi dela, e um redirecionamento permanente guardado no navegador
+  levaria o cliente ao endereço errado. Link com maiúscula vai para o certo.
+- Link sem loja responde "Loja não encontrada", em português (a página padrão
+  era em inglês e sem saída).
+- O nome da loja entra no título, no manifest e no ícone; a cor ainda é a de
+  exemplo, até a identidade visual ir para o banco.
+- `/pedir/minha-loja` continua a demonstração inteira.
+
+**Arquivos:** `apps/api/prisma/schema.prisma` e a migration;
+`apps/api/src/company/store-settings/` (novo: módulo, serviço, dois controllers
+e teste), `company/store-catalog/` (`publicCatalog` e exportação do serviço),
+`app.module.ts`; `apps/api/test/store-link.e2e-spec.ts` (novo); os três pacotes;
+`apps/company-web/src/lib/api-client.ts`, `lib/loja-publica.ts` (novo) e teste,
+`components/loja/link-da-loja.tsx` (novo), `app/(app)/loja/configuracoes/page.tsx`,
+`app/(app)/loja/produtos/page.tsx` e teste, `components/loja-online/loja-publica.tsx`
+(a antiga página) e teste, `components/loja-online/folha-do-produto.tsx`,
+`app/(loja)/pedir/[slug]/page.tsx`, `layout.tsx`, `not-found.tsx` (novo),
+`manifest.webmanifest/route.ts` e `icone/[tamanho]/route.tsx`;
+`docs/plano-loja-online.md`, `docs/agent-handoff.md`, `docs/architecture.md`.
+
+**Como foi validado:**
+
+- Migration gerada pelo Prisma (`migrate diff`) e, num banco descartável
+  (`motoboycity_link_validacao`, apagado no fim): as 59 migrations do zero,
+  banco igual ao schema, desfazer volta ao anterior, reaplicar funciona.
+- API: 1309 testes de unidade passam, 12 novos (link, sugestão, dono único,
+  corrida, loja pendente e suspensa, link antigo, cardápio público); **2
+  falham, e já falhavam** (`deliveries.service.spec.ts`). E2E do catálogo e do
+  link em banco descartável e Redis no índice 9: passam. `eslint`, `nest build`
+  e `pnpm typecheck` (8 partes) limpos.
+- Painel e página do cliente: 329 testes passam, 8 novos (o carregador: demonstração,
+  vitrine, link antigo, maiúscula, 404/400 e 500; a vitrine na tela); `tsc` e
+  `eslint` limpos.
+- No navegador, com a API local (migration aplicada no `motoboycity_dev`): o
+  card do link recusou endereço com acento e o reservado, criou o link da
+  empresa de teste e mostrou "Copiar" e "Abrir a loja"; o link dessa empresa,
+  que está pendente de aprovação, respondeu "Loja não encontrada"; e
+  `/pedir/minha-loja` continuou a demonstração. **A vitrine com o cardápio de
+  verdade não foi vista no navegador**: exige empresa aprovada, e a de teste
+  não está. Ela está coberta pelos testes do carregador, da tela e pelo E2E.
+
+**Para funcionar em produção**, além do deploy: a página do cliente usa o
+Clerk, que só tem chave de desenvolvimento — sem as chaves de produção, as
+rotas `/pedir` falham lá.
+
+**Deploy:** nada foi enviado.
+
+**Reverter**, se preciso:
+
+```sql
+ALTER TABLE "store_settings" DROP CONSTRAINT "store_settings_companyId_fkey";
+ALTER TABLE "store_settings" DROP CONSTRAINT "store_settings_slug_fkey";
+ALTER TABLE "store_slugs" DROP CONSTRAINT "store_slugs_companyId_fkey";
+DROP TABLE "store_settings";
+DROP TABLE "store_slugs";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925190000_loja_link';
+```
