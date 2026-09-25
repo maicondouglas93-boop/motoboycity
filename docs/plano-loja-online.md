@@ -10,18 +10,27 @@
 
 Existe a área `/loja` no `company-web`, com **telas de demonstração**:
 
-| Tela                                   | O que faz                                                 |
-| -------------------------------------- | --------------------------------------------------------- |
-| `/loja/vendas`                         | Pedidos vindos da loja, janela de cancelamento, detalhe   |
-| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências          |
-| `/loja/produtos/organizar`             | Categorias e ordem do catálogo                            |
-| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só                       |
-| `/loja/configuracoes`                  | Link, identidade visual, pagamentos, Asaas, preparo, taxa |
+| Tela                                   | O que faz                                                             |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir fora do horário    |
+| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento com motivo, agendados   |
+| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências                      |
+| `/loja/produtos/organizar`             | Categorias e ordem do catálogo                                        |
+| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só                                   |
+| `/loja/horarios`                       | Semana com períodos, datas especiais, feriados, recado de fechada     |
+| `/loja/tipos-de-pedido`                | Entrega, retirada, pedido agendado e recebimento (aceite e tempos)    |
+| `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente                    |
+| `/loja/configuracoes`                  | Link, identidade visual, pagamentos, Asaas, bairros e ponto de coleta |
 
-**Nada disso tem backend.** Os dados vêm de `apps/company-web/src/lib/loja-mock.ts`
-e vivem na memória do navegador. O arquivo pede para ser **apagado**, e não
-adaptado, por quem for ligar à API. A loja **não está no menu** do painel; as
-telas são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
+**Nada disso tem backend.** Os dados de exemplo vêm de
+`apps/company-web/src/lib/loja-mock.ts`. O que o painel configura em Horários,
+Tipos de pedido e Notificações, o status e as vendas ficam no `localStorage`
+deste navegador, por `lib/loja-demo.ts` — é o que faz painel e página do cliente
+conversarem na demonstração, em abas do mesmo navegador. Os dois arquivos pedem
+para ser **apagados**, e não adaptados, por quem for ligar à API. As regras
+(`loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts`, `loja-operacao.ts`)
+ficam: o servidor precisa delas. A loja **não está no menu** do painel; as telas
+são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
 `top-nav.tsx`.
 
 Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
@@ -31,9 +40,14 @@ Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
 
 1. **Uma loja por empresa, com link próprio** (`/slug`), e não um marketplace
    que reúne todas. A empresa divulga o próprio endereço.
-2. **O pedido entra como `agendado`** e vira entrega sozinho quando o tempo de
-   preparo vence. A loja não aprova nada — ela tem uma janela para cancelar.
-   (Ver o item 2 de "A fazer": isto passa a ser configurável.)
+2. **O pedido passa pelas etapas Novo → Aceito → Em preparação → Pronto → Saiu
+   para entrega → Entregue** (2026-09-25; substitui "entra como agendado, com
+   uma janela para cancelar"). A retirada vai de Pronto a Retirado. No aceite
+   automático, que é o padrão, o pedido nasce aceito. O motoboy é chamado quando
+   o pedido fica pronto ou quando o preparo vence, o que vier primeiro. A loja
+   cancela até o pedido ficar pronto, na entrega, e até o cliente buscar, na
+   retirada. O pedido não é a entrega: "Saiu" e "Entregue" virão da corrida
+   (`COLLECTED`, `DELIVERED`).
 3. **A loja recebe na própria conta Asaas.** A plataforma não toca no dinheiro
    da venda; a central continua cobrando as entregas na fatura, como hoje.
 4. **Produto → grupo de escolhas → escolha**, com mínimo e máximo por grupo. É o
@@ -48,6 +62,18 @@ Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
 9. **Identidade visual:** duas cores livres (marca e ação) mais tema claro ou
    escuro; o resto é calculado. O contraste é medido contra o fundo da loja no
    tema escolhido.
+10. **Horário no fuso de Brasília**, e não no do aparelho. Período que fecha
+    antes de abrir é "depois da meia-noite" e pertence ao dia em que abre. Duas
+    datas especiais no mesmo dia: vale a mais curta.
+11. **O ajuste da hora vence sozinho.** Pausar e fechar têm fim, ou "até eu
+    reabrir"; abrir fora do horário sempre tem fim.
+12. **Os tempos ficam só no recebimento** (preparo e entrega padrão). O tempo
+    estimado da entrega e o "pronto em" da retirada são derivados deles. O
+    aceite automático é uma chave só, para as duas modalidades.
+13. **Pedido mínimo só na entrega.**
+14. **Agendar é pedir agora para depois:** uma janela só aparece se a loja
+    estiver aberta na hora de a cozinha começar. A madrugada conta na noite em
+    que a cozinha abriu.
 
 ## A fazer
 
@@ -89,24 +115,23 @@ endereços resolve.
 loja? Como tratar quem pede uma vez e nunca mais — cadastrar todo mundo
 automaticamente encheria a lista de clientes de uma vez só.
 
-### 2. A empresa decide se o pedido entra em agendado automaticamente
+### 2. Aceite automático ou manual
 
-> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+> **Desenhado nas telas de demonstração em 2026-09-23, e refeito com as etapas
+> do pedido em 2026-09-25**, em Tipos de pedido → Recebimento. Falta o backend.
 
-Checkbox em `/loja/configuracoes`. Marcado (padrão), vale a decisão 2 acima: o
-pedido entra `agendado` e o motoboy é chamado quando o preparo vence.
-Desmarcado, o pedido fica esperando alguém da loja confirmar.
+Automático (padrão): o pedido nasce aceito. Manual: fica em "Novo" até alguém
+aceitar — e dá para mudar o tempo de preparo daquele pedido na hora de aceitar.
 
-**O que precisa ser resolvido junto, senão o modo manual vira armadilha:**
+Já resolvido nas telas: o som de pedido novo repete a cada 30 segundos enquanto
+houver pedido esperando aceite, e a tela de vendas diz quantos esperam. O
+cancelamento vale nos dois modos: até o pedido ficar pronto, na entrega.
 
-- Sem ninguém olhando a tela, o pedido fica parado e o cliente espera sem saber.
-  Precisa de alerta sonoro/visual na tela de vendas e, provavelmente, de um
-  prazo: não confirmado em X minutos, avisa ou cancela.
-- **A janela de cancelamento deixa de existir no modo manual.** Hoje ela é o
-  tempo de preparo correndo antes do despacho. Sem despacho automático não há
-  janela — a tela de vendas precisa mostrar coisa diferente em cada modo, e não
-  a contagem regressiva em ambos.
-- Se o pagamento foi Pix online, o pedido já está pago quando chega. Recusar ou
+**Ainda em aberto:**
+
+- Prazo: não aceito em X minutos, avisa ou cancela sozinho? Sem prazo, e com o
+  painel fechado, o pedido fica parado e o cliente espera sem saber.
+- Se o pagamento foi online, o pedido já está pago quando chega. Recusar ou
   deixar expirar exige estorno. Definir de quem é a responsabilidade.
 
 ### 3. A empresa configura o valor da taxa de entrega cobrada no PWA
@@ -185,9 +210,13 @@ problema que o aviso do painel existe para evitar.
 sacola não exige conta; fechar exige. A identidade é do Clerk, escopado ao grupo
 de rotas `(loja)` — ver `agent-handoff.md` para por que ele não toca o painel.
 
-A loja respeita horário por dia com mais de uma faixa, feriados, pausa manual,
-bairros com taxa própria, pedido mínimo e retirada no local. O checkout tem
-observação do cliente.
+A loja respeita horário por dia com mais de uma faixa, período depois da
+meia-noite, datas especiais (feriado, férias, horário especial), o ajuste da
+hora (pausar, fechar, abrir fora do horário), bairros com taxa própria, pedido
+mínimo na entrega, e entrega e retirada ligáveis. Fechada, diz quando abre, mostra
+o recado da loja e deixa agendar. O checkout tem "Agora" ou "Agendar" (dia e
+janela) e observação do cliente. "Meus pedidos" mostra a etapa de cada pedido e
+muda sozinho.
 
 **Pagamento em dois grupos** (decisão de 2026-09-24): online pelo Asaas — Pix,
 crédito e débito — ou na entrega — dinheiro, e Pix, crédito e débito na
@@ -207,9 +236,12 @@ convite para instalar aparece depois do pedido feito — botão no Android, pass
 no iPhone —, e "agora não" o faz descansar trinta dias. Não verificado ainda: o
 comportamento sem internet e a instalação em aparelho real.
 
-Falta o Web Push para avisar a loja de pedido novo (o que existe é FCM para o
-app Android do motoboy). E falta o backend inteiro: hoje o pedido termina no
-`localStorage` e a loja nunca fica sabendo dele.
+Os avisos saem do navegador, com a página aberta em alguma aba: som e
+notificação para a loja, notificação para o cliente. Falta o Web Push de
+servidor, que avisa com o navegador fechado — da loja e do cliente (o que existe
+é FCM para o app Android do motoboy). E falta o backend inteiro: hoje o pedido
+termina no `localStorage`, e só chega à tela de vendas do painel aberta no mesmo
+navegador.
 
 **Contrato a alterar na integração:** `CompanyCustomerAddress` não tem bairro, e
 a taxa por bairro obriga o checkout a coletá-lo. Mexe em `packages/types`, na
@@ -222,7 +254,9 @@ validação e no cadastro de clientes do painel.
 3. Ligar as telas do painel que já existem; **apagar** o `loja-mock.ts`.
 4. O PWA do cliente: catálogo, carrinho, checkout (com telefone e endereço
    estruturado, por causa do item 1).
-5. Pedido da loja virando entrega, com o checkbox do item 2.
+5. Pedido da loja virando entrega, com o aceite do item 2: as etapas até
+   "Pronto" são do pedido; "Saiu para entrega" e "Entregue" vêm da corrida.
+   Junto, o Web Push de servidor para os avisos da loja e do cliente.
 6. Salvar cliente a partir da venda (item 1).
 7. Pôr o item "Loja" de volta no `NAV_ITEMS` — no mesmo recorte em que as telas
    deixarem de ser demonstração.

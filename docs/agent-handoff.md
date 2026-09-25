@@ -551,10 +551,26 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas de demonstração dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
-Organizar, Cadastrar e Editar) e Configurações. **Nada disso está integrado.** Os
-dados vêm de `apps/company-web/src/lib/loja-mock.ts` e vivem na memória do
-navegador; toda tela traz um aviso dizendo isso, e todo botão de salvar está
-desativado. Existem para aprovar o desenho antes de escrever backend.
+Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
+Configurações, e o status da loja no alto da barra lateral. **Nada disso está
+integrado.** Os dados de exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`,
+e toda tela traz um aviso dizendo isso. Existem para aprovar o desenho antes de
+escrever backend.
+
+**Uma parte salva — só no navegador.** Horários, Tipos de pedido, Notificações,
+o status e as vendas gravam no `localStorage` por `lib/loja-demo.ts`, e o evento
+`storage` leva a mudança entre abas: pausar no painel pausa a página do cliente
+aberta no mesmo navegador, e aceitar um pedido muda o "Meus pedidos" dele. É
+demonstração, e não sincronização — nada sai do aparelho. Quem integrar apaga
+`loja-demo.ts` junto com `loja-mock.ts`; as regras de `lib/loja-horario.ts`,
+`loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts` ficam, porque o
+servidor vai precisar delas. Configurações continua sem salvar nada.
+
+**O horário é calculado no fuso da loja** (`America/Sao_Paulo`), e não no do
+aparelho. Teste de horário constrói as datas com `-03:00`, para dar o mesmo
+resultado em qualquer máquina. Telas que dependem da hora usam o relógio único
+de `lib/relogio.ts`: quem grava um ajuste acerta o relógio antes, e ele se acerta
+sozinho quando outra aba muda a loja.
 
 **A loja não está no menu, e isso é a trava.** Nenhum item aponta para `/loja`
 no `top-nav.tsx`; chega-se às telas pela URL direta. Enquanto elas forem

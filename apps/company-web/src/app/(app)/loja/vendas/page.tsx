@@ -1,27 +1,53 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
+  CalendarClock,
   Check,
   ChevronDown,
   ChevronRight,
   MapPin,
   MessageSquare,
   Phone,
+  RotateCcw,
   Store,
   Timer,
   UserPlus,
+  Volume2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import { useSomLiberado } from '@/lib/avisos-do-navegador';
+import { mudarEtapa, recomecarVendas, useOperacao, useVendas } from '@/lib/loja-demo';
+import { hora, momentoNaLoja, rotuloDoDia } from '@/lib/loja-horario';
+import { enderecoEmLinha, type CadastroDoCliente, type VendaDaLoja } from '@/lib/loja-mock';
 import {
-  VENDAS_DE_EXEMPLO,
-  enderecoEmLinha,
-  type CadastroDoCliente,
-  type VendaDeExemplo,
-} from '@/lib/loja-mock';
+  acaoParaAvancar,
+  caminhoDoPedido,
+  esperandoAHora,
+  etapaParaALoja,
+  inicioDoPreparo,
+  nomeCurtoDaEtapa,
+  podeCancelar,
+  proximaEtapa,
+  quandoChegou,
+  vemDoMotoboy,
+  type EtapaDoPedido,
+} from '@/lib/loja-pedido';
+import { useAgora } from '@/lib/relogio';
+
+/**
+ * O que a loja faz com cada pedido: aceitar, preparar, entregar.
+ *
+ * A fila de agora é separada por etapa, na ordem em que o pedido anda. O que
+ * pede ação de alguém — o pedido novo esperando aceite — vem primeiro, e cada
+ * cartão tem um botão só para frente, com o nome da ação ("Começar o preparo"),
+ * e não da etapa: quem está com a mão suja de massa lê o verbo.
+ *
+ * Os agendados ficam à parte até a hora de começar. Um pedido para amanhã no
+ * meio da fila da noite faria a cozinha começar a coisa errada.
+ */
 
 /**
  * O que a tela oferece para cada situação do cadastro. Três, e não um botão
@@ -43,135 +69,164 @@ const CADASTRO: Record<CadastroDoCliente, { texto: string; acao: string | null }
   },
 };
 
-/**
- * As situações usam as mesmas palavras do painel de pedidos que a loja já
- * conhece. Inventar vocabulário novo para a venda online obrigaria o mesmo
- * atendente a aprender duas linguagens para a mesma operação.
- */
-const SITUACOES: Record<VendaDeExemplo['situacao'], { texto: string; classe: string }> = {
-  agendado: { texto: 'Aguardando preparo', classe: 'bg-sky-500/10 text-sky-700' },
-  // (no modo manual este rótulo vira "Aguardando confirmação", no cartão e no filtro)
-  preparo: { texto: 'Em preparo', classe: 'bg-amber-500/10 text-amber-700' },
-  rota: { texto: 'Em rota', classe: 'bg-violet-500/10 text-violet-700' },
-  entregue: { texto: 'Entregue', classe: 'bg-emerald-500/10 text-emerald-700' },
-  cancelado: { texto: 'Cancelado', classe: 'bg-destructive/10 text-destructive' },
+const CORES: Record<EtapaDoPedido, string> = {
+  NOVO: 'bg-amber-500/15 text-amber-800',
+  ACEITO: 'bg-sky-500/10 text-sky-700',
+  EM_PREPARO: 'bg-orange-500/10 text-orange-700',
+  PRONTO: 'bg-violet-500/10 text-violet-700',
+  SAIU_PARA_ENTREGA: 'bg-indigo-500/10 text-indigo-700',
+  ENTREGUE: 'bg-emerald-500/10 text-emerald-700',
+  CANCELADO: 'bg-destructive/10 text-destructive',
 };
 
-/**
- * O rótulo de `agendado` acompanha o modo de entrada, senão o filtro diz
- * "aguardando preparo" enquanto o cartão logo abaixo diz "aguardando
- * confirmação" — duas palavras para o mesmo estado, na mesma tela.
- */
-function filtrosDaTela(
-  entradaAutomatica: boolean,
-): Array<{ valor: '' | VendaDeExemplo['situacao']; texto: string }> {
-  return [
-    { valor: '', texto: 'Todas' },
-    {
-      valor: 'agendado',
-      texto: entradaAutomatica ? 'Aguardando preparo' : 'Aguardando confirmação',
-    },
-    { valor: 'preparo', texto: 'Em preparo' },
-    { valor: 'rota', texto: 'Em rota' },
-    { valor: 'entregue', texto: 'Entregues' },
-  ];
-}
+/** As seções da fila de agora, na ordem em que o pedido anda. */
+const SECOES_DA_FILA: Array<{ etapa: EtapaDoPedido; titulo: string }> = [
+  { etapa: 'NOVO', titulo: 'Novos — esperando você aceitar' },
+  { etapa: 'ACEITO', titulo: 'Aceitos' },
+  { etapa: 'EM_PREPARO', titulo: 'Em preparação' },
+  { etapa: 'PRONTO', titulo: 'Prontos' },
+  { etapa: 'SAIU_PARA_ENTREGA', titulo: 'Saíram para entrega' },
+];
+
+const MOTIVOS = [
+  'Item em falta',
+  'Cozinha sem condição de atender agora',
+  'Endereço fora da área de entrega',
+  'Cliente pediu para cancelar',
+  'Outro motivo',
+];
+
+type Aba = 'andamento' | 'agendados' | 'concluidos' | 'cancelados';
 
 function moeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function quandoFoiFeita(venda: VendaDaLoja): Date {
+  return quandoChegou(venda, 'NOVO') ?? new Date(0);
+}
+
+/** "amanhã, 12:00–12:30". */
+function janelaEmTexto(venda: VendaDaLoja, agora: Date): string | null {
+  if (!venda.janela) return null;
+  const inicio = new Date(venda.janela.inicio);
+  const fim = new Date(venda.janela.fim);
+  return `${rotuloDoDia(momentoNaLoja(inicio).data, agora)}, ${hora(inicio)}–${hora(fim)}`;
+}
+
 export default function LojaVendasPage() {
-  const [filtro, setFiltro] = useState<'' | VendaDeExemplo['situacao']>('');
-  const [aberta, setAberta] = useState<string | null>(null);
+  const vendas = useVendas();
+  const operacao = useOperacao();
+  const instante = useAgora();
+  const somLiberado = useSomLiberado();
+  const [aba, setAba] = useState<Aba>('andamento');
+  const [confirmarRecomeco, setConfirmarRecomeco] = useState(false);
 
-  /**
-   * Espelha o checkbox de Configurações. Aqui é um controle de demonstração
-   * porque as duas telas não compartilham estado sem backend — e sem ele não
-   * haveria como conferir o modo manual, que é justamente o que muda a tela.
-   */
-  const [entradaAutomatica, setEntradaAutomatica] = useState(true);
+  const agora = new Date(instante);
+  const manual = operacao.recebimento.modo === 'MANUAL';
 
-  const lista = useMemo(
-    () => VENDAS_DE_EXEMPLO.filter((venda) => !filtro || venda.situacao === filtro),
-    [filtro],
+  const agendados = vendas
+    .filter((venda) => esperandoAHora(venda, agora))
+    .sort((a, b) => (a.janela?.inicio ?? '').localeCompare(b.janela?.inicio ?? ''));
+  // Na fila, o mais antigo primeiro: é o que está esperando há mais tempo.
+  const naFila = vendas
+    .filter(
+      (venda) =>
+        venda.etapa !== 'ENTREGUE' && venda.etapa !== 'CANCELADO' && !esperandoAHora(venda, agora),
+    )
+    .sort((a, b) => quandoFoiFeita(a).getTime() - quandoFoiFeita(b).getTime());
+  const concluidas = vendas.filter((venda) => venda.etapa === 'ENTREGUE');
+  const canceladas = vendas.filter((venda) => venda.etapa === 'CANCELADO');
+  const esperandoAceite = naFila.filter((venda) => venda.etapa === 'NOVO');
+
+  // O resumo é do dia, no calendário da loja — e sem as canceladas.
+  const hoje = instante === 0 ? '' : momentoNaLoja(agora).data;
+  const deHoje = vendas.filter(
+    (venda) => venda.etapa !== 'CANCELADO' && momentoNaLoja(quandoFoiFeita(venda)).data === hoje,
   );
+  const totalDoDia = deHoje.reduce((soma, venda) => soma + venda.total, 0);
 
-  const validas = VENDAS_DE_EXEMPLO.filter((venda) => venda.situacao !== 'cancelado');
-  const total = validas.reduce((soma, venda) => soma + venda.total, 0);
-  const aguardando = VENDAS_DE_EXEMPLO.filter((venda) => venda.situacao === 'agendado');
+  const abas: Array<{ valor: Aba; texto: string; lista: VendaDaLoja[] }> = [
+    { valor: 'andamento', texto: 'Em andamento', lista: naFila },
+    { valor: 'agendados', texto: 'Agendados', lista: agendados },
+    { valor: 'concluidos', texto: 'Concluídos', lista: concluidas },
+    { valor: 'cancelados', texto: 'Cancelados', lista: canceladas },
+  ];
+  const lista = abas.find((item) => item.valor === aba)?.lista ?? [];
 
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-bold">Vendas</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pedidos que chegaram pela página da sua loja.
+          Pedidos que chegaram pela página da sua loja. Aceite {manual ? 'manual' : 'automático'} —
+          muda em Tipos de pedido.
         </p>
       </header>
 
       <Card className="border-dashed">
-        <CardContent className="space-y-3 py-3">
-          <p className="text-xs text-muted-foreground">
-            Tela de demonstração. As vendas abaixo são exemplos — a página de pedidos da loja ainda
-            não existe.
-          </p>
-          <label className="flex items-start gap-2.5 text-xs">
-            <Checkbox
-              className="mt-0.5"
-              checked={entradaAutomatica}
-              onCheckedChange={(valor) => setEntradaAutomatica(valor === true)}
-            />
-            <span>
-              Aceitar pedidos automaticamente
-              <span className="block text-muted-foreground">
-                Na versão final isto vem de Configurações. Aqui fica na tela para o modo manual
-                poder ser conferido — é ele que muda o que aparece abaixo.
-              </span>
+        <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-xs text-muted-foreground">
+          <span className="min-w-60 flex-1">
+            Demonstração: aparecem aqui os exemplos e os pedidos feitos na página da loja{' '}
+            <strong>neste navegador</strong>. Nada vai para o servidor.
+          </span>
+          {confirmarRecomeco ? (
+            <span className="flex items-center gap-2">
+              Apagar os pedidos desta demonstração?
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  recomecarVendas();
+                  setConfirmarRecomeco(false);
+                }}
+              >
+                Apagar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setConfirmarRecomeco(false)}
+              >
+                Não
+              </Button>
             </span>
-          </label>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirmarRecomeco(true)}
+            >
+              <RotateCcw className="size-4" /> Recomeçar os exemplos
+            </Button>
+          )}
         </CardContent>
       </Card>
 
-      {/* O aviso mais importante da tela.
-          O pedido entra AGENDADO e vira entrega sozinho quando o preparo vence.
-          A loja não precisa aprovar nada — precisa saber que tem uma janela
-          para cancelar, e quanto dela ainda resta. */}
-      {aguardando.length > 0 && (
-        <Card
-          className={
-            entradaAutomatica
-              ? 'border-sky-500/30 bg-sky-500/5'
-              : 'border-amber-500/40 bg-amber-500/5'
-          }
-        >
+      {/* Sem o primeiro clique, o navegador não deixa tocar som — e a lojista
+          acharia que o aviso sonoro não funciona. */}
+      {instante !== 0 && !somLiberado && operacao.notificacoes.lojista.NOVO_PEDIDO.som && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Volume2 className="size-4 shrink-0" aria-hidden="true" />
+          Clique em qualquer lugar da página para liberar o som dos avisos.
+        </p>
+      )}
+
+      {esperandoAceite.length > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
           <CardContent className="flex flex-wrap items-center gap-2 py-3 text-sm">
-            <Timer
-              className={`size-4 shrink-0 ${entradaAutomatica ? 'text-sky-700' : 'text-amber-700'}`}
-              aria-hidden="true"
-            />
-            {entradaAutomatica ? (
-              <span>
-                <strong>
-                  {aguardando.length}{' '}
-                  {aguardando.length === 1 ? 'pedido aguardando' : 'pedidos aguardando'} preparo
-                </strong>{' '}
-                — o motoboy é chamado automaticamente quando o tempo acabar. Cancele antes disso se
-                não for dar conta.
-              </span>
-            ) : (
-              /* No modo manual não há contagem: nada anda até alguém confirmar,
-                 e o cliente está esperando sem saber disso. */
-              <span>
-                <strong>
-                  {aguardando.length}{' '}
-                  {aguardando.length === 1
-                    ? 'pedido esperando sua confirmação'
-                    : 'pedidos esperando sua confirmação'}
-                </strong>{' '}
-                — nada anda até você confirmar, e o cliente já pediu. Não há contagem correndo aqui.
-              </span>
-            )}
+            <Timer className="size-4 shrink-0 text-amber-700" aria-hidden="true" />
+            <span>
+              <strong>
+                {esperandoAceite.length === 1
+                  ? '1 pedido esperando você aceitar'
+                  : `${esperandoAceite.length} pedidos esperando você aceitar`}
+              </strong>{' '}
+              — o cliente já pediu e está esperando a resposta.
+            </span>
           </CardContent>
         </Card>
       )}
@@ -180,233 +235,428 @@ export default function LojaVendasPage() {
         <Card>
           <CardContent className="py-4">
             <p className="text-xs text-muted-foreground">Vendas hoje</p>
-            <p className="mt-1 text-2xl font-bold">{validas.length}</p>
+            <p className="mt-1 text-2xl font-bold">{deHoje.length}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-4">
             <p className="text-xs text-muted-foreground">Total do dia</p>
-            <p className="mt-1 text-2xl font-bold">{moeda(total)}</p>
+            <p className="mt-1 text-2xl font-bold">{moeda(totalDoDia)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="py-4">
             <p className="text-xs text-muted-foreground">Ticket médio</p>
             <p className="mt-1 text-2xl font-bold">
-              {validas.length > 0 ? moeda(total / validas.length) : moeda(0)}
+              {moeda(deHoje.length > 0 ? totalDoDia / deHoje.length : 0)}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {filtrosDaTela(entradaAutomatica).map((item) => (
+      <div role="tablist" aria-label="Vendas por situação" className="flex flex-wrap gap-2">
+        {abas.map((item) => (
           <button
-            key={item.valor || 'todas'}
+            key={item.valor}
             type="button"
-            onClick={() => setFiltro(item.valor)}
-            aria-pressed={filtro === item.valor}
+            role="tab"
+            aria-selected={aba === item.valor}
+            onClick={() => setAba(item.valor)}
             className={`rounded-full border px-3 py-1 text-sm transition-colors ${
-              filtro === item.valor
+              aba === item.valor
                 ? 'border-primary bg-primary/10 font-semibold text-primary'
                 : 'text-muted-foreground hover:bg-muted'
             }`}
           >
             {item.texto}
+            <span className="ml-1.5 text-xs opacity-70">{item.lista.length}</span>
           </button>
         ))}
       </div>
 
-      <div className="space-y-2">
-        {lista.map((venda) => {
-          const situacao = SITUACOES[venda.situacao];
-          const expandida = aberta === venda.id;
-          const aguardandoEsta = venda.situacao === 'agendado';
-          // No modo manual não existe janela: nada é despachado sem confirmação.
-          const podeCancelar = aguardandoEsta && entradaAutomatica;
-          const esperaConfirmacao = aguardandoEsta && !entradaAutomatica;
-          const cadastro = CADASTRO[venda.cadastro];
+      {instante !== 0 && aba === 'andamento' && (
+        <div className="space-y-5">
+          {SECOES_DA_FILA.map(({ etapa, titulo }) => {
+            const daEtapa = naFila.filter((venda) => venda.etapa === etapa);
+            if (daEtapa.length === 0) return null;
+            return (
+              <section key={etapa} className="space-y-2">
+                <h2 className="text-sm font-semibold text-muted-foreground">
+                  {titulo} <span className="font-normal">· {daEtapa.length}</span>
+                </h2>
+                {daEtapa.map((venda) => (
+                  <CartaoDaVenda
+                    key={venda.numero}
+                    venda={venda}
+                    agora={agora}
+                    preparoPadrao={operacao.recebimento.minutosDePreparo}
+                  />
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      )}
 
-          return (
-            <Card
-              key={venda.id}
-              className={
-                esperaConfirmacao
-                  ? 'border-amber-500/40'
-                  : podeCancelar
-                    ? 'border-sky-500/30'
-                    : undefined
-              }
-            >
-              <CardContent className="space-y-3 py-4">
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="min-w-28">
-                    <p className="font-semibold">#{venda.numero}</p>
-                    <p className="text-xs text-muted-foreground">{venda.horario}</p>
-                  </div>
+      {instante !== 0 && aba !== 'andamento' && (
+        <div className="space-y-2">
+          {lista.map((venda) => (
+            <CartaoDaVenda
+              key={venda.numero}
+              venda={venda}
+              agora={agora}
+              preparoPadrao={operacao.recebimento.minutosDePreparo}
+            />
+          ))}
+        </div>
+      )}
 
-                  <div className="min-w-40 flex-1">
-                    <p className="text-sm font-medium">{venda.cliente}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {venda.itens.length} {venda.itens.length === 1 ? 'item' : 'itens'} ·{' '}
-                      {venda.pagamento}
-                    </p>
-                  </div>
-
-                  {/* Quanto ainda dá para cancelar. Sem isto, a loja não sabe
-                      que existe prazo — e descobre quando o motoboy chega. */}
-                  {podeCancelar && venda.minutosParaDespachar !== null && (
-                    <span className="flex items-center gap-1 text-sm font-medium text-sky-700">
-                      <Timer className="size-4" aria-hidden="true" />
-                      {venda.minutosParaDespachar} min
-                    </span>
-                  )}
-
-                  {esperaConfirmacao && (
-                    <Button size="sm" disabled>
-                      <Check className="size-4" /> Confirmar
-                    </Button>
-                  )}
-
-                  <p className="font-semibold">{moeda(venda.total)}</p>
-
-                  <Badge className={situacao.classe} variant="secondary">
-                    {esperaConfirmacao ? 'Aguardando confirmação' : situacao.texto}
-                  </Badge>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setAberta(expandida ? null : venda.id)}
-                    aria-expanded={expandida}
-                  >
-                    {expandida ? (
-                      <ChevronDown className="size-4" />
-                    ) : (
-                      <ChevronRight className="size-4" />
-                    )}
-                    Detalhes
-                  </Button>
-                </div>
-
-                {expandida && (
-                  <div className="space-y-3 border-t pt-3 text-sm">
-                    <ul className="space-y-2">
-                      {venda.itens.map((item, indice) => (
-                        <li key={`${venda.id}-${indice}`} className="flex justify-between gap-4">
-                          <span>
-                            <span className="font-medium">
-                              {item.quantidade}× {item.nome}
-                              {item.tamanho && ` — ${item.tamanho}`}
-                            </span>
-                            {item.escolhas.length > 0 && (
-                              <span className="block text-xs text-muted-foreground">
-                                {item.escolhas.join(' · ')}
-                              </span>
-                            )}
-                          </span>
-                          <span className="shrink-0">{moeda(item.total)}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    {/* O cliente do PWA vira cliente da loja aqui, com os
-                        dados que ele mesmo digitou no checkout — em vez de
-                        alguém redigitar tudo no cadastro depois. */}
-                    <div className="space-y-2 rounded-lg border p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">{venda.cliente}</span>
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Phone className="size-3.5" aria-hidden="true" />
-                          {venda.telefone}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{cadastro.texto}</p>
-                      {cadastro.acao ? (
-                        <Button variant="outline" size="sm" disabled>
-                          <UserPlus className="size-4" /> {cadastro.acao}
-                        </Button>
-                      ) : (
-                        <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-                          <Check className="size-3.5" aria-hidden="true" />
-                          Nada a fazer.
-                        </p>
-                      )}
-                    </div>
-
-                    {/* O que o cliente escreveu vai para quem prepara, e por
-                        isso não pode virar texto cinza no meio do resto. */}
-                    {venda.observacao && (
-                      <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
-                        <MessageSquare
-                          className="mt-0.5 size-4 shrink-0 text-amber-700"
-                          aria-hidden="true"
-                        />
-                        {venda.observacao}
-                      </p>
-                    )}
-
-                    <div className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
-                      {venda.retirarNaLoja ? (
-                        /* Retirada não gera entrega: ninguém vai buscar, e
-                           mostrar um endereço aqui faria a loja chamar motoboy
-                           à toa. */
-                        <p className="flex items-start gap-1.5 font-medium text-foreground">
-                          <Store className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />O cliente
-                          retira na loja — sem entrega.
-                        </p>
-                      ) : (
-                        <p className="flex items-start gap-1.5">
-                          <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                          <span>
-                            {enderecoEmLinha(venda.entrega)}
-                            {venda.entrega.referencia && (
-                              // Referência é o que faz o motoboy achar a casa.
-                              <span className="block">{venda.entrega.referencia}</span>
-                            )}
-                          </span>
-                        </p>
-                      )}
-                      <p>
-                        Pagamento: {venda.pagamento}
-                        {venda.trocoPara !== null && (
-                          // Troco é a informação que o motoboy precisa levar na
-                          // mão. Enterrada numa observação de texto, ela se
-                          // perde — por isso aparece destacada.
-                          <strong className="text-foreground">
-                            {' '}
-                            · troco para {moeda(venda.trocoPara)}
-                          </strong>
-                        )}
-                      </p>
-                    </div>
-
-                    {podeCancelar && (
-                      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-                        <Button variant="outline" size="sm" disabled>
-                          Cancelar pedido
-                        </Button>
-                        <span className="text-xs text-muted-foreground">
-                          Desativado na demonstração. Depois do prazo, o pedido já virou entrega e o
-                          cancelamento passa a ser com a central.
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-
-        {lista.length === 0 && (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Nenhuma venda com essa situação.
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      {instante !== 0 && lista.length === 0 && (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            {aba === 'andamento'
+              ? 'Nenhum pedido em andamento agora.'
+              : aba === 'agendados'
+                ? 'Nenhum pedido agendado esperando a hora.'
+                : aba === 'concluidos'
+                  ? 'Nenhum pedido entregue ainda.'
+                  : 'Nenhum pedido cancelado.'}
+          </CardContent>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function CartaoDaVenda({
+  venda,
+  agora,
+  preparoPadrao,
+}: {
+  venda: VendaDaLoja;
+  agora: Date;
+  preparoPadrao: number;
+}) {
+  const [expandida, setExpandida] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const [motivo, setMotivo] = useState(MOTIVOS[0] ?? '');
+  const [preparo, setPreparo] = useState(preparoPadrao);
+
+  const proxima = proximaEtapa(venda.modalidade, venda.etapa);
+  const acao = acaoParaAvancar(venda.modalidade, venda.etapa);
+  const cancelavel = podeCancelar(venda.modalidade, venda.etapa);
+  const janela = janelaEmTexto(venda, agora);
+  const cadastro = CADASTRO[venda.cadastro];
+  const inicioAgendado = inicioDoPreparo(venda);
+  const caminho = caminhoDoPedido(venda.modalidade);
+  const indiceAtual = caminho.indexOf(venda.etapa);
+
+  // O que a cozinha precisa saber sobre o tempo, conforme a etapa.
+  let tempo: string | null = null;
+  if (venda.etapa === 'ACEITO' && inicioAgendado && agora.getTime() < inicioAgendado.getTime()) {
+    tempo = `Começar o preparo às ${hora(inicioAgendado)}`;
+  } else if (venda.etapa === 'ACEITO' && inicioAgendado) {
+    tempo = 'Hora de começar o preparo';
+  } else if (venda.etapa === 'EM_PREPARO') {
+    const aceito = quandoChegou(venda, 'ACEITO');
+    if (aceito && !venda.janela) {
+      tempo = `Pronto previsto às ${hora(new Date(aceito.getTime() + venda.minutosDePreparo * 60_000))}`;
+    }
+  } else if (venda.etapa === 'PRONTO' && venda.modalidade === 'ENTREGA') {
+    tempo = 'Motoboy chamado';
+  } else if (venda.etapa === 'PRONTO') {
+    tempo = 'Esperando o cliente buscar';
+  }
+
+  return (
+    <Card className={venda.etapa === 'NOVO' ? 'border-amber-500/50' : undefined}>
+      <CardContent className="space-y-3 py-4">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+          <div className="min-w-24">
+            <p className="font-semibold">#{venda.numero}</p>
+            <p className="text-xs text-muted-foreground">{hora(quandoFoiFeita(venda))}</p>
+          </div>
+
+          <div className="min-w-40 flex-1">
+            <p className="text-sm font-medium">{venda.cliente}</p>
+            <p className="text-xs text-muted-foreground">
+              {venda.itens.length} {venda.itens.length === 1 ? 'item' : 'itens'} · {venda.pagamento}
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Badge variant="outline" className="gap-1">
+                {venda.modalidade === 'RETIRADA' ? (
+                  <Store className="size-3" aria-hidden="true" />
+                ) : (
+                  <MapPin className="size-3" aria-hidden="true" />
+                )}
+                {venda.modalidade === 'RETIRADA' ? 'Retirada' : 'Entrega'}
+              </Badge>
+              {janela && (
+                <Badge variant="outline" className="gap-1">
+                  <CalendarClock className="size-3" aria-hidden="true" />
+                  {janela}
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          <p className="font-semibold">{moeda(venda.total)}</p>
+
+          <Badge className={CORES[venda.etapa]} variant="secondary">
+            {etapaParaALoja(venda.etapa, venda.modalidade)}
+          </Badge>
+        </div>
+
+        {/* A régua: onde o pedido está no caminho dele. */}
+        {venda.etapa !== 'CANCELADO' && (
+          <ol className="flex gap-1" aria-label="Etapas do pedido">
+            {caminho.map((etapa, indice) => (
+              <li
+                key={etapa}
+                className={`h-1.5 flex-1 rounded-full ${indice <= indiceAtual ? 'bg-primary' : 'bg-muted'}`}
+                title={nomeCurtoDaEtapa(etapa, venda.modalidade)}
+              >
+                <span className="sr-only">
+                  {nomeCurtoDaEtapa(etapa, venda.modalidade)}
+                  {indice <= indiceAtual ? ' (feito)' : ''}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {tempo && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Timer className="size-3.5" aria-hidden="true" />
+            {tempo}
+          </p>
+        )}
+
+        {venda.etapa === 'CANCELADO' && venda.cancelamento && (
+          <p className="text-xs text-muted-foreground">
+            Cancelado
+            {venda.cancelamento.por === 'CLIENTE'
+              ? ' pelo cliente'
+              : venda.cancelamento.por === 'SISTEMA'
+                ? ' pelo sistema'
+                : ''}
+            {venda.cancelamento.motivo ? ` · ${venda.cancelamento.motivo}` : ''}
+          </p>
+        )}
+
+        {/* A ação. Aceitar tem o preparo junto: é ali que a loja diz "hoje
+            está cheio, vai levar 40". */}
+        {!cancelando && (proxima || cancelavel) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {venda.etapa === 'NOVO' && proxima && (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => mudarEtapa(venda.numero, 'ACEITO', { minutosDePreparo: preparo })}
+                >
+                  <Check className="size-4" /> Aceitar
+                </Button>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  Preparo
+                  <select
+                    value={preparo}
+                    onChange={(evento) => setPreparo(Number(evento.target.value))}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                    aria-label={`Tempo de preparo do pedido ${venda.numero}`}
+                  >
+                    {[0, 10, 20, 30].map((extra) => (
+                      <option key={extra} value={preparoPadrao + extra}>
+                        {preparoPadrao + extra} min{extra === 0 ? ' (padrão)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setCancelando(true)}>
+                  Recusar
+                </Button>
+              </>
+            )}
+
+            {venda.etapa !== 'NOVO' && proxima && acao && (
+              <Button type="button" size="sm" onClick={() => mudarEtapa(venda.numero, proxima)}>
+                {acao}
+              </Button>
+            )}
+
+            {venda.etapa !== 'NOVO' && cancelavel && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setCancelando(true)}>
+                Cancelar pedido
+              </Button>
+            )}
+
+            {vemDoMotoboy(venda.modalidade, venda.etapa) && (
+              <span className="text-xs text-muted-foreground">
+                Na versão final, esta etapa vem sozinha do aplicativo do motoboy.
+              </span>
+            )}
+            {venda.modalidade === 'ENTREGA' && venda.etapa === 'EM_PREPARO' && (
+              <span className="text-xs text-muted-foreground">
+                Depois de pronto, cancelar passa a ser com a central: o motoboy já foi chamado.
+              </span>
+            )}
+          </div>
+        )}
+
+        {cancelando && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-2">
+            <label className="flex items-center gap-2 text-xs">
+              Motivo
+              <select
+                value={motivo}
+                onChange={(evento) => setMotivo(evento.target.value)}
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+              >
+                {MOTIVOS.map((texto) => (
+                  <option key={texto} value={texto}>
+                    {texto}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={() => {
+                mudarEtapa(venda.numero, 'CANCELADO', { cancelamento: { motivo, por: 'LOJA' } });
+                setCancelando(false);
+              }}
+            >
+              {venda.etapa === 'NOVO' ? 'Recusar pedido' : 'Cancelar pedido'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setCancelando(false)}>
+              Voltar
+            </Button>
+            <span className="w-full text-xs text-muted-foreground">
+              O cliente é avisado com o motivo.
+              {venda.pagamento.toLowerCase().includes('online') &&
+                ' Foi pago online: o estorno ainda não está definido no plano da loja.'}
+            </span>
+          </div>
+        )}
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2"
+          onClick={() => setExpandida((atual) => !atual)}
+          aria-expanded={expandida}
+        >
+          {expandida ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          Detalhes
+        </Button>
+
+        {expandida && (
+          <div className="space-y-3 border-t pt-3 text-sm">
+            <ul className="space-y-2">
+              {venda.itens.map((item, indice) => (
+                <li key={`${venda.numero}-${indice}`} className="flex justify-between gap-4">
+                  <span>
+                    <span className="font-medium">
+                      {item.quantidade}× {item.nome}
+                      {item.tamanho && ` — ${item.tamanho}`}
+                    </span>
+                    {item.escolhas.length > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        {item.escolhas.join(' · ')}
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0">{moeda(item.total)}</span>
+                </li>
+              ))}
+            </ul>
+
+            {/* O cliente do PWA vira cliente da loja aqui, com os dados que
+                ele mesmo digitou no checkout — em vez de alguém redigitar tudo
+                no cadastro depois. */}
+            <div className="space-y-2 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{venda.cliente}</span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Phone className="size-3.5" aria-hidden="true" />
+                  {venda.telefone}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">{cadastro.texto}</p>
+              {cadastro.acao ? (
+                <Button variant="outline" size="sm" disabled>
+                  <UserPlus className="size-4" /> {cadastro.acao}
+                </Button>
+              ) : (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+                  <Check className="size-3.5" aria-hidden="true" />
+                  Nada a fazer.
+                </p>
+              )}
+            </div>
+
+            {/* O que o cliente escreveu vai para quem prepara, e por isso não
+                pode virar texto cinza no meio do resto. */}
+            {venda.observacao && (
+              <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+                <MessageSquare
+                  className="mt-0.5 size-4 shrink-0 text-amber-700"
+                  aria-hidden="true"
+                />
+                {venda.observacao}
+              </p>
+            )}
+
+            <div className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
+              {venda.entrega === null ? (
+                /* Retirada não gera entrega: ninguém vai buscar, e mostrar um
+                   endereço aqui faria a loja chamar motoboy à toa. */
+                <p className="flex items-start gap-1.5 font-medium text-foreground">
+                  <Store className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />O cliente retira
+                  na loja — sem entrega.
+                </p>
+              ) : (
+                <p className="flex items-start gap-1.5">
+                  <MapPin className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {enderecoEmLinha(venda.entrega)}
+                    {venda.entrega.referencia && (
+                      // Referência é o que faz o motoboy achar a casa.
+                      <span className="block">{venda.entrega.referencia}</span>
+                    )}
+                  </span>
+                </p>
+              )}
+              <p>
+                Pagamento: {venda.pagamento}
+                {venda.trocoPara !== null && (
+                  // Troco é a informação que o motoboy precisa levar na mão.
+                  // Enterrada numa observação de texto, ela se perde — por
+                  // isso aparece destacada.
+                  <strong className="text-foreground">
+                    {' '}
+                    · troco para {moeda(venda.trocoPara)}
+                  </strong>
+                )}
+              </p>
+            </div>
+
+            {/* O histórico com hora: é a resposta para "que horas esse pedido
+                ficou pronto?" quando o cliente reclama da demora. */}
+            <ol className="space-y-1 border-t pt-3 text-xs text-muted-foreground">
+              {venda.historico.map((passo) => (
+                <li key={`${passo.etapa}-${passo.em}`} className="flex gap-2">
+                  <span className="w-12 shrink-0 tabular-nums">{hora(new Date(passo.em))}</span>
+                  <span>{etapaParaALoja(passo.etapa, venda.modalidade)}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -11,50 +11,14 @@
  */
 
 import type { TemaDaLoja } from '@/lib/contraste';
-
-/**
- * O perfil da loja, como o cliente a vê na página de pedidos.
- *
- * As cores e o tema são os mesmos que a empresa escolhe em
- * `/loja/configuracoes` — esta é a tela onde eles finalmente aparecem.
- */
-/** `HH:MM`, em 24h. */
-export type Relogio = string;
-
-export interface FaixaDeHorario {
-  abre: Relogio;
-  fecha: Relogio;
-}
-
-/**
- * Mais de uma faixa por dia porque isso é o comum, e não a exceção: lanchonete
- * que serve almoço e volta à noite fecharia das 14h às 18h. Com uma faixa só,
- * ela seria obrigada a declarar um horário que não pratica — e receberia
- * pedido com a cozinha apagada.
- */
-export interface DiaDeFuncionamento {
-  /** 0 = domingo, igual a `Date.getDay()`. */
-  dia: number;
-  faixas: FaixaDeHorario[];
-}
+import { instanteNaLoja, momentoNaLoja, somarDias } from '@/lib/loja-horario';
+import type { OperacaoDaLoja } from '@/lib/loja-operacao';
+import type { AndamentoDoPedido, EtapaDoPedido } from '@/lib/loja-pedido';
 
 export interface BairroAtendido {
   id: string;
   nome: string;
   taxa: number;
-}
-
-/**
- * Um dia em que a loja não abre, por cima do horário semanal.
- *
- * O horário da semana não sabe o que é 25 de dezembro. Sem esta lista, a única
- * forma de fechar num feriado seria apagar o horário do dia e lembrar de
- * recolocar depois — e quem esquece recebe pedido com a porta fechada.
- */
-export interface DiaFechado {
-  /** `AAAA-MM-DD`. */
-  data: string;
-  motivo: string;
 }
 
 /**
@@ -240,6 +204,14 @@ export function resumoDosPagamentos(formas: FormaDePagamento[]): string {
   return partes.join(' · ');
 }
 
+/**
+ * O perfil da loja, como o cliente a vê na página de pedidos.
+ *
+ * As cores e o tema são os mesmos que a empresa escolhe em
+ * `/loja/configuracoes` — esta é a tela onde eles finalmente aparecem. Como a
+ * loja FUNCIONA — horário, tipos de pedido, agendamento, avisos — fica à parte,
+ * em `OPERACAO_DE_EXEMPLO`.
+ */
 export interface LojaDeExemplo {
   slug: string;
   nome: string;
@@ -247,36 +219,17 @@ export interface LojaDeExemplo {
   corDaMarca: string;
   corDeAcao: string;
   /**
-   * Fechar a loja AGORA, por cima do horário.
-   *
-   * O horário diz a regra; isto diz a exceção — acabou o ingrediente, a
-   * cozinha entupiu, está chovendo demais para o motoboy. Sem esse botão, a
-   * única saída seria editar o horário e depois lembrar de desfazer.
-   */
-  pausadaManualmente: boolean;
-  semana: DiaDeFuncionamento[];
-  minutosDePreparo: number;
-  /**
    * Taxa por bairro. Vazio quer dizer que a loja não cobra entrega na página,
    * e aí ela continua só na fatura que a central cobra da empresa.
    */
   bairros: BairroAtendido[];
-  /** `null` quando a loja não exige valor mínimo. */
-  pedidoMinimo: number | null;
   pagamentos: FormaDePagamento[];
   /**
    * Se a loja já cadastrou a conta Asaas. Sem ela, nenhuma forma online pode ser
    * oferecida: não haveria para onde o dinheiro ir.
    */
   asaasConfigurado: boolean;
-  diasFechados: DiaFechado[];
   pontoDeColeta: PontoDeColeta;
-  /** Deixar o cliente buscar na loja, sem entrega e sem taxa. */
-  aceitaRetirada: boolean;
-  /** Tocar um som no painel quando entra pedido, com a aba aberta. */
-  avisoSonoro: boolean;
-  /** Notificação do navegador, que chega com a aba fechada. */
-  avisoPush: boolean;
 }
 
 export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
@@ -285,57 +238,14 @@ export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
   tema: 'CLARO',
   corDaMarca: '#c2410c',
   corDeAcao: '#15803d',
-  pausadaManualmente: false,
-  semana: [
-    { dia: 0, faixas: [] },
-    {
-      dia: 1,
-      faixas: [
-        { abre: '11:00', fecha: '14:00' },
-        { abre: '18:00', fecha: '22:00' },
-      ],
-    },
-    {
-      dia: 2,
-      faixas: [
-        { abre: '11:00', fecha: '14:00' },
-        { abre: '18:00', fecha: '22:00' },
-      ],
-    },
-    {
-      dia: 3,
-      faixas: [
-        { abre: '11:00', fecha: '14:00' },
-        { abre: '18:00', fecha: '22:00' },
-      ],
-    },
-    {
-      dia: 4,
-      faixas: [
-        { abre: '11:00', fecha: '14:00' },
-        { abre: '18:00', fecha: '22:00' },
-      ],
-    },
-    {
-      dia: 5,
-      faixas: [
-        { abre: '11:00', fecha: '14:00' },
-        { abre: '18:00', fecha: '23:00' },
-      ],
-    },
-    { dia: 6, faixas: [{ abre: '11:00', fecha: '23:00' }] },
-  ],
-  minutosDePreparo: 20,
   bairros: [
     { id: 'b1', nome: 'Centro', taxa: 6 },
     { id: 'b2', nome: 'Sagrada Família', taxa: 8 },
     { id: 'b3', nome: 'Vila Nova', taxa: 10 },
     { id: 'b4', nome: 'Alto da Serra', taxa: 14 },
   ],
-  pedidoMinimo: 15,
   pagamentos: ['PIX_ONLINE', 'CREDITO_ONLINE', 'DINHEIRO', 'PIX_MAQUININHA', 'DEBITO_MAQUININHA'],
   asaasConfigurado: true,
-  diasFechados: [{ data: '2026-12-25', motivo: 'Natal' }],
   pontoDeColeta: {
     rua: 'Rua Coronel Pedro Alves',
     numero: '140',
@@ -344,86 +254,115 @@ export const LOJA_DE_EXEMPLO: LojaDeExemplo = {
     cidade: 'Lajinha',
     estado: 'MG',
   },
-  aceitaRetirada: true,
-  avisoSonoro: true,
-  avisoPush: false,
 };
 
-export const DIAS_DA_SEMANA = [
-  'Domingo',
-  'Segunda',
-  'Terça',
-  'Quarta',
-  'Quinta',
-  'Sexta',
-  'Sábado',
+const ALMOCO_E_JANTA = [
+  { abre: '11:00', fecha: '14:00' },
+  { abre: '18:00', fecha: '22:00' },
 ];
 
-function emMinutos(relogio: Relogio): number {
-  const [hora, minuto] = relogio.split(':');
-  return Number(hora) * 60 + Number(minuto);
-}
-
-export interface SituacaoDaLoja {
-  aberta: boolean;
-  /** Frase curta, do jeito que o cliente lê. */
-  texto: string;
-}
-
 /**
- * Se dá para pedir agora, e o que dizer ao cliente.
- *
- * A pausa manual vence o horário: é para isso que ela existe. Depois dela, o
- * que manda é a faixa do dia — e quando está fechado, a tela diz QUANDO abre,
- * porque "fechado" sozinho só faz a pessoa sair sem saber se volta em dez
- * minutos ou amanhã.
+ * Como a loja de exemplo funciona. Os valores foram escolhidos para mostrar
+ * cada caso da tela: domingo fechado, dois períodos por dia, sexta e sábado
+ * passando da meia-noite, feriado, horário especial na véspera de Natal e
+ * férias de uma semana.
  */
-export function situacaoDaLoja(loja: LojaDeExemplo, agora: Date): SituacaoDaLoja {
-  if (loja.pausadaManualmente) {
-    return { aberta: false, texto: 'Fechada no momento' };
-  }
-
-  const dataDeHoje = [
-    agora.getFullYear(),
-    String(agora.getMonth() + 1).padStart(2, '0'),
-    String(agora.getDate()).padStart(2, '0'),
-  ].join('-');
-
-  // O feriado vence o horário da semana, e dizer o motivo evita o cliente
-  // achar que a página quebrou.
-  const fechadoHoje = loja.diasFechados.find((dia) => dia.data === dataDeHoje);
-  if (fechadoHoje) {
-    return { aberta: false, texto: `Fechado hoje · ${fechadoHoje.motivo}` };
-  }
-
-  const minutoDeAgora = agora.getHours() * 60 + agora.getMinutes();
-  const hoje = loja.semana.find((item) => item.dia === agora.getDay());
-
-  const faixaAberta = hoje?.faixas.find(
-    (faixa) => minutoDeAgora >= emMinutos(faixa.abre) && minutoDeAgora < emMinutos(faixa.fecha),
-  );
-  if (faixaAberta) {
-    return { aberta: true, texto: `Aberto até ${faixaAberta.fecha}` };
-  }
-
-  const proximaHoje = hoje?.faixas.find((faixa) => emMinutos(faixa.abre) > minutoDeAgora);
-  if (proximaHoje) {
-    return { aberta: false, texto: `Fechado · abre às ${proximaHoje.abre}` };
-  }
-
-  // Procura o próximo dia com faixa, dando a volta na semana.
-  for (let passo = 1; passo <= 7; passo += 1) {
-    const dia = (agora.getDay() + passo) % 7;
-    const adiante = loja.semana.find((item) => item.dia === dia);
-    const primeira = adiante?.faixas[0];
-    if (primeira) {
-      const quando = passo === 1 ? 'amanhã' : DIAS_DA_SEMANA[dia]?.toLowerCase();
-      return { aberta: false, texto: `Fechado · abre ${quando} às ${primeira.abre}` };
-    }
-  }
-
-  return { aberta: false, texto: 'Fechada' };
-}
+export const OPERACAO_DE_EXEMPLO: OperacaoDaLoja = {
+  funcionamento: {
+    semana: [
+      { dia: 0, faixas: [] },
+      { dia: 1, faixas: ALMOCO_E_JANTA },
+      { dia: 2, faixas: ALMOCO_E_JANTA },
+      { dia: 3, faixas: ALMOCO_E_JANTA },
+      { dia: 4, faixas: ALMOCO_E_JANTA },
+      {
+        dia: 5,
+        faixas: [
+          { abre: '11:00', fecha: '14:00' },
+          { abre: '18:00', fecha: '00:30' },
+        ],
+      },
+      {
+        dia: 6,
+        faixas: [
+          { abre: '11:00', fecha: '15:00' },
+          { abre: '18:00', fecha: '01:00' },
+        ],
+      },
+    ],
+    excecoes: [
+      {
+        id: 'x1',
+        inicio: '2026-10-12',
+        fim: '2026-10-12',
+        tipo: 'FECHADO',
+        motivo: 'Nossa Senhora Aparecida',
+        faixas: [],
+      },
+      {
+        id: 'x2',
+        inicio: '2026-12-24',
+        fim: '2026-12-24',
+        tipo: 'HORARIO_ESPECIAL',
+        motivo: 'Véspera de Natal',
+        faixas: [{ abre: '11:00', fecha: '16:00' }],
+      },
+      {
+        id: 'x3',
+        inicio: '2026-12-25',
+        fim: '2026-12-25',
+        tipo: 'FECHADO',
+        motivo: 'Natal',
+        faixas: [],
+      },
+      {
+        id: 'x4',
+        inicio: '2027-01-04',
+        fim: '2027-01-10',
+        tipo: 'FECHADO',
+        motivo: 'Férias coletivas',
+        faixas: [],
+      },
+    ],
+    ajuste: null,
+    // Sem repetir o que a página já calcula — o horário e o "dá para agendar".
+    mensagemFechada: 'Obrigado pela visita! Logo mais a cozinha está de volta.',
+  },
+  recebimento: { modo: 'AUTOMATICO', minutosDePreparo: 20, minutosDeEntrega: 15 },
+  entrega: { ativa: true, pedidoMinimo: 15, agendamento: true },
+  retirada: {
+    ativa: true,
+    endereco: null,
+    instrucoes: 'Retire no balcão, dizendo o número do pedido.',
+    agendamento: true,
+  },
+  agendamento: {
+    permitir: true,
+    antecedenciaMinimaMin: 60,
+    antecedenciaMaximaDias: 7,
+    intervaloMin: 30,
+  },
+  notificacoes: {
+    lojista: {
+      NOVO_PEDIDO: { push: true, som: true },
+      PEDIDO_CANCELADO: { push: true, som: true },
+      PEDIDO_AGENDADO: { push: true, som: false },
+      PAGAMENTO_RECEBIDO: { push: true, som: false },
+      LOJA_FECHANDO: { push: false, som: true },
+    },
+    minutosAntesDeFechar: 15,
+    repetirSom: true,
+    cliente: {
+      RECEBIDO: true,
+      ACEITO: true,
+      EM_PREPARO: false,
+      PRONTO_PARA_RETIRAR: true,
+      SAIU_PARA_ENTREGA: true,
+      ENTREGUE: true,
+      CANCELADO: true,
+    },
+  },
+};
 
 export interface CategoriaDeExemplo {
   id: string;
@@ -531,19 +470,22 @@ export interface EnderecoDaEntrega {
  */
 export type CadastroDoCliente = 'novo' | 'jaCadastrado' | 'enderecoNovo';
 
-export interface VendaDeExemplo {
-  id: string;
-  numero: number;
+/**
+ * Uma venda como a loja a vê no painel.
+ *
+ * O caminho — etapa, histórico, agendamento, tempos — vem de
+ * `AndamentoDoPedido`, com as regras em `loja-pedido.ts`. Aqui fica o resto.
+ */
+export interface VendaDaLoja extends AndamentoDoPedido {
   cliente: string;
-  horario: string;
-  total: number;
-  situacao: 'agendado' | 'preparo' | 'rota' | 'entregue' | 'cancelado';
-  itens: ItemDeVenda[];
   telefone: string;
+  total: number;
+  itens: ItemDeVenda[];
   pagamento: string;
   /** Preenchido só quando o cliente paga em dinheiro. */
   trocoPara: number | null;
-  entrega: EnderecoDaEntrega;
+  /** `null` na retirada: não há para onde levar. */
+  entrega: EnderecoDaEntrega | null;
   cadastro: CadastroDoCliente;
   /**
    * O que o cliente escreveu: "sem cebola", "troca o refri por suco".
@@ -552,16 +494,12 @@ export interface VendaDeExemplo {
    * um campo, isso ia parar no telefone da loja — ou em lugar nenhum.
    */
   observacao: string | null;
-  /** Retirada não gera entrega: o cliente busca no balcão. */
-  retirarNaLoja: boolean;
   /**
-   * Minutos que faltam para o pedido entrar no despacho e chamar o motoboy.
-   *
-   * Só existe enquanto a venda está `agendado`. É a janela em que a loja
-   * consegue cancelar — depois dela, o pedido vira entrega e sai do controle
-   * da loja.
+   * DEMONSTRAÇÃO: a conta de quem pediu nesta página, para "Meus pedidos" achar
+   * a venda certa. `null` nos exemplos. Na integração o pedido pertence ao
+   * cliente no banco, e isto some.
    */
-  minutosParaDespachar: number | null;
+  contaDoCliente: string | null;
 }
 
 /**
@@ -703,155 +641,249 @@ export const PRODUTOS_DE_EXEMPLO: ProdutoDeExemplo[] = [
   },
 ];
 
-export const VENDAS_DE_EXEMPLO: VendaDeExemplo[] = [
-  {
-    id: 'v1',
-    numero: 1542,
-    cliente: 'Ana Ribeiro',
-    horario: '10:24',
-    total: 32.9,
-    situacao: 'agendado',
-    pagamento: 'Dinheiro na entrega',
-    telefone: '(35) 99841-2207',
-    trocoPara: 50,
-    entrega: {
-      rua: 'Rua Arnaldo Leite Ribeiro',
-      numero: '212',
-      complemento: null,
-      bairro: 'Centro',
-      cidade: 'Lajinha',
-      estado: 'MG',
-      cep: '36980-000',
-      referencia: 'Portão azul, ao lado da padaria',
-    },
-    cadastro: 'novo',
-    observacao: 'Sem granola, por favor.',
-    retirarNaLoja: false,
-    minutosParaDespachar: 6,
-    itens: [
-      {
-        nome: 'Açaí',
-        quantidade: 1,
-        tamanho: '500ml',
-        escolhas: ['Morango +R$ 3,00', 'Leite em pó +R$ 2,00'],
-        total: 23,
+/**
+ * As vendas de exemplo, com as horas contadas a partir de `agora` — senão o
+ * painel abriria mostrando pedido "em preparação" desde ontem. Uma de cada
+ * etapa, uma retirada e uma agendada para amanhã, para cada caso da tela
+ * aparecer sem ninguém precisar fazer pedido.
+ *
+ * Todas entram aceitas: a loja de exemplo aceita automaticamente. Para ver um
+ * pedido esperando aceite, troque para o aceite manual em Tipos de pedido e
+ * faça um pedido pela página da loja.
+ */
+export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
+  const ha = (minutos: number) => new Date(agora.getTime() - minutos * 60_000).toISOString();
+  const passos = (...lista: Array<[EtapaDoPedido, number]>) =>
+    lista.map(([etapa, minutos]) => ({ etapa, em: ha(minutos) }));
+
+  const amanha = somarDias(momentoNaLoja(agora).data, 1);
+  const tempos = { minutosDePreparo: 20, minutosDeEntrega: 15 };
+
+  return [
+    {
+      numero: 1544,
+      cliente: 'Beatriz Nunes',
+      telefone: '(35) 99873-4410',
+      modalidade: 'ENTREGA',
+      etapa: 'ACEITO',
+      historico: passos(['NOVO', 12], ['ACEITO', 12]),
+      janela: {
+        inicio: instanteNaLoja(amanha, 12 * 60).toISOString(),
+        fim: instanteNaLoja(amanha, 12 * 60 + 30).toISOString(),
       },
-      { nome: 'Sorvete casquinha', quantidade: 1, tamanho: null, escolhas: [], total: 6 },
-    ],
-  },
-  {
-    id: 'v2',
-    numero: 1541,
-    cliente: 'Carlos Menezes',
-    horario: '09:56',
-    total: 45,
-    situacao: 'preparo',
-    pagamento: 'Pix online',
-    telefone: '(35) 99712-6680',
-    trocoPara: null,
-    entrega: {
-      rua: 'Rua das Flores',
-      numero: '45',
-      complemento: 'Apto 302',
-      bairro: 'Sagrada Família',
-      cidade: 'Lajinha',
-      estado: 'MG',
-      cep: '36980-000',
-      referencia: null,
-    },
-    cadastro: 'enderecoNovo',
-    observacao: null,
-    retirarNaLoja: false,
-    minutosParaDespachar: null,
-    itens: [
-      {
-        nome: 'X-Burguer',
-        quantidade: 2,
-        tamanho: null,
-        escolhas: ['Bacon +R$ 4,00'],
-        total: 52,
+      ...tempos,
+      cancelamento: null,
+      total: 44,
+      pagamento: 'Pix online',
+      trocoPara: null,
+      entrega: {
+        rua: 'Rua Padre Júlio',
+        numero: '58',
+        complemento: 'Casa 2',
+        bairro: 'Sagrada Família',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: null,
       },
-    ],
-  },
-  {
-    id: 'v3',
-    numero: 1540,
-    cliente: 'Joana Prado',
-    horario: '09:32',
-    total: 27.5,
-    situacao: 'rota',
-    pagamento: 'Crédito na maquininha',
-    telefone: '(35) 99655-1143',
-    trocoPara: null,
-    entrega: {
-      rua: 'Av. Principal',
-      numero: '900',
-      complemento: null,
-      bairro: 'Vila Nova',
-      cidade: 'Lajinha',
-      estado: 'MG',
-      cep: '36980-000',
-      referencia: null,
+      cadastro: 'novo',
+      observacao: 'Para o almoço do escritório.',
+      contaDoCliente: null,
+      itens: [{ nome: 'Açaí', quantidade: 2, tamanho: '500ml', escolhas: ['Granola'], total: 36 }],
     },
-    cadastro: 'jaCadastrado',
-    observacao: 'Apartamento no fundo, interfone quebrado.',
-    retirarNaLoja: false,
-    minutosParaDespachar: null,
-    itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '700ml', escolhas: [], total: 24 }],
-  },
-  {
-    id: 'v4',
-    numero: 1539,
-    cliente: 'Marcos Lima',
-    horario: '08:47',
-    total: 18,
-    situacao: 'entregue',
-    pagamento: 'Pix online',
-    telefone: '(35) 99655-1143',
-    trocoPara: null,
-    entrega: {
-      rua: 'Rua do Comércio',
-      numero: '77',
-      complemento: null,
-      bairro: 'Centro',
-      cidade: 'Lajinha',
-      estado: 'MG',
-      cep: '36980-000',
-      referencia: null,
+    {
+      numero: 1543,
+      cliente: 'Lucas Andrade',
+      telefone: '(35) 99120-5563',
+      modalidade: 'RETIRADA',
+      etapa: 'PRONTO',
+      historico: passos(['NOVO', 18], ['ACEITO', 18], ['EM_PREPARO', 15], ['PRONTO', 2]),
+      janela: null,
+      ...tempos,
+      cancelamento: null,
+      total: 24,
+      pagamento: 'Pix online',
+      trocoPara: null,
+      entrega: null,
+      cadastro: 'jaCadastrado',
+      observacao: null,
+      contaDoCliente: null,
+      itens: [
+        { nome: 'X-Salada', quantidade: 1, tamanho: null, escolhas: ['Ao ponto'], total: 24 },
+      ],
     },
-    cadastro: 'jaCadastrado',
-    observacao: null,
-    retirarNaLoja: false,
-    minutosParaDespachar: null,
-    itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '500ml', escolhas: [], total: 18 }],
-  },
-  {
-    id: 'v5',
-    numero: 1538,
-    cliente: 'Rita Souza',
-    horario: '08:12',
-    total: 52.9,
-    situacao: 'cancelado',
-    pagamento: 'Dinheiro na entrega',
-    telefone: '(35) 99420-7781',
-    trocoPara: 60,
-    entrega: {
-      rua: 'Rua Sete',
-      numero: '310',
-      complemento: null,
-      bairro: 'Vila Nova',
-      cidade: 'Lajinha',
-      estado: 'MG',
-      cep: '36980-000',
-      referencia: null,
+    {
+      numero: 1542,
+      cliente: 'Ana Ribeiro',
+      telefone: '(35) 99841-2207',
+      modalidade: 'ENTREGA',
+      etapa: 'ACEITO',
+      historico: passos(['NOVO', 3], ['ACEITO', 3]),
+      janela: null,
+      ...tempos,
+      cancelamento: null,
+      total: 32.9,
+      pagamento: 'Dinheiro na entrega',
+      trocoPara: 50,
+      entrega: {
+        rua: 'Rua Arnaldo Leite Ribeiro',
+        numero: '212',
+        complemento: null,
+        bairro: 'Centro',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: 'Portão azul, ao lado da padaria',
+      },
+      cadastro: 'novo',
+      observacao: 'Sem granola, por favor.',
+      contaDoCliente: null,
+      itens: [
+        {
+          nome: 'Açaí',
+          quantidade: 1,
+          tamanho: '500ml',
+          escolhas: ['Morango +R$ 3,00', 'Leite em pó +R$ 2,00'],
+          total: 23,
+        },
+        { nome: 'Sorvete casquinha', quantidade: 1, tamanho: null, escolhas: [], total: 6 },
+      ],
     },
-    cadastro: 'novo',
-    observacao: null,
-    retirarNaLoja: false,
-    minutosParaDespachar: null,
-    itens: [{ nome: 'X-Burguer', quantidade: 2, tamanho: null, escolhas: [], total: 44 }],
-  },
-];
+    {
+      numero: 1541,
+      cliente: 'Carlos Menezes',
+      telefone: '(35) 99712-6680',
+      modalidade: 'ENTREGA',
+      etapa: 'EM_PREPARO',
+      historico: passos(['NOVO', 14], ['ACEITO', 14], ['EM_PREPARO', 9]),
+      janela: null,
+      ...tempos,
+      cancelamento: null,
+      total: 45,
+      pagamento: 'Pix online',
+      trocoPara: null,
+      entrega: {
+        rua: 'Rua das Flores',
+        numero: '45',
+        complemento: 'Apto 302',
+        bairro: 'Sagrada Família',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: null,
+      },
+      cadastro: 'enderecoNovo',
+      observacao: null,
+      contaDoCliente: null,
+      itens: [
+        {
+          nome: 'X-Burguer',
+          quantidade: 2,
+          tamanho: null,
+          escolhas: ['Bacon +R$ 4,00'],
+          total: 52,
+        },
+      ],
+    },
+    {
+      numero: 1540,
+      cliente: 'Joana Prado',
+      telefone: '(35) 99655-1143',
+      modalidade: 'ENTREGA',
+      etapa: 'SAIU_PARA_ENTREGA',
+      historico: passos(
+        ['NOVO', 38],
+        ['ACEITO', 38],
+        ['EM_PREPARO', 33],
+        ['PRONTO', 16],
+        ['SAIU_PARA_ENTREGA', 9],
+      ),
+      janela: null,
+      ...tempos,
+      cancelamento: null,
+      total: 27.5,
+      pagamento: 'Crédito na maquininha',
+      trocoPara: null,
+      entrega: {
+        rua: 'Av. Principal',
+        numero: '900',
+        complemento: null,
+        bairro: 'Vila Nova',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: null,
+      },
+      cadastro: 'jaCadastrado',
+      observacao: 'Apartamento no fundo, interfone quebrado.',
+      contaDoCliente: null,
+      itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '700ml', escolhas: [], total: 24 }],
+    },
+    {
+      numero: 1539,
+      cliente: 'Marcos Lima',
+      telefone: '(35) 99655-1143',
+      modalidade: 'ENTREGA',
+      etapa: 'ENTREGUE',
+      historico: passos(
+        ['NOVO', 95],
+        ['ACEITO', 95],
+        ['EM_PREPARO', 90],
+        ['PRONTO', 72],
+        ['SAIU_PARA_ENTREGA', 66],
+        ['ENTREGUE', 51],
+      ),
+      janela: null,
+      ...tempos,
+      cancelamento: null,
+      total: 18,
+      pagamento: 'Pix online',
+      trocoPara: null,
+      entrega: {
+        rua: 'Rua do Comércio',
+        numero: '77',
+        complemento: null,
+        bairro: 'Centro',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: null,
+      },
+      cadastro: 'jaCadastrado',
+      observacao: null,
+      contaDoCliente: null,
+      itens: [{ nome: 'Açaí', quantidade: 1, tamanho: '500ml', escolhas: [], total: 18 }],
+    },
+    {
+      numero: 1538,
+      cliente: 'Rita Souza',
+      telefone: '(35) 99420-7781',
+      modalidade: 'ENTREGA',
+      etapa: 'CANCELADO',
+      historico: passos(['NOVO', 130], ['ACEITO', 130], ['CANCELADO', 124]),
+      janela: null,
+      ...tempos,
+      cancelamento: { motivo: 'Item em falta', por: 'LOJA' },
+      total: 52.9,
+      pagamento: 'Dinheiro na entrega',
+      trocoPara: 60,
+      entrega: {
+        rua: 'Rua Sete',
+        numero: '310',
+        complemento: null,
+        bairro: 'Vila Nova',
+        cidade: 'Lajinha',
+        estado: 'MG',
+        cep: '36980-000',
+        referencia: null,
+      },
+      cadastro: 'novo',
+      observacao: null,
+      contaDoCliente: null,
+      itens: [{ nome: 'X-Burguer', quantidade: 2, tamanho: null, escolhas: [], total: 44 }],
+    },
+  ];
+}
 
 /**
  * A faixa de preço de um produto com tamanhos. Mostrar só o menor esconderia o

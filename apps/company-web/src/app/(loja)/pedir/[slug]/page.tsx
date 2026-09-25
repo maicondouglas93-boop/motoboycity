@@ -11,15 +11,17 @@ import {
   formasOferecidas,
   pendenciasDoProduto,
   resumoDosPagamentos,
-  situacaoDaLoja,
   type ProdutoDeExemplo,
 } from '@/lib/loja-mock';
+import { situacaoDaLoja } from '@/lib/loja-horario';
+import { horariosDaModalidade, modalidadesAtivas, textoDoTempo } from '@/lib/loja-operacao';
+import { useOperacao } from '@/lib/loja-demo';
+import { useAgora } from '@/lib/relogio';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import {
   ajustarQuantidade,
   juntarNaSacola,
-  useHidratado,
   usePedidos,
   useSacola,
 } from '@/components/loja-online/armazenamento';
@@ -80,11 +82,38 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
    * Antes dela a loja é tratada como fechada — errar para o lado de não deixar
    * pedir é melhor do que aceitar pedido com a cozinha apagada.
    *
-   * Sem relógio correndo aqui de propósito. Quando houver backend, quem decide
-   * se dá para pedir é o servidor, no momento do checkout.
+   * O relógio anda sozinho e é acertado quando o painel muda a loja em outra
+   * aba: a pausa acaba, a loja abre, e a página acompanha sem recarregar.
+   * Quando houver backend, quem decide se dá para pedir continua sendo o
+   * servidor, no momento do checkout.
    */
-  const hidratado = useHidratado();
-  const situacao = hidratado ? situacaoDaLoja(loja, new Date()) : { aberta: false, texto: '' };
+  const operacao = useOperacao();
+  const instante = useAgora();
+  const hidratado = instante !== 0;
+  const situacao = useMemo(
+    () => (instante === 0 ? null : situacaoDaLoja(operacao.funcionamento, new Date(instante))),
+    [operacao, instante],
+  );
+  const modalidades = modalidadesAtivas(operacao);
+
+  /*
+   * Fechada, a loja ainda vende se der para agendar: é justamente quando o
+   * agendamento mais importa — a pessoa escolhe à noite o almoço de amanhã.
+   */
+  const agendavel = useMemo(
+    () =>
+      instante !== 0 &&
+      modalidadesAtivas(operacao).some(
+        (modalidade) => horariosDaModalidade(operacao, modalidade, new Date(instante)).length > 0,
+      ),
+    [operacao, instante],
+  );
+  const podePedir = modalidades.length > 0 && ((situacao?.aberta ?? false) || agendavel);
+
+  const faltamParaFechar =
+    situacao?.aberta && situacao.muda
+      ? Math.ceil((situacao.muda.getTime() - instante) / 60_000)
+      : null;
 
   const taxas = loja.bairros.map((bairro) => bairro.taxa);
 
@@ -190,10 +219,16 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             <div className="min-w-0">
               <h1 className="truncate text-xl leading-tight font-bold">{loja.nome}</h1>
               <p className="mt-0.5 text-sm" style={{ color: paleta.suave }}>
-                {situacao.aberta ? (
-                  <span style={{ color: loja.corDeAcao }}>{situacao.texto}</span>
+                {situacao?.aberta ? (
+                  <span style={{ color: loja.corDeAcao }}>
+                    {situacao.texto}
+                    {/* Perto de fechar, a conta que o cliente faria de cabeça. */}
+                    {faltamParaFechar !== null && faltamParaFechar <= 30 && (
+                      <span className="font-medium"> · fecha em {faltamParaFechar} min</span>
+                    )}
+                  </span>
                 ) : (
-                  <span className="font-medium">{situacao.texto}</span>
+                  <span className="font-medium">{situacao?.texto}</span>
                 )}
               </p>
             </div>
@@ -204,30 +239,40 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             <ControleDaConta paleta={paleta} />
           </div>
 
-          {/* Os três fatos que decidem o pedido, juntos e antes do cardápio. */}
+          {/* Os fatos que decidem o pedido, juntos e antes do cardápio. Só
+              aparece o que a loja oferece: sem entrega, nada de taxa. */}
           <div
             className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2 text-sm"
             style={{ backgroundColor: paleta.superficie }}
           >
             <span className="flex items-center gap-1.5">
               <Clock className="size-4" style={{ color: paleta.suave }} aria-hidden="true" />
-              {loja.minutosDePreparo} a {loja.minutosDePreparo + 15} min
+              {modalidades.includes('ENTREGA')
+                ? textoDoTempo(operacao, 'ENTREGA')
+                : `pronto em ${textoDoTempo(operacao, 'RETIRADA')}`}
             </span>
-            <span>
-              Entrega{' '}
-              {taxas.length === 0 ? (
-                <strong>a combinar</strong>
-              ) : Math.min(...taxas) === Math.max(...taxas) ? (
-                <strong>{moeda(taxas[0]!)}</strong>
-              ) : (
-                /* Faixa, e não um número só: a taxa depende do bairro, e
-                   mostrar apenas a menor faria o total do checkout parecer
-                   engano. */
-                <strong>
-                  {moeda(Math.min(...taxas))} a {moeda(Math.max(...taxas))}
-                </strong>
-              )}
-            </span>
+            {modalidades.includes('ENTREGA') && (
+              <span>
+                Entrega{' '}
+                {taxas.length === 0 ? (
+                  <strong>a combinar</strong>
+                ) : Math.min(...taxas) === Math.max(...taxas) ? (
+                  <strong>{moeda(taxas[0]!)}</strong>
+                ) : (
+                  /* Faixa, e não um número só: a taxa depende do bairro, e
+                     mostrar apenas a menor faria o total do checkout parecer
+                     engano. */
+                  <strong>
+                    {moeda(Math.min(...taxas))} a {moeda(Math.max(...taxas))}
+                  </strong>
+                )}
+              </span>
+            )}
+            {modalidades.includes('RETIRADA') && (
+              <span>
+                {modalidades.includes('ENTREGA') ? 'Retirada sem taxa' : 'Só retirada na loja'}
+              </span>
+            )}
             <span style={{ color: paleta.suave }}>
               {resumoDosPagamentos(formasOferecidas(loja))}
             </span>
@@ -250,12 +295,34 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
           )}
         </header>
 
-        {hidratado && !situacao.aberta && (
+        {/* Fechada: a situação, o recado da loja e o que ainda dá para fazer.
+            "Fechado" sozinho faz o cliente ir embora — dizendo que dá para
+            agendar, ele fica. */}
+        {hidratado && situacao && !situacao.aberta && (
+          <div
+            role="status"
+            className="mx-4 mb-3 space-y-1 rounded-lg px-3 py-2 text-sm"
+            style={{ backgroundColor: paleta.superficie }}
+          >
+            <p className="font-medium">{situacao.texto}</p>
+            {operacao.funcionamento.mensagemFechada && (
+              <p>{operacao.funcionamento.mensagemFechada}</p>
+            )}
+            <p className="text-xs" style={{ color: paleta.suave }}>
+              {podePedir
+                ? 'Você já pode escolher e agendar o seu pedido.'
+                : 'Dá para ver o cardápio, mas só dá para pedir quando ela abrir.'}
+            </p>
+          </div>
+        )}
+
+        {hidratado && situacao?.aberta && modalidades.length === 0 && (
           <p
+            role="status"
             className="mx-4 mb-3 rounded-lg px-3 py-2 text-sm"
             style={{ backgroundColor: paleta.superficie }}
           >
-            {situacao.texto}. Dá para ver o cardápio, mas só dá para pedir quando ela abrir.
+            A loja não está recebendo pedidos pela página agora.
           </p>
         )}
 
@@ -393,7 +460,7 @@ export default function LojaPublicaPage({ params }: { params: Promise<{ slug: st
             produto={aberto}
             paleta={paleta}
             corDeAcao={loja.corDeAcao}
-            aberta={situacao.aberta}
+            aberta={podePedir}
             onFechar={() => setAberto(null)}
             onAdicionar={adicionar}
           />

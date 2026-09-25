@@ -22,8 +22,20 @@ import { textoSobre } from './paleta';
  *
  * Quem pediu menos movimento vê o check já pronto: o traço sendo desenhado não
  * é transformação, então o `MotionConfig` sozinho não o desligaria.
+ *
+ * Agendado, diz para quando: "enviado" sozinho faria quem agendou para amanhã
+ * achar que o pedido vem agora.
  */
-export function ConfirmacaoDoPedido({ cor, numero }: { cor: string; numero: number }) {
+export function ConfirmacaoDoPedido({
+  cor,
+  numero,
+  agendadoPara = null,
+}: {
+  cor: string;
+  numero: number;
+  /** "amanhã, 12:00". */
+  agendadoPara?: string | null;
+}) {
   const reduzir = useReducedMotion();
   const texto = textoSobre(cor);
 
@@ -59,7 +71,9 @@ export function ConfirmacaoDoPedido({ cor, numero }: { cor: string; numero: numb
           transition={{ duration: 0.2, ease: CURVA_ENTRADA, delay: 0.26 }}
         />
       </svg>
-      Pedido #{numero} enviado para a loja.
+      {agendadoPara
+        ? `Pedido #${numero} agendado para ${agendadoPara}.`
+        : `Pedido #${numero} enviado para a loja.`}
     </m.p>
   );
 }

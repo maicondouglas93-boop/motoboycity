@@ -1,28 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import {
-  AlertCircle,
-  Bell,
-  Check,
-  Copy,
-  ImagePlus,
-  Link2,
-  MapPin,
-  Plus,
-  Trash2,
-} from 'lucide-react';
+import { AlertCircle, Check, Copy, ImagePlus, Link2, MapPin, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  DIAS_DA_SEMANA,
   FORMAS_DE_PAGAMENTO,
   GRUPOS_DE_PAGAMENTO,
   LOJA_DE_EXEMPLO,
-  type DiaFechado,
   type FormaDePagamento,
 } from '@/lib/loja-mock';
 import {
@@ -40,17 +28,6 @@ interface LinhaDeBairro {
   id: string;
   nome: string;
   taxa: string;
-}
-
-interface LinhaDeFaixa {
-  id: string;
-  abre: string;
-  fecha: string;
-}
-
-interface LinhaDeDia {
-  dia: number;
-  faixas: LinhaDeFaixa[];
 }
 
 function novoId(): string {
@@ -82,24 +59,6 @@ export default function LojaConfiguracoesPage() {
       asaasConfigurado ||
       FORMAS_DE_PAGAMENTO.find((forma) => forma.valor === valor)?.grupo !== 'ONLINE',
   );
-  const [preparo, setPreparo] = useState('20');
-  const [entradaAutomatica, setEntradaAutomatica] = useState(true);
-  const [pausada, setPausada] = useState(false);
-  const [pedidoMinimo, setPedidoMinimo] = useState('15,00');
-  const [aceitaRetirada, setAceitaRetirada] = useState(LOJA_DE_EXEMPLO.aceitaRetirada);
-  const [avisoSonoro, setAvisoSonoro] = useState(LOJA_DE_EXEMPLO.avisoSonoro);
-  const [avisoPush, setAvisoPush] = useState(LOJA_DE_EXEMPLO.avisoPush);
-
-  const [diasFechados, setDiasFechados] = useState<Array<DiaFechado & { id: string }>>(
-    LOJA_DE_EXEMPLO.diasFechados.map((dia) => ({ ...dia, id: novoId() })),
-  );
-
-  function alterarDiaFechado(id: string, campo: 'data' | 'motivo', valor: string) {
-    setDiasFechados((atual) =>
-      atual.map((dia) => (dia.id === id ? { ...dia, [campo]: valor } : dia)),
-    );
-  }
-
   const coleta = LOJA_DE_EXEMPLO.pontoDeColeta;
 
   const [bairros, setBairros] = useState<LinhaDeBairro[]>(
@@ -110,66 +69,11 @@ export default function LojaConfiguracoesPage() {
     })),
   );
 
-  const [semana, setSemana] = useState<LinhaDeDia[]>(
-    LOJA_DE_EXEMPLO.semana.map((dia) => ({
-      dia: dia.dia,
-      faixas: dia.faixas.map((faixa) => ({ id: novoId(), abre: faixa.abre, fecha: faixa.fecha })),
-    })),
-  );
-
   function alterarBairro(id: string, campo: 'nome' | 'taxa', valor: string) {
     setBairros((atual) =>
       atual.map((bairro) => (bairro.id === id ? { ...bairro, [campo]: valor } : bairro)),
     );
   }
-
-  function alterarFaixa(dia: number, id: string, campo: 'abre' | 'fecha', valor: string) {
-    setSemana((atual) =>
-      atual.map((linha) =>
-        linha.dia === dia
-          ? {
-              ...linha,
-              faixas: linha.faixas.map((faixa) =>
-                faixa.id === id ? { ...faixa, [campo]: valor } : faixa,
-              ),
-            }
-          : linha,
-      ),
-    );
-  }
-
-  function acrescentarFaixa(dia: number) {
-    setSemana((atual) =>
-      atual.map((linha) =>
-        linha.dia === dia
-          ? { ...linha, faixas: [...linha.faixas, { id: novoId(), abre: '18:00', fecha: '22:00' }] }
-          : linha,
-      ),
-    );
-  }
-
-  function removerFaixa(dia: number, id: string) {
-    setSemana((atual) =>
-      atual.map((linha) =>
-        linha.dia === dia
-          ? { ...linha, faixas: linha.faixas.filter((faixa) => faixa.id !== id) }
-          : linha,
-      ),
-    );
-  }
-
-  /*
-   * Faixa que fecha antes de abrir não é erro de digitação inofensivo: a loja
-   * fica declarada aberta num intervalo vazio e não recebe pedido nenhum, sem
-   * nada na tela explicando por quê.
-   */
-  const faixasInvertidas = semana.flatMap((linha) =>
-    linha.faixas
-      .filter((faixa) => faixa.fecha <= faixa.abre)
-      .map(() => DIAS_DA_SEMANA[linha.dia] ?? ''),
-  );
-
-  const semDiaAberto = semana.every((linha) => linha.faixas.length === 0);
 
   const url = `${DOMINIO}/${slug}`;
 
@@ -208,7 +112,8 @@ export default function LojaConfiguracoesPage() {
       <header>
         <h1 className="text-2xl font-bold">Configurações da loja</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Como sua página de pedidos aparece e como você recebe.
+          O link, a aparência, o pagamento e a área de entrega. Horário, tipos de pedido e avisos
+          têm telas próprias, no menu ao lado.
         </p>
       </header>
 
@@ -546,227 +451,7 @@ export default function LojaConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      {/* 5. Entrada dos pedidos. Vem antes do preparo de propósito: o preparo
-          só significa "janela para cancelar" quando a entrada é automática. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Entrada dos pedidos</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="flex items-start gap-2.5 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={entradaAutomatica}
-              onCheckedChange={(valor) => setEntradaAutomatica(valor === true)}
-            />
-            <span>
-              Aceitar os pedidos automaticamente
-              <span className="block text-xs text-muted-foreground">
-                O pedido entra na fila sozinho e o motoboy é chamado quando o preparo vence.
-              </span>
-            </span>
-          </label>
-
-          {entradaAutomatica ? (
-            <p className="text-xs text-muted-foreground">
-              Ninguém precisa ficar olhando a tela. Se não for dar conta de um pedido, você tem o
-              tempo de preparo para cancelar.
-            </p>
-          ) : (
-            /* O modo manual troca um problema por outro, e a tela diz qual. */
-            <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-              <p>
-                <strong>Cada pedido vai esperar você confirmar.</strong> Se ninguém estiver olhando
-                a tela, o cliente espera sem saber — e o motoboy só é chamado depois da sua
-                confirmação.
-              </p>
-              <p>
-                Você deixa de ter a janela de cancelamento: ela é o preparo correndo antes do
-                despacho, e aqui nada corre até você confirmar.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 6. Preparo. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tempo de preparo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="max-w-40 space-y-2">
-            <Label htmlFor="preparo">Minutos</Label>
-            <Input
-              id="preparo"
-              type="number"
-              min={1}
-              value={preparo}
-              onChange={(event) => setPreparo(event.target.value)}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {entradaAutomatica
-              ? 'O pedido entra na fila e o motoboy só é chamado quando esse tempo vence. É também a janela em que você consegue cancelar — depois dela, o pedido já virou entrega.'
-              : 'O motoboy é chamado esse tempo depois de você confirmar o pedido. É o que o cliente vê como previsão na página.'}
-          </p>
-          <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">
-            Sua página só aceita pedido dentro do horário de funcionamento. Sem isso, um pedido de
-            madrugada chamaria motoboy para loja fechada.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* 7. Horário. É ele que decide se a página aceita pedido agora. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Horário de funcionamento</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Fora desses horários, sua página mostra o cardápio mas não deixa fechar pedido. É o que
-            evita um pedido de madrugada chamando motoboy para loja fechada.
-          </p>
-
-          {semana.map((linha) => (
-            <div key={linha.dia} className="space-y-2 border-t pt-3 first:border-t-0 first:pt-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="w-20 text-sm font-medium">{DIAS_DA_SEMANA[linha.dia]}</span>
-                {linha.faixas.length === 0 && (
-                  <span className="text-sm text-muted-foreground">Fechado o dia todo</span>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto"
-                  onClick={() => acrescentarFaixa(linha.dia)}
-                >
-                  <Plus className="size-4" /> Horário
-                </Button>
-              </div>
-
-              {/* Duas faixas no mesmo dia porque almoço e janta é o comum. Com
-                  uma faixa só, quem fecha das 14h às 18h seria obrigado a
-                  declarar um horário que não pratica. */}
-              {linha.faixas.map((faixa) => (
-                <div key={faixa.id} className="flex flex-wrap items-center gap-2 pl-20">
-                  <Input
-                    type="time"
-                    value={faixa.abre}
-                    onChange={(evento) =>
-                      alterarFaixa(linha.dia, faixa.id, 'abre', evento.target.value)
-                    }
-                    aria-label={DIAS_DA_SEMANA[linha.dia] + ': abre às'}
-                    className="max-w-32"
-                  />
-                  <span className="text-sm text-muted-foreground">às</span>
-                  <Input
-                    type="time"
-                    value={faixa.fecha}
-                    onChange={(evento) =>
-                      alterarFaixa(linha.dia, faixa.id, 'fecha', evento.target.value)
-                    }
-                    aria-label={DIAS_DA_SEMANA[linha.dia] + ': fecha às'}
-                    className="max-w-32"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={'Remover horário de ' + DIAS_DA_SEMANA[linha.dia]}
-                    onClick={() => removerFaixa(linha.dia, faixa.id)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ))}
-
-          {faixasInvertidas.length > 0 && (
-            <p
-              role="alert"
-              className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs"
-            >
-              <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-              <span>
-                Em <strong>{[...new Set(faixasInvertidas)].join(', ')}</strong> o horário de fechar
-                não é depois do de abrir. Do jeito que está, a loja nunca abre nesse dia.
-              </span>
-            </p>
-          )}
-
-          {semDiaAberto && (
-            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-              Nenhum dia com horário: sua página não aceita pedido em dia nenhum.
-            </p>
-          )}
-
-          {/* O horário da semana não sabe o que é 25 de dezembro. */}
-          <div className="space-y-2 border-t pt-3">
-            <p className="text-sm font-medium">Dias fechados</p>
-            {diasFechados.map((dia) => (
-              <div key={dia.id} className="grid gap-2 sm:grid-cols-[170px_1fr_40px]">
-                <Input
-                  type="date"
-                  value={dia.data}
-                  onChange={(evento) => alterarDiaFechado(dia.id, 'data', evento.target.value)}
-                  aria-label="Data fechada"
-                />
-                <Input
-                  value={dia.motivo}
-                  onChange={(evento) => alterarDiaFechado(dia.id, 'motivo', evento.target.value)}
-                  aria-label="Motivo"
-                  placeholder="Feriado, férias, reforma"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={'Remover ' + (dia.motivo || dia.data)}
-                  onClick={() => setDiasFechados((atual) => atual.filter((d) => d.id !== dia.id))}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setDiasFechados((atual) => [...atual, { id: novoId(), data: '', motivo: '' }])
-              }
-            >
-              <Plus className="size-4" /> Acrescentar dia
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Nesses dias a loja não aceita pedido, seja qual for o horário. O motivo aparece para o
-              cliente, para ele não achar que a página quebrou.
-            </p>
-          </div>
-
-          {/* A exceção que o horário não cobre, e que é o botão mais usado numa
-              noite ruim. */}
-          <label className="flex items-start gap-2.5 border-t pt-3 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={pausada}
-              onCheckedChange={(valor) => setPausada(valor === true)}
-            />
-            <span>
-              Fechar a loja agora
-              <span className="block text-xs text-muted-foreground">
-                Vale por cima do horário. Para quando acabou ingrediente, a cozinha encheu ou está
-                chovendo demais — sem precisar mexer no horário e lembrar de desfazer depois.
-              </span>
-            </span>
-          </label>
-        </CardContent>
-      </Card>
-
-      {/* 8. Bairros e taxas, no lugar da taxa única. */}
+      {/* 5. Bairros e taxas, no lugar da taxa única. */}
       <Card>
         <CardHeader>
           <CardTitle>Bairros que você atende</CardTitle>
@@ -839,30 +524,7 @@ export default function LojaConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      {/* 9. Pedido mínimo. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Pedido mínimo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="max-w-40 space-y-2">
-            <Label htmlFor="pedidoMinimo">Valor mínimo</Label>
-            <Input
-              id="pedidoMinimo"
-              inputMode="decimal"
-              value={pedidoMinimo}
-              onChange={(evento) => setPedidoMinimo(evento.target.value)}
-              placeholder="sem mínimo"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Conta só os itens, sem a entrega. Deixe vazio para não exigir. Sem mínimo, um sorvete de
-            R$ 6,00 pode sair com R$ 8,00 de taxa — e a diferença sai do seu bolso.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* 10. De onde o motoboy retira. NÃO é campo desta tela. */}
+      {/* 6. De onde o motoboy retira. NÃO é campo desta tela. */}
       <Card>
         <CardHeader>
           <CardTitle>De onde o motoboy retira</CardTitle>
@@ -883,90 +545,6 @@ export default function LojaConfiguracoesPage() {
             configuração separada da loja. Para alterar, mude o endereço da empresa — a loja
             acompanha.
           </p>
-        </CardContent>
-      </Card>
-
-      {/* 11. Retirada: pedido sem entrega, e sem taxa. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Retirada na loja</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="flex items-start gap-2.5 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={aceitaRetirada}
-              onCheckedChange={(valor) => setAceitaRetirada(valor === true)}
-            />
-            <span>
-              Deixar o cliente buscar na loja
-              <span className="block text-xs text-muted-foreground">
-                No checkout ele escolhe entre entrega e retirada. Na retirada não há taxa, não há
-                endereço a preencher e nenhum motoboy é chamado.
-              </span>
-            </span>
-          </label>
-          <p className="text-xs text-muted-foreground">
-            O endereço acima é o que aparece para o cliente saber onde buscar.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* 12. Avisos. O que funciona e o que ainda não, dito na tela. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Avisos de pedido novo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="flex items-start gap-2.5 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={avisoSonoro}
-              onCheckedChange={(valor) => setAvisoSonoro(valor === true)}
-            />
-            <span>
-              Tocar um som quando entrar pedido
-              <span className="block text-xs text-muted-foreground">
-                Só toca com esta página aberta em alguma aba. Fechou o navegador, não toca.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex items-start gap-2.5 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={avisoPush}
-              onCheckedChange={(valor) => setAvisoPush(valor === true)}
-            />
-            <span>
-              Notificação no celular, mesmo com o painel fechado
-              <span className="block text-xs text-muted-foreground">
-                É o que resolve o caso real: o pedido chega enquanto ninguém está olhando a tela.
-              </span>
-            </span>
-          </label>
-
-          {/* Dizer o que falta é mais honesto do que um botão que não faz
-              nada. O push do motoboy é Android via Firebase; alertar a loja é
-              outro caminho e ainda não existe. */}
-          <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-            <Bell className="mt-0.5 size-3.5 shrink-0 text-amber-700" aria-hidden="true" />
-            <span>
-              A notificação ainda não está construída. O push que já existe no sistema é o do
-              aplicativo do motoboy, no Android; avisar o painel é pelo navegador, e depende de o
-              navegador pedir sua permissão. Enquanto isso, vale o som — com a aba aberta.
-            </span>
-          </p>
-
-          {!entradaAutomatica && !avisoPush && (
-            /* No modo manual o pedido espera confirmação. Sem aviso que
-               atravesse a aba fechada, ele espera até alguém lembrar de
-               olhar — e o cliente espera junto. */
-            <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
-              Você desligou a aceitação automática, então todo pedido espera você confirmar. Sem
-              notificação, ninguém é avisado quando um chega.
-            </p>
-          )}
         </CardContent>
       </Card>
 

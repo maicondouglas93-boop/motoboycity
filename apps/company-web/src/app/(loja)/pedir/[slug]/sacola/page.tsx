@@ -12,10 +12,27 @@ import {
   descricaoDaForma,
   formasOferecidas,
   rotuloDoPagamento,
-  situacaoDaLoja,
   type EnderecoDaEntrega,
   type FormaDePagamento,
 } from '@/lib/loja-mock';
+import {
+  DIAS_DA_SEMANA,
+  dataCurta,
+  diaDaSemana,
+  hora,
+  momentoNaLoja,
+  rotuloDoDia,
+  situacaoDaLoja,
+} from '@/lib/loja-horario';
+import {
+  horariosDaModalidade,
+  modalidadesAtivas,
+  pedidoMinimoDa,
+  textoDoTempo,
+} from '@/lib/loja-operacao';
+import { inicioDoPedido, type JanelaAgendada, type Modalidade } from '@/lib/loja-pedido';
+import { proximoNumeroDeVenda, registrarVenda, useOperacao } from '@/lib/loja-demo';
+import { acertarRelogio, useAgora } from '@/lib/relogio';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import {
   ajustarQuantidade,
@@ -35,6 +52,14 @@ import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
  * comprar. O cliente confere o que escolheu e preenche a entrega rolando para
  * baixo, sem perder de vista o que está levando.
  */
+
+/** "Hoje", "Amanhã", "Sex 26/09" — o nome do dia sozinho confunde quando a semana vira. */
+function rotuloDoDiaComData(data: string, agora: Date): string {
+  const rotulo = rotuloDoDia(data, agora);
+  if (rotulo === 'hoje') return 'Hoje';
+  if (rotulo === 'amanhã') return 'Amanhã';
+  return `${(DIAS_DA_SEMANA[diaDaSemana(data)] ?? '').slice(0, 3)} ${dataCurta(data)}`;
+}
 
 const ENDERECO_VAZIO: EnderecoDaEntrega = {
   rua: '',
@@ -97,9 +122,60 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
   const [pagamento, setPagamento] = useState<FormaDePagamento>(oferecidas[0] ?? 'DINHEIRO');
   const [trocoPara, setTrocoPara] = useState('');
   const [observacao, setObservacao] = useState('');
-  const [retirar, setRetirar] = useState(false);
 
-  const situacao = situacaoDaLoja(loja, new Date());
+  const operacao = useOperacao();
+  const instante = useAgora();
+  const situacao = situacaoDaLoja(operacao.funcionamento, new Date(instante));
+
+  /*
+   * Só o que a loja oferece. Se ela desligar a modalidade escolhida com a
+   * página aberta, a escolha cai para a que sobrou, em vez de mandar um pedido
+   * que a loja não aceita mais.
+   */
+  const modalidades = modalidadesAtivas(operacao);
+  const [modalidadeEscolhida, setModalidade] = useState<Modalidade>(modalidades[0] ?? 'ENTREGA');
+  const modalidade = modalidades.includes(modalidadeEscolhida)
+    ? modalidadeEscolhida
+    : (modalidades[0] ?? 'ENTREGA');
+  const retirar = modalidade === 'RETIRADA';
+
+  const dias = useMemo(
+    () => horariosDaModalidade(operacao, modalidade, new Date(instante)),
+    [operacao, modalidade, instante],
+  );
+  const podeAgendar = dias.length > 0;
+  const intervalo = operacao.agendamento.intervaloMin;
+
+  // Com a loja fechada, a página já chega em "Agendar": é a única opção que
+  // leva a um pedido.
+  const [quandoEscolhido, setQuando] = useState<'AGORA' | 'AGENDAR'>(() =>
+    situacao.aberta ? 'AGORA' : 'AGENDAR',
+  );
+  const quando = quandoEscolhido === 'AGENDAR' && podeAgendar ? 'AGENDAR' : 'AGORA';
+  const [diaEscolhido, setDia] = useState<string | null>(null);
+  const [horarioEscolhido, setHorario] = useState<number | null>(null);
+  const dia = dias.find((item) => item.data === diaEscolhido) ?? dias[0] ?? null;
+  // O horário que saiu da lista — o tempo passou — cai para o primeiro que
+  // ainda vale, em vez de ficar escolhido um horário que a loja não aceita.
+  const horario =
+    dia?.horarios.find((item) => item.getTime() === horarioEscolhido) ?? dia?.horarios[0] ?? null;
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  /**
+   * "19:00 – 19:30" na entrega, "A partir de 19:00" na retirada. A janela
+   * depois da meia-noite, que conta na noite anterior, vem marcada — para
+   * ninguém escolher 00:30 achando que é meio-dia e meia.
+   */
+  function rotuloDaJanela(inicio: Date, diaDaNoite: string): string {
+    const fim = new Date(inicio.getTime() + intervalo * 60_000);
+    const base = retirar ? `A partir de ${hora(inicio)}` : `${hora(inicio)} – ${hora(fim)}`;
+    return momentoNaLoja(inicio).data !== diaDaNoite ? `${base} · madrugada` : base;
+  }
+  const enderecoDeRetirada = operacao.retirada.endereco ?? loja.pontoDeColeta;
+  const indisponivel =
+    modalidades.length === 0 ||
+    (quando === 'AGORA' && !situacao.aberta) ||
+    (quando === 'AGENDAR' && horario === null);
 
   /*
    * O bairro vem de uma LISTA, e não de um campo livre.
@@ -118,9 +194,10 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
   const pagaOnline = descricaoDaForma(pagamento).grupo === 'ONLINE';
 
   // O mínimo conta só os itens: somar a entrega faria a taxa ajudar a atingir
-  // o mínimo, que é o contrário do que o mínimo existe para proteger.
-  const faltaParaOMinimo =
-    loja.pedidoMinimo !== null && subtotal < loja.pedidoMinimo ? loja.pedidoMinimo - subtotal : 0;
+  // o mínimo, que é o contrário do que o mínimo existe para proteger. E vale só
+  // na entrega — na retirada não há taxa para proteger.
+  const minimo = pedidoMinimoDa(operacao, modalidade);
+  const faltaParaOMinimo = minimo !== null && subtotal < minimo ? minimo - subtotal : 0;
 
   const faltando: string[] = [];
   if (nome.trim() === '') faltando.push('seu nome');
@@ -139,23 +216,88 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
 
   function confirmar() {
     if (usuarioId === null) return;
-    const numero = proximoNumero(slug, usuarioId);
+
+    /*
+     * Confere de novo na hora de enviar: a página pode ter ficado aberta
+     * enquanto a loja fechou, pausou, ou o horário escolhido passou. Na
+     * integração quem confere é o servidor — aqui é a mesma regra, no único
+     * lugar que existe.
+     */
+    const momento = new Date(acertarRelogio());
+    let janela: JanelaAgendada | null = null;
+    if (quando === 'AGENDAR') {
+      const aindaVale =
+        horario !== null &&
+        horariosDaModalidade(operacao, modalidade, momento).some((item) =>
+          item.horarios.some((opcao) => opcao.getTime() === horario.getTime()),
+        );
+      if (!aindaVale || horario === null) {
+        setAviso('Esse horário acabou de sair da lista. Escolha outro.');
+        return;
+      }
+      janela = {
+        inicio: horario.toISOString(),
+        fim: new Date(horario.getTime() + intervalo * 60_000).toISOString(),
+      };
+    } else if (!situacaoDaLoja(operacao.funcionamento, momento).aberta) {
+      setAviso('A loja acabou de parar de receber pedidos para agora.');
+      return;
+    }
+
+    // O número vem da lista de vendas da demonstração, e não só dos pedidos
+    // desta conta: duas contas no mesmo navegador não podem dividir um número.
+    const numero = Math.max(proximoNumero(slug, usuarioId), proximoNumeroDeVenda());
+    const troco =
+      emDinheiro && trocoPara.trim() !== '' ? Number(trocoPara.replace(',', '.')) : null;
+    const nota = observacao.trim() === '' ? null : observacao.trim();
+    const { minutosDePreparo, minutosDeEntrega } = operacao.recebimento;
+
     guardarPedido(slug, usuarioId, {
       numero,
-      criadoEm: new Date().toISOString(),
+      criadoEm: momento.toISOString(),
       itens,
       subtotal,
       taxaDeEntrega: taxa,
       total,
       pagamento: rotuloDoPagamento(pagamento),
-      trocoPara: emDinheiro && trocoPara.trim() !== '' ? Number(trocoPara.replace(',', '.')) : null,
+      trocoPara: troco,
       nome: nome.trim(),
       telefone: telefone.trim(),
       entrega,
-      minutosDePreparo: loja.minutosDePreparo,
-      observacao: observacao.trim() === '' ? null : observacao.trim(),
+      minutosDePreparo,
+      minutosDeEntrega,
+      observacao: nota,
       retirarNaLoja: retirar,
+      janela,
     });
+
+    // Na demonstração, a venda chega ao painel pelo mesmo navegador.
+    registrarVenda({
+      numero,
+      modalidade,
+      ...inicioDoPedido(operacao.recebimento.modo, momento),
+      janela,
+      minutosDePreparo,
+      minutosDeEntrega,
+      cancelamento: null,
+      cliente: nome.trim(),
+      telefone: telefone.trim(),
+      total,
+      itens: itens.map((item) => ({
+        nome: item.nome,
+        quantidade: item.quantidade,
+        tamanho: item.tamanho,
+        escolhas: item.escolhas,
+        total: item.unitario * item.quantidade,
+      })),
+      pagamento: rotuloDoPagamento(pagamento),
+      trocoPara: troco,
+      entrega: retirar ? null : entrega,
+      cadastro: 'novo',
+      observacao: nota,
+      contaDoCliente: usuarioId,
+    });
+
     setItens([]);
     router.push(`/pedir/${slug}/pedidos?novo=${numero}`);
   }
@@ -318,35 +460,45 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                 </section>
 
                 {/* A escolha vem ANTES do endereço: quem vai retirar não deve
-                nem ver os campos que não vai preencher. */}
-                {loja.aceitaRetirada && (
+                nem ver os campos que não vai preencher. Com uma modalidade só,
+                não há o que escolher — mas a retirada ainda precisa dizer onde. */}
+                {(modalidades.length > 1 || retirar) && (
                   <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
-                    <h2 className="px-4 pb-2 text-base font-bold">Como você quer receber</h2>
-                    {[
-                      { valor: false, titulo: 'Entrega', detalhe: 'Levamos até você.' },
-                      { valor: true, titulo: 'Retirar na loja', detalhe: 'Sem taxa de entrega.' },
-                    ].map((opcao) => (
-                      <label
-                        key={String(opcao.valor)}
-                        className="flex items-center gap-3 border-b px-4 py-3 text-sm"
-                        style={{ borderColor: paleta.linha }}
-                      >
-                        <input
-                          type="radio"
-                          name="recebimento"
-                          className="size-4"
-                          style={{ accentColor: loja.corDeAcao }}
-                          checked={retirar === opcao.valor}
-                          onChange={() => setRetirar(opcao.valor)}
-                        />
-                        <span>
-                          {opcao.titulo}
-                          <span className="block text-xs" style={{ color: paleta.suave }}>
-                            {opcao.detalhe}
+                    <h2 className="px-4 pb-2 text-base font-bold">
+                      {modalidades.length > 1 ? 'Como você quer receber' : 'Retirada na loja'}
+                    </h2>
+                    {modalidades.length > 1 &&
+                      (
+                        [
+                          { valor: 'ENTREGA', titulo: 'Entrega', detalhe: 'Levamos até você.' },
+                          {
+                            valor: 'RETIRADA',
+                            titulo: 'Retirar na loja',
+                            detalhe: 'Sem taxa de entrega.',
+                          },
+                        ] as const
+                      ).map((opcao) => (
+                        <label
+                          key={opcao.valor}
+                          className="flex items-center gap-3 border-b px-4 py-3 text-sm"
+                          style={{ borderColor: paleta.linha }}
+                        >
+                          <input
+                            type="radio"
+                            name="recebimento"
+                            className="size-4"
+                            style={{ accentColor: loja.corDeAcao }}
+                            checked={modalidade === opcao.valor}
+                            onChange={() => setModalidade(opcao.valor)}
+                          />
+                          <span>
+                            {opcao.titulo}
+                            <span className="block text-xs" style={{ color: paleta.suave }}>
+                              {opcao.detalhe}
+                            </span>
                           </span>
-                        </span>
-                      </label>
-                    ))}
+                        </label>
+                      ))}
 
                     <AnimatePresence initial={false}>
                       {retirar && (
@@ -361,14 +513,151 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                           <span className="block pt-3">
                             Retire em{' '}
                             <strong>
-                              {loja.pontoDeColeta.rua}, {loja.pontoDeColeta.numero}
+                              {enderecoDeRetirada.rua}, {enderecoDeRetirada.numero}
+                              {enderecoDeRetirada.complemento &&
+                                ` — ${enderecoDeRetirada.complemento}`}
                             </strong>
                             <span className="block text-xs" style={{ color: paleta.suave }}>
-                              {loja.pontoDeColeta.bairro}, {loja.pontoDeColeta.cidade}/
-                              {loja.pontoDeColeta.estado}
+                              {enderecoDeRetirada.bairro}, {enderecoDeRetirada.cidade}/
+                              {enderecoDeRetirada.estado}
                             </span>
+                            {operacao.retirada.instrucoes && (
+                              <span className="mt-1 block text-xs">
+                                {operacao.retirada.instrucoes}
+                              </span>
+                            )}
                           </span>
                         </m.p>
+                      )}
+                    </AnimatePresence>
+                  </section>
+                )}
+
+                {/* Quando: só aparece se der para agendar. Sem agendamento, o
+                    pedido é para agora, e perguntar seria uma escolha falsa. */}
+                {podeAgendar && (
+                  <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
+                    <h2 className="px-4 pb-2 text-base font-bold">Quando</h2>
+                    <label
+                      className="flex items-start gap-3 border-b px-4 py-3 text-sm"
+                      style={{ borderColor: paleta.linha, opacity: situacao.aberta ? 1 : 0.55 }}
+                    >
+                      <input
+                        type="radio"
+                        name="quando"
+                        className="mt-0.5 size-4"
+                        style={{ accentColor: loja.corDeAcao }}
+                        checked={quando === 'AGORA'}
+                        disabled={!situacao.aberta}
+                        onChange={() => {
+                          setQuando('AGORA');
+                          setAviso(null);
+                        }}
+                      />
+                      <span>
+                        Agora
+                        <span className="block text-xs" style={{ color: paleta.suave }}>
+                          {!situacao.aberta
+                            ? situacao.texto
+                            : retirar
+                              ? `Pronto em ${textoDoTempo(operacao, 'RETIRADA')}`
+                              : `Chega em ${textoDoTempo(operacao, 'ENTREGA')}`}
+                        </span>
+                      </span>
+                    </label>
+                    <label
+                      className="flex items-start gap-3 border-b px-4 py-3 text-sm"
+                      style={{ borderColor: paleta.linha }}
+                    >
+                      <input
+                        type="radio"
+                        name="quando"
+                        className="mt-0.5 size-4"
+                        style={{ accentColor: loja.corDeAcao }}
+                        checked={quando === 'AGENDAR'}
+                        onChange={() => {
+                          setQuando('AGENDAR');
+                          setAviso(null);
+                        }}
+                      />
+                      <span>
+                        Agendar
+                        <span className="block text-xs" style={{ color: paleta.suave }}>
+                          {retirar ? 'Escolha a hora de buscar.' : 'Escolha quando quer receber.'}
+                        </span>
+                      </span>
+                    </label>
+
+                    <AnimatePresence initial={false}>
+                      {quando === 'AGENDAR' && dia && (
+                        <m.div
+                          key="agenda"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                          className="overflow-hidden"
+                        >
+                          <div className="space-y-3 px-4 pt-3">
+                            {/* Os dias numa fileira que rola de lado: sete
+                                botões não cabem na largura do celular. */}
+                            <div
+                              role="radiogroup"
+                              aria-label="Dia"
+                              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
+                            >
+                              {dias.map((item) => {
+                                const escolhido = item.data === dia.data;
+                                return (
+                                  <button
+                                    key={item.data}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={escolhido}
+                                    onClick={() => {
+                                      setDia(item.data);
+                                      setHorario(null);
+                                      setAviso(null);
+                                    }}
+                                    className="shrink-0 rounded-full border px-3 py-1.5 text-sm"
+                                    style={
+                                      escolhido
+                                        ? {
+                                            backgroundColor: loja.corDeAcao,
+                                            borderColor: loja.corDeAcao,
+                                            color: textoSobre(loja.corDeAcao),
+                                          }
+                                        : { borderColor: paleta.linha }
+                                    }
+                                  >
+                                    {rotuloDoDiaComData(item.data, new Date(instante))}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div>
+                              <label htmlFor="horario" className="mb-1 block text-xs font-medium">
+                                {retirar ? 'Hora de buscar' : 'Janela de entrega'}
+                              </label>
+                              <select
+                                id="horario"
+                                value={horario?.getTime() ?? ''}
+                                onChange={(evento) => {
+                                  setHorario(Number(evento.target.value));
+                                  setAviso(null);
+                                }}
+                                className="h-11 w-full rounded-lg border px-3 text-sm"
+                                style={campo}
+                              >
+                                {dia.horarios.map((opcao) => (
+                                  <option key={opcao.getTime()} value={opcao.getTime()}>
+                                    {rotuloDaJanela(opcao, dia.data)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </m.div>
                       )}
                     </AnimatePresence>
                   </section>
@@ -634,7 +923,19 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                 sem isso o botão pula para cima ou para baixo justamente quando
                 o polegar está indo nele. */}
             <AnimatePresence initial={false} mode="popLayout">
-              {faltaParaOMinimo > 0 ? (
+              {aviso ? (
+                <m.p
+                  key="aviso"
+                  role="alert"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                  className="overflow-hidden text-xs font-medium"
+                >
+                  <span className="block pb-2">{aviso}</span>
+                </m.p>
+              ) : faltaParaOMinimo > 0 ? (
                 <m.p
                   key="minimo"
                   initial={{ height: 0, opacity: 0 }}
@@ -644,7 +945,7 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
                   className="overflow-hidden text-xs font-medium"
                 >
                   <span className="block pb-2">
-                    Pedido mínimo de {moeda(loja.pedidoMinimo ?? 0)} em itens. Faltam{' '}
+                    Pedido mínimo de {moeda(minimo ?? 0)} em itens para entrega. Faltam{' '}
                     {moeda(faltaParaOMinimo)}.
                   </span>
                 </m.p>
@@ -664,17 +965,21 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
             </AnimatePresence>
             <button
               type="button"
-              disabled={!situacao.aberta || faltando.length > 0 || faltaParaOMinimo > 0}
+              disabled={indisponivel || faltando.length > 0 || faltaParaOMinimo > 0}
               onClick={confirmar}
               className="flex h-13 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold transition-opacity duration-200 disabled:opacity-40"
               style={{ backgroundColor: loja.corDeAcao, color: textoSobre(loja.corDeAcao) }}
             >
               <span>
-                {!situacao.aberta
-                  ? situacao.texto
-                  : pagaOnline
-                    ? 'Ir para o pagamento'
-                    : 'Fazer pedido'}
+                {modalidades.length === 0
+                  ? 'A loja não está recebendo pedidos'
+                  : quando === 'AGORA' && !situacao.aberta
+                    ? situacao.texto
+                    : pagaOnline
+                      ? 'Ir para o pagamento'
+                      : quando === 'AGENDAR'
+                        ? 'Agendar pedido'
+                        : 'Fazer pedido'}
               </span>
               <span>{moeda(total)}</span>
             </button>

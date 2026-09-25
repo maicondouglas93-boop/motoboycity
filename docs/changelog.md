@@ -14692,3 +14692,127 @@ Arquivos: `apps/company-web/src/components/loja-online/instalacao.ts`,
 
 Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, **190 testes**
 passando, `next build` compila.
+
+## 2026-09-25 — Loja: status, horários, tipos de pedido, agendamento, etapas do pedido e avisos
+
+Pedido do usuário, "bastante completo": status da loja (aberta, fechada, pausar
+pedidos, abrir e fechar manualmente, mensagem de fechada); horário por dia com
+dois períodos, dia fechado, feriado, horário especial, exceção de data e
+funcionamento depois da meia-noite; tipos de pedido (entrega, retirada, pedido
+agendado, recebimento); as etapas Novo → Aceito → Em preparação → Pronto → Saiu
+para entrega → Entregue; e notificações para o lojista e para o cliente.
+
+Tudo continua **demonstração, sem backend**.
+
+**O que existe agora:**
+
+- **Status** no alto da área da loja, em todas as telas dela: aberta, fechada ou
+  pausada, com o motivo e quando muda. Pausar 15/30/60 min ou até retomar;
+  fechar até a próxima abertura ou até reabrir; abrir fora do horário por
+  30 min, 1 h, 2 h ou até uma hora escolhida — sempre com fim. Perto de fechar,
+  "Fecha em N min" com "Ficar aberta mais 1 hora".
+- **Horários** (`/loja/horarios`): semana com até três períodos por dia, dia
+  fechado, período que passa da meia-noite, datas especiais de um dia ou de um
+  período (fechado ou horário especial), feriados nacionais sugeridos — com
+  Carnaval, Sexta-feira Santa e Corpus Christi calculados pela Páscoa —, recado
+  para quando a loja está fechada e conferências antes de salvar.
+- **Tipos de pedido** (`/loja/tipos-de-pedido`): entrega e retirada ligáveis;
+  pedido mínimo só na entrega; endereço de retirada (o da empresa ou outro) e
+  instruções; pedido agendado com antecedência mínima, máxima e intervalo das
+  janelas, com prévia dos horários; recebimento automático ou manual, com os
+  tempos padrão de preparo e de entrega.
+- **Notificações** (`/loja/notificacoes`): por evento do lojista, notificação e
+  som; antecedência do aviso de loja fechando; som repetido enquanto houver
+  pedido esperando aceite; eventos do cliente; testar som e notificação.
+- **Vendas**: fila separada por etapa, com o botão da próxima ação ("Começar o
+  preparo"); aceite com tempo de preparo daquele pedido; recusa e cancelamento
+  com motivo; agendados à parte até a hora de começar; histórico com hora.
+- **Loja do cliente**: status com a hora de abrir e o recado; fechada, ainda dá
+  para montar a sacola e agendar; checkout com "Agora" ou "Agendar", dia e
+  janela; só as modalidades ligadas; "Meus pedidos" com a etapa, uma régua e a
+  previsão, mudando sozinho; convite para receber avisos.
+
+**Decisões:**
+
+- As regras ficam em módulos próprios, fora do `loja-mock.ts`, porque o servidor
+  vai precisar delas: `lib/loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts`
+  e `loja-operacao.ts`. Os valores de exemplo continuam no mock.
+- O horário é avaliado no fuso de Brasília (`America/Sao_Paulo`), e não no do
+  aparelho, como fazia a `situacaoDaLoja` anterior.
+- Faixa que fecha antes de abrir deixou de ser erro: é "depois da meia-noite".
+  Ela pertence ao dia em que abre — um feriado no sábado não corta a madrugada
+  de sexta.
+- Duas datas especiais no mesmo dia: vale a mais curta, e a tela avisa.
+- O ajuste da hora é um só por vez e vence sozinho. Abrir fora do horário
+  sempre tem fim.
+- Os tempos ficam só no recebimento. O "tempo estimado" da entrega e o "pronto
+  em" da retirada são derivados deles, para não discordarem. "Aceitar
+  automaticamente" também aparece uma vez só, no recebimento, e vale para as
+  duas modalidades — a lista pedida o tinha também dentro da entrega.
+- Pedido mínimo só na entrega: ele protege a taxa, e a retirada não tem taxa.
+- Agendar é pedir agora para depois. Uma janela só é oferecida se a loja estiver
+  aberta na hora de a cozinha começar (o preparo, e na entrega o caminho, antes
+  da janela). Pausa e fechamento também valem. As janelas da madrugada aparecem
+  na noite em que a cozinha abriu, marcadas "madrugada".
+- O pedido não é a entrega. "Saiu para entrega" e "Entregue" virão da corrida do
+  motoboy (`COLLECTED` e `DELIVERED`); na demonstração são botões, avisados
+  como tal. A retirada vai de "Pronto" a "Retirado". A loja cancela até o pedido
+  ficar pronto, na entrega — depois o motoboy foi chamado —, e até o cliente
+  buscar, na retirada.
+- A decisão 2 do plano muda de forma: o pedido não "entra como agendado com uma
+  janela de cancelamento"; ele passa pelas etapas, e o motoboy é chamado quando
+  o pedido fica pronto ou quando o preparo vence, o que vier primeiro.
+- "Pronto para retirar" entrou nos avisos do cliente, além da lista pedida: na
+  retirada é o aviso que faz o cliente sair de casa. "Cancelado" não pode ser
+  desligado.
+- A demonstração conversa: `lib/loja-demo.ts` guarda a configuração e as vendas
+  no `localStorage`, e o evento `storage` leva a mudança entre abas do mesmo
+  navegador. Pausar no painel pausa a página do cliente; aceitar no painel muda
+  "Meus pedidos". Um pedido feito em outro aparelho não chega — é o que o
+  backend vai resolver. O arquivo deve ser APAGADO na integração, junto com o
+  mock.
+- Configurações perdeu os cartões que foram para as telas novas: entrada dos
+  pedidos, tempo de preparo, horário, pedido mínimo, retirada e avisos.
+
+**Encontrado conferindo na tela, e corrigido:**
+
+- o agendamento oferecia um "domingo" — a loja não abre no domingo — com as
+  janelas da madrugada de sábado. Agora a madrugada fica no sábado; há teste;
+- no celular, o menu da loja, agora com seis itens, alargava a página para o
+  lado. A barra lateral ganhou `min-w-0`;
+- a tabela de avisos do lojista escondia a coluna do som no celular. Virou
+  linhas, com o nome de cada caixa;
+- os campos de hora empurravam a lixeira para a linha de baixo;
+- o recado de exemplo repetia a frase que a página já escreve sozinha.
+
+**Verificado no navegador**, na loja do cliente (localhost): status fechado com
+o recado e o agendamento; checkout chegando em "Agendar", com os dias e as
+janelas; um pedido de retirada agendado (#1607) chegando à lista da loja com a
+janela certa e aparecendo em "Meus pedidos" com a etapa e a previsão; mudança
+de etapa, "abrir agora" e "pausar" feitos em outra aba aparecendo sem
+recarregar. O painel exige login e a API, que não estava rodando: as telas
+foram vistas numa rota temporária local, já apagada, em largura de celular e de
+computador — ações do status, avanço de etapa, salvar horário com um feriado
+sugerido, e as travas de horário especial sem horário e de nenhuma modalidade
+ligada.
+
+**Não verificado:** o som e a notificação de verdade (o navegador embutido nega
+a permissão de notificação); o painel dentro do login real; um pedido "Agora"
+com a loja aberta — a conferência foi de madrugada, e esse caminho está coberto
+só pelos testes.
+
+Arquivos novos: `apps/company-web/src/lib/loja-horario.ts`, `loja-pedido.ts`,
+`loja-avisos.ts`, `loja-operacao.ts`, `loja-demo.ts`, `relogio.ts`,
+`avisos-do-navegador.ts`, `loja-horario.test.ts`, `loja-pedido.test.ts`,
+`loja-demo.test.ts`; `src/components/loja/controle-do-status.tsx`,
+`avisos-da-loja.tsx`; `src/components/loja-online/avisos-do-cliente.tsx`;
+`src/app/(app)/loja/horarios/`, `tipos-de-pedido/` e `notificacoes/`.
+Alterados: `loja-mock.ts`; `src/app/(app)/loja/layout.tsx`, `vendas/page.tsx`,
+`configuracoes/page.tsx`; `src/app/(loja)/pedir/[slug]/layout.tsx`,
+`page.tsx`, `sacola/page.tsx`, `pedidos/page.tsx`;
+`src/components/loja-online/armazenamento.ts`, `confirmacao.tsx`. Removido:
+`src/lib/loja-situacao.test.ts`, substituído por `loja-horario.test.ts`.
+
+Validação: `tsc --noEmit` limpo, `eslint src` limpo, Prettier limpo nos arquivos
+alterados, **252 testes** passando (eram 190), `next build` compila com as rotas
+novas.

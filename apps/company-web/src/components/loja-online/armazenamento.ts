@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import type { EnderecoDaEntrega } from '@/lib/loja-mock';
+import type { JanelaAgendada } from '@/lib/loja-pedido';
 import type { ItemEscolhido } from './folha-do-produto';
 
 /**
@@ -109,6 +110,30 @@ function ler<T>(chave: string, padrao: T): T {
   return instantaneo(chave, padrao);
 }
 
+/*
+ * O mesmo mecanismo, aberto para outras chaves: a demonstração do painel
+ * (`lib/loja-demo.ts`) guarda a configuração e as vendas da loja assim, e é o
+ * `storage` entre abas que leva o que o painel muda até a página do cliente.
+ *
+ * `padrao` precisa ser uma referência estável — uma constante —, porque é
+ * devolvido como está quando não há nada guardado.
+ */
+export function useGuardado<T>(chave: string, padrao: T): T {
+  return useSyncExternalStore(
+    assinar,
+    () => instantaneo(chave, padrao),
+    () => padrao,
+  );
+}
+
+export function lerGuardado<T>(chave: string, padrao: T): T {
+  return instantaneo(chave, padrao);
+}
+
+export function gravarGuardado(chave: string, valor: unknown): void {
+  gravar(chave, valor);
+}
+
 const naoAssina = () => () => {};
 const noCliente = () => true;
 const noServidor = () => false;
@@ -139,6 +164,12 @@ export interface PedidoGuardado {
   minutosDePreparo: number;
   observacao: string | null;
   retirarNaLoja: boolean;
+  /*
+   * Opcionais porque o aparelho pode guardar pedidos de antes do agendamento
+   * existir. Ausente é o mesmo que "o quanto antes" e o caminho padrão.
+   */
+  janela?: JanelaAgendada | null;
+  minutosDeEntrega?: number;
 }
 
 type Atualizacao = ItemEscolhido[] | ((atual: ItemEscolhido[]) => ItemEscolhido[]);

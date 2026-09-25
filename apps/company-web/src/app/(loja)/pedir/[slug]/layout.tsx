@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { AvisosDoCliente } from '@/components/loja-online/avisos-do-cliente';
 import { RegistroDoApp } from '@/components/loja-online/registro-do-app';
 import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
 
@@ -49,6 +50,7 @@ export default async function LojaDoSlugLayout({
     <>
       {children}
       <RegistroDoApp slug={slug} />
+      <AvisosDoCliente slug={slug} />
     </>
   );
 }
