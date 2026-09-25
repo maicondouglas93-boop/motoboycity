@@ -202,8 +202,10 @@ baixo, o item voando até a sacola e a confirmação desenhada. Vocabulário em
 `components/loja-online/movimento.tsx`.
 
 **É um app instalável** (2026-09-24): manifest por loja, ícones com a cor da
-marca, barra do navegador na cor da marca e service worker escopado à loja. Não
-verificado ainda: o comportamento sem internet e a instalação em aparelho real.
+marca, barra do navegador na cor da marca e service worker escopado à loja. O
+convite para instalar aparece depois do pedido feito — botão no Android, passos
+no iPhone —, e "agora não" o faz descansar trinta dias. Não verificado ainda: o
+comportamento sem internet e a instalação em aparelho real.
 
 Falta o Web Push para avisar a loja de pedido novo (o que existe é FCM para o
 app Android do motoboy). E falta o backend inteiro: hoje o pedido termina no

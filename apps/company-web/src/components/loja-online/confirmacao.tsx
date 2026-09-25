@@ -12,15 +12,18 @@ import { textoSobre } from './paleta';
  * quique, sem escala exagerada: app de entrega que comemora demais parece
  * brinquedo, e o cliente só quer saber que a loja recebeu.
  *
- * Só aparece quando a URL traz o pedido recém-feito (`?novo=`), que é para onde
- * o checkout manda. Entrar em "Meus pedidos" pelo link não a mostra — ela diz
- * "acabou de acontecer", e depois deixa de ser verdade. Recarregar a página ou
- * voltar a ela pelo histórico, com o `?novo=` ainda na URL, repete o desenho.
+ * Só aparece para o pedido recém-feito (`?novo=` na URL, para onde o checkout
+ * manda) e só enquanto ele for o mais recente — quem decide isso é a página de
+ * pedidos. Entrar em "Meus pedidos" pelo link não a mostra: ela diz "acabou de
+ * acontecer", e depois deixa de ser verdade.
+ *
+ * Diz o número do pedido porque é a única informação que o cliente talvez
+ * precise repetir para a loja, se ligar.
  *
  * Quem pediu menos movimento vê o check já pronto: o traço sendo desenhado não
  * é transformação, então o `MotionConfig` sozinho não o desligaria.
  */
-export function ConfirmacaoDoPedido({ cor }: { cor: string }) {
+export function ConfirmacaoDoPedido({ cor, numero }: { cor: string; numero: number }) {
   const reduzir = useReducedMotion();
   const texto = textoSobre(cor);
 
@@ -30,7 +33,7 @@ export function ConfirmacaoDoPedido({ cor }: { cor: string }) {
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: DURACAO.curta, ease: CURVA_ENTRADA }}
-      className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
+      className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
       style={{ backgroundColor: cor, color: texto }}
     >
       <svg viewBox="0 0 20 20" className="size-5 shrink-0" fill="none" aria-hidden="true">
@@ -56,7 +59,7 @@ export function ConfirmacaoDoPedido({ cor }: { cor: string }) {
           transition={{ duration: 0.2, ease: CURVA_ENTRADA, delay: 0.26 }}
         />
       </svg>
-      Pedido enviado para a loja.
+      Pedido #{numero} enviado para a loja.
     </m.p>
   );
 }

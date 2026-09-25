@@ -1,13 +1,19 @@
 'use client';
 
 import { useEffect } from 'react';
+import { escutarInstalacao } from './instalacao';
 
 /**
- * Registra o service worker da loja, com escopo restrito a ela.
+ * Registra o service worker da loja, com escopo restrito a ela, e passa a ouvir
+ * o "pode instalar" do navegador.
  *
- * Só em produção. Em desenvolvimento, um worker que guarda arquivos serviria a
- * versão anterior do código depois de cada edição — e o sintoma, "minha mudança
- * não apareceu", faz qualquer um procurar o erro no lugar errado.
+ * A escuta vem ANTES do registro: é o worker ativo que torna a página
+ * instalável, e o navegador pode avisar logo em seguida. Ouvindo depois, o aviso
+ * se perderia até o próximo carregamento.
+ *
+ * O worker só em produção. Em desenvolvimento, um worker que guarda arquivos
+ * serviria a versão anterior do código depois de cada edição — e o sintoma,
+ * "minha mudança não apareceu", faz qualquer um procurar o erro no lugar errado.
  *
  * O escopo é passado explicitamente. Sem ele, o navegador usaria o diretório do
  * arquivo, que é a raiz do site — e aí o worker da loja passaria a controlar o
@@ -16,6 +22,8 @@ import { useEffect } from 'react';
  */
 export function RegistroDoApp({ slug }: { slug: string }) {
   useEffect(() => {
+    escutarInstalacao();
+
     if (process.env.NODE_ENV !== 'production') return;
     if (!('serviceWorker' in navigator)) return;
 

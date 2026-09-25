@@ -223,7 +223,8 @@ export function usePedidos(slug: string, usuarioId: string | null) {
 export interface ClienteSalvo {
   nome: string;
   telefone: string;
-  entrega: EnderecoDaEntrega;
+  /** `null` para quem só retirou na loja até agora e nunca informou endereço. */
+  entrega: EnderecoDaEntrega | null;
 }
 
 /** Grava o pedido, guarda o endereço na conta e esvazia a sacola. */
@@ -233,11 +234,19 @@ export function guardarPedido(slug: string, usuarioId: string, pedido: PedidoGua
 
   // Guardado à parte, e não lido do último pedido: assim continua valendo se o
   // histórico for podado, e é o registro que vai para o banco na integração.
-  gravar(chaveDoCliente(slug, usuarioId), {
+  //
+  // Retirada não pergunta endereço, então não pode mexer no que está salvo. Uma
+  // versão anterior gravava o endereço do formulário mesmo assim — vazio, para
+  // quem nunca tinha entregado — e a conta passava a ter um "endereço salvo" em
+  // branco. Retirada atualiza nome e telefone; o endereço continua o da última
+  // entrega.
+  const anterior = ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
+  const salvo: ClienteSalvo = {
     nome: pedido.nome,
     telefone: pedido.telefone,
-    entrega: pedido.entrega,
-  });
+    entrega: pedido.retirarNaLoja ? (anterior?.entrega ?? null) : pedido.entrega,
+  };
+  gravar(chaveDoCliente(slug, usuarioId), salvo);
 
   gravar(chaveDaSacola(slug), []);
 }

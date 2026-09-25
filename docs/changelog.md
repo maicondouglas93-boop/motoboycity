@@ -14630,3 +14630,65 @@ Arquivos: `apps/company-web/public/loja-sw.js`,
 
 Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, 173 testes
 passando, `next build` compila com as rotas do manifest e dos ícones.
+
+## 2026-09-24 — Loja: convite para instalar, e três correções na lista de pedidos
+
+**O convite para pôr a loja na tela inicial.** Aparece depois do pedido feito, e
+não na primeira visita: antes da primeira compra o cliente não tem motivo para
+querer a loja no celular. Cada aparelho tem o seu caminho:
+
+- **Android** (Chrome, Edge, Samsung): o navegador avisa que a página é
+  instalável com `beforeinstallprompt` — uma vez por carregamento, e quase
+  sempre antes de o cliente chegar à confirmação. O evento é capturado cedo, no
+  layout da loja, e **antes** do registro do service worker, que é o que torna a
+  página instalável: ouvindo depois, o aviso se perderia. A faixa própria do
+  Chrome fica segurada até o nosso botão ser tocado.
+- **iPhone**: não existe esse evento nem instalação por botão. "Instalar" abre
+  uma folha com os três passos — Compartilhar, "Adicionar à Tela de Início",
+  Adicionar.
+- **Já instalado**: nada aparece.
+
+"Agora não" faz o convite descansar trinta dias; recusar no diálogo do
+navegador conta como "agora não". O evento do Chrome só serve uma vez, e é
+descartado antes de ser usado.
+
+**Correções encontradas testando — as três do recorte anterior, não do botão:**
+
+- **A confirmação aparecia no meio da página.** Ela vivia dentro do cartão do
+  pedido; com o `?novo=` ainda na URL e pedidos novos feitos depois, "Pedido
+  enviado" ficava presa ao terceiro cartão, falando de um pedido que já não era
+  o último. Agora fica no topo, com o número do pedido, e só aparece se aquele é
+  o **mais recente**. O usuário apontou; a regra evita o caso por inteiro.
+- **A lista não sabia exibir retirada.** Mostrava o endereço de entrega vazio
+  (", ") e "Chega entre…", prometendo uma entrega que ninguém faria. Agora mostra
+  "Retirada na loja" com o endereço de onde buscar, e "Pronto para retirar a
+  partir de…".
+- **Retirada gravava um endereço em branco como o endereço salvo da conta.**
+  Retirada não pergunta endereço, mas `guardarPedido` gravava o do formulário
+  mesmo assim. Agora retirada atualiza nome e telefone e deixa o endereço da
+  última entrega em paz; quem nunca entregou fica com `null`, e não com um
+  endereço vazio que pareceria preenchido.
+
+Testes novos: nove em `instalacao.test.ts` (o descanso de trinta dias, o evento
+interceptado, usado uma vez só, e deixando de ser oferecido depois de
+instalado) e oito em `armazenamento.test.ts` (a regressão do endereço, conta
+separada de conta, e as regras da sacola). Os dois testes do endereço falhariam
+contra o código antigo.
+
+**Verificado no navegador:** sem o aviso do navegador, nenhum convite; com ele,
+o convite aparece e a faixa do Chrome fica segurada; "Instalar" abre o diálogo
+uma vez e o convite some; "Agora não" some e continua escondido depois de
+recarregar. A confirmação aparece no topo só para o pedido mais recente, e as
+retiradas mostram onde buscar. O aviso de instalação foi disparado por um evento
+igual ao do Chrome — o Chrome deste painel não o dispara em desenvolvimento,
+onde não há service worker.
+
+**Não verificado:** a instalação de verdade num Android e os passos num iPhone.
+
+Arquivos: `apps/company-web/src/components/loja-online/instalacao.ts`,
+`convite-para-instalar.tsx`, `instalacao.test.ts`, `armazenamento.test.ts`
+(novos); `registro-do-app.tsx`, `armazenamento.ts`, `confirmacao.tsx`,
+`src/app/(loja)/pedir/[slug]/pedidos/page.tsx`.
+
+Validação: `tsc --noEmit` limpo, `eslint` limpo, Prettier limpo, **190 testes**
+passando, `next build` compila.
