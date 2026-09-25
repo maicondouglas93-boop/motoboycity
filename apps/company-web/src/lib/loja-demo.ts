@@ -14,6 +14,7 @@ import {
   MOTIVO_DO_PRAZO,
   TransicaoInvalida,
   avancar,
+  chamarMotoboyCity,
   prazoDoAceite,
   type Cancelamento,
   type EtapaDoPedido,
@@ -145,6 +146,23 @@ export function mudarEtapa(
       if (erro instanceof TransicaoInvalida) return venda;
       throw erro;
     }
+  });
+  if (mudou) gravarGuardado(CHAVE_DAS_VENDAS, vendas);
+  return mudou;
+}
+
+/**
+ * Passa um pedido do entregador da loja para o MOTOboyCity. Na integração, é
+ * aqui que a corrida nasce. Devolve falso quando não vale mais — o pedido já
+ * saiu, foi cancelado, ou outra aba já chamou.
+ */
+export function chamarMotoboyCityPara(numero: number): boolean {
+  let mudou = false;
+  const vendas = lerVendas().map((venda) => {
+    if (venda.numero !== numero) return venda;
+    const chamada = chamarMotoboyCity(venda);
+    mudou = chamada !== venda;
+    return chamada;
   });
   if (mudou) gravarGuardado(CHAVE_DAS_VENDAS, vendas);
   return mudou;

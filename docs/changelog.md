@@ -15083,3 +15083,65 @@ tocado.
 entregar pelo MOTOboyCity é opcional. Há empresas com motoboy próprio, e o
 pedido de entrega delas não entra na lista de pedidos do MOTOboyCity. Está em
 `docs/business-rules.md` e na decisão 15 do plano; ainda não está nas telas.
+
+## 2026-09-25 — Loja online: entregador próprio, chamada avulsa ao MOTOboyCity e comanda impressa
+
+Três pedidos do usuário, no mesmo dia: "algumas empresas vão utilizar a loja mas
+não vão utilizar os serviços de motoboy porque já têm motoboy próprio"; "sim"
+para a loja com motoboy próprio chamar um motoboy do MOTOboyCity para um pedido
+específico; e "coloca a opção de imprimir pedido também". Tudo na camada de
+demonstração — o pedido da loja ainda não existe no banco.
+
+**Quem faz a entrega** (decisão 15 do plano; `docs/business-rules.md`):
+
+- Tipos de pedido → Entrega ganhou a escolha "Motoboy do MOTOboyCity" (padrão)
+  ou "Entregador da loja" (`OperacaoDaLoja.entrega.quemEntrega`).
+- Cada pedido guarda a escolha em `entregaPor`, congelada como os tempos: mudar
+  a configuração não troca quem já está levando. Venda gravada antes não tem o
+  campo e conta como MOTOboyCity, o que valia para todas até aqui.
+- Com o entregador da loja, o pedido não passa pelo MOTOboyCity: a própria loja
+  marca "Saiu para entrega" e "Entregue", e cancela o pedido pronto até o
+  entregador sair. Pelo MOTOboyCity, nada muda.
+- Em Vendas, o pedido do entregador da loja tem "Chamar motoboy do
+  MOTOboyCity", com confirmação, depois do aceite e até sair. O pedido passa ao
+  caminho da corrida. A etiqueta de quem leva só aparece para quem usa
+  entregador próprio.
+- As regras ficam em `lib/loja-pedido.ts` (`podeCancelar`, `acaoParaAvancar`,
+  `vemDoMotoboy`, `podeChamarMotoboyCity`, `chamarMotoboyCity`), puras, para o
+  servidor usar na integração.
+
+**Comanda** (decisão 16 do plano): botão "Imprimir" em cada venda, numa aba
+nova — a fila de Vendas continua aberta, e com ela o som do próximo pedido. A
+página `/loja/vendas/<número>/imprimir` fica no grupo `(print)`, como a
+impressão de entregas, e usa o mesmo estilo de bobina de 80 mm já acertado na
+Elgin i8/i9. Diferente do cupom de entrega, leva os valores: itens com
+escolhas, observação, cliente, endereço, taxa, total, "já pago — não cobrar"
+ou "cobrar R$ X", e o troco a levar.
+
+**Arquivos:** `apps/company-web/src/lib/loja-pedido.ts`, `loja-operacao.ts`,
+`loja-demo.ts`, `loja-mock.ts` e os testes `loja-pedido.test.ts` e
+`loja-demo.test.ts`; `src/app/(app)/loja/tipos-de-pedido/page.tsx`,
+`vendas/page.tsx`; `src/app/(loja)/pedir/[slug]/sacola/page.tsx`;
+`src/app/(print)/loja/vendas/[numero]/imprimir/page.tsx` (novo);
+`src/components/loja/comanda-da-venda.tsx`, `comanda-da-venda.module.css` e
+`impressao-da-venda.tsx` (novos); testes novos `vendas.test.tsx` e
+`comanda-da-venda.test.tsx`, e um caso a mais em `tipos-de-pedido.test.tsx`;
+`docs/plano-loja-online.md`, `docs/business-rules.md`,
+`docs/agent-handoff.md`.
+
+**Como foi validado:**
+
+- `vitest` do company-web: 316 testes passam, 11 deles novos — quem marca cada
+  etapa, até quando cancela, venda antiga sem o campo, chamada avulsa (e a
+  segunda aba tocando o mesmo botão), a escolha salva em Tipos de pedido, o
+  cartão da Vendas antes e depois da chamada, o link de impressão, e a comanda
+  com troco, taxa e pagamento online.
+- `tsc --noEmit` e `eslint` limpos nos arquivos do recorte.
+- No navegador, com a API local: a escolha aparece em Tipos de pedido, marcada
+  no MOTOboyCity; cada venda tem "Imprimir" em aba nova; e a comanda de um
+  pedido agendado de retirada saiu com loja, número, janela, itens, cliente,
+  total e "já pago — não cobrar". O fluxo do entregador da loja foi conferido
+  pelos testes, e não no navegador, para não mudar a configuração que o
+  usuário estava testando.
+
+**Deploy:** nada foi enviado.

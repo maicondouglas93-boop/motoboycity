@@ -499,9 +499,16 @@ nem buscando motoboy.
   marca "Saiu para entrega" e "Entregue";
 - pelo MOTOboyCity, vale o fluxo do plano: a corrida nasce quando o pedido fica
   pronto (ou o preparo vence), e "Saiu" e "Entregue" vêm dela;
-- a retirada não muda: nunca teve corrida.
+- a retirada não muda: nunca teve corrida;
+- sem corrida, a loja cancela o pedido pronto até o entregador sair (pelo
+  MOTOboyCity, depois de pronto, o cancelamento é com a central);
+- quem tem entregador próprio pode chamar um motoboy do MOTOboyCity para **um**
+  pedido, num dia de aperto (confirmado pelo usuário em 2026-09-25): vale
+  depois do aceite e até o pedido sair, e o pedido passa a seguir o caminho da
+  corrida, cobrada na fatura como as demais.
 
-Ainda não implementado — o pedido da loja não existe no banco. Ver
+Nas telas de demonstração (Tipos de pedido e Vendas) desde 2026-09-25; no
+backend, ainda não — o pedido da loja não existe no banco. Ver
 `docs/plano-loja-online.md`, decisão 15.
 
 ## Arquitetura de sessão/token

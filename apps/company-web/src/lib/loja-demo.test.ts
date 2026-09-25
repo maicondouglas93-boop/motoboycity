@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ajustarAgora,
   cancelarVencidos,
+  chamarMotoboyCityPara,
   completarOperacao,
   lerOperacao,
   lerVendas,
@@ -11,6 +12,7 @@ import {
   salvarOperacao,
 } from './loja-demo';
 import { OPERACAO_DE_EXEMPLO } from './loja-mock';
+import type { OperacaoDaLoja } from './loja-operacao';
 import { MOTIVO_DO_PRAZO, inicioDoPedido } from './loja-pedido';
 
 /**
@@ -22,10 +24,11 @@ import { MOTIVO_DO_PRAZO, inicioDoPedido } from './loja-pedido';
 
 describe('configuração da loja', () => {
   it('completa com o exemplo o que uma versão anterior não salvou', () => {
-    const operacao = completarOperacao({
-      entrega: { ativa: false, pedidoMinimo: null, agendamento: false },
-    });
+    // Salvo antes de existir "quem faz a entrega": o campo falta no bloco.
+    const antiga = { ativa: false, pedidoMinimo: null, agendamento: false };
+    const operacao = completarOperacao({ entrega: antiga as OperacaoDaLoja['entrega'] });
     expect(operacao.entrega.ativa).toBe(false);
+    expect(operacao.entrega.quemEntrega).toBe('MOTOBOYCITY');
     expect(operacao.retirada).toEqual(OPERACAO_DE_EXEMPLO.retirada);
     expect(operacao.notificacoes.cliente.CANCELADO).toBe(true);
   });
@@ -83,6 +86,22 @@ describe('vendas', () => {
       etapa: 'ACEITO',
       minutosDePreparo: 40,
     });
+  });
+
+  it('chamar o MOTOboyCity para um pedido da loja grava uma vez só', () => {
+    const numero = proximoNumeroDeVenda();
+    registrarVenda({
+      ...lerVendas()[0]!,
+      numero,
+      modalidade: 'ENTREGA',
+      entregaPor: 'LOJA',
+      etapa: 'PRONTO',
+    });
+
+    expect(chamarMotoboyCityPara(numero)).toBe(true);
+    expect(lerVendas().find((venda) => venda.numero === numero)?.entregaPor).toBe('MOTOBOYCITY');
+    // A segunda aba tocando o mesmo botão.
+    expect(chamarMotoboyCityPara(numero)).toBe(false);
   });
 
   it('o próximo número passa de todos os que existem', () => {

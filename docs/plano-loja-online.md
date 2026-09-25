@@ -15,7 +15,7 @@ Organizar, cadastro e edição) **gravam na API** desde 2026-09-25; as demais s�
 | Tela                                   | O que faz                                                             |
 | -------------------------------------- | --------------------------------------------------------------------- |
 | Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir fora do horário    |
-| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento com motivo, agendados   |
+| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento, agendados, comanda     |
 | `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências — **API**            |
 | `/loja/produtos/organizar`             | Categorias e ordem do catálogo — **API**                              |
 | `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só — **API**                         |
@@ -94,9 +94,16 @@ a API já usa ImageKit para avatar e documentos, que é o caminho natural).
     Há empresas que vão usar a loja com motoboy próprio. Para elas, o pedido de
     entrega não vira corrida nem entra na lista de pedidos do MOTOboyCity — nem
     como agendado: fica só em Vendas, e a loja marca "Saiu para entrega" e
-    "Entregue". A escolha é da empresa, na configuração da entrega. **Ainda não
-    está nas telas.** Em aberto: se quem tem entregador próprio pode chamar um
-    motoboy do MOTOboyCity pedido a pedido, num dia de aperto.
+    "Entregue". A escolha é da empresa, em Tipos de pedido → Entrega ("Quem faz
+    a entrega"). Quem tem entregador próprio pode, num dia de aperto, chamar um
+    motoboy do MOTOboyCity para UM pedido, em Vendas, depois do aceite e até o
+    pedido sair (usuário, 2026-09-25); o pedido passa ao caminho da corrida. Sem
+    corrida, a loja cancela o pedido pronto até o entregador sair. Nas telas de
+    demonstração desde 2026-09-25.
+16. **A venda se imprime em comanda de 80 mm** (2026-09-25, pedido do
+    usuário), no mesmo formato do cupom de entrega que já roda na Elgin i8/i9.
+    Diferente dele, leva os valores: quem entrega precisa saber quanto cobrar e
+    quanto de troco levar, e se o pedido já foi pago online.
 
 ## A fazer
 

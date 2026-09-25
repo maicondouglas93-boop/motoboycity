@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
+  Bike,
   CalendarClock,
   Check,
   ChevronDown,
@@ -9,6 +11,7 @@ import {
   MapPin,
   MessageSquare,
   Phone,
+  Printer,
   RotateCcw,
   Store,
   Timer,
@@ -16,10 +19,16 @@ import {
   Volume2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useSomLiberado } from '@/lib/avisos-do-navegador';
-import { mudarEtapa, recomecarVendas, useOperacao, useVendas } from '@/lib/loja-demo';
+import {
+  chamarMotoboyCityPara,
+  mudarEtapa,
+  recomecarVendas,
+  useOperacao,
+  useVendas,
+} from '@/lib/loja-demo';
 import { hora, momentoNaLoja, rotuloDoDia } from '@/lib/loja-horario';
 import { enderecoEmLinha, type CadastroDoCliente, type VendaDaLoja } from '@/lib/loja-mock';
 import {
@@ -31,10 +40,12 @@ import {
   nomeCurtoDaEtapa,
   prazoDoAceite,
   podeCancelar,
+  podeChamarMotoboyCity,
   proximaEtapa,
   quandoChegou,
   vemDoMotoboy,
   type EtapaDoPedido,
+  type QuemEntrega,
 } from '@/lib/loja-pedido';
 import { useAgora } from '@/lib/relogio';
 
@@ -292,6 +303,7 @@ export default function LojaVendasPage() {
                     agora={agora}
                     preparoPadrao={operacao.recebimento.minutosDePreparo}
                     prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
+                    quemEntregaNaLoja={operacao.entrega.quemEntrega}
                   />
                 ))}
               </section>
@@ -309,6 +321,7 @@ export default function LojaVendasPage() {
               agora={agora}
               preparoPadrao={operacao.recebimento.minutosDePreparo}
               prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
+              quemEntregaNaLoja={operacao.entrega.quemEntrega}
             />
           ))}
         </div>
@@ -336,20 +349,32 @@ function CartaoDaVenda({
   agora,
   preparoPadrao,
   prazoDoAceiteMin,
+  quemEntregaNaLoja,
 }: {
   venda: VendaDaLoja;
   agora: Date;
   preparoPadrao: number;
   prazoDoAceiteMin: number | null;
+  /** Como a loja entrega hoje — decide se vale mostrar quem leva cada pedido. */
+  quemEntregaNaLoja: QuemEntrega;
 }) {
   const [expandida, setExpandida] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  const [chamando, setChamando] = useState(false);
   const [motivo, setMotivo] = useState(MOTIVOS[0] ?? '');
   const [preparo, setPreparo] = useState(preparoPadrao);
 
   const proxima = proximaEtapa(venda.modalidade, venda.etapa);
-  const acao = acaoParaAvancar(venda.modalidade, venda.etapa);
-  const cancelavel = podeCancelar(venda.modalidade, venda.etapa);
+  const acao = acaoParaAvancar(venda.modalidade, venda.etapa, venda.entregaPor);
+  const cancelavel = podeCancelar(venda.modalidade, venda.etapa, venda.entregaPor);
+  const pelaLoja = venda.modalidade === 'ENTREGA' && venda.entregaPor === 'LOJA';
+  /*
+   * Quem leva só aparece para quem usa entregador próprio: ali convivem pedidos
+   * da loja e pedidos passados ao MOTOboyCity. Para quem entrega sempre pelo
+   * MOTOboyCity, seria a mesma etiqueta em todo cartão.
+   */
+  const mostrarQuemLeva =
+    venda.modalidade === 'ENTREGA' && (quemEntregaNaLoja === 'LOJA' || pelaLoja);
   const janela = janelaEmTexto(venda, agora);
   const cadastro = CADASTRO[venda.cadastro];
   const inicioAgendado = inicioDoPreparo(venda);
@@ -377,6 +402,8 @@ function CartaoDaVenda({
     if (aceito && !venda.janela) {
       tempo = `Pronto previsto às ${hora(new Date(aceito.getTime() + venda.minutosDePreparo * 60_000))}`;
     }
+  } else if (venda.etapa === 'PRONTO' && pelaLoja) {
+    tempo = 'Esperando o seu entregador sair';
   } else if (venda.etapa === 'PRONTO' && venda.modalidade === 'ENTREGA') {
     tempo = 'Motoboy chamado';
   } else if (venda.etapa === 'PRONTO') {
@@ -406,6 +433,12 @@ function CartaoDaVenda({
                 )}
                 {venda.modalidade === 'RETIRADA' ? 'Retirada' : 'Entrega'}
               </Badge>
+              {mostrarQuemLeva && (
+                <Badge variant="outline" className="gap-1">
+                  <Bike className="size-3" aria-hidden="true" />
+                  {pelaLoja ? 'Entregador da loja' : 'Motoboy do MOTOboyCity'}
+                </Badge>
+              )}
               {janela && (
                 <Badge variant="outline" className="gap-1">
                   <CalendarClock className="size-3" aria-hidden="true" />
@@ -461,7 +494,7 @@ function CartaoDaVenda({
 
         {/* A ação. Aceitar tem o preparo junto: é ali que a loja diz "hoje
             está cheio, vai levar 40". */}
-        {!cancelando && (proxima || cancelavel) && (
+        {!cancelando && !chamando && (proxima || cancelavel) && (
           <div className="flex flex-wrap items-center gap-2">
             {venda.etapa === 'NOVO' && proxima && (
               <>
@@ -505,16 +538,46 @@ function CartaoDaVenda({
               </Button>
             )}
 
-            {vemDoMotoboy(venda.modalidade, venda.etapa) && (
+            {podeChamarMotoboyCity(venda) && (
+              <Button type="button" size="sm" variant="outline" onClick={() => setChamando(true)}>
+                <Bike className="size-4" /> Chamar motoboy do MOTOboyCity
+              </Button>
+            )}
+
+            {vemDoMotoboy(venda.modalidade, venda.etapa, venda.entregaPor) && (
               <span className="text-xs text-muted-foreground">
                 Na versão final, esta etapa vem sozinha do aplicativo do motoboy.
               </span>
             )}
-            {venda.modalidade === 'ENTREGA' && venda.etapa === 'EM_PREPARO' && (
+            {venda.modalidade === 'ENTREGA' && !pelaLoja && venda.etapa === 'EM_PREPARO' && (
               <span className="text-xs text-muted-foreground">
                 Depois de pronto, cancelar passa a ser com a central: o motoboy já foi chamado.
               </span>
             )}
+          </div>
+        )}
+
+        {/* Passar para o MOTOboyCity custa uma corrida e não tem volta pela
+            loja: por isso pergunta antes, dizendo o que muda. */}
+        {chamando && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
+            <span className="w-full text-xs">
+              Este pedido vira corrida no MOTOboyCity e entra na sua fatura, como as demais. A saída
+              e a entrega passam a chegar do aplicativo do motoboy.
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                chamarMotoboyCityPara(venda.numero);
+                setChamando(false);
+              }}
+            >
+              Chamar motoboy
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setChamando(false)}>
+              Voltar
+            </Button>
           </div>
         )}
 
@@ -556,17 +619,28 @@ function CartaoDaVenda({
           </div>
         )}
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="-ml-2"
-          onClick={() => setExpandida((atual) => !atual)}
-          aria-expanded={expandida}
-        >
-          {expandida ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          Detalhes
-        </Button>
+        <div className="-ml-2 flex flex-wrap items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpandida((atual) => !atual)}
+            aria-expanded={expandida}
+          >
+            {expandida ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            Detalhes
+          </Button>
+          {/* Numa aba nova: a fila de Vendas continua aberta, e com ela o som
+              do próximo pedido. */}
+          <Link
+            href={`/loja/vendas/${venda.numero}/imprimir`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+          >
+            <Printer className="size-4" aria-hidden="true" /> Imprimir
+          </Link>
+        </div>
 
         {expandida && (
           <div className="space-y-3 border-t pt-3 text-sm">

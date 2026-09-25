@@ -16,7 +16,7 @@ import {
   type EnderecoDeRetirada,
   type OperacaoDaLoja,
 } from '@/lib/loja-operacao';
-import type { ModoDeAceite } from '@/lib/loja-pedido';
+import type { ModoDeAceite, QuemEntrega } from '@/lib/loja-pedido';
 import { useAgora } from '@/lib/relogio';
 
 /**
@@ -42,6 +42,7 @@ interface Rascunho {
   prazoLigado: boolean;
   prazoMin: number;
   entregaAtiva: boolean;
+  quemEntrega: QuemEntrega;
   pedidoMinimo: string;
   entregaAgendada: boolean;
   retiradaAtiva: boolean;
@@ -107,6 +108,7 @@ function paraRascunho(operacao: OperacaoDaLoja): Rascunho {
     prazoLigado: operacao.recebimento.prazoDoAceiteMin !== null,
     prazoMin: operacao.recebimento.prazoDoAceiteMin ?? 10,
     entregaAtiva: operacao.entrega.ativa,
+    quemEntrega: operacao.entrega.quemEntrega,
     pedidoMinimo: moedaParaTexto(operacao.entrega.pedidoMinimo),
     entregaAgendada: operacao.entrega.agendamento,
     retiradaAtiva: operacao.retirada.ativa,
@@ -131,6 +133,7 @@ function paraGravar(rascunho: Rascunho): Partes {
     },
     entrega: {
       ativa: rascunho.entregaAtiva,
+      quemEntrega: rascunho.quemEntrega,
       pedidoMinimo: textoParaMoeda(rascunho.pedidoMinimo),
       agendamento: rascunho.entregaAgendada,
     },
@@ -287,14 +290,58 @@ function Formulario({
             <span>
               Oferecer entrega
               <span className="block text-xs text-muted-foreground">
-                O motoboy da central leva o pedido. A taxa que o cliente paga é a do bairro, em
-                Configurações.
+                A taxa que o cliente paga é a do bairro, em Configurações.
               </span>
             </span>
           </label>
 
           {rascunho.entregaAtiva && (
             <>
+              {/* Há loja com motoboy próprio, e o pedido dela não pode cair na
+                  lista de corridas do MOTOboyCity. Quem tem entregador ainda
+                  pode chamar um motoboy do MOTOboyCity para um pedido só, na
+                  própria venda — o dia em que o entregador faltou. */}
+              <fieldset className="space-y-2">
+                <legend className="mb-2 text-sm font-medium">Quem faz a entrega</legend>
+                {(
+                  [
+                    {
+                      valor: 'MOTOBOYCITY',
+                      titulo: 'Motoboy do MOTOboyCity',
+                      detalhe:
+                        'O pedido pronto vira corrida no MOTOboyCity. A saída e a entrega chegam do aplicativo do motoboy, e a corrida entra na sua fatura, como as demais.',
+                    },
+                    {
+                      valor: 'LOJA',
+                      titulo: 'Entregador da loja',
+                      detalhe:
+                        'O pedido fica só em Vendas, fora da lista do MOTOboyCity, e a loja marca "Saiu para entrega" e "Entregue". Num dia de aperto, dá para chamar um motoboy do MOTOboyCity para um pedido, na própria venda.',
+                    },
+                  ] as const
+                ).map((opcao) => (
+                  <label
+                    key={opcao.valor}
+                    className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm ${
+                      rascunho.quemEntrega === opcao.valor
+                        ? 'border-primary bg-primary/5'
+                        : 'hover:bg-muted/50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="quemEntrega"
+                      className="mt-1"
+                      checked={rascunho.quemEntrega === opcao.valor}
+                      onChange={() => mudar({ quemEntrega: opcao.valor })}
+                    />
+                    <span>
+                      {opcao.titulo}
+                      <span className="block text-xs text-muted-foreground">{opcao.detalhe}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+
               <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Tempo estimado que o cliente vê: </span>
                 <strong>

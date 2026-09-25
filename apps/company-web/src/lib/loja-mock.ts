@@ -336,7 +336,7 @@ export const OPERACAO_DE_EXEMPLO: OperacaoDaLoja = {
     // esquecida é o cliente, esperando uma resposta que não vem.
     prazoDoAceiteMin: 10,
   },
-  entrega: { ativa: true, pedidoMinimo: 15, agendamento: true },
+  entrega: { ativa: true, quemEntrega: 'MOTOBOYCITY', pedidoMinimo: 15, agendamento: true },
   retirada: {
     ativa: true,
     endereco: null,
@@ -672,6 +672,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Beatriz Nunes',
       telefone: '(35) 99873-4410',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'ACEITO',
       historico: passos(['NOVO', 12], ['ACEITO', 12]),
       janela: {
@@ -703,6 +704,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Lucas Andrade',
       telefone: '(35) 99120-5563',
       modalidade: 'RETIRADA',
+      entregaPor: null,
       etapa: 'PRONTO',
       historico: passos(['NOVO', 18], ['ACEITO', 18], ['EM_PREPARO', 15], ['PRONTO', 2]),
       janela: null,
@@ -724,6 +726,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Ana Ribeiro',
       telefone: '(35) 99841-2207',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'ACEITO',
       historico: passos(['NOVO', 3], ['ACEITO', 3]),
       janela: null,
@@ -761,6 +764,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Carlos Menezes',
       telefone: '(35) 99712-6680',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'EM_PREPARO',
       historico: passos(['NOVO', 14], ['ACEITO', 14], ['EM_PREPARO', 9]),
       janela: null,
@@ -797,6 +801,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Joana Prado',
       telefone: '(35) 99655-1143',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'SAIU_PARA_ENTREGA',
       historico: passos(
         ['NOVO', 38],
@@ -831,6 +836,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Marcos Lima',
       telefone: '(35) 99655-1143',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'ENTREGUE',
       historico: passos(
         ['NOVO', 95],
@@ -866,6 +872,7 @@ export function vendasDeExemplo(agora: Date): VendaDaLoja[] {
       cliente: 'Rita Souza',
       telefone: '(35) 99420-7781',
       modalidade: 'ENTREGA',
+      entregaPor: 'MOTOBOYCITY',
       etapa: 'CANCELADO',
       historico: passos(['NOVO', 130], ['ACEITO', 130], ['CANCELADO', 124]),
       janela: null,

@@ -9,9 +9,10 @@ import { hora, momentoNaLoja, rotuloDoDia } from './loja-horario';
  *
  * O pedido NÃO é a entrega. O pedido é o que a loja vendeu; a entrega é a
  * corrida do motoboy, com o `DeliveryStatus` dela. As etapas até "Pronto" são
- * da cozinha. "Saiu para entrega" e "Entregue" vêm da corrida (`COLLECTED` e
- * `DELIVERED`) — na integração, quem as marca é o aplicativo do motoboy, e não
- * a loja. Retirada não tem corrida nenhuma: vai de "Pronto" a "Retirado".
+ * da cozinha. Quando o MOTOboyCity entrega, "Saiu para entrega" e "Entregue"
+ * vêm da corrida (`COLLECTED` e `DELIVERED`) — quem as marca é o aplicativo do
+ * motoboy, e não a loja. Com entregador próprio não há corrida, e a loja marca
+ * as duas. Retirada não tem corrida nenhuma: vai de "Pronto" a "Retirado".
  */
 
 export type Modalidade = 'ENTREGA' | 'RETIRADA';
@@ -21,6 +22,17 @@ export type Modalidade = 'ENTREGA' | 'RETIRADA';
  * Manual: cada pedido espera alguém da loja aceitar.
  */
 export type ModoDeAceite = 'AUTOMATICO' | 'MANUAL';
+
+/**
+ * Quem leva o pedido de entrega até o cliente. A escolha é da empresa: há
+ * quem use a loja com motoboy próprio, e o pedido dela não pode cair na lista
+ * de corridas do MOTOboyCity (decisão 15 do plano da loja).
+ *
+ * `MOTOBOYCITY`: o pedido pronto vira corrida, e a saída e a entrega chegam do
+ * aplicativo do motoboy. `LOJA`: o entregador é da loja, nada passa pelo
+ * MOTOboyCity, e é a loja que marca a saída e a entrega.
+ */
+export type QuemEntrega = 'MOTOBOYCITY' | 'LOJA';
 
 export type EtapaDoPedido =
   'NOVO' | 'ACEITO' | 'EM_PREPARO' | 'PRONTO' | 'SAIU_PARA_ENTREGA' | 'ENTREGUE' | 'CANCELADO';
@@ -60,6 +72,11 @@ export interface AndamentoDoPedido {
   minutosDePreparo: number;
   minutosDeEntrega: number;
   cancelamento: Cancelamento | null;
+  /**
+   * Na entrega, quem leva — congelado no pedido pelo mesmo motivo dos tempos:
+   * mudar a configuração não troca quem já está levando. `null` na retirada.
+   */
+  entregaPor: QuemEntrega | null;
 }
 
 const CAMINHOS: Record<Modalidade, EtapaDoPedido[]> = {
@@ -83,15 +100,46 @@ export function concluido(etapa: EtapaDoPedido): boolean {
 }
 
 /**
+ * O pedido é levado pelo entregador da própria loja. Pedidos gravados antes
+ * de existir a escolha não têm o campo, e contam como MOTOboyCity — o que
+ * valia para todos até então.
+ */
+function levaALoja(modalidade: Modalidade, entregaPor: QuemEntrega | null | undefined): boolean {
+  return modalidade === 'ENTREGA' && entregaPor === 'LOJA';
+}
+
+/**
  * Até quando a loja cancela sozinha.
  *
- * Na entrega, até o pedido ficar pronto: dali em diante o motoboy já foi
- * chamado, pode estar a caminho, e cancelar passa a ser com a central. Na
- * retirada não há corrida, e a loja cancela até o cliente buscar.
+ * Pelo MOTOboyCity, até o pedido ficar pronto: dali em diante o motoboy já foi
+ * chamado, pode estar a caminho, e cancelar passa a ser com a central. Sem
+ * corrida — na retirada, ou com o entregador da loja —, a loja cancela até o
+ * pedido sair das mãos dela: o cliente buscar, ou o entregador sair.
  */
-export function podeCancelar(modalidade: Modalidade, etapa: EtapaDoPedido): boolean {
+export function podeCancelar(
+  modalidade: Modalidade,
+  etapa: EtapaDoPedido,
+  entregaPor: QuemEntrega | null = null,
+): boolean {
   if (etapa === 'NOVO' || etapa === 'ACEITO' || etapa === 'EM_PREPARO') return true;
-  return modalidade === 'RETIRADA' && etapa === 'PRONTO';
+  return etapa === 'PRONTO' && (modalidade === 'RETIRADA' || levaALoja(modalidade, entregaPor));
+}
+
+/**
+ * Quem entrega com motoboy próprio pode passar UM pedido para o MOTOboyCity —
+ * o dia em que o entregador faltou, ou em que a fila apertou. Vale depois do
+ * aceite e até o pedido sair; o pedido passa a seguir o caminho da corrida.
+ */
+export function podeChamarMotoboyCity(pedido: AndamentoDoPedido): boolean {
+  return (
+    levaALoja(pedido.modalidade, pedido.entregaPor) &&
+    (pedido.etapa === 'ACEITO' || pedido.etapa === 'EM_PREPARO' || pedido.etapa === 'PRONTO')
+  );
+}
+
+/** O pedido passado para o MOTOboyCity. Fora do caso de `podeChamarMotoboyCity`, fica como está. */
+export function chamarMotoboyCity<T extends AndamentoDoPedido>(pedido: T): T {
+  return podeChamarMotoboyCity(pedido) ? { ...pedido, entregaPor: 'MOTOBOYCITY' } : pedido;
 }
 
 export class TransicaoInvalida extends Error {
@@ -120,7 +168,7 @@ export function avancar<T extends AndamentoDoPedido>(
   const passo: PassoDoPedido = { etapa: para, em: agora.toISOString() };
 
   if (para === 'CANCELADO') {
-    if (!podeCancelar(pedido.modalidade, pedido.etapa)) {
+    if (!podeCancelar(pedido.modalidade, pedido.etapa, pedido.entregaPor)) {
       throw new TransicaoInvalida(pedido.etapa, para);
     }
     return {
@@ -278,7 +326,11 @@ export function nomeCurtoDaEtapa(etapa: EtapaDoPedido, modalidade: Modalidade): 
 }
 
 /** O botão que leva à próxima etapa, dito como a ação que a pessoa faz. */
-export function acaoParaAvancar(modalidade: Modalidade, etapa: EtapaDoPedido): string | null {
+export function acaoParaAvancar(
+  modalidade: Modalidade,
+  etapa: EtapaDoPedido,
+  entregaPor: QuemEntrega | null = null,
+): string | null {
   switch (etapa) {
     case 'NOVO':
       return 'Aceitar';
@@ -287,7 +339,8 @@ export function acaoParaAvancar(modalidade: Modalidade, etapa: EtapaDoPedido): s
     case 'EM_PREPARO':
       return 'Marcar como pronto';
     case 'PRONTO':
-      return modalidade === 'ENTREGA' ? 'Motoboy coletou' : 'Cliente retirou';
+      if (modalidade === 'RETIRADA') return 'Cliente retirou';
+      return levaALoja(modalidade, entregaPor) ? 'Saiu para entrega' : 'Motoboy coletou';
     case 'SAIU_PARA_ENTREGA':
       return 'Marcar como entregue';
     default:
@@ -295,9 +348,20 @@ export function acaoParaAvancar(modalidade: Modalidade, etapa: EtapaDoPedido): s
   }
 }
 
-/** As etapas que, na integração, chegam do aplicativo do motoboy e não da loja. */
-export function vemDoMotoboy(modalidade: Modalidade, etapa: EtapaDoPedido): boolean {
-  return modalidade === 'ENTREGA' && (etapa === 'PRONTO' || etapa === 'SAIU_PARA_ENTREGA');
+/**
+ * As etapas que, na integração, chegam do aplicativo do motoboy do MOTOboyCity
+ * e não da loja. Com o entregador da loja, nenhuma: é ela quem marca.
+ */
+export function vemDoMotoboy(
+  modalidade: Modalidade,
+  etapa: EtapaDoPedido,
+  entregaPor: QuemEntrega | null = null,
+): boolean {
+  return (
+    modalidade === 'ENTREGA' &&
+    !levaALoja(modalidade, entregaPor) &&
+    (etapa === 'PRONTO' || etapa === 'SAIU_PARA_ENTREGA')
+  );
 }
 
 /** "hoje", "amanhã", "sexta, 25/09". */

@@ -5,12 +5,15 @@ import {
   acaoParaAvancar,
   avancar,
   caminhoDoPedido,
+  chamarMotoboyCity,
   esperandoAHora,
   inicioDoPedido,
   inicioDoPreparo,
   podeCancelar,
+  podeChamarMotoboyCity,
   prazoDoAceite,
   previsaoParaOCliente,
+  vemDoMotoboy,
   type AndamentoDoPedido,
 } from './loja-pedido';
 
@@ -25,6 +28,7 @@ function pedido(mudancas: Partial<AndamentoDoPedido> = {}): AndamentoDoPedido {
     minutosDePreparo: 20,
     minutosDeEntrega: 15,
     cancelamento: null,
+    entregaPor: 'MOTOBOYCITY',
     ...mudancas,
   };
 }
@@ -102,6 +106,48 @@ describe('cancelar', () => {
   it('recusa cancelar o que já saiu com o motoboy', () => {
     const saiu = pedido({ etapa: 'SAIU_PARA_ENTREGA' });
     expect(() => avancar(saiu, 'CANCELADO', em('2026-09-22T19:40'))).toThrow(TransicaoInvalida);
+  });
+});
+
+describe('entregador da loja', () => {
+  const daLoja = (etapa: AndamentoDoPedido['etapa']) => pedido({ etapa, entregaPor: 'LOJA' });
+
+  it('a loja marca a saída e a entrega: nada vem do aplicativo do motoboy', () => {
+    expect(acaoParaAvancar('ENTREGA', 'PRONTO', 'LOJA')).toBe('Saiu para entrega');
+    expect(vemDoMotoboy('ENTREGA', 'PRONTO', 'LOJA')).toBe(false);
+    expect(vemDoMotoboy('ENTREGA', 'SAIU_PARA_ENTREGA', 'LOJA')).toBe(false);
+    expect(vemDoMotoboy('ENTREGA', 'PRONTO', 'MOTOBOYCITY')).toBe(true);
+  });
+
+  it('sem corrida chamada, a loja cancela o pronto até o entregador sair', () => {
+    expect(podeCancelar('ENTREGA', 'PRONTO', 'LOJA')).toBe(true);
+    expect(podeCancelar('ENTREGA', 'SAIU_PARA_ENTREGA', 'LOJA')).toBe(false);
+    expect(podeCancelar('ENTREGA', 'PRONTO', 'MOTOBOYCITY')).toBe(false);
+    const cancelado = avancar(daLoja('PRONTO'), 'CANCELADO', em('2026-09-22T19:30'));
+    expect(cancelado.etapa).toBe('CANCELADO');
+  });
+
+  it('pedido gravado antes da escolha existir conta como MOTOboyCity', () => {
+    const antigo = pedido({ etapa: 'PRONTO' }) as Partial<AndamentoDoPedido>;
+    delete antigo.entregaPor;
+    expect(podeCancelar('ENTREGA', 'PRONTO', antigo.entregaPor)).toBe(false);
+    expect(acaoParaAvancar('ENTREGA', 'PRONTO', antigo.entregaPor)).toBe('Motoboy coletou');
+  });
+
+  it('num dia de aperto, um pedido passa para o MOTOboyCity até sair', () => {
+    expect(podeChamarMotoboyCity(daLoja('NOVO'))).toBe(false);
+    expect(podeChamarMotoboyCity(daLoja('EM_PREPARO'))).toBe(true);
+    expect(podeChamarMotoboyCity(daLoja('PRONTO'))).toBe(true);
+    expect(podeChamarMotoboyCity(daLoja('SAIU_PARA_ENTREGA'))).toBe(false);
+    expect(podeChamarMotoboyCity(pedido({ etapa: 'PRONTO' }))).toBe(false);
+
+    const chamado = chamarMotoboyCity(daLoja('PRONTO'));
+    expect(chamado.entregaPor).toBe('MOTOBOYCITY');
+    // Dali em diante, o caminho é o da corrida.
+    expect(podeCancelar(chamado.modalidade, chamado.etapa, chamado.entregaPor)).toBe(false);
+
+    const saiu = daLoja('SAIU_PARA_ENTREGA');
+    expect(chamarMotoboyCity(saiu)).toBe(saiu);
   });
 });
 

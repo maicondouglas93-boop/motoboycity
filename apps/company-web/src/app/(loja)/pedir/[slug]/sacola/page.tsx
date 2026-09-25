@@ -275,6 +275,7 @@ function Conteudo({ slug, usuarioId }: { slug: string; usuarioId: string | null 
     registrarVenda({
       numero,
       modalidade,
+      entregaPor: retirar ? null : operacao.entrega.quemEntrega,
       ...inicioDoPedido(operacao.recebimento.modo, momento),
       janela,
       minutosDePreparo,

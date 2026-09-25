@@ -1,0 +1,31 @@
+/* Só o que a comanda tem a mais que o cupom de entrega: as linhas com valor. */
+.itens {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.itens li {
+  margin: 1.5mm 0;
+  break-inside: avoid;
+}
+.linha {
+  display: flex;
+  justify-content: space-between;
+  gap: 2mm;
+}
+.linha > span:last-child {
+  flex-shrink: 0;
+}
+.escolhas {
+  padding-left: 4mm;
+  font-size: 9pt;
+}
+.total {
+  margin-top: 1.5mm;
+  font-size: 12pt;
+  font-weight: 800;
+}
+.destaque {
+  margin-top: 1.5mm;
+  font-weight: 800;
+}

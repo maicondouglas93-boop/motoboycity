@@ -5,7 +5,7 @@ import {
   type Funcionamento,
   type RegrasDoAgendamento,
 } from './loja-horario';
-import type { Modalidade, ModoDeAceite } from './loja-pedido';
+import type { Modalidade, ModoDeAceite, QuemEntrega } from './loja-pedido';
 
 /**
  * Como a loja funciona: horário, tipos de pedido, agendamento, recebimento e
@@ -53,6 +53,8 @@ export interface OperacaoDaLoja {
   };
   entrega: {
     ativa: boolean;
+    /** Quem leva o pedido: o motoboy do MOTOboyCity ou o entregador da loja. */
+    quemEntrega: QuemEntrega;
     /** Conta só os itens, sem a taxa. `null`: sem mínimo. */
     pedidoMinimo: number | null;
     agendamento: boolean;

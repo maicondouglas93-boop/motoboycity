@@ -50,3 +50,15 @@ describe('Tipos de pedido — prazo do aceite', () => {
     expect(lerOperacao().recebimento).toMatchObject({ modo: 'MANUAL', prazoDoAceiteMin: null });
   });
 });
+
+describe('Tipos de pedido — quem faz a entrega', () => {
+  it('vem pelo MOTOboyCity, e a loja com motoboy próprio escolhe o entregador dela', () => {
+    render(<TiposDePedidoPage />);
+    expect(screen.getByLabelText(/Motoboy do MOTOboyCity/)).toBeChecked();
+
+    fireEvent.click(screen.getByLabelText(/Entregador da loja/));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar tipos de pedido' }));
+
+    expect(lerOperacao().entrega.quemEntrega).toBe('LOJA');
+  });
+});

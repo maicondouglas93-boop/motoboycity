@@ -587,6 +587,14 @@ demonstração, e não sincronização — nada sai do aparelho. Quem integrar a
 `loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts` ficam, porque o
 servidor vai precisar delas. Configurações continua sem salvar nada.
 
+**Quem faz a entrega e a comanda** (2026-09-25, ainda na demonstração). A
+loja escolhe em Tipos de pedido se entrega pelo MOTOboyCity ou com entregador
+próprio, e cada pedido guarda a escolha em `entregaPor` (`lib/loja-pedido.ts`);
+venda gravada antes disso não tem o campo e conta como MOTOboyCity. A comanda
+da venda fica em `/loja/vendas/<número>/imprimir`, no grupo `(print)`, e usa o
+estilo do cupom de entrega (`delivery-receipt.module.css`) — mudar aquele
+arquivo muda as duas impressões.
+
 **O horário é calculado no fuso da loja** (`America/Sao_Paulo`), e não no do
 aparelho. Teste de horário constrói as datas com `-03:00`, para dar o mesmo
 resultado em qualquer máquina. Telas que dependem da hora usam o relógio único
