@@ -50,10 +50,16 @@ empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
   formulário desatualizado (409, `STORE_PRODUCT_STALE`).
 - **Publicado é comprável.** `storeProductIssues`, em `packages/validation`,
   decide o que impede vender; o servidor recusa publicar com pendência (400,
-  `STORE_PRODUCT_NOT_PUBLISHABLE`). Ao ser ligado, o painel deve usar a mesma
-  função para avisar antes — hoje ele usa a cópia de `loja-mock.ts`.
+  `STORE_PRODUCT_NOT_PUBLISHABLE`). O painel usa a mesma função para avisar
+  antes; só a página do cliente, ainda de exemplo, usa a cópia de
+  `loja-mock.ts`.
 - **Categoria com produto não sai** (409, `STORE_CATEGORY_NOT_EMPTY`), com
   `ON DELETE RESTRICT` no banco como segunda defesa.
+- **No painel** (`app/(app)/loja/produtos/*`), as quatro telas dividem uma
+  consulta só do catálogo inteiro (`useCatalogo`, em
+  `components/loja/catalogo.ts`). Organizar muda a tela antes da resposta e
+  grava numa fila serial (`scope` do TanStack Query), para a ordem dos cliques
+  ser a ordem no servidor; a última gravação da fila relê o catálogo.
 
 ## 2. A cadeia de contratos
 

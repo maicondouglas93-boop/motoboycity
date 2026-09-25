@@ -548,23 +548,35 @@ minutos em que os painéis já mostram o campo e a API ainda é a antiga: nessa
 janela o Zod descarta a chave desconhecida e o pedido nasce sem a marcação.
 Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 
-## Loja online — telas de demonstração dentro do painel
+## Loja online — telas dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
 Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
-Configurações, e o status da loja no alto da barra lateral. **Nenhuma tela está
-integrada.** Os dados de exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`,
-e toda tela traz um aviso dizendo isso. Existem para aprovar o desenho antes de
-escrever backend.
+Configurações, e o status da loja no alto da barra lateral.
 
-**O backend do catálogo existe desde 2026-09-25, e nenhuma tela o usa ainda.**
-Tabelas `store_*` (migration `20260925090000_loja_catalogo`, só criação de
-tabelas), módulo `apps/api/src/company/store-catalog` com as rotas
-`/company/store/*`, e contratos em `packages/*`. Quem ligar Produtos e Organizar
-deve usar `createCompanyStoreCatalogApi` e mandar os itens do produto com o `id`
-que a API devolveu — sem ele, a edição recria o item com id novo. A migration
-ainda não foi aplicada em banco nenhum além dos descartáveis da validação: sai
-no próximo `push`, pelo `prisma migrate deploy` do build do Render.
+**Produtos, Organizar, Cadastrar e Editar gravam na API desde 2026-09-25**
+(rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`).
+As demais são demonstração, com dados de `apps/company-web/src/lib/loja-mock.ts`
+e um aviso na tela. **A página do cliente (`/pedir/[slug]`) ainda mostra o
+cardápio de exemplo** — não existe o catálogo público por `slug` —, e a lista de
+Produtos diz isso à loja. O que quem mexer no catálogo do painel precisa saber:
+
+- Uma consulta só para as quatro telas: `useCatalogo`, em
+  `components/loja/catalogo.ts`.
+- Organizar grava cada mudança na hora e muda a tela antes da resposta. As
+  gravações correm numa fila (`scope` do TanStack Query, em
+  `useFilaDoCatalogo`): em paralelo, cliques seguidos em "subir" podiam chegar
+  ao servidor fora de ordem. A última da fila relê o catálogo.
+- O formulário manda cada item do produto com o `id` que a API devolveu, e linha
+  nova sem id (`components/loja/produto-no-formulario.ts`). Sem isso, a edição
+  recriaria o item com id novo.
+- Não há envio de foto: o campo aparece desativado, e "sem foto" fica fora das
+  pendências mostradas (`pendenciasParaMostrar`) até existir.
+
+A migration `20260925090000_loja_catalogo` está aplicada no `motoboycity_dev`
+local (junto com quatro migrations aditivas de outros recortes que estavam
+pendentes nele). Em produção, sai no próximo `push`, pelo
+`prisma migrate deploy` do build do Render.
 
 **Uma parte salva — só no navegador.** Horários, Tipos de pedido, Notificações,
 o status e as vendas gravam no `localStorage` por `lib/loja-demo.ts`, e o evento
@@ -582,9 +594,10 @@ de `lib/relogio.ts`: quem grava um ajuste acerta o relógio antes, e ele se acer
 sozinho quando outra aba muda a loja.
 
 **A loja não está no menu, e isso é a trava.** Nenhum item aponta para `/loja`
-no `top-nav.tsx`; chega-se às telas pela URL direta. Enquanto elas forem
-demonstração, um item no menu mostraria vendas falsas às empresas de produção no
-primeiro deploy. O motivo está comentado no próprio `top-nav.tsx`, junto do
+no `top-nav.tsx`; chega-se às telas pela URL direta. Enquanto houver tela de
+demonstração — Vendas é uma —, um item no menu mostraria vendas falsas às
+empresas de produção no primeiro deploy. As telas do catálogo, ligadas à API,
+não mudam isso. O motivo está comentado no próprio `top-nav.tsx`, junto do
 `NAV_ITEMS` — quem ligar a loja à API acrescenta o item ali no mesmo recorte.
 
 ### Clerk: uma SEGUNDA autenticação neste app, e por que ela não toca o painel

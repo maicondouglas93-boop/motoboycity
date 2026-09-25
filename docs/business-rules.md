@@ -487,6 +487,23 @@ agendamento e começa a buscar motoboy imediatamente
   marcada sai da fila e, se sobrar por falha de limpeza, vira no-op sozinho;
 - não vale para lote: lote não pode ser agendado nesta versão.
 
+## Loja online: entregar pelo MOTOboyCity é opcional
+
+Decisão de 2026-09-25, do usuário. Há empresas que vão usar a loja online com
+motoboy próprio, sem as entregas do MOTOboyCity. Para elas, o pedido de entrega
+da loja **não entra** na lista de pedidos do MOTOboyCity — nem como agendado,
+nem buscando motoboy.
+
+- a escolha é da empresa, na configuração da entrega da loja;
+- com entregador próprio, o pedido fica só nas vendas da loja, e é a loja que
+  marca "Saiu para entrega" e "Entregue";
+- pelo MOTOboyCity, vale o fluxo do plano: a corrida nasce quando o pedido fica
+  pronto (ou o preparo vence), e "Saiu" e "Entregue" vêm dela;
+- a retirada não muda: nunca teve corrida.
+
+Ainda não implementado — o pedido da loja não existe no banco. Ver
+`docs/plano-loja-online.md`, decisão 15.
+
 ## Arquitetura de sessão/token
 
 Revisitada em 2026-08-09 e mantida como está, deliberadamente: JWT em

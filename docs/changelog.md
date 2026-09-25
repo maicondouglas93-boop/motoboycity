@@ -14993,3 +14993,93 @@ Arquivos: `apps/api/prisma/schema.prisma`,
 
 **Próximo passo:** ligar Produtos e Organizar do painel a esta API, e aplicar a
 migration no `motoboycity_dev` para testar com o painel local.
+
+## 2026-09-25 — Loja online: Produtos e Organizar ligadas à API do catálogo
+
+Pedido do usuário ("sim", à pergunta de ligar as telas Produtos e Organizar do
+painel à API do catálogo, aplicando antes a migration no banco local de
+desenvolvimento). É o item 3 da ordem sugerida no plano, para o catálogo.
+
+**Banco local.** O `motoboycity_dev` (Postgres local, porta 5434) recebeu, por
+`prisma migrate deploy`, as cinco migrations que estavam pendentes nele: quatro
+aditivas de recortes anteriores e a `20260925090000_loja_catalogo`.
+`prisma migrate status`: 56 migrations, em dia. Nenhum banco compartilhado foi
+tocado.
+
+**Telas** (`apps/company-web`):
+
+- `/loja/produtos`: a lista vem da API; publicar, pausar e voltar a vender
+  gravam (`PUT products/:id/status`). As pendências são as de
+  `storeProductIssues`, a mesma regra com que o servidor recusa publicar.
+  Estados de carregando, erro e loja vazia — quem ainda não tem seção começa
+  por Organizar.
+- `/loja/produtos/organizar`: criar, renomear (ao sair do campo ou no Enter;
+  Esc desiste; vazio volta o nome), excluir categoria vazia, subir e descer
+  categoria e produto. Cada mudança grava na hora, e o botão "Salvar ordem"
+  saiu. A tela muda antes da resposta, e as gravações correm numa fila
+  (`scope` do TanStack Query): em paralelo, dois cliques seguidos podiam chegar
+  ao servidor fora de ordem e deixar o cardápio na ordem do meio, com a tela
+  mostrando a última. A última gravação da fila relê o catálogo; o que o
+  servidor recusou volta ao que ficou gravado, com o motivo no topo. O nome em
+  edição fica no campo até a resposta — a tela só recebe o nome novo do
+  catálogo um tique depois, e soltá-lo antes mostrava o antigo por um instante.
+- Cadastro e edição: um formulário só, agora com os dados da API. Cada item
+  volta com o `id` recebido, e linha nova vai sem id. Os botões dependem da
+  situação: no cadastro, "Publicar produto" (travado com pendência) e "Salvar
+  rascunho"; no ar, "Salvar alterações" — ou "Salvar e tirar do ar", que grava
+  como rascunho, quando a edição deixa o produto sem poder ser comprado;
+  pausado continua pausado ao salvar. Enter num campo não publica nada. Dá para
+  criar a categoria sem sair do formulário (a loja nova chega ao primeiro
+  produto sem nenhuma), e excluir o produto, com confirmação. Quem acabou de
+  excluir lê "Produto excluído", e não "não encontrado".
+- Preço no padrão brasileiro ("18,50", "R$ 1.234,50"). O que não é valor, ou
+  passa de R$ 99.999,99, é apontado antes de sair da tela; limites de texto e de
+  quantidade de itens são os do schema.
+
+**O que continua de fora, e a tela diz:**
+
+- A página do cliente (`/pedir/[slug]`) ainda mostra o cardápio de exemplo: não
+  existe o catálogo público por `slug`. A lista de Produtos avisa.
+- Não há envio de foto. O campo aparece desativado, e "sem foto" sai das
+  pendências mostradas até existir (a API já usa ImageKit para avatar e
+  documentos).
+- A loja continua fora do menu: Vendas e as outras telas ainda são
+  demonstração.
+
+**Arquivos:** `apps/company-web/src/lib/api-client.ts`;
+`src/components/loja/catalogo.ts` e `produto-no-formulario.ts` (novos) e
+`formulario-de-produto.tsx`; `src/app/(app)/loja/produtos/page.tsx`,
+`organizar/page.tsx`, `novo/page.tsx` e `[id]/editar/page.tsx`; testes novos
+`catalogo.test.ts`, `produto-no-formulario.test.ts`,
+`formulario-de-produto.test.tsx`, `organizar.test.tsx` e `produtos.test.tsx`;
+`docs/plano-loja-online.md`, `docs/agent-handoff.md`, `docs/architecture.md`,
+`docs/business-rules.md`.
+
+**Como foi validado:**
+
+- `vitest` do company-web: 305 testes passam, 45 deles novos — conversão de
+  preço, ida e volta do produto com os mesmos ids, linhas em branco, erros de
+  montagem, botões por situação, a fila (a segunda lista só sai depois da
+  resposta da primeira), a volta ao gravado quando o servidor recusa, o nome em
+  edição, a exclusão com confirmação.
+- `tsc --noEmit` e `eslint` limpos nos arquivos do recorte; `next build` do
+  company-web passa.
+- No navegador, com a API local e uma empresa de teste cadastrada pelo usuário
+  no banco local (pendente de aprovação, o que não impede as telas do
+  catálogo): criar, renomear e excluir seção, com a seção que tem produto
+  travada; cadastrar produto com preço único e com tamanhos e adicionais;
+  preço inválido recusado na tela, sem ir à API; rascunho sem seção em "Fora
+  de qualquer seção", publicado depois de ganhar seção; pausar e voltar a
+  vender; reordenar produto e recarregar; excluir produto com confirmação. Na
+  edição do açaí, os tamanhos e a escolha mantidos voltaram com o mesmo id, e
+  os novos ganharam id. Dois cliques em "descer" com 8 ms entre eles: a
+  segunda gravação só saiu depois da resposta da primeira, e o catálogo foi
+  relido uma vez, no fim. Nenhum erro no log da API.
+
+**Deploy:** nada foi enviado. As telas sobem junto com a migration no próximo
+`push`.
+
+**Decisão registrada no mesmo recorte** (do usuário, durante o teste):
+entregar pelo MOTOboyCity é opcional. Há empresas com motoboy próprio, e o
+pedido de entrega delas não entra na lista de pedidos do MOTOboyCity. Está em
+`docs/business-rules.md` e na decisão 15 do plano; ainda não está nas telas.

@@ -14,6 +14,7 @@ import {
   createCompanyIntegrationsApi,
   createNotificationsApi,
   createCompanyPageProtectionApi,
+  createCompanyStoreCatalogApi,
   configureApiClient,
 } from '@motoboycity/api-client';
 import { pageProtectionSession } from './page-protection-session';
@@ -39,3 +40,4 @@ export const paymentNoticeApi = createPaymentNoticeApi({ baseUrl: apiBaseUrl });
 export const companyIntegrationsApi = createCompanyIntegrationsApi({ baseUrl: apiBaseUrl });
 export const notificationsApi = createNotificationsApi({ baseUrl: apiBaseUrl });
 export const companyPageProtectionApi = createCompanyPageProtectionApi({ baseUrl: apiBaseUrl });
+export const companyStoreCatalogApi = createCompanyStoreCatalogApi({ baseUrl: apiBaseUrl });
