@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ajustarAgora,
+  cancelarVencidos,
   completarOperacao,
   lerOperacao,
   lerVendas,
@@ -10,7 +11,7 @@ import {
   salvarOperacao,
 } from './loja-demo';
 import { OPERACAO_DE_EXEMPLO } from './loja-mock';
-import { inicioDoPedido } from './loja-pedido';
+import { MOTIVO_DO_PRAZO, inicioDoPedido } from './loja-pedido';
 
 /**
  * O armazenamento da demonstração faz as vezes do servidor. Dois erros dele
@@ -87,5 +88,53 @@ describe('vendas', () => {
   it('o próximo número passa de todos os que existem', () => {
     const maior = Math.max(...lerVendas().map((venda) => venda.numero));
     expect(proximoNumeroDeVenda()).toBeGreaterThan(Math.max(maior, 1600));
+  });
+});
+
+describe('prazo do aceite', () => {
+  const as = (hora: string) => new Date(`2026-09-22T${hora}:00-03:00`);
+
+  /** Um pedido esperando aceite, recebido às 19:00. */
+  function pedidoNovo(): number {
+    const numero = proximoNumeroDeVenda();
+    registrarVenda({
+      ...lerVendas()[0]!,
+      numero,
+      janela: null,
+      cancelamento: null,
+      contaDoCliente: 'conta_de_teste',
+      ...inicioDoPedido('MANUAL', as('19:00')),
+    });
+    return numero;
+  }
+
+  it('cancela o pedido vencido, com a hora do prazo, e uma vez só', () => {
+    salvarOperacao({
+      recebimento: { ...OPERACAO_DE_EXEMPLO.recebimento, modo: 'MANUAL', prazoDoAceiteMin: 10 },
+    });
+    const numero = pedidoNovo();
+
+    expect(cancelarVencidos(as('19:09'))).toBe(0);
+    expect(cancelarVencidos(as('19:30'))).toBe(1);
+
+    const venda = lerVendas().find((item) => item.numero === numero);
+    expect(venda).toMatchObject({
+      etapa: 'CANCELADO',
+      cancelamento: { motivo: MOTIVO_DO_PRAZO, por: 'SISTEMA' },
+    });
+    // A hora é a do prazo, e não a de quando a página percebeu.
+    expect(venda?.historico.at(-1)?.em).toBe(as('19:10').toISOString());
+
+    // A outra aba rodando junto não cancela de novo.
+    expect(cancelarVencidos(as('19:31'))).toBe(0);
+  });
+
+  it('com o prazo desligado, ninguém cancela sozinho', () => {
+    salvarOperacao({
+      recebimento: { ...OPERACAO_DE_EXEMPLO.recebimento, modo: 'MANUAL', prazoDoAceiteMin: null },
+    });
+    const numero = pedidoNovo();
+    expect(cancelarVencidos(as('23:59'))).toBe(0);
+    expect(lerVendas().find((item) => item.numero === numero)?.etapa).toBe('NOVO');
   });
 });

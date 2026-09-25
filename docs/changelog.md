@@ -14816,3 +14816,55 @@ Alterados: `loja-mock.ts`; `src/app/(app)/loja/layout.tsx`, `vendas/page.tsx`,
 Validação: `tsc --noEmit` limpo, `eslint src` limpo, Prettier limpo nos arquivos
 alterados, **252 testes** passando (eram 190), `next build` compila com as rotas
 novas.
+
+## 2026-09-25 — Loja: prazo do aceite manual
+
+Continuação do recorte anterior, que deixou uma pergunta aberta: no aceite
+manual, o pedido que ninguém aceita deve cair sozinho? Virou configuração de
+cada loja, em Tipos de pedido → Recebimento, quando o aceite é manual:
+"Cancelar sozinho se ninguém aceitar a tempo", com 5, 10, 15, 20 ou 30 minutos.
+Vem **ligado, com 10 minutos**: sem prazo, quem paga pela tela esquecida é o
+cliente, esperando uma resposta que não vem.
+
+- **Para agora**, o prazo conta do recebimento. **Agendado**, vai até a hora de
+  a cozinha começar: o pedido feito à noite para o almoço de amanhã não cai às
+  22h10 só porque ninguém estava no painel.
+- Vencido, o pedido é cancelado pelo sistema, com o motivo "A loja não
+  confirmou a tempo". O cliente recebe o aviso de cancelado — que não pode ser
+  desligado — e a loja, o de pedido cancelado.
+- No painel, o cartão do pedido novo diz "Cancela sozinho em 7 min (19:12), se
+  ninguém aceitar"; no agendado, "Aceite até 11:25, quando a cozinha precisa
+  começar".
+- Em "Meus pedidos", o cliente lê até quando a loja tem para confirmar, e o que
+  acontece se ela não confirmar.
+- A regra está em `prazoDoAceite` (`lib/loja-pedido.ts`), para o servidor usar.
+  Na demonstração, quem cancela é `cancelarVencidos` (`lib/loja-demo.ts`),
+  chamado a cada volta do relógio pelo painel e pela página do cliente. As duas
+  abertas juntas cancelam uma vez só, e a hora gravada é a do prazo, e não a de
+  quando a página percebeu. Na integração, é um trabalho agendado no servidor.
+
+**Ainda em aberto:** o estorno de pedido pago online e recusado, cancelado ou
+vencido. Pela decisão 3 do plano, a venda cai na conta Asaas da loja, então é
+dela que o valor volta. Recomendação registrada no plano: estorno automático e
+total, pela conta da loja, nos três casos. Falta confirmar.
+
+**Verificado no navegador**, com a loja aberta pelo "abrir agora" e o aceite
+manual: um pedido de retirada para agora (#1608, R$ 6,00 — sem pedido mínimo,
+por ser retirada) ficou "Esperando a loja confirmar", com o prazo à vista; com
+um prazo de 1 minuto usado só no teste, caiu sozinho, com o cancelamento
+registrado exatamente no prazo. Outro (#1609), aceito pelo cartão do painel com
+30 minutos de preparo, apareceu na aba do cliente como "Pedido aceito · Pronto
+para retirar a partir de 05:15", sem recarregar. O painel foi visto de novo
+numa rota temporária local, já apagada; a opção do prazo em Tipos de pedido
+ganhou teste de componente. Isso também cobre o que o recorte anterior deixou
+sem conferir: o pedido "Agora" com a loja aberta.
+
+Arquivos: `apps/company-web/src/lib/loja-pedido.ts`, `loja-operacao.ts`,
+`loja-mock.ts`, `loja-demo.ts`, `loja-pedido.test.ts`, `loja-demo.test.ts`;
+`src/components/loja/avisos-da-loja.tsx`, `tipos-de-pedido.test.tsx` (novo);
+`src/components/loja-online/avisos-do-cliente.tsx`;
+`src/app/(app)/loja/tipos-de-pedido/page.tsx`, `vendas/page.tsx`;
+`src/app/(loja)/pedir/[slug]/pedidos/page.tsx`; `docs/plano-loja-online.md`.
+
+Validação: `tsc --noEmit` limpo, `eslint src` limpo, Prettier limpo nos arquivos
+alterados, **260 testes** passando (eram 252), `next build` compila.

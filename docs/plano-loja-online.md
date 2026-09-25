@@ -127,12 +127,16 @@ Já resolvido nas telas: o som de pedido novo repete a cada 30 segundos enquanto
 houver pedido esperando aceite, e a tela de vendas diz quantos esperam. O
 cancelamento vale nos dois modos: até o pedido ficar pronto, na entrega.
 
-**Ainda em aberto:**
+**Prazo do aceite** (2026-09-25): cada loja escolhe, e vem ligado com 10
+minutos. Não aceito no prazo, o pedido é cancelado pelo sistema e o cliente é
+avisado. Para agora, o prazo conta do recebimento; agendado, vai até a hora de
+a cozinha começar. Regra em `prazoDoAceite` (`lib/loja-pedido.ts`); na
+integração, é um trabalho agendado no servidor.
 
-- Prazo: não aceito em X minutos, avisa ou cancela sozinho? Sem prazo, e com o
-  painel fechado, o pedido fica parado e o cliente espera sem saber.
-- Se o pagamento foi online, o pedido já está pago quando chega. Recusar ou
-  deixar expirar exige estorno. Definir de quem é a responsabilidade.
+**Ainda em aberto:** pedido pago online e recusado, cancelado ou vencido exige
+estorno. Pela decisão 3, a venda cai na conta Asaas da loja, então é dela que o
+valor volta. Recomendação: estorno automático e total, pela conta da loja,
+nesses três casos. Falta confirmar.
 
 ### 3. A empresa configura o valor da taxa de entrega cobrada no PWA
 

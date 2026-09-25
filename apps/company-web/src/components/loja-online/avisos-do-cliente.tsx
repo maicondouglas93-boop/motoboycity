@@ -7,9 +7,10 @@ import {
   avisoParaOCliente,
   eventoDoCliente,
 } from '@/lib/loja-avisos';
-import { useOperacao, useVendas } from '@/lib/loja-demo';
+import { cancelarVencidos, useOperacao, useVendas } from '@/lib/loja-demo';
 import { LOJA_DE_EXEMPLO, type VendaDaLoja } from '@/lib/loja-mock';
 import type { EtapaDoPedido } from '@/lib/loja-pedido';
+import { useAgora } from '@/lib/relogio';
 import { useHidratado } from './armazenamento';
 import { useConta } from './conta';
 
@@ -32,9 +33,18 @@ export function AvisosDoCliente({ slug }: { slug: string }) {
   const { usuarioId } = useConta();
   const vendas = useVendas();
   const operacao = useOperacao();
+  const instante = useAgora();
 
   const conhecidas = useRef<Map<number, EtapaDoPedido> | null>(null);
   const contaConhecida = useRef<string | null>(null);
+
+  // O prazo do aceite também é vigiado daqui: com o painel fechado, é a página
+  // do cliente aberta que faz as vezes do servidor na demonstração — e ele
+  // fica sabendo que o pedido caiu, em vez de esperar para sempre.
+  useEffect(() => {
+    if (!hidratado || instante === 0) return;
+    cancelarVencidos(new Date(instante));
+  }, [hidratado, instante, vendas]);
 
   const avisar = useEffectEvent((venda: VendaDaLoja) => {
     const evento = eventoDoCliente(venda.modalidade, venda.etapa);

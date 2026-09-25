@@ -11,6 +11,7 @@ import {
   caminhoDoPedido,
   concluido,
   etapaParaOCliente,
+  prazoDoAceite,
   previsaoParaOCliente,
 } from '@/lib/loja-pedido';
 import type { VendaDaLoja } from '@/lib/loja-mock';
@@ -194,6 +195,7 @@ function Conteudo({ slug }: { slug: string }) {
                   agora={agora}
                   paleta={paleta}
                   cor={loja.corDeAcao}
+                  prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
                 />
               )}
 
@@ -283,13 +285,16 @@ function Andamento({
   agora,
   paleta,
   cor,
+  prazoDoAceiteMin,
 }: {
   andamento: VendaDaLoja;
   agora: Date;
   paleta: Paleta;
   cor: string;
+  prazoDoAceiteMin: number | null;
 }) {
   const caminho = caminhoDoPedido(andamento.modalidade);
+  const prazo = prazoDoAceite(andamento, prazoDoAceiteMin);
   const atual = caminho.indexOf(andamento.etapa);
   const cancelado = andamento.etapa === 'CANCELADO';
 
@@ -325,8 +330,23 @@ function Andamento({
         <Clock className="size-4 shrink-0" aria-hidden="true" />
         {previsaoParaOCliente(andamento, agora)}
       </p>
+
+      {/* Esperando a loja: até quando, e o que acontece se ela não vier. É o
+          que troca "será que viram meu pedido?" por uma hora certa. */}
+      {prazo && (
+        <p className="text-xs" style={{ color: paleta.suave }}>
+          A loja confirma até {quandoEmTexto(prazo, agora)}. Se não confirmar, o pedido é cancelado
+          e você fica sabendo.
+        </p>
+      )}
     </div>
   );
+}
+
+/** "às 19:12", "amanhã às 11:25". */
+function quandoEmTexto(instante: Date, agora: Date): string {
+  const dia = rotuloDoDia(momentoNaLoja(instante).data, agora);
+  return dia === 'hoje' ? `às ${hora(instante)}` : `${dia} às ${hora(instante)}`;
 }
 
 /**

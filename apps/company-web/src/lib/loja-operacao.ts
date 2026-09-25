@@ -44,6 +44,12 @@ export interface OperacaoDaLoja {
     minutosDePreparo: number;
     /** O caminho do motoboy, da loja até o cliente, em média. */
     minutosDeEntrega: number;
+    /**
+     * No aceite manual: sem ninguém aceitar nesse tempo, o pedido é cancelado e
+     * o cliente avisado. `null`: não cancela sozinho — a loja assume que alguém
+     * sempre olha a tela.
+     */
+    prazoDoAceiteMin: number | null;
   };
   entrega: {
     ativa: boolean;

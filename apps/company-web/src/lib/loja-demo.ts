@@ -11,8 +11,10 @@ import type { AjusteManual } from '@/lib/loja-horario';
 import { OPERACAO_DE_EXEMPLO, vendasDeExemplo, type VendaDaLoja } from '@/lib/loja-mock';
 import type { OperacaoDaLoja } from '@/lib/loja-operacao';
 import {
+  MOTIVO_DO_PRAZO,
   TransicaoInvalida,
   avancar,
+  prazoDoAceite,
   type Cancelamento,
   type EtapaDoPedido,
 } from '@/lib/loja-pedido';
@@ -146,6 +148,31 @@ export function mudarEtapa(
   });
   if (mudou) gravarGuardado(CHAVE_DAS_VENDAS, vendas);
   return mudou;
+}
+
+/**
+ * Cancela os pedidos que esperaram o aceite além do prazo da loja.
+ *
+ * Na integração isto é um trabalho agendado no servidor, que roda com todo
+ * mundo desconectado. Aqui roda de qualquer página aberta — painel ou loja do
+ * cliente —, e duas abas rodando juntas cancelam uma vez só: o segundo
+ * encontra o pedido já cancelado.
+ *
+ * A hora gravada é a do prazo, e não a de quando alguma página percebeu: se o
+ * painel abriu meia hora depois, o pedido caiu no prazo mesmo assim, e o
+ * histórico tem que dizer isso.
+ */
+export function cancelarVencidos(agora: Date): number {
+  const prazo = lerOperacao().recebimento.prazoDoAceiteMin;
+  let cancelados = 0;
+  const vendas = lerVendas().map((venda) => {
+    const vence = prazoDoAceite(venda, prazo);
+    if (!vence || agora.getTime() < vence.getTime()) return venda;
+    cancelados += 1;
+    return avancar(venda, 'CANCELADO', vence, { motivo: MOTIVO_DO_PRAZO, por: 'SISTEMA' });
+  });
+  if (cancelados > 0) gravarGuardado(CHAVE_DAS_VENDAS, vendas);
+  return cancelados;
 }
 
 /**

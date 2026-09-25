@@ -9,6 +9,7 @@ import {
   inicioDoPedido,
   inicioDoPreparo,
   podeCancelar,
+  prazoDoAceite,
   previsaoParaOCliente,
   type AndamentoDoPedido,
 } from './loja-pedido';
@@ -186,5 +187,32 @@ describe('o que o cliente lê', () => {
     expect(acaoParaAvancar('ENTREGA', 'PRONTO')).toBe('Motoboy coletou');
     expect(acaoParaAvancar('RETIRADA', 'PRONTO')).toBe('Cliente retirou');
     expect(acaoParaAvancar('ENTREGA', 'ENTREGUE')).toBeNull();
+  });
+});
+
+describe('prazo do aceite manual', () => {
+  it('pedido para agora: conta do recebimento', () => {
+    // O pedido de exemplo chega às 19:00, esperando aceite.
+    expect(prazoDoAceite(pedido(), 10)).toEqual(em('2026-09-22T19:10'));
+  });
+
+  /*
+   * O caso que um prazo ingênuo erraria: o pedido feito à noite para o almoço
+   * de amanhã cairia dez minutos depois, com a loja fechada e ninguém no
+   * painel. Ele só vira problema quando a cozinha já devia estar trabalhando.
+   */
+  it('agendado: espera até a hora de a cozinha começar', () => {
+    const agendado = pedido({
+      janela: {
+        inicio: em('2026-09-23T12:00').toISOString(),
+        fim: em('2026-09-23T12:30').toISOString(),
+      },
+    });
+    expect(prazoDoAceite(agendado, 10)).toEqual(em('2026-09-23T11:25'));
+  });
+
+  it('sem prazo escolhido, ou depois de aceito, não há prazo', () => {
+    expect(prazoDoAceite(pedido(), null)).toBeNull();
+    expect(prazoDoAceite(avancar(pedido(), 'ACEITO', em('2026-09-22T19:02')), 10)).toBeNull();
   });
 });

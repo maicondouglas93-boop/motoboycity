@@ -39,6 +39,8 @@ interface Rascunho {
   modo: ModoDeAceite;
   preparo: string;
   caminho: string;
+  prazoLigado: boolean;
+  prazoMin: number;
   entregaAtiva: boolean;
   pedidoMinimo: string;
   entregaAgendada: boolean;
@@ -75,6 +77,8 @@ const ANTECEDENCIAS_MAXIMAS = [
 
 const INTERVALOS = [15, 30, 60];
 
+const PRAZOS_DO_ACEITE = [5, 10, 15, 20, 30];
+
 const ENDERECO_VAZIO: EnderecoDeRetirada = {
   rua: '',
   numero: '',
@@ -100,6 +104,8 @@ function paraRascunho(operacao: OperacaoDaLoja): Rascunho {
     modo: operacao.recebimento.modo,
     preparo: String(operacao.recebimento.minutosDePreparo),
     caminho: String(operacao.recebimento.minutosDeEntrega),
+    prazoLigado: operacao.recebimento.prazoDoAceiteMin !== null,
+    prazoMin: operacao.recebimento.prazoDoAceiteMin ?? 10,
     entregaAtiva: operacao.entrega.ativa,
     pedidoMinimo: moedaParaTexto(operacao.entrega.pedidoMinimo),
     entregaAgendada: operacao.entrega.agendamento,
@@ -121,6 +127,7 @@ function paraGravar(rascunho: Rascunho): Partes {
       modo: rascunho.modo,
       minutosDePreparo: Number(rascunho.preparo),
       minutosDeEntrega: Number(rascunho.caminho),
+      prazoDoAceiteMin: rascunho.prazoLigado ? rascunho.prazoMin : null,
     },
     entrega: {
       ativa: rascunho.entregaAtiva,
@@ -639,22 +646,59 @@ function Formulario({
             ))}
           </fieldset>
 
-          {/* O modo manual troca um problema por outro, e a tela diz qual. */}
+          {/* O modo manual troca um problema por outro, e a tela diz qual — e
+              oferece o remédio logo abaixo. */}
           {rascunho.modo === 'MANUAL' && (
-            <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-              <p>
-                <strong>Se ninguém estiver olhando a tela, o cliente espera sem saber.</strong>{' '}
-                Deixe o som e a notificação de pedido novo ligados em{' '}
-                <Link href="/loja/notificacoes" className="underline">
-                  Notificações
-                </Link>
-                .
-              </p>
-              <p>
-                Pedido pago online e recusado precisa de estorno. Quem estorna, e em quanto tempo,
-                ainda está em aberto no plano da loja.
-              </p>
-            </div>
+            <>
+              <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+                <p>
+                  <strong>Se ninguém estiver olhando a tela, o pedido fica esperando.</strong> Deixe
+                  o som e a notificação de pedido novo ligados em{' '}
+                  <Link href="/loja/notificacoes" className="underline">
+                    Notificações
+                  </Link>
+                  .
+                </p>
+                <p>
+                  Pedido pago online e recusado precisa de estorno. Quem estorna, e em quanto tempo,
+                  ainda está em aberto no plano da loja.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="flex items-start gap-2.5 text-sm">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={rascunho.prazoLigado}
+                    onCheckedChange={(valor) => mudar({ prazoLigado: valor === true })}
+                  />
+                  <span>
+                    Cancelar sozinho se ninguém aceitar a tempo
+                    <span className="block text-xs text-muted-foreground">
+                      O cliente é avisado na hora, em vez de esperar uma resposta que não vem.
+                      Pedido agendado espera até a hora de a cozinha começar.
+                    </span>
+                  </span>
+                </label>
+                {rascunho.prazoLigado && (
+                  <label className="flex items-center gap-2 pl-6 text-sm">
+                    Esperar o aceite por
+                    <select
+                      value={rascunho.prazoMin}
+                      onChange={(evento) => mudar({ prazoMin: Number(evento.target.value) })}
+                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      aria-label="Quanto tempo esperar o aceite"
+                    >
+                      {PRAZOS_DO_ACEITE.map((minutos) => (
+                        <option key={minutos} value={minutos}>
+                          {minutos} minutos
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            </>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">

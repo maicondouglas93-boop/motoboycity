@@ -29,6 +29,7 @@ import {
   etapaParaALoja,
   inicioDoPreparo,
   nomeCurtoDaEtapa,
+  prazoDoAceite,
   podeCancelar,
   proximaEtapa,
   quandoChegou,
@@ -290,6 +291,7 @@ export default function LojaVendasPage() {
                     venda={venda}
                     agora={agora}
                     preparoPadrao={operacao.recebimento.minutosDePreparo}
+                    prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
                   />
                 ))}
               </section>
@@ -306,6 +308,7 @@ export default function LojaVendasPage() {
               venda={venda}
               agora={agora}
               preparoPadrao={operacao.recebimento.minutosDePreparo}
+              prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
             />
           ))}
         </div>
@@ -332,10 +335,12 @@ function CartaoDaVenda({
   venda,
   agora,
   preparoPadrao,
+  prazoDoAceiteMin,
 }: {
   venda: VendaDaLoja;
   agora: Date;
   preparoPadrao: number;
+  prazoDoAceiteMin: number | null;
 }) {
   const [expandida, setExpandida] = useState(false);
   const [cancelando, setCancelando] = useState(false);
@@ -353,7 +358,17 @@ function CartaoDaVenda({
 
   // O que a cozinha precisa saber sobre o tempo, conforme a etapa.
   let tempo: string | null = null;
-  if (venda.etapa === 'ACEITO' && inicioAgendado && agora.getTime() < inicioAgendado.getTime()) {
+  const prazo = prazoDoAceite(venda, prazoDoAceiteMin);
+  if (prazo) {
+    const faltam = Math.max(0, Math.ceil((prazo.getTime() - agora.getTime()) / 60_000));
+    tempo = venda.janela
+      ? `Aceite até ${hora(prazo)}, quando a cozinha precisa começar — senão cancela sozinho`
+      : `Cancela sozinho em ${faltam} min (${hora(prazo)}), se ninguém aceitar`;
+  } else if (
+    venda.etapa === 'ACEITO' &&
+    inicioAgendado &&
+    agora.getTime() < inicioAgendado.getTime()
+  ) {
     tempo = `Começar o preparo às ${hora(inicioAgendado)}`;
   } else if (venda.etapa === 'ACEITO' && inicioAgendado) {
     tempo = 'Hora de começar o preparo';

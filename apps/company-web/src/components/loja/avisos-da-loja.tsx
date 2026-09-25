@@ -8,7 +8,7 @@ import {
   tocarAviso,
 } from '@/lib/avisos-do-navegador';
 import { EVENTOS_DO_LOJISTA, type EventoDoLojista } from '@/lib/loja-avisos';
-import { useOperacao, useVendas } from '@/lib/loja-demo';
+import { cancelarVencidos, useOperacao, useVendas } from '@/lib/loja-demo';
 import { hora, momentoNaLoja, rotuloDoDia, situacaoDaLoja } from '@/lib/loja-horario';
 import type { VendaDaLoja } from '@/lib/loja-mock';
 import { inicioDoPreparo, type EtapaDoPedido } from '@/lib/loja-pedido';
@@ -54,6 +54,13 @@ export function AvisosDaLoja() {
   const fechamentoAvisado = useRef<number | null>(null);
 
   useEffect(() => liberarSomNoPrimeiroToque(), []);
+
+  // O prazo do aceite manual, enquanto não há servidor vigiando: pedido que
+  // esperou demais é cancelado, e o aviso de cancelado sai pelo efeito abaixo.
+  useEffect(() => {
+    if (!hidratado || instante === 0) return;
+    cancelarVencidos(new Date(instante));
+  }, [hidratado, instante, vendas]);
 
   /** Toca e notifica conforme o que a loja escolheu em Notificações. */
   const avisar = useEffectEvent((evento: EventoDoLojista, texto: string, etiqueta: string) => {

@@ -328,7 +328,14 @@ export const OPERACAO_DE_EXEMPLO: OperacaoDaLoja = {
     // Sem repetir o que a página já calcula — o horário e o "dá para agendar".
     mensagemFechada: 'Obrigado pela visita! Logo mais a cozinha está de volta.',
   },
-  recebimento: { modo: 'AUTOMATICO', minutosDePreparo: 20, minutosDeEntrega: 15 },
+  recebimento: {
+    modo: 'AUTOMATICO',
+    minutosDePreparo: 20,
+    minutosDeEntrega: 15,
+    // Ligado por padrão: no aceite manual, sem prazo, quem paga pela tela
+    // esquecida é o cliente, esperando uma resposta que não vem.
+    prazoDoAceiteMin: 10,
+  },
   entrega: { ativa: true, pedidoMinimo: 15, agendamento: true },
   retirada: {
     ativa: true,

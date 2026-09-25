@@ -188,6 +188,27 @@ export function esperandoAHora(pedido: AndamentoDoPedido, agora: Date): boolean 
   return inicio !== null && pedido.etapa === 'ACEITO' && agora.getTime() < inicio.getTime();
 }
 
+/** O motivo que o cliente lê quando o pedido cai por falta de aceite. */
+export const MOTIVO_DO_PRAZO = 'A loja não confirmou a tempo';
+
+/**
+ * Até quando a loja pode aceitar um pedido novo antes de ele ser cancelado
+ * sozinho. `null`: não há prazo — a loja escolheu não cancelar, ou o pedido já
+ * não está esperando aceite.
+ *
+ * Para agora, conta do recebimento: o cliente está com fome e esperando uma
+ * resposta. Agendado, espera até a hora de a cozinha começar — o pedido feito à
+ * noite para o almoço de amanhã não pode cair às 22h10 só porque ninguém estava
+ * no painel; ele só vira problema quando a comida já devia estar sendo feita.
+ */
+export function prazoDoAceite(pedido: AndamentoDoPedido, prazoMin: number | null): Date | null {
+  if (prazoMin === null || pedido.etapa !== 'NOVO') return null;
+  const inicio = inicioDoPreparo(pedido);
+  if (inicio) return inicio;
+  const recebido = quandoChegou(pedido, 'NOVO');
+  return recebido ? new Date(recebido.getTime() + prazoMin * 60_000) : null;
+}
+
 /* ---------------------------------------------------------------------------
  * Como cada lado chama cada etapa
  * ------------------------------------------------------------------------- */
