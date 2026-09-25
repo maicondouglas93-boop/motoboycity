@@ -15145,3 +15145,82 @@ ou "cobrar R$ X", e o troco a levar.
   usuário estava testando.
 
 **Deploy:** nada foi enviado.
+
+## 2026-09-25 — Loja online: foto do produto
+
+Pedido do usuário ("continue", depois do push das telas do catálogo). Era o que
+faltava no cadastro do produto, e o campo aparecia desativado.
+
+**Banco** — migration `20260925160000_loja_foto_do_produto`, só uma coluna
+nova e vazia: `store_products.imageExternalFileId` (`VARCHAR(100)`, nula). É o
+identificador do arquivo no ImageKit, o mesmo que o avatar guarda: sem ele, a
+foto trocada ou removida ficaria esquecida lá.
+
+**API:**
+
+- `PUT /company/store/products/:id/image` (arquivo no campo `file`, até 5 MB,
+  30 por minuto) e `DELETE /company/store/products/:id/image`.
+- O arquivo passa pela checagem de bytes antes de sair da API — JPEG, PNG ou
+  WebP inteiros, até 4096 × 4096. A checagem estava dentro do serviço de perfil
+  e foi para `media/supported-image.ts`, sem mudar o avatar; o `ImageKitService`
+  ganhou `uploadStoreProductImage`, e o envio das duas fotos virou um só.
+- A foto só troca se ainda for a que foi lida (três tentativas); a que saiu é
+  apagada do ImageKit depois de gravado, e a que subiu e não foi usada também.
+  Excluir o produto apaga a foto dele.
+- **Contrato:** `imageUrl` saiu de `upsertStoreProductSchema`. Salvar o
+  produto não mexe mais na foto — aceitar um endereço qualquer ali deixaria a
+  foto enviada esquecida no ImageKit, e o produto mostrando outra. No deploy,
+  o painel novo pode encontrar a API antiga por alguns minutos, e salvar
+  produto falha nesse intervalo (a antiga exige o campo). As telas da loja
+  estão fora do menu.
+- `api-client`: `uploadProductImage` e `removeProductImage`.
+
+**Painel:**
+
+- Na edição, a foto sobe na hora, com miniatura, "Trocar foto" e "Remover
+  foto". No cadastro, ela espera o produto existir e sobe logo depois do
+  primeiro salvar; se só a foto falhar, o produto está salvo e a edição abre
+  avisando, para tentar de novo.
+- Tipo e tamanho são conferidos antes do envio, com a mensagem do que fazer.
+- "sem foto" voltou às pendências mostradas: agora é recomendação que a loja
+  consegue atender.
+
+**Arquivos:** `apps/api/prisma/schema.prisma` e a migration;
+`apps/api/src/media/supported-image.ts` (novo), `media/imagekit.service.ts`,
+`profile/profile.service.ts`; `company/store-catalog/` (serviço, controller,
+módulo e teste); `apps/api/test/store-catalog.e2e-spec.ts`;
+`packages/validation/src/company/store-catalog.schema.ts`;
+`packages/api-client/src/company-store-catalog.ts`;
+`apps/company-web/src/components/loja/` (formulário, `catalogo.ts`,
+`produto-no-formulario.ts` e testes), `app/(app)/loja/produtos/page.tsx` e
+`[id]/editar/page.tsx`; `docs/plano-loja-online.md`, `docs/agent-handoff.md`,
+`docs/architecture.md`.
+
+**Como foi validado:**
+
+- Migration gerada pelo Prisma (`migrate diff`) e, num banco descartável
+  (`motoboycity_foto_validacao`, apagado no fim): as 58 migrations do zero,
+  banco igual ao schema, desfazer volta ao anterior e reaplicar funciona.
+- API: 1297 testes de unidade passam, 8 novos da foto (troca apagando a
+  anterior, arquivo que não é imagem nem chega ao ImageKit, produto de outra
+  empresa, produto excluído enquanto a foto subia, outra aba trocando sem
+  parar, remover, excluir o produto, salvar sem mexer na foto); **2 falham, e
+  já falhavam** (`deliveries.service.spec.ts`, item 3 das pendências do
+  handoff). E2E do catálogo em banco descartável e Redis no índice 9 (limpo
+  depois): passa. `tsc`, `eslint` e `nest build` limpos.
+- Painel: 321 testes passam — 6 novos da foto, e saiu o do filtro que
+  escondia "sem foto"; `tsc` e `eslint` limpos.
+- No navegador, com a API local (migration aplicada no `motoboycity_dev`): a
+  lista voltou a mostrar "sem foto"; na edição, um GIF foi barrado na tela, e um
+  "JPEG" falso subiu e foi recusado pela API antes do ImageKit (400, com a
+  mensagem). **Nenhuma foto de verdade foi enviada**: a API local usa a conta
+  real do ImageKit.
+
+**Deploy:** nada foi enviado.
+
+**Reverter**, se preciso:
+
+```sql
+ALTER TABLE "store_products" DROP COLUMN "imageExternalFileId";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925160000_loja_foto_do_produto';
+```

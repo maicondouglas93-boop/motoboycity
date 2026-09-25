@@ -55,6 +55,12 @@ empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
   `loja-mock.ts`.
 - **Categoria com produto não sai** (409, `STORE_CATEGORY_NOT_EMPTY`), com
   `ON DELETE RESTRICT` no banco como segunda defesa.
+- **A foto é do servidor.** Sobe por `PUT products/:id/image` (arquivo, até
+  5 MB), passa pela checagem de bytes de `media/supported-image.ts` — a mesma
+  do avatar — e vai para o ImageKit. O produto guarda o endereço e o
+  `imageExternalFileId`, que nunca sai da API; a troca só acontece se a foto
+  ainda for a que foi lida, e a que saiu é apagada lá depois de gravado. O
+  salvar do produto não aceita endereço de foto.
 - **No painel** (`app/(app)/loja/produtos/*`), as quatro telas dividem uma
   consulta só do catálogo inteiro (`useCatalogo`, em
   `components/loja/catalogo.ts`). Organizar muda a tela antes da resposta e

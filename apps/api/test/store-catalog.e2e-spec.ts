@@ -106,7 +106,6 @@ describe('StoreCatalogController (e2e)', () => {
         categoryId: null,
         name: 'Milkshake',
         description: '',
-        imageUrl: null,
         price: 15,
         status: 'PUBLISHED',
         sizes: [],
@@ -123,7 +122,6 @@ describe('StoreCatalogController (e2e)', () => {
         categoryId: acai.body.id,
         name: 'Açaí',
         description: 'Cremoso, batido na hora.',
-        imageUrl: null,
         price: null,
         status: 'PUBLISHED',
         sizes: [
@@ -166,7 +164,6 @@ describe('StoreCatalogController (e2e)', () => {
         categoryId: acai.body.id,
         name: 'Açaí',
         description: 'Cremoso, batido na hora.',
-        imageUrl: null,
         price: null,
         status: 'PUBLISHED',
         sizes: [
@@ -235,7 +232,6 @@ describe('StoreCatalogController (e2e)', () => {
         categoryId: lanches.body.id,
         name: depois.name,
         description: depois.description,
-        imageUrl: null,
         price: null,
         status: 'PAUSED',
         sizes: depois.sizes,

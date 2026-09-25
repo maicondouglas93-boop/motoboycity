@@ -570,13 +570,19 @@ Produtos diz isso à loja. O que quem mexer no catálogo do painel precisa saber
 - O formulário manda cada item do produto com o `id` que a API devolveu, e linha
   nova sem id (`components/loja/produto-no-formulario.ts`). Sem isso, a edição
   recriaria o item com id novo.
-- Não há envio de foto: o campo aparece desativado, e "sem foto" fica fora das
-  pendências mostradas (`pendenciasParaMostrar`) até existir.
+- A foto tem rotas próprias (`PUT` e `DELETE /company/store/products/:id/image`)
+  e não vai mais no salvar do produto: o servidor guarda o arquivo no ImageKit
+  e o `imageExternalFileId` dele, e apaga lá a foto trocada, removida ou de
+  produto excluído. No cadastro, a foto espera o produto existir e sobe logo
+  depois do primeiro salvar; se só ela falhar, a edição abre avisando.
+- **A API local tem chave de ImageKit de verdade**: foto válida enviada pelo
+  painel local vai para a conta real. Para testar sem isso, use um arquivo que
+  a checagem de bytes recuse — ela roda antes do envio.
 
-A migration `20260925090000_loja_catalogo` está aplicada no `motoboycity_dev`
-local (junto com quatro migrations aditivas de outros recortes que estavam
-pendentes nele). Em produção, sai no próximo `push`, pelo
-`prisma migrate deploy` do build do Render.
+As migrations `20260925090000_loja_catalogo` (em produção desde o push de
+2026-09-25) e `20260925160000_loja_foto_do_produto` estão aplicadas no
+`motoboycity_dev` local. A da foto só acrescenta uma coluna vazia, e sai para
+produção no próximo `push`, pelo `prisma migrate deploy` do build do Render.
 
 **Uma parte salva — só no navegador.** Horários, Tipos de pedido, Notificações,
 o status e as vendas gravam no `localStorage` por `lib/loja-demo.ts`, e o evento

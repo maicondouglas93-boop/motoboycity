@@ -11,7 +11,6 @@ import {
   SITUACOES,
   faixaDePreco,
   mensagemDoErro,
-  pendenciasParaMostrar,
   useCatalogo,
 } from '@/components/loja/catalogo';
 import { Badge } from '@/components/ui/badge';
@@ -74,7 +73,7 @@ export default function LojaProdutosPage() {
   const comPendencias = useMemo(
     () =>
       produtos.map((produto) => {
-        const pendencias = pendenciasParaMostrar(storeProductIssues(produto));
+        const pendencias = storeProductIssues(produto);
         return {
           produto,
           bloqueiam: pendencias.filter((item) => item.blocking),

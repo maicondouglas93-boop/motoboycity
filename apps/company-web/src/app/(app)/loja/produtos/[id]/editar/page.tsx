@@ -8,8 +8,15 @@ import { FormularioDeProduto, MolduraDoProduto } from '@/components/loja/formula
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
-export default function EditarProdutoPage({ params }: { params: Promise<{ id: string }> }) {
+export default function EditarProdutoPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ foto?: string }>;
+}) {
   const { id } = use(params);
+  const { foto } = use(searchParams);
   const catalogo = useCatalogo();
   const produto = catalogo.data?.products.find((item) => item.id === id);
 
@@ -77,6 +84,15 @@ export default function EditarProdutoPage({ params }: { params: Promise<{ id: st
   // A chave prende o formulário a este produto: uma releitura do catálogo em
   // segundo plano não apaga o que está sendo digitado.
   return (
-    <FormularioDeProduto key={produto.id} produto={produto} categorias={catalogo.data.categories} />
+    <FormularioDeProduto
+      key={produto.id}
+      produto={produto}
+      categorias={catalogo.data.categories}
+      avisoDaFoto={
+        foto === 'falhou'
+          ? 'O produto foi salvo, mas a foto não subiu. Tente de novo por aqui.'
+          : null
+      }
+    />
   );
 }

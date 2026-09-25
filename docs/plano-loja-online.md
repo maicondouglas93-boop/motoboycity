@@ -46,10 +46,12 @@ ainda lê o cardápio de exemplo**: o que se cadastra no painel só aparece para
 cliente quando existir o catálogo público por `slug` — e a lista de Produtos
 avisa isso.
 
+A foto do produto sobe pelo painel desde 2026-09-25, para o ImageKit, como o
+avatar.
+
 Não existe ainda: a configuração da loja no banco (link, identidade, horário,
-tipos de pedido, avisos), o pedido da loja, o catálogo público por `slug`, o
-PWA ligado à API e o **envio de foto do produto** (o campo aparece desativado;
-a API já usa ImageKit para avatar e documentos, que é o caminho natural).
+tipos de pedido, avisos), o pedido da loja, o catálogo público por `slug` e o
+PWA ligado à API.
 
 ## Decisões já tomadas
 

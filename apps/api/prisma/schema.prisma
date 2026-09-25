@@ -1949,17 +1949,20 @@ model StoreCategory {
 /// ficaria sem seção e sumiria da loja sem ninguém perceber. O serviço recusa
 /// antes; a restrição no banco é a segunda defesa.
 model StoreProduct {
-  id          String             @id @default(uuid())
-  companyId   String
+  id                  String             @id @default(uuid())
+  companyId           String
   /// Nulo: sem seção. O produto não aparece na loja enquanto não tiver uma.
-  categoryId  String?
-  name        String             @db.VarChar(120)
-  description String             @default("") @db.VarChar(500)
-  imageUrl    String?            @db.VarChar(500)
-  price       Decimal?           @db.Decimal(10, 2)
-  status      StoreProductStatus @default(DRAFT)
+  categoryId          String?
+  name                String             @db.VarChar(120)
+  description         String             @default("") @db.VarChar(500)
+  imageUrl            String?            @db.VarChar(500)
+  /// O arquivo da foto no ImageKit. Só o servidor o conhece: é por ele que a
+  /// foto trocada ou removida é apagada lá, em vez de ficar esquecida.
+  imageExternalFileId String?            @db.VarChar(100)
+  price               Decimal?           @db.Decimal(10, 2)
+  status              StoreProductStatus @default(DRAFT)
   /// Ordem dentro da seção — ou entre os produtos sem seção.
-  position    Int
+  position            Int
 
   company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   category     StoreCategory?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)

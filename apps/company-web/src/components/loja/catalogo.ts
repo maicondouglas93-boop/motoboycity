@@ -107,16 +107,6 @@ export function mensagemDoErro(erro: unknown, padrao: string): string {
   return detalhe && !erro.message.includes(detalhe) ? `${erro.message} ${detalhe}` : erro.message;
 }
 
-/**
- * As pendências que a tela mostra. "sem foto" fica de fora enquanto o painel
- * não tem como enviar foto: cobrar da loja o que ela não consegue fazer é
- * ruído, e o aviso que vira ruído deixa de ser lido quando importa. Volta
- * junto com o envio de foto.
- */
-export function pendenciasParaMostrar<T extends { text: string }>(lista: T[]): T[] {
-  return lista.filter((pendencia) => pendencia.text !== 'sem foto');
-}
-
 /** Move um item e devolve uma cópia do array. Fora do intervalo, a cópia sai igual. */
 export function mover<T>(itens: readonly T[], de: number, para: number): T[] {
   if (para < 0 || para >= itens.length || de === para) return [...itens];

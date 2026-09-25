@@ -68,6 +68,22 @@ export const LIMITES_DO_PRODUTO = {
   preco: 99999.99,
 } as const;
 
+/** O mesmo que a API aceita: ela confere de novo, pelos bytes. */
+export const TAMANHO_MAXIMO_DA_FOTO = 5 * 1024 * 1024;
+const TIPOS_DE_FOTO = ['image/jpeg', 'image/png', 'image/webp'];
+
+/**
+ * O que impede a foto de subir, dito antes do envio — esperar a API recusar
+ * uma foto de 12 MB é esperar à toa, e a mensagem dela não diz o que fazer.
+ */
+export function problemaDaFoto(foto: { type: string; size: number }): string | null {
+  if (!TIPOS_DE_FOTO.includes(foto.type)) return 'Use uma foto JPG, PNG ou WebP.';
+  if (foto.size > TAMANHO_MAXIMO_DA_FOTO) {
+    return 'A foto passa de 5 MB. Use uma menor — a do celular, reduzida, serve.';
+  }
+  return null;
+}
+
 export function novaChave(): string {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -247,7 +263,6 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
       categoryId: estado.categoriaId === '' ? null : estado.categoriaId,
       name: nome,
       description: estado.descricao.trim(),
-      imageUrl: estado.imagemUrl,
       price,
       status,
       sizes,

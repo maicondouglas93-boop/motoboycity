@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,13 +11,12 @@ import type {
   StoreProductStatus,
 } from '@motoboycity/types';
 import type { UpsertStoreProductPayload } from '@motoboycity/validation';
-import { AlertCircle, Check, ChevronLeft, ImageOff, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronLeft, ImageOff, ImagePlus, Plus, Trash2 } from 'lucide-react';
 import {
   CHAVE_DO_CATALOGO,
   chaveDaExclusao,
   comProdutoSalvo,
   mensagemDoErro,
-  pendenciasParaMostrar,
   semProduto,
 } from '@/components/loja/catalogo';
 import {
@@ -25,6 +24,7 @@ import {
   montarPayload,
   novaChave,
   pendenciasDoFormulario,
+  problemaDaFoto,
   produtoParaFormulario,
   saidasDoFormulario,
   type GrupoNoFormulario,
@@ -32,7 +32,7 @@ import {
   type LinhaDeTamanho,
   type ProdutoNoFormulario,
 } from '@/components/loja/produto-no-formulario';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -101,15 +101,32 @@ function textoSemPendencia(atual: StoreProductStatus | undefined): string {
 export function FormularioDeProduto({
   produto,
   categorias,
+  avisoDaFoto = null,
 }: {
   produto?: StoreProduct;
   categorias: StoreCategory[];
+  /** O cadastro salvou o produto, mas a foto não subiu: a edição avisa. */
+  avisoDaFoto?: string | null;
 }) {
   const token = session.getToken();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [estado, setEstado] = useState<ProdutoNoFormulario>(() => produtoParaFormulario(produto));
   const [erros, setErros] = useState<string[]>([]);
+  const [erroDaFoto, setErroDaFoto] = useState<string | null>(avisoDaFoto);
+  /**
+   * No cadastro, a foto espera o produto existir: ela sobe logo depois do
+   * primeiro salvar. Na edição, sobe na hora — não há o que esperar.
+   */
+  const [fotoPendente, setFotoPendente] = useState<File | null>(null);
+
+  // A prévia da foto pendente é um endereço do navegador; solta quando troca.
+  useEffect(() => {
+    const url = estado.imagemUrl;
+    return () => {
+      if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+    };
+  }, [estado.imagemUrl]);
   /** `null`: o campo de nova categoria está fechado. */
   const [novaCategoria, setNovaCategoria] = useState<string | null>(null);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
@@ -119,15 +136,82 @@ export function FormularioDeProduto({
       produto
         ? companyStoreCatalogApi.updateProduct(token as string, produto.id, payload)
         : companyStoreCatalogApi.createProduct(token as string, payload),
-    onSuccess: (salvo) => {
+    onSuccess: async (salvo) => {
+      let final = salvo;
+      let fotoFalhou = false;
+      if (!produto && fotoPendente) {
+        try {
+          final = await companyStoreCatalogApi.uploadProductImage(
+            token as string,
+            salvo.id,
+            fotoPendente,
+          );
+        } catch {
+          fotoFalhou = true;
+        }
+      }
       queryClient.setQueryData<StoreCatalog>(
         CHAVE_DO_CATALOGO,
-        (atual) => atual && comProdutoSalvo(atual, salvo),
+        (atual) => atual && comProdutoSalvo(atual, final),
       );
       void queryClient.invalidateQueries({ queryKey: CHAVE_DO_CATALOGO });
-      router.push('/loja/produtos');
+      // O produto está salvo; só a foto ficou para trás. A edição dele diz
+      // isso e deixa tentar de novo, em vez de a foto sumir calada.
+      router.push(fotoFalhou ? `/loja/produtos/${salvo.id}/editar?foto=falhou` : '/loja/produtos');
     },
   });
+
+  function comFoto(salvo: StoreProduct) {
+    setErroDaFoto(null);
+    setEstado((antes) => ({ ...antes, imagemUrl: salvo.imageUrl }));
+    queryClient.setQueryData<StoreCatalog>(
+      CHAVE_DO_CATALOGO,
+      (atual) => atual && comProdutoSalvo(atual, salvo),
+    );
+  }
+
+  const enviarFoto = useMutation({
+    mutationFn: (foto: File) =>
+      companyStoreCatalogApi.uploadProductImage(token as string, produto!.id, foto),
+    onSuccess: comFoto,
+    onError: (falha) => setErroDaFoto(mensagemDoErro(falha, 'Não foi possível enviar a foto.')),
+  });
+
+  const tirarFoto = useMutation({
+    mutationFn: () => companyStoreCatalogApi.removeProductImage(token as string, produto!.id),
+    onSuccess: comFoto,
+    onError: (falha) => setErroDaFoto(mensagemDoErro(falha, 'Não foi possível tirar a foto.')),
+  });
+
+  const mexendoNaFoto = enviarFoto.isPending || tirarFoto.isPending;
+
+  function escolherFoto(evento: ChangeEvent<HTMLInputElement>) {
+    const foto = evento.target.files?.[0];
+    // Limpa o campo: escolher a mesma foto de novo, depois de um erro, é mudança.
+    evento.target.value = '';
+    if (!foto) return;
+    const problema = problemaDaFoto(foto);
+    if (problema) {
+      setErroDaFoto(problema);
+      return;
+    }
+    setErroDaFoto(null);
+    if (produto) {
+      enviarFoto.mutate(foto);
+      return;
+    }
+    setFotoPendente(foto);
+    setEstado((antes) => ({ ...antes, imagemUrl: URL.createObjectURL(foto) }));
+  }
+
+  function descartarFoto() {
+    if (produto) {
+      tirarFoto.mutate();
+      return;
+    }
+    setFotoPendente(null);
+    setEstado((antes) => ({ ...antes, imagemUrl: null }));
+  }
 
   const criarCategoria = useMutation({
     mutationFn: (name: string) => companyStoreCatalogApi.createCategory(token as string, { name }),
@@ -167,14 +251,15 @@ export function FormularioDeProduto({
    * pela metade, que é para isso que ele serve. É a mesma regra do servidor:
    * o que a tela libera para publicar, a API aceita.
    */
-  const pendencias = pendenciasParaMostrar(pendenciasDoFormulario(estado));
+  const pendencias = pendenciasDoFormulario(estado);
   const bloqueios = pendencias.filter((item) => item.blocking);
   const recomendacoes = pendencias.filter((item) => !item.blocking);
 
   const atual = produto?.status;
   const saidas = saidasDoFormulario(atual, bloqueios.length > 0);
   const saiDoAr = atual === 'PUBLISHED' && bloqueios.length > 0;
-  const ocupado = salvar.isPending || salvar.isSuccess || excluir.isPending || excluir.isSuccess;
+  const ocupado =
+    salvar.isPending || salvar.isSuccess || excluir.isPending || excluir.isSuccess || mexendoNaFoto;
 
   function salvarComo(status: StoreProductStatus) {
     const montagem = montarPayload(estado, status);
@@ -413,13 +498,68 @@ export function FormularioDeProduto({
 
               <div className="space-y-2">
                 <Label>Foto</Label>
-                <div className="flex h-10 items-center gap-2 rounded-md border border-dashed px-3 text-sm text-muted-foreground">
-                  <ImageOff className="size-4" aria-hidden="true" />
-                  {estado.imagemUrl ? 'Foto cadastrada' : 'Sem foto'}
+                <div className="flex items-center gap-3">
+                  <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
+                    {estado.imagemUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={estado.imagemUrl}
+                        alt={`Foto de ${estado.nome || 'produto'}`}
+                        className="size-20 object-cover"
+                      />
+                    ) : (
+                      <ImageOff className="size-6 text-muted-foreground/60" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-start gap-1">
+                    <label
+                      className={buttonVariants({
+                        variant: 'outline',
+                        size: 'sm',
+                        className: mexendoNaFoto
+                          ? 'pointer-events-none opacity-50'
+                          : 'cursor-pointer',
+                      })}
+                    >
+                      <ImagePlus className="size-4" aria-hidden="true" />
+                      {estado.imagemUrl ? 'Trocar foto' : 'Adicionar foto'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="sr-only"
+                        disabled={mexendoNaFoto}
+                        onChange={escolherFoto}
+                      />
+                    </label>
+                    {estado.imagemUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={mexendoNaFoto}
+                        onClick={descartarFoto}
+                      >
+                        Remover foto
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  O envio de foto ainda não está disponível — chega numa próxima etapa.
+                  JPG, PNG ou WebP, até 5 MB.{' '}
+                  {produto
+                    ? 'A foto é salva na hora.'
+                    : 'A foto sobe junto com o produto, ao salvar.'}
                 </p>
+                {mexendoNaFoto && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {enviarFoto.isPending ? 'Enviando a foto...' : 'Tirando a foto...'}
+                  </p>
+                )}
+                {erroDaFoto && (
+                  <p className="text-xs text-destructive" role="alert">
+                    {erroDaFoto}
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>

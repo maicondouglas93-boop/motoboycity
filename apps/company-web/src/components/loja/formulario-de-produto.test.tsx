@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   updateProduct: vi.fn(),
   deleteProduct: vi.fn(),
   createCategory: vi.fn(),
+  uploadProductImage: vi.fn(),
+  removeProductImage: vi.fn(),
   push: vi.fn(),
 }));
 
@@ -20,6 +22,8 @@ vi.mock('@/lib/api-client', () => ({
     updateProduct: mocks.updateProduct,
     deleteProduct: mocks.deleteProduct,
     createCategory: mocks.createCategory,
+    uploadProductImage: mocks.uploadProductImage,
+    removeProductImage: mocks.removeProductImage,
   },
 }));
 
@@ -85,7 +89,6 @@ describe('Formulário de produto', () => {
       categoryId: LANCHES.id,
       name: 'X-Burger',
       description: '',
-      imageUrl: null,
       price: 22,
       status: 'PUBLISHED',
       sizes: [],
@@ -136,7 +139,6 @@ describe('Formulário de produto', () => {
       categoryId: LANCHES.id,
       name: 'X-Burger',
       description: 'Pão, carne e queijo',
-      imageUrl: null,
       price: 22,
       status: 'DRAFT',
       sizes: [],
@@ -208,5 +210,92 @@ describe('Formulário de produto', () => {
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/loja/produtos'));
     expect(mocks.deleteProduct).toHaveBeenCalledWith('token', NO_AR.id);
     expect(queryClient.getQueryData<StoreCatalog>(CHAVE_DO_CATALOGO)?.products).toEqual([]);
+  });
+});
+
+describe('Formulário de produto — foto', () => {
+  const foto = (tipo = 'image/jpeg', tamanho = 1000) =>
+    new File([new Uint8Array(tamanho)], 'foto.jpg', { type: tipo });
+  const escolher = (arquivo: File) =>
+    fireEvent.change(screen.getByLabelText(/Adicionar foto|Trocar foto/), {
+      target: { files: [arquivo] },
+    });
+
+  beforeEach(() => {
+    window.localStorage.setItem('motoboycity.accessToken', 'token');
+    for (const mock of Object.values(mocks)) mock.mockReset();
+    URL.createObjectURL = vi.fn(() => 'blob:previa');
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it('na edição, a foto sobe na hora e aparece no lugar', async () => {
+    const comFoto = { ...NO_AR, imageUrl: 'https://ik.imagekit.io/motoboycity/x.jpg' };
+    mocks.uploadProductImage.mockResolvedValue(comFoto);
+    const queryClient = renderizar(NO_AR);
+
+    const arquivo = foto();
+    escolher(arquivo);
+
+    await waitFor(() => expect(screen.getByRole('img')).toHaveAttribute('src', comFoto.imageUrl));
+    expect(mocks.uploadProductImage).toHaveBeenCalledWith('token', NO_AR.id, arquivo);
+    expect(queryClient.getQueryData<StoreCatalog>(CHAVE_DO_CATALOGO)?.products[0]?.imageUrl).toBe(
+      comFoto.imageUrl,
+    );
+    expect(screen.getByLabelText(/Trocar foto/)).toBeInTheDocument();
+  });
+
+  it('foto grande demais é recusada antes de subir', () => {
+    renderizar(NO_AR);
+    escolher(foto('image/jpeg', 6 * 1024 * 1024));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('passa de 5 MB');
+    expect(mocks.uploadProductImage).not.toHaveBeenCalled();
+  });
+
+  it('remover a foto na edição tira do produto', async () => {
+    const comFoto = { ...NO_AR, imageUrl: 'https://ik.imagekit.io/motoboycity/x.jpg' };
+    mocks.removeProductImage.mockResolvedValue(NO_AR);
+    renderizar(comFoto);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remover foto' }));
+
+    await waitFor(() => expect(screen.queryByRole('img')).not.toBeInTheDocument());
+    expect(mocks.removeProductImage).toHaveBeenCalledWith('token', NO_AR.id);
+  });
+
+  it('no cadastro, a foto espera o produto existir e sobe logo depois', async () => {
+    const criado = { ...NO_AR, optionGroups: [] };
+    mocks.createProduct.mockResolvedValue(criado);
+    mocks.uploadProductImage.mockResolvedValue({
+      ...criado,
+      imageUrl: 'https://ik.imagekit.io/y.jpg',
+    });
+    renderizar();
+
+    const arquivo = foto('image/png');
+    escolher(arquivo);
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:previa');
+    expect(mocks.uploadProductImage).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'X-Burger' } });
+    fireEvent.click(botao('Salvar rascunho'));
+
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/loja/produtos'));
+    expect(mocks.uploadProductImage).toHaveBeenCalledWith('token', criado.id, arquivo);
+  });
+
+  it('no cadastro, se só a foto falhar, a edição abre avisando', async () => {
+    const criado = { ...NO_AR, optionGroups: [] };
+    mocks.createProduct.mockResolvedValue(criado);
+    mocks.uploadProductImage.mockRejectedValue(new Error('rede'));
+    renderizar();
+
+    escolher(foto());
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'X-Burger' } });
+    fireEvent.click(botao('Salvar rascunho'));
+
+    await waitFor(() =>
+      expect(mocks.push).toHaveBeenCalledWith(`/loja/produtos/${criado.id}/editar?foto=falhou`),
+    );
   });
 });

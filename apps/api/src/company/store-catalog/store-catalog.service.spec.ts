@@ -7,6 +7,7 @@ import {
 import { Test, type TestingModule } from '@nestjs/testing';
 import { storeProductIssues, type UpsertStoreProductPayload } from '@motoboycity/validation';
 import { Prisma, type User } from '@prisma/client';
+import { ImageKitService } from '../../media/imagekit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from './store-catalog.service';
 
@@ -28,6 +29,7 @@ function produtoGravado(mudancas: Record<string, unknown> = {}) {
     name: 'Açaí',
     description: 'Cremoso, batido na hora.',
     imageUrl: null,
+    imageExternalFileId: null,
     price: null,
     status: 'DRAFT',
     position: 0,
@@ -72,7 +74,6 @@ function payload(mudancas: Partial<UpsertStoreProductPayload> = {}): UpsertStore
     categoryId: CATEGORIA_A,
     name: 'Açaí',
     description: 'Cremoso, batido na hora.',
-    imageUrl: null,
     price: null,
     status: 'DRAFT',
     sizes: [{ id: TAMANHO, name: '500ml', price: 18, available: true }],
@@ -98,7 +99,14 @@ describe('StoreCatalogService', () => {
       jest.Mock
     >;
     storeProduct: Record<
-      'findMany' | 'findFirst' | 'aggregate' | 'create' | 'update' | 'delete' | 'count',
+      | 'findMany'
+      | 'findFirst'
+      | 'aggregate'
+      | 'create'
+      | 'update'
+      | 'updateMany'
+      | 'delete'
+      | 'count',
       jest.Mock
     >;
     storeProductSize: Record<'deleteMany' | 'update' | 'create', jest.Mock>;
@@ -107,7 +115,16 @@ describe('StoreCatalogService', () => {
     $transaction: jest.Mock;
   };
 
+  let imageKit: { uploadStoreProductImage: jest.Mock; delete: jest.Mock };
+
   beforeEach(async () => {
+    imageKit = {
+      uploadStoreProductImage: jest.fn().mockResolvedValue({
+        externalFileId: 'foto-nova',
+        url: 'https://ik.imagekit.io/motoboycity/produto-nova.jpg',
+      }),
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
     const mocks = <K extends string>(...nomes: K[]) =>
       Object.fromEntries(nomes.map((nome) => [nome, jest.fn()])) as Record<K, jest.Mock>;
     prisma = {
@@ -119,6 +136,7 @@ describe('StoreCatalogService', () => {
         'aggregate',
         'create',
         'update',
+        'updateMany',
         'delete',
         'count',
       ),
@@ -133,7 +151,11 @@ describe('StoreCatalogService', () => {
     );
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [StoreCatalogService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        StoreCatalogService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: ImageKitService, useValue: imageKit },
+      ],
     }).compile();
     service = module.get(StoreCatalogService);
   });
@@ -471,6 +493,141 @@ describe('StoreCatalogService', () => {
       await expect(
         service.reorderProducts(membro, { categoryId: CATEGORIA_A, ids: [PRODUTO] }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('salvar o produto não mexe na foto: ela tem rota própria', async () => {
+      prisma.storeProduct.findFirst.mockResolvedValue(
+        produtoGravado({ imageUrl: 'https://ik.imagekit.io/a.jpg', imageExternalFileId: 'foto-a' }),
+      );
+      prisma.storeOptionGroup.update.mockResolvedValue({ id: GRUPO });
+      prisma.storeProduct.update.mockResolvedValue(produtoGravado());
+
+      await service.updateProduct(membro, PRODUTO, payload());
+
+      const dados = prisma.storeProduct.update.mock.calls[0]![0].data;
+      expect(dados).not.toHaveProperty('imageUrl');
+      expect(dados).not.toHaveProperty('imageExternalFileId');
+    });
+
+    it('excluir o produto apaga a foto do ImageKit', async () => {
+      prisma.storeProduct.findFirst.mockResolvedValue(
+        produtoGravado({ imageExternalFileId: 'foto-a' }),
+      );
+      prisma.storeProduct.delete.mockResolvedValue({});
+
+      await service.deleteProduct(membro, PRODUTO);
+
+      expect(imageKit.delete).toHaveBeenCalledWith('foto-a');
+    });
+  });
+
+  describe('foto do produto', () => {
+    // Um JPEG mínimo de 1 x 1: começo, quadro com as dimensões, e fim.
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+      0xff, 0xd9,
+    ]);
+    const arquivo = (buffer: Buffer) => ({
+      buffer,
+      size: buffer.length,
+      mimetype: 'image/jpeg',
+      originalname: 'foto.jpg',
+    });
+
+    it('troca a foto e apaga a anterior do ImageKit, depois de gravar', async () => {
+      prisma.storeProduct.findFirst
+        .mockResolvedValueOnce(produtoGravado({ imageExternalFileId: 'foto-antiga' }))
+        .mockResolvedValueOnce({ imageExternalFileId: 'foto-antiga' })
+        .mockResolvedValueOnce(
+          produtoGravado({
+            imageUrl: 'https://ik.imagekit.io/motoboycity/produto-nova.jpg',
+            imageExternalFileId: 'foto-nova',
+          }),
+        );
+      prisma.storeProduct.updateMany.mockResolvedValue({ count: 1 });
+
+      const produto = await service.setProductImage(membro, PRODUTO, arquivo(jpeg));
+
+      expect(imageKit.uploadStoreProductImage).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: EMPRESA, productId: PRODUTO, extension: 'jpg' }),
+      );
+      // Só troca se a foto ainda for a que foi lida.
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: PRODUTO, companyId: EMPRESA, imageExternalFileId: 'foto-antiga' },
+        data: {
+          imageUrl: 'https://ik.imagekit.io/motoboycity/produto-nova.jpg',
+          imageExternalFileId: 'foto-nova',
+        },
+      });
+      expect(imageKit.delete).toHaveBeenCalledWith('foto-antiga');
+      expect(produto.imageUrl).toBe('https://ik.imagekit.io/motoboycity/produto-nova.jpg');
+      expect(produto).not.toHaveProperty('imageExternalFileId');
+    });
+
+    it('arquivo que não é imagem não chega ao ImageKit', async () => {
+      prisma.storeProduct.findFirst.mockResolvedValue(produtoGravado());
+
+      await expect(
+        service.setProductImage(membro, PRODUTO, arquivo(Buffer.from('não sou imagem'))),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(imageKit.uploadStoreProductImage).not.toHaveBeenCalled();
+    });
+
+    it('produto de outra empresa responde como se não existisse, sem enviar nada', async () => {
+      prisma.storeProduct.findFirst.mockResolvedValue(null);
+
+      await expect(service.setProductImage(membro, PRODUTO, arquivo(jpeg))).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(imageKit.uploadStoreProductImage).not.toHaveBeenCalled();
+    });
+
+    it('produto excluído enquanto a foto subia: a foto nova sai do ImageKit', async () => {
+      prisma.storeProduct.findFirst
+        .mockResolvedValueOnce(produtoGravado())
+        .mockResolvedValueOnce(null);
+
+      await expect(service.setProductImage(membro, PRODUTO, arquivo(jpeg))).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(imageKit.delete).toHaveBeenCalledWith('foto-nova');
+    });
+
+    it('outra aba trocando a foto sem parar vira aviso, e a foto enviada não fica esquecida', async () => {
+      prisma.storeProduct.findFirst
+        .mockResolvedValueOnce(produtoGravado())
+        .mockResolvedValue({ imageExternalFileId: 'foto-da-outra-aba' });
+      prisma.storeProduct.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.setProductImage(membro, PRODUTO, arquivo(jpeg))).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledTimes(3);
+      expect(imageKit.delete).toHaveBeenCalledWith('foto-nova');
+      expect(imageKit.delete).not.toHaveBeenCalledWith('foto-da-outra-aba');
+    });
+
+    it('tirar a foto limpa o produto e apaga o arquivo; sem foto, não faz nada de mais', async () => {
+      prisma.storeProduct.findFirst
+        .mockResolvedValueOnce(produtoGravado({ imageExternalFileId: 'foto-a' }))
+        .mockResolvedValueOnce({ imageExternalFileId: 'foto-a' })
+        .mockResolvedValueOnce(produtoGravado());
+      prisma.storeProduct.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.removeProductImage(membro, PRODUTO);
+
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { imageUrl: null, imageExternalFileId: null } }),
+      );
+      expect(imageKit.delete).toHaveBeenCalledWith('foto-a');
+
+      imageKit.delete.mockClear();
+      prisma.storeProduct.findFirst
+        .mockResolvedValueOnce(produtoGravado())
+        .mockResolvedValueOnce({ imageExternalFileId: null })
+        .mockResolvedValueOnce(produtoGravado());
+      await service.removeProductImage(membro, PRODUTO);
+      expect(imageKit.delete).not.toHaveBeenCalled();
     });
   });
 });

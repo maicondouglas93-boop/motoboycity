@@ -80,6 +80,22 @@ export function createCompanyStoreCatalogApi({ baseUrl }: CompanyStoreCatalogApi
       return enviar<{ deleted: true }>(accessToken, `/products/${id}`, 'DELETE');
     },
 
+    /** Põe ou troca a foto: JPEG, PNG ou WebP de até 5 MB. */
+    async uploadProductImage(accessToken: string, id: string, foto: Blob): Promise<StoreProduct> {
+      const corpo = new FormData();
+      corpo.append('file', foto);
+      const response = await apiFetch(`${baseUrl}/company/store/products/${id}/image`, {
+        method: 'PUT',
+        headers: comToken(accessToken),
+        body: corpo,
+      });
+      return parseJsonOrThrow<StoreProduct>(response);
+    },
+
+    removeProductImage(accessToken: string, id: string) {
+      return enviar<StoreProduct>(accessToken, `/products/${id}/image`, 'DELETE');
+    },
+
     /** A ordem nova dos produtos de uma categoria. Recusada (409) se a lista estiver desatualizada. */
     reorderProducts(accessToken: string, payload: ReorderStoreProductsPayload) {
       return enviar<StoreProduct[]>(accessToken, '/products/order', 'PUT', payload);

@@ -8,7 +8,6 @@ import {
   mensagemDoErro,
   mover,
   ordenarPelasCategorias,
-  pendenciasParaMostrar,
   semProduto,
 } from './catalogo';
 
@@ -132,14 +131,5 @@ describe('textos da tela', () => {
     expect(mensagemDoErro(new Error('rede'), 'Não foi possível salvar.')).toBe(
       'Não foi possível salvar.',
     );
-  });
-
-  it('"sem foto" não aparece enquanto não há como enviar foto', () => {
-    expect(
-      pendenciasParaMostrar([
-        { text: 'sem foto', blocking: false },
-        { text: 'sem descrição', blocking: false },
-      ]),
-    ).toEqual([{ text: 'sem descrição', blocking: false }]);
   });
 });

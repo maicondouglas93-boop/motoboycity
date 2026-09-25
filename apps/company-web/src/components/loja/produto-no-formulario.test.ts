@@ -5,6 +5,7 @@ import {
   montarPayload,
   pendenciasDoFormulario,
   precoParaTexto,
+  problemaDaFoto,
   produtoParaFormulario,
   saidasDoFormulario,
   textoParaPreco,
@@ -75,7 +76,6 @@ describe('montarPayload', () => {
         categoryId: CATEGORIA,
         name: 'Açaí',
         description: 'Batido na hora',
-        imageUrl: null,
         price: null,
         status: 'PUBLISHED',
         sizes: ACAI.sizes,
@@ -216,6 +216,19 @@ describe('pendenciasDoFormulario', () => {
       text: '"Adicionais" exige 1 e só tem 0 disponíveis — o cliente não fecha o pedido',
       blocking: true,
     });
+  });
+});
+
+describe('problemaDaFoto', () => {
+  it('JPG, PNG e WebP de até 5 MB passam; o resto é dito antes de subir', () => {
+    expect(problemaDaFoto({ type: 'image/jpeg', size: 2 * 1024 * 1024 })).toBeNull();
+    expect(problemaDaFoto({ type: 'image/webp', size: 5 * 1024 * 1024 })).toBeNull();
+    expect(problemaDaFoto({ type: 'image/gif', size: 1000 })).toBe(
+      'Use uma foto JPG, PNG ou WebP.',
+    );
+    expect(problemaDaFoto({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })).toMatch(
+      /passa de 5 MB/,
+    );
   });
 });
 

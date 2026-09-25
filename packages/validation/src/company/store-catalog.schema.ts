@@ -92,7 +92,9 @@ export const upsertStoreProductSchema = z
     categoryId: idSchema.nullable(),
     name: nomeSchema(120),
     description: z.string().trim().max(500, 'Use no máximo 500 caracteres.'),
-    imageUrl: z.string().url('Endereço de imagem inválido.').max(500).nullable(),
+    // Sem `imageUrl`: a foto tem rotas próprias, e o endereço dela vem do
+    // ImageKit pelo servidor. Aceitar um endereço qualquer aqui deixaria a
+    // foto enviada esquecida lá, e o produto mostrando outra.
     /** Com tamanhos, é ignorado: o preço vem de cada tamanho. */
     price: precoSchema.nullable(),
     status: storeProductStatusSchema,

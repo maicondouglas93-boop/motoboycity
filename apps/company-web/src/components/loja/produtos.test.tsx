@@ -67,8 +67,8 @@ describe('Produtos', () => {
 
     expect(await screen.findByRole('button', { name: 'Publicar' })).toBeDisabled();
     expect(screen.getByText('sem preço')).toBeInTheDocument();
-    // Sem envio de foto, "sem foto" não é cobrado.
-    expect(screen.queryByText(/sem foto/)).not.toBeInTheDocument();
+    // Sem foto não trava a venda: vai na linha das recomendações.
+    expect(screen.getByText('Falta ainda: sem foto.')).toBeInTheDocument();
   });
 
   it('loja nova começa pelas seções', async () => {

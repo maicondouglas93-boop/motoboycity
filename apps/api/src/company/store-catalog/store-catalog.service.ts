@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { StoreCatalog, StoreCategory, StoreProduct } from '@motoboycity/types';
@@ -16,6 +17,8 @@ import {
   type UpsertStoreProductPayload,
 } from '@motoboycity/validation';
 import { Prisma, type User } from '@prisma/client';
+import { ImageKitService } from '../../media/imagekit.service';
+import { detectSupportedImage, type UploadedImageFile } from '../../media/supported-image';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -97,7 +100,12 @@ function listaDesatualizada(qual: string): ConflictException {
 
 @Injectable()
 export class StoreCatalogService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(StoreCatalogService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly imageKit: ImageKitService,
+  ) {}
 
   async resolveCompanyId(user: User): Promise<string> {
     if (user.type !== 'COMPANY_MEMBER') {
@@ -230,7 +238,11 @@ export class StoreCatalogService {
   async createProduct(user: User, payload: UpsertStoreProductPayload): Promise<StoreProduct> {
     const companyId = await this.resolveCompanyId(user);
     await this.assertCategoria(companyId, payload.categoryId);
-    this.assertPublicavel(payload.status, { ...payload, price: precoUnico(payload) });
+    this.assertPublicavel(payload.status, {
+      ...payload,
+      imageUrl: null,
+      price: precoUnico(payload),
+    });
     const position = await this.proximaPosicao(companyId, payload.categoryId);
 
     const criado = await this.prisma.storeProduct.create({
@@ -239,7 +251,6 @@ export class StoreCatalogService {
         categoryId: payload.categoryId,
         name: payload.name,
         description: payload.description,
-        imageUrl: payload.imageUrl,
         price: precoUnico(payload),
         status: payload.status,
         position,
@@ -291,7 +302,11 @@ export class StoreCatalogService {
     const companyId = await this.resolveCompanyId(user);
     const atual = await this.produtoDaEmpresa(companyId, id);
     await this.assertCategoria(companyId, payload.categoryId);
-    this.assertPublicavel(payload.status, { ...payload, price: precoUnico(payload) });
+    this.assertPublicavel(payload.status, {
+      ...payload,
+      imageUrl: atual.imageUrl,
+      price: precoUnico(payload),
+    });
     this.assertItensDoProduto(atual, payload);
 
     const position =
@@ -362,7 +377,6 @@ export class StoreCatalogService {
             categoryId: payload.categoryId,
             name: payload.name,
             description: payload.description,
-            imageUrl: payload.imageUrl,
             price: precoUnico(payload),
             status: payload.status,
             position,
@@ -395,11 +409,62 @@ export class StoreCatalogService {
     return paraProduto(salvo);
   }
 
+  /** Os itens saem junto, pelo banco; a foto sai do ImageKit depois. */
   async deleteProduct(user: User, id: string): Promise<{ deleted: true }> {
     const companyId = await this.resolveCompanyId(user);
-    await this.produtoDaEmpresa(companyId, id);
+    const atual = await this.produtoDaEmpresa(companyId, id);
     await this.prisma.storeProduct.delete({ where: { id } });
+    if (atual.imageExternalFileId) {
+      await this.apagarFotoSemQuebrar(atual.imageExternalFileId, 'foto de produto excluído');
+    }
     return { deleted: true };
+  }
+
+  /**
+   * Põe ou troca a foto do produto.
+   *
+   * O arquivo sobe antes, e o produto troca de foto só se a foto dele ainda for
+   * a que foi lida — um envio que chegue no meio (outra aba) faz esta tentativa
+   * reler, em vez de um apagar a foto que o outro acabou de pôr. A foto que
+   * saiu é apagada do ImageKit depois de gravado; a que subiu e não foi usada,
+   * também.
+   */
+  async setProductImage(user: User, id: string, file: UploadedImageFile): Promise<StoreProduct> {
+    const companyId = await this.resolveCompanyId(user);
+    await this.produtoDaEmpresa(companyId, id);
+    const imagem = detectSupportedImage(file);
+    const enviada = await this.imageKit.uploadStoreProductImage({
+      companyId,
+      productId: id,
+      buffer: file.buffer,
+      extension: imagem.extension,
+    });
+
+    try {
+      const anterior = await this.trocarFoto(companyId, id, {
+        imageUrl: enviada.url,
+        imageExternalFileId: enviada.externalFileId,
+      });
+      if (anterior && anterior !== enviada.externalFileId) {
+        await this.apagarFotoSemQuebrar(anterior, 'foto substituída');
+      }
+    } catch (erro) {
+      await this.apagarFotoSemQuebrar(enviada.externalFileId, 'foto nova depois de falha');
+      throw erro;
+    }
+    return paraProduto(await this.produtoDaEmpresa(companyId, id));
+  }
+
+  /** Tirar a foto de quem não tem foto não é erro: dois toques, ou duas abas. */
+  async removeProductImage(user: User, id: string): Promise<StoreProduct> {
+    const companyId = await this.resolveCompanyId(user);
+    await this.produtoDaEmpresa(companyId, id);
+    const anterior = await this.trocarFoto(companyId, id, {
+      imageUrl: null,
+      imageExternalFileId: null,
+    });
+    if (anterior) await this.apagarFotoSemQuebrar(anterior, 'foto removida');
+    return paraProduto(await this.produtoDaEmpresa(companyId, id));
   }
 
   async reorderProducts(user: User, payload: ReorderStoreProductsPayload): Promise<StoreProduct[]> {
@@ -437,6 +502,41 @@ export class StoreCatalogService {
       select: { id: true },
     });
     if (!categoria) throw new NotFoundException('Categoria não encontrada.');
+  }
+
+  /**
+   * Troca a foto só se ela ainda for a que foi lida, e devolve o arquivo que
+   * saiu. Três tentativas: mais que isso é alguém trocando a foto sem parar.
+   */
+  private async trocarFoto(
+    companyId: string,
+    id: string,
+    foto: { imageUrl: string | null; imageExternalFileId: string | null },
+  ): Promise<string | null> {
+    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+      const atual = await this.prisma.storeProduct.findFirst({
+        where: { id, companyId },
+        select: { imageExternalFileId: true },
+      });
+      if (!atual) throw new NotFoundException('Produto não encontrado.');
+      const { count } = await this.prisma.storeProduct.updateMany({
+        where: { id, companyId, imageExternalFileId: atual.imageExternalFileId },
+        data: foto,
+      });
+      if (count === 1) return atual.imageExternalFileId;
+    }
+    throw new ConflictException({
+      message: 'A foto mudou enquanto você enviava. Tente de novo.',
+      code: 'STORE_PRODUCT_STALE',
+    });
+  }
+
+  private async apagarFotoSemQuebrar(externalFileId: string, contexto: string): Promise<void> {
+    try {
+      await this.imageKit.delete(externalFileId);
+    } catch {
+      this.logger.warn(`Nao foi possivel remover ${contexto} do ImageKit.`);
+    }
   }
 
   private async produtoDaEmpresa(companyId: string, id: string): Promise<ProdutoGravado> {
