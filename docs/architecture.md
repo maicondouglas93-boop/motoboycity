@@ -32,6 +32,29 @@ pedido. Não usa `detail` (que pode persistir enriquecimento de endereço GPS),
 não cria endpoint/schema e não imprime produtos/valores/troco. Guia e limites
 de validação em `runbooks/company-order-printing.md`.
 
+### Catálogo da loja online
+
+O cardápio que a empresa vende na própria página de pedidos. Tabelas `store_*`
+(categoria, produto, tamanho, grupo de escolhas, escolha), todas com
+`companyId` direto ou pelo produto; módulo `company/store-catalog` com as rotas
+`/company/store/*`, atrás de `JwtAuthGuard` + `CompanyOnlyGuard`, e o escopo da
+empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
+
+- **Ordem é lista.** O banco guarda `position`, mas o contrato não o expõe:
+  quem reordena manda a lista inteira, o servidor confere que ela é exatamente a
+  atual e renumera numa transação. Lista desatualizada responde 409
+  (`STORE_CATALOG_STALE`).
+- **Os itens do produto têm id estável.** A edição recebe tamanhos, grupos e
+  escolhas com o `id` dos que ficam; o que falta na lista é apagado, o que vem
+  sem `id` é criado. Id de outro produto — ou escolha trocando de grupo — é
+  formulário desatualizado (409, `STORE_PRODUCT_STALE`).
+- **Publicado é comprável.** `storeProductIssues`, em `packages/validation`,
+  decide o que impede vender; o servidor recusa publicar com pendência (400,
+  `STORE_PRODUCT_NOT_PUBLISHABLE`). Ao ser ligado, o painel deve usar a mesma
+  função para avisar antes — hoje ele usa a cópia de `loja-mock.ts`.
+- **Categoria com produto não sai** (409, `STORE_CATEGORY_NOT_EMPTY`), com
+  `ON DELETE RESTRICT` no banco como segunda defesa.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

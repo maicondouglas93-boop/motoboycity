@@ -14868,3 +14868,128 @@ Arquivos: `apps/company-web/src/lib/loja-pedido.ts`, `loja-operacao.ts`,
 
 Validação: `tsc --noEmit` limpo, `eslint src` limpo, Prettier limpo nos arquivos
 alterados, **260 testes** passando (eram 252), `next build` compila.
+
+## 2026-09-25 — Loja online: backend do catálogo (banco, API e contratos)
+
+Primeiro recorte do backend da loja, pedido pelo usuário ("continue", depois de
+ser avisado de que o passo seguinte era criar migration no banco e de que o
+deploy a aplica sozinho). É o item 1 e o item 2 da ordem sugerida no plano, só
+para o catálogo. **Nenhuma tela usa ainda**: Produtos e Organizar continuam na
+demonstração, e ligá-las é o próximo recorte.
+
+**Banco** — migration `20260925090000_loja_catalogo`, só criação:
+
+- enum `StoreProductStatus` (PUBLISHED, DRAFT, PAUSED) — as três situações do
+  plano, e não um booleano;
+- tabelas `store_categories`, `store_products`, `store_product_sizes`,
+  `store_option_groups`, `store_options`, com índices e chaves estrangeiras;
+- dinheiro em `Decimal(10,2)`, como no resto do schema; tamanho com preço cheio;
+  grupo com mínimo e máximo (nulo = sem limite);
+- `store_products.categoryId` com `ON DELETE RESTRICT`: categoria com produto
+  não sai nem por fora da API.
+
+Nenhuma tabela existente muda; a única linha fora da seção nova é o
+realinhamento do bloco de relações de `Company`, onde entraram
+`storeCategories` e `storeProducts`.
+
+**Ordem.** O plano decidiu "a ordem é a posição no array" (decisão 8). No banco
+isso vira `position`, mas o contrato continua falando em listas: quem reordena
+manda a lista inteira, o servidor confere que ela é exatamente a atual e
+renumera numa transação. A tela nunca vê nem manda número.
+
+**API** — módulo `apps/api/src/company/store-catalog`, rotas
+`/company/store/*`, atrás de `JwtAuthGuard` + `CompanyOnlyGuard`, qualquer
+membro ativo da empresa (como clientes e endereços):
+
+- `GET catalog` — tudo, na ordem do cardápio; os sem categoria por último;
+- `POST categories`, `PUT categories/:id`, `DELETE categories/:id` (409
+  `STORE_CATEGORY_NOT_EMPTY` com produto dentro), `PUT categories/order`;
+- `POST products`, `PUT products/:id`, `PUT products/:id/status`,
+  `DELETE products/:id`, `PUT products/order` (por categoria).
+
+Decisões do serviço:
+
+- Os itens do produto guardam o id entre edições: com id, é mantido; sem id, é
+  criado; fora da lista, é apagado — tudo numa transação. Assim a sacola montada
+  antes de uma edição continua apontando para a escolha certa. Id de outro
+  produto, ou escolha trocando de grupo, é formulário desatualizado (409
+  `STORE_PRODUCT_STALE`).
+- Publicar exige o produto comprável. A regra (`storeProductIssues`) fica em
+  `packages/validation`, a mesma lista de pendências da tela, para o painel e o
+  servidor nunca discordarem (400 `STORE_PRODUCT_NOT_PUBLISHABLE`, com a
+  pendência escrita). Pausar e voltar a rascunho sempre podem.
+- A regra ganhou um caso que a tela não tinha: todos os tamanhos indisponíveis
+  impede vender, como produto sem preço.
+- Com tamanhos, o preço único é descartado.
+- Mudar de categoria põe o produto no fim da nova.
+- Lista de reordenação desatualizada responde 409 `STORE_CATALOG_STALE`, em vez
+  de embaralhar o cardápio.
+
+**Contratos:** `packages/types/src/store-catalog.ts`,
+`packages/validation/src/company/store-catalog.schema.ts` e
+`packages/api-client/src/company-store-catalog.ts`
+(`createCompanyStoreCatalogApi`).
+
+**Como foi validado:**
+
+- `prisma validate` antes e depois; SQL gerado pelo próprio Prisma
+  (`migrate diff` do schema de antes para o novo), sem escrita à mão, e lido:
+  só `CREATE TYPE`, `CREATE TABLE`, `CREATE INDEX` e chaves das tabelas novas.
+- Num banco **descartável** do Postgres local (`motoboycity_loja_validacao`,
+  apagado no fim; `DATABASE_URL` e `DIRECT_URL` trocados, e o alvo conferido pelo
+  Prisma antes de escrever): as 57 migrations aplicadas do zero; banco igual ao
+  schema; o SQL de desfazer volta o banco ao schema anterior; reaplicar depois
+  de desfazer funciona.
+- 24 testes de unidade do serviço (Prisma simulado): acesso, ordem do cardápio,
+  categoria com produto, a corrida entre contar e apagar, listas desatualizadas,
+  publicação recusada, ids estáveis, escolha mudando de grupo, mudança de
+  categoria.
+- 1 E2E (`test/store-catalog.e2e-spec.ts`) contra a API de verdade, num banco
+  descartável (`motoboycity_loja_e2e`) e no índice 9 do Redis local (vazio antes,
+  limpo depois), com `THROTTLE_LIMIT=100000`: edição mantendo, criando e
+  apagando itens no banco; 409 da categoria com produto; lista incompleta
+  recusada; outra empresa com 404 e cardápio vazio; apagar o produto leva os
+  itens.
+- `pnpm typecheck` (8 workspaces) limpo; `eslint` limpo nos arquivos novos;
+  Prettier limpo; `nest build` compila; build de `@motoboycity/validation`.
+- Suíte de unidade da API: 1289 passam; **2 falham, e já falhavam** — os dois
+  testes do `detail` em `deliveries.service.spec.ts`, com mock sem
+  `walletTransaction`, registrados no handoff (item 3 das pendências). Nada
+  deste recorte toca entregas.
+
+**Deploy:** a migration não foi aplicada em nenhum banco compartilhado, nem no
+`motoboycity_dev`. Sai no próximo `push` para o `main`, pelo
+`prisma migrate deploy` do build do Render. Não há dado a migrar.
+
+**Reverter**, se preciso (só apaga tabelas novas, vazias até alguma tela usá-las):
+
+```sql
+ALTER TABLE "store_categories" DROP CONSTRAINT "store_categories_companyId_fkey";
+ALTER TABLE "store_products" DROP CONSTRAINT "store_products_companyId_fkey";
+ALTER TABLE "store_products" DROP CONSTRAINT "store_products_categoryId_fkey";
+ALTER TABLE "store_product_sizes" DROP CONSTRAINT "store_product_sizes_productId_fkey";
+ALTER TABLE "store_option_groups" DROP CONSTRAINT "store_option_groups_productId_fkey";
+ALTER TABLE "store_options" DROP CONSTRAINT "store_options_groupId_fkey";
+DROP TABLE "store_categories";
+DROP TABLE "store_products";
+DROP TABLE "store_product_sizes";
+DROP TABLE "store_option_groups";
+DROP TABLE "store_options";
+DROP TYPE "StoreProductStatus";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925090000_loja_catalogo';
+```
+
+Gerado pelo Prisma (`migrate diff` do schema novo para o anterior) e testado no
+banco descartável — menos a última linha, que é o registro da migration.
+
+Arquivos: `apps/api/prisma/schema.prisma`,
+`apps/api/prisma/migrations/20260925090000_loja_catalogo/migration.sql`,
+`apps/api/src/company/store-catalog/` (módulo, controller, serviço e teste),
+`apps/api/src/app.module.ts`, `apps/api/test/store-catalog.e2e-spec.ts`,
+`packages/types/src/store-catalog.ts` e `index.ts`,
+`packages/validation/src/company/store-catalog.schema.ts` e `index.ts`,
+`packages/api-client/src/company-store-catalog.ts` e `index.ts`;
+`docs/plano-loja-online.md`, `docs/agent-handoff.md`, `docs/architecture.md`.
+
+**Próximo passo:** ligar Produtos e Organizar do painel a esta API, e aplicar a
+migration no `motoboycity_dev` para testar com o painel local.

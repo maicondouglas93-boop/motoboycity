@@ -472,18 +472,20 @@ model Company {
   approvedAt       DateTime?
   approvedBy       User?     @relation("CompanyApprovedBy", fields: [approvedByUserId], references: [id])
 
-  teamMembers    CompanyTeamMember[]
-  addresses      CompanyAddress[]
-  customers      CompanyCustomer[]
-  deliveries     Delivery[]
-  wallet         Wallet?
-  invoices       Invoice[]
-  integrations   Integration[]
-  pricingTables  PricingTable[]
-  statusHistory  CompanyStatusHistory[]
-  driverBlocks   DriverCompanyBlock[]
-  asaasCustomers AsaasCustomer[]
+  teamMembers     CompanyTeamMember[]
+  addresses       CompanyAddress[]
+  customers       CompanyCustomer[]
+  deliveries      Delivery[]
+  wallet          Wallet?
+  invoices        Invoice[]
+  integrations    Integration[]
+  pricingTables   PricingTable[]
+  statusHistory   CompanyStatusHistory[]
+  driverBlocks    DriverCompanyBlock[]
+  asaasCustomers  AsaasCustomer[]
   pageProtections CompanyPageProtection[]
+  storeCategories StoreCategory[]
+  storeProducts   StoreProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1900,4 +1902,122 @@ model JobCheckIn {
   updatedAt DateTime @updatedAt
 
   @@map("job_check_ins")
+}
+
+// ============================================================================
+// 8. LOJA ONLINE — CATÁLOGO
+// ============================================================================
+//
+// O cardápio que a empresa vende na própria página de pedidos. As regras e o
+// desenho aprovado estão em docs/plano-loja-online.md.
+//
+// A ordem das seções, dos produtos e dos itens dentro do produto é `position`.
+// O contrato da API nunca expõe esse número: ele fala em ordem de lista, e o
+// servidor renumera numa transação a cada reordenação — assim não há dois itens
+// na mesma posição nem renumeração feita pela tela.
+
+/// Três situações, e não um booleano: "não terminei de cadastrar" e "acabou
+/// hoje" são coisas diferentes, e a lista do painel precisa separar o que exige
+/// trabalho do que exige só um clique quando a mercadoria chegar.
+enum StoreProductStatus {
+  PUBLISHED
+  DRAFT
+  PAUSED
+}
+
+/// Seção do cardápio: "Açaí", "Lanches", "Bebidas".
+model StoreCategory {
+  id        String @id @default(uuid())
+  companyId String
+  name      String @db.VarChar(60)
+  position  Int
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products StoreProduct[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, position])
+  @@map("store_categories")
+}
+
+/// Produto do cardápio. Sem tamanhos, o preço é `price`; com tamanhos, o preço
+/// vem de cada tamanho e `price` fica nulo.
+///
+/// A categoria não pode ser apagada com produto dentro (`Restrict`): o produto
+/// ficaria sem seção e sumiria da loja sem ninguém perceber. O serviço recusa
+/// antes; a restrição no banco é a segunda defesa.
+model StoreProduct {
+  id          String             @id @default(uuid())
+  companyId   String
+  /// Nulo: sem seção. O produto não aparece na loja enquanto não tiver uma.
+  categoryId  String?
+  name        String             @db.VarChar(120)
+  description String             @default("") @db.VarChar(500)
+  imageUrl    String?            @db.VarChar(500)
+  price       Decimal?           @db.Decimal(10, 2)
+  status      StoreProductStatus @default(DRAFT)
+  /// Ordem dentro da seção — ou entre os produtos sem seção.
+  position    Int
+
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category     StoreCategory?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  sizes        StoreProductSize[]
+  optionGroups StoreOptionGroup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, categoryId, position])
+  @@index([companyId, status])
+  @@map("store_products")
+}
+
+/// Tamanho do produto, com o preço CHEIO naquele tamanho — e não o acréscimo
+/// sobre uma base, que obrigaria a lojista a fazer conta para cadastrar.
+model StoreProductSize {
+  id        String  @id @default(uuid())
+  productId String
+  name      String  @db.VarChar(40)
+  price     Decimal @db.Decimal(10, 2)
+  available Boolean @default(true)
+  position  Int
+
+  product StoreProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("store_product_sizes")
+}
+
+/// Grupo de escolhas do produto: "Adicionais", "Ponto da carne". `minChoices`
+/// a partir de 1 torna o grupo obrigatório; `maxChoices` nulo é sem limite.
+model StoreOptionGroup {
+  id         String @id @default(uuid())
+  productId  String
+  name       String @db.VarChar(60)
+  minChoices Int    @default(0)
+  maxChoices Int?
+  position   Int
+
+  product StoreProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  options StoreOption[]
+
+  @@index([productId, position])
+  @@map("store_option_groups")
+}
+
+/// Uma escolha do grupo, com o que ela soma ao preço. Zero é de graça.
+model StoreOption {
+  id        String  @id @default(uuid())
+  groupId   String
+  name      String  @db.VarChar(60)
+  price     Decimal @default(0) @db.Decimal(10, 2)
+  available Boolean @default(true)
+  position  Int
+
+  group StoreOptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, position])
+  @@map("store_options")
 }

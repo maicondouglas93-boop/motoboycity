@@ -552,10 +552,19 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
 Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
-Configurações, e o status da loja no alto da barra lateral. **Nada disso está
-integrado.** Os dados de exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`,
+Configurações, e o status da loja no alto da barra lateral. **Nenhuma tela está
+integrada.** Os dados de exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`,
 e toda tela traz um aviso dizendo isso. Existem para aprovar o desenho antes de
 escrever backend.
+
+**O backend do catálogo existe desde 2026-09-25, e nenhuma tela o usa ainda.**
+Tabelas `store_*` (migration `20260925090000_loja_catalogo`, só criação de
+tabelas), módulo `apps/api/src/company/store-catalog` com as rotas
+`/company/store/*`, e contratos em `packages/*`. Quem ligar Produtos e Organizar
+deve usar `createCompanyStoreCatalogApi` e mandar os itens do produto com o `id`
+que a API devolveu — sem ele, a edição recria o item com id novo. A migration
+ainda não foi aplicada em banco nenhum além dos descartáveis da validação: sai
+no próximo `push`, pelo `prisma migrate deploy` do build do Render.
 
 **Uma parte salva — só no navegador.** Horários, Tipos de pedido, Notificações,
 o status e as vendas gravam no `localStorage` por `lib/loja-demo.ts`, e o evento

@@ -22,7 +22,7 @@ Existe a área `/loja` no `company-web`, com **telas de demonstração**:
 | `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente                    |
 | `/loja/configuracoes`                  | Link, identidade visual, pagamentos, Asaas, bairros e ponto de coleta |
 
-**Nada disso tem backend.** Os dados de exemplo vêm de
+**As telas ainda não usam backend.** Os dados de exemplo vêm de
 `apps/company-web/src/lib/loja-mock.ts`. O que o painel configura em Horários,
 Tipos de pedido e Notificações, o status e as vendas ficam no `localStorage`
 deste navegador, por `lib/loja-demo.ts` — é o que faz painel e página do cliente
@@ -33,8 +33,18 @@ ficam: o servidor precisa delas. A loja **não está no menu** do painel; as tel
 são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
 `top-nav.tsx`.
 
-Não existe ainda: schema Prisma, migration, endpoint, schema Zod, contrato em
-`packages/*`, nem o PWA do cliente.
+**O catálogo já tem backend** (2026-09-25), ainda sem tela ligada a ele:
+tabelas `store_categories`, `store_products`, `store_product_sizes`,
+`store_option_groups` e `store_options` (migration
+`20260925090000_loja_catalogo`), o módulo `company/store-catalog` da API com as
+rotas `/company/store/*`, e os contratos em `packages/*`
+(`store-catalog.schema.ts`, `store-catalog.ts`, `company-store-catalog.ts`). A
+regra de "dá para publicar?" (`storeProductIssues`) mora no pacote de
+validação, para o painel e o servidor não discordarem.
+
+Não existe ainda: a configuração da loja no banco (link, identidade, horário,
+tipos de pedido, avisos), o pedido da loja, o catálogo público por `slug` e o
+PWA ligado à API.
 
 ## Decisões já tomadas
 
@@ -253,9 +263,13 @@ validação e no cadastro de clientes do painel.
 
 ## Ordem sugerida
 
-1. Schema e migration do catálogo (produto, categoria, grupo, escolha, tamanho).
-2. Endpoints e contratos em `packages/*`, com os schemas Zod.
-3. Ligar as telas do painel que já existem; **apagar** o `loja-mock.ts`.
+1. ~~Schema e migration do catálogo (produto, categoria, grupo, escolha,
+   tamanho).~~ Feito em 2026-09-25.
+2. ~~Endpoints e contratos em `packages/*`, com os schemas Zod~~ — do catálogo,
+   feito em 2026-09-25. Falta o mesmo para a configuração da loja.
+3. Ligar as telas do painel que já existem — começando por Produtos e
+   Organizar, que já têm API; **apagar** o `loja-mock.ts` quando a última tela
+   deixar de usá-lo.
 4. O PWA do cliente: catálogo, carrinho, checkout (com telefone e endereço
    estruturado, por causa do item 1).
 5. Pedido da loja virando entrega, com o aceite do item 2: as etapas até
