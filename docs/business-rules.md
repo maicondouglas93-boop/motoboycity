@@ -511,6 +511,23 @@ Nas telas de demonstração (Tipos de pedido e Vendas) desde 2026-09-25; no
 backend, ainda não — o pedido da loja não existe no banco. Ver
 `docs/plano-loja-online.md`, decisão 15.
 
+## Loja online: taxa, estorno e cadastro do cliente
+
+Decisões de 2026-09-25, do usuário:
+
+- **Taxa de entrega por bairro.** A loja lista os bairros que atende, cada um
+  com a sua taxa, e o cliente escolhe o bairro no checkout. Bairro fora da
+  lista não pede entrega: é assim que a loja limita a área. A taxa cobrada do
+  cliente é da loja e não muda o que a central cobra dela na fatura — são dois
+  valores independentes.
+- **Estorno automático e total.** Pedido pago online e depois recusado,
+  cancelado ou vencido sem aceite é estornado inteiro, pelo sistema, na conta
+  Asaas da loja (onde o dinheiro caiu), sem depender de alguém lembrar.
+- **O cliente da página só vira cadastro se a loja salvar.** Na venda, a loja
+  tem "Salvar cliente" (ou "salvar este endereço", se o telefone já existe). O
+  checkout avisa que os dados do pedido vão para a loja. Ninguém é cadastrado
+  automaticamente.
+
 ## Arquitetura de sessão/token
 
 Revisitada em 2026-08-09 e mantida como está, deliberadamente: JWT em

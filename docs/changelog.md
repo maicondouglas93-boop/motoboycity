@@ -15401,3 +15401,19 @@ ImageKit, Google, aiqfome, Groq) vazias no processo — o `.env` local não as
 preenche, e nenhuma credencial real foi usada, como no CI.
 
 **Deploy:** nada foi enviado. O CI só fica verde no GitHub depois do push.
+
+## 2026-09-25 — Loja online: taxa por bairro, estorno automático, cadastro só pela loja
+
+Três decisões em aberto no plano, respondidas pelo usuário (perguntadas antes
+do pedido no banco, que depende delas):
+
+- **Taxa de entrega por bairro**, como as telas de demonstração já fazem — e é
+  assim que a loja limita a área de entrega.
+- **Estorno automático e total** do pedido pago online e recusado, cancelado ou
+  vencido, pela conta Asaas da loja.
+- **O cliente da página só vira cadastro se a loja salvar**, com o aviso no
+  checkout de que os dados vão para a loja.
+
+Registradas em `docs/business-rules.md` ("Loja online: taxa, estorno e cadastro
+do cliente") e em `docs/plano-loja-online.md` (decisões 17 a 19, e os "em
+aberto" dos itens 1 a 3 fechados). Só documentação; nenhum código mudou.

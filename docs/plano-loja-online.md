@@ -111,6 +111,14 @@ checkout ligado à API.
     usuário), no mesmo formato do cupom de entrega que já roda na Elgin i8/i9.
     Diferente dele, leva os valores: quem entrega precisa saber quanto cobrar e
     quanto de troco levar, e se o pedido já foi pago online.
+17. **Taxa de entrega por bairro** (2026-09-25, usuário): cada bairro atendido
+    com a sua taxa; fora da lista, não há entrega. Fecha o "em aberto" do item 3.
+18. **Estorno automático e total** (2026-09-25, usuário) do pedido pago online
+    e recusado, cancelado ou vencido, pela conta Asaas da loja. Fecha o "em
+    aberto" do item 2.
+19. **Cliente só vira cadastro se a loja salvar** (2026-09-25, usuário), com o
+    aviso no checkout de que os dados vão para a loja. Fecha o "em aberto" do
+    item 1.
 
 ## A fazer
 
@@ -148,9 +156,8 @@ endereços por cliente, com `label` e `isPrimary`. Criar um cliente duplicado
 porque ele pediu do trabalho em vez de casa seria desfazer o que o cadastro de
 endereços resolve.
 
-**Em aberto:** o cliente do PWA precisa consentir que os dados fiquem com a
-loja? Como tratar quem pede uma vez e nunca mais — cadastrar todo mundo
-automaticamente encheria a lista de clientes de uma vez só.
+**Decidido** (decisão 19): só vira cadastro se a loja salvar, com o aviso no
+checkout de que os dados vão para a loja.
 
 ### 2. Aceite automático ou manual
 
@@ -170,10 +177,9 @@ avisado. Para agora, o prazo conta do recebimento; agendado, vai até a hora de
 a cozinha começar. Regra em `prazoDoAceite` (`lib/loja-pedido.ts`); na
 integração, é um trabalho agendado no servidor.
 
-**Ainda em aberto:** pedido pago online e recusado, cancelado ou vencido exige
-estorno. Pela decisão 3, a venda cai na conta Asaas da loja, então é dela que o
-valor volta. Recomendação: estorno automático e total, pela conta da loja,
-nesses três casos. Falta confirmar.
+**Estorno** (decisão 18): pedido pago online e recusado, cancelado ou vencido
+é estornado inteiro, automaticamente, pela conta Asaas da loja — pela decisão
+3, é nela que a venda cai.
 
 ### 3. A empresa configura o valor da taxa de entrega cobrada no PWA
 
@@ -189,11 +195,9 @@ independente do que a central cobra da loja na fatura. São dois números, e
 tratá-los como um só é o erro provável — a loja pode cobrar mais, menos ou nada,
 e continua devendo a entrega à central do mesmo jeito.
 
-**Em aberto:** valor fixo, por quilômetro, ou por bairro/zona? Fixo é o que a
-loja pequena entende e configura em trinta segundos; por distância é mais justo
-e exige calcular no checkout, com o custo de Routes API que o cache de rota já
-tenta conter. Sugestão: começar com **valor fixo**, e por faixa de distância
-depois, se pedirem.
+**Decidido** (decisão 17): **por bairro**, como as telas de demonstração já
+fazem — cada bairro atendido com a sua taxa, e bairro fora da lista não pede
+entrega.
 
 ### 4. Interface do PWA sem cara de front feito por IA
 
