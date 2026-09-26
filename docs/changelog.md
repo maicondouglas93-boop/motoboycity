@@ -15334,3 +15334,40 @@ DROP TABLE "store_settings";
 DROP TABLE "store_slugs";
 DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925190000_loja_link';
 ```
+
+**Verificação da vitrine, depois do commit `64aebc9`** (2026-09-25): a pedido
+do usuário, a empresa de teste foi aprovada só no `motoboycity_dev` local
+(`status` ativo e `approvedAt`; nada em produção). `/pedir/franklim` abriu como
+vitrine, com o nome da loja, o aviso de que ainda não recebe pedidos e só o
+produto publicado — o pausado ficou de fora. A folha do açaí mostrou os
+tamanhos e adicionais como editados no painel (o preço mudado, o tamanho e a
+escolha acrescentados, a escolha removida ausente) e o botão "Pedidos em
+breve", desligado.
+
+## 2026-09-25 — Loja online: a página do cliente abre sem a chave do Clerk
+
+Pedido do usuário ("pode continuar", depois da lista do que falta para
+produção, que recomendava isto primeiro). Sem as chaves de produção do Clerk,
+toda rota `/pedir` caía — inclusive a vitrine, que não precisa de conta.
+
+- `lib/conta-da-loja.ts`: `CONTA_DISPONIVEL`, lida da chave pública no build.
+- Sem a chave: o layout da loja não põe o `ClerkProvider`; o `proxy.ts` não roda
+  o middleware do Clerk (ele exige as duas chaves); `useConta` responde "sem
+  conta" sem chamar o Clerk; o botão "Entrar" some; a porteira da sacola diz
+  "Pedidos por aqui em breve"; e `/sign-in` e `/sign-up` dizem que a conta
+  ainda não está disponível. Com a chave, nada muda.
+
+**Arquivos:** `apps/company-web/src/lib/conta-da-loja.ts` (novo),
+`components/loja-online/conta.tsx`, `app/(loja)/layout.tsx`, `proxy.ts`,
+`app/(loja)/sign-in/[[...sign-in]]/page.tsx`, `sign-up/[[...sign-up]]/page.tsx`,
+`components/loja-online/loja-publica.test.tsx`; `docs/agent-handoff.md`.
+
+**Como foi validado:** testes da loja do cliente, com o Clerk simulado para
+falhar se alguém o usasse: 21 passam, 2 novos (demonstração sem conta,
+porteira sem login). `tsc` e `eslint` limpos. `next build` com as duas chaves
+vazias, servido por `next start`: `/pedir/franklim` abriu a vitrine sem erro
+e sem nenhum script do Clerk, e a sacola da demonstração mostrou o aviso no
+lugar do login.
+
+**Deploy:** nada foi enviado. Depois do push, a vitrine abre em produção
+mesmo sem o Clerk configurado.

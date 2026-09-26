@@ -644,8 +644,14 @@ rotas ao painel, porque o matcher do proxy é uma lista de caminhos da loja.
 
 As chaves ficam em `apps/company-web/.env.local`, que é ignorado pelo Git. Só
 existe instância de **desenvolvimento**; produção não está configurada, e quando
-estiver, as chaves vão no Render como variáveis de ambiente — nunca no
-repositório, que é público.
+estiver, as chaves vão no Vercel (é lá que o `company-web` roda) como variáveis
+de ambiente — nunca no repositório, que é público.
+
+**Sem a chave, a loja abre sem conta** (2026-09-25, `lib/conta-da-loja.ts`): o
+`ClerkProvider`, o middleware e as páginas de entrar só entram com a chave; sem
+ela, a vitrine funciona e a sacola diz que ainda não dá para pedir. A chave é
+lida no build — pôr a chave pede um deploy novo. Conferido com `next build` sem
+as chaves e `next start`: vitrine e sacola sem erro, zero script do Clerk.
 
 A biblioteca de animação da loja (`motion`) segue o mesmo recorte: é carregada
 pelo `LazyMotion` no layout de `(loja)` e não chega ao painel — conferido, zero

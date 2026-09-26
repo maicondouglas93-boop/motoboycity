@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ClerkProvider } from '@clerk/nextjs';
 import { ptBR } from '@clerk/localizations';
 import { MovimentoDaLoja } from '@/components/loja-online/movimento';
+import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 
 /**
  * O Clerk vale SÓ para a loja do cliente, e não para o painel.
@@ -19,11 +20,11 @@ import { MovimentoDaLoja } from '@/components/loja-online/movimento';
  *
  * O mesmo vale para a biblioteca de animação: ela só carrega aqui. O painel,
  * que não anima nada disso, não paga o peso dela.
+ *
+ * Sem a chave do Clerk, a loja abre sem conta (ver `lib/conta-da-loja.ts`).
  */
 export default function LojaLayout({ children }: { children: ReactNode }) {
-  return (
-    <ClerkProvider localization={ptBR}>
-      <MovimentoDaLoja>{children}</MovimentoDaLoja>
-    </ClerkProvider>
-  );
+  const loja = <MovimentoDaLoja>{children}</MovimentoDaLoja>;
+  if (!CONTA_DISPONIVEL) return loja;
+  return <ClerkProvider localization={ptBR}>{loja}</ClerkProvider>;
 }

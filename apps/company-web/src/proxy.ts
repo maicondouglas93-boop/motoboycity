@@ -1,6 +1,15 @@
+import { NextResponse } from 'next/server';
 import { clerkMiddleware } from '@clerk/nextjs/server';
 
-export default clerkMiddleware();
+/**
+ * Sem as duas chaves, o middleware do Clerk derruba toda requisição da loja —
+ * inclusive a vitrine, que não precisa de conta. Aí ele não roda.
+ */
+const clerkConfigurado = Boolean(
+  process.env['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'] && process.env['CLERK_SECRET_KEY'],
+);
+
+export default clerkConfigurado ? clerkMiddleware() : () => NextResponse.next();
 
 /**
  * Restrito à loja, e não ao app inteiro.

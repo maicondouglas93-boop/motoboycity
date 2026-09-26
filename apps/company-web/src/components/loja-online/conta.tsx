@@ -1,6 +1,7 @@
 'use client';
 
 import { SignInButton, SignUpButton, UserButton, useAuth } from '@clerk/nextjs';
+import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 import { textoSobre, type Paleta } from './paleta';
 
 /**
@@ -25,10 +26,19 @@ export interface Conta {
  * logado, e pior: faz um formulário que nasce preenchido a partir da conta
  * nascer vazio, porque na primeira renderização ainda não havia conta.
  */
-export function useConta(): Conta {
+function useContaDoClerk(): Conta {
   const { userId, isLoaded } = useAuth();
   return { carregada: isLoaded, usuarioId: isLoaded ? (userId ?? null) : null };
 }
+
+/** Sem Clerk neste deploy: ninguém entrou, e não há o que esperar carregar. */
+function useSemConta(): Conta {
+  return { carregada: true, usuarioId: null };
+}
+
+// Escolhida uma vez, no carregamento: o gancho é sempre o mesmo durante a vida
+// da página, como a regra dos hooks exige.
+export const useConta: () => Conta = CONTA_DISPONIVEL ? useContaDoClerk : useSemConta;
 
 /** Atalho para quem só precisa do id e não se importa com o carregamento. */
 export function useUsuarioId(): string | null {
@@ -36,6 +46,10 @@ export function useUsuarioId(): string | null {
 }
 
 export function ControleDaConta({ paleta }: { paleta: Paleta }) {
+  return CONTA_DISPONIVEL ? <ControleDoClerk paleta={paleta} /> : null;
+}
+
+function ControleDoClerk({ paleta }: { paleta: Paleta }) {
   const { isLoaded, isSignedIn } = useAuth();
 
   // Nada enquanto carrega: um botão "Entrar" que pisca e vira avatar é pior do
@@ -81,6 +95,17 @@ export function PorteiraDeLogin({
   textoDoBotao: string;
   resumo: string;
 }) {
+  if (!CONTA_DISPONIVEL) {
+    return (
+      <div className="space-y-2 px-4 py-6">
+        <p className="text-base font-semibold">Pedidos por aqui em breve</p>
+        <p className="text-sm" style={{ color: paleta.suave }}>
+          Esta loja ainda não recebe pedidos pela página. Para pedir, fale com a loja.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3 px-4 py-6">
       <p className="text-base font-semibold">Entre para finalizar</p>
