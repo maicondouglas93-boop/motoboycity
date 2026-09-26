@@ -17,12 +17,12 @@ import {
   Printer,
   Store,
   Timer,
-  UserPlus,
   Volume2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { CadastroDaVenda } from '@/components/loja/cadastro-da-venda';
 import { mensagemDoErro } from '@/components/loja/catalogo';
 import { CHAVE_DA_CONFIGURACAO } from '@/components/loja/link-da-loja';
 import { useOperacaoDaLoja } from '@/components/loja/operacao';
@@ -31,7 +31,7 @@ import { companyStoreSettingsApi } from '@/lib/api-client';
 import { useSomLiberado } from '@/lib/avisos-do-navegador';
 import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 import { hora, momentoNaLoja, rotuloDoDia } from '@/lib/loja-horario';
-import { enderecoEmLinha, type CadastroDoCliente } from '@/lib/loja-mock';
+import { enderecoEmLinha } from '@/lib/loja-mock';
 import { session } from '@/lib/session';
 import {
   acaoParaAvancar,
@@ -64,26 +64,6 @@ import { useAgora } from '@/lib/relogio';
  * Os agendados ficam à parte até a hora de começar. Um pedido para amanhã no
  * meio da fila da noite faria a cozinha começar a coisa errada.
  */
-
-/**
- * O que a tela oferece para cada situação do cadastro. Três, e não um botão
- * só: quem já é cliente mas pediu de um endereço novo precisa que o ENDEREÇO
- * seja salvo, e não que um cliente duplicado seja criado.
- */
-const CADASTRO: Record<CadastroDoCliente, { texto: string; acao: string | null }> = {
-  novo: {
-    texto: 'Este telefone não está no seu cadastro de clientes.',
-    acao: 'Salvar cliente',
-  },
-  jaCadastrado: {
-    texto: 'Já é seu cliente, e este endereço já está salvo nele.',
-    acao: null,
-  },
-  enderecoNovo: {
-    texto: 'Já é seu cliente, mas pediu de um endereço que não está salvo.',
-    acao: 'Salvar este endereço no cliente',
-  },
-};
 
 const CORES: Record<EtapaDoPedido, string> = {
   // A loja não vê o pedido nesta etapa; a cor existe porque o tipo tem a etapa.
@@ -471,7 +451,6 @@ function CartaoDaVenda({
   const mostrarQuemLeva =
     venda.modalidade === 'ENTREGA' && (quemEntregaNaLoja === 'LOJA' || pelaLoja);
   const janela = janelaEmTexto(venda, agora);
-  const cadastro = venda.cadastro === null ? null : CADASTRO[venda.cadastro];
   const inicioAgendado = inicioDoPreparo(venda);
   const caminho = caminhoDoPedido(venda.modalidade);
   const indiceAtual = caminho.indexOf(venda.etapa);
@@ -835,7 +814,7 @@ function CartaoDaVenda({
 
             {/* O cliente do PWA vira cliente da loja aqui, com os dados que
                 ele mesmo digitou no checkout — em vez de alguém redigitar tudo
-                no cadastro depois. */}
+                no cadastro depois. Retirada não tem endereço para salvar. */}
             <div className="space-y-2 rounded-lg border p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">{venda.cliente}</span>
@@ -844,21 +823,7 @@ function CartaoDaVenda({
                   {venda.telefone}
                 </span>
               </div>
-              {cadastro && (
-                <>
-                  <p className="text-xs text-muted-foreground">{cadastro.texto}</p>
-                  {cadastro.acao ? (
-                    <Button variant="outline" size="sm" disabled>
-                      <UserPlus className="size-4" /> {cadastro.acao}
-                    </Button>
-                  ) : (
-                    <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-                      <Check className="size-3.5" aria-hidden="true" />
-                      Nada a fazer.
-                    </p>
-                  )}
-                </>
-              )}
+              {venda.entrega && <CadastroDaVenda venda={venda} />}
             </div>
 
             {/* O que o cliente escreveu vai para quem prepara, e por isso não

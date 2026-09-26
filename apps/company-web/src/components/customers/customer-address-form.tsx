@@ -18,7 +18,10 @@ import { formatCustomerAddress } from '@/lib/company-customer';
 interface Props {
   token: string;
   customerId: string;
+  /** O endereço salvo que está sendo editado. */
   initial?: CompanyCustomerSavedAddress;
+  /** Sem `initial`: um endereço novo, já preenchido (o da venda da loja online). */
+  prefill?: { label: string; address: CompanyCustomerAddress };
   onSaved: (address: CompanyCustomerSavedAddress) => void;
   onCancel: () => void;
 }
@@ -37,14 +40,22 @@ function addressFromGoogle(address: SelectedGoogleAddress): CompanyCustomerAddre
   };
 }
 
-export function CustomerAddressForm({ token, customerId, initial, onSaved, onCancel }: Props) {
+export function CustomerAddressForm({
+  token,
+  customerId,
+  initial,
+  prefill,
+  onSaved,
+  onCancel,
+}: Props) {
   const queryClient = useQueryClient();
-  const [label, setLabel] = useState(initial?.label ?? 'Casa');
-  const [addressSearch, setAddressSearch] = useState(initial ? formatCustomerAddress(initial) : '');
-  const [address, setAddress] = useState<CompanyCustomerAddress | null>(initial ?? null);
-  const [number, setNumber] = useState(initial?.number ?? '');
-  const [complement, setComplement] = useState(initial?.complement ?? '');
-  const [referenceNote, setReferenceNote] = useState(initial?.referenceNote ?? '');
+  const start = initial ?? prefill?.address;
+  const [label, setLabel] = useState(initial?.label ?? prefill?.label ?? 'Casa');
+  const [addressSearch, setAddressSearch] = useState(start ? formatCustomerAddress(start) : '');
+  const [address, setAddress] = useState<CompanyCustomerAddress | null>(start ?? null);
+  const [number, setNumber] = useState(start?.number ?? '');
+  const [complement, setComplement] = useState(start?.complement ?? '');
+  const [referenceNote, setReferenceNote] = useState(start?.referenceNote ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const mutation = useMutation({

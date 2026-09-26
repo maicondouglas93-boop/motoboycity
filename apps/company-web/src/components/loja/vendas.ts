@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CorridaDoPedido, PagamentoOnlineDoPedido, PedidoDaLoja } from '@motoboycity/types';
 import { companyStoreOrdersApi } from '@/lib/api-client';
-import type { CadastroDoCliente, VendaDaLoja } from '@/lib/loja-mock';
+import type { VendaDaLoja } from '@/lib/loja-mock';
 import { rotuloDoPagamento } from '@/lib/loja-pagamentos';
 import { session } from '@/lib/session';
 
@@ -19,12 +19,11 @@ export const INTERVALO_DAS_VENDAS_MS = 10_000;
 
 /**
  * A venda no formato que a tela já mostra, com o id do pedido para as ações.
- * `cadastro: null`: o cadastro do cliente ainda não é conferido no servidor —
- * a tela não afirma o que não sabe.
+ * O cadastro do cliente não vem com ela: a tela o confere pelo telefone quando
+ * a venda é aberta (`CadastroDaVenda`).
  */
 export type VendaNoPainel = Omit<VendaDaLoja, 'cadastro'> & {
   id: string;
-  cadastro: CadastroDoCliente | null;
   /** A corrida do MOTOboyCity que leva o pedido, quando há. */
   corrida: CorridaDoPedido | null;
   /** O que a loja precisa resolver na corrida. */
@@ -58,7 +57,6 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
     pagamento: rotuloDoPagamento(pedido.pagamento),
     trocoPara: pedido.trocoPara,
     entrega: pedido.entrega,
-    cadastro: null,
     observacao: pedido.observacao,
     contaDoCliente: null,
     corrida: pedido.corrida,

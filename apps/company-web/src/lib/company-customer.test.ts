@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCompletedDeliveryCustomerPrefill,
   buildCustomerRegistrationCandidates,
+  buildStoreOrderCustomerPrefill,
   type CompletedDeliveryCustomerSource,
+  customerHasAddress,
   customerToDeliveryFields,
   formatCustomerCpf,
+  type StoreOrderCustomerSource,
+  unusedAddressLabel,
 } from '@/lib/company-customer';
 
 const customer: CompanyCustomer = {
@@ -194,5 +198,76 @@ describe('company customer delivery integration', () => {
     ],
   ])('nao oferece cadastro para %s', (_label, override) => {
     expect(buildCompletedDeliveryCustomerPrefill({ ...completedDelivery, ...override })).toBeNull();
+  });
+});
+
+describe('cliente da venda da loja online', () => {
+  const venda = {
+    cliente: '  Ana Souza ',
+    telefone: '5533988776655',
+    entrega: {
+      rua: 'Rua São José',
+      numero: '45',
+      complemento: 'fundos',
+      bairro: 'Centro',
+      cidade: 'Lajinha',
+      estado: 'mg',
+      cep: '36930-000',
+      referencia: 'Portão azul',
+    },
+  } satisfies StoreOrderCustomerSource;
+  const coleta = { zip: '36930111', state: 'MG' };
+
+  it('monta o cadastro com o que o cliente digitou, e o bairro na referência', () => {
+    expect(buildStoreOrderCustomerPrefill(venda, coleta)).toEqual({
+      name: 'Ana Souza',
+      phone: '33988776655',
+      addressLabel: 'Centro',
+      address: {
+        street: 'Rua São José',
+        number: '45',
+        complement: 'fundos',
+        city: 'Lajinha',
+        state: 'MG',
+        zip: '36930000',
+        lat: null,
+        lng: null,
+        referenceNote: 'Bairro Centro · Portão azul',
+      },
+    });
+  });
+
+  it('sem CEP ou UF no checkout, usa os da loja', () => {
+    const prefill = buildStoreOrderCustomerPrefill(
+      { ...venda, entrega: { ...venda.entrega, cep: '', estado: '', referencia: null } },
+      coleta,
+    );
+    expect(prefill?.address).toMatchObject({
+      zip: '36930111',
+      state: 'MG',
+      referenceNote: 'Bairro Centro',
+    });
+  });
+
+  it.each([
+    ['retirada, sem endereço', { entrega: null }],
+    ['telefone inválido', { telefone: '123' }],
+    ['nome curto demais', { cliente: 'A' }],
+  ])('não oferece cadastro para %s', (_label, override) => {
+    expect(buildStoreOrderCustomerPrefill({ ...venda, ...override }, coleta)).toBeNull();
+  });
+
+  it('reconhece o endereço já salvo sem olhar acento, caixa e complemento', () => {
+    expect(customerHasAddress(customer, { street: 'RUA UM', number: '10', city: 'lajinha' })).toBe(
+      true,
+    );
+    expect(customerHasAddress(customer, { street: 'Rua Um', number: '12', city: 'Lajinha' })).toBe(
+      false,
+    );
+  });
+
+  it('escolhe um nome de endereço que o cliente ainda não usa', () => {
+    expect(unusedAddressLabel(customer, 'Centro')).toBe('Centro');
+    expect(unusedAddressLabel(customer, 'casa')).toBe('casa 2');
   });
 });

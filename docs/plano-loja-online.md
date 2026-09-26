@@ -90,8 +90,10 @@ Configurações, o cliente paga pelo Pix na página, e o pedido só chega à loj
 depois de pago; cancelado depois de pago, volta inteiro. Regras em
 `business-rules.md`.
 
-Não existe ainda: o cartão online (crédito e débito, pela página do Asaas) e o
-"Salvar cliente".
+**O "Salvar cliente" existe** (2026-09-26, item 1): na venda, a loja salva o
+comprador da página no cadastro de clientes, ou só o endereço novo dele.
+
+Não existe ainda: o cartão online (crédito e débito, pela página do Asaas).
 
 ## Decisões já tomadas
 
@@ -167,10 +169,13 @@ Não existe ainda: o cartão online (crédito e débito, pela página do Asaas) 
 
 ### 1. Salvar o cliente com os dados do pedido do PWA
 
-> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
-> O checkout já coleta telefone e endereço estruturado, e cada pedido os grava
-> em `store_orders`; neste aparelho, o endereço fica guardado para o próximo
-> pedido.
+> **Feito em 2026-09-26**, só no painel, com as rotas do cadastro de clientes
+> que já existiam (`/company/customers/match`, `POST /company/customers` e
+> `POST /company/customers/:id/addresses`): nenhum contrato mudou. Em Vendas →
+> Detalhes, `CadastroDaVenda` confere o telefone e oferece a ação da situação,
+> num formulário já preenchido com o pedido. "Mesmo endereço" é mesma rua,
+> número e cidade, sem olhar acento, caixa e complemento. O checkout avisa que
+> nome, telefone e endereço vão para a loja.
 
 Na venda, oferecer o cadastro do cliente no registro que o painel já usa, para
 que ele deixe de ser comprador avulso e possa receber entrega pelo fluxo normal.
@@ -207,7 +212,8 @@ checkout de que os dados vão para a loja.
 
 > **Desenhado nas telas de demonstração em 2026-09-23, refeito com as etapas
 > do pedido em 2026-09-25, e no servidor desde 2026-09-26**, em Tipos de pedido
-> → Recebimento. Falta o estorno, que depende do Asaas.
+> → Recebimento. O estorno do pedido pago online existe desde 2026-09-26, com o
+> Pix.
 
 Automático (padrão): o pedido nasce aceito. Manual: fica em "Novo" até alguém
 aceitar — e dá para mudar o tempo de preparo daquele pedido na hora de aceitar.
@@ -337,9 +343,11 @@ chega pelo Web Push, da loja e do cliente, no aparelho que o ligou (desde
 Ainda sem push: o lembrete de "hora de preparar" o agendado e o "loja
 fechando", que só o painel aberto dá.
 
-**Contrato a alterar na integração:** `CompanyCustomerAddress` não tem bairro, e
-a taxa por bairro obriga o checkout a coletá-lo. Mexe em `packages/types`, na
-validação e no cadastro de clientes do painel.
+**O bairro fora do cadastro** (2026-09-26): `CompanyCustomerAddress` e o
+endereço da entrega não têm bairro. Em vez de mudar os dois contratos, o bairro
+do pedido vai na referência ("Bairro Centro · portão azul") — na corrida que
+nasce do pedido e no cliente salvo da venda. Sem CEP ou UF no checkout, valem os
+da loja; sem os dois, o formulário pede para escolher o endereço no Google.
 
 ## Ordem sugerida
 
@@ -348,15 +356,15 @@ validação e no cadastro de clientes do painel.
 2. ~~Endpoints e contratos em `packages/*`, com os schemas Zod~~ — do catálogo
    e da operação (horário, status, tipos de pedido, avisos), feito em
    2026-09-25 — e da identidade, do pagamento e dos bairros, também em
-   2026-09-25. Falta a conta Asaas da loja.
+   2026-09-25 — ~~e a conta Asaas da loja~~, em 2026-09-26.
 3. Ligar as telas do painel que já existem — ~~Produtos, Organizar, Horários,
    Tipos de pedido, Notificações, status e Configurações~~, feito em
    2026-09-25 — ~~e Vendas~~, em 2026-09-26. Falta **apagar** a loja de
    exemplo, com o `loja-mock.ts` e o `loja-demo.ts`.
 4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
-   ~~carrinho e checkout (com telefone e endereço estruturado, por causa do item 1)~~, feitos em 2026-09-26. Pagamento online espera o Asaas.
+   ~~carrinho e checkout (com telefone e endereço estruturado, por causa do item 1)~~, feitos em 2026-09-26. O Pix online entrou em 2026-09-26; o cartão online, não.
 5. ~~Pedido da loja virando entrega, com o aceite do item 2 — só para a loja
    que entrega pelo MOTOboyCity (decisão 15)~~, feito em 2026-09-26, ~~e o Web
    Push de servidor para os avisos da loja e do cliente~~, também.
-6. Salvar cliente a partir da venda (item 1).
+6. ~~Salvar cliente a partir da venda (item 1)~~, feito em 2026-09-26.
 7. ~~Pôr o item "Loja" de volta no `NAV_ITEMS`~~, feito em 2026-09-26.

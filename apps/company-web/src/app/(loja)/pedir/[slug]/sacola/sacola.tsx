@@ -588,6 +588,12 @@ function Conteudo({
                         className="col-span-2"
                       />
                     </div>
+                    {/* A loja pode guardar o cliente no cadastro dela (decisão 19
+                        do plano): quem compra fica sabendo antes de mandar. */}
+                    <p className="text-xs" style={{ color: paleta.suave }}>
+                      {retirar ? 'Nome e telefone vão' : 'Nome, telefone e endereço vão'} para a
+                      loja, que pode guardá-los no cadastro de clientes dela.
+                    </p>
                   </div>
                 </section>
 

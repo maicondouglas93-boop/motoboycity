@@ -16297,3 +16297,61 @@ enviado para `main` em 26/09; CI verde; a migration
 `/company/store/asaas-account` responde 401; Vercel do company e do admin em
 success no status do commit. O Pix fica desligado até
 `STORE_ASAAS_ENCRYPTION_KEY` entrar no Render.
+
+## 2026-09-26 — "Salvar cliente" a partir da venda da loja online
+
+**Pedido do usuário:** "segue para o próximo item" — o item 1 do plano da loja
+online, o último que faltava além do cartão online. Decisão 19 (2026-09-25): o
+cliente só vira cadastro se a loja salvar, com o aviso no checkout.
+
+**Desenho:** só no painel, com as rotas do cadastro de clientes que já existiam
+(`GET /company/customers/match`, `POST /company/customers` e
+`POST /company/customers/:id/addresses`) — nenhuma rota, contrato ou migration
+nova. Em Vendas → Detalhes, `CadastroDaVenda` confere o telefone quando a venda
+é aberta (e não a fila inteira de uma vez) e mostra uma de três situações:
+telefone fora do cadastro ("Salvar cliente"); já cliente com este endereço
+(nada a fazer, com o link para o cadastro); já cliente com outro endereço
+("Salvar este endereço no cliente", e não um cliente duplicado). As duas ações
+abrem os formulários do cadastro já preenchidos com o pedido, para a loja
+conferir — a rua e o número vieram escritos pelo cliente.
+
+- "Mesmo endereço": mesma rua, número e cidade, sem olhar acento, caixa,
+  pontuação e complemento.
+- O bairro não tem campo no cadastro (nem na entrega): vai na referência,
+  como na corrida que nasce do pedido. Sem CEP ou UF no checkout, valem os da
+  loja (a mesma regra da corrida); sem os dois, o diálogo pede para escolher o
+  endereço no Google, que é de onde o formulário tira o CEP.
+- O nome do endereço é o bairro; repetido no cliente, ganha número ("Centro 2").
+- Retirada não oferece cadastro: o cadastro exige endereço.
+- `CustomerAddressForm` aceita `prefill` (endereço novo já preenchido); antes,
+  vir preenchido só servia para editar.
+- A venda do painel perdeu o campo `cadastro`, que vinha sempre nulo da API; o
+  desenho estático da demonstração saiu da tela.
+- O checkout diz, em "Seus dados", que nome, telefone e endereço (na
+  retirada, nome e telefone) vão para a loja, que pode guardá-los no cadastro
+  de clientes dela.
+
+**Arquivos:** `apps/company-web/src/components/loja/cadastro-da-venda.tsx` e
+teste (novos), `lib/company-customer.ts` e teste
+(`buildStoreOrderCustomerPrefill`, `customerHasAddress`, `unusedAddressLabel`),
+`components/customers/customer-address-form.tsx`, `components/loja/vendas.ts`,
+`app/(app)/loja/vendas/page.tsx`, `app/(loja)/pedir/[slug]/sacola/sacola.tsx`;
+`docs/plano-loja-online.md`, `docs/agent-handoff.md` (com o registro da
+publicação de `bd35d87`).
+
+**Como foi validado:** vitest do `company-web` 56 arquivos e 391 testes antes
+do último ajuste (o aviso de "sem CEP"), e o arquivo do componente, com 5
+testes, depois dele; `tsc --noEmit` e eslint sem erro; build do `company-web`
+sem erro. No navegador, com a API local e a empresa de teste do banco local,
+por uma rota temporária (apagada) que mostra a ficha com uma venda de exemplo:
+telefone fora do cadastro, formulário preenchido (nome, telefone, "Centro",
+"Bairro Centro · Portão azul"), cliente salvo e a ficha passando a "já é seu
+cliente"; depois, outro endereço do mesmo telefone, salvo como "Centro 2", e a
+página do cliente com os dois endereços. Achado no caminho: sem CEP no pedido e
+sem endereço da loja, o formulário só dizia "CEP inválido" — daí o aviso novo.
+**Não visto na tela**: o aviso do checkout (a loja de demonstração não recebe
+pedidos, e nenhum teste monta a sacola).
+
+**Publicação de `bd35d87`** (a oferta repete no conflito de serialização):
+enviado para `main` em 26/09; CI verde; "Deploy live" no Render às 14:40, lido
+nos eventos do serviço.

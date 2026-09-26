@@ -4,6 +4,7 @@ import type {
   CompanyCustomerSavedAddress,
   DeliveryAddressItem,
   DeliveryStatus,
+  EnderecoDaEntrega,
 } from '@motoboycity/types';
 import { companyCustomerPhoneSchema } from '@motoboycity/validation';
 import type { SelectedGoogleAddress } from '@/components/operations/google-address-autocomplete';
@@ -185,4 +186,85 @@ export function buildCompletedDeliveryCustomerPrefill(
       referenceNote: dropoff.referenceNote?.trim() || null,
     },
   };
+}
+
+/** O que a venda da loja online traz do cliente: o que ele digitou no checkout. */
+export interface StoreOrderCustomerSource {
+  cliente: string;
+  telefone: string;
+  entrega: EnderecoDaEntrega | null;
+}
+
+/**
+ * O cliente da loja online no formato do cadastro, com os dados do pedido.
+ *
+ * O cadastro não tem campo de bairro (a entrega também não): ele vai na
+ * referência, como na corrida que nasce do pedido. Sem CEP ou UF no checkout,
+ * valem os da loja — o cliente está na cidade dela, a mesma regra da corrida.
+ * Retirada não tem endereço, e o cadastro exige um: `null`.
+ */
+export function buildStoreOrderCustomerPrefill(
+  venda: StoreOrderCustomerSource,
+  coleta: { zip: string; state: string } | null,
+): CustomerRegistrationPrefill | null {
+  const entrega = venda.entrega;
+  const name = venda.cliente.trim();
+  const phone = companyCustomerPhoneSchema.safeParse(venda.telefone);
+  if (!entrega || name.length < 2 || !phone.success) return null;
+
+  const bairro = entrega.bairro.trim();
+  const referencia = [bairro ? `Bairro ${bairro}` : '', entrega.referencia?.trim() ?? '']
+    .filter(Boolean)
+    .join(' · ');
+  return {
+    name,
+    phone: phone.data,
+    addressLabel: bairro.slice(0, 40) || 'Principal',
+    address: {
+      street: entrega.rua.trim(),
+      number: entrega.numero.trim(),
+      complement: entrega.complemento?.trim() || null,
+      city: entrega.cidade.trim(),
+      state: (entrega.estado.trim() || coleta?.state || '').toUpperCase(),
+      zip: entrega.cep.replace(/\D/g, '') || coleta?.zip || '',
+      lat: null,
+      lng: null,
+      referenceNote: referencia || null,
+    },
+  };
+}
+
+function comparable(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * O endereço já está salvo no cliente: mesma rua, número e cidade, sem olhar
+ * acento, caixa e pontuação. O complemento fica de fora de propósito — "casa"
+ * digitado no checkout não faz do endereço salvo sem complemento um outro lugar.
+ */
+export function customerHasAddress(
+  customer: CompanyCustomer,
+  address: Pick<CompanyCustomerAddress, 'street' | 'number' | 'city'>,
+): boolean {
+  const key = (item: Pick<CompanyCustomerAddress, 'street' | 'number' | 'city'>) =>
+    [item.street, item.number, item.city].map(comparable).join('|');
+  const target = key(address);
+  return [customer.address, ...customer.addresses].some((item) => key(item) === target);
+}
+
+/** Um nome de endereço que o cliente ainda não usa: o servidor recusa repetido. */
+export function unusedAddressLabel(customer: CompanyCustomer, wanted: string): string {
+  const used = new Set(customer.addresses.map((address) => comparable(address.label)));
+  const base = wanted.trim().slice(0, 36) || 'Endereço';
+  if (!used.has(comparable(base))) return base;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${base} ${suffix}`;
+    if (!used.has(comparable(candidate))) return candidate;
+  }
 }
