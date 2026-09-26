@@ -79,8 +79,13 @@ Asaas existir.
 fica pronto, liberada no "Pronto", cancelada junto com o pedido; o pedido
 acompanha a corrida até "Entregue". Regras em `business-rules.md`.
 
+**Os avisos chegam com a página fechada** (2026-09-26, migration
+`20260926200000_loja_avisos_push`): Web Push para o painel da loja e para o
+cliente, ligado aparelho a aparelho, e o prazo do aceite vencendo sozinho em
+até um minuto. Precisa das chaves VAPID no servidor.
+
 Não existe ainda: a conta Asaas da loja (e com ela o pagamento online e o
-estorno), o Web Push e o "Salvar cliente".
+estorno) e o "Salvar cliente".
 
 ## Decisões já tomadas
 
@@ -205,8 +210,7 @@ cancelamento vale nos dois modos: até o pedido ficar pronto, na entrega.
 minutos. Não aceito no prazo, o pedido é cancelado pelo sistema e o cliente é
 avisado. Para agora, o prazo conta do recebimento; agendado, vai até a hora de
 a cozinha começar. Regra em `prazoDoAceite` (`store-order.rules.ts`). No
-servidor, o pedido vencido cai na leitura seguinte da fila ou dos pedidos do
-cliente, sem tarefa agendada; o aviso ao cliente com a página fechada espera o
+servidor, a varredura de minuto derruba o vencido, e o cliente é avisado pelo
 Web Push.
 
 **Estorno** (decisão 18): pedido pago online e recusado, cancelado ou vencido
@@ -317,11 +321,11 @@ convite para instalar aparece depois do pedido feito — botão no Android, pass
 no iPhone —, e "agora não" o faz descansar trinta dias. Não verificado ainda: o
 comportamento sem internet e a instalação em aparelho real.
 
-Os avisos saem do navegador, com a página aberta em alguma aba: som e
-notificação para a loja, notificação para o cliente. Falta o Web Push de
-servidor, que avisa com o navegador fechado — da loja e do cliente (o que existe
-é FCM para o app Android do motoboy). Enquanto isso, Vendas consulta a fila a
-cada 10 s e "Meus pedidos", a cada 20 s.
+Com a página aberta, o painel toca e notifica sozinho; com ela fechada, o aviso
+chega pelo Web Push, da loja e do cliente, no aparelho que o ligou (desde
+2026-09-26). Vendas consulta a fila a cada 10 s e "Meus pedidos", a cada 20 s.
+Ainda sem push: o lembrete de "hora de preparar" o agendado e o "loja
+fechando", que só o painel aberto dá.
 
 **Contrato a alterar na integração:** `CompanyCustomerAddress` não tem bairro, e
 a taxa por bairro obriga o checkout a coletá-lo. Mexe em `packages/types`, na
@@ -342,7 +346,7 @@ validação e no cadastro de clientes do painel.
 4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
    ~~carrinho e checkout (com telefone e endereço estruturado, por causa do item 1)~~, feitos em 2026-09-26. Pagamento online espera o Asaas.
 5. ~~Pedido da loja virando entrega, com o aceite do item 2 — só para a loja
-   que entrega pelo MOTOboyCity (decisão 15)~~, feito em 2026-09-26. Falta o
-   Web Push de servidor para os avisos da loja e do cliente.
+   que entrega pelo MOTOboyCity (decisão 15)~~, feito em 2026-09-26, ~~e o Web
+   Push de servidor para os avisos da loja e do cliente~~, também.
 6. Salvar cliente a partir da venda (item 1).
 7. ~~Pôr o item "Loja" de volta no `NAV_ITEMS`~~, feito em 2026-09-26.

@@ -1,15 +1,25 @@
 import type { EventoDoCliente, EventoDoLojista } from '@motoboycity/types';
-import type { EtapaDoPedido, Modalidade } from './loja-pedido';
 
 export type { EventoDoCliente, EventoDoLojista };
+
+/*
+ * Qual evento cada etapa dispara e o texto dele moram em `@motoboycity/validation`
+ * (`store-notification.rules.ts`): o servidor manda o push com as mesmas
+ * palavras que esta tela mostra. Reexportados aqui com o caminho de sempre.
+ */
+export {
+  EVENTOS_DO_CLIENTE_OBRIGATORIOS,
+  avisoParaOCliente,
+  eventoDoCliente,
+} from '@motoboycity/validation';
 
 /**
  * Os avisos da loja online: o que o lojista recebe, o que o cliente recebe e o
  * texto de cada um.
  *
- * Só o catálogo e as palavras. Como o aviso chega — som, notificação do
- * navegador, push de servidor — é de quem o entrega (`avisos-do-navegador.ts`,
- * e na integração o servidor de push).
+ * Aqui, o catálogo das telas. Como o aviso chega — som, notificação do
+ * navegador, push de servidor — é de quem o entrega (`avisos-do-navegador.ts`
+ * no navegador; `store-order-notifications.service.ts`, na API).
  */
 
 export interface DescricaoDoEvento<T extends string> {
@@ -89,63 +99,3 @@ export const EVENTOS_DO_CLIENTE: DescricaoDoEvento<EventoDoCliente>[] = [
     detalhe: 'Sempre avisado: quem pagou online precisa saber na hora.',
   },
 ];
-
-/**
- * O cancelamento não pode ser desligado. Quem pagou por Pix e não recebe nada
- * precisa saber que o pedido não vem — descobrir pela demora é o pior jeito.
- */
-export const EVENTOS_DO_CLIENTE_OBRIGATORIOS: EventoDoCliente[] = ['CANCELADO'];
-
-/** Qual aviso a etapa dispara para o cliente, se algum. */
-export function eventoDoCliente(
-  modalidade: Modalidade,
-  etapa: EtapaDoPedido,
-): EventoDoCliente | null {
-  switch (etapa) {
-    case 'NOVO':
-      return 'RECEBIDO';
-    case 'ACEITO':
-      return 'ACEITO';
-    case 'EM_PREPARO':
-      return 'EM_PREPARO';
-    case 'PRONTO':
-      // Na entrega, "pronto" é assunto da loja com o motoboy: o próximo aviso
-      // que interessa ao cliente é a saída.
-      return modalidade === 'RETIRADA' ? 'PRONTO_PARA_RETIRAR' : null;
-    case 'SAIU_PARA_ENTREGA':
-      return 'SAIU_PARA_ENTREGA';
-    case 'ENTREGUE':
-      return 'ENTREGUE';
-    case 'CANCELADO':
-      return 'CANCELADO';
-  }
-}
-
-/** O texto que o cliente lê na notificação. */
-export function avisoParaOCliente(
-  evento: EventoDoCliente,
-  numero: number,
-  modalidade: Modalidade,
-  motivo?: string | null,
-): string {
-  switch (evento) {
-    case 'RECEBIDO':
-      return `Recebemos seu pedido #${numero}.`;
-    case 'ACEITO':
-      return `Seu pedido #${numero} foi aceito.`;
-    case 'EM_PREPARO':
-      return `Seu pedido #${numero} está sendo preparado.`;
-    case 'PRONTO_PARA_RETIRAR':
-      return `Seu pedido #${numero} está pronto. Já pode vir buscar.`;
-    case 'SAIU_PARA_ENTREGA':
-      return `Seu pedido #${numero} saiu para entrega.`;
-    case 'ENTREGUE':
-      return modalidade === 'ENTREGA'
-        ? `Seu pedido #${numero} foi entregue.`
-        : `Pedido #${numero} retirado. Obrigado!`;
-    case 'CANCELADO':
-      return motivo?.trim()
-        ? `Seu pedido #${numero} foi cancelado: ${motivo.trim()}.`
-        : `Seu pedido #${numero} foi cancelado.`;
-  }
-}

@@ -138,7 +138,12 @@ O checkout refaz no servidor tudo o que a página conferiu, com as regras de
 `store-operation.rules.ts` e o `storeCheckoutSchema`), e recusa com 409
 `STORE_ORDER_TOTAL_CHANGED` se o total não for o que o cliente viu. A etapa
 muda por atualização condicional ao `updatedAt` lido, e o NOVO que passou do
-prazo de aceite é cancelado na leitura seguinte (sem tarefa agendada). No
+prazo de aceite é cancelado pela varredura de minuto (fila BullMQ
+`store-orders`, `StoreOrdersScheduler`), que também leva o pedido à etapa que a
+corrida alcançou; a leitura faz o mesmo. Quem faz a mudança avisa, pelo Web
+Push (`StoreOrderNotificationsService` → `WebPushService`): a loja e o cliente,
+nos aparelhos inscritos em `web_push_subscriptions`, conforme as escolhas de
+Notificações. No
 `company-web`, Vendas (`components/loja/vendas.ts`) consulta a fila a cada 10 s
 e os pedidos do cliente (`components/loja-online/pedidos-do-cliente.ts`), a
 cada 20 s.

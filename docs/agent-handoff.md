@@ -177,10 +177,10 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre), enviado para `main` em 26/09/2026. CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
+| Commit publicado | `f94ff4a`, a corrida nasce do pedido da loja online, enviado para `main` em 26/09/2026: CI verde, a rota nova (`POST /company/store/orders/:id/ride`) passou de 404 a 401 no Render cerca de 3,5 min depois do push, `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes dele, no mesmo dia: `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre). CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 61 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
+| Banco | PostgreSQL gerenciado; 62 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
 | APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -600,9 +600,12 @@ estão aplicadas também no `motoboycity_dev` local. A do pedido,
 `20260926120000_loja_pedido` (tabela `store_orders`, quatro enums e a coluna
 `store_settings.acceptsOrders`), foi no push de 2026-09-26, pelo mesmo caminho;
 o rollback está no changelog. A da corrida, `20260926150000_loja_pedido_corrida`
-(`store_orders.deliveryId`, `rideAttempt` e `rideIssue`), **ainda não foi para
-produção**: está só no `motoboycity_dev` local e foi validada em banco
-descartável (aplicar, desfazer, reaplicar).
+(`store_orders.deliveryId`, `rideAttempt` e `rideIssue`), foi no push de
+2026-09-26 (`f94ff4a`), depois de validada em banco descartável (aplicar,
+desfazer, reaplicar); está também no `motoboycity_dev` local. A dos avisos,
+`20260926200000_loja_avisos_push` (tabela `web_push_subscriptions` e o enum
+`WebPushAudience`), **ainda não foi para produção**: está no `motoboycity_dev`
+local e foi validada em banco descartável.
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -691,9 +694,12 @@ Quem mexer aqui precisa saber:
   o `updatedAt` que leu (três tentativas, relendo); aceitar numa aba e cancelar
   na outra não passa as duas. Transição que a regra não permite: 409
   `STORE_ORDER_STAGE_INVALID`.
-- **O prazo do aceite vence na leitura.** Não há tarefa agendada: cada leitura
-  da fila ou dos pedidos do cliente cancela os NOVOS com `acceptDeadline`
-  vencido, como `SISTEMA`. Pedido não lido fica NOVO no banco até alguém olhar.
+- **O prazo do aceite vence em até um minuto**, mesmo sem ninguém olhar: a
+  varredura `store-orders-sweep-every-minute` (fila `store-orders`, BullMQ,
+  desde 2026-09-26) cancela os NOVOS com `acceptDeadline` vencido, como
+  `SISTEMA`, e leva o pedido à etapa que a corrida já alcançou. A leitura da
+  fila e dos pedidos do cliente continua fazendo o mesmo — a varredura só
+  garante que aconteça sem leitura, para o aviso sair na hora.
 - **O número é por loja**, o maior mais um, numa transação; dois pedidos no
   mesmo instante esbarram na chave única e o segundo tenta de novo.
 - **A corrida nasce do pedido** (2026-09-26), quando o MOTOboyCity entrega:
@@ -719,6 +725,36 @@ Quem mexer aqui precisa saber:
   troco. Decisões do usuário, 2026-09-26.
 - **Estorno e pagamento online não existem ainda**: a página só aceita
   pagamento na entrega enquanto o Asaas da loja não estiver ligado.
+
+### Avisos com a página fechada (Web Push) — 2026-09-26
+
+Módulo `apps/api/src/web-push/` (envio com a biblioteca `web-push`, chaves
+VAPID nas variáveis `WEB_PUSH_*`, inerte sem elas) e
+`company/store-orders/store-order-notifications.service.ts` (quem recebe o
+quê). Tabela `web_push_subscriptions` (migration
+`20260926200000_loja_avisos_push`), uma linha por aparelho: `LOJA` (o painel
+de quem ativou) ou `CLIENTE` (o uid do Firebase).
+
+- **A loja** recebe pedido novo, agendado e cancelado por outra ponta, se a
+  coluna "Notificação" de Notificações estiver ligada; **o cliente**, as
+  etapas ligadas em "Para o cliente", e sempre o cancelamento. As palavras são
+  as de `store-notification.rules.ts` (validação), as mesmas das telas.
+- **Os workers.** O do painel é `public/loja/avisos-sw.js`, só de push (sem
+  `fetch`), com escopo `/loja/`: não guarda nada nem controla o resto do
+  painel. O do cliente é o `loja-sw.js` de sempre, que ganhou `push` e
+  `notificationclick` — e por isso só existe em produção. Com a página
+  visível, o worker não mostra o aviso: o painel aberto toca e notifica
+  sozinho, com a mesma etiqueta (`venda-<número>`).
+- **O endereço de push é conferido** (`web-push.schema.ts`): só HTTPS e só os
+  serviços dos navegadores (Google, Mozilla, Apple, Windows). O servidor faz
+  POST nele; aceitar qualquer um abriria SSRF.
+- O aparelho que o serviço de push dá como sumido (404/410) sai da tabela no
+  envio. Ativar é por aparelho: o cartão "Avisos com o painel fechado", em
+  Notificações, e "Avisar quando o pedido andar", em Meus pedidos.
+- **Não exercitado de verdade**: a entrega pelo Google/Mozilla (o ambiente
+  local não tem as chaves). O E2E cobre inscrição, decisão e varredura com o
+  envio simulado, e uma checagem sem rede confirmou que a biblioteca monta a
+  requisição assinada e cifrada com as opções do serviço.
 
 ### Login do cliente da loja: Firebase, só com Google, e por que ele não toca o painel
 
@@ -813,7 +849,14 @@ registradas no `changelog.md` de 2026-09-23.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 5. **Rotação dos segredos** registrada no changelog da integração aiqfome.
-6. **Ligar o login do cliente da loja (Firebase).** No console do projeto
+6. **Ligar os avisos com a página fechada (Web Push).** Gerar o par de chaves
+   uma vez (`npx web-push generate-vapid-keys`, em qualquer máquina) e pôr no
+   Render as três variáveis `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` e
+   `WEB_PUSH_SUBJECT` (`mailto:` de um contato). Nada no Vercel: o painel lê a
+   chave pública da API. Sem elas, o painel diz "ainda não foram ligados no
+   servidor", e a loja segue avisando só com a página aberta. Trocar o par
+   depois desliga todas as inscrições.
+7. **Ligar o login do cliente da loja (Firebase).** No console do projeto
    do push: Authentication → Sign-in method → ativar **Google**; Settings →
    Authorized domains → incluir `motoboycity-company-web.vercel.app`;
    Configurações do projeto → Seus apps → cadastrar um app **Web** e copiar
@@ -822,7 +865,7 @@ registradas no `changelog.md` de 2026-09-23.
    deploy novo. No Vercel, apagar as variáveis do Clerk, que não são mais lidas.
    O lado da API já está pronto: o Render tem o `FIREBASE_PROJECT_ID` (a rota
    do cliente respondeu 401, e não 503, em 26/09).
-7. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+8. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

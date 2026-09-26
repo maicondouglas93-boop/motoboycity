@@ -1,10 +1,25 @@
-import { Body, Controller, Get, Header, Param, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import type { PedidoDaLoja } from '@motoboycity/types';
 import {
   storeOrderCancelSchema,
   storeOrderStageSchema,
+  webPushSubscriptionSchema,
+  webPushUnsubscribeSchema,
   type StoreOrderCancelPayload,
   type StoreOrderStagePayload,
+  type WebPushSubscriptionPayload,
+  type WebPushUnsubscribePayload,
 } from '@motoboycity/validation';
 import type { User } from '@prisma/client';
 import { CompanyOnlyGuard } from '../../auth/company-only.guard';
@@ -23,6 +38,25 @@ export class StoreOrdersController {
   @Header('Cache-Control', 'no-store')
   vendas(@CurrentUser() user: User): Promise<PedidoDaLoja[]> {
     return this.storeOrdersService.vendas(user);
+  }
+
+  /** O painel deste aparelho passa a receber os avisos da loja com ele fechado. */
+  @Put('push-subscription')
+  @HttpCode(204)
+  async inscrever(
+    @CurrentUser() user: User,
+    @Body(new ZodValidationPipe(webPushSubscriptionSchema)) inscricao: WebPushSubscriptionPayload,
+  ): Promise<void> {
+    await this.storeOrdersService.inscreverAvisosDaLoja(user, inscricao);
+  }
+
+  @Delete('push-subscription')
+  @HttpCode(204)
+  async cancelarInscricao(
+    @CurrentUser() user: User,
+    @Body(new ZodValidationPipe(webPushUnsubscribeSchema)) { endpoint }: WebPushUnsubscribePayload,
+  ): Promise<void> {
+    await this.storeOrdersService.cancelarAvisosDaLoja(user, endpoint);
   }
 
   @Put(':id/stage')

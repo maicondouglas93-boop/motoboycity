@@ -6,6 +6,7 @@ import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
+import { StoreOrderNotificationsService } from './store-order-notifications.service';
 import { StoreOrdersService } from './store-orders.service';
 
 /**
@@ -107,6 +108,7 @@ describe('StoreOrdersService — Vendas', () => {
     releaseScheduled: jest.Mock;
     cancelFromStoreOrder: jest.Mock;
   };
+  let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
 
   const comCorrida = () => ({ ...banco.pedido, delivery: banco.corrida });
 
@@ -154,6 +156,8 @@ describe('StoreOrdersService — Vendas', () => {
       }),
     };
 
+    avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StoreOrdersService,
@@ -167,6 +171,7 @@ describe('StoreOrdersService — Vendas', () => {
           useValue: { tipoDeServicoDaCorrida: jest.fn().mockResolvedValue(TIPO_DE_SERVICO) },
         },
         { provide: DeliveriesService, useValue: entregas },
+        { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
     service = module.get(StoreOrdersService);
@@ -391,6 +396,28 @@ describe('StoreOrdersService — Vendas', () => {
     const comALoja = await service.entregarComALoja(membro, 'pedido-1');
     expect(comALoja.entregaPor).toBe('LOJA');
     expect(comALoja.avisoDaCorrida).toBeNull();
+  });
+
+  it('quem muda a etapa avisa, com o antes e o depois', async () => {
+    await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
+    const [empresa, antes, depois] = avisos.etapaMudou.mock.calls[0]!;
+    expect(empresa).toBe(EMPRESA);
+    expect(antes.etapa).toBe('NOVO');
+    expect(depois.etapa).toBe('ACEITO');
+  });
+
+  it('a varredura de minuto cai o prazo vencido e acompanha a corrida, sem ninguém olhar', async () => {
+    jest.setSystemTime(new Date(RECEBIDO.getTime() + 11 * 60_000));
+    prisma.storeOrder.findMany
+      // As empresas com prazo vencido; os vencidos dela; as corridas que andaram.
+      .mockResolvedValueOnce([{ companyId: EMPRESA }])
+      .mockResolvedValueOnce([{ id: 'pedido-1' }])
+      .mockResolvedValueOnce([]);
+
+    await service.varrer();
+
+    expect(banco.pedido).toMatchObject({ stage: 'CANCELADO', cancelledBy: 'SISTEMA' });
+    expect(avisos.etapaMudou).toHaveBeenCalledTimes(1);
   });
 
   it('a fila cancela, pelo sistema, o pedido que passou do prazo do aceite', async () => {

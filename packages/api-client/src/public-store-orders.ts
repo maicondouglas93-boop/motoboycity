@@ -2,6 +2,7 @@ import type { PedidoDaLoja } from '@motoboycity/types';
 import type { StoreCheckoutPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
+import { semCorpoOuErro, type InscricaoDoNavegador } from './web-push';
 
 export interface PublicStoreOrdersApiConfig {
   baseUrl: string;
@@ -38,6 +39,20 @@ export function createPublicStoreOrdersApi({ baseUrl }: PublicStoreOrdersApiConf
         headers: { Authorization: `Bearer ${tokenDoCliente}` },
       });
       return parseJsonOrThrow<PedidoDaLoja[]>(response);
+    },
+
+    /** Este aparelho passa a receber os avisos dos pedidos com a página fechada. */
+    async inscreverAvisos(
+      slug: string,
+      tokenDoCliente: string,
+      inscricao: InscricaoDoNavegador,
+    ): Promise<void> {
+      const response = await apiFetch(`${base(slug)}/push-subscription`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${tokenDoCliente}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(inscricao),
+      });
+      await semCorpoOuErro(response);
     },
   };
 }

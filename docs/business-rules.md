@@ -562,6 +562,21 @@ A loja só recebe pedido pela página quando liga **Pedidos pela página** (em
 Vendas; vem desligado). Desligada — ou sem o login configurado —, a página
 mostra o cardápio como vitrine.
 
+## Loja online: avisos com a página fechada
+
+Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel
+em Notificações; o cliente em Meus pedidos, depois de pedir):
+
+- a loja recebe pedido novo, pedido agendado e pedido cancelado pelo cliente
+  ou pelo sistema, conforme a coluna "Notificação" de Notificações; o que ela
+  mesma cancela não avisa;
+- o cliente recebe as etapas que a loja deixou ligadas em "Para o cliente", e
+  sempre o cancelamento;
+- o pedido que ninguém aceitou no prazo cai sozinho em até um minuto, e os
+  dois lados são avisados;
+- com a página aberta e visível, o aviso não aparece por cima: a página já
+  mostra a mudança.
+
 ## Arquitetura de sessão/token
 
 Revisitada em 2026-08-09 e mantida como está, deliberadamente: JWT em

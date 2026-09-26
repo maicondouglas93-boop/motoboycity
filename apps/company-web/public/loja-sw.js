@@ -1,15 +1,16 @@
 /*
  * Service worker da loja do cliente (/pedir/<slug>).
  *
- * Faz duas coisas, e só duas:
+ * Faz três coisas, e só três:
  *
  * - guarda os arquivos do Next que têm hash no nome, que nunca mudam, para a
  *   loja abrir rápido na segunda visita;
  * - guarda a última cópia de cada página DESTA loja, para quem perde a conexão
  *   no meio do caminho ainda ver o cardápio — e, sem cópia, ver um aviso claro
- *   em vez da tela de erro do navegador.
+ *   em vez da tela de erro do navegador;
+ * - mostra os avisos do pedido que chegam pelo Web Push, com a página fechada.
  *
- * Todo o resto passa direto, como se ele não existisse: login do Clerk,
+ * Todo o resto passa direto, como se ele não existisse: login do Google,
  * pagamento do Asaas, a API, outras lojas.
  *
  * ESCOPO. Este arquivo mora na raiz do site porque é servido pelo mesmo app que
@@ -149,3 +150,62 @@ function paginaSemConexao() {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
 }
+
+/*
+ * Avisos do pedido (Web Push). O servidor manda { titulo, corpo, url, etiqueta }.
+ * Com a página desta loja visível, o aviso não aparece: "Meus pedidos" já mostra
+ * a mudança, e a notificação seria o mesmo recado duas vezes.
+ */
+function lerAviso(evento) {
+  try {
+    const aviso = evento.data ? evento.data.json() : null;
+    return aviso && typeof aviso.titulo === 'string' ? aviso : null;
+  } catch {
+    return null;
+  }
+}
+
+self.addEventListener('push', (evento) => {
+  if (!ESCOPO_VALIDO) return;
+  const aviso = lerAviso(evento);
+  if (!aviso) return;
+  evento.waitUntil(
+    (async () => {
+      const janelas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const vendo = janelas.some(
+        (janela) =>
+          janela.visibilityState === 'visible' && eDestaLoja(new URL(janela.url).pathname),
+      );
+      if (vendo) return;
+      await self.registration.showNotification(aviso.titulo, {
+        body: aviso.corpo,
+        tag: aviso.etiqueta,
+        data: { url: aviso.url },
+      });
+    })(),
+  );
+});
+
+self.addEventListener('notificationclick', (evento) => {
+  evento.notification.close();
+  const destino = new URL(
+    (evento.notification.data && evento.notification.data.url) || escopo,
+    self.location.origin,
+  ).href;
+  evento.waitUntil(
+    (async () => {
+      const janelas = await self.clients.matchAll({ type: 'window' });
+      const aberta =
+        janelas.find((janela) => janela.url === destino) ||
+        janelas.find((janela) => eDestaLoja(new URL(janela.url).pathname));
+      if (aberta) {
+        await aberta.focus();
+        if (aberta.url !== destino && 'navigate' in aberta) {
+          await aberta.navigate(destino).catch(() => undefined);
+        }
+        return;
+      }
+      await self.clients.openWindow(destino);
+    })(),
+  );
+});

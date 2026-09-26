@@ -20,6 +20,7 @@ import {
   type EventoDoLojista,
 } from '@/lib/loja-avisos';
 import { mensagemDoErro } from '@/components/loja/catalogo';
+import { AvisosNoAparelho } from '@/components/loja/avisos-no-aparelho';
 import { mesmoConteudo, useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
 import { companyStoreOperationApi } from '@/lib/api-client';
 import type { OperacaoDaLoja } from '@/lib/loja-operacao';
@@ -28,11 +29,11 @@ import { useAgora } from '@/lib/relogio';
 /**
  * Os avisos: o que chega para a loja, e o que chega para o cliente.
  *
- * Diz na tela o que já funciona e o que não. Hoje o aviso sai do navegador,
- * com o painel (ou a página da loja) aberto em alguma aba. Com o navegador
- * fechado, só o push de servidor alcança o celular — e ele ainda não existe
- * neste sistema. Um botão que promete o que não faz ensina a não confiar nos
- * outros.
+ * Diz na tela o que já funciona e o que não. Com o painel aberto em alguma aba,
+ * o próprio painel toca e notifica. Com ele fechado, o aviso chega pelo Web
+ * Push, no aparelho que ligou "Avisar neste aparelho" — e só se o servidor
+ * tiver as chaves; sem elas, o cartão diz isso, em vez de oferecer um botão que
+ * não faz nada.
  */
 
 type Notificacoes = OperacaoDaLoja['notificacoes'];
@@ -56,8 +57,8 @@ export default function LojaNotificacoesPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          As escolhas são salvas no sistema. Os avisos em si ainda funcionam só entre o painel e a
-          página da loja abertos no mesmo navegador — o envio pelo servidor vem com o pedido.
+          As escolhas são salvas no sistema e valem para o painel aberto e para os avisos com a
+          página fechada, nos aparelhos em que eles forem ligados.
         </CardContent>
       </Card>
 
@@ -256,10 +257,9 @@ function Formulario({
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              Por enquanto os avisos chegam com o painel aberto em alguma aba, mesmo em segundo
-              plano. Com o navegador fechado, só o push de servidor alcança o celular — e ele ainda
-              não existe. O som só toca depois do primeiro clique na página: é regra dos
-              navegadores.
+              Com o painel aberto em alguma aba, mesmo em segundo plano, ele avisa sozinho. Para
+              avisar com ele fechado, ligue o aparelho no cartão abaixo. O som só toca depois do
+              primeiro clique na página: é regra dos navegadores.
             </p>
           </div>
 
@@ -275,6 +275,8 @@ function Formulario({
           )}
         </CardContent>
       </Card>
+
+      <AvisosNoAparelho />
 
       <Card>
         <CardHeader>
@@ -322,7 +324,8 @@ function Formulario({
           })}
 
           <p className="text-xs text-muted-foreground">
-            Por enquanto, só com a página da loja aberta no celular do cliente, como no painel.
+            Com a página fechada, chega para o cliente que tocou em &quot;Avisar quando o pedido
+            andar&quot;, em Meus pedidos, depois de pedir.
           </p>
         </CardContent>
       </Card>

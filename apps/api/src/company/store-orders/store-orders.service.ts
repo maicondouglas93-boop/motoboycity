@@ -41,6 +41,7 @@ import {
   type CreateDeliveryPayload,
   type StoreCheckoutPayload,
   type StoreOrderStagePayload,
+  type WebPushSubscriptionPayload,
 } from '@motoboycity/validation';
 import { Prisma, type DeliveryStatus, type StoreOrder, type User } from '@prisma/client';
 import { ZodError } from 'zod';
@@ -48,6 +49,7 @@ import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
+import { StoreOrderNotificationsService } from './store-order-notifications.service';
 
 /** Reais: a conta é feita em centavos para 0,1 + 0,2 não virar 0,30000000000000004. */
 function reais(centavos: number): number {
@@ -359,6 +361,7 @@ export class StoreOrdersService {
     private readonly catalogo: StoreCatalogService,
     private readonly operacao: StoreOperationService,
     private readonly entregas: DeliveriesService,
+    private readonly avisos: StoreOrderNotificationsService,
   ) {}
 
   async checkout(
@@ -495,7 +498,9 @@ export class StoreOrdersService {
     const gravado = await this.gravarComNumero(companyId, dados);
     // Aceite automático: o pedido nasce aceito, e a corrida nasce com ele.
     if (gravado.stage === 'ACEITO') await this.chamarCorrida(companyId, gravado.id);
-    return paraPedido(gravado);
+    const feito = paraPedido(gravado);
+    await this.avisos.pedidoNovo(companyId, feito);
+    return feito;
   }
 
   /** Os pedidos deste cliente nesta loja, do mais novo ao mais antigo. */
@@ -856,6 +861,80 @@ export class StoreOrdersService {
     return mudou ? reler() : linhas;
   }
 
+  /* -------------------------------------------------------------------------
+   * A varredura de minuto e os avisos com a página fechada
+   * ----------------------------------------------------------------------- */
+
+  /**
+   * A cada minuto, sem ninguém olhar: o pedido que passou do prazo do aceite
+   * cai, e o pedido acompanha a corrida que andou. Enquanto o aviso só existia
+   * com a página aberta, bastava a leitura fazer isso — quem não olhava não
+   * precisava saber. Com o aviso no celular, a mudança tem de acontecer na hora,
+   * e não quando alguém abrir o painel.
+   */
+  async varrer(): Promise<void> {
+    const comPrazoVencido = await this.prisma.storeOrder.findMany({
+      where: { stage: 'NOVO', acceptDeadline: { lte: new Date() } },
+      select: { companyId: true },
+      distinct: ['companyId'],
+    });
+    for (const { companyId } of comPrazoVencido) await this.cancelarVencidos(companyId);
+
+    const andaram = await this.prisma.storeOrder.findMany({
+      where: {
+        stage: { in: ['ACEITO', 'EM_PREPARO', 'PRONTO', 'SAIU_PARA_ENTREGA'] },
+        courier: 'MOTOBOYCITY',
+        delivery: { status: { in: ['COLLECTED', 'DELIVERED', 'COMPLETED', 'FAILED'] } },
+      },
+      include: COM_A_CORRIDA,
+      take: 500,
+    });
+    const porEmpresa = new Map<string, LinhaDoPedido[]>();
+    for (const linha of andaram) {
+      porEmpresa.set(linha.companyId, [...(porEmpresa.get(linha.companyId) ?? []), linha]);
+    }
+    for (const [companyId, linhas] of porEmpresa) {
+      await this.acompanharCorridas(companyId, linhas, () => Promise.resolve(linhas));
+    }
+  }
+
+  /** O painel deste aparelho passa a receber os avisos da loja com ele fechado. */
+  async inscreverAvisosDaLoja(user: User, inscricao: WebPushSubscriptionPayload): Promise<void> {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    await this.avisos.inscreverLoja(user, companyId, inscricao);
+  }
+
+  async cancelarAvisosDaLoja(user: User, endpoint: string): Promise<void> {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    await this.avisos.desinscrever(companyId, endpoint, { userId: user.id });
+  }
+
+  /** O cliente, neste aparelho, passa a receber os avisos dos pedidos dele nesta loja. */
+  async inscreverAvisosDoCliente(
+    slug: string,
+    clienteId: string,
+    inscricao: WebPushSubscriptionPayload,
+  ): Promise<void> {
+    const companyId = await this.empresaDoLink(slug);
+    await this.avisos.inscreverCliente(companyId, clienteId, inscricao);
+  }
+
+  async cancelarAvisosDoCliente(slug: string, clienteId: string, endpoint: string): Promise<void> {
+    const companyId = await this.empresaDoLink(slug);
+    await this.avisos.desinscrever(companyId, endpoint, { customerAuthId: clienteId });
+  }
+
+  private async empresaDoLink(slug: string): Promise<string> {
+    const link = await this.prisma.storeSlug.findUnique({
+      where: { slug },
+      select: { companyId: true },
+    });
+    if (!link) {
+      throw new NotFoundException({ message: 'Loja não encontrada.', code: 'STORE_NOT_FOUND' });
+    }
+    return link.companyId;
+  }
+
   private async linhaDaLoja(companyId: string, id: string): Promise<LinhaDoPedido> {
     const linha = await this.prisma.storeOrder.findFirst({
       where: { id, companyId },
@@ -949,7 +1028,11 @@ export class StoreOrdersService {
         data: dados,
       });
       if (count === 1) {
-        return paraPedido(await this.prisma.storeOrder.findFirstOrThrow({ where: { id } }));
+        const depois = paraPedido(await this.prisma.storeOrder.findFirstOrThrow({ where: { id } }));
+        // Quem fez a mudança é quem avisa: a outra aba, que perdeu a disputa,
+        // não chega aqui, e o aviso não sai duas vezes.
+        await this.avisos.etapaMudou(companyId, paraPedido(linha), depois);
+        return depois;
       }
     }
     throw new ConflictException({

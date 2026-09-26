@@ -10,8 +10,10 @@ import type {
 } from '@motoboycity/types';
 import { AppModule } from '../src/app.module';
 import { VerificadorDoCliente } from '../src/company/store-orders/cliente-da-loja.guard';
+import { StoreOrdersService } from '../src/company/store-orders/store-orders.service';
 import { GoogleMapsService } from '../src/maps/google-maps.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { WebPushService, type AvisoDePush } from '../src/web-push/web-push.service';
 
 /**
  * O pedido da página da loja, contra o banco de verdade: o cliente logado faz o
@@ -19,8 +21,23 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * a corrida do MOTOboyCity que nasce do pedido aceito.
  *
  * O login do Firebase é simulado: "cliente-a" e "cliente-b" são dois tokens
- * válidos. O Google também: a distância é sempre 5 km.
+ * válidos. O Google também: a distância é sempre 5 km. E o envio do Web Push:
+ * os avisos ficam numa lista, sem rede e sem chaves.
  */
+
+/** Cada aviso que teria saído, com os endereços de quem o receberia. */
+const avisosEnviados: Array<{ para: string[]; aviso: AvisoDePush }> = [];
+const pushDeTeste = {
+  onModuleInit: () => undefined,
+  disponivel: () => true,
+  chavePublica: () => 'chave-publica-e2e',
+  enviar: (inscricoes: Array<{ endpoint: string }>, aviso: AvisoDePush) => {
+    if (inscricoes.length > 0) {
+      avisosEnviados.push({ para: inscricoes.map((item) => item.endpoint), aviso });
+    }
+    return Promise.resolve();
+  },
+};
 
 const suffix = String(Date.now()).slice(-8);
 const password = 'senhaSegura123';
@@ -64,6 +81,8 @@ describe('Pedido da loja online (e2e)', () => {
         geocode: async () => null,
         reverseGeocode: async () => null,
       })
+      .overrideProvider(WebPushService)
+      .useValue(pushDeTeste)
       .compile();
     app = module.createNestApplication();
     prisma = module.get(PrismaService);
@@ -468,5 +487,155 @@ describe('Pedido da loja online (e2e)', () => {
         .expect(201)
     ).body as PedidoDaLoja;
     expect(comALoja).toMatchObject({ entregaPor: 'LOJA', avisoDaCorrida: null });
+  });
+
+  it('os avisos com a página fechada: quem se inscreve recebe, e o prazo vence sozinho', async () => {
+    const servidor = app.getHttpServer();
+    const doPainel = `https://fcm.googleapis.com/fcm/send/painel-${suffix}`;
+    const doCliente = `https://fcm.googleapis.com/fcm/send/cliente-${suffix}`;
+
+    // A chave pública é aberta; o endereço de push só de serviço conhecido.
+    expect((await request(servidor).get('/public/web-push').expect(200)).body).toEqual({
+      chavePublica: 'chave-publica-e2e',
+    });
+    await request(servidor)
+      .put('/company/store/orders/push-subscription')
+      .set(comoEmpresa())
+      .send({ endpoint: 'https://169.254.169.254/latest', keys: { p256dh: 'p', auth: 'a' } })
+      .expect(400);
+    await request(servidor)
+      .put('/company/store/orders/push-subscription')
+      .set(comoEmpresa())
+      .send({ endpoint: doPainel, keys: { p256dh: 'p', auth: 'a' } })
+      .expect(204);
+    await request(servidor)
+      .put(`/public/stores/${link}/orders/push-subscription`)
+      .set(comoCliente('cliente-b'))
+      .send({ endpoint: doCliente, keys: { p256dh: 'p', auth: 'a' } })
+      .expect(204);
+    const naLoja = await prisma.company.findUniqueOrThrow({
+      where: { document: empresa.document },
+    });
+    expect(
+      await prisma.webPushSubscription.findMany({
+        where: { companyId: naLoja.id },
+        select: { audience: true, customerAuthId: true },
+        orderBy: { audience: 'asc' },
+      }),
+    ).toEqual([
+      { audience: 'LOJA', customerAuthId: null },
+      { audience: 'CLIENTE', customerAuthId: 'user_b' },
+    ]);
+
+    // O cliente B pede (o aceite ficou manual no teste anterior): a loja fica
+    // sabendo, e o cliente recebe o "recebido".
+    avisosEnviados.length = 0;
+    const feito = (
+      await request(servidor)
+        .post(`/public/stores/${link}/orders`)
+        .set(comoCliente('cliente-b'))
+        .send({
+          modalidade: 'ENTREGA',
+          itens: [{ produtoId, tamanhoId: null, escolhas: [], quantidade: 2 }],
+          agendadoPara: null,
+          cliente: { nome: 'Bia', telefone: '33999887766' },
+          entrega: {
+            rua: 'Rua B',
+            numero: '20',
+            complemento: null,
+            bairroId: 'b1',
+            cidade: 'Lajinha',
+            estado: 'MG',
+            cep: '',
+            referencia: null,
+          },
+          pagamento: 'DINHEIRO',
+          trocoPara: null,
+          observacao: null,
+          totalVisto: 55,
+        })
+        .expect(201)
+    ).body as PedidoDaLoja;
+    expect(avisosEnviados).toEqual([
+      {
+        para: [doPainel],
+        aviso: {
+          titulo: 'Novo pedido',
+          corpo: `#${feito.numero} · Bia · R$ 55,00 · entrega`,
+          url: '/loja/vendas',
+          etiqueta: `venda-${feito.numero}`,
+        },
+      },
+      {
+        para: [doCliente],
+        aviso: {
+          titulo: 'Pedido',
+          corpo: `Recebemos seu pedido #${feito.numero}.`,
+          url: `/pedir/${link}/pedidos`,
+          etiqueta: `pedido-${feito.numero}`,
+        },
+      },
+    ]);
+
+    // A loja aceita: só o cliente é avisado.
+    avisosEnviados.length = 0;
+    await request(servidor)
+      .put(`/company/store/orders/${feito.id}/stage`)
+      .set(comoEmpresa())
+      .send({ para: 'ACEITO' })
+      .expect(200);
+    expect(avisosEnviados.map((item) => [item.para, item.aviso.corpo])).toEqual([
+      [[doCliente], `Seu pedido #${feito.numero} foi aceito.`],
+    ]);
+
+    // Um pedido novo que passou do prazo cai na varredura de minuto, sem
+    // ninguém abrir o painel — e a loja e o cliente ficam sabendo.
+    const esquecido = (
+      await request(servidor)
+        .post(`/public/stores/${link}/orders`)
+        .set(comoCliente('cliente-b'))
+        .send({
+          modalidade: 'ENTREGA',
+          itens: [{ produtoId, tamanhoId: null, escolhas: [], quantidade: 2 }],
+          agendadoPara: null,
+          cliente: { nome: 'Bia', telefone: '33999887766' },
+          entrega: {
+            rua: 'Rua B',
+            numero: '20',
+            complemento: null,
+            bairroId: 'b1',
+            cidade: 'Lajinha',
+            estado: 'MG',
+            cep: '',
+            referencia: null,
+          },
+          pagamento: 'DINHEIRO',
+          trocoPara: null,
+          observacao: null,
+          totalVisto: 55,
+        })
+        .expect(201)
+    ).body as PedidoDaLoja;
+    await prisma.storeOrder.update({
+      where: { id: esquecido.id },
+      data: { acceptDeadline: new Date(Date.now() - 60_000) },
+    });
+    avisosEnviados.length = 0;
+    await app.get(StoreOrdersService).varrer();
+    expect(
+      (await prisma.storeOrder.findUniqueOrThrow({ where: { id: esquecido.id } })).cancelledBy,
+    ).toBe('SISTEMA');
+    expect(avisosEnviados.map((item) => [item.para, item.aviso.titulo])).toEqual([
+      [[doPainel], 'Pedido cancelado'],
+      [[doCliente], 'Pedido'],
+    ]);
+
+    // Desligar neste aparelho apaga a inscrição.
+    await request(servidor)
+      .delete(`/public/stores/${link}/orders/push-subscription`)
+      .set(comoCliente('cliente-b'))
+      .send({ endpoint: doCliente })
+      .expect(204);
+    expect(await prisma.webPushSubscription.count({ where: { endpoint: doCliente } })).toBe(0);
   });
 });

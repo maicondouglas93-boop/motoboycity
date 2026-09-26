@@ -32,6 +32,7 @@ import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
 import { usePedidosDoCliente } from '@/components/loja-online/pedidos-do-cliente';
 import { ConfirmacaoDoPedido } from '@/components/loja-online/confirmacao';
 import { ConviteParaInstalar } from '@/components/loja-online/convite-para-instalar';
+import { AvisosDoPedido } from '@/components/loja-online/avisos-do-pedido';
 
 /**
  * Onde o cliente responde sozinho a pergunta que ele faria à loja no WhatsApp:
@@ -208,8 +209,14 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
         )}
 
         {/* Avisos no celular: oferecidos só com pedido andando, que é quando
-            o cliente tem motivo para dizer sim. */}
-        {pronto && algumEmAndamento && <ConviteParaAvisos paleta={paleta} cor={marca.corDeAcao} />}
+            o cliente tem motivo para dizer sim. Na loja de verdade, pelo Web
+            Push; na de exemplo, só com a página aberta em alguma aba. */}
+        {pronto && algumEmAndamento && real && usuarioId !== null && (
+          <AvisosDoPedido slug={slug} paleta={paleta} cor={marca.corDeAcao} />
+        )}
+        {pronto && algumEmAndamento && !real && (
+          <ConviteParaAvisos paleta={paleta} cor={marca.corDeAcao} />
+        )}
 
         {/* Pedido é da conta: sem entrar, não há o que mostrar — e mostrar
             os pedidos de quem usou o celular antes seria pior ainda. */}

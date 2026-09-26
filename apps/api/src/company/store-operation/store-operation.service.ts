@@ -157,6 +157,11 @@ export class StoreOperationService {
     return this.daEmpresa(companyId);
   }
 
+  /** A operação inteira de uma empresa, para quem já sabe qual é (os avisos do pedido). */
+  operacaoDaEmpresa(companyId: string): Promise<OperacaoDaLoja> {
+    return this.daEmpresa(companyId);
+  }
+
   /**
    * A operação sem os avisos da loja: é o que a página do cliente recebe. As
    * formas online saem se não há para onde o dinheiro ir — a gravação já as

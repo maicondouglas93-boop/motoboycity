@@ -15959,3 +15959,116 @@ DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926150000_loja_p
 
 As corridas já criadas continuam em `deliveries`; só o vínculo com o pedido se
 perde.
+
+## 2026-09-26 — Publicação da corrida do pedido
+
+**Publicação** (push autorizado pelo usuário: "Commit e push"). `f94ff4a` (a
+corrida nasce do pedido da loja online) enviado para `main`. CI verde no GitHub.
+Render: `POST /company/store/orders/:id/ride` passou de 404 a 401 cerca de 3,5
+min depois do push — a API nova subiu, e com ela o `migrate deploy` da
+`20260926150000_loja_pedido_corrida`; `/health/ready` com PostgreSQL e Redis
+ok. Vercel: o status do commit traz company e admin em "Deployment has
+completed"; `/pedir/minha-loja`, `/loja/vendas` e `/loja/tipos-de-pedido`
+respondem 200. Os painéis do Render e do Vercel não foram abertos, e não houve
+inspeção SQL do banco de produção.
+
+## 2026-09-26 — Avisos da loja online com a página fechada (Web Push)
+
+**Decisão do usuário:** o próximo recorte é o Web Push (escolhido entre Web
+Push, Salvar cliente, tirar a loja de exemplo e pagamento online).
+
+**Motivo:** os avisos da loja online só existiam com a página aberta — o painel
+tocava e notificava, e o cliente só via a mudança com "Meus pedidos" na frente.
+E o prazo do aceite só vencia quando alguém lia a fila: pedido esquecido ficava
+"novo", e o cliente sem resposta.
+
+**Banco** — migration `20260926200000_loja_avisos_push`, aditiva: tabela
+`web_push_subscriptions` (um aparelho por linha, `endpoint` único, `LOJA` com o
+usuário que ativou ou `CLIENTE` com o uid do Firebase; some em cascata com a
+empresa e com o usuário) e o enum `WebPushAudience`. Validada num banco
+descartável: aplicar todas, conferir, desfazer, voltar ao anterior e reaplicar —
+as quatro ok. Aplicada no `motoboycity_dev` local. **Não foi para produção.**
+
+**API:**
+
+- `web-push/` (novo): `WebPushService` com a biblioteca `web-push` (VAPID,
+  TTL de 1 h, urgência alta), inerte sem `WEB_PUSH_PUBLIC_KEY`,
+  `WEB_PUSH_PRIVATE_KEY` e `WEB_PUSH_SUBJECT` — sobe e avisa no log, como o
+  push do motoboy. O aparelho dado como sumido (404/410) sai da tabela; o envio
+  nunca lança. `GET /public/web-push` devolve a chave pública (ou `null`), e o
+  painel a lê dali: as chaves ficam só no Render.
+- `StoreOrderNotificationsService` (novo): a loja recebe pedido novo, agendado
+  e cancelado pelo cliente ou pelo sistema, conforme a coluna "Notificação"; o
+  cliente, as etapas ligadas e sempre o cancelamento. Quem faz a mudança de
+  etapa avisa (dentro do `mudar`, depois da gravação condicional), e a outra aba
+  que perdeu a disputa não avisa de novo.
+- Varredura de minuto (fila BullMQ `store-orders`,
+  `store-orders-sweep-every-minute`, nome fixo como a do despacho): cancela o
+  NOVO com prazo vencido e leva o pedido à etapa que a corrida alcançou, sem
+  depender de leitura.
+- Inscrição: `PUT`/`DELETE /company/store/orders/push-subscription` (painel) e
+  `/public/stores/:slug/orders/push-subscription` (cliente, 10 por minuto). O
+  endereço só é aceito se for HTTPS de um serviço de push conhecido (Google,
+  Mozilla, Apple, Windows): o servidor faz POST nele, e aceitar qualquer um
+  abriria SSRF.
+
+**Contratos:** `store-notification.rules.ts` (o evento de cada etapa e os
+textos, que saíram do painel para o servidor usar as mesmas palavras; o
+`lib/loja-avisos.ts` só os reexporta), `web-push.schema.ts`; no `api-client`,
+`createWebPushApi`, `inscreverAvisos` e `cancelarAvisos` nos dois clientes de
+pedidos.
+
+**Painel e página do cliente:** `public/loja/avisos-sw.js` (novo), worker só de
+push, sem `fetch`, com escopo `/loja/`; o `loja-sw.js` ganhou `push` e
+`notificationclick`. Com a página visível, nenhum dos dois mostra o aviso. Em
+Notificações, o cartão "Avisos com o painel fechado" liga e desliga o aparelho,
+e diz quando o navegador não tem push ou o servidor está sem as chaves; os
+textos que diziam que o push "ainda não existe" saíram. Em Meus pedidos da loja
+de verdade, "Avisar quando o pedido andar" usa o push (a loja de exemplo segue
+com o convite antigo, só com a página aberta).
+
+**Arquivos:** `apps/api/prisma/schema.prisma`, a migration nova,
+`apps/api/package.json` e `pnpm-lock.yaml` (`web-push`, `@types/web-push`),
+`apps/api/.env.example`; `apps/api/src/web-push/*` (novos, com spec);
+`apps/api/src/company/store-orders/` (serviço, controllers, módulo,
+`store-order-notifications.service.ts` e spec, `store-orders.queue.ts`,
+`.processor.ts`, `.scheduler.ts`, specs); `store-operation.service.ts`;
+`apps/api/test/store-orders.e2e-spec.ts`;
+`packages/validation/src/company/store-notification.rules.ts` e
+`web-push.schema.ts` (novos), `index.ts`; `packages/api-client/src/web-push.ts`
+(novo), `company-store-orders.ts`, `public-store-orders.ts`, `index.ts`;
+`apps/company-web/public/loja-sw.js`, `public/loja/avisos-sw.js` (novo),
+`src/lib/avisos-push.ts` (novo), `loja-avisos.ts`, `api-client.ts`,
+`src/components/loja/avisos-no-aparelho.tsx` e teste (novos),
+`src/components/loja-online/avisos-do-pedido.tsx` e teste (novos),
+`src/app/(app)/loja/notificacoes/page.tsx`,
+`src/app/(loja)/pedir/[slug]/pedidos/meus-pedidos.tsx`; `docs/agent-handoff.md`,
+`architecture.md`, `business-rules.md`, `plano-loja-online.md`.
+
+**Como foi validado:** `pnpm typecheck` 8/8; `pnpm lint` 8/8 (o aviso antigo
+do driver-app); Jest da API, 1380 passam e 1 pulado; vitest do `company-web`,
+53 arquivos e 370 testes; driver-app 210/210; E2E inteiro isolado, 29 suítes e
+254 testes — o novo, com o envio simulado: chave pública aberta, endereço fora
+da lista recusado (400), inscrição da loja e do cliente gravadas, pedido novo
+avisa a loja e o cliente com as palavras e etiquetas certas, aceite avisa só o
+cliente, a varredura derruba o pedido vencido e avisa os dois, e desligar apaga
+a inscrição. Builds da API e dos dois painéis sem erro. Sem rede: com um par de
+chaves descartável, a biblioteca montou a requisição com as opções do serviço —
+`Authorization` VAPID, `aes128gcm`, TTL e urgência. No navegador, com a API
+local sem as chaves: o cartão de Notificações disse que o servidor ainda não
+ligou os avisos, sem botão. **Não exercitado**: a entrega de verdade por um
+serviço de push, e os workers recebendo um push (só a sintaxe foi conferida) —
+dependem das chaves no ambiente.
+
+**Deploy:** nada foi enviado. Para ligar em produção, o usuário gera o par
+(`npx web-push generate-vapid-keys`) e põe as três `WEB_PUSH_*` no Render.
+
+**Reverter** a migration, se preciso:
+
+```sql
+DROP TABLE "web_push_subscriptions";
+DROP TYPE "WebPushAudience";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926200000_loja_avisos_push';
+```
+
+As inscrições se perdem; cada aparelho liga de novo.

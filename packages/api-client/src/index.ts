@@ -25,6 +25,7 @@ export * from './company-business-hours';
 export * from './company-profile';
 export * from './company-customers';
 export * from './service-types';
+export * from './web-push';
 export * from './driver-presence';
 export * from './tracking';
 export * from './driver-wallet';

@@ -1,10 +1,25 @@
-import { Body, Controller, Get, Header, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { PedidoDaLoja } from '@motoboycity/types';
 import {
   storeCheckoutSchema,
   storeSlugLookupSchema,
+  webPushSubscriptionSchema,
+  webPushUnsubscribeSchema,
   type StoreCheckoutPayload,
+  type WebPushSubscriptionPayload,
+  type WebPushUnsubscribePayload,
 } from '@motoboycity/validation';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ClienteAtual, ClienteDaLojaGuard, type ClienteDaLoja } from './cliente-da-loja.guard';
@@ -37,5 +52,27 @@ export class PublicStoreOrdersController {
     @ClienteAtual() cliente: ClienteDaLoja,
   ): Promise<PedidoDaLoja[]> {
     return this.storeOrdersService.pedidosDoCliente(slug, cliente.id);
+  }
+
+  /** Este aparelho passa a receber os avisos dos pedidos com a página fechada. */
+  @Put('push-subscription')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async inscrever(
+    @Param('slug', new ZodValidationPipe(storeSlugLookupSchema)) slug: string,
+    @ClienteAtual() cliente: ClienteDaLoja,
+    @Body(new ZodValidationPipe(webPushSubscriptionSchema)) inscricao: WebPushSubscriptionPayload,
+  ): Promise<void> {
+    await this.storeOrdersService.inscreverAvisosDoCliente(slug, cliente.id, inscricao);
+  }
+
+  @Delete('push-subscription')
+  @HttpCode(204)
+  async cancelarInscricao(
+    @Param('slug', new ZodValidationPipe(storeSlugLookupSchema)) slug: string,
+    @ClienteAtual() cliente: ClienteDaLoja,
+    @Body(new ZodValidationPipe(webPushUnsubscribeSchema)) { endpoint }: WebPushUnsubscribePayload,
+  ): Promise<void> {
+    await this.storeOrdersService.cancelarAvisosDoCliente(slug, cliente.id, endpoint);
   }
 }

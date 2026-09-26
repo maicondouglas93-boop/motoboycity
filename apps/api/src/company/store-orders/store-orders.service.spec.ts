@@ -9,6 +9,7 @@ import {
   OPERACAO_INICIAL,
   StoreOperationService,
 } from '../store-operation/store-operation.service';
+import { StoreOrderNotificationsService } from './store-order-notifications.service';
 import { StoreOrdersService } from './store-orders.service';
 
 const EMPRESA = 'empresa-1';
@@ -119,6 +120,7 @@ describe('StoreOrdersService', () => {
   let catalogo: { publicCatalog: jest.Mock };
   let operacaoDaLoja: { publicOperation: jest.Mock; tipoDeServicoDaCorrida: jest.Mock };
   let entregas: { createFromStoreOrder: jest.Mock };
+  let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
     company: { id: EMPRESA, status: 'ACTIVE', storeSettings: { acceptsOrders } },
@@ -171,6 +173,7 @@ describe('StoreOrdersService', () => {
       tipoDeServicoDaCorrida: jest.fn().mockResolvedValue('6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d'),
     };
     entregas = { createFromStoreOrder: jest.fn().mockResolvedValue({ id: 'corrida-1' }) };
+    avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -179,6 +182,7 @@ describe('StoreOrdersService', () => {
         { provide: StoreCatalogService, useValue: catalogo },
         { provide: StoreOperationService, useValue: operacaoDaLoja },
         { provide: DeliveriesService, useValue: entregas },
+        { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
     service = module.get(StoreOrdersService);
@@ -363,6 +367,11 @@ describe('StoreOrdersService', () => {
       where: { id: 'pedido-1', companyId: EMPRESA },
       data: { deliveryId: 'corrida-1', rideIssue: null },
     });
+  });
+
+  it('o pedido novo avisa a loja (e o cliente) pelo serviço de avisos', async () => {
+    const feito = await service.checkout('acai', CLIENTE, pedido());
+    expect(avisos.pedidoNovo).toHaveBeenCalledWith(EMPRESA, feito);
   });
 
   it('no aceite manual, o pedido espera como novo, com prazo para cair', async () => {

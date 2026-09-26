@@ -2,6 +2,7 @@ import type { PedidoDaLoja } from '@motoboycity/types';
 import type { StoreOrderCancelPayload, StoreOrderStagePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
+import { semCorpoOuErro, type InscricaoDoNavegador } from './web-push';
 
 export interface CompanyStoreOrdersApiConfig {
   baseUrl: string;
@@ -52,6 +53,25 @@ export function createCompanyStoreOrdersApi({ baseUrl }: CompanyStoreOrdersApiCo
     /** O pedido que o MOTOboyCity não vai levar passa ao entregador da loja. */
     entregarComALoja(accessToken: string, id: string) {
       return enviar(accessToken, `/${id}/own-courier`, 'POST');
+    },
+
+    /** O painel deste aparelho passa a receber os avisos da loja com ele fechado. */
+    async inscreverAvisos(accessToken: string, inscricao: InscricaoDoNavegador): Promise<void> {
+      const response = await apiFetch(`${base}/push-subscription`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(inscricao),
+      });
+      await semCorpoOuErro(response);
+    },
+
+    async cancelarAvisos(accessToken: string, endpoint: string): Promise<void> {
+      const response = await apiFetch(`${base}/push-subscription`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint }),
+      });
+      await semCorpoOuErro(response);
     },
   };
 }
