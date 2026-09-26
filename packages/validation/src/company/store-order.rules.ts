@@ -19,11 +19,13 @@ import { hora, momentoNaLoja, rotuloDoDia } from './store-schedule.rules';
 import type {
   AndamentoDoPedido,
   Cancelamento,
+  CorridaDoPedido,
   EtapaDoPedido,
   Modalidade,
   ModoDeAceite,
   PassoDoPedido,
   QuemEntrega,
+  SituacaoDaCorrida,
 } from '@motoboycity/types';
 
 const CAMINHOS: Record<Modalidade, EtapaDoPedido[]> = {
@@ -205,6 +207,87 @@ export function prazoDoAceite(pedido: AndamentoDoPedido, prazoMin: number | null
 }
 
 /* ---------------------------------------------------------------------------
+ * A corrida do MOTOboyCity
+ * ------------------------------------------------------------------------- */
+
+/**
+ * O pedido segue a corrida: entrega pelo MOTOboyCity. "Saiu" e "Entregue" vêm
+ * dela, e a loja não as marca.
+ */
+export function segueACorrida(
+  pedido: Pick<AndamentoDoPedido, 'modalidade' | 'entregaPor'>,
+): boolean {
+  return pedido.modalidade === 'ENTREGA' && pedido.entregaPor === 'MOTOBOYCITY';
+}
+
+/**
+ * Quando o pedido deve ficar pronto — a hora em que a corrida começa a buscar
+ * motoboy. Agendado: a janela menos o caminho. Para agora: o aceite mais o
+ * preparo. `null` antes do aceite.
+ */
+export function prontoEm(pedido: AndamentoDoPedido): Date | null {
+  const inicio = inicioDoPreparo(pedido);
+  if (inicio) return new Date(inicio.getTime() + pedido.minutosDePreparo * 60_000);
+  const aceito = quandoChegou(pedido, 'ACEITO');
+  return aceito ? new Date(aceito.getTime() + pedido.minutosDePreparo * 60_000) : null;
+}
+
+/**
+ * O pedido acompanhando a corrida: coletada, ele saiu; entregue, foi entregue.
+ *
+ * A loja pode ter esquecido de marcar "Pronto" — a corrida coletada prova que
+ * ficou, e o histórico ganha as etapas que faltavam, com a mesma hora. A corrida
+ * não entregue também saiu. Os outros estados da corrida não mudam a etapa: o
+ * que fazer com uma corrida cancelada é a loja quem decide.
+ */
+export function pelaCorrida<T extends AndamentoDoPedido>(
+  pedido: T,
+  situacao: SituacaoDaCorrida,
+  agora: Date,
+): T {
+  if (!segueACorrida(pedido) || concluido(pedido.etapa)) return pedido;
+  const alvo: EtapaDoPedido | null =
+    situacao === 'COLETADA' || situacao === 'NAO_ENTREGUE'
+      ? 'SAIU_PARA_ENTREGA'
+      : situacao === 'ENTREGUE'
+        ? 'ENTREGUE'
+        : null;
+  if (!alvo) return pedido;
+  const caminho = CAMINHOS.ENTREGA;
+  const de = caminho.indexOf(pedido.etapa);
+  const ate = caminho.indexOf(alvo);
+  if (de === -1 || ate <= de) return pedido;
+  const em = agora.toISOString();
+  const passos: PassoDoPedido[] = caminho.slice(de + 1, ate + 1).map((etapa) => ({ etapa, em }));
+  return { ...pedido, etapa: alvo, historico: [...pedido.historico, ...passos] };
+}
+
+/** A corrida numa linha, para o cartão do pedido em Vendas. */
+export function corridaParaALoja(corrida: CorridaDoPedido): string {
+  const motoboy = corrida.motoboy ?? 'O motoboy';
+  switch (corrida.situacao) {
+    case 'AGENDADA':
+      return corrida.agendadaPara
+        ? `Motoboy chamado para as ${hora(new Date(corrida.agendadaPara))}`
+        : 'Motoboy agendado';
+    case 'AGUARDANDO_PAGAMENTO':
+      return 'Corrida esperando o pagamento';
+    case 'BUSCANDO_MOTOBOY':
+      return 'Buscando motoboy';
+    case 'MOTOBOY_A_CAMINHO':
+      return `${motoboy} está vindo buscar`;
+    case 'COLETADA':
+      return `${motoboy} saiu com o pedido`;
+    case 'ENTREGUE':
+      return 'Entregue pelo motoboy';
+    case 'NAO_ENTREGUE':
+      return 'O motoboy não conseguiu entregar';
+    case 'CANCELADA':
+      return 'Corrida cancelada';
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Como cada lado chama cada etapa
  * ------------------------------------------------------------------------- */
 
@@ -272,7 +355,12 @@ export function nomeCurtoDaEtapa(etapa: EtapaDoPedido, modalidade: Modalidade): 
   }
 }
 
-/** O botão que leva à próxima etapa, dito como a ação que a pessoa faz. */
+/**
+ * O botão que leva à próxima etapa, dito como a ação que a pessoa faz.
+ *
+ * Pelo MOTOboyCity, depois de pronto não há botão: a saída e a entrega vêm da
+ * corrida (`pelaCorrida`), e o servidor recusa marcá-las à mão.
+ */
 export function acaoParaAvancar(
   modalidade: Modalidade,
   etapa: EtapaDoPedido,
@@ -287,9 +375,9 @@ export function acaoParaAvancar(
       return 'Marcar como pronto';
     case 'PRONTO':
       if (modalidade === 'RETIRADA') return 'Cliente retirou';
-      return levaALoja(modalidade, entregaPor) ? 'Saiu para entrega' : 'Motoboy coletou';
+      return levaALoja(modalidade, entregaPor) ? 'Saiu para entrega' : null;
     case 'SAIU_PARA_ENTREGA':
-      return 'Marcar como entregue';
+      return levaALoja(modalidade, entregaPor) ? 'Marcar como entregue' : null;
     default:
       return null;
   }

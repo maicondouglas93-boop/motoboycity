@@ -508,9 +508,29 @@ nem buscando motoboy.
   corrida, cobrada na fatura como as demais.
 
 No backend desde 2026-09-26: cada pedido guarda quem entrega ao nascer, e a
-loja passa um pedido ao MOTOboyCity em Vendas. **A corrida ainda não nasce
-sozinha do pedido**: a loja chama o motoboy pelo botão "Chamar" do painel, e a
-tela diz isso. Ver `docs/plano-loja-online.md`, decisão 15.
+loja passa um pedido ao MOTOboyCity em Vendas. Ver `docs/plano-loja-online.md`,
+decisão 15.
+
+## Loja online: a corrida que nasce do pedido
+
+Decisões de 2026-09-26, do usuário:
+
+- **A corrida nasce no aceite, agendada** para a hora em que o pedido fica
+  pronto (aceite mais o preparo; agendado, a janela menos o caminho). Marcar
+  "Pronto" antes libera a corrida na hora. Cancelar o pedido cancela a corrida
+  enquanto nenhum motoboy aceitou; depois disso, é com a central, como na
+  empresa que chama pelo painel;
+- **o tipo de serviço é da loja**, em Tipos de pedido → Entrega. Sem escolha,
+  vale o primeiro tipo ativo, o mesmo que o botão "Chamar" traz marcado. O
+  escolhido precisa estar ativo e ter tabela de preço na região;
+- **sem CEP digitado pelo cliente, vale o CEP da loja** (cidades de CEP único);
+- **pago na entrega, o motoboy volta à loja**, com o dinheiro ou a maquininha,
+  e a loja paga a taxa de retorno — igual ao aiqfome. Pago online, sem retorno;
+- **fora do horário da central, o pedido entra e a loja é avisada**: a corrida
+  não nasce, e Vendas oferece chamar de novo ou entregar com o entregador da
+  loja. O mesmo vale para qualquer outro motivo de a corrida não nascer, e
+  para a corrida cancelada pela central;
+- "Saiu para entrega" e "Entregue" vêm da corrida; a loja não as marca à mão.
 
 ## Loja online: taxa, estorno e cadastro do cliente
 

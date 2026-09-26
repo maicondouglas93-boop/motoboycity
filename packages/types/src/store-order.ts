@@ -86,6 +86,31 @@ export interface ItemDoPedido {
   total: number;
 }
 
+/**
+ * Onde está a corrida do MOTOboyCity que leva o pedido — o `DeliveryStatus`
+ * dela, com os nomes das telas.
+ */
+export type SituacaoDaCorrida =
+  | 'AGENDADA'
+  | 'AGUARDANDO_PAGAMENTO'
+  | 'BUSCANDO_MOTOBOY'
+  | 'MOTOBOY_A_CAMINHO'
+  | 'COLETADA'
+  | 'ENTREGUE'
+  | 'NAO_ENTREGUE'
+  | 'CANCELADA';
+
+/** A corrida que nasceu do pedido, como Vendas a mostra. */
+export interface CorridaDoPedido {
+  /** O número da corrida no painel de Pedidos. */
+  numero: number;
+  situacao: SituacaoDaCorrida;
+  /** ISO. Quando a corrida começa a buscar motoboy; `null` se já busca. */
+  agendadaPara: string | null;
+  /** O nome do motoboy, depois do aceite. */
+  motoboy: string | null;
+}
+
 /** O pedido inteiro, como a página do cliente e o painel o mostram. */
 export interface PedidoDaLoja extends AndamentoDoPedido {
   id: string;
@@ -104,4 +129,15 @@ export interface PedidoDaLoja extends AndamentoDoPedido {
   entrega: EnderecoDaEntrega | null;
   /** "Sem cebola", "portão azul". */
   observacao: string | null;
+  /**
+   * A corrida do MOTOboyCity, quando há. Só a loja recebe: para o cliente vem
+   * `null`, e ele acompanha pela etapa.
+   */
+  corrida: CorridaDoPedido | null;
+  /**
+   * O que a loja precisa resolver na corrida: ela não nasceu, foi cancelada
+   * pela central, o motoboy não conseguiu entregar. `null` quando está tudo
+   * certo, e sempre `null` para o cliente.
+   */
+  avisoDaCorrida: string | null;
 }

@@ -92,6 +92,11 @@ export const storeOrderTypesSchema = z.object({
     quemEntrega: z.enum(['MOTOBOYCITY', 'LOJA']),
     pedidoMinimo: z.number().min(0).max(99999.99).nullable(),
     agendamento: z.boolean(),
+    /**
+     * Opcional só para aceitar a aba aberta antes de o campo existir: sem ele,
+     * o servidor mantém o que estava gravado.
+     */
+    tipoDeServicoId: z.uuid('Tipo de serviço inválido.').nullable().optional(),
   }),
   retirada: z.object({
     ativa: z.boolean(),

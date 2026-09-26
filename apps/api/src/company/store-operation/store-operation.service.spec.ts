@@ -18,6 +18,7 @@ import {
 } from './store-operation.service';
 
 const EMPRESA = 'empresa-1';
+const TIPO = '6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d';
 const membro = { id: 'user-1', type: 'COMPANY_MEMBER' } as User;
 
 const SEMANA_DO_ALMOCO = [0, 1, 2, 3, 4, 5, 6].map((dia) => ({
@@ -42,10 +43,20 @@ function linha(mudancas: Partial<StoreOperation> = {}): StoreOperation {
 
 describe('StoreOperationService', () => {
   let service: StoreOperationService;
-  let prisma: { storeOperation: { findUnique: jest.Mock; upsert: jest.Mock } };
+  let prisma: {
+    storeOperation: { findUnique: jest.Mock; upsert: jest.Mock };
+    serviceType: { findFirst: jest.Mock };
+    company: { findUnique: jest.Mock };
+    pricingTable: { findFirst: jest.Mock };
+  };
 
   beforeEach(async () => {
-    prisma = { storeOperation: { findUnique: jest.fn(), upsert: jest.fn() } };
+    prisma = {
+      storeOperation: { findUnique: jest.fn(), upsert: jest.fn() },
+      serviceType: { findFirst: jest.fn().mockResolvedValue({ id: TIPO }) },
+      company: { findUnique: jest.fn().mockResolvedValue({ regionId: 'regiao-1' }) },
+      pricingTable: { findFirst: jest.fn().mockResolvedValue({ id: 'tabela-1' }) },
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StoreOperationService,
@@ -80,6 +91,8 @@ describe('StoreOperationService', () => {
       quemEntrega: 'MOTOBOYCITY',
       pedidoMinimo: 20,
       agendamento: true,
+      // Gravado antes de o campo existir: vem o inicial.
+      tipoDeServicoId: null,
     });
     expect(operacao.notificacoes.cliente.EM_PREPARO).toBe(true);
     expect(operacao.notificacoes.cliente.CANCELADO).toBe(true);
@@ -160,6 +173,57 @@ describe('StoreOperationService', () => {
     );
     const publica = await service.publicOperation(EMPRESA);
     expect(publica.pagamentos).toEqual(['DINHEIRO']);
+  });
+
+  it('tipo de serviço da corrida: ativo e com preço na região; sem o campo, fica o gravado', async () => {
+    const tipos = storeOrderTypesSchema.parse({
+      recebimento: OPERACAO_INICIAL.recebimento,
+      entrega: { ...OPERACAO_INICIAL.entrega, tipoDeServicoId: TIPO },
+      retirada: OPERACAO_INICIAL.retirada,
+      agendamento: OPERACAO_INICIAL.agendamento,
+    });
+    prisma.storeOperation.findUnique.mockResolvedValue(linha());
+    await service.updateOrderTypes(membro, tipos);
+    expect(prisma.storeOperation.upsert.mock.calls[0][0].update.orderTypes.entrega).toMatchObject({
+      tipoDeServicoId: TIPO,
+    });
+
+    prisma.pricingTable.findFirst.mockResolvedValueOnce(null);
+    await expect(service.updateOrderTypes(membro, tipos)).rejects.toMatchObject({
+      response: { code: 'STORE_SERVICE_TYPE_UNPRICED' },
+    });
+    prisma.serviceType.findFirst.mockResolvedValueOnce(null);
+    await expect(service.updateOrderTypes(membro, tipos)).rejects.toMatchObject({
+      response: { code: 'STORE_SERVICE_TYPE_UNAVAILABLE' },
+    });
+
+    // A aba aberta antes de o campo existir não apaga a escolha.
+    prisma.storeOperation.findUnique.mockResolvedValue(
+      linha({ orderTypes: { entrega: { ...OPERACAO_INICIAL.entrega, tipoDeServicoId: TIPO } } }),
+    );
+    const { tipoDeServicoId: _campo, ...entregaAntiga } = tipos.entrega;
+    await service.updateOrderTypes(membro, { ...tipos, entrega: entregaAntiga });
+    expect(
+      prisma.storeOperation.upsert.mock.calls.at(-1)[0].update.orderTypes.entrega.tipoDeServicoId,
+    ).toBe(TIPO);
+  });
+
+  it('a corrida usa o tipo escolhido, ou o primeiro ativo; escolhido que saiu é recusado', async () => {
+    prisma.storeOperation.findUnique.mockResolvedValue(linha());
+    prisma.serviceType.findFirst.mockResolvedValueOnce({ id: 'primeiro' });
+    await expect(service.tipoDeServicoDaCorrida(EMPRESA)).resolves.toBe('primeiro');
+    expect(prisma.serviceType.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { active: true }, orderBy: { createdAt: 'asc' } }),
+    );
+
+    prisma.storeOperation.findUnique.mockResolvedValue(
+      linha({ orderTypes: { entrega: { ...OPERACAO_INICIAL.entrega, tipoDeServicoId: TIPO } } }),
+    );
+    await expect(service.tipoDeServicoDaCorrida(EMPRESA)).resolves.toBe(TIPO);
+    prisma.serviceType.findFirst.mockResolvedValueOnce(null);
+    await expect(service.tipoDeServicoDaCorrida(EMPRESA)).rejects.toMatchObject({
+      response: { code: 'STORE_SERVICE_TYPE_UNAVAILABLE' },
+    });
   });
 
   it('os bairros são gravados e lidos como a loja salvou', async () => {

@@ -74,8 +74,13 @@ em `store_settings`, e as formas de pagamento e os bairros com taxa como dois
 blocos novos de `store_operations`. Pagamento online fica recusado até a conta
 Asaas existir.
 
+**A corrida nasce do pedido** (2026-09-26, migration
+`20260926150000_loja_pedido_corrida`): no aceite, agendada para quando o pedido
+fica pronto, liberada no "Pronto", cancelada junto com o pedido; o pedido
+acompanha a corrida até "Entregue". Regras em `business-rules.md`.
+
 Não existe ainda: a conta Asaas da loja (e com ela o pagamento online e o
-estorno), a corrida nascendo do pedido, o Web Push e o "Salvar cliente".
+estorno), o Web Push e o "Salvar cliente".
 
 ## Decisões já tomadas
 
@@ -336,9 +341,8 @@ validação e no cadastro de clientes do painel.
    exemplo, com o `loja-mock.ts` e o `loja-demo.ts`.
 4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
    ~~carrinho e checkout (com telefone e endereço estruturado, por causa do item 1)~~, feitos em 2026-09-26. Pagamento online espera o Asaas.
-5. Pedido da loja virando entrega, com o aceite do item 2 — só para a loja que
-   entrega pelo MOTOboyCity (decisão 15): as etapas até "Pronto" são do pedido;
-   "Saiu para entrega" e "Entregue" vêm da corrida.
-   Junto, o Web Push de servidor para os avisos da loja e do cliente.
+5. ~~Pedido da loja virando entrega, com o aceite do item 2 — só para a loja
+   que entrega pelo MOTOboyCity (decisão 15)~~, feito em 2026-09-26. Falta o
+   Web Push de servidor para os avisos da loja e do cliente.
 6. Salvar cliente a partir da venda (item 1).
 7. ~~Pôr o item "Loja" de volta no `NAV_ITEMS`~~, feito em 2026-09-26.

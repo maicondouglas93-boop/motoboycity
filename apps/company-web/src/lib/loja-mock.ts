@@ -191,7 +191,13 @@ export const OPERACAO_DE_EXEMPLO: OperacaoDaLoja = {
     // esquecida é o cliente, esperando uma resposta que não vem.
     prazoDoAceiteMin: 10,
   },
-  entrega: { ativa: true, quemEntrega: 'MOTOBOYCITY', pedidoMinimo: 15, agendamento: true },
+  entrega: {
+    ativa: true,
+    quemEntrega: 'MOTOBOYCITY',
+    pedidoMinimo: 15,
+    agendamento: true,
+    tipoDeServicoId: null,
+  },
   retirada: {
     ativa: true,
     endereco: null,

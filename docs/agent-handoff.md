@@ -177,10 +177,10 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `5840883`, configuração da loja online no banco (junto: `3602075` vitrine sem Clerk, `76242f5` CI, `0df2a76` decisões), enviado para `main` em 25/09/2026. CI verde no GitHub, o primeiro desde 21/09. API nova conferida pela rota nova (`/company/store/operation`, 404 → 401) e `/health/ready` com PostgreSQL/Redis ok; no Vercel, `/pedir/minha-loja` abre sem script do Clerk. Painéis do Render e do Vercel não foram abertos |
+| Commit publicado | `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre), enviado para `main` em 26/09/2026. CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 60 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
+| Banco | PostgreSQL gerenciado; 61 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
 | APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -598,9 +598,11 @@ As migrations da loja online (`20260925090000_loja_catalogo`,
 nos pushes de 2026-09-25, pelo `prisma migrate deploy` do build do Render, e
 estão aplicadas também no `motoboycity_dev` local. A do pedido,
 `20260926120000_loja_pedido` (tabela `store_orders`, quatro enums e a coluna
-`store_settings.acceptsOrders`), **ainda não foi para produção**: está só no
-`motoboycity_dev` local e foi validada em banco descartável. Entra no próximo
-push, pelo mesmo caminho; o rollback está no changelog.
+`store_settings.acceptsOrders`), foi no push de 2026-09-26, pelo mesmo caminho;
+o rollback está no changelog. A da corrida, `20260926150000_loja_pedido_corrida`
+(`store_orders.deliveryId`, `rideAttempt` e `rideIssue`), **ainda não foi para
+produção**: está só no `motoboycity_dev` local e foi validada em banco
+descartável (aplicar, desfazer, reaplicar).
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -694,9 +696,27 @@ Quem mexer aqui precisa saber:
   vencido, como `SISTEMA`. Pedido não lido fica NOVO no banco até alguém olhar.
 - **O número é por loja**, o maior mais um, numa transação; dois pedidos no
   mesmo instante esbarram na chave única e o segundo tenta de novo.
-- **A corrida ainda não nasce do pedido.** "Chamar motoboy do MOTOboyCity" em
-  Vendas só marca o pedido; a loja chama o motoboy pelo botão "Chamar" do
-  painel, como qualquer corrida, e a tela diz isso.
+- **A corrida nasce do pedido** (2026-09-26), quando o MOTOboyCity entrega:
+  no aceite (ou no checkout, com aceite automático), agendada para quando o
+  pedido fica pronto (`prontoEm`: aceite + preparo, ou a janela menos o
+  caminho). "Pronto" antes da hora libera a corrida agora, pelo mesmo
+  `releaseScheduled` do painel. Cancelar o pedido cancela a corrida enquanto
+  nenhum motoboy aceitou; depois, 409 `STORE_ORDER_RIDE_ASSIGNED` (é com a
+  central). A criação é a do painel (`createFromStoreOrder`, em nome do dono da
+  empresa, como a do aiqfome), com chave idempotente `pedido:tentativa`.
+- **A corrida que não nasce não desfaz o aceite.** Fora do horário da central,
+  sem endereço de coleta, sem tipo de serviço ou sem preço: o motivo vai para
+  `rideIssue`, e Vendas mostra o aviso com "Chamar o motoboy de novo" e
+  "Entregar com o entregador da loja". Corrida cancelada pela central também
+  avisa; chamar de novo abre uma tentativa nova.
+- **O pedido acompanha a corrida na leitura**, como o prazo do aceite: a fila
+  e os pedidos do cliente levam o pedido a "Saiu" quando a corrida é coletada
+  e a "Entregue" quando é entregue (`pelaCorrida`). A loja não marca essas duas
+  à mão (409 `STORE_ORDER_FOLLOWS_RIDE`).
+- **A corrida pedida**: tipo de serviço escolhido em Tipos de pedido (ou o
+  primeiro ativo), CEP do cliente ou, sem ele, o da loja; pago na entrega, com
+  retorno à loja, como no aiqfome; a nota do motoboy diz quanto cobrar e o
+  troco. Decisões do usuário, 2026-09-26.
 - **Estorno e pagamento online não existem ainda**: a página só aceita
   pagamento na entrega enquanto o Asaas da loja não estiver ligado.
 
@@ -800,6 +820,8 @@ registradas no `changelog.md` de 2026-09-23.
    `apiKey`, `authDomain`, `projectId` e `appId` para as quatro
    `NEXT_PUBLIC_FIREBASE_*` do Vercel (company-web) e do `.env.local`. Depois,
    deploy novo. No Vercel, apagar as variáveis do Clerk, que não são mais lidas.
+   O lado da API já está pronto: o Render tem o `FIREBASE_PROJECT_ID` (a rota
+   do cliente respondeu 401, e não 503, em 26/09).
 7. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um

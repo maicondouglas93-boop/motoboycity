@@ -43,5 +43,15 @@ export function createCompanyStoreOrdersApi({ baseUrl }: CompanyStoreOrdersApiCo
     chamarMotoboyCity(accessToken: string, id: string) {
       return enviar(accessToken, `/${id}/call-motoboycity`, 'POST');
     },
+
+    /** A corrida não nasceu, ou a central a cancelou: chama o motoboy de novo. */
+    chamarDeNovo(accessToken: string, id: string) {
+      return enviar(accessToken, `/${id}/ride`, 'POST');
+    },
+
+    /** O pedido que o MOTOboyCity não vai levar passa ao entregador da loja. */
+    entregarComALoja(accessToken: string, id: string) {
+      return enviar(accessToken, `/${id}/own-courier`, 'POST');
+    },
   };
 }

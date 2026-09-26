@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, Bike, CalendarClock, Inbox, MapPin, Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { mensagemDoErro } from '@/components/loja/catalogo';
 import { enderecoEmTexto, useEnderecoDaEmpresa } from '@/components/loja/endereco-da-empresa';
 import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
-import { companyStoreOperationApi } from '@/lib/api-client';
+import { companyStoreOperationApi, serviceTypesApi } from '@/lib/api-client';
 import { hora, horariosParaAgendar, rotuloDoDia } from '@/lib/loja-horario';
 import {
   FOLGA_DA_ENTREGA_MIN,
@@ -20,6 +21,7 @@ import {
 } from '@/lib/loja-operacao';
 import type { ModoDeAceite, QuemEntrega } from '@/lib/loja-pedido';
 import { useAgora } from '@/lib/relogio';
+import { session } from '@/lib/session';
 
 /**
  * Que tipos de pedido a loja aceita e como eles entram: entrega, retirada,
@@ -45,6 +47,8 @@ interface Rascunho {
   prazoMin: number;
   entregaAtiva: boolean;
   quemEntrega: QuemEntrega;
+  /** `null`: o padrão, o primeiro tipo ativo. */
+  tipoDeServicoId: string | null;
   pedidoMinimo: string;
   entregaAgendada: boolean;
   retiradaAtiva: boolean;
@@ -111,6 +115,7 @@ function paraRascunho(operacao: OperacaoDaLoja): Rascunho {
     prazoMin: operacao.recebimento.prazoDoAceiteMin ?? 10,
     entregaAtiva: operacao.entrega.ativa,
     quemEntrega: operacao.entrega.quemEntrega,
+    tipoDeServicoId: operacao.entrega.tipoDeServicoId,
     pedidoMinimo: moedaParaTexto(operacao.entrega.pedidoMinimo),
     entregaAgendada: operacao.entrega.agendamento,
     retiradaAtiva: operacao.retirada.ativa,
@@ -138,6 +143,7 @@ function paraGravar(rascunho: Rascunho): Partes {
       quemEntrega: rascunho.quemEntrega,
       pedidoMinimo: textoParaMoeda(rascunho.pedidoMinimo),
       agendamento: rascunho.entregaAgendada,
+      tipoDeServicoId: rascunho.tipoDeServicoId,
     },
     retirada: {
       ativa: rascunho.retiradaAtiva,
@@ -187,8 +193,8 @@ export default function LojaTiposDePedidoPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          O que você salvar aqui vai para o sistema e vale para a página da sua loja. Pedido por ela
-          ainda não chega — a página mostra o cardápio e o horário.
+          O que você salvar aqui vai para o sistema e vale para a página da sua loja. Os pedidos
+          chegam por ela quando você liga os pedidos pela página, no alto de Vendas.
         </CardContent>
       </Card>
 
@@ -280,6 +286,14 @@ function Formulario({
   // padrão, e não um endereço à parte da loja.
   const empresa = useEnderecoDaEmpresa();
   const coleta = empresa.data?.address ? enderecoEmTexto(empresa.data.address) : null;
+  // Os mesmos tipos do botão "Chamar" do painel, na mesma consulta.
+  const token = session.getToken();
+  const tiposDeServico = useQuery({
+    queryKey: ['service-types', { active: true }],
+    queryFn: () => serviceTypesApi.list(token as string, { active: true }),
+    enabled: Boolean(token),
+  });
+  const primeiroTipo = tiposDeServico.data?.[0]?.name;
 
   /*
    * A prévia dos horários usa o horário SALVO da loja e as regras deste
@@ -339,7 +353,7 @@ function Formulario({
                       valor: 'MOTOBOYCITY',
                       titulo: 'Motoboy do MOTOboyCity',
                       detalhe:
-                        'O pedido pronto vira corrida no MOTOboyCity. A saída e a entrega chegam do aplicativo do motoboy, e a corrida entra na sua fatura, como as demais.',
+                        'Ao aceitar o pedido, o motoboy é chamado para a hora em que ele fica pronto; marcar "Pronto" antes chama na hora. A saída e a entrega chegam do aplicativo do motoboy, e a corrida entra na sua fatura, como as demais. Pago na entrega, o motoboy volta à loja com o dinheiro ou a maquininha, com a taxa de retorno.',
                     },
                     {
                       valor: 'LOJA',
@@ -371,6 +385,31 @@ function Formulario({
                   </label>
                 ))}
               </fieldset>
+
+              {rascunho.quemEntrega === 'MOTOBOYCITY' && (
+                <div className="max-w-72 space-y-2">
+                  <Label htmlFor="tipoDeServico">Tipo de serviço da corrida</Label>
+                  <select
+                    id="tipoDeServico"
+                    value={rascunho.tipoDeServicoId ?? ''}
+                    onChange={(evento) => mudar({ tipoDeServicoId: evento.target.value || null })}
+                    className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                  >
+                    <option value="">
+                      {primeiroTipo ? `Padrão (${primeiroTipo})` : 'Padrão (o primeiro da lista)'}
+                    </option>
+                    {tiposDeServico.data?.map((tipo) => (
+                      <option key={tipo.id} value={tipo.id}>
+                        {tipo.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    O mesmo que você escolheria no botão &quot;Chamar&quot;. Define o preço da
+                    corrida.
+                  </p>
+                </div>
+              )}
 
               <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Tempo estimado que o cliente vê: </span>

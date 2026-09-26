@@ -36,6 +36,8 @@ import { session } from '@/lib/session';
 import {
   acaoParaAvancar,
   caminhoDoPedido,
+  concluido,
+  corridaParaALoja,
   esperandoAHora,
   etapaParaALoja,
   inicioDoPreparo,
@@ -45,7 +47,7 @@ import {
   podeChamarMotoboyCity,
   proximaEtapa,
   quandoChegou,
-  vemDoMotoboy,
+  segueACorrida,
   type EtapaDoPedido,
   type QuemEntrega,
 } from '@/lib/loja-pedido';
@@ -439,6 +441,16 @@ function CartaoDaVenda({
   const acao = acaoParaAvancar(venda.modalidade, venda.etapa, venda.entregaPor);
   const cancelavel = podeCancelar(venda.modalidade, venda.etapa, venda.entregaPor);
   const pelaLoja = venda.modalidade === 'ENTREGA' && venda.entregaPor === 'LOJA';
+  const pelaCorrida = segueACorrida(venda);
+  const corridaCancelada = venda.corrida?.situacao === 'CANCELADA';
+  const naoEntregou = venda.corrida?.situacao === 'NAO_ENTREGUE';
+  const etapaComCorrida =
+    venda.etapa === 'ACEITO' || venda.etapa === 'EM_PREPARO' || venda.etapa === 'PRONTO';
+  // A corrida: o que ela está fazendo, enquanto o pedido não terminou.
+  const linhaDaCorrida =
+    pelaCorrida && venda.corrida && !corridaCancelada && !concluido(venda.etapa)
+      ? `${corridaParaALoja(venda.corrida)} · corrida #${venda.corrida.numero}`
+      : null;
   /*
    * Quem leva só aparece para quem usa entregador próprio: ali convivem pedidos
    * da loja e pedidos passados ao MOTOboyCity. Para quem entrega sempre pelo
@@ -476,8 +488,8 @@ function CartaoDaVenda({
   } else if (venda.etapa === 'PRONTO' && pelaLoja) {
     tempo = 'Esperando o seu entregador sair';
   } else if (venda.etapa === 'PRONTO' && venda.modalidade === 'ENTREGA') {
-    // A corrida ainda não nasce do pedido: quem chama o motoboy é a loja.
-    tempo = 'Chame o motoboy pelo botão "Chamar", no alto do painel';
+    // A corrida diz o resto, na linha dela.
+    tempo = null;
   } else if (venda.etapa === 'PRONTO') {
     tempo = 'Esperando o cliente buscar';
   }
@@ -550,6 +562,45 @@ function CartaoDaVenda({
             <Timer className="size-3.5" aria-hidden="true" />
             {tempo}
           </p>
+        )}
+
+        {linhaDaCorrida && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Bike className="size-3.5" aria-hidden="true" />
+            {linhaDaCorrida}
+          </p>
+        )}
+
+        {/* A corrida que não nasceu, foi cancelada ou não entregou: a loja
+            decide — chamar de novo, ou levar com o próprio entregador. */}
+        {venda.avisoDaCorrida && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+            <p className="w-full text-xs" role="status">
+              {venda.avisoDaCorrida}
+            </p>
+            {etapaComCorrida && (!venda.corrida || corridaCancelada) && (
+              <Button
+                type="button"
+                size="sm"
+                disabled={ocupado}
+                onClick={() => acaoNaVenda.mutate({ tipo: 'chamarDeNovo', id: venda.id })}
+              >
+                <Bike className="size-4" /> Chamar o motoboy de novo
+              </Button>
+            )}
+            {(etapaComCorrida || naoEntregou) &&
+              (!venda.corrida || corridaCancelada || naoEntregou) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={ocupado}
+                  onClick={() => acaoNaVenda.mutate({ tipo: 'entregarComALoja', id: venda.id })}
+                >
+                  Entregar com o entregador da loja
+                </Button>
+              )}
+          </div>
         )}
 
         {venda.etapa === 'CANCELADO' && venda.cancelamento && (
@@ -633,12 +684,7 @@ function CartaoDaVenda({
               </Button>
             )}
 
-            {vemDoMotoboy(venda.modalidade, venda.etapa, venda.entregaPor) && (
-              <span className="text-xs text-muted-foreground">
-                Por enquanto marcada aqui: a corrida do MOTOboyCity ainda não nasce do pedido.
-              </span>
-            )}
-            {venda.modalidade === 'ENTREGA' && !pelaLoja && venda.etapa === 'EM_PREPARO' && (
+            {pelaCorrida && venda.etapa === 'EM_PREPARO' && (
               <span className="text-xs text-muted-foreground">
                 Depois de pronto, cancelar passa a ser com a central: o motoboy já foi chamado.
               </span>
@@ -651,9 +697,9 @@ function CartaoDaVenda({
         {chamando && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
             <span className="w-full text-xs">
-              Este pedido passa a ser entregue por um motoboy do MOTOboyCity. Chame o motoboy pelo
-              botão &quot;Chamar&quot;, no alto do painel: a corrida entra na sua fatura, como as
-              demais.
+              Este pedido passa a ser entregue por um motoboy do MOTOboyCity: pronto, o motoboy é
+              chamado na hora; antes, para quando ficar pronto. A corrida entra na sua fatura, como
+              as demais.
             </span>
             <Button
               type="button"

@@ -115,8 +115,14 @@ empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
 sequencial por empresa (`@@unique([companyId, number])`), a etapa
 (`StoreOrderStage`), o histórico de etapas, os itens e o endereço em JSONB (no
 formato de `PedidoDaLoja`, de `@motoboycity/types`), os valores em `Decimal` e
-o uid do Firebase do cliente (`customerAuthId`). Não é `Delivery`: vira corrida
-só quando a loja chama o motoboy, pelo caminho de sempre.
+o uid do Firebase do cliente (`customerAuthId`). Não é `Delivery`: quando o
+MOTOboyCity entrega, a corrida nasce dele no aceite (`deliveryId`, 1:1),
+agendada para quando o pedido fica pronto, pela mesma criação do painel
+(`DeliveriesService.createFromStoreOrder`). "Pronto" libera a corrida
+agendada; cancelar o pedido a cancela (`cancelFromStoreOrder`, só antes de um
+motoboy aceitar). O pedido acompanha a corrida na leitura — coletada, saiu;
+entregue, entregue —, e o que der errado com ela vira `rideIssue`, o aviso de
+Vendas, sem desfazer a etapa do pedido.
 
 Módulo `company/store-orders`, dois controllers:
 

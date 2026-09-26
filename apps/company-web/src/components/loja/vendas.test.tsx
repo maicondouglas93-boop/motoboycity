@@ -8,7 +8,8 @@ import { OPERACAO_DE_EXEMPLO } from '@/lib/loja-mock';
 /**
  * A tela de Vendas fica atrás do login do painel; este teste confere o que ela
  * manda para a API em cada ação, o pedido da loja que entrega com motoboy
- * próprio, a impressão e a chave dos pedidos pela página.
+ * próprio, a corrida do MOTOboyCity, a impressão e a chave dos pedidos pela
+ * página.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   avancar: vi.fn(),
   cancelar: vi.fn(),
   chamarMotoboyCity: vi.fn(),
+  chamarDeNovo: vi.fn(),
+  entregarComALoja: vi.fn(),
   operation: vi.fn(),
   settings: vi.fn(),
   updateAcceptsOrders: vi.fn(),
@@ -27,6 +30,8 @@ vi.mock('@/lib/api-client', () => ({
     avancar: mocks.avancar,
     cancelar: mocks.cancelar,
     chamarMotoboyCity: mocks.chamarMotoboyCity,
+    chamarDeNovo: mocks.chamarDeNovo,
+    entregarComALoja: mocks.entregarComALoja,
   },
   companyStoreOperationApi: { operation: mocks.operation },
   companyStoreSettingsApi: {
@@ -83,6 +88,8 @@ function pedido(mudancas: Partial<PedidoDaLoja> = {}): PedidoDaLoja {
       referencia: null,
     },
     observacao: null,
+    corrida: null,
+    avisoDaCorrida: null,
     ...mudancas,
   };
 }
@@ -130,7 +137,12 @@ beforeEach(() => {
 
 describe('Vendas — entregador da loja', () => {
   it('a loja marca a saída; num aperto, passa o pedido para o MOTOboyCity', async () => {
-    mocks.chamarMotoboyCity.mockResolvedValue(pedido({ entregaPor: 'MOTOBOYCITY' }));
+    mocks.chamarMotoboyCity.mockResolvedValue(
+      pedido({
+        entregaPor: 'MOTOBOYCITY',
+        corrida: { numero: 900, situacao: 'BUSCANDO_MOTOBOY', agendadaPara: null, motoboy: null },
+      }),
+    );
     abrir();
 
     const doPedido = within(await cartao(42));
@@ -140,15 +152,73 @@ describe('Vendas — entregador da loja', () => {
     expect(doPedido.getByRole('button', { name: 'Cancelar pedido' })).toBeInTheDocument();
 
     fireEvent.click(doPedido.getByRole('button', { name: 'Chamar motoboy do MOTOboyCity' }));
-    // A corrida ainda não nasce do pedido: a tela diz como chamar.
-    expect(doPedido.getByText(/pelo botão "Chamar"/)).toBeInTheDocument();
+    // Pronto, o motoboy é chamado na hora: a confirmação diz isso.
+    expect(doPedido.getByText(/pronto, o motoboy é chamado na hora/)).toBeInTheDocument();
     fireEvent.click(doPedido.getByRole('button', { name: 'Chamar motoboy' }));
 
     await waitFor(() => expect(mocks.chamarMotoboyCity).toHaveBeenCalledWith('token', 'pedido-1'));
     const depois = within(await cartao(42));
     expect(await depois.findByText('Motoboy do MOTOboyCity')).toBeInTheDocument();
-    expect(depois.getByRole('button', { name: 'Motoboy coletou' })).toBeInTheDocument();
+    expect(depois.getByText('Buscando motoboy · corrida #900')).toBeInTheDocument();
+    // A saída vem da corrida: não há botão para marcá-la, nem para cancelar.
+    expect(depois.queryByRole('button', { name: 'Motoboy coletou' })).not.toBeInTheDocument();
     expect(depois.queryByRole('button', { name: 'Cancelar pedido' })).not.toBeInTheDocument();
+  });
+
+  it('a corrida que não nasceu avisa, e a loja chama de novo ou entrega ela mesma', async () => {
+    mocks.vendas.mockResolvedValue([
+      pedido({
+        etapa: 'EM_PREPARO',
+        entregaPor: 'MOTOBOYCITY',
+        historico: [
+          { etapa: 'NOVO', em: AGORA.toISOString() },
+          { etapa: 'ACEITO', em: AGORA.toISOString() },
+          { etapa: 'EM_PREPARO', em: AGORA.toISOString() },
+        ],
+        avisoDaCorrida: 'Não deu para chamar o motoboy: A operação está fora do horário.',
+      }),
+    ]);
+    mocks.chamarDeNovo.mockResolvedValue(
+      pedido({
+        etapa: 'EM_PREPARO',
+        entregaPor: 'MOTOBOYCITY',
+        corrida: {
+          numero: 901,
+          situacao: 'AGENDADA',
+          agendadaPara: new Date(AGORA.getTime() + 15 * 60_000).toISOString(),
+          motoboy: null,
+        },
+      }),
+    );
+    mocks.entregarComALoja.mockResolvedValue(pedido({ etapa: 'EM_PREPARO', entregaPor: 'LOJA' }));
+    abrir();
+
+    const doPedido = within(await cartao(42));
+    expect(doPedido.getByRole('status')).toHaveTextContent('fora do horário');
+    fireEvent.click(doPedido.getByRole('button', { name: /Chamar o motoboy de novo/ }));
+    await waitFor(() => expect(mocks.chamarDeNovo).toHaveBeenCalledWith('token', 'pedido-1'));
+    expect(
+      await within(await cartao(42)).findByText(/Motoboy chamado para as .* · corrida #901/),
+    ).toBeInTheDocument();
+  });
+
+  it('a corrida cancelada pela central pode passar ao entregador da loja', async () => {
+    mocks.vendas.mockResolvedValue([
+      pedido({
+        entregaPor: 'MOTOBOYCITY',
+        corrida: { numero: 900, situacao: 'CANCELADA', agendadaPara: null, motoboy: null },
+        avisoDaCorrida: 'A central cancelou a corrida.',
+      }),
+    ]);
+    mocks.entregarComALoja.mockResolvedValue(pedido({ entregaPor: 'LOJA' }));
+    abrir();
+
+    const doPedido = within(await cartao(42));
+    fireEvent.click(doPedido.getByRole('button', { name: 'Entregar com o entregador da loja' }));
+    await waitFor(() => expect(mocks.entregarComALoja).toHaveBeenCalledWith('token', 'pedido-1'));
+    expect(
+      await within(await cartao(42)).findByRole('button', { name: 'Saiu para entrega' }),
+    ).toBeInTheDocument();
   });
 
   it('aceitar manda o preparo escolhido', async () => {

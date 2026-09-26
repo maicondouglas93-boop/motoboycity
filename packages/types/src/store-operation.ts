@@ -188,6 +188,11 @@ export interface OperacaoDaLoja {
     /** Conta só os itens, sem a taxa. `null`: sem mínimo. */
     pedidoMinimo: number | null;
     agendamento: boolean;
+    /**
+     * O tipo de serviço da corrida que nasce do pedido, quando o MOTOboyCity
+     * entrega. `null`: o primeiro tipo ativo, como no botão "Chamar".
+     */
+    tipoDeServicoId: string | null;
   };
   retirada: {
     ativa: boolean;

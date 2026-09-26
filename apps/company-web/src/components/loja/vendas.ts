@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PedidoDaLoja } from '@motoboycity/types';
+import type { CorridaDoPedido, PedidoDaLoja } from '@motoboycity/types';
 import { companyStoreOrdersApi } from '@/lib/api-client';
 import type { CadastroDoCliente, VendaDaLoja } from '@/lib/loja-mock';
 import { rotuloDoPagamento } from '@/lib/loja-pagamentos';
@@ -25,6 +25,10 @@ export const INTERVALO_DAS_VENDAS_MS = 10_000;
 export type VendaNoPainel = Omit<VendaDaLoja, 'cadastro'> & {
   id: string;
   cadastro: CadastroDoCliente | null;
+  /** A corrida do MOTOboyCity que leva o pedido, quando há. */
+  corrida: CorridaDoPedido | null;
+  /** O que a loja precisa resolver na corrida. */
+  avisoDaCorrida: string | null;
 };
 
 export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
@@ -55,6 +59,8 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
     cadastro: null,
     observacao: pedido.observacao,
     contaDoCliente: null,
+    corrida: pedido.corrida,
+    avisoDaCorrida: pedido.avisoDaCorrida,
   };
 }
 
@@ -77,7 +83,9 @@ export type AcaoNaVenda =
       minutosDePreparo?: number;
     }
   | { tipo: 'cancelar'; id: string; motivo: string }
-  | { tipo: 'chamarMotoboyCity'; id: string };
+  | { tipo: 'chamarMotoboyCity'; id: string }
+  | { tipo: 'chamarDeNovo'; id: string }
+  | { tipo: 'entregarComALoja'; id: string };
 
 /**
  * O que a loja faz com uma venda. A resposta é o pedido como ficou, e ele
@@ -98,6 +106,10 @@ export function useAcaoNaVenda() {
       }
       if (acao.tipo === 'cancelar') {
         return companyStoreOrdersApi.cancelar(chave, acao.id, { motivo: acao.motivo });
+      }
+      if (acao.tipo === 'chamarDeNovo') return companyStoreOrdersApi.chamarDeNovo(chave, acao.id);
+      if (acao.tipo === 'entregarComALoja') {
+        return companyStoreOrdersApi.entregarComALoja(chave, acao.id);
       }
       return companyStoreOrdersApi.chamarMotoboyCity(chave, acao.id);
     },

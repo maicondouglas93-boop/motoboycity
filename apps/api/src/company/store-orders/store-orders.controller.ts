@@ -47,4 +47,16 @@ export class StoreOrdersController {
   chamarMotoboy(@CurrentUser() user: User, @Param('id') id: string): Promise<PedidoDaLoja> {
     return this.storeOrdersService.chamarMotoboy(user, id);
   }
+
+  /** A corrida não nasceu, ou a central a cancelou: chama o motoboy de novo. */
+  @Post(':id/ride')
+  chamarDeNovo(@CurrentUser() user: User, @Param('id') id: string): Promise<PedidoDaLoja> {
+    return this.storeOrdersService.chamarDeNovo(user, id);
+  }
+
+  /** O pedido que o MOTOboyCity não vai levar passa ao entregador da loja. */
+  @Post(':id/own-courier')
+  entregarComALoja(@CurrentUser() user: User, @Param('id') id: string): Promise<PedidoDaLoja> {
+    return this.storeOrdersService.entregarComALoja(user, id);
+  }
 }

@@ -22,6 +22,18 @@ vi.mock('@/lib/api-client', () => ({
     updateOrderTypes: mocks.updateOrderTypes,
   },
   companyAddressApi: { get: mocks.endereco },
+  serviceTypesApi: {
+    list: () =>
+      Promise.resolve([
+        {
+          id: '6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d',
+          code: 'MOTO',
+          name: 'Moto',
+          active: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]),
+  },
 }));
 
 /** Como o banco (JSONB) devolve: o mesmo conteúdo, com as chaves em outra ordem. */

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import type {
   AjusteManual,
   BairroAtendido,
@@ -42,7 +42,13 @@ export const OPERACAO_INICIAL: OperacaoDaLoja = {
     minutosDeEntrega: 15,
     prazoDoAceiteMin: 10,
   },
-  entrega: { ativa: true, quemEntrega: 'MOTOBOYCITY', pedidoMinimo: null, agendamento: false },
+  entrega: {
+    ativa: true,
+    quemEntrega: 'MOTOBOYCITY',
+    pedidoMinimo: null,
+    agendamento: false,
+    tipoDeServicoId: null,
+  },
   retirada: { ativa: false, endereco: null, instrucoes: '', agendamento: false },
   agendamento: {
     permitir: false,
@@ -190,9 +196,83 @@ export class StoreOperationService {
     return this.gravar(user, { manualStatus: valor ? comoJson(valor) : Prisma.DbNull });
   }
 
-  updateOrderTypes(user: User, payload: StoreOrderTypesPayload): Promise<OperacaoDaLoja> {
-    const tipos: TiposDePedido = payload;
+  /**
+   * O tipo de serviço da corrida passa pela mesma conferência da integração
+   * aiqfome: ativo, e com tabela de preço na região da empresa — sem ela, a
+   * corrida não teria preço, e só se saberia no primeiro pedido. Sem o campo
+   * (aba aberta antes de ele existir), fica o que estava gravado.
+   */
+  async updateOrderTypes(user: User, payload: StoreOrderTypesPayload): Promise<OperacaoDaLoja> {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    let tipoDeServicoId = payload.entrega.tipoDeServicoId;
+    if (tipoDeServicoId === undefined) {
+      tipoDeServicoId = (await this.daEmpresa(companyId)).entrega.tipoDeServicoId;
+    } else if (tipoDeServicoId !== null) {
+      await this.conferirTipoDeServico(companyId, tipoDeServicoId);
+    }
+    const tipos: TiposDePedido = {
+      ...payload,
+      entrega: { ...payload.entrega, tipoDeServicoId },
+    };
     return this.gravar(user, { orderTypes: comoJson(tipos) });
+  }
+
+  /**
+   * O tipo de serviço da corrida que nasce de um pedido: o escolhido em Tipos
+   * de pedido ou, sem escolha, o primeiro ativo — o mesmo que o botão "Chamar"
+   * do painel traz marcado. O escolhido que deixou de valer é recusado, em vez
+   * de trocado em silêncio por outro, de outro preço.
+   */
+  async tipoDeServicoDaCorrida(companyId: string): Promise<string> {
+    const escolhido = (await this.daEmpresa(companyId)).entrega.tipoDeServicoId;
+    if (escolhido) {
+      await this.conferirTipoDeServico(companyId, escolhido);
+      return escolhido;
+    }
+    const primeiro = await this.prisma.serviceType.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!primeiro) {
+      throw new ConflictException({
+        message: 'Não há tipo de serviço ativo para chamar o motoboy. Fale com a central.',
+        code: 'STORE_SERVICE_TYPE_UNAVAILABLE',
+      });
+    }
+    return primeiro.id;
+  }
+
+  private async conferirTipoDeServico(companyId: string, tipoDeServicoId: string): Promise<void> {
+    const [tipo, empresa] = await Promise.all([
+      this.prisma.serviceType.findFirst({
+        where: { id: tipoDeServicoId, active: true },
+        select: { id: true },
+      }),
+      this.prisma.company.findUnique({ where: { id: companyId }, select: { regionId: true } }),
+    ]);
+    if (!tipo) {
+      throw new ConflictException({
+        message:
+          'O tipo de serviço escolhido em Tipos de pedido não está mais ativo. Escolha outro.',
+        code: 'STORE_SERVICE_TYPE_UNAVAILABLE',
+      });
+    }
+    const tabela = await this.prisma.pricingTable.findFirst({
+      where: {
+        regionId: empresa?.regionId,
+        serviceTypeId: tipoDeServicoId,
+        active: true,
+        OR: [{ companyId }, { companyId: null }],
+      },
+      select: { id: true },
+    });
+    if (!tabela) {
+      throw new ConflictException({
+        message: 'Este tipo de serviço não tem preço na sua região. Escolha outro.',
+        code: 'STORE_SERVICE_TYPE_UNPRICED',
+      });
+    }
   }
 
   updateNotifications(user: User, payload: StoreNotificationsPayload): Promise<OperacaoDaLoja> {

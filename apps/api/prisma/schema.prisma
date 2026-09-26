@@ -921,6 +921,8 @@ model Delivery {
   trackingPoints            DeliveryLocationPoint[]
   integrationInboundEvents  IntegrationInboundEvent[]
   integrationOutboundEvents IntegrationOutboundEvent[]
+  /// O pedido da loja online que esta corrida leva, quando nasceu de um.
+  storeOrder                StoreOrder?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2179,8 +2181,18 @@ model StoreOrder {
   note            String?              @db.VarChar(200)
   cancelReason    String?              @db.VarChar(200)
   cancelledBy     StoreOrderCanceller?
+  /// A corrida do MOTOboyCity que leva o pedido. Nula na retirada, com o
+  /// entregador da loja, antes do aceite e quando a corrida não pôde nascer.
+  deliveryId      String?              @unique
+  /// Quantas corridas o pedido já teve: entra na chave idempotente da criação,
+  /// para a corrida cancelada pela central poder ser chamada de novo.
+  rideAttempt     Int                  @default(0)
+  /// O que a loja precisa resolver na corrida (não nasceu, foi cancelada, não
+  /// entregou), como Vendas mostra. Nulo quando está tudo certo.
+  rideIssue       String?              @db.VarChar(300)
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  delivery Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

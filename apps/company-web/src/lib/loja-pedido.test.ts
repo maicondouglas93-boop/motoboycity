@@ -6,13 +6,17 @@ import {
   avancar,
   caminhoDoPedido,
   chamarMotoboyCity,
+  corridaParaALoja,
   esperandoAHora,
   inicioDoPedido,
   inicioDoPreparo,
+  pelaCorrida,
   podeCancelar,
   podeChamarMotoboyCity,
   prazoDoAceite,
   previsaoParaOCliente,
+  prontoEm,
+  segueACorrida,
   vemDoMotoboy,
   type AndamentoDoPedido,
 } from './loja-pedido';
@@ -131,7 +135,7 @@ describe('entregador da loja', () => {
     const antigo = pedido({ etapa: 'PRONTO' }) as Partial<AndamentoDoPedido>;
     delete antigo.entregaPor;
     expect(podeCancelar('ENTREGA', 'PRONTO', antigo.entregaPor)).toBe(false);
-    expect(acaoParaAvancar('ENTREGA', 'PRONTO', antigo.entregaPor)).toBe('Motoboy coletou');
+    expect(acaoParaAvancar('ENTREGA', 'PRONTO', antigo.entregaPor)).toBeNull();
   });
 
   it('num dia de aperto, um pedido passa para o MOTOboyCity até sair', () => {
@@ -229,8 +233,10 @@ describe('o que o cliente lê', () => {
     );
   });
 
-  it('o botão diz a ação, e muda na retirada', () => {
-    expect(acaoParaAvancar('ENTREGA', 'PRONTO')).toBe('Motoboy coletou');
+  it('o botão diz a ação, e muda na retirada; pelo MOTOboyCity, a saída vem da corrida', () => {
+    expect(acaoParaAvancar('ENTREGA', 'PRONTO')).toBeNull();
+    expect(acaoParaAvancar('ENTREGA', 'SAIU_PARA_ENTREGA', 'MOTOBOYCITY')).toBeNull();
+    expect(acaoParaAvancar('ENTREGA', 'SAIU_PARA_ENTREGA', 'LOJA')).toBe('Marcar como entregue');
     expect(acaoParaAvancar('RETIRADA', 'PRONTO')).toBe('Cliente retirou');
     expect(acaoParaAvancar('ENTREGA', 'ENTREGUE')).toBeNull();
   });
@@ -260,5 +266,77 @@ describe('prazo do aceite manual', () => {
   it('sem prazo escolhido, ou depois de aceito, não há prazo', () => {
     expect(prazoDoAceite(pedido(), null)).toBeNull();
     expect(prazoDoAceite(avancar(pedido(), 'ACEITO', em('2026-09-22T19:02')), 10)).toBeNull();
+  });
+});
+
+describe('a corrida do MOTOboyCity', () => {
+  it('só o pedido de entrega pelo MOTOboyCity segue a corrida', () => {
+    expect(segueACorrida(pedido())).toBe(true);
+    expect(segueACorrida(pedido({ entregaPor: 'LOJA' }))).toBe(false);
+    expect(segueACorrida(pedido({ modalidade: 'RETIRADA', entregaPor: null }))).toBe(false);
+  });
+
+  it('fica pronto no aceite mais o preparo; agendado, na janela menos o caminho', () => {
+    expect(prontoEm(pedido())).toBeNull();
+    const aceito = avancar(pedido(), 'ACEITO', em('2026-09-22T19:05'));
+    expect(prontoEm(aceito)).toEqual(em('2026-09-22T19:25'));
+
+    const agendado = pedido({
+      janela: {
+        inicio: em('2026-09-23T12:00').toISOString(),
+        fim: em('2026-09-23T12:30').toISOString(),
+      },
+    });
+    expect(prontoEm(agendado)).toEqual(em('2026-09-23T11:45'));
+  });
+
+  it('coletada, o pedido saiu — com o "Pronto" que a loja esqueceu; entregue, entregue', () => {
+    const emPreparo = avancar(
+      avancar(pedido(), 'ACEITO', em('2026-09-22T19:05')),
+      'EM_PREPARO',
+      em('2026-09-22T19:06'),
+    );
+    const saiu = pelaCorrida(emPreparo, 'COLETADA', em('2026-09-22T19:30'));
+    expect(saiu.etapa).toBe('SAIU_PARA_ENTREGA');
+    expect(saiu.historico.slice(-2)).toEqual([
+      { etapa: 'PRONTO', em: em('2026-09-22T19:30').toISOString() },
+      { etapa: 'SAIU_PARA_ENTREGA', em: em('2026-09-22T19:30').toISOString() },
+    ]);
+    expect(pelaCorrida(saiu, 'ENTREGUE', em('2026-09-22T19:45')).etapa).toBe('ENTREGUE');
+  });
+
+  it('agendada, buscando ou cancelada não mudam a etapa; e nada volta para trás', () => {
+    const emPreparo = avancar(pedido(), 'ACEITO', em('2026-09-22T19:05'));
+    for (const situacao of [
+      'AGENDADA',
+      'BUSCANDO_MOTOBOY',
+      'MOTOBOY_A_CAMINHO',
+      'CANCELADA',
+    ] as const) {
+      expect(pelaCorrida(emPreparo, situacao, em('2026-09-22T19:30'))).toBe(emPreparo);
+    }
+    const entregue = pelaCorrida(emPreparo, 'ENTREGUE', em('2026-09-22T19:45'));
+    expect(pelaCorrida(entregue, 'COLETADA', em('2026-09-22T19:50'))).toBe(entregue);
+    const daLoja = pedido({ entregaPor: 'LOJA', etapa: 'PRONTO' });
+    expect(pelaCorrida(daLoja, 'COLETADA', em('2026-09-22T19:30'))).toBe(daLoja);
+  });
+
+  it('a corrida numa linha, para o cartão da venda', () => {
+    expect(
+      corridaParaALoja({
+        numero: 900,
+        situacao: 'AGENDADA',
+        agendadaPara: em('2026-09-22T19:25').toISOString(),
+        motoboy: null,
+      }),
+    ).toBe('Motoboy chamado para as 19:25');
+    expect(
+      corridaParaALoja({
+        numero: 900,
+        situacao: 'MOTOBOY_A_CAMINHO',
+        agendadaPara: null,
+        motoboy: 'João',
+      }),
+    ).toBe('João está vindo buscar');
   });
 });

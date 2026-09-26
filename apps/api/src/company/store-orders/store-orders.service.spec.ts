@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import type { OperacaoPublica, PublicStoreProduct } from '@motoboycity/types';
 import type { StoreCheckoutPayload } from '@motoboycity/validation';
 import { Prisma } from '@prisma/client';
+import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 import {
@@ -105,11 +106,19 @@ describe('StoreOrdersService', () => {
   let service: StoreOrdersService;
   let prisma: {
     storeSlug: { findUnique: jest.Mock };
-    storeOrder: { aggregate: jest.Mock; create: jest.Mock; findMany: jest.Mock };
+    storeOrder: {
+      aggregate: jest.Mock;
+      create: jest.Mock;
+      findMany: jest.Mock;
+      findFirst: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    companyAddress: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
   let catalogo: { publicCatalog: jest.Mock };
-  let operacaoDaLoja: { publicOperation: jest.Mock };
+  let operacaoDaLoja: { publicOperation: jest.Mock; tipoDeServicoDaCorrida: jest.Mock };
+  let entregas: { createFromStoreOrder: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
     company: { id: EMPRESA, status: 'ACTIVE', storeSettings: { acceptsOrders } },
@@ -129,6 +138,9 @@ describe('StoreOrdersService', () => {
             updatedAt: new Date(),
             cancelReason: null,
             cancelledBy: null,
+            deliveryId: null,
+            rideAttempt: 0,
+            rideIssue: null,
             ...data,
             address: data.address === Prisma.DbNull ? null : data.address,
             subtotal: new Prisma.Decimal(data.subtotal),
@@ -138,6 +150,15 @@ describe('StoreOrdersService', () => {
           }),
         ),
         findMany: jest.fn().mockResolvedValue([]),
+        // A corrida relê o pedido recém-gravado.
+        findFirst: jest.fn().mockImplementation(async () => ({
+          ...(await prisma.storeOrder.create.mock.results.at(-1)?.value),
+          delivery: null,
+        })),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      companyAddress: {
+        findFirst: jest.fn().mockResolvedValue({ zip: '36980-000', state: 'MG' }),
       },
       $transaction: jest.fn(),
     };
@@ -145,7 +166,11 @@ describe('StoreOrdersService', () => {
     catalogo = {
       publicCatalog: jest.fn().mockResolvedValue({ categories: [], products: [ACAI, SUCO] }),
     };
-    operacaoDaLoja = { publicOperation: jest.fn().mockResolvedValue(operacao()) };
+    operacaoDaLoja = {
+      publicOperation: jest.fn().mockResolvedValue(operacao()),
+      tipoDeServicoDaCorrida: jest.fn().mockResolvedValue('6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d'),
+    };
+    entregas = { createFromStoreOrder: jest.fn().mockResolvedValue({ id: 'corrida-1' }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -153,6 +178,7 @@ describe('StoreOrdersService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: StoreCatalogService, useValue: catalogo },
         { provide: StoreOperationService, useValue: operacaoDaLoja },
+        { provide: DeliveriesService, useValue: entregas },
       ],
     }).compile();
     service = module.get(StoreOrdersService);
@@ -321,6 +347,24 @@ describe('StoreOrdersService', () => {
     ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_CHANGE_TOO_LOW' } });
   });
 
+  it('no aceite automático, a corrida nasce junto, agendada para o fim do preparo', async () => {
+    await service.checkout('acai', CLIENTE, pedido());
+
+    const [empresa, chave, payload] = entregas.createFromStoreOrder.mock.calls[0]!;
+    expect(empresa).toBe(EMPRESA);
+    expect(chave).toBe('pedido-1:0');
+    const preparo = OPERACAO_INICIAL.recebimento.minutosDePreparo;
+    expect(payload).toMatchObject({
+      externalOrderNumber: 'Loja #42',
+      requiresReturn: true,
+      scheduledAt: new Date(MEIO_DIA.getTime() + preparo * 60_000).toISOString(),
+    });
+    expect(prisma.storeOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: 'pedido-1', companyId: EMPRESA },
+      data: { deliveryId: 'corrida-1', rideIssue: null },
+    });
+  });
+
   it('no aceite manual, o pedido espera como novo, com prazo para cair', async () => {
     const manual = operacao();
     manual.recebimento = { ...manual.recebimento, modo: 'MANUAL', prazoDoAceiteMin: 10 };
@@ -329,6 +373,8 @@ describe('StoreOrdersService', () => {
     const feito = await service.checkout('acai', CLIENTE, pedido());
 
     expect(feito.etapa).toBe('NOVO');
+    // Sem aceite, sem corrida: ela nasce quando a loja aceitar.
+    expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
     expect(prisma.storeOrder.create.mock.calls[0][0].data.acceptDeadline).toEqual(
       new Date(MEIO_DIA.getTime() + 10 * 60_000),
     );

@@ -15824,3 +15824,138 @@ comanda saiu com os itens, o troco e o nome da loja. O item "Loja" apareceu no
 menu e ficou marcado nas telas de `/loja`.
 
 **Deploy:** nada foi enviado.
+
+## 2026-09-26 — Publicação do pedido da loja online
+
+**Publicação** (push autorizado pelo usuário: "Commit e push"). Dois commits
+enviados para `main`: `6c4dace` (a loja que não abre, com o registro da
+publicação anterior) e `424db8a` (pedido da loja online, login pelo Firebase e
+Vendas). O recorte de resiliência foi montado no índice a partir de versões
+intermediárias dos três arquivos que ele dividia com o do pedido; só a ponta
+(`424db8a`) foi validada inteira, e é ela que o CI e os deploys usaram.
+
+- CI verde no GitHub, com a instalação pelo lock congelado e o
+  `.pnpmfile.cjs` (o `pnpmfileChecksum` do lock bateu).
+- Render: `/company/store/orders` passou de 404 a 401 cerca de 3,5 min depois
+  do push — a API nova subiu, e com ela o `migrate deploy` da
+  `20260926120000_loja_pedido`. A rota do cliente respondeu 401
+  `STORE_CUSTOMER_REQUIRED`, e não 503: o `FIREBASE_PROJECT_ID` está no Render.
+  `/health/ready` com PostgreSQL e Redis ok.
+- Vercel: o status do commit traz company e admin em "Deployment has
+  completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200.
+- Os painéis do Render e do Vercel não foram abertos, e não houve inspeção SQL
+  do banco de produção.
+
+Sem as quatro `NEXT_PUBLIC_FIREBASE_*` no Vercel, toda loja segue como vitrine
+em produção, mesmo com os pedidos ligados — é o esperado até o usuário
+configurar o Firebase.
+
+## 2026-09-26 — A corrida nasce do pedido da loja online
+
+**Decisões do usuário** (perguntadas neste recorte):
+
+- a corrida nasce **no aceite, agendada** para quando o pedido fica pronto;
+  "Pronto" antes da hora a libera na hora;
+- **a loja escolhe o tipo de serviço**, em Tipos de pedido → Entrega (sem
+  escolha, o primeiro ativo, como o botão "Chamar");
+- **sem CEP do cliente, vale o CEP da loja**;
+- **fora do horário da central, o pedido entra e a loja é avisada**;
+- **pago na entrega, a corrida exige retorno à loja**, igual ao aiqfome.
+
+**Motivo:** o pedido da loja que entrega pelo MOTOboyCity parava em "Pronto" —
+a corrida não nascia dele, e a tela mandava a loja chamar pelo botão "Chamar".
+Era o impedimento O4 da loja online.
+
+**Banco** — migration `20260926150000_loja_pedido_corrida`, aditiva:
+`store_orders.deliveryId` (único, FK para `deliveries`, `ON DELETE SET NULL`),
+`rideAttempt` (padrão 0) e `rideIssue` (VARCHAR 300). Em produção a tabela está
+vazia (sem o Firebase, toda loja é vitrine). Validada num banco descartável:
+aplicar todas, conferir, desfazer, voltar ao anterior e reaplicar — as quatro
+ok. Aplicada no `motoboycity_dev` local. **Não foi para produção.**
+
+**API:**
+
+- `DeliveriesService.createFromStoreOrder`: a criação do painel (endereço de
+  coleta, distância, preço congelado, horário da central), em nome do dono da
+  empresa, sem autor no histórico, com a nota "Pedido #N da loja online." e
+  chave idempotente `pedido:tentativa`. `cancelFromStoreOrder`: cancela só
+  antes de um motoboy aceitar. O miolo do `cancelFromIntegration` virou o
+  `cancelBySystem`, comum aos dois — o comportamento do aiqfome não mudou (266
+  testes de entregas e integrações passam). O metadado de criação pelo sistema
+  (`SystemCreationMetadata`) passou a ter integração opcional.
+- `StoreOrdersService`: a corrida nasce no aceite (e no checkout, com aceite
+  automático); "Pronto" libera a agendada (`releaseScheduled`, que respeita o
+  horário da central); cancelar tira a corrida antes (409
+  `STORE_ORDER_RIDE_ASSIGNED` com motoboy a caminho); "Saiu" e "Entregue" à mão
+  são recusados no pedido que segue a corrida (409 `STORE_ORDER_FOLLOWS_RIDE`);
+  a leitura da fila e dos pedidos do cliente leva o pedido à etapa que a
+  corrida alcançou. O que der errado vira `rideIssue` sem desfazer a etapa.
+  Rotas novas: `POST /company/store/orders/:id/ride` (chamar de novo) e
+  `POST :id/own-courier` (passar ao entregador da loja).
+- `StoreOperationService`: `entrega.tipoDeServicoId` gravado com a conferência
+  do aiqfome (ativo e com tabela de preço na região); sem o campo (aba antiga),
+  mantém o gravado. `tipoDeServicoDaCorrida` recusa o escolhido que saiu, em
+  vez de trocá-lo em silêncio por outro preço.
+- O pedido para a loja traz `corrida` (número, situação, hora agendada,
+  motoboy) e `avisoDaCorrida`; para o cliente, os dois vêm `null`.
+
+**Contratos:** `CorridaDoPedido`, `SituacaoDaCorrida` e os dois campos novos
+de `PedidoDaLoja`; `entrega.tipoDeServicoId` na operação (opcional no schema,
+para a aba antiga); regras `segueACorrida`, `prontoEm`, `pelaCorrida` e
+`corridaParaALoja`; `acaoParaAvancar` sem botão depois de "Pronto" no pedido do
+MOTOboyCity; `chamarDeNovo` e `entregarComALoja` no `api-client`.
+
+**Painel:** Vendas mostra a corrida numa linha ("Motoboy chamado para as
+19:25 · corrida #900", "Buscando motoboy"...) e o aviso com "Chamar o motoboy
+de novo" e "Entregar com o entregador da loja"; sai o texto "a corrida ainda
+não nasce do pedido". Tipos de pedido ganha o seletor do tipo de serviço, e o
+texto do MOTOboyCity diz quando o motoboy é chamado e o retorno. O aviso de
+Tipos de pedido que dizia que pedido "ainda não chega" saiu.
+
+**Arquivos:** `apps/api/prisma/schema.prisma`, a migration nova;
+`apps/api/src/deliveries/deliveries.service.ts`;
+`apps/api/src/company/store-orders/` (serviço, controller, módulo, os dois
+specs); `apps/api/src/company/store-operation/` (serviço e spec);
+`apps/api/test/store-orders.e2e-spec.ts`; `packages/types/src/store-order.ts`
+e `store-operation.ts`; `packages/validation/src/company/store-order.rules.ts`
+e `store-operation.schema.ts`; `packages/api-client/src/company-store-orders.ts`;
+`apps/company-web/src/app/(app)/loja/vendas/page.tsx` e
+`tipos-de-pedido/page.tsx`, `src/components/loja/vendas.ts`, `vendas.test.tsx`,
+`tipos-de-pedido.test.tsx`, `src/lib/loja-pedido.ts`, `loja-pedido.test.ts`,
+`loja-mock.ts`; `docs/agent-handoff.md`, `architecture.md`,
+`business-rules.md`, `plano-loja-online.md`.
+
+**Como foi validado:** `pnpm typecheck` 8/8; `pnpm lint` 8/8 (o aviso antigo
+do driver-app); Jest da API, 1369 passam e 1 pulado, e depois um caso novo
+(26/26 no módulo do pedido); vitest do `company-web`, 51 arquivos e 363 testes;
+driver-app 210/210; E2E inteiro isolado, 29 suítes e 253 testes — o novo faz o
+caminho todo contra o banco: aceite → corrida agendada para aceite + 30 min, com
+retorno, pagamento em dinheiro, CEP da loja e a nota no histórico → "Pronto"
+libera → coletada, o pedido saiu → entregue → cancelamento antes de pronto
+cancela a corrida → tipo de serviço inativo vira aviso e "chamar de novo" cria
+a corrida → a central cancela e o pedido passa ao entregador da loja. Builds da
+API e dos dois painéis sem erro. No navegador, com a API local: o pedido #2 da
+empresa de teste `franklim` (sem endereço de coleta) foi aceito, e Vendas
+mostrou "Não deu para chamar o motoboy: A empresa ainda não tem um endereço de
+coleta..." com os dois botões; "Entregar com o entregador da loja" passou o
+pedido à loja. A primeira versão desse aviso culpava o endereço do cliente — a
+falta do endereço de coleta derrubava o CEP de reserva na validação —, e foi
+corrigida para acusar a causa. O seletor do tipo de serviço apareceu em Tipos de
+pedido. **Não foi exercitado no navegador**: a corrida nascendo de verdade (a
+empresa local não tem endereço de coleta, e ele não foi cadastrado para não
+mexer nos dados de teste do usuário) — está coberta pelo E2E.
+
+**Deploy:** nada foi enviado.
+
+**Reverter** a migration, se preciso:
+
+```sql
+ALTER TABLE "store_orders" DROP CONSTRAINT "store_orders_deliveryId_fkey";
+DROP INDEX "store_orders_deliveryId_key";
+ALTER TABLE "store_orders" DROP COLUMN "deliveryId", DROP COLUMN "rideAttempt",
+  DROP COLUMN "rideIssue";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926150000_loja_pedido_corrida';
+```
+
+As corridas já criadas continuam em `deliveries`; só o vínculo com o pedido se
+perde.

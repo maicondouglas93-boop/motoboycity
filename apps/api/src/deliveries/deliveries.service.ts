@@ -102,10 +102,15 @@ export interface DeliveryOperationsRecentWindow {
   limit?: number | null;
 }
 
-interface IntegrationCreationMetadata {
-  integrationId: string;
-  externalOrderId: string;
+/**
+ * Pedido criado pelo sistema, e não por alguém no painel: importado do aiqfome
+ * (com a integração e o id do pedido lá) ou nascido de um pedido da loja online.
+ * O histórico fica sem autor e com a nota.
+ */
+interface SystemCreationMetadata {
   historyNote: string;
+  integrationId?: string;
+  externalOrderId?: string;
 }
 
 const OPERATIONAL_DELIVERY_INCLUDE = Prisma.validator<Prisma.DeliveryInclude>()({
@@ -424,6 +429,42 @@ export class DeliveriesService {
   }
 
   /**
+   * A corrida que nasce de um pedido da loja online (`company/store-orders`): a
+   * mesma criação do painel — endereço de coleta, distância, preço congelado,
+   * horário de funcionamento —, em nome do responsável pela empresa, como a do
+   * aiqfome. `chave` identifica a tentativa: repetir a mesma chave devolve a
+   * corrida já criada, e não uma segunda.
+   */
+  async createFromStoreOrder(
+    companyId: string,
+    chave: string,
+    payload: CreateDeliveryPayload,
+    historyNote: string,
+  ): Promise<DeliveryDetail> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, status: true, regionId: true },
+    });
+    if (!company || company.status !== 'ACTIVE') {
+      throw new ConflictException('A empresa não está ativa para chamar motoboy.');
+    }
+    const owner = await this.prisma.companyTeamMember.findFirst({
+      where: { companyId, role: 'OWNER', active: true },
+      orderBy: { joinedAt: 'asc' },
+      select: { user: true },
+    });
+    if (!owner) {
+      throw new ConflictException('A empresa não tem um responsável ativo para chamar motoboy.');
+    }
+    return this.createForResolvedCompany(
+      owner.user,
+      company,
+      { ...payload, idempotencyKey: this.deterministicUuid(`store-order:${chave}`) },
+      { historyNote },
+    );
+  }
+
+  /**
    * Edita um pedido avulso antes de ele ser aceito por um motoboy.
    *
    * O painel pode alterar inclusive modalidade e destino, portanto preço e
@@ -637,7 +678,7 @@ export class DeliveriesService {
     user: User,
     company: { id: string; status: string; regionId: string },
     payload: CreateDeliveryPayload,
-    integration?: IntegrationCreationMetadata,
+    system?: SystemCreationMetadata,
   ): Promise<DeliveryDetail> {
     const idempotentDeliveryId = payload.idempotencyKey
       ? this.deterministicUuid(`delivery:${company.id}:${payload.idempotencyKey}`)
@@ -728,9 +769,9 @@ export class DeliveriesService {
             ...(idempotentDeliveryId && { id: idempotentDeliveryId }),
             companyId: company.id,
             companyCustomerId,
-            ...(integration && {
-              integrationId: integration.integrationId,
-              externalOrderId: integration.externalOrderId,
+            ...(system?.integrationId && {
+              integrationId: system.integrationId,
+              externalOrderId: system.externalOrderId,
             }),
             serviceTypeId: payload.serviceTypeId,
             status: initialStatus,
@@ -794,8 +835,8 @@ export class DeliveriesService {
             deliveryId: delivery.id,
             fromStatus: null,
             toStatus: initialStatus,
-            changedByUserId: integration ? null : user.id,
-            note: integration?.historyNote,
+            changedByUserId: system ? null : user.id,
+            note: system?.historyNote,
           },
         });
 
@@ -1768,7 +1809,45 @@ export class DeliveriesService {
     if (!delivery) return 'NOT_FOUND';
     if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
     if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
+    const note = reason?.trim().slice(0, 500) || 'Cancelado no aiqfome.';
+    return (await this.cancelBySystem(delivery, note)) ? 'CANCELLED' : 'REVIEW';
+  }
 
+  /**
+   * A loja cancelou o pedido da loja online, e a corrida dele sai junto — só
+   * enquanto nenhum motoboy aceitou, como a empresa no painel. `REVIEW`: um
+   * motoboy já aceitou, e cancelar passa a ser com a central.
+   */
+  async cancelFromStoreOrder(
+    companyId: string,
+    deliveryId: string,
+    note: string,
+  ): Promise<'CANCELLED' | 'NOT_FOUND' | 'TERMINAL' | 'REVIEW'> {
+    const delivery = await this.prisma.delivery.findFirst({
+      where: { id: deliveryId, companyId },
+      include: {
+        company: { select: { tradeName: true } },
+        driver: { include: { user: { select: { name: true } } } },
+      },
+    });
+    if (!delivery) return 'NOT_FOUND';
+    if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
+    if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
+    return (await this.cancelBySystem(delivery, note)) ? 'CANCELLED' : 'REVIEW';
+  }
+
+  /**
+   * Cancela, sem autor no histórico, uma corrida que ainda não tem motoboy.
+   * Condicional ao status lido: se ele mudou no meio (um motoboy aceitou),
+   * devolve `false` e nada muda.
+   */
+  private async cancelBySystem(
+    delivery: Delivery & {
+      company: { tradeName: string };
+      driver: { user: { name: string } } | null;
+    },
+    note: string,
+  ): Promise<boolean> {
     const changedAt = new Date();
     const changed = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.delivery.updateMany({
@@ -1782,12 +1861,12 @@ export class DeliveriesService {
           fromStatus: delivery.status,
           toStatus: 'CANCELLED',
           changedByUserId: null,
-          note: reason?.trim().slice(0, 500) || 'Cancelado no aiqfome.',
+          note,
         },
       });
       return true;
     });
-    if (!changed) return 'REVIEW';
+    if (!changed) return false;
 
     if (delivery.status === 'SCHEDULED') {
       await this.dispatchService.cancelScheduledActivation(delivery.id);
@@ -1815,7 +1894,7 @@ export class DeliveriesService {
       companyName: delivery.company.tradeName,
       status: 'CANCELLED',
     });
-    return 'CANCELLED';
+    return true;
   }
 
   /** Ação única pro lote inteiro — "cheguei na empresa, peguei tudo".
