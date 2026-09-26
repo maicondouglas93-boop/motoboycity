@@ -488,6 +488,7 @@ model Company {
   storeProducts   StoreProduct[]
   storeSettings   StoreSettings?
   storeSlugs      StoreSlug[]
+  storeOperation  StoreOperation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2030,11 +2031,29 @@ model StoreOption {
 /// A loja online da empresa: por enquanto, o link e o nome que o cliente vê.
 /// Nasce no primeiro "salvar" do link, nas Configurações da loja; antes disso a
 /// empresa não tem loja aberta ao público.
+/// O fundo da página da loja. As duas cores da identidade são medidas contra ele.
+enum StoreTheme {
+  CLARO
+  ESCURO
+}
+
 model StoreSettings {
   companyId String @id
   /// O link atual. Os anteriores ficam em `StoreSlug` e redirecionam para ele.
   slug      String @unique @db.VarChar(40)
   name      String @db.VarChar(80)
+
+  /// A identidade visual. O padrão é o da loja de demonstração, que passa na
+  /// régua de contraste (`problemasDasCores`, em `packages/validation`).
+  theme              StoreTheme @default(CLARO)
+  /// `#rrggbb`: o preço em destaque, como texto sobre o fundo.
+  brandColor         String     @default("#c2410c") @db.VarChar(7)
+  /// `#rrggbb`: o fundo dos botões.
+  actionColor        String     @default("#15803d") @db.VarChar(7)
+  logoUrl            String?    @db.VarChar(500)
+  /// O arquivo da logo no ImageKit. Nunca sai da API: é o que permite apagar a
+  /// logo trocada ou removida.
+  logoExternalFileId String?    @db.VarChar(100)
 
   company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   current StoreSlug @relation("LinkAtual", fields: [slug], references: [slug], onDelete: NoAction)
@@ -2058,4 +2077,35 @@ model StoreSlug {
 
   @@index([companyId])
   @@map("store_slugs")
+}
+
+/// Como a loja online funciona: o horário, o ajuste da hora, os tipos de pedido
+/// e os avisos. Cada bloco numa coluna, gravado pela tela dele — salvar o
+/// horário não desfaz a pausa que outra aba acabou de fazer.
+///
+/// JSON no formato `OperacaoDaLoja` de `@motoboycity/types`, conferido pelo Zod
+/// na entrada. Nasce no primeiro salvar; antes disso, a API responde a
+/// configuração inicial (sem horário: loja fechada).
+model StoreOperation {
+  companyId      String @id
+  /// `semana`, `excecoes` e `mensagemFechada`.
+  schedule       Json
+  /// O ajuste da hora (`estado`, `desde`, `ate`), ou nulo: vale o horário.
+  manualStatus   Json?
+  /// `recebimento`, `entrega`, `retirada` e `agendamento`.
+  orderTypes     Json
+  notifications  Json
+  /// As formas de pagamento aceitas (`FormaDePagamento[]`). Nulo até a loja
+  /// salvar: vale o inicial.
+  paymentMethods Json?
+  /// Os bairros atendidos, com a taxa de cada um (`BairroAtendido[]`). Nulo até
+  /// a loja salvar: sem bairro, a página não aceita entrega.
+  deliveryAreas  Json?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("store_operations")
 }

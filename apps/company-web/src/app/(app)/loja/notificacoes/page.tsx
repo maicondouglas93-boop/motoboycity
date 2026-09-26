@@ -19,7 +19,9 @@ import {
   avisoParaOCliente,
   type EventoDoLojista,
 } from '@/lib/loja-avisos';
-import { salvarOperacao, useOperacao } from '@/lib/loja-demo';
+import { mensagemDoErro } from '@/components/loja/catalogo';
+import { mesmoConteudo, useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
+import { companyStoreOperationApi } from '@/lib/api-client';
 import type { OperacaoDaLoja } from '@/lib/loja-operacao';
 import { useAgora } from '@/lib/relogio';
 
@@ -38,7 +40,8 @@ type Notificacoes = OperacaoDaLoja['notificacoes'];
 const ANTECEDENCIAS_DO_FECHAMENTO = [5, 10, 15, 30];
 
 export default function LojaNotificacoesPage() {
-  const operacao = useOperacao();
+  const consulta = useOperacaoDaLoja();
+  const operacao = consulta.data;
   const instante = useAgora();
   const [versao, setVersao] = useState(0);
 
@@ -53,12 +56,25 @@ export default function LojaNotificacoesPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          Demonstração: o que você salvar aqui fica só neste navegador. Os avisos funcionam entre o
-          painel e a página da loja abertos nele, em abas diferentes.
+          As escolhas são salvas no sistema. Os avisos em si ainda funcionam só entre o painel e a
+          página da loja abertos no mesmo navegador — o envio pelo servidor vem com o pedido.
         </CardContent>
       </Card>
 
-      {instante !== 0 && (
+      {consulta.isError && (
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <p className="text-sm text-destructive">Não foi possível carregar as notificações.</p>
+            <Button type="button" variant="outline" onClick={() => void consulta.refetch()}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      {!operacao && !consulta.isError && (
+        <p className="text-sm text-muted-foreground">Carregando...</p>
+      )}
+      {instante !== 0 && operacao && (
         <Formulario
           key={versao}
           operacao={operacao}
@@ -80,7 +96,8 @@ function Formulario({
   const [permissao, setPermissao] = useState<PermissaoDeNotificacao>(permissaoDeNotificacao);
   const [testado, setTestado] = useState<string | null>(null);
 
-  const mudou = JSON.stringify(rascunho) !== JSON.stringify(operacao.notificacoes);
+  const mudou = !mesmoConteudo(rascunho, operacao.notificacoes);
+  const salvar = useGravarOperacao(companyStoreOperationApi.updateNotifications);
   const manual = operacao.recebimento.modo === 'MANUAL';
   const novoPedido = rascunho.lojista.NOVO_PEDIDO;
 
@@ -313,10 +330,10 @@ function Formulario({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          disabled={!mudou}
-          onClick={() => salvarOperacao({ notificacoes: rascunho })}
+          disabled={!mudou || salvar.isPending}
+          onClick={() => salvar.mutate(rascunho)}
         >
-          Salvar notificações
+          {salvar.isPending ? 'Salvando...' : 'Salvar notificações'}
         </Button>
         {mudou && (
           <Button type="button" variant="ghost" onClick={onDescartar}>
@@ -324,9 +341,14 @@ function Formulario({
           </Button>
         )}
         <span className="text-xs text-muted-foreground">
-          {mudou ? 'Há alterações não salvas.' : 'Tudo salvo neste navegador.'}
+          {mudou ? 'Há alterações não salvas.' : 'Tudo salvo.'}
         </span>
       </div>
+      {salvar.isError && (
+        <p className="text-sm text-destructive" role="alert">
+          {mensagemDoErro(salvar.error, 'Não foi possível salvar as notificações.')}
+        </p>
+      )}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import type { StoreSettings } from '@motoboycity/types';
-import type { UpdateStoreLinkPayload } from '@motoboycity/validation';
+import type { UpdateStoreIdentityPayload, UpdateStoreLinkPayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -7,7 +7,7 @@ export interface CompanyStoreSettingsApiConfig {
   baseUrl: string;
 }
 
-/** O link e o nome da loja online, do lado do painel da empresa. */
+/** O link, o nome e a identidade visual da loja online, do lado do painel da empresa. */
 export function createCompanyStoreSettingsApi({ baseUrl }: CompanyStoreSettingsApiConfig) {
   return {
     async settings(accessToken: string): Promise<StoreSettings> {
@@ -23,6 +23,42 @@ export function createCompanyStoreSettingsApi({ baseUrl }: CompanyStoreSettingsA
         method: 'PUT',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<StoreSettings>(response);
+    },
+
+    /**
+     * O tema e as duas cores. Recusado (400) se uma cor não se separa do fundo,
+     * e (409) antes de a loja ter link — é por ele que ela existe.
+     */
+    async updateIdentity(
+      accessToken: string,
+      payload: UpdateStoreIdentityPayload,
+    ): Promise<StoreSettings> {
+      const response = await apiFetch(`${baseUrl}/company/store/settings/identity`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<StoreSettings>(response);
+    },
+
+    /** A logo vai por arquivo (campo `file`); o servidor a guarda no ImageKit. */
+    async uploadLogo(accessToken: string, logo: Blob): Promise<StoreSettings> {
+      const corpo = new FormData();
+      corpo.append('file', logo);
+      const response = await apiFetch(`${baseUrl}/company/store/settings/logo`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: corpo,
+      });
+      return parseJsonOrThrow<StoreSettings>(response);
+    },
+
+    async removeLogo(accessToken: string): Promise<StoreSettings> {
+      const response = await apiFetch(`${baseUrl}/company/store/settings/logo`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       return parseJsonOrThrow<StoreSettings>(response);
     },

@@ -49,6 +49,20 @@ export class ImageKitService {
     });
   }
 
+  /** A logo da loja online, na pasta da empresa. */
+  async uploadStoreLogo(input: {
+    companyId: string;
+    buffer: Buffer;
+    extension: string;
+  }): Promise<StoredImage> {
+    return this.uploadImage({
+      buffer: input.buffer,
+      fileName: `logo.${input.extension}`,
+      folder: `/motoboycity/store-logos/${input.companyId}`,
+      tags: ['motoboycity', 'store-logo'],
+    });
+  }
+
   private async uploadImage(input: {
     buffer: Buffer;
     fileName: string;

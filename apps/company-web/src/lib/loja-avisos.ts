@@ -1,4 +1,7 @@
+import type { EventoDoCliente, EventoDoLojista } from '@motoboycity/types';
 import type { EtapaDoPedido, Modalidade } from './loja-pedido';
+
+export type { EventoDoCliente, EventoDoLojista };
 
 /**
  * Os avisos da loja online: o que o lojista recebe, o que o cliente recebe e o
@@ -8,9 +11,6 @@ import type { EtapaDoPedido, Modalidade } from './loja-pedido';
  * navegador, push de servidor — é de quem o entrega (`avisos-do-navegador.ts`,
  * e na integração o servidor de push).
  */
-
-export type EventoDoLojista =
-  'NOVO_PEDIDO' | 'PEDIDO_CANCELADO' | 'PEDIDO_AGENDADO' | 'PAGAMENTO_RECEBIDO' | 'LOJA_FECHANDO';
 
 export interface DescricaoDoEvento<T extends string> {
   valor: T;
@@ -45,15 +45,6 @@ export const EVENTOS_DO_LOJISTA: DescricaoDoEvento<EventoDoLojista>[] = [
     detalhe: 'Alguns minutos antes do fim do horário — dá tempo de ficar aberta mais um pouco.',
   },
 ];
-
-export type EventoDoCliente =
-  | 'RECEBIDO'
-  | 'ACEITO'
-  | 'EM_PREPARO'
-  | 'PRONTO_PARA_RETIRAR'
-  | 'SAIU_PARA_ENTREGA'
-  | 'ENTREGUE'
-  | 'CANCELADO';
 
 /**
  * "Pronto para retirar" entrou além da lista pedida: na retirada é o aviso que

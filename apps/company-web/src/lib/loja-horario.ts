@@ -15,90 +15,30 @@
 
 export const FUSO_DA_LOJA = 'America/Sao_Paulo';
 
-/** `HH:MM`, em 24h. */
-export type Relogio = string;
+// O formato é contrato: o banco guarda o mesmo JSON que estas regras leem.
+import type {
+  AjusteManual,
+  DiaDeFuncionamento,
+  EstadoManual,
+  ExcecaoDeData,
+  FaixaDeHorario,
+  Funcionamento,
+  RegrasDoAgendamento,
+  Relogio,
+  TipoDeExcecao,
+} from '@motoboycity/types';
 
-/**
- * Uma faixa em que a loja atende.
- *
- * `fecha` antes de `abre` quer dizer que a faixa passa da meia-noite:
- * 18:00 → 02:00 fecha às duas da manhã do dia SEGUINTE. A faixa pertence ao
- * dia em que abre — a sexta que vai até as duas é horário de sexta, e um
- * feriado no sábado não corta a madrugada de sexta para sábado.
- *
- * `fecha` igual a `abre` é o dia inteiro: 00:00 → 00:00 são 24 horas.
- */
-export interface FaixaDeHorario {
-  abre: Relogio;
-  fecha: Relogio;
-}
-
-/**
- * Mais de uma faixa por dia porque isso é o comum, e não a exceção: lanchonete
- * que serve almoço e volta à noite fecha das 14h às 18h. Com uma faixa só, ela
- * seria obrigada a declarar um horário que não pratica — e receberia pedido com
- * a cozinha apagada. Dia sem faixa nenhuma é dia fechado.
- */
-export interface DiaDeFuncionamento {
-  /** 0 = domingo, igual a `Date.getDay()`. */
-  dia: number;
-  faixas: FaixaDeHorario[];
-}
-
-/**
- * Uma data que foge do horário da semana: feriado, férias, reforma, véspera de
- * Natal com horário curto.
- *
- * O horário da semana não sabe o que é 25 de dezembro. Sem esta lista, fechar
- * num feriado exigiria apagar o horário do dia e lembrar de recolocar depois —
- * e quem esquece recebe pedido com a porta fechada.
- *
- * Um período, e não uma data só: férias coletivas ocupam duas semanas, e
- * cadastrá-las dia por dia é o tipo de trabalho que a lojista não faz.
- */
-export type TipoDeExcecao = 'FECHADO' | 'HORARIO_ESPECIAL';
-
-export interface ExcecaoDeData {
-  id: string;
-  /** `AAAA-MM-DD`. */
-  inicio: string;
-  /** `AAAA-MM-DD`, igual a `inicio` quando é um dia só. */
-  fim: string;
-  tipo: TipoDeExcecao;
-  /** Aparece para o cliente, para ele não achar que a página quebrou. */
-  motivo: string;
-  /** Só vale em `HORARIO_ESPECIAL`. */
-  faixas: FaixaDeHorario[];
-}
-
-/**
- * O que a loja decide AGORA, por cima do horário.
- *
- * - `PAUSADA`: pedidos parados por alguns minutos — a cozinha encheu, choveu.
- * - `FECHADA`: fechou antes da hora, ou hoje não abre.
- * - `ABERTA`: atende fora do horário, até uma hora combinada.
- *
- * Abrir NUNCA fica sem fim: esquecido ligado, seria pedido de madrugada
- * chamando motoboy para porta fechada. Fechar e pausar podem ficar "até eu
- * reabrir", porque o erro ali custa venda, e não uma corrida perdida.
- */
-export type EstadoManual = 'ABERTA' | 'FECHADA' | 'PAUSADA';
-
-export interface AjusteManual {
-  estado: EstadoManual;
-  /** ISO. */
-  desde: string;
-  /** ISO. `null` só para fechar ou pausar "até eu reabrir". */
-  ate: string | null;
-}
-
-export interface Funcionamento {
-  semana: DiaDeFuncionamento[];
-  excecoes: ExcecaoDeData[];
-  ajuste: AjusteManual | null;
-  /** O recado da loja para quando ela está fechada. Vazio: só a situação. */
-  mensagemFechada: string;
-}
+export type {
+  AjusteManual,
+  DiaDeFuncionamento,
+  EstadoManual,
+  ExcecaoDeData,
+  FaixaDeHorario,
+  Funcionamento,
+  RegrasDoAgendamento,
+  Relogio,
+  TipoDeExcecao,
+};
 
 export const DIAS_DA_SEMANA = [
   'Domingo',
@@ -357,10 +297,21 @@ export function ajusteVigente(ajuste: AjusteManual | null, agora: Date): AjusteM
   return ajuste;
 }
 
-/** Abrir acrescenta um trecho à linha do tempo; fechar e pausar tiram. */
-function aplicarAjuste(intervalos: Intervalo[], ajuste: AjusteManual | null): Intervalo[] {
+/**
+ * Abrir acrescenta um trecho à linha do tempo; fechar e pausar tiram.
+ *
+ * O começo gravado é o relógio do servidor, marcado quando a gravação chega lá
+ * — depois do clique, e num relógio que pode estar adiantado em relação ao da
+ * tela. Ajuste gravado já está valendo: o começo nunca fica depois de agora, e
+ * o painel não mostra "Aberta" nos segundos seguintes à pausa.
+ */
+function aplicarAjuste(
+  intervalos: Intervalo[],
+  ajuste: AjusteManual | null,
+  agora: number,
+): Intervalo[] {
   if (!ajuste) return intervalos;
-  const desde = new Date(ajuste.desde).getTime();
+  const desde = Math.min(new Date(ajuste.desde).getTime(), agora);
   const ate = ajuste.ate === null ? SEM_FIM : new Date(ajuste.ate).getTime();
 
   if (ajuste.estado === 'ABERTA') return juntar([...intervalos, { inicio: desde, fim: ate }]);
@@ -387,7 +338,11 @@ function linhaDoTempo(funcionamento: Funcionamento, agora: Date, dias: number) {
   const hoje = momentoNaLoja(agora).data;
   // Começa ontem: a faixa de ontem que passa da meia-noite ainda vale hoje cedo.
   const horario = intervalosDoHorario(funcionamento, somarDias(hoje, -1), somarDias(hoje, dias));
-  const efetiva = aplicarAjuste(horario, ajusteVigente(funcionamento.ajuste, agora));
+  const efetiva = aplicarAjuste(
+    horario,
+    ajusteVigente(funcionamento.ajuste, agora),
+    agora.getTime(),
+  );
   return { horario, efetiva };
 }
 
@@ -537,15 +492,6 @@ export function proximaAberturaDoHorario(funcionamento: Funcionamento, agora: Da
 /* ---------------------------------------------------------------------------
  * Horários para agendar
  * ------------------------------------------------------------------------- */
-
-export interface RegrasDoAgendamento {
-  /** Minutos entre o pedido e o primeiro horário que dá para escolher. */
-  antecedenciaMinimaMin: number;
-  /** Quantos dias à frente o cliente pode agendar. */
-  antecedenciaMaximaDias: number;
-  /** De quanto em quanto tempo as janelas começam: 15, 30, 60. */
-  intervaloMin: number;
-}
 
 export interface DiaParaAgendar {
   /**

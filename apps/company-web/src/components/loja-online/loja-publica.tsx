@@ -58,12 +58,12 @@ interface Voo {
  * Em produção o endereço é `pedidos.…/{slug}`; aqui a rota é `/pedir/{slug}`
  * porque `/loja` já é a área do painel neste mesmo app.
  *
- * A loja de verdade chega como VITRINE: o cardápio publicado, sem pedido. O
- * que depende do que ainda não está no banco — horário, taxa, pagamento — não
- * aparece, em vez de aparecer com os dados de exemplo como se fossem dela.
+ * A loja de verdade chega como VITRINE: o cardápio publicado, a cara, o
+ * horário, a situação, os bairros e o pagamento dela — tudo do banco —, mas sem
+ * pedido: o pedido ainda não chega à loja.
  */
 export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina }) {
-  // Só a demonstração usa o resto do exemplo: bairros e formas de pagamento.
+  // Só a demonstração usa o resto do exemplo, até o checkout dela.
   const loja = LOJA_DE_EXEMPLO;
   const marca = cardapio.identidade;
   const vitrine = cardapio.vitrine;
@@ -91,8 +91,12 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
    * aba: a pausa acaba, a loja abre, e a página acompanha sem recarregar.
    * Quando houver backend, quem decide se dá para pedir continua sendo o
    * servidor, no momento do checkout.
+   *
+   * A loja de verdade traz a operação do banco, lida quando a página foi
+   * aberta; a demonstração segue a do `localStorage`.
    */
-  const operacao = useOperacao();
+  const operacaoDaDemonstracao = useOperacao();
+  const operacao = cardapio.operacao ?? operacaoDaDemonstracao;
   const instante = useAgora();
   const hidratado = instante !== 0;
   const situacao = useMemo(
@@ -121,7 +125,12 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
       ? Math.ceil((situacao.muda.getTime() - instante) / 60_000)
       : null;
 
-  const taxas = loja.bairros.map((bairro) => bairro.taxa);
+  // A loja de verdade mostra os bairros e as formas que gravou — as online já
+  // vêm de fora se ela não tem para onde receber. A demonstração, as do exemplo.
+  const taxas = (cardapio.operacao ? cardapio.operacao.bairros : loja.bairros).map(
+    (bairro) => bairro.taxa,
+  );
+  const formas = cardapio.operacao ? cardapio.operacao.pagamentos : formasOferecidas(loja);
 
   /*
    * O cliente só vê o que dá para comprar. Rascunho e pausado somem, e produto
@@ -217,19 +226,27 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
       <div className="mx-auto w-full max-w-lg">
         <header className="px-4 pt-4 pb-3">
           <div className="flex items-center gap-3">
-            <div
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl text-lg font-bold"
-              style={{ backgroundColor: marca.corDaMarca, color: textoSobre(marca.corDaMarca) }}
-              aria-hidden="true"
-            >
-              {marca.nome.charAt(0)}
-            </div>
+            {marca.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={marca.logoUrl}
+                alt=""
+                className="size-12 shrink-0 rounded-xl object-cover"
+                style={{ backgroundColor: paleta.superficie }}
+              />
+            ) : (
+              <div
+                className="flex size-12 shrink-0 items-center justify-center rounded-xl text-lg font-bold"
+                style={{ backgroundColor: marca.corDaMarca, color: textoSobre(marca.corDaMarca) }}
+                aria-hidden="true"
+              >
+                {marca.nome.charAt(0)}
+              </div>
+            )}
             <div className="min-w-0">
               <h1 className="truncate text-xl leading-tight font-bold">{marca.nome}</h1>
               <p className="mt-0.5 text-sm" style={{ color: paleta.suave }}>
-                {vitrine ? (
-                  'Cardápio · pedidos por aqui em breve'
-                ) : situacao?.aberta ? (
+                {situacao?.aberta ? (
                   <span style={{ color: marca.corDeAcao }}>
                     {situacao.texto}
                     {/* Perto de fechar, a conta que o cliente faria de cabeça. */}
@@ -250,10 +267,9 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
           </div>
 
           {/* Os fatos que decidem o pedido, juntos e antes do cardápio. Só
-              aparece o que a loja oferece: sem entrega, nada de taxa. Na
-              vitrine, nada: horário, taxa e pagamento ainda não estão no
-              banco, e os do exemplo não são os da loja. */}
-          {!vitrine && (
+              aparece o que a loja oferece: sem entrega, nada de taxa. A loja
+              de verdade sem modalidade nenhuma não tem o que dizer aqui. */}
+          {(!vitrine || modalidades.length > 0) && (
             <div
               className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2 text-sm"
               style={{ backgroundColor: paleta.superficie }}
@@ -268,7 +284,11 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                 <span>
                   Entrega{' '}
                   {taxas.length === 0 ? (
-                    <strong>a combinar</strong>
+                    // Na loja de verdade, sem bairro não há entrega pela página;
+                    // na demonstração, é a loja que não cobra por aqui.
+                    vitrine ? null : (
+                      <strong>a combinar</strong>
+                    )
                   ) : Math.min(...taxas) === Math.max(...taxas) ? (
                     <strong>{moeda(taxas[0]!)}</strong>
                   ) : (
@@ -286,9 +306,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                   {modalidades.includes('ENTREGA') ? 'Retirada sem taxa' : 'Só retirada na loja'}
                 </span>
               )}
-              <span style={{ color: paleta.suave }}>
-                {resumoDosPagamentos(formasOferecidas(loja))}
-              </span>
+              <span style={{ color: paleta.suave }}>{resumoDosPagamentos(formas)}</span>
             </div>
           )}
 
@@ -312,7 +330,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
         {/* Fechada: a situação, o recado da loja e o que ainda dá para fazer.
             "Fechado" sozinho faz o cliente ir embora — dizendo que dá para
             agendar, ele fica. */}
-        {!vitrine && hidratado && situacao && !situacao.aberta && (
+        {hidratado && situacao && !situacao.aberta && (
           <div
             role="status"
             className="mx-4 mb-3 space-y-1 rounded-lg px-3 py-2 text-sm"
@@ -322,11 +340,14 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
             {operacao.funcionamento.mensagemFechada && (
               <p>{operacao.funcionamento.mensagemFechada}</p>
             )}
-            <p className="text-xs" style={{ color: paleta.suave }}>
-              {podePedir
-                ? 'Você já pode escolher e agendar o seu pedido.'
-                : 'Dá para ver o cardápio, mas só dá para pedir quando ela abrir.'}
-            </p>
+            {/* Na vitrine, o aviso logo abaixo já diz que não se pede por aqui. */}
+            {!vitrine && (
+              <p className="text-xs" style={{ color: paleta.suave }}>
+                {podePedir
+                  ? 'Você já pode escolher e agendar o seu pedido.'
+                  : 'Dá para ver o cardápio, mas só dá para pedir quando ela abrir.'}
+              </p>
+            )}
           </div>
         )}
 

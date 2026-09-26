@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { lerOperacao, salvarOperacao, useOperacao } from '@/lib/loja-demo';
+import { mensagemDoErro } from '@/components/loja/catalogo';
+import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
+import { companyStoreOperationApi } from '@/lib/api-client';
 import {
   DIAS_DA_SEMANA,
   ORDEM_DA_SEMANA,
@@ -106,8 +108,31 @@ function configuravel(funcionamento: Funcionamento): Configuravel {
   };
 }
 
+/**
+ * A mesma configuração com as chaves numa ordem só. O banco (JSONB) não guarda
+ * a ordem das chaves, e o "há alterações" não pode acusar mudança só porque o
+ * que voltou da API veio em outra ordem.
+ */
+function canonica(config: Configuravel): string {
+  const faixas = (lista: Configuravel['semana'][number]['faixas']) =>
+    lista.map(({ abre, fecha }) => ({ abre, fecha }));
+  return JSON.stringify({
+    semana: config.semana.map(({ dia, faixas: doDia }) => ({ dia, faixas: faixas(doDia) })),
+    excecoes: config.excecoes.map(({ id, inicio, fim, tipo, motivo, faixas: daData }) => ({
+      id,
+      inicio,
+      fim,
+      tipo,
+      motivo,
+      faixas: faixas(daData),
+    })),
+    mensagemFechada: config.mensagemFechada,
+  });
+}
+
 export default function LojaHorariosPage() {
-  const operacao = useOperacao();
+  const consulta = useOperacaoDaLoja();
+  const operacao = consulta.data;
   const instante = useAgora();
   const [versao, setVersao] = useState(0);
 
@@ -123,15 +148,28 @@ export default function LojaHorariosPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          Demonstração: o que você salvar aqui fica só neste navegador, e vale para a página da loja
-          aberta nele. Ainda não vai para o sistema.
+          O horário é salvo no sistema e vale para a página da sua loja: fora dele, ela aparece
+          fechada.
         </CardContent>
       </Card>
 
       {/* O formulário só nasce depois da hidratação, com o que está salvo:
           `useState` só lê o valor inicial uma vez, e nascer com o exemplo
           apagaria o que a loja já tinha salvo. */}
-      {instante !== 0 && (
+      {consulta.isError && (
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <p className="text-sm text-destructive">Não foi possível carregar o horário.</p>
+            <Button type="button" variant="outline" onClick={() => void consulta.refetch()}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      {!operacao && !consulta.isError && (
+        <p className="text-sm text-muted-foreground">Carregando o horário...</p>
+      )}
+      {instante !== 0 && operacao && (
         <Formulario
           key={versao}
           salvo={operacao.funcionamento}
@@ -160,7 +198,8 @@ function Formulario({
 
   const hoje = momentoNaLoja(agora).data;
   const rascunho = paraGravar(semana, excecoes, mensagem);
-  const mudou = JSON.stringify(rascunho) !== JSON.stringify(configuravel(salvo));
+  const mudou = canonica(rascunho) !== canonica(configuravel(salvo));
+  const gravar = useGravarOperacao(companyStoreOperationApi.updateSchedule);
   const problemas = problemasDoHorario({ ...rascunho, ajuste: null }, hoje);
   const graves = problemas.filter((problema) => problema.grave);
 
@@ -254,10 +293,12 @@ function Formulario({
   }
 
   function salvar() {
-    // O ajuste da hora é relido na hora de gravar: enquanto esta tela estava
-    // aberta, alguém pode ter pausado a loja pelo status.
-    salvarOperacao({ funcionamento: { ...rascunho, ajuste: lerOperacao().funcionamento.ajuste } });
-    setExcecoes((atual) => [...atual].sort((a, b) => a.inicio.localeCompare(b.inicio)));
+    // Só o horário vai: a pausa que alguém fez pelo status, com esta tela
+    // aberta, fica como está — o ajuste tem gravação própria.
+    gravar.mutate(rascunho, {
+      onSuccess: () =>
+        setExcecoes((atual) => [...atual].sort((a, b) => a.inicio.localeCompare(b.inicio))),
+    });
   }
 
   const situacaoDoRascunho = situacaoDaLoja({ ...rascunho, ajuste: null }, agora);
@@ -493,9 +534,19 @@ function Formulario({
         </div>
       )}
 
+      {gravar.isError && (
+        <p className="text-sm text-destructive" role="alert">
+          {mensagemDoErro(gravar.error, 'Não foi possível salvar o horário.')}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" disabled={!mudou || graves.length > 0} onClick={salvar}>
-          Salvar horários
+        <Button
+          type="button"
+          disabled={!mudou || graves.length > 0 || gravar.isPending}
+          onClick={salvar}
+        >
+          {gravar.isPending ? 'Salvando...' : 'Salvar horários'}
         </Button>
         {mudou && (
           <Button type="button" variant="ghost" onClick={onDescartar}>
@@ -507,7 +558,7 @@ function Formulario({
             ? 'Resolva o que está em vermelho para salvar.'
             : mudou
               ? 'Há alterações não salvas.'
-              : 'Tudo salvo neste navegador.'}
+              : 'Tudo salvo.'}
         </span>
       </div>
     </>
@@ -654,6 +705,7 @@ function DataEspecial({
           <Label className="text-xs">Motivo</Label>
           <Input
             value={excecao.motivo}
+            maxLength={80}
             onChange={(evento) => onMudar({ motivo: evento.target.value })}
             placeholder="Feriado, férias, reforma"
             aria-label={`Motivo de ${rotulo}`}

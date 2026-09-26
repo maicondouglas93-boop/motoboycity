@@ -1,19 +1,19 @@
-import type { EventoDoCliente, EventoDoLojista } from './loja-avisos';
-import {
-  horariosParaAgendar,
-  type DiaParaAgendar,
-  type Funcionamento,
-  type RegrasDoAgendamento,
-} from './loja-horario';
-import type { Modalidade, ModoDeAceite, QuemEntrega } from './loja-pedido';
+import type {
+  EnderecoDeRetirada,
+  NotificacaoDoLojista,
+  OperacaoDaLoja,
+  OperacaoPublica,
+} from '@motoboycity/types';
+import { horariosParaAgendar, type DiaParaAgendar } from './loja-horario';
+import type { Modalidade } from './loja-pedido';
 
 /**
  * Como a loja funciona: horário, tipos de pedido, agendamento, recebimento e
- * avisos. É o que o painel configura em Horários, Tipos de pedido e
- * Notificações — e o que a página do cliente obedece.
+ * avisos. O FORMATO está em `@motoboycity/types` (`OperacaoDaLoja`), que é o
+ * que o banco guarda; aqui ficam as contas sobre ele.
  *
- * Aqui fica o FORMATO, que é o que a integração vai gravar. Os valores de
- * exemplo ficam no `loja-mock.ts`, que será apagado.
+ * As contas recebem a operação PÚBLICA — sem os avisos da loja —, porque a
+ * página do cliente só tem essa. A operação inteira também serve.
  *
  * Os tempos ficam num lugar só, no recebimento. O "tempo estimado" da entrega e
  * o "tempo de preparo" da retirada são o que o cliente VÊ desses dois números,
@@ -21,66 +21,12 @@ import type { Modalidade, ModoDeAceite, QuemEntrega } from './loja-pedido';
  * e o cliente leria uma previsão que a cozinha nunca prometeu.
  */
 
-/** O mesmo formato do endereço da empresa. */
-export interface EnderecoDeRetirada {
-  rua: string;
-  numero: string;
-  complemento: string | null;
-  bairro: string;
-  cidade: string;
-  estado: string;
-}
-
-export interface NotificacaoDoLojista {
-  push: boolean;
-  som: boolean;
-}
-
-export interface OperacaoDaLoja {
-  funcionamento: Funcionamento;
-  recebimento: {
-    modo: ModoDeAceite;
-    /** Padrão. No aceite manual, a loja pode mudar pedido a pedido ao aceitar. */
-    minutosDePreparo: number;
-    /** O caminho do motoboy, da loja até o cliente, em média. */
-    minutosDeEntrega: number;
-    /**
-     * No aceite manual: sem ninguém aceitar nesse tempo, o pedido é cancelado e
-     * o cliente avisado. `null`: não cancela sozinho — a loja assume que alguém
-     * sempre olha a tela.
-     */
-    prazoDoAceiteMin: number | null;
-  };
-  entrega: {
-    ativa: boolean;
-    /** Quem leva o pedido: o motoboy do MOTOboyCity ou o entregador da loja. */
-    quemEntrega: QuemEntrega;
-    /** Conta só os itens, sem a taxa. `null`: sem mínimo. */
-    pedidoMinimo: number | null;
-    agendamento: boolean;
-  };
-  retirada: {
-    ativa: boolean;
-    /** `null`: o endereço da empresa, o mesmo de onde o motoboy retira. */
-    endereco: EnderecoDeRetirada | null;
-    /** "Retire no balcão lateral, com o número do pedido." */
-    instrucoes: string;
-    agendamento: boolean;
-  };
-  agendamento: RegrasDoAgendamento & { permitir: boolean };
-  notificacoes: {
-    lojista: Record<EventoDoLojista, NotificacaoDoLojista>;
-    minutosAntesDeFechar: number;
-    /** No aceite manual, o som repete enquanto houver pedido esperando. */
-    repetirSom: boolean;
-    cliente: Record<EventoDoCliente, boolean>;
-  };
-}
+export type { EnderecoDeRetirada, NotificacaoDoLojista, OperacaoDaLoja, OperacaoPublica };
 
 /** A folga da janela de entrega: o caminho varia, e a previsão mostra isso. */
 export const FOLGA_DA_ENTREGA_MIN = 15;
 
-export function modalidadesAtivas(operacao: OperacaoDaLoja): Modalidade[] {
+export function modalidadesAtivas(operacao: OperacaoPublica): Modalidade[] {
   const lista: Modalidade[] = [];
   if (operacao.entrega.ativa) lista.push('ENTREGA');
   if (operacao.retirada.ativa) lista.push('RETIRADA');
@@ -91,7 +37,7 @@ export function modalidadesAtivas(operacao: OperacaoDaLoja): Modalidade[] {
  * O agendamento vale por modalidade, mas depende da chave geral: desligar
  * "Pedido agendado" desliga nas duas, sem apagar a escolha de cada uma.
  */
-export function agendamentoLigado(operacao: OperacaoDaLoja, modalidade: Modalidade): boolean {
+export function agendamentoLigado(operacao: OperacaoPublica, modalidade: Modalidade): boolean {
   if (!operacao.agendamento.permitir) return false;
   return modalidade === 'ENTREGA'
     ? operacao.entrega.ativa && operacao.entrega.agendamento
@@ -99,13 +45,13 @@ export function agendamentoLigado(operacao: OperacaoDaLoja, modalidade: Modalida
 }
 
 /** Quanto antes do horário do cliente a cozinha começa: o preparo, e o caminho na entrega. */
-export function minutosAntesDoHorario(operacao: OperacaoDaLoja, modalidade: Modalidade): number {
+export function minutosAntesDoHorario(operacao: OperacaoPublica, modalidade: Modalidade): number {
   const { minutosDePreparo, minutosDeEntrega } = operacao.recebimento;
   return minutosDePreparo + (modalidade === 'ENTREGA' ? minutosDeEntrega : 0);
 }
 
 export function horariosDaModalidade(
-  operacao: OperacaoDaLoja,
+  operacao: OperacaoPublica,
   modalidade: Modalidade,
   agora: Date,
 ): DiaParaAgendar[] {
@@ -119,7 +65,7 @@ export function horariosDaModalidade(
 }
 
 /** O que o cliente vê como previsão: "35 a 50 min" na entrega, "20 min" na retirada. */
-export function textoDoTempo(operacao: OperacaoDaLoja, modalidade: Modalidade): string {
+export function textoDoTempo(operacao: OperacaoPublica, modalidade: Modalidade): string {
   const base = minutosAntesDoHorario(operacao, modalidade);
   return modalidade === 'ENTREGA' ? `${base} a ${base + FOLGA_DA_ENTREGA_MIN} min` : `${base} min`;
 }
@@ -129,6 +75,6 @@ export function textoDoTempo(operacao: OperacaoDaLoja, modalidade: Modalidade): 
  * sorvete de R$ 6,00 com R$ 8,00 de entrega. Na retirada não há taxa, e exigir
  * mínimo ali só recusaria venda.
  */
-export function pedidoMinimoDa(operacao: OperacaoDaLoja, modalidade: Modalidade): number | null {
+export function pedidoMinimoDa(operacao: OperacaoPublica, modalidade: Modalidade): number | null {
   return modalidade === 'ENTREGA' ? operacao.entrega.pedidoMinimo : null;
 }

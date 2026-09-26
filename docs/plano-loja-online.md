@@ -9,27 +9,29 @@
 ## Onde estamos
 
 Existe a área `/loja` no `company-web`. As telas do catálogo (Produtos,
-Organizar, cadastro e edição) **gravam na API** desde 2026-09-25; as demais são
-**demonstração**:
+Organizar, cadastro e edição), as da operação (status, Horários, Tipos de
+pedido e Notificações) e Configurações **gravam na API** desde 2026-09-25; só
+Vendas é **demonstração**:
 
-| Tela                                   | O que faz                                                             |
-| -------------------------------------- | --------------------------------------------------------------------- |
-| Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir fora do horário    |
-| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento, agendados, comanda     |
-| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências — **API**            |
-| `/loja/produtos/organizar`             | Categorias e ordem do catálogo — **API**                              |
-| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só — **API**                         |
-| `/loja/horarios`                       | Semana com períodos, datas especiais, feriados, recado de fechada     |
-| `/loja/tipos-de-pedido`                | Entrega, retirada, pedido agendado e recebimento (aceite e tempos)    |
-| `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente                    |
-| `/loja/configuracoes`                  | Link, identidade visual, pagamentos, Asaas, bairros e ponto de coleta |
+| Tela                                   | O que faz                                                               |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir — **API**            |
+| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento, agendados, comanda       |
+| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências — **API**              |
+| `/loja/produtos/organizar`             | Categorias e ordem do catálogo — **API**                                |
+| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só — **API**                           |
+| `/loja/horarios`                       | Semana, datas especiais, feriados, recado de fechada — **API**          |
+| `/loja/tipos-de-pedido`                | Entrega, retirada, agendado e recebimento (aceite e tempos) — **API**   |
+| `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente — **API**            |
+| `/loja/configuracoes`                  | Link, identidade, pagamento, bairros e coleta — **API**; Asaas em breve |
 
-**As demais telas ainda não usam backend.** Os dados de exemplo vêm de
-`apps/company-web/src/lib/loja-mock.ts`. O que o painel configura em Horários,
-Tipos de pedido e Notificações, o status e as vendas ficam no `localStorage`
-deste navegador, por `lib/loja-demo.ts` — é o que faz painel e página do cliente
-conversarem na demonstração, em abas do mesmo navegador. Os dois arquivos pedem
-para ser **apagados**, e não adaptados, por quem for ligar à API. As regras
+**Vendas ainda não usa backend.** Os dados de
+exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`, e as vendas ficam no
+`localStorage` deste navegador, por `lib/loja-demo.ts` — é o que faz painel e
+página do cliente conversarem na demonstração, em abas do mesmo navegador. O
+painel copia para lá a operação que a API guardou, e a demonstração segue o
+horário e a pausa configurados. Os dois arquivos pedem para ser **apagados**, e
+não adaptados, por quem for ligar o pedido à API. As regras
 (`loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts`, `loja-operacao.ts`)
 ficam: o servidor precisa delas. A loja **não está no menu** do painel; as telas
 são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
@@ -46,17 +48,31 @@ validação, para o painel e o servidor não discordarem.
 **O link da loja e a vitrine** (2026-09-25): a loja cria o link em
 Configurações (`store_settings` e `store_slugs`, migration
 `20260925190000_loja_link`), e `/pedir/<link>` mostra o cardápio publicado,
-pela rota pública `GET /public/stores/:slug`. É **vitrine**: sem pedido, e sem
-horário, taxa ou pagamento, que ainda não estão no banco. Link antigo leva ao
+pela rota pública `GET /public/stores/:slug`. É **vitrine**: mostra o horário,
+a situação (aberta, fechada, pausada, com o recado) e o tempo de entrega, mas
+não recebe pedido, e não mostra taxa nem pagamento, que ainda não estão no
+banco. Link antigo leva ao
 atual; empresa pendente ou suspensa não aparece. `/pedir/minha-loja` continua
 sendo a demonstração inteira, com os dados de exemplo.
 
 A foto do produto sobe pelo painel desde 2026-09-25, para o ImageKit, como o
 avatar.
 
-Não existe ainda: o resto da configuração da loja no banco (identidade,
-horário, tipos de pedido, avisos, pagamento, bairros), o pedido da loja e o
-checkout ligado à API.
+**A operação da loja tem backend** (2026-09-25): `store_operations` (migration
+`20260925230000_loja_operacao`), um JSONB por bloco — horário, ajuste da hora,
+tipos de pedido, avisos —, módulo `company/store-operation` com
+`/company/store/operation/*`, e os contratos em `packages/*`
+(`store-operation.schema.ts`, `store-operation.ts`,
+`company-store-operation.ts`).
+
+**A configuração da loja tem backend** (2026-09-25, migration
+`20260926090000_loja_configuracoes`): a identidade visual (tema, cores, logo)
+em `store_settings`, e as formas de pagamento e os bairros com taxa como dois
+blocos novos de `store_operations`. Pagamento online fica recusado até a conta
+Asaas existir.
+
+Não existe ainda: a conta Asaas da loja, o pedido da loja e o checkout ligado à
+API.
 
 ## Decisões já tomadas
 
@@ -296,11 +312,14 @@ validação e no cadastro de clientes do painel.
 
 1. ~~Schema e migration do catálogo (produto, categoria, grupo, escolha,
    tamanho).~~ Feito em 2026-09-25.
-2. ~~Endpoints e contratos em `packages/*`, com os schemas Zod~~ — do catálogo,
-   feito em 2026-09-25. Falta o mesmo para a configuração da loja.
-3. Ligar as telas do painel que já existem — ~~Produtos e Organizar~~, feito
-   em 2026-09-25. Faltam as que dependem da configuração da loja e do pedido no
-   banco; **apagar** o `loja-mock.ts` quando a última tela deixar de usá-lo.
+2. ~~Endpoints e contratos em `packages/*`, com os schemas Zod~~ — do catálogo
+   e da operação (horário, status, tipos de pedido, avisos), feito em
+   2026-09-25 — e da identidade, do pagamento e dos bairros, também em
+   2026-09-25. Falta a conta Asaas da loja.
+3. Ligar as telas do painel que já existem — ~~Produtos, Organizar, Horários,
+   Tipos de pedido, Notificações, status e Configurações~~, feito em
+   2026-09-25. Falta Vendas, que depende do pedido no banco; **apagar** o
+   `loja-mock.ts` quando a última tela deixar de usá-lo.
 4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
    carrinho, checkout (com telefone e endereço estruturado, por causa do item
    1).

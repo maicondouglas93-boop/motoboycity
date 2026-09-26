@@ -1,5 +1,5 @@
 import { ApiError, createPublicStoreApi } from '@motoboycity/api-client';
-import type { PublicStoreProduct } from '@motoboycity/types';
+import type { OperacaoPublica, PublicStore, PublicStoreProduct } from '@motoboycity/types';
 import {
   CATEGORIAS_DE_EXEMPLO,
   LOJA_DE_EXEMPLO,
@@ -13,10 +13,10 @@ import type { TemaDaLoja } from '@/lib/contraste';
  * De onde a página do cliente tira a loja: do banco, pelo link, ou da
  * demonstração, no link reservado a ela.
  *
- * A loja de verdade abre como VITRINE: mostra o cardápio publicado, e não
- * recebe pedido — o pedido ainda não chega à loja, e um cliente de verdade
- * acharia que pediu. A demonstração continua com o fluxo inteiro, no
- * `localStorage`, para mostrar como vai ser.
+ * A loja de verdade abre como VITRINE: mostra o cardápio publicado, o horário e
+ * a situação dela, e não recebe pedido — o pedido ainda não chega à loja, e um
+ * cliente de verdade acharia que pediu. A demonstração continua com o fluxo
+ * inteiro, no `localStorage`, para mostrar como vai ser.
  *
  * Roda no servidor: a página chega pronta, e o link antigo redireciona antes
  * de o navegador baixar qualquer coisa.
@@ -33,6 +33,7 @@ export interface IdentidadeDaLoja {
   tema: TemaDaLoja;
   corDaMarca: string;
   corDeAcao: string;
+  logoUrl: string | null;
 }
 
 export interface CardapioDaPagina {
@@ -41,6 +42,11 @@ export interface CardapioDaPagina {
   identidade: IdentidadeDaLoja;
   categorias: CategoriaDeExemplo[];
   produtos: ProdutoDeExemplo[];
+  /**
+   * Como a loja funciona, do banco. `null` na demonstração, que segue a
+   * configuração do `localStorage` — a mesma que o painel copia para lá.
+   */
+  operacao: OperacaoPublica | null;
 }
 
 export type LojaDoLink =
@@ -48,17 +54,14 @@ export type LojaDoLink =
   | { tipo: 'mudou'; slug: string }
   | { tipo: 'nao-existe' };
 
-/**
- * A identidade visual ainda não está no banco: até estar, a loja de verdade
- * usa as cores da demonstração, que passam na régua de contraste da tela de
- * Configurações. O nome é o dela.
- */
-function identidade(nome: string): IdentidadeDaLoja {
+/** A identidade que a loja escolheu em Configurações, no formato da página. */
+function identidade(loja: PublicStore): IdentidadeDaLoja {
   return {
-    nome,
-    tema: LOJA_DE_EXEMPLO.tema,
-    corDaMarca: LOJA_DE_EXEMPLO.corDaMarca,
-    corDeAcao: LOJA_DE_EXEMPLO.corDeAcao,
+    nome: loja.name,
+    tema: loja.identity.theme,
+    corDaMarca: loja.identity.brandColor,
+    corDeAcao: loja.identity.actionColor,
+    logoUrl: loja.identity.logoUrl,
   };
 }
 
@@ -104,9 +107,11 @@ export async function lojaDoLink(slug: string): Promise<LojaDoLink> {
           tema: LOJA_DE_EXEMPLO.tema,
           corDaMarca: LOJA_DE_EXEMPLO.corDaMarca,
           corDeAcao: LOJA_DE_EXEMPLO.corDeAcao,
+          logoUrl: null,
         },
         categorias: CATEGORIAS_DE_EXEMPLO,
         produtos: PRODUTOS_DE_EXEMPLO,
+        operacao: null,
       },
     };
   }
@@ -120,9 +125,10 @@ export async function lojaDoLink(slug: string): Promise<LojaDoLink> {
       tipo: 'loja',
       cardapio: {
         vitrine: true,
-        identidade: identidade(achado.store.name),
+        identidade: identidade(achado.store),
         categorias: achado.store.categories.map(({ id, name }) => ({ id, nome: name })),
         produtos: achado.store.products.map(produtoDaVitrine),
+        operacao: achado.store.operacao,
       },
     };
   } catch (erro) {

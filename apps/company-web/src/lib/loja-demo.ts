@@ -59,6 +59,8 @@ export function completarOperacao(salva: Partial<OperacaoDaLoja> | null): Operac
       lojista: { ...base.notificacoes.lojista, ...salva.notificacoes?.lojista },
       cliente: { ...base.notificacoes.cliente, ...salva.notificacoes?.cliente },
     },
+    pagamentos: salva.pagamentos ?? base.pagamentos,
+    bairros: salva.bairros ?? base.bairros,
   };
 }
 

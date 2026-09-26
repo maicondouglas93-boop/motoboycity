@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { Clock, Pause, Play, Power } from 'lucide-react';
+import { mensagemDoErro } from '@/components/loja/catalogo';
+import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
 import { Button } from '@/components/ui/button';
-import { ajustarAgora, useOperacao } from '@/lib/loja-demo';
+import { companyStoreOperationApi } from '@/lib/api-client';
 import {
   emMinutos,
   hora,
@@ -27,6 +29,9 @@ import { acertarRelogio, useAgora } from '@/lib/relogio';
  * ingrediente, a cozinha encheu, choveu demais para o motoboy — a loja pausa
  * sem mexer no horário e sem precisar lembrar de desfazer depois, porque a
  * pausa e o fechamento vencem sozinhos.
+ *
+ * Grava na API: a situação é a da loja de verdade, a que a vitrine mostra. O
+ * começo do ajuste é a hora do servidor.
  */
 
 const MINUTO = 60_000;
@@ -67,13 +72,29 @@ function detalhe(situacao: SituacaoDaLoja, ajuste: AjusteManual | null, agora: D
 type Menu = 'pausar' | 'fechar' | 'abrir' | null;
 
 export function ControleDoStatus() {
-  const operacao = useOperacao();
+  const consulta = useOperacaoDaLoja();
+  const gravar = useGravarOperacao(companyStoreOperationApi.updateStatus);
   const instante = useAgora();
   const [menu, setMenu] = useState<Menu>(null);
   const [ateAs, setAteAs] = useState('');
 
-  // Antes da hidratação não há hora — e o status depende dela.
-  if (instante === 0) return <div className="h-24 rounded-xl border" aria-hidden="true" />;
+  if (consulta.isError) {
+    return (
+      <section aria-label="Status da loja" className="space-y-2 rounded-xl border p-3 text-xs">
+        <p className="text-destructive">Não foi possível carregar a situação da loja.</p>
+        <Button type="button" size="sm" variant="outline" onClick={() => void consulta.refetch()}>
+          Tentar de novo
+        </Button>
+      </section>
+    );
+  }
+
+  // Antes da hidratação não há hora — e o status depende dela. Sem a operação,
+  // também não: a situação sai do horário que a API guarda.
+  const operacao = consulta.data;
+  if (instante === 0 || !operacao) {
+    return <div className="h-24 rounded-xl border" aria-hidden="true" />;
+  }
 
   const agora = new Date(instante);
   const { funcionamento } = operacao;
@@ -85,22 +106,18 @@ export function ControleDoStatus() {
       : null;
   const pausada = situacao.motivo === 'PAUSADA';
 
-  /** Grava com a hora acertada agora, para a tela já ver o ajuste começado. */
+  /** Grava com a hora acertada agora; o fim sai dela, e o começo, do servidor. */
   function ajustar(estado: EstadoManual, minutos: number | null, ate?: Date | null) {
     const desde = acertarRelogio();
     const fim =
       ate !== undefined ? ate : minutos === null ? null : new Date(desde + minutos * MINUTO);
-    ajustarAgora({
-      estado,
-      desde: new Date(desde).toISOString(),
-      ate: fim ? fim.toISOString() : null,
-    });
+    gravar.mutate({ ajuste: { estado, ate: fim ? fim.toISOString() : null } });
     setMenu(null);
   }
 
   function voltarAoHorario() {
     acertarRelogio();
-    ajustarAgora(null);
+    gravar.mutate({ ajuste: null });
     setMenu(null);
   }
 
@@ -134,6 +151,17 @@ export function ControleDoStatus() {
           </span>
         </span>
       </div>
+
+      {gravar.isPending && (
+        <p className="text-xs text-muted-foreground" role="status">
+          Salvando...
+        </p>
+      )}
+      {gravar.isError && (
+        <p className="text-xs text-destructive" role="alert">
+          {mensagemDoErro(gravar.error, 'Não foi possível mudar a situação da loja.')}
+        </p>
+      )}
 
       {/* Fechando: a hora de decidir se fica mais um pouco, e não depois. */}
       {fechando && (

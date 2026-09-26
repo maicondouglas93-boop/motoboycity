@@ -15,6 +15,7 @@ import {
   createNotificationsApi,
   createCompanyPageProtectionApi,
   createCompanyStoreCatalogApi,
+  createCompanyStoreOperationApi,
   createCompanyStoreSettingsApi,
   createPublicStoreApi,
   configureApiClient,
@@ -44,4 +45,5 @@ export const notificationsApi = createNotificationsApi({ baseUrl: apiBaseUrl });
 export const companyPageProtectionApi = createCompanyPageProtectionApi({ baseUrl: apiBaseUrl });
 export const companyStoreCatalogApi = createCompanyStoreCatalogApi({ baseUrl: apiBaseUrl });
 export const companyStoreSettingsApi = createCompanyStoreSettingsApi({ baseUrl: apiBaseUrl });
+export const companyStoreOperationApi = createCompanyStoreOperationApi({ baseUrl: apiBaseUrl });
 export const publicStoreApi = createPublicStoreApi({ baseUrl: apiBaseUrl });

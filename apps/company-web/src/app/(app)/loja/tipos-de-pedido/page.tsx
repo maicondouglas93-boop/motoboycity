@@ -8,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { salvarOperacao, useOperacao } from '@/lib/loja-demo';
+import { mensagemDoErro } from '@/components/loja/catalogo';
+import { enderecoEmTexto, useEnderecoDaEmpresa } from '@/components/loja/endereco-da-empresa';
+import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
+import { companyStoreOperationApi } from '@/lib/api-client';
 import { hora, horariosParaAgendar, rotuloDoDia } from '@/lib/loja-horario';
-import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
 import {
   FOLGA_DA_ENTREGA_MIN,
   type EnderecoDeRetirada,
@@ -139,10 +141,16 @@ function paraGravar(rascunho: Rascunho): Partes {
     },
     retirada: {
       ativa: rascunho.retiradaAtiva,
+      // Aparado aqui, como o servidor apara: senão o que volta dele não bate
+      // com a tela, e o "há alterações" continua aceso depois de salvar.
       endereco: rascunho.outroEndereco
         ? {
-            ...rascunho.endereco,
+            rua: rascunho.endereco.rua.trim(),
+            numero: rascunho.endereco.numero.trim(),
             complemento: rascunho.endereco.complemento?.trim() || null,
+            bairro: rascunho.endereco.bairro.trim(),
+            cidade: rascunho.endereco.cidade.trim(),
+            estado: rascunho.endereco.estado.trim(),
           }
         : null,
       instrucoes: rascunho.instrucoes.trim(),
@@ -162,7 +170,8 @@ function inteiroEntre(texto: string, minimo: number, maximo: number): boolean {
 }
 
 export default function LojaTiposDePedidoPage() {
-  const operacao = useOperacao();
+  const consulta = useOperacaoDaLoja();
+  const operacao = consulta.data;
   const instante = useAgora();
   const [versao, setVersao] = useState(0);
 
@@ -178,12 +187,27 @@ export default function LojaTiposDePedidoPage() {
 
       <Card className="border-dashed">
         <CardContent className="py-3 text-xs text-muted-foreground">
-          Demonstração: o que você salvar aqui fica só neste navegador, e vale para a página da loja
-          aberta nele. Ainda não vai para o sistema.
+          O que você salvar aqui vai para o sistema e vale para a página da sua loja. Pedido por ela
+          ainda não chega — a página mostra o cardápio e o horário.
         </CardContent>
       </Card>
 
-      {instante !== 0 && (
+      {consulta.isError && (
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <p className="text-sm text-destructive">
+              Não foi possível carregar os tipos de pedido.
+            </p>
+            <Button type="button" variant="outline" onClick={() => void consulta.refetch()}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      {!operacao && !consulta.isError && (
+        <p className="text-sm text-muted-foreground">Carregando...</p>
+      )}
+      {instante !== 0 && operacao && (
         <Formulario
           key={versao}
           operacao={operacao}
@@ -228,28 +252,34 @@ function Formulario({
   if (!caminhoValido) graves.push('O tempo de entrega precisa ser de 1 a 180 minutos.');
   if (minimo !== null && Number.isNaN(minimo))
     graves.push('O pedido mínimo tem que ser um valor, como 15,00.');
+  if (minimo !== null && minimo > 99999.99) graves.push('O pedido mínimo vai até R$ 99.999,99.');
+  // Os mesmos campos que o sistema exige, para o que falta aparecer aqui em
+  // vermelho, e não como recusa depois de salvar.
+  const { endereco } = rascunho;
   if (
     rascunho.retiradaAtiva &&
     rascunho.outroEndereco &&
-    [rascunho.endereco.rua, rascunho.endereco.numero, rascunho.endereco.cidade].some(
+    ([endereco.rua, endereco.numero, endereco.bairro, endereco.cidade].some(
       (campo) => campo.trim() === '',
-    )
+    ) ||
+      endereco.estado.trim().length !== 2)
   ) {
-    graves.push('O endereço de retirada precisa de rua, número e cidade.');
+    graves.push('O endereço de retirada precisa de rua, número, bairro, cidade e UF.');
   }
 
   const gravar = paraGravar(rascunho);
-  const salvo: Partes = {
-    recebimento: operacao.recebimento,
-    entrega: operacao.entrega,
-    retirada: operacao.retirada,
-    agendamento: operacao.agendamento,
-  };
-  const mudou = JSON.stringify(gravar) !== JSON.stringify(salvo);
+  // O salvo passa pelas mesmas duas conversões da tela antes de comparar: o que
+  // volta do banco (JSONB) não guarda a ordem das chaves, e o "há alterações"
+  // não pode depender dela.
+  const mudou = JSON.stringify(gravar) !== JSON.stringify(paraGravar(paraRascunho(operacao)));
+  const salvar = useGravarOperacao(companyStoreOperationApi.updateOrderTypes);
 
   const preparo = preparoValido ? Number(rascunho.preparo) : operacao.recebimento.minutosDePreparo;
   const caminho = caminhoValido ? Number(rascunho.caminho) : operacao.recebimento.minutosDeEntrega;
-  const coleta = LOJA_DE_EXEMPLO.pontoDeColeta;
+  // O endereço da empresa, o mesmo de onde o motoboy retira: é ele a retirada
+  // padrão, e não um endereço à parte da loja.
+  const empresa = useEnderecoDaEmpresa();
+  const coleta = empresa.data?.address ? enderecoEmTexto(empresa.data.address) : null;
 
   /*
    * A prévia dos horários usa o horário SALVO da loja e as regras deste
@@ -433,9 +463,13 @@ function Formulario({
                   <span>
                     O endereço da empresa
                     <span className="block text-xs text-muted-foreground">
-                      {coleta.rua}, {coleta.numero} · {coleta.bairro}, {coleta.cidade}/
-                      {coleta.estado}
-                      {' — '}o mesmo de onde o motoboy retira.
+                      {coleta
+                        ? `${coleta.rua} · ${coleta.cidade} — o mesmo de onde o motoboy retira.`
+                        : empresa.isError
+                          ? 'Não foi possível carregar o endereço da empresa.'
+                          : empresa.data
+                            ? 'A empresa ainda não tem endereço cadastrado: cadastre na tela inicial.'
+                            : 'Carregando o endereço...'}
                     </span>
                   </span>
                 </label>
@@ -461,30 +495,35 @@ function Formulario({
                     <Input
                       value={rascunho.endereco.rua}
                       onChange={(evento) => mudarEndereco('rua', evento.target.value)}
+                      maxLength={120}
                       placeholder="Rua"
                       aria-label="Rua da retirada"
                     />
                     <Input
                       value={rascunho.endereco.numero}
                       onChange={(evento) => mudarEndereco('numero', evento.target.value)}
+                      maxLength={20}
                       placeholder="Número"
                       aria-label="Número da retirada"
                     />
                     <Input
                       value={rascunho.endereco.complemento ?? ''}
                       onChange={(evento) => mudarEndereco('complemento', evento.target.value)}
+                      maxLength={60}
                       placeholder="Complemento"
                       aria-label="Complemento da retirada"
                     />
                     <Input
                       value={rascunho.endereco.bairro}
                       onChange={(evento) => mudarEndereco('bairro', evento.target.value)}
+                      maxLength={80}
                       placeholder="Bairro"
                       aria-label="Bairro da retirada"
                     />
                     <Input
                       value={rascunho.endereco.cidade}
                       onChange={(evento) => mudarEndereco('cidade', evento.target.value)}
+                      maxLength={80}
                       placeholder="Cidade"
                       aria-label="Cidade da retirada"
                     />
@@ -806,10 +845,10 @@ function Formulario({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          disabled={!mudou || graves.length > 0}
-          onClick={() => salvarOperacao(gravar)}
+          disabled={!mudou || graves.length > 0 || salvar.isPending}
+          onClick={() => salvar.mutate(gravar)}
         >
-          Salvar tipos de pedido
+          {salvar.isPending ? 'Salvando...' : 'Salvar tipos de pedido'}
         </Button>
         {mudou && (
           <Button type="button" variant="ghost" onClick={onDescartar}>
@@ -821,9 +860,14 @@ function Formulario({
             ? 'Resolva o que está em vermelho para salvar.'
             : mudou
               ? 'Há alterações não salvas.'
-              : 'Tudo salvo neste navegador.'}
+              : 'Tudo salvo.'}
         </span>
       </div>
+      {salvar.isError && (
+        <p className="text-sm text-destructive" role="alert">
+          {mensagemDoErro(salvar.error, 'Não foi possível salvar os tipos de pedido.')}
+        </p>
+      )}
     </>
   );
 }

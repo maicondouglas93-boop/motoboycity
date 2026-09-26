@@ -34,18 +34,43 @@ de validação em `runbooks/company-order-printing.md`.
 
 ### Link da loja online
 
-`store_settings` (1:1 com a empresa: o link atual e o nome) e `store_slugs`
+`store_settings` (1:1 com a empresa: o link atual, o nome e a identidade
+visual — tema, as duas cores e a logo) e `store_slugs`
 (todo link que a loja já usou, com a loja como dona — a chave é o próprio
 endereço). Trocar de link não libera o antigo: ele continua da loja e leva ao
 atual, e nenhuma outra loja pode pegá-lo. O link atual referencia `store_slugs`
 com `NO ACTION`, para a exclusão da empresa levar os dois em cascata.
 
-Módulo `company/store-settings`: `GET` e `PUT /company/store/settings[/link]`
-no painel, e `GET /public/stores/:slug` aberto, sem login, só para empresa
+Módulo `company/store-settings`: `GET /company/store/settings` e os `PUT`
+`link` e `identity` e `PUT`/`DELETE` `logo` no painel — a identidade exige o
+link, e a cor que some contra o fundo é recusada pela régua de contraste de
+`packages/validation` (`problemasDasCores`), a mesma que o painel usa para
+avisar —, e `GET /public/stores/:slug` aberto, sem login, só para empresa
 ativa — devolve a loja com o cardápio vendável (`publicCatalog`, do serviço do
-catálogo) ou `{ kind: 'moved' }` para link antigo. No `company-web`, a página
+catálogo) e a operação sem os avisos (`publicOperation`), ou
+`{ kind: 'moved' }` para link antigo. No `company-web`, a página
 `/pedir/[slug]` é de servidor e decide entre demonstração, vitrine,
 redirecionamento e "não encontrada" (`lib/loja-publica.ts`).
+
+### Operação da loja online
+
+Como a loja funciona: horário, ajuste da hora (aberta, fechada ou pausada
+agora), tipos de pedido, avisos, formas de pagamento e bairros atendidos (com a
+taxa de cada um). `store_operations`, 1:1 com a empresa, com um
+JSONB por bloco — o formato é o `OperacaoDaLoja` de `@motoboycity/types`, o
+mesmo que as telas editam. Módulo `company/store-operation`: `GET
+/company/store/operation` e um `PUT` por bloco (`schedule`, `status`,
+`order-types`, `notifications`, `payments`, `delivery-areas`), cada um validado
+pelo schema do bloco em
+`packages/validation` e gravando só a sua coluna — duas abas mexendo em blocos
+diferentes não se desfazem. A linha nasce na primeira gravação, com os padrões
+nos outros blocos; sem ela, a leitura responde a semana fechada. O começo do
+ajuste é a hora do servidor, e fim no passado é recusado (400,
+`STORE_STATUS_ENDED`). Forma de pagamento online é recusada e tirada do que a
+página recebe enquanto a loja não tem conta Asaas. A regra de "aberta agora" é
+calculada por quem mostra
+(`lib/loja-horario.ts`, no fuso `America/Sao_Paulo`); quando houver pedido, o
+servidor decide de novo no checkout.
 
 ### Catálogo da loja online
 

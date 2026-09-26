@@ -276,6 +276,19 @@ describe('situacaoDaLoja — o que a loja decide na hora', () => {
     );
   });
 
+  it('a pausa gravada vale já, mesmo com o começo marcado depois de agora', () => {
+    // O servidor marca o começo quando a gravação chega, alguns segundos
+    // depois do clique — e o relógio dele pode estar adiantado.
+    const loja = funcionamento({
+      ajuste: ajuste('PAUSADA', '2026-09-22T12:01', '2026-09-22T12:30'),
+    });
+    expect(situacaoDaLoja(loja, em('2026-09-22T12:00'))).toMatchObject({
+      aberta: false,
+      motivo: 'PAUSADA',
+      texto: 'Pedidos pausados · voltam às 12:30',
+    });
+  });
+
   it('a pausa sem fim não promete volta', () => {
     const loja = funcionamento({ ajuste: ajuste('PAUSADA', '2026-09-22T12:00', null) });
     expect(situacaoDaLoja(loja, em('2026-09-22T12:10'))).toMatchObject({

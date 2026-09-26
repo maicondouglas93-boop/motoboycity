@@ -15417,3 +15417,194 @@ do pedido no banco, que depende delas):
 Registradas em `docs/business-rules.md` ("Loja online: taxa, estorno e cadastro
 do cliente") e em `docs/plano-loja-online.md` (decisões 17 a 19, e os "em
 aberto" dos itens 1 a 3 fechados). Só documentação; nenhum código mudou.
+
+## 2026-09-25 — Loja online: horário, status, tipos de pedido e avisos no banco
+
+Pedido do usuário ("pode continuar", segundo item da lista do que falta para
+produção; depois, "segue para o próximo, até eliminarmos todos os
+impedimentos"). Horários, Tipos de pedido, Notificações e o status gravavam só
+no `localStorage` do navegador, e a vitrine não mostrava horário nenhum.
+
+**Decisões:**
+
+- `store_operations`, 1:1 com a empresa, com **um JSONB por bloco** (horário,
+  ajuste da hora, tipos de pedido, avisos) e **um `PUT` por bloco**: cada tela
+  grava só o seu, e salvar o horário não desfaz a pausa que outra aba acabou de
+  fazer. Tabelas por faixa de horário seriam normalização sem consulta que a
+  peça — nada filtra horário no banco —, e o JSON é o mesmo `OperacaoDaLoja`
+  que as telas já editavam, agora em `@motoboycity/types`.
+- A linha nasce na primeira gravação. Antes dela, a leitura responde a semana
+  **fechada** (`OPERACAO_INICIAL`): loja nova não aparece aberta num horário
+  que ninguém cadastrou.
+- O começo do ajuste (`desde`) é a hora do servidor; fim no passado é recusado
+  (400, `STORE_STATUS_ENDED`).
+- `GET /public/stores/:slug` passa a trazer a operação sem os avisos da loja
+  (`OperacaoPublica`). A vitrine mostra a situação (aberta, fechada, pausada),
+  o recado de fechada, o tempo de entrega e as modalidades; continua sem pedido,
+  taxa e pagamento.
+- O painel copia a operação da API para o `localStorage` da demonstração
+  (`espelharNaDemonstracao`), para a loja de exemplo e Vendas continuarem
+  obedecendo ao que se configura.
+
+**Achados no caminho, corrigidos:**
+
+- O banco (JSONB) não guarda a ordem das chaves, e o "há alterações" comparava
+  `JSON.stringify`: ficaria aceso depois de salvar. As três telas comparam pelo
+  conteúdo.
+- O servidor apara os textos, e o endereço de retirada ia sem aparar: a tela
+  continuaria "com alterações" depois de salvar. Agora sai aparado.
+- Depois de pausar, o painel mostraria "Aberta" por até 15 s: o `desde` do
+  servidor fica depois do relógio da tela, que é acertado no clique. O ajuste
+  gravado passa a valer já (`aplicarAjuste`, em `lib/loja-horario.ts`: o começo
+  nunca fica depois de agora). O teste novo do status falha sem a correção.
+- Tipos de pedido deixava salvar endereço de retirada sem bairro ou UF, que a
+  API recusa. A tela passa a exigir os mesmos campos, limita o tamanho deles e
+  o pedido mínimo ao que a API aceita.
+
+**Arquivos:** migration `apps/api/prisma/migrations/20260925230000_loja_operacao/`,
+`apps/api/prisma/schema.prisma`; `apps/api/src/company/store-operation/`
+(serviço, controller, módulo, spec), `app.module.ts`,
+`company/store-settings/store-settings.{module,service,service.spec}.ts`,
+`apps/api/test/store-operation.e2e-spec.ts`;
+`packages/types/src/store-operation.ts` (+ `store-settings.ts`, `index.ts`),
+`packages/validation/src/company/store-operation.schema.ts` (+ `index.ts`),
+`packages/api-client/src/company-store-operation.ts` (+ `index.ts`);
+`apps/company-web/src/components/loja/operacao.ts` (novo),
+`controle-do-status.tsx`, `app/(app)/loja/{horarios,tipos-de-pedido,notificacoes}/page.tsx`,
+`lib/api-client.ts`, `lib/loja-publica.ts`, `components/loja-online/loja-publica.tsx`,
+`lib/loja-horario.ts`, `lib/loja-operacao.ts`, `lib/loja-pedido.ts`,
+`lib/loja-avisos.ts` e os testes `controle-do-status.test.tsx` (novo),
+`tipos-de-pedido.test.tsx`, `loja-publica.test.tsx`, `loja-publica.test.ts`,
+`loja-horario.test.ts`; `docs/agent-handoff.md`, `docs/architecture.md`,
+`docs/plano-loja-online.md`.
+
+**Como foi validado:**
+
+- Migration num banco descartável do Postgres local: aplicar todas, conferir
+  que o banco bate com o schema, desfazer, conferir que voltou ao anterior,
+  reaplicar. Depois, aplicada no `motoboycity_dev` local (só ela pendente).
+- API: `jest src/company` — 13 suítes, 127 testes passam (serviço da operação,
+  10; link, 11). `tsc` e `eslint` limpos. E2E da operação, do catálogo e do
+  link — 3 suítes passam — num banco e num Redis (índice 9) isolados, criados e
+  apagados pelo script.
+- `company-web`: `vitest` — 48 arquivos, 339 testes passam; `tsc` e `eslint`
+  limpos; `prettier` limpo nos arquivos do recorte; `next build` concluído.
+- No navegador, com a API local: Horários salvou a sexta das 18h às 22h e um
+  recado com espaço no fim ("Tudo salvo."); a vitrine `/pedir/franklim` mostrou
+  "Fechado · abre às 18:00", o recado e "35 a 50 min · Entrega". "Abrir agora"
+  por 30 min: painel "aberta por você até 22:00", vitrine "Aberto até 22:00".
+  Com a sexta desde as 11h, "Pausar 15 min": o painel mostrou "Pausada ·
+  pedidos voltam às 17:46" um segundo depois do clique, e a vitrine, "Pedidos
+  pausados · voltam às 17:46". Tipos de pedido salvou a retirada em outro
+  endereço (com o aviso até preencher bairro e UF), e Notificações, uma troca
+  de som — as duas com "Tudo salvo.". Todas as chamadas a
+  `/company/store/operation` responderam 200.
+
+**Deploy:** nada foi enviado. A migration só acrescenta uma tabela, e vai no
+próximo push, pelo `prisma migrate deploy` do build do Render.
+
+**Reverter**, se preciso:
+
+```sql
+ALTER TABLE "store_operations" DROP CONSTRAINT "store_operations_companyId_fkey";
+DROP TABLE "store_operations";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260925230000_loja_operacao';
+```
+
+## 2026-09-25 — Loja online: identidade, pagamento e bairros no banco
+
+Continuação da lista do que falta para produção (o usuário pediu para seguir
+até eliminar os impedimentos). O pedido da loja precisa que o servidor confira
+taxa e pagamento, e isso não existia fora do navegador: a tela de
+Configurações era demonstração inteira, salvo o link.
+
+**Decisões:**
+
+- **Identidade visual em `store_settings`** (tema, cor da marca, cor de ação,
+  logo), junto do link e do nome: a identidade só existe numa página, e a
+  página só existe pelo link. Sem link, `PUT identity` e `PUT logo` respondem
+  409 (`STORE_LINK_REQUIRED`), e o painel trava o cartão dizendo por quê.
+- **A régua de contraste foi para `packages/validation`**
+  (`store-identity.schema.ts`, `problemasDasCores`), e o `lib/contraste.ts` do
+  painel só a reexporta: o servidor recusa a cor que o painel avisa, com a
+  mesma frase — como já é com "dá para publicar?" no catálogo.
+- **A logo segue o caminho da foto do produto**: ImageKit, pasta
+  `store-logos/<empresa>`, checagem pelos bytes, troca protegida contra duas
+  abas e a anterior apagada lá depois de gravada a nova.
+- **Formas de pagamento e bairros viraram dois blocos de `store_operations`**
+  (`payments`, `delivery-areas`), cada um com a sua gravação, como os outros.
+  A página do cliente os recebe na operação pública.
+- **Pagamento online recusado até a conta Asaas existir**: a API recusa forma
+  online ao gravar (`STORE_PAYMENT_ONLINE_UNAVAILABLE`) e a tira do que a página
+  recebe; o painel trava o grupo, e o cartão do Asaas diz "ainda não
+  disponível" em vez de mostrar campos que não gravam. Loja nova começa
+  recebendo em dinheiro, sem bairro — e sem bairro não há entrega pela página
+  (decisão 17).
+- **Bairro repetido é recusado mesmo com acento ou maiúscula diferente**
+  (`chaveDoBairro`): "São José" e "sao jose" com taxas diferentes deixariam o
+  cliente escolher a mais barata.
+- **Nada do exemplo numa tela integrada**: o ponto de coleta das Configurações
+  e a retirada de Tipos de pedido mostravam o endereço da loja de exemplo
+  ("Rua Coronel Pedro Alves, 140"); agora mostram o endereço da empresa, o
+  mesmo de onde o motoboy retira. Os textos das formas de pagamento saíram do
+  `loja-mock.ts` (que existe para ser apagado) para `lib/loja-pagamentos.ts`.
+
+**Achado no navegador, corrigido:** com duas linhas de bairro em branco, a
+mesma frase de aviso aparecia duas vezes, com a mesma `key`, e o React deixava
+avisos órfãos na tela ao lado de "Tudo salvo.". Os avisos agora não se
+repetem; teste novo cobre as duas linhas em branco preenchidas depois.
+
+**Arquivos:** migration
+`apps/api/prisma/migrations/20260926090000_loja_configuracoes/`,
+`apps/api/prisma/schema.prisma`; API `company/store-settings/`
+(serviço, controller, módulo, spec), `company/store-operation/` (serviço,
+controller, spec), `media/imagekit.service.ts`, E2E
+`test/store-operation.e2e-spec.ts` e `test/store-link.e2e-spec.ts`; contratos
+`packages/types/src/{store-settings,store-operation}.ts`,
+`packages/validation/src/company/{store-identity,store-operation}.schema.ts` (+
+`index.ts`), `packages/api-client/src/company-store-{settings,operation}.ts`;
+painel `components/loja/{identidade-da-loja,pagamentos-da-loja,bairros-da-loja,endereco-da-empresa}.tsx`
+(novos), `app/(app)/loja/configuracoes/page.tsx`,
+`app/(app)/loja/tipos-de-pedido/page.tsx`, `lib/loja-pagamentos.ts` (novo),
+`lib/{contraste,loja-mock,loja-demo,loja-publica}.ts`,
+`components/loja-online/loja-publica.tsx` e os testes
+`components/loja/configuracoes.test.tsx` (novo), `tipos-de-pedido.test.tsx`,
+`loja-publica.test.tsx`, `lib/loja-publica.test.ts`; `docs/agent-handoff.md`,
+`docs/architecture.md`, `docs/plano-loja-online.md`.
+
+**Como foi validado:**
+
+- Migration num banco descartável: aplicar todas, conferir com o schema,
+  desfazer, conferir com o anterior, reaplicar — tudo igual. Depois, aplicada
+  no `motoboycity_dev` local (só ela pendente).
+- API: `jest` inteiro — 100 suítes, 1341 passam (1 pulada); os da loja, 35
+  (operação 16, com pagamento e bairros; configurações 19, com identidade e
+  logo com o ImageKit simulado). `tsc` e `eslint` limpos. E2E da loja (link,
+  catálogo, operação) num banco e num Redis isolados: 3 suítes passam, com
+  identidade antes e depois do link, cor recusada, pagamento online recusado,
+  bairro repetido recusado e o que a página pública recebe.
+- `company-web`: `vitest` — 49 arquivos, 350 testes; `tsc`, `eslint` e
+  `next build` limpos; `pnpm typecheck` e `pnpm lint` do monorepo, 8 de 8.
+- No navegador, com a API local: amarelo no tema claro mostrou o aviso de
+  contraste 1,5 e travou o salvar; no tema escuro passou e salvou. Pagamento
+  (Pix e débito na maquininha) e bairros (Centro R$ 5,00, Vila Nova R$ 8,50)
+  salvaram e voltaram iguais depois de recarregar. A vitrine `/pedir/franklim`
+  abriu no tema escuro, com o amarelo da marca, "Entrega R$ 5,00 a R$ 8,50",
+  "Retirada sem taxa" e "Na entrega: dinheiro, Pix, débito"; o manifest do app
+  saiu com a cor da marca. **A logo não foi enviada no navegador**: a API local
+  usa a conta real do ImageKit. O envio está coberto pelos testes do serviço.
+
+**Deploy:** nada foi enviado. A migration só acrescenta colunas (com padrão, ou
+nulas) e um tipo enumerado.
+
+**Reverter**, se preciso:
+
+```sql
+ALTER TABLE "store_settings" DROP COLUMN "actionColor", DROP COLUMN "brandColor",
+  DROP COLUMN "logoExternalFileId", DROP COLUMN "logoUrl", DROP COLUMN "theme";
+ALTER TABLE "store_operations" DROP COLUMN "deliveryAreas", DROP COLUMN "paymentMethods";
+DROP TYPE "StoreTheme";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926090000_loja_configuracoes';
+```
+
+Logos já enviadas ficariam no ImageKit, na pasta `store-logos/`.

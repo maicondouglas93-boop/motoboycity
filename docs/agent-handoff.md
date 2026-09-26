@@ -555,12 +555,15 @@ Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
 **Produtos, Organizar, Cadastrar e Editar gravam na API desde 2026-09-25**
-(rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`).
-As demais são demonstração, com dados de `apps/company-web/src/lib/loja-mock.ts`
-e um aviso na tela. **O link da loja também grava** (Configurações → "Link da
-sua loja"), e `/pedir/<link>` abre a loja de verdade como **vitrine**: o
-cardápio publicado, sem pedido, sem horário, taxa ou pagamento (ainda não estão
-no banco). A página é de servidor (`lib/loja-publica.ts` busca
+(rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`),
+e **Horários, Tipos de pedido, Notificações, o status e Configurações também**
+(rotas `/company/store/operation/*` e `/company/store/settings/*`; tabelas
+`store_operations` e `store_settings`). Só Vendas é demonstração, com dados de
+`apps/company-web/src/lib/loja-mock.ts` e um aviso na tela. `/pedir/<link>`
+abre a loja de verdade como **vitrine**: o cardápio publicado, a cara da loja
+(logo, tema e cores), o horário, a situação (aberta, fechada, pausada, com o
+recado), o tempo de entrega, a faixa de taxa dos bairros e as formas de
+pagamento — tudo do banco —, mas sem pedido. A página é de servidor (`lib/loja-publica.ts` busca
 `GET /public/stores/:slug`); link antigo redireciona, com 307 de propósito — a
 loja pode voltar a um link que já foi dela. Empresa pendente ou suspensa
 responde "Loja não encontrada". **`/pedir/minha-loja` é a demonstração**, com o
@@ -585,20 +588,59 @@ catálogo do painel precisa saber:
   painel local vai para a conta real. Para testar sem isso, use um arquivo que
   a checagem de bytes recuse — ela roda antes do envio.
 
-As migrations `20260925090000_loja_catalogo` (em produção desde o push de
-2026-09-25) e `20260925160000_loja_foto_do_produto` estão aplicadas no
-`motoboycity_dev` local. A da foto só acrescenta uma coluna vazia, e sai para
-produção no próximo `push`, pelo `prisma migrate deploy` do build do Render.
+As migrations `20260925090000_loja_catalogo`, `20260925160000_loja_foto_do_produto`
+e `20260925190000_loja_link` foram no push de 2026-09-25, pelo
+`prisma migrate deploy` do build do Render. `20260925230000_loja_operacao` e
+`20260926090000_loja_configuracoes` estão só no `motoboycity_dev` local e vão
+no próximo push.
 
-**Uma parte salva — só no navegador.** Horários, Tipos de pedido, Notificações,
-o status e as vendas gravam no `localStorage` por `lib/loja-demo.ts`, e o evento
-`storage` leva a mudança entre abas: pausar no painel pausa a página do cliente
-aberta no mesmo navegador, e aceitar um pedido muda o "Meus pedidos" dele. É
-demonstração, e não sincronização — nada sai do aparelho. Quem integrar apaga
-`loja-demo.ts` junto com `loja-mock.ts`; as regras de `lib/loja-horario.ts`,
-`loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts` ficam, porque o
-servidor vai precisar delas. Em Configurações, só o link grava; o resto da
-tela é demonstração.
+**Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
+de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
+cada tela grava só o seu: salvar o horário não desfaz a pausa feita em outra
+aba. A linha nasce na primeira gravação; sem ela, a API responde a semana
+fechada (`OPERACAO_INICIAL`, em `store-operation.service.ts`). O JSON segue o
+tipo `OperacaoDaLoja` de `@motoboycity/types`, em português, porque é o mesmo
+que as telas editam. O que quem mexer aqui precisa saber:
+
+- O banco (JSONB) não guarda a ordem das chaves. O "há alterações" das telas
+  compara pelo conteúdo (`mesmoConteudo`, em `components/loja/operacao.ts`, e
+  as conversões de cada tela); comparar o `JSON.stringify` direto acusa mudança
+  depois de salvar.
+- O começo do ajuste (`desde`) é a hora do servidor, e a API recusa fim no
+  passado. A tela mostra o ajuste gravado como já valendo, mesmo com o `desde`
+  segundos à frente do relógio dela (`aplicarAjuste`, em `lib/loja-horario.ts`).
+- A página do cliente recebe a operação sem os avisos da loja
+  (`OperacaoPublica`), lida quando a página abre: uma pausa feita depois só
+  aparece ao recarregar. A pausa que vence, sim, a página acompanha sozinha.
+- **Pagamento online está travado de propósito.** A API recusa forma online ao
+  gravar (`STORE_PAYMENT_ONLINE_UNAVAILABLE`) e a tira do que a página recebe
+  (`PAGAMENTO_ONLINE_DISPONIVEL`, em `store-operation.service.ts`), e o painel
+  trava o grupo (`RECEBE_ONLINE`, em `components/loja/pagamentos-da-loja.tsx`):
+  sem a conta Asaas da loja, o dinheiro não teria para onde ir. Quem ligar o
+  Asaas troca as duas constantes pela checagem da conta.
+- **Sem bairro, não há entrega pela página** (decisão 17 do plano): a lista
+  vazia é o padrão da loja nova. Na demonstração, lista vazia ainda quer dizer
+  "entrega a combinar" — é o comportamento antigo, e some com ela.
+
+**Identidade visual** (2026-09-25): tema, cor da marca, cor de ação e logo
+ficam em `store_settings`, e exigem o link (409 `STORE_LINK_REQUIRED` sem ele).
+A régua de contraste mora em `packages/validation` (`store-identity.schema.ts`),
+e o `lib/contraste.ts` do painel só a reexporta: o servidor recusa a cor que o
+painel avisa, com a mesma frase. A logo sobe como a foto do produto (ImageKit,
+pasta `store-logos/<empresa>`, troca protegida e a anterior apagada lá). Os
+textos das formas de pagamento saíram do `loja-mock.ts` para
+`lib/loja-pagamentos.ts`, porque a tela integrada os usa.
+
+**Uma parte ainda só no navegador.** As vendas gravam no `localStorage` por
+`lib/loja-demo.ts`, e o evento `storage` leva a mudança entre abas: aceitar um
+pedido muda o "Meus pedidos" do cliente aberto no mesmo navegador. É
+demonstração, e não sincronização. O painel copia para lá a operação que a API
+guardou (`espelharNaDemonstracao`), e por isso a loja de exemplo e Vendas
+continuam obedecendo ao horário e à pausa configurados. Quem integrar o pedido
+apaga `loja-demo.ts` junto com `loja-mock.ts`; as regras de
+`lib/loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts`
+ficam, porque o servidor vai precisar delas. Em Configurações, o cartão do
+Asaas diz "ainda não disponível", em vez de mostrar campo que não grava.
 
 **Quem faz a entrega e a comanda** (2026-09-25, ainda na demonstração). A
 loja escolhe em Tipos de pedido se entrega pelo MOTOboyCity ou com entregador

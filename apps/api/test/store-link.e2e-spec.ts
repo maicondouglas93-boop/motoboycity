@@ -87,8 +87,22 @@ describe('Link da loja online (e2e)', () => {
   it('o link abre só o que está à venda, e o antigo continua valendo', async () => {
     const servidor = app.getHttpServer();
 
-    const sugestao = await request(servidor).get('/company/store/settings').set(comoA()).expect(200);
-    expect(sugestao.body).toEqual({ slug: null, name: 'Link A', suggestedSlug: 'link-a' });
+    const sugestao = await request(servidor)
+      .get('/company/store/settings')
+      .set(comoA())
+      .expect(200);
+    expect(sugestao.body).toEqual({
+      slug: null,
+      name: 'Link A',
+      suggestedSlug: 'link-a',
+      // Antes de a loja escolher, a cara da demonstração.
+      identity: {
+        theme: 'CLARO',
+        brandColor: '#c2410c',
+        actionColor: '#15803d',
+        logoUrl: null,
+      },
+    });
 
     await request(servidor)
       .put('/company/store/settings/link')

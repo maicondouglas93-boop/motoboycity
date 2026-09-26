@@ -17,22 +17,10 @@ import { hora, momentoNaLoja, rotuloDoDia } from './loja-horario';
 
 export type Modalidade = 'ENTREGA' | 'RETIRADA';
 
-/**
- * Automático: o pedido entra aceito e vai para a fila da cozinha sozinho.
- * Manual: cada pedido espera alguém da loja aceitar.
- */
-export type ModoDeAceite = 'AUTOMATICO' | 'MANUAL';
+// Contrato: o aceite e quem entrega também são gravados na configuração da loja.
+import type { ModoDeAceite, QuemEntrega } from '@motoboycity/types';
 
-/**
- * Quem leva o pedido de entrega até o cliente. A escolha é da empresa: há
- * quem use a loja com motoboy próprio, e o pedido dela não pode cair na lista
- * de corridas do MOTOboyCity (decisão 15 do plano da loja).
- *
- * `MOTOBOYCITY`: o pedido pronto vira corrida, e a saída e a entrega chegam do
- * aplicativo do motoboy. `LOJA`: o entregador é da loja, nada passa pelo
- * MOTOboyCity, e é a loja que marca a saída e a entrega.
- */
-export type QuemEntrega = 'MOTOBOYCITY' | 'LOJA';
+export type { ModoDeAceite, QuemEntrega };
 
 export type EtapaDoPedido =
   'NOVO' | 'ACEITO' | 'EM_PREPARO' | 'PRONTO' | 'SAIU_PARA_ENTREGA' | 'ENTREGUE' | 'CANCELADO';

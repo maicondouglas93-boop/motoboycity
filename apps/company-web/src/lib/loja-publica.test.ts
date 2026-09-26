@@ -1,5 +1,6 @@
-import type { PublicStoreProduct } from '@motoboycity/types';
+import type { OperacaoPublica, PublicStoreProduct } from '@motoboycity/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { OPERACAO_DE_EXEMPLO } from '@/lib/loja-mock';
 
 const mocks = vi.hoisted(() => ({ store: vi.fn() }));
 
@@ -30,6 +31,23 @@ const ACAI: PublicStoreProduct = {
   ],
 };
 
+const OPERACAO: OperacaoPublica = {
+  funcionamento: { ...OPERACAO_DE_EXEMPLO.funcionamento, mensagemFechada: 'Voltamos às 18h.' },
+  recebimento: OPERACAO_DE_EXEMPLO.recebimento,
+  entrega: OPERACAO_DE_EXEMPLO.entrega,
+  retirada: OPERACAO_DE_EXEMPLO.retirada,
+  agendamento: OPERACAO_DE_EXEMPLO.agendamento,
+  pagamentos: ['DINHEIRO'],
+  bairros: [{ id: 'b1', nome: 'Centro', taxa: 6 }],
+};
+
+const IDENTIDADE = {
+  theme: 'ESCURO' as const,
+  brandColor: '#fbbf24',
+  actionColor: '#22c55e',
+  logoUrl: 'https://ik.imagekit.io/x/logo.png',
+};
+
 describe('a loja pelo link', () => {
   // Em bloco, sem devolver o mock: o vitest chama o que o beforeEach devolve
   // como limpeza, depois do teste — e chamaria o mock mais uma vez.
@@ -40,18 +58,24 @@ describe('a loja pelo link', () => {
   it('o link da demonstração abre o exemplo inteiro, sem ir à API', async () => {
     const achada = await lojaDoLink(LINK_DA_DEMONSTRACAO);
     expect(achada.tipo).toBe('loja');
-    if (achada.tipo === 'loja') expect(achada.cardapio.vitrine).toBe(false);
+    if (achada.tipo === 'loja') {
+      expect(achada.cardapio.vitrine).toBe(false);
+      // A demonstração segue a configuração do navegador, e não a do banco.
+      expect(achada.cardapio.operacao).toBeNull();
+    }
     expect(mocks.store).not.toHaveBeenCalled();
   });
 
-  it('loja de verdade abre como vitrine, com o cardápio dela', async () => {
+  it('loja de verdade abre como vitrine, com o cardápio, a cara e o horário dela', async () => {
     mocks.store.mockResolvedValue({
       kind: 'store',
       store: {
         slug: 'acai-do-ze',
         name: 'Açaí do Zé',
+        identity: IDENTIDADE,
         categories: [{ id: 'c1', name: 'Açaí' }],
         products: [ACAI],
+        operacao: OPERACAO,
       },
     });
 
@@ -61,8 +85,15 @@ describe('a loja pelo link', () => {
       tipo: 'loja',
       cardapio: {
         vitrine: true,
-        identidade: { nome: 'Açaí do Zé' },
+        identidade: {
+          nome: 'Açaí do Zé',
+          tema: 'ESCURO',
+          corDaMarca: '#fbbf24',
+          corDeAcao: '#22c55e',
+          logoUrl: 'https://ik.imagekit.io/x/logo.png',
+        },
         categorias: [{ id: 'c1', nome: 'Açaí' }],
+        operacao: { funcionamento: { mensagemFechada: 'Voltamos às 18h.' } },
       },
     });
     expect(mocks.store).toHaveBeenCalledWith('acai-do-ze', { cache: 'no-store' });
@@ -74,7 +105,14 @@ describe('a loja pelo link', () => {
 
     mocks.store.mockResolvedValue({
       kind: 'store',
-      store: { slug: 'acai-do-ze', name: 'Açaí do Zé', categories: [], products: [] },
+      store: {
+        slug: 'acai-do-ze',
+        name: 'Açaí do Zé',
+        identity: IDENTIDADE,
+        categories: [],
+        products: [],
+        operacao: OPERACAO,
+      },
     });
     await expect(lojaDoLink('Acai-Do-Ze')).resolves.toEqual({ tipo: 'mudou', slug: 'acai-do-ze' });
   });
