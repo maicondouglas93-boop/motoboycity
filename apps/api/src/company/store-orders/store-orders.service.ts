@@ -1,10 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   HttpException,
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type {
   AndamentoDoPedido,
@@ -14,6 +17,7 @@ import type {
   FormaDePagamento,
   ItemDoPedido,
   JanelaAgendada,
+  PagamentoOnlineDoPedido,
   PassoDoPedido,
   PedidoDaLoja,
   PublicStoreProduct,
@@ -29,7 +33,9 @@ import {
   createDeliverySchema,
   horariosDaModalidade,
   inicioDoPedido,
+  momentoNaLoja,
   modalidadesAtivas,
+  pagamentoConfirmado,
   pedidoMinimoDa,
   pelaCorrida,
   podeCancelar,
@@ -43,10 +49,20 @@ import {
   type StoreOrderStagePayload,
   type WebPushSubscriptionPayload,
 } from '@motoboycity/validation';
-import { Prisma, type DeliveryStatus, type StoreOrder, type User } from '@prisma/client';
+import {
+  Prisma,
+  type DeliveryStatus,
+  type StoreOrder,
+  type StoreOrderPaymentStatus,
+  type User,
+} from '@prisma/client';
 import { ZodError } from 'zod';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
+import { AsaasProviderError } from '../../finance/asaas/asaas.client';
+import type { AsaasWebhookEnvelope } from '../../finance/asaas/asaas.schemas';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
+import { StoreAsaasClient } from '../store-asaas/store-asaas.client';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
 import { StoreOrderNotificationsService } from './store-order-notifications.service';
@@ -270,17 +286,60 @@ function paraPedido(linha: StoreOrder): PedidoDaLoja {
     observacao: linha.note,
     corrida: null,
     avisoDaCorrida: null,
+    pagamentoOnline: paraPagamento(linha),
   };
 }
 
-/** O pedido para a loja: com a corrida e o aviso dela. */
+/**
+ * O Pix do pedido. O QR code e o copia e cola só enquanto aguarda: pago ou
+ * vencido, eles não servem para mais nada.
+ */
+function paraPagamento(linha: StoreOrder): PagamentoOnlineDoPedido | null {
+  if (!linha.paymentStatus) return null;
+  const aguardando = linha.paymentStatus === 'AGUARDANDO';
+  return {
+    situacao: linha.paymentStatus,
+    pixCopiaECola: aguardando ? linha.pixPayload : null,
+    qrCode: aguardando ? linha.pixQrCode : null,
+    expiraEm: aguardando && linha.paymentDueAt ? linha.paymentDueAt.toISOString() : null,
+    pagoEm: linha.paidAt ? linha.paidAt.toISOString() : null,
+    aviso: null,
+  };
+}
+
+/** O pedido para a loja: com a corrida, o aviso dela e o aviso do estorno. */
 function paraALoja(linha: LinhaDoPedido): PedidoDaLoja {
   const pedido = paraPedido(linha);
   return {
     ...pedido,
     corrida: linha.delivery ? paraCorrida(linha.delivery) : null,
     avisoDaCorrida: avisoDaCorrida(linha, pedido),
+    pagamentoOnline: pedido.pagamentoOnline
+      ? { ...pedido.pagamentoOnline, aviso: linha.paymentIssue }
+      : null,
   };
+}
+
+/** Quanto tempo o Pix vale. Passou, o pedido cai e a cobrança some do Asaas. */
+const MINUTOS_DO_PIX = 15;
+
+/** Quanto esperar entre uma tentativa de estorno recusada e a próxima. */
+const INTERVALO_DO_ESTORNO_MS = 15 * 60_000;
+
+/** O Asaas deu a cobrança como paga. */
+function cobrancaPaga(status: string): boolean {
+  return status === 'RECEIVED' || status === 'CONFIRMED' || status === 'RECEIVED_IN_CASH';
+}
+
+/** A frase que a loja lê em Vendas quando o estorno não saiu. */
+function motivoDoEstorno(erro: unknown): string {
+  if (erro instanceof AsaasProviderError && erro.httpStatus === 400) {
+    return 'O Asaas recusou o estorno — confira se há saldo na sua conta Asaas. O sistema tenta de novo a cada 15 minutos.';
+  }
+  if (erro instanceof Error && erro.message === 'SEM_CONTA') {
+    return 'A conta Asaas da loja foi desligada ou trocada: faça o estorno pelo painel do Asaas.';
+  }
+  return 'Não deu para estornar agora. O sistema tenta de novo a cada 15 minutos.';
 }
 
 function eOnline(forma: FormaDePagamento): boolean {
@@ -362,6 +421,8 @@ export class StoreOrdersService {
     private readonly operacao: StoreOperationService,
     private readonly entregas: DeliveriesService,
     private readonly avisos: StoreOrderNotificationsService,
+    private readonly contasAsaas: StoreAsaasAccountService,
+    private readonly asaas: StoreAsaasClient,
   ) {}
 
   async checkout(
@@ -457,7 +518,14 @@ export class StoreOrdersService {
     }
 
     const { minutosDePreparo, minutosDeEntrega, modo, prazoDoAceiteMin } = operacao.recebimento;
-    const inicio = inicioDoPedido(modo, agora);
+    // Pago online, o pedido nasce esperando o Pix: a loja só o vê depois de pago.
+    const online = eOnline(pedido.pagamento);
+    const inicio: { etapa: PedidoDaLoja['etapa']; historico: PassoDoPedido[] } = online
+      ? {
+          etapa: 'AGUARDANDO_PAGAMENTO',
+          historico: [{ etapa: 'AGUARDANDO_PAGAMENTO', em: agora.toISOString() }],
+        }
+      : inicioDoPedido(modo, agora);
     const entregaPor = pedido.modalidade === 'ENTREGA' ? operacao.entrega.quemEntrega : null;
     const andamento: AndamentoDoPedido = {
       numero: 0,
@@ -472,7 +540,20 @@ export class StoreOrdersService {
     };
     const prazo = prazoDoAceite(andamento, prazoDoAceiteMin);
 
+    const id = randomUUID();
+    const pix = online
+      ? await this.gerarPix(companyId, id, clienteId, {
+          nome: pedido.cliente.nome,
+          telefone: pedido.cliente.telefone,
+          cpf: pedido.cpf ?? '',
+          valor: reais(total),
+          agora,
+        })
+      : null;
+
     const dados = {
+      id,
+      ...(pix ?? {}),
       customerAuthId: clienteId,
       customerName: pedido.cliente.nome,
       customerPhone: pedido.cliente.telefone,
@@ -495,12 +576,87 @@ export class StoreOrdersService {
       note: pedido.observacao || null,
     } satisfies Omit<Prisma.StoreOrderUncheckedCreateInput, 'companyId' | 'number'>;
 
-    const gravado = await this.gravarComNumero(companyId, dados);
+    let gravado: StoreOrder;
+    try {
+      gravado = await this.gravarComNumero(companyId, dados);
+    } catch (erro) {
+      // Sem pedido, a cobrança não pode ficar no Asaas esperando pagamento.
+      if (pix) await this.apagarCobranca(companyId, pix.paymentProviderId);
+      throw erro;
+    }
+    // O Pix ainda não foi pago: nada de corrida, nem de aviso à loja.
+    if (online) return paraPedido(gravado);
     // Aceite automático: o pedido nasce aceito, e a corrida nasce com ele.
     if (gravado.stage === 'ACEITO') await this.chamarCorrida(companyId, gravado.id);
     const feito = paraPedido(gravado);
     await this.avisos.pedidoNovo(companyId, feito);
     return feito;
+  }
+
+  /**
+   * "Já paguei": o cliente pede para conferir o Pix agora, em vez de esperar o
+   * aviso do Asaas. O servidor pergunta ao Asaas — o navegador não decide que
+   * pagou.
+   */
+  async conferirPagamento(slug: string, clienteId: string, id: string): Promise<PedidoDaLoja> {
+    const companyId = await this.empresaDoLink(slug);
+    const linha = await this.prisma.storeOrder.findFirst({
+      where: { id, companyId, customerAuthId: clienteId },
+    });
+    if (!linha) {
+      throw new NotFoundException({
+        message: 'Pedido não encontrado.',
+        code: 'STORE_ORDER_NOT_FOUND',
+      });
+    }
+    if (linha.stage === 'AGUARDANDO_PAGAMENTO' && linha.paymentProviderId) {
+      const conta = await this.contasAsaas.contaParaCobrar(companyId);
+      const cobranca = conta
+        ? await this.asaas.cobranca(conta.credencial, linha.paymentProviderId).catch(() => null)
+        : null;
+      if (cobranca && cobrancaPaga(cobranca.status)) await this.pagamentoRecebido(companyId, linha);
+    }
+    return paraPedido(await this.prisma.storeOrder.findFirstOrThrow({ where: { id } }));
+  }
+
+  /**
+   * O aviso do Asaas, na conta da loja. O token é o que o MOTOboyCity criou para
+   * esta conta; valor, cobrança e referência têm de bater com o pedido. Responde
+   * 200 também ao que ignora — o Asaas para de mandar a fila inteira se um
+   * aviso falhar.
+   */
+  async receberWebhook(
+    companyId: string,
+    token: string | undefined,
+    envelope: AsaasWebhookEnvelope,
+  ): Promise<{ received: true }> {
+    if (!(await this.contasAsaas.webhookDaLoja(companyId, token))) {
+      throw new UnauthorizedException('Webhook não autorizado.');
+    }
+    const pagamento = envelope.payment;
+    if (!pagamento) return { received: true };
+    const linha = await this.prisma.storeOrder.findFirst({
+      where: { companyId, paymentProviderId: pagamento.id },
+    });
+    if (!linha) return { received: true };
+
+    if (envelope.event === 'PAYMENT_RECEIVED' || envelope.event === 'PAYMENT_CONFIRMED') {
+      const confere =
+        cobrancaPaga(pagamento.status) &&
+        pagamento.externalReference === linha.id &&
+        Math.round(pagamento.value * 100) === centavos(Number(linha.total));
+      if (!confere) {
+        this.logger.warn(`Aviso do Asaas ${envelope.id} não confere com o pedido ${linha.id}.`);
+        return { received: true };
+      }
+      await this.pagamentoRecebido(companyId, linha);
+    } else if (envelope.event === 'PAYMENT_REFUNDED') {
+      await this.prisma.storeOrder.updateMany({
+        where: { id: linha.id, paymentStatus: { in: ['PAGO', 'ESTORNANDO', 'ESTORNO_FALHOU'] } },
+        data: { paymentStatus: 'ESTORNADO', paymentIssue: null },
+      });
+    }
+    return { received: true };
   }
 
   /** Os pedidos deste cliente nesta loja, do mais novo ao mais antigo. */
@@ -540,7 +696,14 @@ export class StoreOrdersService {
       this.prisma.storeOrder.findMany({
         where: {
           companyId,
-          OR: [{ stage: { notIn: ['ENTREGUE', 'CANCELADO'] } }, { updatedAt: { gte: desde } }],
+          // O Pix não pago nunca chegou à loja: nem esperando, nem depois de cair.
+          stage: { not: 'AGUARDANDO_PAGAMENTO' },
+          AND: [
+            { OR: [{ paymentStatus: null }, { paymentStatus: { not: 'NAO_PAGO' } }] },
+            {
+              OR: [{ stage: { notIn: ['ENTREGUE', 'CANCELADO'] } }, { updatedAt: { gte: desde } }],
+            },
+          ],
         },
         include: COM_A_CORRIDA,
         orderBy: { createdAt: 'desc' },
@@ -873,6 +1036,34 @@ export class StoreOrdersService {
    * e não quando alguém abrir o painel.
    */
   async varrer(): Promise<void> {
+    const agora = Date.now();
+    const pixVencidos = await this.prisma.storeOrder.findMany({
+      where: { stage: 'AGUARDANDO_PAGAMENTO', paymentDueAt: { lte: new Date(agora) } },
+      select: { id: true, companyId: true },
+      take: 200,
+    });
+    for (const { id, companyId } of pixVencidos) {
+      await this.pixVencido(companyId, id).catch((erro: unknown) =>
+        this.logger.warn(
+          `Pix vencido ${id}: ${erro instanceof Error ? erro.message : String(erro)}`,
+        ),
+      );
+    }
+    const estornosParados = await this.prisma.storeOrder.findMany({
+      where: {
+        paymentStatus: 'ESTORNO_FALHOU',
+        OR: [
+          { paymentCheckedAt: null },
+          { paymentCheckedAt: { lte: new Date(agora - INTERVALO_DO_ESTORNO_MS) } },
+        ],
+      },
+      select: { id: true, companyId: true, cancelReason: true },
+      take: 100,
+    });
+    for (const { id, companyId, cancelReason } of estornosParados) {
+      await this.estornar(companyId, id, cancelReason ?? 'Pedido cancelado.');
+    }
+
     const comPrazoVencido = await this.prisma.storeOrder.findMany({
       where: { stage: 'NOVO', acceptDeadline: { lte: new Date() } },
       select: { companyId: true },
@@ -933,6 +1124,196 @@ export class StoreOrdersService {
       throw new NotFoundException({ message: 'Loja não encontrada.', code: 'STORE_NOT_FOUND' });
     }
     return link.companyId;
+  }
+
+  /* -------------------------------------------------------------------------
+   * O Pix, na conta Asaas da loja
+   * ----------------------------------------------------------------------- */
+
+  /**
+   * A cobrança Pix do pedido, na conta da loja, antes de o pedido existir: se o
+   * Asaas não gerar o Pix, o cliente fica sabendo na hora, e nenhum pedido fica
+   * pela metade. O CPF vai ao Asaas (que o exige) e não fica no pedido.
+   */
+  private async gerarPix(
+    companyId: string,
+    pedidoId: string,
+    clienteId: string,
+    dados: { nome: string; telefone: string; cpf: string; valor: number; agora: Date },
+  ) {
+    const conta = (await this.contasAsaas.recebePix(companyId))
+      ? await this.contasAsaas.contaParaCobrar(companyId)
+      : null;
+    if (!conta) {
+      throw new ConflictException({
+        message: 'Esta loja não está recebendo Pix pela página agora. Escolha pagar na entrega.',
+        code: 'STORE_ORDER_PAYMENT_UNAVAILABLE',
+      });
+    }
+    const loja = await this.prisma.storeSettings.findUnique({
+      where: { companyId },
+      select: { name: true },
+    });
+    let cobrancaId: string | null = null;
+    try {
+      const cliente = await this.asaas.clienteDoCpf(conta.credencial, {
+        nome: dados.nome,
+        cpf: dados.cpf,
+        telefone: dados.telefone,
+        referencia: clienteId,
+      });
+      const cobranca = await this.asaas.criarCobrancaPix(conta.credencial, {
+        customer: cliente,
+        value: dados.valor,
+        dueDate: momentoNaLoja(dados.agora).data,
+        description: `Pedido na ${loja?.name ?? 'loja online'}`.slice(0, 200),
+        externalReference: pedidoId,
+      });
+      cobrancaId = cobranca.id;
+      const qr = await this.asaas.qrCodePix(conta.credencial, cobranca.id);
+      return {
+        paymentStatus: 'AGUARDANDO' as StoreOrderPaymentStatus,
+        paymentProviderId: cobranca.id,
+        paymentEnvironment: conta.ambiente,
+        pixPayload: qr.payload,
+        pixQrCode: qr.encodedImage,
+        paymentDueAt: new Date(dados.agora.getTime() + MINUTOS_DO_PIX * 60_000),
+      };
+    } catch (erro) {
+      this.logger.warn(
+        `Pix não gerado na conta da loja ${companyId}: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+      if (cobrancaId) await this.apagarCobranca(companyId, cobrancaId);
+      throw new BadGatewayException({
+        message: 'Não deu para gerar o Pix agora. Tente de novo, ou escolha pagar na entrega.',
+        code: 'STORE_ORDER_PIX_FAILED',
+      });
+    }
+  }
+
+  /**
+   * O Pix foi pago. Esperando, o pedido entra na loja (novo, ou aceito no
+   * automático, com a corrida); já caído — pagou depois dos 15 minutos —, o
+   * dinheiro volta inteiro na hora.
+   */
+  private async pagamentoRecebido(companyId: string, linha: StoreOrder): Promise<void> {
+    if (linha.stage === 'AGUARDANDO_PAGAMENTO') {
+      await this.confirmarPagamento(companyId, linha.id);
+      return;
+    }
+    if (
+      linha.stage === 'CANCELADO' &&
+      (linha.paymentStatus === 'NAO_PAGO' || linha.paymentStatus === 'AGUARDANDO')
+    ) {
+      const { count } = await this.prisma.storeOrder.updateMany({
+        where: { id: linha.id, paymentStatus: linha.paymentStatus },
+        data: { paymentStatus: 'PAGO', paidAt: new Date() },
+      });
+      if (count === 1) {
+        await this.estornar(companyId, linha.id, 'O Pix chegou depois de o pedido ser cancelado.');
+      }
+    }
+  }
+
+  private async confirmarPagamento(companyId: string, id: string): Promise<void> {
+    const { recebimento } = await this.operacao.operacaoDaEmpresa(companyId);
+    const depois = await this.mudar(companyId, id, (pedido, agora) => {
+      if (pedido.etapa !== 'AGUARDANDO_PAGAMENTO') return null;
+      const entrou = pagamentoConfirmado(pedido, recebimento.modo, agora);
+      return {
+        stage: entrou.etapa,
+        history: entrou.historico as unknown as Prisma.InputJsonValue,
+        acceptDeadline: prazoDoAceite(entrou, recebimento.prazoDoAceiteMin),
+        paymentStatus: 'PAGO',
+        paidAt: agora,
+        pixPayload: null,
+        pixQrCode: null,
+      };
+    });
+    if (depois.etapa === 'ACEITO') await this.chamarCorrida(companyId, id);
+  }
+
+  /**
+   * O Pix não pago em 15 minutos. Antes de cair, pergunta ao Asaas — o aviso
+   * pode ter se perdido. Não pago: a cobrança é apagada lá, para não poder ser
+   * paga depois, e o pedido cai sem a loja nunca tê-lo visto.
+   */
+  private async pixVencido(companyId: string, id: string): Promise<void> {
+    const linha = await this.prisma.storeOrder.findFirst({ where: { id, companyId } });
+    if (!linha || linha.stage !== 'AGUARDANDO_PAGAMENTO') return;
+    const conta = await this.contasAsaas.contaParaCobrar(companyId);
+    if (conta && linha.paymentProviderId) {
+      const cobranca = await this.asaas
+        .cobranca(conta.credencial, linha.paymentProviderId)
+        .catch(() => null);
+      if (cobranca && cobrancaPaga(cobranca.status)) {
+        await this.pagamentoRecebido(companyId, linha);
+        return;
+      }
+    }
+    if (linha.paymentProviderId) await this.apagarCobranca(companyId, linha.paymentProviderId);
+    await this.mudar(companyId, id, (pedido, momento) => {
+      if (pedido.etapa !== 'AGUARDANDO_PAGAMENTO') return null;
+      const cancelamento = this.dadosDoCancelamento(pedido, momento, {
+        motivo: 'O Pix não foi pago a tempo',
+        por: 'SISTEMA',
+      });
+      return cancelamento
+        ? { ...cancelamento, paymentStatus: 'NAO_PAGO', pixPayload: null, pixQrCode: null }
+        : null;
+    });
+  }
+
+  /**
+   * O estorno inteiro, pela conta da loja (decisão 18). Antes de pedir de
+   * novo, pergunta ao Asaas se já não foi feito — o pedido anterior pode ter
+   * saído sem resposta. Recusado, fica `ESTORNO_FALHOU`, com o motivo em Vendas,
+   * e a varredura tenta de novo a cada 15 minutos.
+   */
+  private async estornar(companyId: string, id: string, motivo: string): Promise<void> {
+    const { count } = await this.prisma.storeOrder.updateMany({
+      where: { id, companyId, paymentStatus: { in: ['PAGO', 'ESTORNO_FALHOU'] } },
+      data: { paymentStatus: 'ESTORNANDO', paymentCheckedAt: new Date() },
+    });
+    if (count !== 1) return;
+    const linha = await this.prisma.storeOrder.findFirstOrThrow({ where: { id } });
+    try {
+      const conta = await this.contasAsaas.contaParaCobrar(companyId);
+      if (
+        !conta ||
+        !linha.paymentProviderId ||
+        (linha.paymentEnvironment && linha.paymentEnvironment !== conta.ambiente)
+      ) {
+        throw new Error('SEM_CONTA');
+      }
+      const atual = await this.asaas.cobranca(conta.credencial, linha.paymentProviderId);
+      const jaPedido = atual.status.startsWith('REFUND');
+      const cobranca = jaPedido
+        ? atual
+        : await this.asaas.estornar(conta.credencial, linha.paymentProviderId, motivo);
+      await this.prisma.storeOrder.updateMany({
+        where: { id },
+        data: {
+          paymentStatus: cobranca.status === 'REFUNDED' ? 'ESTORNADO' : 'ESTORNANDO',
+          paymentIssue: null,
+        },
+      });
+    } catch (erro) {
+      this.logger.warn(
+        `Estorno do pedido ${id} não saiu: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+      await this.prisma.storeOrder.updateMany({
+        where: { id },
+        data: { paymentStatus: 'ESTORNO_FALHOU', paymentIssue: motivoDoEstorno(erro) },
+      });
+    }
+  }
+
+  /** Sem lançar: a cobrança pode já ter sido paga, apagada ou vencida no Asaas. */
+  private async apagarCobranca(companyId: string, cobrancaId: string): Promise<void> {
+    const conta = await this.contasAsaas.contaParaCobrar(companyId).catch(() => null);
+    if (!conta) return;
+    await this.asaas.apagarCobranca(conta.credencial, cobrancaId).catch(() => undefined);
   }
 
   private async linhaDaLoja(companyId: string, id: string): Promise<LinhaDoPedido> {
@@ -1032,6 +1413,12 @@ export class StoreOrdersService {
         // Quem fez a mudança é quem avisa: a outra aba, que perdeu a disputa,
         // não chega aqui, e o aviso não sai duas vezes.
         await this.avisos.etapaMudou(companyId, paraPedido(linha), depois);
+        // Pago online e cancelado — pela loja, pelo prazo do aceite —: o
+        // dinheiro volta inteiro, sozinho (decisão 18).
+        if (depois.etapa === 'CANCELADO' && linha.paymentStatus === 'PAGO') {
+          await this.estornar(companyId, id, depois.cancelamento?.motivo || 'Pedido cancelado.');
+          return paraPedido(await this.prisma.storeOrder.findFirstOrThrow({ where: { id } }));
+        }
         return depois;
       }
     }

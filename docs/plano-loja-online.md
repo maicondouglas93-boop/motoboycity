@@ -84,8 +84,14 @@ acompanha a corrida até "Entregue". Regras em `business-rules.md`.
 cliente, ligado aparelho a aparelho, e o prazo do aceite vencendo sozinho em
 até um minuto. Precisa das chaves VAPID no servidor.
 
-Não existe ainda: a conta Asaas da loja (e com ela o pagamento online e o
-estorno) e o "Salvar cliente".
+**O Pix online existe** (2026-09-26, migration
+`20260926230000_loja_pagamento_online`): a loja liga a conta Asaas dela em
+Configurações, o cliente paga pelo Pix na página, e o pedido só chega à loja
+depois de pago; cancelado depois de pago, volta inteiro. Regras em
+`business-rules.md`.
+
+Não existe ainda: o cartão online (crédito e débito, pela página do Asaas) e o
+"Salvar cliente".
 
 ## Decisões já tomadas
 
@@ -152,6 +158,10 @@ estorno) e o "Salvar cliente".
     Clerk, escolhido antes, exige domínio próprio em produção, e ainda não há
     domínio: a loja roda em `.vercel.app`. O Firebase já é do projeto (push do
     motoboy) e aceita o endereço do Vercel como domínio autorizado.
+21. **Pix online primeiro, com a chave da API da loja** (2026-09-26, usuário).
+    A loja cola a chave da conta Asaas dela, e a plataforma a guarda cifrada;
+    o pedido pago pelo Pix só chega à loja depois de pago, e o Pix vale 15
+    minutos. Cartão online fica para depois.
 
 ## A fazer
 

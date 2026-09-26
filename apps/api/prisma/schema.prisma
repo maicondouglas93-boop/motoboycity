@@ -492,6 +492,7 @@ model Company {
   storeOperation       StoreOperation?
   storeOrders          StoreOrder[]
   webPushSubscriptions WebPushSubscription[]
+  storeAsaasAccount    StoreAsaasAccount?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2120,6 +2121,8 @@ model StoreOperation {
 
 /// A etapa do pedido da loja online. Os nomes são os das telas (`EtapaDoPedido`).
 enum StoreOrderStage {
+  /// Só no pedido pago online, antes de tudo: a loja não o vê até o Pix ser pago.
+  AGUARDANDO_PAGAMENTO
   NOVO
   ACEITO
   EM_PREPARO
@@ -2127,6 +2130,18 @@ enum StoreOrderStage {
   SAIU_PARA_ENTREGA
   ENTREGUE
   CANCELADO
+}
+
+/// O pagamento online do pedido, na conta Asaas da loja. Nulo: pago na entrega.
+enum StoreOrderPaymentStatus {
+  AGUARDANDO
+  PAGO
+  /// O Pix venceu sem pagamento; a cobrança foi apagada no Asaas.
+  NAO_PAGO
+  ESTORNANDO
+  ESTORNADO
+  /// O Asaas recusou o estorno (sem saldo, por exemplo); a varredura tenta de novo.
+  ESTORNO_FALHOU
 }
 
 enum StoreOrderModality {
@@ -2150,48 +2165,64 @@ enum StoreOrderCanceller {
 /// vendeu. Itens, endereço e valores são cópias da hora da compra — mudar o
 /// cardápio ou os bairros depois não muda o que o cliente comprou.
 model StoreOrder {
-  id              String               @id @default(uuid())
-  companyId       String
+  id                 String                   @id @default(uuid())
+  companyId          String
   /// O número da venda na loja (1, 2, 3...): é o que a loja e o cliente falam.
-  number          Int
+  number             Int
   /// O cliente no login do Firebase (`uid`). Quem compra não é usuário do sistema.
-  customerAuthId  String               @db.VarChar(64)
-  customerName    String               @db.VarChar(80)
-  customerPhone   String               @db.VarChar(20)
-  modality        StoreOrderModality
-  stage           StoreOrderStage
+  customerAuthId     String                   @db.VarChar(64)
+  customerName       String                   @db.VarChar(80)
+  customerPhone      String                   @db.VarChar(20)
+  modality           StoreOrderModality
+  stage              StoreOrderStage
   /// Nulo na retirada.
-  courier         StoreOrderCourier?
+  courier            StoreOrderCourier?
   /// `PassoDoPedido[]`: cada etapa e a hora em que o pedido chegou nela.
-  history         Json
-  scheduledStart  DateTime?
-  scheduledEnd    DateTime?
-  prepMinutes     Int
-  deliveryMinutes Int
+  history            Json
+  scheduledStart     DateTime?
+  scheduledEnd       DateTime?
+  prepMinutes        Int
+  deliveryMinutes    Int
   /// Sem aceite até aqui, o pedido cai sozinho. Nulo: não há prazo.
-  acceptDeadline  DateTime?
+  acceptDeadline     DateTime?
   /// `EnderecoDaEntrega`. Nulo na retirada.
-  address         Json?
+  address            Json?
   /// `ItemDoPedido[]`.
-  items           Json
-  subtotal        Decimal              @db.Decimal(10, 2)
-  deliveryFee     Decimal              @db.Decimal(10, 2)
-  total           Decimal              @db.Decimal(10, 2)
+  items              Json
+  subtotal           Decimal                  @db.Decimal(10, 2)
+  deliveryFee        Decimal                  @db.Decimal(10, 2)
+  total              Decimal                  @db.Decimal(10, 2)
   /// `FormaDePagamento`.
-  paymentMethod   String               @db.VarChar(30)
-  changeFor       Decimal?             @db.Decimal(10, 2)
-  note            String?              @db.VarChar(200)
-  cancelReason    String?              @db.VarChar(200)
-  cancelledBy     StoreOrderCanceller?
+  paymentMethod      String                   @db.VarChar(30)
+  changeFor          Decimal?                 @db.Decimal(10, 2)
+  note               String?                  @db.VarChar(200)
+  cancelReason       String?                  @db.VarChar(200)
+  cancelledBy        StoreOrderCanceller?
   /// A corrida do MOTOboyCity que leva o pedido. Nula na retirada, com o
   /// entregador da loja, antes do aceite e quando a corrida não pôde nascer.
-  deliveryId      String?              @unique
+  deliveryId         String?                  @unique
   /// Quantas corridas o pedido já teve: entra na chave idempotente da criação,
   /// para a corrida cancelada pela central poder ser chamada de novo.
-  rideAttempt     Int                  @default(0)
+  rideAttempt        Int                      @default(0)
   /// O que a loja precisa resolver na corrida (não nasceu, foi cancelada, não
   /// entregou), como Vendas mostra. Nulo quando está tudo certo.
-  rideIssue       String?              @db.VarChar(300)
+  rideIssue          String?                  @db.VarChar(300)
+  /// O pagamento online (Pix), na conta Asaas da loja. Nulos: pago na entrega.
+  paymentStatus      StoreOrderPaymentStatus?
+  /// O id da cobrança no Asaas (`pay_...`).
+  paymentProviderId  String?                  @unique @db.VarChar(120)
+  /// O ambiente da conta no momento da cobrança: o estorno vai ao mesmo.
+  paymentEnvironment AsaasEnvironment?
+  /// O Pix copia e cola e o QR code (PNG em base64), enquanto aguarda.
+  pixPayload         String?
+  pixQrCode          String?
+  /// Até quando o Pix vale; passou, o pedido cai.
+  paymentDueAt       DateTime?
+  paidAt             DateTime?
+  /// O que a loja precisa saber do estorno que não saiu.
+  paymentIssue       String?                  @db.VarChar(300)
+  /// A última conferência com o Asaas: segura novas tentativas de estorno.
+  paymentCheckedAt   DateTime?
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   delivery Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
@@ -2203,6 +2234,7 @@ model StoreOrder {
   @@index([companyId, stage])
   @@index([companyId, customerAuthId, createdAt])
   @@index([stage, acceptDeadline])
+  @@index([paymentStatus, paymentDueAt])
   @@map("store_orders")
 }
 
@@ -2238,4 +2270,31 @@ model WebPushSubscription {
   @@index([companyId, audience])
   @@index([companyId, customerAuthId])
   @@map("web_push_subscriptions")
+}
+
+/// A conta Asaas da loja: por onde ela recebe as vendas pagas online, direto na
+/// conta dela (decisão 3 do plano da loja online). A chave da API e o token do
+/// webhook ficam cifrados (AES-256-GCM, `STORE_ASAAS_ENCRYPTION_KEY`, com o id
+/// da empresa como dado autenticado) e nunca saem do servidor.
+model StoreAsaasAccount {
+  companyId        String           @id
+  environment      AsaasEnvironment
+  /// `{ apiKey, webhookToken }` cifrado.
+  encryptedPayload String
+  iv               String           @db.VarChar(32)
+  authTag          String           @db.VarChar(32)
+  keyVersion       Int
+  /// O webhook criado na conta da loja, para apagar ao desconectar.
+  webhookId        String?          @db.VarChar(120)
+  /// Como o Asaas devolveu: a loja confere que ligou a conta certa.
+  accountName      String           @db.VarChar(200)
+  accountEmail     String?          @db.VarChar(200)
+  hasPixKey        Boolean
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("store_asaas_accounts")
 }

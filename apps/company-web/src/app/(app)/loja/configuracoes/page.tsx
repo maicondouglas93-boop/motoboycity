@@ -1,6 +1,7 @@
 'use client';
 
 import { BairrosDaLoja } from '@/components/loja/bairros-da-loja';
+import { ContaAsaas } from '@/components/loja/conta-asaas';
 import { EnderecoDaEmpresa } from '@/components/loja/endereco-da-empresa';
 import { IdentidadeDaLoja } from '@/components/loja/identidade-da-loja';
 import { LinkDaLoja } from '@/components/loja/link-da-loja';
@@ -33,24 +34,8 @@ export default function LojaConfiguracoesPage() {
       <PagamentosDaLoja />
 
       {/* 4. Recebimento: a loja recebe na PRÓPRIA conta; a plataforma não toca
-          no dinheiro de ninguém. A conta ainda não tem onde ser cadastrada — a
-          tela diz isso, em vez de mostrar um campo que não grava. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recebimento online pelo Asaas</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Com a sua conta Asaas cadastrada aqui, o cliente vai poder pagar pela página — Pix,
-            crédito e débito — <strong>direto na sua conta</strong>. A central continua cobrando as
-            entregas na fatura, como hoje: o dinheiro da venda nunca passa por ela.
-          </p>
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-            Ainda não disponível. Por enquanto, o cliente paga na entrega, em dinheiro ou na sua
-            maquininha.
-          </p>
-        </CardContent>
-      </Card>
+          no dinheiro de ninguém. */}
+      <ContaAsaas />
 
       {/* 5. Bairros e taxas: a área de entrega e o que a loja cobra em cada um. */}
       <BairrosDaLoja />

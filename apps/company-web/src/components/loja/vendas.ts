@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CorridaDoPedido, PedidoDaLoja } from '@motoboycity/types';
+import type { CorridaDoPedido, PagamentoOnlineDoPedido, PedidoDaLoja } from '@motoboycity/types';
 import { companyStoreOrdersApi } from '@/lib/api-client';
 import type { CadastroDoCliente, VendaDaLoja } from '@/lib/loja-mock';
 import { rotuloDoPagamento } from '@/lib/loja-pagamentos';
@@ -29,6 +29,8 @@ export type VendaNoPainel = Omit<VendaDaLoja, 'cadastro'> & {
   corrida: CorridaDoPedido | null;
   /** O que a loja precisa resolver na corrida. */
   avisoDaCorrida: string | null;
+  /** O Pix do pedido pago online. */
+  pagamentoOnline: PagamentoOnlineDoPedido | null;
 };
 
 export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
@@ -61,6 +63,7 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
     contaDoCliente: null,
     corrida: pedido.corrida,
     avisoDaCorrida: pedido.avisoDaCorrida,
+    pagamentoOnline: pedido.pagamentoOnline,
   };
 }
 

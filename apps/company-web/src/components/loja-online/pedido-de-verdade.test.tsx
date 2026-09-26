@@ -157,6 +157,31 @@ describe('Sacola da loja de verdade', () => {
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(`/pedir/${SLUG}/pedidos?novo=7`));
   });
 
+  it('no Pix, pede o CPF de quem paga e o manda junto; sem ele, não segue', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 8 } as PedidoDaLoja);
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({ operacao: { ...OPERACAO, pagamentos: ['PIX_ONLINE', 'DINHEIRO'] } })}
+      />,
+    );
+
+    const seguir = await screen.findByRole('button', { name: /Ir para o pagamento/ });
+    expect(seguir).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('CPF de quem paga o Pix'), {
+      target: { value: '529.982.247-25' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Ir para o pagamento/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ pagamento: 'PIX_ONLINE', cpf: '52998224725' }),
+      ),
+    );
+  });
+
   it('a recusa do servidor aparece com a frase dele, e a sacola fica', async () => {
     mocks.checkout.mockRejectedValue(
       new ApiError(409, { message: 'O total mudou para R$ 52,00. Confira a sacola.' }),

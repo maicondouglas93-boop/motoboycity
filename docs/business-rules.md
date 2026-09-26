@@ -562,6 +562,22 @@ A loja só recebe pedido pela página quando liga **Pedidos pela página** (em
 Vendas; vem desligado). Desligada — ou sem o login configurado —, a página
 mostra o cardápio como vitrine.
 
+## Loja online: pagamento pelo Pix
+
+Decisões de 2026-09-26, do usuário:
+
+- a loja liga a **conta Asaas dela**, colando a chave da API em Configurações;
+  o dinheiro da venda cai direto nessa conta, e a central continua cobrando as
+  entregas na fatura (decisão 3 do plano);
+- **só Pix** por enquanto; cartão online depois;
+- o cliente informa o **CPF** para pagar pelo Pix (o Asaas exige); ele vai para
+  a conta da loja no Asaas e não fica no pedido;
+- **a loja só vê o pedido depois de pago**. O Pix vale 15 minutos; vencido, o
+  pedido cai e a cobrança é apagada no Asaas. Pago depois disso, volta inteiro;
+- pedido pago e cancelado volta **inteiro, sozinho** (decisão 18), pela conta
+  da loja; as tarifas do Asaas não voltam. Sem saldo, o estorno é tentado de
+  novo a cada 15 minutos, e a loja vê o aviso em Vendas.
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

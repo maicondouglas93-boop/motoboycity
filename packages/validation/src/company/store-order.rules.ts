@@ -70,7 +70,14 @@ export function podeCancelar(
   etapa: EtapaDoPedido,
   entregaPor: QuemEntrega | null = null,
 ): boolean {
-  if (etapa === 'NOVO' || etapa === 'ACEITO' || etapa === 'EM_PREPARO') return true;
+  if (
+    etapa === 'AGUARDANDO_PAGAMENTO' ||
+    etapa === 'NOVO' ||
+    etapa === 'ACEITO' ||
+    etapa === 'EM_PREPARO'
+  ) {
+    return true;
+  }
   return etapa === 'PRONTO' && (modalidade === 'RETIRADA' || levaALoja(modalidade, entregaPor));
 }
 
@@ -153,6 +160,22 @@ export function inicioDoPedido(
     };
   }
   return { etapa: 'NOVO', historico: [{ etapa: 'NOVO', em }] };
+}
+
+/**
+ * O Pix confirmado: o pedido pago online entra na loja como se chegasse agora
+ * — novo, ou já aceito no aceite automático —, com as marcas no histórico
+ * depois da do pagamento. Fora de `AGUARDANDO_PAGAMENTO`, fica como está: o
+ * webhook que chega duas vezes não anda o pedido duas vezes.
+ */
+export function pagamentoConfirmado<T extends AndamentoDoPedido>(
+  pedido: T,
+  modo: ModoDeAceite,
+  agora: Date,
+): T {
+  if (pedido.etapa !== 'AGUARDANDO_PAGAMENTO') return pedido;
+  const inicio = inicioDoPedido(modo, agora);
+  return { ...pedido, etapa: inicio.etapa, historico: [...pedido.historico, ...inicio.historico] };
 }
 
 /** Quando o pedido chegou a uma etapa, ou `null` se não chegou. */
@@ -294,6 +317,8 @@ export function corridaParaALoja(corrida: CorridaDoPedido): string {
 /** Como a etapa aparece no painel. */
 export function etapaParaALoja(etapa: EtapaDoPedido, modalidade: Modalidade): string {
   switch (etapa) {
+    case 'AGUARDANDO_PAGAMENTO':
+      return 'Aguardando o pagamento';
     case 'NOVO':
       return 'Novo';
     case 'ACEITO':
@@ -318,6 +343,8 @@ export function etapaParaALoja(etapa: EtapaDoPedido, modalidade: Modalidade): st
  */
 export function etapaParaOCliente(etapa: EtapaDoPedido, modalidade: Modalidade): string {
   switch (etapa) {
+    case 'AGUARDANDO_PAGAMENTO':
+      return 'Esperando o pagamento';
     case 'NOVO':
       return 'Esperando a loja confirmar';
     case 'ACEITO':
@@ -338,6 +365,8 @@ export function etapaParaOCliente(etapa: EtapaDoPedido, modalidade: Modalidade):
 /** O nome curto, para a régua de progresso. */
 export function nomeCurtoDaEtapa(etapa: EtapaDoPedido, modalidade: Modalidade): string {
   switch (etapa) {
+    case 'AGUARDANDO_PAGAMENTO':
+      return 'Pagamento';
     case 'NOVO':
       return 'Recebido';
     case 'ACEITO':

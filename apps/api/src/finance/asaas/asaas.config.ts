@@ -10,7 +10,7 @@ export interface AsaasRuntimeConfig {
 
 export type AsaasRuntimeEnvironment = AsaasRuntimeConfig['environment'];
 
-const BASE_URLS = {
+export const ASAAS_BASE_URLS = {
   sandbox: 'https://api-sandbox.asaas.com/v3',
   production: 'https://api.asaas.com/v3',
 } as const;
@@ -28,7 +28,7 @@ export function readAsaasRuntimeConfig(config: ConfigService): AsaasRuntimeConfi
     apiKey,
     webhookToken,
     environment,
-    baseUrl: BASE_URLS[environment],
+    baseUrl: ASAAS_BASE_URLS[environment],
   };
 }
 

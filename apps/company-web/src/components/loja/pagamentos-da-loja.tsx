@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { FormaDePagamento } from '@motoboycity/types';
 import { mensagemDoErro } from '@/components/loja/catalogo';
+import { recebePix, useContaAsaas } from '@/components/loja/conta-asaas';
 import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,11 +12,14 @@ import { companyStoreOperationApi } from '@/lib/api-client';
 import { FORMAS_DE_PAGAMENTO, GRUPOS_DE_PAGAMENTO, descricaoDaForma } from '@/lib/loja-pagamentos';
 
 /**
- * Receber online é pelo Asaas, direto na conta da loja — e a conta ainda não
- * tem onde ser cadastrada. Até ter, o grupo online fica travado aqui, e o
- * servidor recusa e esconde as formas online.
+ * Receber online é pelo Asaas, direto na conta da loja: o Pix, com a conta
+ * ligada e com chave Pix ativa. Cartão online fica para depois. O servidor
+ * confere o mesmo, e esconde da página o que não vale.
  */
-const RECEBE_ONLINE = false;
+function disponivel(forma: FormaDePagamento, pix: boolean): boolean {
+  if (descricaoDaForma(forma).grupo !== 'ONLINE') return true;
+  return forma === 'PIX_ONLINE' && pix;
+}
 
 function ordenadas(formas: FormaDePagamento[]): string {
   return JSON.stringify([...formas].sort());
@@ -27,6 +31,7 @@ function ordenadas(formas: FormaDePagamento[]): string {
  */
 export function PagamentosDaLoja() {
   const consulta = useOperacaoDaLoja();
+  const pix = recebePix(useContaAsaas().data);
   const [versao, setVersao] = useState(0);
 
   return (
@@ -46,7 +51,8 @@ export function PagamentosDaLoja() {
           <p className="text-sm text-muted-foreground">Carregando...</p>
         ) : (
           <Formulario
-            key={versao}
+            key={`${versao}-${pix}`}
+            pix={pix}
             salvas={consulta.data.pagamentos}
             onDescartar={() => setVersao((atual) => atual + 1)}
           />
@@ -57,9 +63,11 @@ export function PagamentosDaLoja() {
 }
 
 function Formulario({
+  pix,
   salvas,
   onDescartar,
 }: {
+  pix: boolean;
   salvas: FormaDePagamento[];
   onDescartar: () => void;
 }) {
@@ -68,10 +76,8 @@ function Formulario({
 
   // Só as formas que valem: online marcada sem conta não chega ao cliente, e
   // contá-la deixaria desmarcar a última forma que ele de fato enxerga.
-  const efetivas = formas.filter(
-    (forma) => RECEBE_ONLINE || descricaoDaForma(forma).grupo !== 'ONLINE',
-  );
-  const mudou = ordenadas(efetivas) !== ordenadas(salvas);
+  const efetivas = formas.filter((forma) => disponivel(forma, pix));
+  const mudou = ordenadas(efetivas) !== ordenadas(salvas.filter((forma) => disponivel(forma, pix)));
 
   function alternar(forma: FormaDePagamento) {
     setFormas((atual) =>
@@ -83,7 +89,7 @@ function Formulario({
     <>
       {(['ONLINE', 'ENTREGA'] as const).map((grupo) => {
         const doGrupo = FORMAS_DE_PAGAMENTO.filter((forma) => forma.grupo === grupo);
-        const bloqueado = grupo === 'ONLINE' && !RECEBE_ONLINE;
+        const semConta = grupo === 'ONLINE' && !pix;
 
         return (
           <fieldset key={grupo} className="space-y-2">
@@ -96,14 +102,16 @@ function Formulario({
               </span>
             </legend>
 
-            {bloqueado && (
+            {semConta && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-                Receber online depende da conta Asaas da loja, que ainda não pode ser cadastrada.
-                Por enquanto, o cliente paga na entrega.
+                O Pix pela página depende da sua conta Asaas, ligada em &quot;Recebimento online
+                pelo Asaas&quot;, abaixo — e com chave Pix ativa. Cartão online ainda não está
+                disponível.
               </p>
             )}
 
             {doGrupo.map((forma) => {
+              const bloqueado = !disponivel(forma.valor, pix);
               const marcada = formas.includes(forma.valor);
               const ultima = marcada && !bloqueado && efetivas.length === 1;
               return (

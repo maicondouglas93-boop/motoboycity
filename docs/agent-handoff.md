@@ -177,10 +177,10 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `f94ff4a`, a corrida nasce do pedido da loja online, enviado para `main` em 26/09/2026: CI verde, a rota nova (`POST /company/store/orders/:id/ride`) passou de 404 a 401 no Render cerca de 3,5 min depois do push, `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes dele, no mesmo dia: `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre). CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
+| Commit publicado | `18b0d0d`, correção do build, com o Web Push de `840a0ce` (avisos da loja online com a página fechada), enviados para `main` em 26/09/2026. O `840a0ce` sozinho falhou no build do Render, do Vercel e do CI (ver "Armadilhas do ambiente"); com `18b0d0d`, CI verde, `/public/web-push` passou de 404 a 200 no Render (`chavePublica: null` até as chaves `WEB_PUSH_*` entrarem), `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes, no mesmo dia: `f94ff4a`, a corrida nasce do pedido da loja online: CI verde, a rota nova (`POST /company/store/orders/:id/ride`) passou de 404 a 401 no Render cerca de 3,5 min depois do push, `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes dele, no mesmo dia: `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre). CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 62 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
+| Banco | PostgreSQL gerenciado; 63 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido, avisos). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
 | APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -604,8 +604,11 @@ o rollback está no changelog. A da corrida, `20260926150000_loja_pedido_corrida
 2026-09-26 (`f94ff4a`), depois de validada em banco descartável (aplicar,
 desfazer, reaplicar); está também no `motoboycity_dev` local. A dos avisos,
 `20260926200000_loja_avisos_push` (tabela `web_push_subscriptions` e o enum
-`WebPushAudience`), **ainda não foi para produção**: está no `motoboycity_dev`
-local e foi validada em banco descartável.
+`WebPushAudience`), foi no push de 2026-09-26 (`18b0d0d`), depois de validada
+em banco descartável; está também no `motoboycity_dev` local. A do pagamento online,
+`20260926230000_loja_pagamento_online` (a etapa `AGUARDANDO_PAGAMENTO`, o
+pagamento no pedido e `store_asaas_accounts`), também **ainda não foi para
+produção**; o rollback só desfaz a etapa nova se nenhum pedido estiver nela.
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -756,6 +759,35 @@ de quem ativou) ou `CLIENTE` (o uid do Firebase).
   envio simulado, e uma checagem sem rede confirmou que a biblioteca monta a
   requisição assinada e cifrada com as opções do serviço.
 
+### Pagamento online da loja (Asaas, Pix) — 2026-09-26
+
+Decisões do usuário: a loja **cola a chave da API** da conta Asaas dela (o
+dinheiro não passa pela plataforma, decisão 3), **só Pix** por enquanto, e a
+loja **só vê o pedido depois de pago** — o Pix vale 15 minutos.
+
+- **A conta** (`company/store-asaas/`): a API confere a chave no Asaas
+  (`/myAccount/commercialInfo`), vê se há chave Pix ativa, cria o webhook na
+  conta da loja (`/integrations/asaas/stores/<empresa>/webhook`, com token
+  próprio) e guarda chave e token cifrados em `store_asaas_accounts`
+  (AES-256-GCM, `STORE_ASAAS_ENCRYPTION_KEY`, id da empresa como dado
+  autenticado — o mesmo desenho do aiqfome). Nada volta para o navegador.
+  Desligar apaga o webhook e tira o Pix das formas de pagamento.
+- **O pedido pago online nasce `AGUARDANDO_PAGAMENTO`**, com a cobrança já
+  criada na conta da loja (o CPF vai ao Asaas, que o exige, e não fica no
+  pedido). A loja não o vê. Pago — pelo webhook, pelo "Já paguei" do cliente
+  ou pela varredura —, entra como novo (ou aceito, com a corrida), e aí a loja é
+  avisada. Vencido, a varredura confere no Asaas, apaga a cobrança lá e cancela
+  o pedido como `SISTEMA`; o Pix que chegar depois disso é estornado sozinho.
+- **Estorno automático e inteiro** (decisão 18) quando o pedido pago é
+  cancelado, pela conta da loja. Antes de pedir, pergunta ao Asaas se já não
+  foi pedido. Recusado (sem saldo, conta trocada), fica `ESTORNO_FALHOU`, com o
+  motivo em Vendas, e a varredura tenta de novo a cada 15 minutos. As tarifas do
+  Asaas não voltam.
+- O cliente HTTP do Asaas das faturas virou `callAsaas(credencial, ...)`,
+  comum às duas contas; as faturas continuam com a conta da plataforma.
+- **Não exercitado**: uma conta Asaas de verdade, nem sandbox. O E2E cobre o
+  fluxo inteiro com o Asaas simulado.
+
 ### Login do cliente da loja: Firebase, só com Google, e por que ele não toca o painel
 
 O `company-web` tem duas autenticações. O painel continua com a dele
@@ -849,23 +881,27 @@ registradas no `changelog.md` de 2026-09-23.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 5. **Rotação dos segredos** registrada no changelog da integração aiqfome.
-6. **Ligar os avisos com a página fechada (Web Push).** Gerar o par de chaves
-   uma vez (`npx web-push generate-vapid-keys`, em qualquer máquina) e pôr no
-   Render as três variáveis `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` e
-   `WEB_PUSH_SUBJECT` (`mailto:` de um contato). Nada no Vercel: o painel lê a
-   chave pública da API. Sem elas, o painel diz "ainda não foram ligados no
-   servidor", e a loja segue avisando só com a página aberta. Trocar o par
-   depois desliga todas as inscrições.
-7. **Ligar o login do cliente da loja (Firebase).** No console do projeto
-   do push: Authentication → Sign-in method → ativar **Google**; Settings →
-   Authorized domains → incluir `motoboycity-company-web.vercel.app`;
-   Configurações do projeto → Seus apps → cadastrar um app **Web** e copiar
-   `apiKey`, `authDomain`, `projectId` e `appId` para as quatro
-   `NEXT_PUBLIC_FIREBASE_*` do Vercel (company-web) e do `.env.local`. Depois,
-   deploy novo. No Vercel, apagar as variáveis do Clerk, que não são mais lidas.
-   O lado da API já está pronto: o Render tem o `FIREBASE_PROJECT_ID` (a rota
-   do cliente respondeu 401, e não 503, em 26/09).
-8. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+6. **Conferir o Web Push em aparelho.** As chaves `WEB_PUSH_*` foram postas
+   no Render pelo usuário em 26/09 (a API passou a entregar uma chave pública
+   P-256 válida). Num pedido de teste o aviso não chegou, e a causa não foi
+   investigada: conferir no log do Render se há `Aviso não entregue`, se o
+   cartão de Notificações diz "Este aparelho avisa mesmo com o painel fechado.",
+   se o painel estava visível em outra janela (o worker não mostra o aviso
+   nesse caso) e o "Não perturbe" do Windows. Trocar o par de chaves desliga
+   todas as inscrições.
+7. **Login do cliente da loja (Firebase): configurado em 26/09** pelo usuário.
+   As quatro `NEXT_PUBLIC_FIREBASE_*` estão no build do Vercel (conferido no
+   JavaScript publicado: `authDomain` e `projectId` de `motoboycity-bc0b4`, o
+   mesmo do Render). Falta apagar do Vercel as variáveis antigas do Clerk.
+8. **Ligar o pagamento online das lojas (Asaas).** Gerar uma vez a chave
+   mestra (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`)
+   e pôr no Render como `STORE_ASAAS_ENCRYPTION_KEY`, **com cópia fora do
+   Render**: ela abre as chaves de todas as lojas, perdê-la obriga cada loja a
+   ligar a conta de novo, e não há rotação. Depois, cada loja cria a conta no
+   Asaas, cadastra uma chave Pix, gera a chave da API (Integrações → Chaves de
+   API) e cola em Configurações → Recebimento online pelo Asaas. Testar antes
+   com uma conta **sandbox**.
+9. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

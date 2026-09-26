@@ -19,3 +19,4 @@ export * from './store-catalog.js';
 export * from './store-settings.js';
 export * from './store-operation.js';
 export * from './store-order.js';
+export * from './store-asaas.js';

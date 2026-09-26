@@ -6,6 +6,7 @@ import {
   Header,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   UseGuards,
@@ -52,6 +53,21 @@ export class PublicStoreOrdersController {
     @ClienteAtual() cliente: ClienteDaLoja,
   ): Promise<PedidoDaLoja[]> {
     return this.storeOrdersService.pedidosDoCliente(slug, cliente.id);
+  }
+
+  /**
+   * "Já paguei": confere o Pix no Asaas agora, em vez de esperar o aviso dele.
+   * Poucas por minuto: cada uma é uma consulta ao Asaas.
+   */
+  @Post(':id/check-payment')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  conferirPagamento(
+    @Param('slug', new ZodValidationPipe(storeSlugLookupSchema)) slug: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @ClienteAtual() cliente: ClienteDaLoja,
+  ): Promise<PedidoDaLoja> {
+    return this.storeOrdersService.conferirPagamento(slug, cliente.id, id);
   }
 
   /** Este aparelho passa a receber os avisos dos pedidos com a página fechada. */

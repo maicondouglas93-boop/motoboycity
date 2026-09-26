@@ -41,6 +41,22 @@ export function createPublicStoreOrdersApi({ baseUrl }: PublicStoreOrdersApiConf
       return parseJsonOrThrow<PedidoDaLoja[]>(response);
     },
 
+    /**
+     * "Já paguei": pede ao servidor para conferir o Pix no Asaas agora. Devolve o
+     * pedido como ficou — entrou na loja, ou ainda esperando.
+     */
+    async conferirPagamento(
+      slug: string,
+      tokenDoCliente: string,
+      id: string,
+    ): Promise<PedidoDaLoja> {
+      const response = await apiFetch(`${base(slug)}/${encodeURIComponent(id)}/check-payment`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokenDoCliente}` },
+      });
+      return parseJsonOrThrow<PedidoDaLoja>(response);
+    },
+
     /** Este aparelho passa a receber os avisos dos pedidos com a página fechada. */
     async inscreverAvisos(
       slug: string,

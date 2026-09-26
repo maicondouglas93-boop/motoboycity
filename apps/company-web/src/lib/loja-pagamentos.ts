@@ -53,7 +53,7 @@ export const FORMAS_DE_PAGAMENTO: DescricaoDaForma[] = [
     grupo: 'ONLINE',
     titulo: 'Pix',
     curto: 'Pix',
-    detalhe: 'O QR Code aparece assim que o pedido é confirmado.',
+    detalhe: 'O QR Code aparece logo depois do pedido; a loja recebe o pedido quando o Pix é pago.',
   },
   {
     valor: 'CREDITO_ONLINE',

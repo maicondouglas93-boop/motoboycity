@@ -14,8 +14,19 @@ import type { FormaDePagamento, QuemEntrega } from './store-operation.js';
 
 export type Modalidade = 'ENTREGA' | 'RETIRADA';
 
+/**
+ * `AGUARDANDO_PAGAMENTO` vem antes de tudo, só no pedido pago online: a loja
+ * não o vê, e ele entra como novo (ou aceito) quando o Asaas confirma o Pix.
+ */
 export type EtapaDoPedido =
-  'NOVO' | 'ACEITO' | 'EM_PREPARO' | 'PRONTO' | 'SAIU_PARA_ENTREGA' | 'ENTREGUE' | 'CANCELADO';
+  | 'AGUARDANDO_PAGAMENTO'
+  | 'NOVO'
+  | 'ACEITO'
+  | 'EM_PREPARO'
+  | 'PRONTO'
+  | 'SAIU_PARA_ENTREGA'
+  | 'ENTREGUE'
+  | 'CANCELADO';
 
 export interface PassoDoPedido {
   etapa: EtapaDoPedido;
@@ -100,6 +111,34 @@ export type SituacaoDaCorrida =
   | 'NAO_ENTREGUE'
   | 'CANCELADA';
 
+/**
+ * O pagamento online do pedido, na conta Asaas da loja. `ESTORNANDO` e
+ * `ESTORNADO`: o pedido pago foi cancelado, e o dinheiro volta inteiro para o
+ * cliente (decisão 18); `ESTORNO_FALHOU`: o Asaas recusou — por exemplo, sem
+ * saldo na conta da loja —, e o sistema tenta de novo.
+ */
+export type SituacaoDoPagamento =
+  | 'AGUARDANDO'
+  | 'PAGO'
+  | 'NAO_PAGO'
+  | 'ESTORNANDO'
+  | 'ESTORNADO'
+  | 'ESTORNO_FALHOU';
+
+export interface PagamentoOnlineDoPedido {
+  situacao: SituacaoDoPagamento;
+  /** O Pix copia e cola. Só enquanto aguarda. */
+  pixCopiaECola: string | null;
+  /** O QR code em PNG, base64 sem o prefixo `data:`. Só enquanto aguarda. */
+  qrCode: string | null;
+  /** ISO. Até quando o Pix vale. */
+  expiraEm: string | null;
+  /** ISO. */
+  pagoEm: string | null;
+  /** Só para a loja: o que ela precisa saber do estorno que não saiu. */
+  aviso: string | null;
+}
+
 /** A corrida que nasceu do pedido, como Vendas a mostra. */
 export interface CorridaDoPedido {
   /** O número da corrida no painel de Pedidos. */
@@ -134,6 +173,8 @@ export interface PedidoDaLoja extends AndamentoDoPedido {
    * `null`, e ele acompanha pela etapa.
    */
   corrida: CorridaDoPedido | null;
+  /** O Pix do pedido pago online. `null`: pagamento na entrega. */
+  pagamentoOnline: PagamentoOnlineDoPedido | null;
   /**
    * O que a loja precisa resolver na corrida: ela não nasceu, foi cancelada
    * pela central, o motoboy não conseguiu entregar. `null` quando está tudo

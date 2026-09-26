@@ -9,6 +9,8 @@ import {
   OPERACAO_INICIAL,
   StoreOperationService,
 } from '../store-operation/store-operation.service';
+import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
+import { StoreAsaasClient } from '../store-asaas/store-asaas.client';
 import { StoreOrderNotificationsService } from './store-order-notifications.service';
 import { StoreOrdersService } from './store-orders.service';
 
@@ -115,11 +117,19 @@ describe('StoreOrdersService', () => {
       updateMany: jest.Mock;
     };
     companyAddress: { findFirst: jest.Mock };
+    storeSettings: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let catalogo: { publicCatalog: jest.Mock };
   let operacaoDaLoja: { publicOperation: jest.Mock; tipoDeServicoDaCorrida: jest.Mock };
   let entregas: { createFromStoreOrder: jest.Mock };
+  let contasAsaas: { recebePix: jest.Mock; contaParaCobrar: jest.Mock };
+  let asaas: {
+    clienteDoCpf: jest.Mock;
+    criarCobrancaPix: jest.Mock;
+    qrCodePix: jest.Mock;
+    apagarCobranca: jest.Mock;
+  };
   let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
@@ -143,6 +153,15 @@ describe('StoreOrdersService', () => {
             deliveryId: null,
             rideAttempt: 0,
             rideIssue: null,
+            paymentStatus: null,
+            paymentProviderId: null,
+            paymentEnvironment: null,
+            pixPayload: null,
+            pixQrCode: null,
+            paymentDueAt: null,
+            paidAt: null,
+            paymentIssue: null,
+            paymentCheckedAt: null,
             ...data,
             address: data.address === Prisma.DbNull ? null : data.address,
             subtotal: new Prisma.Decimal(data.subtotal),
@@ -162,6 +181,7 @@ describe('StoreOrdersService', () => {
       companyAddress: {
         findFirst: jest.fn().mockResolvedValue({ zip: '36980-000', state: 'MG' }),
       },
+      storeSettings: { findUnique: jest.fn().mockResolvedValue({ name: 'Açaí do Zé' }) },
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
@@ -173,6 +193,29 @@ describe('StoreOrdersService', () => {
       tipoDeServicoDaCorrida: jest.fn().mockResolvedValue('6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d'),
     };
     entregas = { createFromStoreOrder: jest.fn().mockResolvedValue({ id: 'corrida-1' }) };
+    contasAsaas = {
+      recebePix: jest.fn().mockResolvedValue(true),
+      contaParaCobrar: jest.fn().mockResolvedValue({
+        credencial: { apiKey: 'chave', baseUrl: 'https://api-sandbox.asaas.com/v3' },
+        ambiente: 'SANDBOX',
+      }),
+    };
+    asaas = {
+      clienteDoCpf: jest.fn().mockResolvedValue('cus_1'),
+      criarCobrancaPix: jest.fn().mockResolvedValue({
+        id: 'pay_1',
+        customer: 'cus_1',
+        value: 48.2,
+        status: 'PENDING',
+        billingType: 'PIX',
+      }),
+      qrCodePix: jest.fn().mockResolvedValue({
+        encodedImage: 'iVBORw0KGgo',
+        payload: '00020126580014br.gov.bcb.pix',
+        expirationDate: '2026-09-23 23:59:59',
+      }),
+      apagarCobranca: jest.fn().mockResolvedValue(undefined),
+    };
     avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -182,6 +225,8 @@ describe('StoreOrdersService', () => {
         { provide: StoreCatalogService, useValue: catalogo },
         { provide: StoreOperationService, useValue: operacaoDaLoja },
         { provide: DeliveriesService, useValue: entregas },
+        { provide: StoreAsaasAccountService, useValue: contasAsaas },
+        { provide: StoreAsaasClient, useValue: asaas },
         { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
@@ -356,7 +401,8 @@ describe('StoreOrdersService', () => {
 
     const [empresa, chave, payload] = entregas.createFromStoreOrder.mock.calls[0]!;
     expect(empresa).toBe(EMPRESA);
-    expect(chave).toBe('pedido-1:0');
+    const { id } = prisma.storeOrder.create.mock.calls[0][0].data;
+    expect(chave).toBe(`${id}:0`);
     const preparo = OPERACAO_INICIAL.recebimento.minutosDePreparo;
     expect(payload).toMatchObject({
       externalOrderNumber: 'Loja #42',
@@ -364,9 +410,66 @@ describe('StoreOrdersService', () => {
       scheduledAt: new Date(MEIO_DIA.getTime() + preparo * 60_000).toISOString(),
     });
     expect(prisma.storeOrder.updateMany).toHaveBeenCalledWith({
-      where: { id: 'pedido-1', companyId: EMPRESA },
+      where: { id, companyId: EMPRESA },
       data: { deliveryId: 'corrida-1', rideIssue: null },
     });
+  });
+
+  it('Pix online: nasce aguardando o pagamento, com o QR, sem corrida e sem aviso à loja', async () => {
+    operacaoDaLoja.publicOperation.mockResolvedValue(
+      operacao({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] }),
+    );
+
+    const feito = await service.checkout(
+      'acai',
+      CLIENTE,
+      pedido({ pagamento: 'PIX_ONLINE', cpf: '52998224725' }),
+    );
+
+    expect(feito.etapa).toBe('AGUARDANDO_PAGAMENTO');
+    expect(feito.pagamentoOnline).toMatchObject({
+      situacao: 'AGUARDANDO',
+      pixCopiaECola: '00020126580014br.gov.bcb.pix',
+      qrCode: 'iVBORw0KGgo',
+      expiraEm: new Date(MEIO_DIA.getTime() + 15 * 60_000).toISOString(),
+    });
+    const { data } = prisma.storeOrder.create.mock.calls[0][0];
+    expect(asaas.clienteDoCpf).toHaveBeenCalledWith(expect.anything(), {
+      nome: 'Ana',
+      cpf: '52998224725',
+      telefone: '33999887766',
+      referencia: CLIENTE,
+    });
+    expect(asaas.criarCobrancaPix).toHaveBeenCalledWith(expect.anything(), {
+      customer: 'cus_1',
+      value: 48.2,
+      dueDate: '2026-09-23',
+      description: 'Pedido na Açaí do Zé',
+      externalReference: data.id,
+    });
+    expect(data).toMatchObject({ acceptDeadline: null, paymentProviderId: 'pay_1' });
+    // O CPF vai ao Asaas e não fica no pedido.
+    expect(JSON.stringify(data)).not.toContain('52998224725');
+    expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+    expect(avisos.pedidoNovo).not.toHaveBeenCalled();
+  });
+
+  it('Pix sem a conta ligada é recusado; se o Asaas falha, nenhum pedido fica pela metade', async () => {
+    operacaoDaLoja.publicOperation.mockResolvedValue(
+      operacao({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] }),
+    );
+    contasAsaas.recebePix.mockResolvedValueOnce(false);
+    await expect(
+      service.checkout('acai', CLIENTE, pedido({ pagamento: 'PIX_ONLINE', cpf: '52998224725' })),
+    ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_PAYMENT_UNAVAILABLE' } });
+
+    asaas.qrCodePix.mockRejectedValueOnce(new Error('fora do ar'));
+    await expect(
+      service.checkout('acai', CLIENTE, pedido({ pagamento: 'PIX_ONLINE', cpf: '52998224725' })),
+    ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_PIX_FAILED' } });
+    // A cobrança criada antes da falha é apagada, e o pedido nem chega a existir.
+    expect(asaas.apagarCobranca).toHaveBeenCalledWith(expect.anything(), 'pay_1');
+    expect(prisma.storeOrder.create).not.toHaveBeenCalled();
   });
 
   it('o pedido novo avisa a loja (e o cliente) pelo serviço de avisos', async () => {

@@ -143,7 +143,11 @@ prazo de aceite é cancelado pela varredura de minuto (fila BullMQ
 corrida alcançou; a leitura faz o mesmo. Quem faz a mudança avisa, pelo Web
 Push (`StoreOrderNotificationsService` → `WebPushService`): a loja e o cliente,
 nos aparelhos inscritos em `web_push_subscriptions`, conforme as escolhas de
-Notificações. No
+Notificações. O pago online (Pix) nasce `AGUARDANDO_PAGAMENTO`, com a cobrança
+na conta Asaas da própria loja (`company/store-asaas`: a chave dela cifrada em
+`store_asaas_accounts`, e um webhook por conta em
+`/integrations/asaas/stores/:empresa/webhook`); pago, entra como novo ou
+aceito; cancelado depois de pago, é estornado pela mesma conta. No
 `company-web`, Vendas (`components/loja/vendas.ts`) consulta a fila a cada 10 s
 e os pedidos do cliente (`components/loja-online/pedidos-do-cliente.ts`), a
 cada 20 s.

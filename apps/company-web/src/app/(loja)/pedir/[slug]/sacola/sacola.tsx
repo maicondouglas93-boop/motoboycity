@@ -172,6 +172,8 @@ function Conteudo({
   const bairros = cardapio.operacao?.bairros ?? loja.bairros;
   const [pagamento, setPagamento] = useState<FormaDePagamento>(oferecidas[0] ?? 'DINHEIRO');
   const [trocoPara, setTrocoPara] = useState('');
+  // Só no Pix: o Asaas não cria a cobrança sem o CPF de quem paga.
+  const [cpf, setCpf] = useState('');
   const [observacao, setObservacao] = useState('');
 
   const operacaoDaDemonstracao = useOperacao();
@@ -246,6 +248,8 @@ function Conteudo({
   const total = subtotal + taxa;
   const emDinheiro = pagamento === 'DINHEIRO';
   const pagaOnline = descricaoDaForma(pagamento).grupo === 'ONLINE';
+  // A loja de exemplo não cobra nada; o CPF só vale na de verdade.
+  const pedeCpf = pagaOnline && cardapio.operacao !== null;
 
   // O mínimo conta só os itens: somar a entrega faria a taxa ajudar a atingir
   // o mínimo, que é o contrário do que o mínimo existe para proteger. E vale só
@@ -257,6 +261,7 @@ function Conteudo({
   if (nome.trim() === '') faltando.push('seu nome');
   if (telefone.trim().length < 10) faltando.push('o telefone');
   // Na retirada o endereço não é pedido, então também não pode ser exigido.
+  if (pedeCpf && cpf.replace(/\D/g, '').length !== 11) faltando.push('o CPF, para o Pix');
   if (!retirar) {
     if (entrega.rua.trim() === '') faltando.push('a rua');
     if (entrega.numero.trim() === '') faltando.push('o número');
@@ -413,6 +418,7 @@ function Conteudo({
         trocoPara: troco,
         observacao: nota,
         totalVisto: total,
+        cpf: pedeCpf ? cpf.replace(/\D/g, '') : null,
       });
       guardarCliente(slug, conta, {
         nome: nome.trim(),
@@ -1033,6 +1039,34 @@ function Conteudo({
                             paleta={paleta}
                             inputMode="decimal"
                             dica="Deixe em branco se tiver o valor certo."
+                          />
+                        </div>
+                      </m.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* O CPF entra só no Pix, e diz para onde vai: o Asaas o
+                      exige para gerar a cobrança na conta da loja. */}
+                  <AnimatePresence initial={false}>
+                    {pedeCpf && (
+                      <m.div
+                        key="cpf"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                        className="overflow-hidden px-4"
+                      >
+                        <div className="pt-3">
+                          <Campo
+                            id="cpf"
+                            rotulo="CPF de quem paga o Pix"
+                            valor={cpf}
+                            aoMudar={setCpf}
+                            estilo={campo}
+                            paleta={paleta}
+                            inputMode="numeric"
+                            dica="O Asaas pede o CPF para gerar o Pix na conta da loja. Ele não fica guardado aqui."
                           />
                         </div>
                       </m.div>

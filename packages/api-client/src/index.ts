@@ -26,6 +26,7 @@ export * from './company-profile';
 export * from './company-customers';
 export * from './service-types';
 export * from './web-push';
+export * from './company-store-asaas';
 export * from './driver-presence';
 export * from './tracking';
 export * from './driver-wallet';

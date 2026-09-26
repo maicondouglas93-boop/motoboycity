@@ -16100,3 +16100,152 @@ truques.
 deploy) sem erro, e também o `types` e o `api-client`; `pnpm typecheck` 8/8,
 `pnpm lint` 8/8 (o aviso antigo do driver-app); Jest da API 1382 passam e 1
 pulado; os 6 E2E da loja passam.
+
+## 2026-09-26 — Publicação do Web Push
+
+**Publicação** (push autorizado pelo usuário: "Commit e push", para o recorte e
+depois para a correção). `840a0ce` (Web Push) falhou no build — ver a entrada
+anterior —, e `18b0d0d` (a correção) foi enviado em seguida. Com ele: CI verde
+no GitHub; no Render, `/public/web-push` passou de 404 a 200 cerca de 4 min
+depois do push, respondendo `{"chavePublica":null}` — a API nova no ar, com a
+migration `20260926200000_loja_avisos_push` aplicada pelo build, e o push ainda
+desligado por falta das chaves; `/health/ready` com PostgreSQL e Redis ok.
+Vercel: company e admin em "Deployment has completed" no status do commit. Os
+painéis do Render e do Vercel não foram abertos, e não houve inspeção SQL do
+banco de produção. Falta o usuário gerar o par VAPID e pôr as três
+`WEB_PUSH_*` no Render.
+
+## 2026-09-26 — Pix online na loja, pela conta Asaas de cada loja
+
+**Decisões do usuário** (perguntadas neste recorte, depois de "segue pelo
+asaas"): a loja **cola a chave da API** da conta Asaas dela (e não subconta
+criada pela plataforma); **só Pix** por enquanto; **a loja só vê o pedido
+depois de pago**, e o Pix vale 15 minutos. Valem também as decisões 3 (a
+venda cai na conta da loja) e 18 (estorno automático e inteiro).
+
+**Pesquisado na documentação do Asaas** antes do desenho: o cliente exige nome
+e CPF; a cobrança aceita PIX, CREDIT_CARD, BOLETO e UNDEFINED, e o débito só
+existe na página do Asaas; o webhook pode ser criado pela API
+(`POST /v3/webhooks`, token de 32 a 255 caracteres); o estorno é
+`POST /v3/payments/{id}/refund`, o de Pix exige saldo e as tarifas não voltam;
+os dados da conta vêm de `/v3/myAccount/commercialInfo` e as chaves Pix de
+`/v3/pix/addressKeys`.
+
+**Banco** — migration `20260926230000_loja_pagamento_online`, aditiva: o valor
+`AGUARDANDO_PAGAMENTO` em `StoreOrderStage`, o enum `StoreOrderPaymentStatus`,
+os campos do pagamento em `store_orders` (situação, id da cobrança com índice
+único, ambiente, Pix copia e cola e QR, vencimento, pago em, aviso, última
+conferência) e a tabela `store_asaas_accounts`. Validada num banco descartável:
+aplicar todas, conferir, desfazer, voltar ao anterior e reaplicar — as quatro
+ok. O desfazer recria o enum da etapa; só funciona sem pedido nessa etapa.
+Aplicada no `motoboycity_dev` local. **Não foi para produção.**
+
+**API:**
+
+- `company/store-asaas/` (novo): `StoreAsaasCredentialsService` (AES-256-GCM,
+  `STORE_ASAAS_ENCRYPTION_KEY`, id da empresa como dado autenticado — o desenho
+  do aiqfome), `StoreAsaasClient` (a API do Asaas com a chave de uma loja),
+  `StoreAsaasAccountService` e `GET`/`PUT`/`DELETE /company/store/asaas-account`
+  (5 tentativas de ligar por minuto). Ligar confere a chave no Asaas, vê a chave
+  Pix, cria o webhook na conta da loja com token próprio e grava tudo cifrado;
+  religar apaga o webhook antigo; desligar apaga o webhook e tira o Pix das
+  formas de pagamento. A chave nunca volta ao navegador.
+- `callAsaas(credencial, ...)`: a chamada HTTP das faturas saiu do
+  `AsaasClient` para servir às duas contas. As faturas continuam com a conta da
+  plataforma, e os 19 testes delas passam.
+- Formas de pagamento: sai a trava fixa; o Pix online vale com a conta ligada
+  e chave Pix ativa, e cartão online continua recusado.
+- Pedido: o checkout com Pix cria a cobrança (cliente pelo CPF, que não fica no
+  pedido) antes de gravar — se o Asaas falhar, nenhum pedido fica pela metade,
+  e a cobrança criada é apagada —, e o pedido nasce `AGUARDANDO_PAGAMENTO`, fora
+  da fila de Vendas, sem corrida e sem aviso à loja. Pago (webhook em
+  `/integrations/asaas/stores/:empresa/webhook`, "Já paguei" em
+  `POST /public/stores/:slug/orders/:id/check-payment`, ou a varredura), entra
+  como novo ou aceito, com a corrida e o aviso de pedido novo. O aviso do Asaas
+  confere token (tempo constante), valor, referência e situação. Vencido, a
+  varredura pergunta ao Asaas, apaga a cobrança lá e cancela como `SISTEMA`; o
+  Pix pago depois disso é estornado sozinho. Cancelado depois de pago, o estorno
+  sai pela conta da loja, depois de conferir que não foi pedido antes; recusado,
+  fica `ESTORNO_FALHOU` com o motivo em Vendas, e a varredura tenta de novo a
+  cada 15 minutos.
+
+**Contratos:** `store-asaas.ts` (tipos), `SituacaoDoPagamento`,
+`PagamentoOnlineDoPedido` e o campo `pagamentoOnline` de `PedidoDaLoja`; a
+etapa nova nas regras (rótulos, `podeCancelar`, `pagamentoConfirmado`) e nos
+avisos; `store-asaas.schema.ts`; o `cpf` no checkout, obrigatório no pagamento
+online (`hasValidCpfCheckDigits` passou a ser exportado); no `api-client`,
+`createCompanyStoreAsaasApi` e `conferirPagamento`.
+
+**Painel e página do cliente:** Configurações troca o cartão "ainda não
+disponível" pelo de ligar a conta (chave, produção ou testes, e o que falta
+quando não há chave Pix); formas de pagamento habilitam o Pix com a conta;
+Vendas mostra "Pago pelo Pix — não cobrar" e o aviso do estorno que não saiu. A
+sacola pede o CPF no Pix. "Meus pedidos" mostra o QR, o copia e cola (com
+copiar), até quando vale e o "Já paguei", e relê a cada 5 segundos enquanto
+houver Pix esperando. Textos de Notificações e da forma Pix atualizados.
+
+**Arquivos:** `apps/api/prisma/schema.prisma`, a migration nova,
+`apps/api/.env.example` (`STORE_ASAAS_ENCRYPTION_KEY`, `API_PUBLIC_URL`);
+`apps/api/src/company/store-asaas/*` (novos, com spec);
+`apps/api/src/finance/asaas/asaas.client.ts` e `asaas.config.ts`;
+`apps/api/src/company/store-operation/*`; `apps/api/src/company/store-orders/`
+(serviço, módulo, controller público, `store-asaas-webhook.controller.ts` novo,
+avisos, specs); `apps/api/test/store-orders.e2e-spec.ts`;
+`packages/types/src/store-asaas.ts` (novo), `store-order.ts`, `index.ts`;
+`packages/validation/src/company/store-asaas.schema.ts` (novo),
+`store-checkout.schema.ts`, `company-customer.schema.ts`,
+`store-order.rules.ts`, `store-notification.rules.ts`, `index.ts`;
+`packages/api-client/src/company-store-asaas.ts` (novo),
+`public-store-orders.ts`, `index.ts`; no `company-web`,
+`components/loja/conta-asaas.tsx` e teste (novos), `pagamentos-da-loja.tsx`,
+`vendas.ts`, `vendas.test.tsx`, `app/(app)/loja/configuracoes/page.tsx`,
+`vendas/page.tsx`, `notificacoes/page.tsx`,
+`components/loja-online/pagamento-pix.tsx` e teste (novos),
+`pedidos-do-cliente.ts`, `pedido-de-verdade.test.tsx`,
+`app/(loja)/pedir/[slug]/sacola/sacola.tsx`, `pedidos/meus-pedidos.tsx`,
+`lib/api-client.ts`, `lib/loja-pagamentos.ts`; `docs/agent-handoff.md`,
+`architecture.md`, `business-rules.md`, `plano-loja-online.md`.
+
+**Como foi validado:** os três pacotes compilados como no deploy
+(`--typeRoots` isolado) sem erro; `pnpm typecheck` 8/8; `pnpm lint` 8/8 (o
+aviso antigo do driver-app); Jest da API 1398 passam e 1 pulado; vitest do
+`company-web` 55 arquivos e 380 testes; driver-app 210/210; E2E inteiro
+isolado, 29 suítes e 255 testes — o novo, com o Asaas simulado: ligar a conta
+(webhook com a URL da loja, nada da chave no banco em claro), Pix nas formas,
+Pix sem CPF recusado, pedido esperando fora de Vendas, aviso com token errado
+401 e certo 200, pedido entrando e a loja avisada, estorno ao cancelar, "Já
+paguei", vencimento com a cobrança apagada, e desligar tirando o Pix da página.
+O E2E zera o limite de pedidos por minuto antes desse teste: o arquivo inteiro
+vem de 127.0.0.1. Builds da API e dos dois painéis sem erro. No navegador, com
+a API local sem a chave mestra: o cartão da conta aparece, a chave fica oculta
+no campo, e ligar diz "O recebimento online ainda não foi ligado no servidor";
+formas de pagamento dizem do que o Pix depende. **Não exercitado**: uma conta
+Asaas de verdade, nem sandbox — depende da chave mestra no Render e de uma
+conta de teste da loja.
+
+**Deploy:** nada foi enviado. Para ligar em produção: `STORE_ASAAS_ENCRYPTION_KEY`
+no Render (com cópia fora do Render), e cada loja liga a conta dela.
+
+**Reverter** a migration, se preciso (sem pedido `AGUARDANDO_PAGAMENTO`):
+
+```sql
+BEGIN;
+CREATE TYPE "StoreOrderStage_new" AS ENUM ('NOVO', 'ACEITO', 'EM_PREPARO', 'PRONTO', 'SAIU_PARA_ENTREGA', 'ENTREGUE', 'CANCELADO');
+ALTER TABLE "store_orders" ALTER COLUMN "stage" TYPE "StoreOrderStage_new" USING ("stage"::text::"StoreOrderStage_new");
+ALTER TYPE "StoreOrderStage" RENAME TO "StoreOrderStage_old";
+ALTER TYPE "StoreOrderStage_new" RENAME TO "StoreOrderStage";
+DROP TYPE "StoreOrderStage_old";
+COMMIT;
+DROP TABLE "store_asaas_accounts";
+DROP INDEX "store_orders_paymentProviderId_key";
+DROP INDEX "store_orders_paymentStatus_paymentDueAt_idx";
+ALTER TABLE "store_orders" DROP COLUMN "paidAt", DROP COLUMN "paymentCheckedAt",
+  DROP COLUMN "paymentDueAt", DROP COLUMN "paymentEnvironment", DROP COLUMN "paymentIssue",
+  DROP COLUMN "paymentProviderId", DROP COLUMN "paymentStatus", DROP COLUMN "pixPayload",
+  DROP COLUMN "pixQrCode";
+DROP TYPE "StoreOrderPaymentStatus";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926230000_loja_pagamento_online';
+```
+
+Os webhooks criados nas contas das lojas ficam lá: apague-os pelo painel do
+Asaas de cada uma.

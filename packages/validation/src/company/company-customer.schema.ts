@@ -12,7 +12,7 @@ function normalizeBrazilPhone(value: string): string {
     : digits;
 }
 
-function hasValidCpfCheckDigits(cpf: string): boolean {
+export function hasValidCpfCheckDigits(cpf: string): boolean {
   if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false;
 
   const calculateDigit = (length: number): number => {

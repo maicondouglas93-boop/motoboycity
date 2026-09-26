@@ -10,6 +10,7 @@ import {
 } from '@motoboycity/validation';
 import { Prisma, type StoreOperation, type User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 import {
   OPERACAO_INICIAL,
@@ -43,6 +44,7 @@ function linha(mudancas: Partial<StoreOperation> = {}): StoreOperation {
 
 describe('StoreOperationService', () => {
   let service: StoreOperationService;
+  let contaAsaas: { recebePix: jest.Mock };
   let prisma: {
     storeOperation: { findUnique: jest.Mock; upsert: jest.Mock };
     serviceType: { findFirst: jest.Mock };
@@ -51,6 +53,7 @@ describe('StoreOperationService', () => {
   };
 
   beforeEach(async () => {
+    contaAsaas = { recebePix: jest.fn().mockResolvedValue(false) };
     prisma = {
       storeOperation: { findUnique: jest.fn(), upsert: jest.fn() },
       serviceType: { findFirst: jest.fn().mockResolvedValue({ id: TIPO }) },
@@ -65,6 +68,7 @@ describe('StoreOperationService', () => {
           provide: StoreCatalogService,
           useValue: { resolveCompanyId: jest.fn().mockResolvedValue(EMPRESA) },
         },
+        { provide: StoreAsaasAccountService, useValue: contaAsaas },
       ],
     }).compile();
     service = module.get(StoreOperationService);
@@ -153,7 +157,7 @@ describe('StoreOperationService', () => {
     expect(operacao.bairros).toEqual([]);
   });
 
-  it('as formas na entrega são gravadas; as online, recusadas sem a conta Asaas', async () => {
+  it('as formas na entrega são gravadas; Pix online, só com a conta Asaas', async () => {
     prisma.storeOperation.findUnique.mockResolvedValue(linha());
 
     await service.updatePayments(membro, { pagamentos: ['DINHEIRO', 'DEBITO_MAQUININHA'] });
@@ -165,14 +169,25 @@ describe('StoreOperationService', () => {
       service.updatePayments(membro, { pagamentos: ['DINHEIRO', 'PIX_ONLINE'] }),
     ).rejects.toMatchObject({ response: { code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE' } });
     expect(prisma.storeOperation.upsert).toHaveBeenCalledTimes(1);
+
+    // Com a conta ligada e chave Pix ativa, o Pix entra; cartão online, ainda não.
+    contaAsaas.recebePix.mockResolvedValue(true);
+    await service.updatePayments(membro, { pagamentos: ['DINHEIRO', 'PIX_ONLINE'] });
+    expect(prisma.storeOperation.upsert).toHaveBeenCalledTimes(2);
+    await expect(
+      service.updatePayments(membro, { pagamentos: ['CREDITO_ONLINE'] }),
+    ).rejects.toMatchObject({ response: { code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE' } });
   });
 
-  it('forma online gravada antes não chega à página do cliente', async () => {
+  it('forma online gravada antes não chega à página do cliente sem a conta', async () => {
     prisma.storeOperation.findUnique.mockResolvedValue(
       linha({ paymentMethods: ['PIX_ONLINE', 'DINHEIRO'] }),
     );
     const publica = await service.publicOperation(EMPRESA);
     expect(publica.pagamentos).toEqual(['DINHEIRO']);
+
+    contaAsaas.recebePix.mockResolvedValue(true);
+    expect((await service.publicOperation(EMPRESA)).pagamentos).toEqual(['PIX_ONLINE', 'DINHEIRO']);
   });
 
   it('tipo de serviço da corrida: ativo e com preço na região; sem o campo, fica o gravado', async () => {

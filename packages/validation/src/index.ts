@@ -42,6 +42,7 @@ export * from './company/store-operation.rules';
 export * from './company/store-checkout.schema';
 export * from './company/store-notification.rules';
 export * from './company/web-push.schema';
+export * from './company/store-asaas.schema';
 export * from './driver/set-driver-presence.schema';
 export * from './driver/register-device-token.schema';
 export * from './finance/list-wallet-transactions-query.schema';

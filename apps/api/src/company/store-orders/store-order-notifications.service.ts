@@ -118,6 +118,19 @@ export class StoreOrderNotificationsService {
   async etapaMudou(companyId: string, antes: PedidoDaLoja, depois: PedidoDaLoja): Promise<void> {
     if (antes.etapa === depois.etapa) return;
     await this.semDerrubar(async () => {
+      if (antes.etapa === 'AGUARDANDO_PAGAMENTO') {
+        // Pago, o pedido chega à loja agora. Vencido sem pagar, ela nunca o viu:
+        // só o cliente fica sabendo.
+        if (depois.etapa !== 'CANCELADO') {
+          await this.avisarLoja(
+            companyId,
+            depois.janela ? 'PEDIDO_AGENDADO' : 'NOVO_PEDIDO',
+            depois,
+          );
+        }
+        await this.avisarCliente(companyId, depois);
+        return;
+      }
       if (depois.etapa === 'CANCELADO' && depois.cancelamento?.por !== 'LOJA') {
         await this.avisarLoja(companyId, 'PEDIDO_CANCELADO', depois);
       }

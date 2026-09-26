@@ -46,6 +46,7 @@ function pedido(mudancas: Partial<PedidoDaLoja> = {}): PedidoDaLoja {
     observacao: null,
     corrida: null,
     avisoDaCorrida: null,
+    pagamentoOnline: null,
     ...mudancas,
   };
 }

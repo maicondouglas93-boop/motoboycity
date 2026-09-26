@@ -3,9 +3,15 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import type { User } from '@prisma/client';
 import { Prisma, type DeliveryStatus, type StoreOrder } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
+import { AsaasProviderError } from '../../finance/asaas/asaas.client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
-import { StoreOperationService } from '../store-operation/store-operation.service';
+import {
+  OPERACAO_INICIAL,
+  StoreOperationService,
+} from '../store-operation/store-operation.service';
+import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
+import { StoreAsaasClient } from '../store-asaas/store-asaas.client';
 import { StoreOrderNotificationsService } from './store-order-notifications.service';
 import { StoreOrdersService } from './store-orders.service';
 
@@ -63,6 +69,15 @@ function linha(mudancas: Partial<StoreOrder> = {}): StoreOrder {
     deliveryId: null,
     rideAttempt: 0,
     rideIssue: null,
+    paymentStatus: null,
+    paymentProviderId: null,
+    paymentEnvironment: null,
+    pixPayload: null,
+    pixQrCode: null,
+    paymentDueAt: null,
+    paidAt: null,
+    paymentIssue: null,
+    paymentCheckedAt: null,
     createdAt: RECEBIDO,
     updatedAt: RECEBIDO,
     ...mudancas,
@@ -109,6 +124,8 @@ describe('StoreOrdersService — Vendas', () => {
     cancelFromStoreOrder: jest.Mock;
   };
   let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
+  let contasAsaas: { webhookDaLoja: jest.Mock; contaParaCobrar: jest.Mock };
+  let asaas: { cobranca: jest.Mock; apagarCobranca: jest.Mock; estornar: jest.Mock };
 
   const comCorrida = () => ({ ...banco.pedido, delivery: banco.corrida });
 
@@ -123,10 +140,17 @@ describe('StoreOrdersService — Vendas', () => {
         findFirstOrThrow: jest.fn().mockImplementation(() => Promise.resolve(comCorrida())),
         // Grava só se o pedido ainda estiver como foi lido, como o banco.
         updateMany: jest.fn().mockImplementation(({ where, data }) => {
-          const { updatedAt, rideAttempt } = where as {
+          const { updatedAt, rideAttempt, paymentStatus } = where as {
             updatedAt?: Date;
             rideAttempt?: number;
+            paymentStatus?: string | { in: string[] };
           };
+          if (paymentStatus !== undefined) {
+            const aceitas = typeof paymentStatus === 'string' ? [paymentStatus] : paymentStatus.in;
+            if (!aceitas.includes(banco.pedido.paymentStatus ?? '')) {
+              return Promise.resolve({ count: 0 });
+            }
+          }
           if (updatedAt && updatedAt.getTime() !== banco.pedido.updatedAt.getTime()) {
             return Promise.resolve({ count: 0 });
           }
@@ -157,6 +181,20 @@ describe('StoreOrdersService — Vendas', () => {
     };
 
     avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
+    contasAsaas = {
+      webhookDaLoja: jest.fn((_empresa: string, token: string) =>
+        Promise.resolve(token === 'token-da-loja'),
+      ),
+      contaParaCobrar: jest.fn().mockResolvedValue({
+        credencial: { apiKey: 'chave', baseUrl: 'https://api-sandbox.asaas.com/v3' },
+        ambiente: 'SANDBOX',
+      }),
+    };
+    asaas = {
+      cobranca: jest.fn().mockResolvedValue({ id: 'pay_1', status: 'PENDING' }),
+      apagarCobranca: jest.fn().mockResolvedValue(undefined),
+      estornar: jest.fn().mockResolvedValue({ id: 'pay_1', status: 'REFUNDED' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -168,9 +206,14 @@ describe('StoreOrdersService — Vendas', () => {
         },
         {
           provide: StoreOperationService,
-          useValue: { tipoDeServicoDaCorrida: jest.fn().mockResolvedValue(TIPO_DE_SERVICO) },
+          useValue: {
+            tipoDeServicoDaCorrida: jest.fn().mockResolvedValue(TIPO_DE_SERVICO),
+            operacaoDaEmpresa: jest.fn().mockResolvedValue(OPERACAO_INICIAL),
+          },
         },
         { provide: DeliveriesService, useValue: entregas },
+        { provide: StoreAsaasAccountService, useValue: contasAsaas },
+        { provide: StoreAsaasClient, useValue: asaas },
         { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
@@ -409,7 +452,10 @@ describe('StoreOrdersService — Vendas', () => {
   it('a varredura de minuto cai o prazo vencido e acompanha a corrida, sem ninguém olhar', async () => {
     jest.setSystemTime(new Date(RECEBIDO.getTime() + 11 * 60_000));
     prisma.storeOrder.findMany
-      // As empresas com prazo vencido; os vencidos dela; as corridas que andaram.
+      // Pix vencidos e estornos parados (nenhum); as empresas com prazo
+      // vencido; os vencidos dela; as corridas que andaram.
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ companyId: EMPRESA }])
       .mockResolvedValueOnce([{ id: 'pedido-1' }])
       .mockResolvedValueOnce([]);
@@ -418,6 +464,157 @@ describe('StoreOrdersService — Vendas', () => {
 
     expect(banco.pedido).toMatchObject({ stage: 'CANCELADO', cancelledBy: 'SISTEMA' });
     expect(avisos.etapaMudou).toHaveBeenCalledTimes(1);
+  });
+
+  describe('Pix online', () => {
+    const AGUARDANDO = () =>
+      linha({
+        stage: 'AGUARDANDO_PAGAMENTO',
+        history: [{ etapa: 'AGUARDANDO_PAGAMENTO', em: RECEBIDO.toISOString() }],
+        acceptDeadline: null,
+        paymentMethod: 'PIX_ONLINE',
+        changeFor: null,
+        paymentStatus: 'AGUARDANDO',
+        paymentProviderId: 'pay_1',
+        paymentEnvironment: 'SANDBOX',
+        pixPayload: '0002012658',
+        pixQrCode: 'iVBOR',
+        paymentDueAt: new Date(RECEBIDO.getTime() + 15 * 60_000),
+      });
+    const avisoPago = (valor = 45) => ({
+      id: 'evt_1',
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: 'pay_1',
+        customer: 'cus_1',
+        value: valor,
+        status: 'RECEIVED',
+        billingType: 'PIX',
+        externalReference: 'pedido-1',
+      },
+    });
+
+    it('o aviso do Asaas com o token errado é recusado', async () => {
+      banco.pedido = AGUARDANDO();
+      await expect(
+        service.receberWebhook(EMPRESA, 'outro-token', avisoPago()),
+      ).rejects.toMatchObject({ status: 401 });
+      expect(banco.pedido.stage).toBe('AGUARDANDO_PAGAMENTO');
+    });
+
+    it('pago, o pedido entra na loja — aceito no automático, com a corrida e o aviso', async () => {
+      banco.pedido = AGUARDANDO();
+
+      await service.receberWebhook(EMPRESA, 'token-da-loja', avisoPago());
+
+      expect(banco.pedido).toMatchObject({
+        stage: 'ACEITO',
+        paymentStatus: 'PAGO',
+        pixPayload: null,
+        pixQrCode: null,
+      });
+      expect(
+        (banco.pedido.history as Array<{ etapa: string }>).map((passo) => passo.etapa),
+      ).toEqual(['AGUARDANDO_PAGAMENTO', 'NOVO', 'ACEITO']);
+      expect(entregas.createFromStoreOrder).toHaveBeenCalled();
+      const [, antes, depois] = avisos.etapaMudou.mock.calls[0]!;
+      expect([antes.etapa, depois.etapa]).toEqual(['AGUARDANDO_PAGAMENTO', 'ACEITO']);
+
+      // O mesmo aviso de novo não anda o pedido de novo.
+      await service.receberWebhook(EMPRESA, 'token-da-loja', avisoPago());
+      expect(avisos.etapaMudou).toHaveBeenCalledTimes(1);
+    });
+
+    it('o aviso cujo valor não confere com o pedido é ignorado', async () => {
+      banco.pedido = AGUARDANDO();
+      await service.receberWebhook(EMPRESA, 'token-da-loja', avisoPago(1));
+      expect(banco.pedido.stage).toBe('AGUARDANDO_PAGAMENTO');
+    });
+
+    it('vencido sem pagar, a cobrança some do Asaas e o pedido cai sem a loja ver', async () => {
+      banco.pedido = AGUARDANDO();
+      jest.setSystemTime(new Date(RECEBIDO.getTime() + 16 * 60_000));
+      prisma.storeOrder.findMany
+        .mockResolvedValueOnce([{ id: 'pedido-1', companyId: EMPRESA }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.varrer();
+
+      expect(asaas.apagarCobranca).toHaveBeenCalledWith(expect.anything(), 'pay_1');
+      expect(banco.pedido).toMatchObject({
+        stage: 'CANCELADO',
+        cancelledBy: 'SISTEMA',
+        cancelReason: 'O Pix não foi pago a tempo',
+        paymentStatus: 'NAO_PAGO',
+        pixPayload: null,
+      });
+    });
+
+    it('pago e cancelado pela loja, o dinheiro volta inteiro', async () => {
+      banco.pedido = linha({
+        paymentMethod: 'PIX_ONLINE',
+        paymentStatus: 'PAGO',
+        paymentProviderId: 'pay_1',
+        paymentEnvironment: 'SANDBOX',
+        changeFor: null,
+      });
+      asaas.cobranca.mockResolvedValue({ id: 'pay_1', status: 'RECEIVED' });
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(asaas.estornar).toHaveBeenCalledWith(expect.anything(), 'pay_1', 'Item em falta');
+      expect(banco.pedido.paymentStatus).toBe('ESTORNADO');
+      expect(cancelado.pagamentoOnline?.situacao).toBe('ESTORNADO');
+    });
+
+    it('estorno recusado fica com o motivo em Vendas; o que já foi pedido não se pede de novo', async () => {
+      banco.pedido = linha({
+        paymentMethod: 'PIX_ONLINE',
+        paymentStatus: 'PAGO',
+        paymentProviderId: 'pay_1',
+        paymentEnvironment: 'SANDBOX',
+        changeFor: null,
+      });
+      asaas.cobranca.mockResolvedValue({ id: 'pay_1', status: 'RECEIVED' });
+      asaas.estornar.mockRejectedValueOnce(
+        new AsaasProviderError('REFUND_PAYMENT', 'REQUEST_REJECTED', 400),
+      );
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(banco.pedido.paymentStatus).toBe('ESTORNO_FALHOU');
+      expect(cancelado.pagamentoOnline?.aviso).toMatch(/confira se há saldo/);
+
+      // Na nova tentativa, o Asaas já diz que o estorno foi pedido: não pede de novo.
+      asaas.cobranca.mockResolvedValue({ id: 'pay_1', status: 'REFUND_REQUESTED' });
+      jest.setSystemTime(new Date(AGORA.getTime() + 16 * 60_000));
+      prisma.storeOrder.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { id: 'pedido-1', companyId: EMPRESA, cancelReason: 'Item em falta' },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      await service.varrer();
+      expect(asaas.estornar).toHaveBeenCalledTimes(1);
+      expect(banco.pedido).toMatchObject({ paymentStatus: 'ESTORNANDO', paymentIssue: null });
+    });
+
+    it('o Pix pago depois de o pedido cair volta inteiro, sozinho', async () => {
+      banco.pedido = { ...AGUARDANDO(), stage: 'CANCELADO', paymentStatus: 'NAO_PAGO' };
+      asaas.cobranca.mockResolvedValue({ id: 'pay_1', status: 'RECEIVED' });
+
+      await service.receberWebhook(EMPRESA, 'token-da-loja', avisoPago());
+
+      expect(asaas.estornar).toHaveBeenCalledWith(
+        expect.anything(),
+        'pay_1',
+        'O Pix chegou depois de o pedido ser cancelado.',
+      );
+      expect(banco.pedido.paymentStatus).toBe('ESTORNADO');
+    });
   });
 
   it('a fila cancela, pelo sistema, o pedido que passou do prazo do aceite', async () => {

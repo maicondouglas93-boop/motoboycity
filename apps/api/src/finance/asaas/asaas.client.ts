@@ -15,7 +15,30 @@ const REQUEST_TIMEOUT_MS = 15_000;
 export type AsaasPayment = z.infer<typeof asaasPaymentSchema>;
 export type AsaasPixQrCode = z.infer<typeof asaasPixQrCodeSchema>;
 export type AsaasOperation =
-  'FIND_CUSTOMER' | 'CREATE_CUSTOMER' | 'FIND_PAYMENT' | 'CREATE_PAYMENT' | 'GET_PIX_QR_CODE';
+  | 'FIND_CUSTOMER'
+  | 'CREATE_CUSTOMER'
+  | 'FIND_PAYMENT'
+  | 'CREATE_PAYMENT'
+  | 'GET_PIX_QR_CODE'
+  | 'GET_PAYMENT'
+  | 'DELETE_PAYMENT'
+  | 'REFUND_PAYMENT'
+  | 'GET_COMMERCIAL_INFO'
+  | 'LIST_PIX_KEYS'
+  | 'CREATE_WEBHOOK'
+  | 'DELETE_WEBHOOK';
+
+/** Uma conta Asaas: a da plataforma (faturas) ou a de uma loja (vendas online). */
+export interface AsaasCredential {
+  apiKey: string;
+  baseUrl: string;
+}
+
+/**
+ * Sem resposta, estas operações podem ter acontecido ou não no Asaas: quem
+ * chama confere antes de repetir, em vez de cobrar ou estornar duas vezes.
+ */
+const DESFECHO_INCERTO: AsaasOperation[] = ['CREATE_PAYMENT', 'REFUND_PAYMENT'];
 
 @Injectable()
 export class AsaasClient {
@@ -84,67 +107,71 @@ export class AsaasClient {
     );
   }
 
-  private async request<T>(
+  private request<T>(
     path: string,
     init: RequestInit,
-    schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+    schema: AsaasResponseSchema<T>,
     operation: AsaasOperation,
   ): Promise<T> {
-    const runtime = requireAsaasRuntimeConfig(this.config);
-    let response: Response;
-    try {
-      response = await fetch(`${runtime.baseUrl}${path}`, {
-        ...init,
-        redirect: 'error',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        headers: {
-          Accept: 'application/json',
-          access_token: runtime.apiKey,
-          'User-Agent': 'MOTOboyCity/1.0',
-          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-          ...init.headers,
-        },
-      });
-    } catch {
-      throw new AsaasProviderError(
-        operation,
-        'NETWORK_OR_TIMEOUT',
-        undefined,
-        operation === 'CREATE_PAYMENT',
-      );
-    }
-
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      throw new AsaasProviderError(
-        operation,
-        'INVALID_JSON',
-        response.status,
-        operation === 'CREATE_PAYMENT',
-      );
-    }
-    if (!response.ok) {
-      throw new AsaasProviderError(
-        operation,
-        'REQUEST_REJECTED',
-        response.status,
-        operation === 'CREATE_PAYMENT' && response.status >= 500,
-        providerErrorCode(body),
-      );
-    }
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
-      throw new AsaasProviderError(
-        operation,
-        'INVALID_RESPONSE',
-        response.status,
-        operation === 'CREATE_PAYMENT',
-      );
-    }
-    return parsed.data;
+    return callAsaas(requireAsaasRuntimeConfig(this.config), path, init, schema, operation);
   }
+}
+
+export interface AsaasResponseSchema<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false };
+}
+
+/**
+ * Uma chamada à API do Asaas com a credencial dada: tempo-limite, sem seguir
+ * redirecionamento, e a resposta conferida pelo schema. Erros viram
+ * `AsaasProviderError`, com o código do Asaas saneado — nunca a mensagem dele.
+ */
+export async function callAsaas<T>(
+  credential: AsaasCredential,
+  path: string,
+  init: RequestInit,
+  schema: AsaasResponseSchema<T>,
+  operation: AsaasOperation,
+): Promise<T> {
+  const incerto = DESFECHO_INCERTO.includes(operation);
+  let response: Response;
+  try {
+    response = await fetch(`${credential.baseUrl}${path}`, {
+      ...init,
+      redirect: 'error',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      headers: {
+        Accept: 'application/json',
+        access_token: credential.apiKey,
+        'User-Agent': 'MOTOboyCity/1.0',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new AsaasProviderError(operation, 'NETWORK_OR_TIMEOUT', undefined, incerto);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new AsaasProviderError(operation, 'INVALID_JSON', response.status, incerto);
+  }
+  if (!response.ok) {
+    throw new AsaasProviderError(
+      operation,
+      'REQUEST_REJECTED',
+      response.status,
+      incerto && response.status >= 500,
+      providerErrorCode(body),
+    );
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new AsaasProviderError(operation, 'INVALID_RESPONSE', response.status, incerto);
+  }
+  return parsed.data;
 }
 
 export class AsaasProviderError extends Error {

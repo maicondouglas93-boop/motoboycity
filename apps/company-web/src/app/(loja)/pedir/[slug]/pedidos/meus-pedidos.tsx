@@ -33,6 +33,7 @@ import { usePedidosDoCliente } from '@/components/loja-online/pedidos-do-cliente
 import { ConfirmacaoDoPedido } from '@/components/loja-online/confirmacao';
 import { ConviteParaInstalar } from '@/components/loja-online/convite-para-instalar';
 import { AvisosDoPedido } from '@/components/loja-online/avisos-do-pedido';
+import { PagamentoPix } from '@/components/loja-online/pagamento-pix';
 
 /**
  * Onde o cliente responde sozinho a pergunta que ele faria à loja no WhatsApp:
@@ -237,6 +238,10 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
 
         {pedidos.map((pedido) => {
           const andamento = pronto ? andamentoDe(pedido) : null;
+          const doServidorDesse =
+            pronto && real
+              ? (doServidor.pedidos?.find((item) => item.numero === pedido.numero) ?? null)
+              : null;
           return (
             <article
               key={pedido.numero}
@@ -248,13 +253,24 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
                 <span className="text-sm font-semibold">{moeda(pedido.total)}</span>
               </div>
 
-              {andamento && (
+              {/* Esperando o Pix, o pedido ainda não chegou à loja: no lugar do
+                  andamento, o que falta para chegar. */}
+              {andamento && andamento.etapa !== 'AGUARDANDO_PAGAMENTO' && (
                 <Andamento
                   andamento={andamento}
                   agora={agora}
                   paleta={paleta}
                   cor={marca.corDeAcao}
                   prazoDoAceiteMin={operacao.recebimento.prazoDoAceiteMin}
+                />
+              )}
+              {doServidorDesse && (
+                <PagamentoPix
+                  slug={slug}
+                  pedido={doServidorDesse}
+                  paleta={paleta}
+                  cor={marca.corDeAcao}
+                  aoMudar={doServidor.substituir}
                 />
               )}
 

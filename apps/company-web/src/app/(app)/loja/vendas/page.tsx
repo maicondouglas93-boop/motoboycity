@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AndamentoDoPedido, StoreSettings } from '@motoboycity/types';
+import type { AndamentoDoPedido, SituacaoDoPagamento, StoreSettings } from '@motoboycity/types';
 import {
   Bike,
   CalendarClock,
@@ -86,6 +86,8 @@ const CADASTRO: Record<CadastroDoCliente, { texto: string; acao: string | null }
 };
 
 const CORES: Record<EtapaDoPedido, string> = {
+  // A loja não vê o pedido nesta etapa; a cor existe porque o tipo tem a etapa.
+  AGUARDANDO_PAGAMENTO: 'bg-muted text-muted-foreground',
   NOVO: 'bg-amber-500/15 text-amber-800',
   ACEITO: 'bg-sky-500/10 text-sky-700',
   EM_PREPARO: 'bg-orange-500/10 text-orange-700',
@@ -113,6 +115,16 @@ const MOTIVOS = [
 ];
 
 type Aba = 'andamento' | 'agendados' | 'concluidos' | 'cancelados';
+
+/** O pagamento online, no selo do cartão. Pago: o entregador não cobra nada. */
+const PAGAMENTO_NA_VENDA: Record<SituacaoDoPagamento, string> = {
+  AGUARDANDO: 'Pix aguardando',
+  PAGO: 'Pago pelo Pix — não cobrar',
+  NAO_PAGO: 'Pix não pago',
+  ESTORNANDO: 'Pix sendo estornado',
+  ESTORNADO: 'Pix estornado',
+  ESTORNO_FALHOU: 'Estorno do Pix pendente',
+};
 
 function moeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -523,6 +535,12 @@ function CartaoDaVenda({
                   {pelaLoja ? 'Entregador da loja' : 'Motoboy do MOTOboyCity'}
                 </Badge>
               )}
+              {venda.pagamentoOnline && (
+                <Badge variant="outline" className="gap-1">
+                  <Check className="size-3" aria-hidden="true" />
+                  {PAGAMENTO_NA_VENDA[venda.pagamentoOnline.situacao]}
+                </Badge>
+              )}
               {janela && (
                 <Badge variant="outline" className="gap-1">
                   <CalendarClock className="size-3" aria-hidden="true" />
@@ -561,6 +579,15 @@ function CartaoDaVenda({
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Timer className="size-3.5" aria-hidden="true" />
             {tempo}
+          </p>
+        )}
+
+        {venda.pagamentoOnline?.aviso && (
+          <p
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs"
+          >
+            {venda.pagamentoOnline.aviso}
           </p>
         )}
 
@@ -663,6 +690,7 @@ function CartaoDaVenda({
                 size="sm"
                 disabled={ocupado}
                 onClick={() =>
+                  proxima !== 'AGUARDANDO_PAGAMENTO' &&
                   proxima !== 'NOVO' &&
                   proxima !== 'CANCELADO' &&
                   acaoNaVenda.mutate({ tipo: 'avancar', id: venda.id, para: proxima })

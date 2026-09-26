@@ -1,5 +1,6 @@
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import type {
@@ -10,6 +11,8 @@ import type {
 } from '@motoboycity/types';
 import { AppModule } from '../src/app.module';
 import { VerificadorDoCliente } from '../src/company/store-orders/cliente-da-loja.guard';
+import { randomBytes } from 'node:crypto';
+import { StoreAsaasClient } from '../src/company/store-asaas/store-asaas.client';
 import { StoreOrdersService } from '../src/company/store-orders/store-orders.service';
 import { GoogleMapsService } from '../src/maps/google-maps.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -24,6 +27,58 @@ import { WebPushService, type AvisoDePush } from '../src/web-push/web-push.servi
  * válidos. O Google também: a distância é sempre 5 km. E o envio do Web Push:
  * os avisos ficam numa lista, sem rede e sem chaves.
  */
+
+/**
+ * O Asaas das lojas, simulado: guarda as cobranças numa lista, e o teste diz
+ * quando uma foi paga. O token do webhook criado fica aqui para o teste mandar
+ * o aviso como o Asaas mandaria.
+ */
+const asaasDeTeste = {
+  webhook: null as { url: string; authToken: string } | null,
+  cobrancas: new Map<string, { status: string; value: number; externalReference: string }>(),
+  estornadas: [] as string[],
+  apagadas: [] as string[],
+  dadosComerciais: () =>
+    Promise.resolve({ name: 'Dono', tradingName: 'Pedido E2E', email: 'financeiro@e2e.com' }),
+  temChavePixAtiva: () => Promise.resolve(true),
+  criarWebhook: (_conta: unknown, dados: { url: string; authToken: string }) => {
+    asaasDeTeste.webhook = dados;
+    return Promise.resolve('wh_e2e');
+  },
+  apagarWebhook: () => Promise.resolve(),
+  clienteDoCpf: () => Promise.resolve('cus_e2e'),
+  criarCobrancaPix: (_conta: unknown, cobranca: { value: number; externalReference: string }) => {
+    const id = `pay_${asaasDeTeste.cobrancas.size + 1}`;
+    asaasDeTeste.cobrancas.set(id, { status: 'PENDING', ...cobranca });
+    return Promise.resolve({
+      id,
+      customer: 'cus_e2e',
+      status: 'PENDING',
+      billingType: 'PIX',
+      ...cobranca,
+    });
+  },
+  qrCodePix: () =>
+    Promise.resolve({
+      encodedImage: 'iVBORw0KGgo',
+      payload: '00020126pix',
+      expirationDate: '2026-12-31 23:59:59',
+    }),
+  cobranca: (_conta: unknown, id: string) => {
+    const cobranca = asaasDeTeste.cobrancas.get(id)!;
+    return Promise.resolve({ id, customer: 'cus_e2e', billingType: 'PIX', ...cobranca });
+  },
+  apagarCobranca: (_conta: unknown, id: string) => {
+    asaasDeTeste.apagadas.push(id);
+    return Promise.resolve();
+  },
+  estornar: (_conta: unknown, id: string) => {
+    asaasDeTeste.estornadas.push(id);
+    const cobranca = asaasDeTeste.cobrancas.get(id)!;
+    cobranca.status = 'REFUNDED';
+    return Promise.resolve({ id, customer: 'cus_e2e', billingType: 'PIX', ...cobranca });
+  },
+};
 
 /** Cada aviso que teria saído, com os endereços de quem o receberia. */
 const avisosEnviados: Array<{ para: string[]; aviso: AvisoDePush }> = [];
@@ -66,6 +121,8 @@ describe('Pedido da loja online (e2e)', () => {
   const comoCliente = (quem: string) => ({ Authorization: `Bearer ${quem}` });
 
   beforeAll(async () => {
+    // A chave que cifra as contas Asaas das lojas: descartável, só deste teste.
+    process.env['STORE_ASAAS_ENCRYPTION_KEY'] = randomBytes(32).toString('base64');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(VerificadorDoCliente)
       .useValue({
@@ -83,6 +140,8 @@ describe('Pedido da loja online (e2e)', () => {
       })
       .overrideProvider(WebPushService)
       .useValue(pushDeTeste)
+      .overrideProvider(StoreAsaasClient)
+      .useValue(asaasDeTeste)
       .compile();
     app = module.createNestApplication();
     prisma = module.get(PrismaService);
@@ -637,5 +696,187 @@ describe('Pedido da loja online (e2e)', () => {
       .send({ endpoint: doCliente })
       .expect(204);
     expect(await prisma.webPushSubscription.count({ where: { endpoint: doCliente } })).toBe(0);
+  });
+
+  it('o Pix online: a loja liga a conta, o cliente paga, e o que cai volta inteiro', async () => {
+    const servidor = app.getHttpServer();
+    // O checkout aceita 10 pedidos por minuto por IP, e este arquivo inteiro vem
+    // de 127.0.0.1: a contagem dos testes anteriores zera aqui.
+    (app.get(ThrottlerStorage) as unknown as { storage: Map<string, unknown> }).storage.clear();
+    const naLoja = await prisma.company.findUniqueOrThrow({
+      where: { document: empresa.document },
+    });
+    const pedirPix = (cpf: string | null = '52998224725') =>
+      request(servidor)
+        .post(`/public/stores/${link}/orders`)
+        .set(comoCliente('cliente-a'))
+        .send({
+          modalidade: 'ENTREGA',
+          itens: [{ produtoId, tamanhoId: null, escolhas: [], quantidade: 2 }],
+          agendadoPara: null,
+          cliente: { nome: 'Ana', telefone: '33999887766' },
+          entrega: {
+            rua: 'Rua A',
+            numero: '10',
+            complemento: null,
+            bairroId: 'b1',
+            cidade: 'Lajinha',
+            estado: 'MG',
+            cep: '',
+            referencia: null,
+          },
+          pagamento: 'PIX_ONLINE',
+          trocoPara: null,
+          observacao: null,
+          totalVisto: 55,
+          cpf,
+        });
+    const avisoDoAsaas = (
+      pedido: PedidoDaLoja & { pagamentoOnline: unknown },
+      cobranca: string,
+    ) => ({
+      id: `evt_${cobranca}`,
+      event: 'PAYMENT_RECEIVED',
+      payment: {
+        id: cobranca,
+        customer: 'cus_e2e',
+        value: 55,
+        status: 'RECEIVED',
+        billingType: 'PIX',
+        externalReference: pedido.id,
+      },
+    });
+    const idDaCobranca = async (pedidoId: string) =>
+      (await prisma.storeOrder.findUniqueOrThrow({ where: { id: pedidoId } })).paymentProviderId!;
+
+    // Sem a conta, o Pix não entra nas formas de pagamento.
+    expect(
+      (await request(servidor).get('/company/store/asaas-account').set(comoEmpresa()).expect(200))
+        .body,
+    ).toEqual({ conectada: false });
+    await request(servidor)
+      .put('/company/store/operation/payments')
+      .set(comoEmpresa())
+      .send({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] })
+      .expect(400);
+
+    // A loja liga a conta: o webhook nasce na conta dela, com a URL desta loja.
+    const ligada = await request(servidor)
+      .put('/company/store/asaas-account')
+      .set(comoEmpresa())
+      .send({ chaveDaApi: '$aact_hmlg_chave_de_teste_e2e', ambiente: 'SANDBOX' })
+      .expect(200);
+    expect(ligada.body).toMatchObject({ conectada: true, ambiente: 'SANDBOX', temChavePix: true });
+    expect(asaasDeTeste.webhook?.url).toMatch(
+      new RegExp(`/integrations/asaas/stores/${naLoja.id}/webhook$`),
+    );
+    const guardada = await prisma.storeAsaasAccount.findUniqueOrThrow({
+      where: { companyId: naLoja.id },
+    });
+    expect(JSON.stringify(guardada)).not.toContain('aact');
+    await request(servidor)
+      .put('/company/store/operation/payments')
+      .set(comoEmpresa())
+      .send({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] })
+      .expect(200);
+
+    // Pix sem CPF é recusado; com CPF, o pedido nasce esperando, com o QR.
+    await pedirPix(null).expect(400);
+    const esperando = (await pedirPix().expect(201)).body as PedidoDaLoja;
+    expect(esperando).toMatchObject({
+      etapa: 'AGUARDANDO_PAGAMENTO',
+      pagamentoOnline: {
+        situacao: 'AGUARDANDO',
+        pixCopiaECola: '00020126pix',
+        qrCode: 'iVBORw0KGgo',
+      },
+    });
+    const naFila = async () =>
+      (
+        (await request(servidor).get('/company/store/orders').set(comoEmpresa()).expect(200))
+          .body as PedidoDaLoja[]
+      ).map((pedido) => pedido.id);
+    expect(await naFila()).not.toContain(esperando.id);
+
+    // O aviso com o token errado é recusado; com o certo, o pedido entra na loja.
+    const cobranca = await idDaCobranca(esperando.id);
+    asaasDeTeste.cobrancas.get(cobranca)!.status = 'RECEIVED';
+    await request(servidor)
+      .post(`/integrations/asaas/stores/${naLoja.id}/webhook`)
+      .set('asaas-access-token', 'x'.repeat(43))
+      .send(avisoDoAsaas(esperando as never, cobranca))
+      .expect(401);
+    avisosEnviados.length = 0;
+    await request(servidor)
+      .post(`/integrations/asaas/stores/${naLoja.id}/webhook`)
+      .set('asaas-access-token', asaasDeTeste.webhook!.authToken)
+      .send(avisoDoAsaas(esperando as never, cobranca))
+      .expect(200);
+    const pago = await prisma.storeOrder.findUniqueOrThrow({ where: { id: esperando.id } });
+    expect(pago).toMatchObject({ stage: 'NOVO', paymentStatus: 'PAGO', pixPayload: null });
+    expect(await naFila()).toContain(esperando.id);
+    // A loja recebe o "novo pedido" agora, e não quando o Pix foi gerado.
+    expect(avisosEnviados.some((item) => item.aviso.titulo === 'Novo pedido')).toBe(true);
+
+    // Cancelado pela loja, o dinheiro volta inteiro.
+    const cancelado = (
+      await request(servidor)
+        .post(`/company/store/orders/${esperando.id}/cancel`)
+        .set(comoEmpresa())
+        .send({ motivo: 'Item em falta' })
+        .expect(201)
+    ).body as PedidoDaLoja;
+    expect(asaasDeTeste.estornadas).toContain(cobranca);
+    expect(cancelado.pagamentoOnline).toMatchObject({ situacao: 'ESTORNADO' });
+
+    // "Já paguei": o servidor pergunta ao Asaas, e o pedido entra.
+    const outro = (await pedirPix().expect(201)).body as PedidoDaLoja;
+    const cobrancaDoOutro = await idDaCobranca(outro.id);
+    await request(servidor)
+      .post(`/public/stores/${link}/orders/${outro.id}/check-payment`)
+      .set(comoCliente('cliente-a'))
+      .expect(200)
+      .then((resposta) =>
+        expect((resposta.body as PedidoDaLoja).etapa).toBe('AGUARDANDO_PAGAMENTO'),
+      );
+    asaasDeTeste.cobrancas.get(cobrancaDoOutro)!.status = 'RECEIVED';
+    const entrou = (
+      await request(servidor)
+        .post(`/public/stores/${link}/orders/${outro.id}/check-payment`)
+        .set(comoCliente('cliente-a'))
+        .expect(200)
+    ).body as PedidoDaLoja;
+    expect(entrou.etapa).toBe('NOVO');
+
+    // Vencido sem pagar: a cobrança some do Asaas, e o pedido cai para o cliente.
+    const esquecido = (await pedirPix().expect(201)).body as PedidoDaLoja;
+    const cobrancaEsquecida = await idDaCobranca(esquecido.id);
+    await prisma.storeOrder.update({
+      where: { id: esquecido.id },
+      data: { paymentDueAt: new Date(Date.now() - 60_000) },
+    });
+    await app.get(StoreOrdersService).varrer();
+    expect(asaasDeTeste.apagadas).toContain(cobrancaEsquecida);
+    const doCliente = (
+      (
+        await request(servidor)
+          .get(`/public/stores/${link}/orders`)
+          .set(comoCliente('cliente-a'))
+          .expect(200)
+      ).body as PedidoDaLoja[]
+    ).find((pedido) => pedido.id === esquecido.id)!;
+    expect(doCliente).toMatchObject({
+      etapa: 'CANCELADO',
+      cancelamento: { motivo: 'O Pix não foi pago a tempo', por: 'SISTEMA' },
+      pagamentoOnline: { situacao: 'NAO_PAGO', qrCode: null },
+    });
+    expect(await naFila()).not.toContain(esquecido.id);
+
+    // Desligar a conta tira o Pix da página.
+    await request(servidor).delete('/company/store/asaas-account').set(comoEmpresa()).expect(200);
+    const vitrine = await request(servidor).get(`/public/stores/${link}`).expect(200);
+    expect(
+      (vitrine.body as Extract<PublicStoreLookup, { kind: 'store' }>).store.operacao.pagamentos,
+    ).not.toContain('PIX_ONLINE');
   });
 });

@@ -17,6 +17,7 @@ import {
 } from '@motoboycity/validation';
 import { Prisma, type StoreOperation, type User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
 
 type Horario = Pick<OperacaoDaLoja['funcionamento'], 'semana' | 'excecoes' | 'mensagemFechada'>;
@@ -81,11 +82,11 @@ export const OPERACAO_INICIAL: OperacaoDaLoja = {
 };
 
 /**
- * Pagar online é pelo Asaas, direto na conta da loja, e a conta ainda não tem
- * onde ser cadastrada: sem ela, o dinheiro não teria para onde ir. Quando
- * tiver, esta checagem passa a ser "a loja tem conta Asaas".
+ * Pagar online é pelo Asaas, direto na conta da loja: só o Pix, e só com a
+ * conta ligada e com chave Pix ativa — sem ela, o dinheiro não teria para onde
+ * ir. Cartão online (crédito e débito, pela página do Asaas) fica para depois.
  */
-const PAGAMENTO_ONLINE_DISPONIVEL = false;
+const ONLINE_PRONTAS: FormaDePagamento[] = ['PIX_ONLINE'];
 
 function eOnline(forma: FormaDePagamento): boolean {
   return (FORMAS_DE_PAGAMENTO_ONLINE as readonly string[]).includes(forma);
@@ -150,6 +151,7 @@ export class StoreOperationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly catalogo: StoreCatalogService,
+    private readonly asaas: StoreAsaasAccountService,
   ) {}
 
   async operation(user: User): Promise<OperacaoDaLoja> {
@@ -169,10 +171,11 @@ export class StoreOperationService {
    */
   async publicOperation(companyId: string): Promise<OperacaoPublica> {
     const { notificacoes: _avisos, ...publica } = await this.daEmpresa(companyId);
+    const recebePix = publica.pagamentos.some(eOnline) && (await this.asaas.recebePix(companyId));
     return {
       ...publica,
       pagamentos: publica.pagamentos.filter(
-        (forma) => PAGAMENTO_ONLINE_DISPONIVEL || !eOnline(forma),
+        (forma) => !eOnline(forma) || (recebePix && ONLINE_PRONTAS.includes(forma)),
       ),
     };
   }
@@ -286,11 +289,22 @@ export class StoreOperationService {
   }
 
   async updatePayments(user: User, { pagamentos }: StorePaymentsPayload): Promise<OperacaoDaLoja> {
-    if (!PAGAMENTO_ONLINE_DISPONIVEL && pagamentos.some(eOnline)) {
+    const online = pagamentos.filter(eOnline);
+    if (online.some((forma) => !ONLINE_PRONTAS.includes(forma))) {
       throw new BadRequestException({
-        message: 'Receber online depende da conta Asaas da loja, que ainda não está disponível.',
+        message: 'Cartão online ainda não está disponível. Por enquanto, online é só Pix.',
         code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE',
       });
+    }
+    if (online.length > 0) {
+      const companyId = await this.catalogo.resolveCompanyId(user);
+      if (!(await this.asaas.recebePix(companyId))) {
+        throw new BadRequestException({
+          message:
+            'Para receber Pix pela página, ligue a sua conta Asaas em Configurações — e ela precisa ter uma chave Pix ativa.',
+          code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE',
+        });
+      }
     }
     return this.gravar(user, { paymentMethods: comoJson(pagamentos) });
   }

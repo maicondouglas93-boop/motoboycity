@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasValidCpfCheckDigits } from './company-customer.schema';
 import {
   FORMAS_DE_PAGAMENTO_NA_ENTREGA,
   FORMAS_DE_PAGAMENTO_ONLINE,
@@ -65,6 +66,16 @@ export const storeCheckoutSchema = z
     entrega: enderecoSchema.nullable(),
     pagamento: z.enum([...FORMAS_DE_PAGAMENTO_ONLINE, ...FORMAS_DE_PAGAMENTO_NA_ENTREGA]),
     trocoPara: z.number().positive('Informe o valor para o troco.').max(99999.99).nullable(),
+    /**
+     * Só no pagamento online: o Asaas não cria cobrança sem o CPF de quem paga.
+     * Vai para a conta Asaas da loja, e não fica guardado no pedido.
+     */
+    cpf: z
+      .string()
+      .transform((cpf) => cpf.replace(/\D/g, ''))
+      .refine(hasValidCpfCheckDigits, 'CPF inválido.')
+      .nullable()
+      .optional(),
     observacao: textoCurto(200, 'Use no máximo 200 caracteres na observação.').nullable(),
     /**
      * O total que o cliente viu na tela. Não decide nada: se o cardápio mudou
@@ -80,7 +91,13 @@ export const storeCheckoutSchema = z
   .refine((pedido) => pedido.trocoPara === null || pedido.pagamento === 'DINHEIRO', {
     message: 'Troco só existe no pagamento em dinheiro.',
     path: ['trocoPara'],
-  });
+  })
+  .refine(
+    (pedido) =>
+      !(FORMAS_DE_PAGAMENTO_ONLINE as readonly string[]).includes(pedido.pagamento) ||
+      Boolean(pedido.cpf),
+    { message: 'Informe o CPF para pagar pelo Pix.', path: ['cpf'] },
+  );
 
 export type StoreCheckoutPayload = z.infer<typeof storeCheckoutSchema>;
 

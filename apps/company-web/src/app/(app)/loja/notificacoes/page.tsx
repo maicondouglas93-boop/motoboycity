@@ -154,7 +154,8 @@ function Formulario({
                   <span className="block text-xs text-muted-foreground">{evento.detalhe}</span>
                   {evento.valor === 'PAGAMENTO_RECEBIDO' && (
                     <span className="block text-xs text-muted-foreground">
-                      Depende da integração com o Asaas, que ainda não existe.
+                      Com o Pix, o pedido só chega à loja depois de pago: o aviso de pedido novo já
+                      é o do pagamento.
                     </span>
                   )}
                   {evento.valor === 'LOJA_FECHANDO' && (

@@ -26,6 +26,9 @@ export function eventoDoCliente(
   etapa: EtapaDoPedido,
 ): EventoDoCliente | null {
   switch (etapa) {
+    // O pedido ainda não chegou à loja: o cliente está com o Pix na tela.
+    case 'AGUARDANDO_PAGAMENTO':
+      return null;
     case 'NOVO':
       return 'RECEBIDO';
     case 'ACEITO':
