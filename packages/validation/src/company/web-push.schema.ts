@@ -13,15 +13,17 @@ const SERVICOS_DE_PUSH = [
   /\.notify\.windows\.com$/, // Edge antigo no Windows
 ];
 
+/**
+ * `https://<domínio>/<caminho>`, lido à mão, e não com `URL`: este pacote
+ * compila sem os tipos do navegador e do Node. Estrito de propósito — sem
+ * usuário (`@`), barra invertida ou espaço, que endereço de push nunca tem e
+ * que cada leitor de URL entende de um jeito.
+ */
+const HTTPS = /^https:\/\/([a-z0-9.-]+)(?::\d{1,5})?\/[^\s\\@]*$/i;
+
 export function enderecoDePushAceito(endereco: string): boolean {
-  try {
-    const url = new URL(endereco);
-    return (
-      url.protocol === 'https:' && SERVICOS_DE_PUSH.some((padrao) => padrao.test(url.hostname))
-    );
-  } catch {
-    return false;
-  }
+  const dominio = HTTPS.exec(endereco)?.[1]?.toLowerCase();
+  return dominio !== undefined && SERVICOS_DE_PUSH.some((padrao) => padrao.test(dominio));
 }
 
 /** A inscrição que o navegador devolve em `pushManager.subscribe`, em JSON. */

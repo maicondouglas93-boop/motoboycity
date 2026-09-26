@@ -16072,3 +16072,31 @@ DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926200000_loja_a
 ```
 
 As inscrições se perdem; cada aparelho liga de novo.
+
+## 2026-09-26 — O build de 840a0ce caiu no pacote de validação
+
+**O que aconteceu:** o push de `840a0ce` (Web Push) falhou no Render e nos dois
+Vercel, no primeiro passo: `tsc` do `packages/validation` recusou o `URL` do
+`web-push.schema.ts` ("Cannot find name 'URL'"). O CI do mesmo commit também
+falhou. Nada chegou a produção: o build para antes do `migrate deploy`, e o
+Render e o Vercel seguiram com `f94ff4a`. A migration
+`20260926200000_loja_avisos_push` não foi aplicada.
+
+**Por que passou aqui:** um `node_modules` com `@types/node` na pasta do
+usuário (`C:\Users\Pichau`), fora do repositório. O TypeScript o acha subindo
+pastas e dá aos pacotes os globais do Node. Registrado em "Armadilhas do
+ambiente", no handoff, com o comando que compila como o deploy.
+
+**Correção:** `enderecoDePushAceito` lê o endereço com uma expressão regular, e
+não com `URL`: `https://<domínio>/<caminho>`, sem usuário (`@`), barra
+invertida ou espaço — que endereço de push não tem e que cada leitor de URL
+entende de um jeito. Dois testes novos cobrem os serviços aceitos e esses
+truques.
+
+**Arquivos:** `packages/validation/src/company/web-push.schema.ts`,
+`apps/api/src/web-push/web-push.service.spec.ts`, `docs/agent-handoff.md`.
+
+**Como foi validado:** o pacote compilado com `--typeRoots` isolado (como no
+deploy) sem erro, e também o `types` e o `api-client`; `pnpm typecheck` 8/8,
+`pnpm lint` 8/8 (o aviso antigo do driver-app); Jest da API 1382 passam e 1
+pulado; os 6 E2E da loja passam.

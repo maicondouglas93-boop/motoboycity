@@ -1,3 +1,4 @@
+import { enderecoDePushAceito } from '@motoboycity/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   WebPushService,
@@ -91,5 +92,27 @@ describe('WebPushService', () => {
     });
     expect(prisma.webPushSubscription.deleteMany).toHaveBeenCalledTimes(1);
     expect(prisma.webPushSubscription.deleteMany).toHaveBeenCalledWith({ where: { id: 'sumiu' } });
+  });
+});
+
+describe('o endereço de push', () => {
+  it('aceita só HTTPS dos serviços dos navegadores', () => {
+    expect(enderecoDePushAceito('https://fcm.googleapis.com/fcm/send/abc:APA91b')).toBe(true);
+    expect(enderecoDePushAceito('https://updates.push.services.mozilla.com/wpush/v2/gAAA')).toBe(
+      true,
+    );
+    expect(enderecoDePushAceito('https://web.push.apple.com/QGuQyavXutnMH')).toBe(true);
+    expect(enderecoDePushAceito('https://wns2-par02p.notify.windows.com/w/?token=AQ')).toBe(true);
+    expect(enderecoDePushAceito('http://fcm.googleapis.com/fcm/send/abc')).toBe(false);
+    expect(enderecoDePushAceito('https://169.254.169.254/latest/meta-data')).toBe(false);
+    expect(enderecoDePushAceito('https://fcm.googleapis.com.evil.com/x')).toBe(false);
+  });
+
+  it('recusa o que cada leitor de URL entende de um jeito', () => {
+    expect(enderecoDePushAceito('https://evil.com\\@fcm.googleapis.com/x')).toBe(false);
+    expect(enderecoDePushAceito('https://evil.com\\fcm.googleapis.com/x')).toBe(false);
+    expect(enderecoDePushAceito('https://evil.com@fcm.googleapis.com/x')).toBe(false);
+    expect(enderecoDePushAceito('https://fcm.googleapis.com/x y')).toBe(false);
+    expect(enderecoDePushAceito('https://fcm.googleapis.com')).toBe(false);
   });
 });

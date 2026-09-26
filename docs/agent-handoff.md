@@ -943,6 +943,16 @@ estranha, confira se a tabela nova existe lá. O CLI do Prisma ignora
 
 ### Armadilhas do ambiente
 
+**Os pacotes compilam sem os tipos do Node e do navegador — e esta máquina
+esconde isso.** Existe um `package.json` com `node_modules` em
+`C:\Users\Pichau`, com `@types/node`, e o TypeScript sobe pastas procurando
+`node_modules/@types`: aqui, `URL`, `Buffer` e afins existem em
+`packages/validation`, `types` e `api-client`; no Render, no Vercel e no CI,
+não. Foi o que derrubou o build de `840a0ce` (26/09): `new URL(...)` no
+`web-push.schema.ts` passou em tudo localmente. Para conferir como o deploy,
+compile o pacote com `npx tsc -p tsconfig.build.json --noEmit --typeRoots
+./sem-tipos`. Nos pacotes, nada de global de ambiente.
+
 **Migrations usam também `DIRECT_URL`**: o schema tem `directUrl`, que prevalece
 sobre `url` no CLI de migrations. Sobrescrever só `DATABASE_URL` não isola o
 comando; imports da aplicação podem carregar variáveis locais antes do CLI.
