@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { ApiError, createPublicStoreApi } from '@motoboycity/api-client';
 import type { OperacaoPublica, PublicStore, PublicStoreProduct } from '@motoboycity/types';
 import {
@@ -20,6 +21,10 @@ import type { TemaDaLoja } from '@/lib/contraste';
  *
  * Roda no servidor: a página chega pronta, e o link antigo redireciona antes
  * de o navegador baixar qualquer coisa.
+ *
+ * Uma consulta por requisição: o título da aba, a cor da barra e a página
+ * pedem a mesma loja, e o `cache` do React junta as três numa chamada só à
+ * API — sem ele, cada abertura da loja custava três.
  */
 
 export const LINK_DA_DEMONSTRACAO = LOJA_DE_EXEMPLO.slug;
@@ -96,7 +101,7 @@ export function produtoDaVitrine(produto: PublicStoreProduct): ProdutoDeExemplo 
   };
 }
 
-export async function lojaDoLink(slug: string): Promise<LojaDoLink> {
+export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise<LojaDoLink> {
   if (slug === LINK_DA_DEMONSTRACAO) {
     return {
       tipo: 'loja',
@@ -138,7 +143,7 @@ export async function lojaDoLink(slug: string): Promise<LojaDoLink> {
     }
     throw erro;
   }
-}
+});
 
 /** Só a identidade, para o título, o manifest e o ícone. `null`: link sem loja. */
 export async function identidadeDoLink(slug: string): Promise<IdentidadeDaLoja | null> {

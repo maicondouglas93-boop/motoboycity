@@ -177,10 +177,10 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `378ca74`, liberar agendado antes da hora e valor antes de confirmar, enviado para `main` em 23/09/2026. Render e Vercel Company/ADM em success; API nova conferida pela rota nova (404 → 401) e `/health/ready` com PostgreSQL/Redis ok. CI vermelho desde 21/09 por falha anterior (item 3 das pendências) |
+| Commit publicado | `5840883`, configuração da loja online no banco (junto: `3602075` vitrine sem Clerk, `76242f5` CI, `0df2a76` decisões), enviado para `main` em 25/09/2026. CI verde no GitHub, o primeiro desde 21/09. API nova conferida pela rota nova (`/company/store/operation`, 404 → 401) e `/health/ready` com PostgreSQL/Redis ok; no Vercel, `/pedir/minha-loja` abre sem script do Clerk. Painéis do Render e do Vercel não foram abertos |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
-| Banco | PostgreSQL gerenciado; 53 migrations no repositorio, incluindo chegada na coleta. Build Render com `migrate deploy` concluido e readiness PostgreSQL ok; sem inspecao SQL direta do schema de producao |
+| Banco | PostgreSQL gerenciado; 60 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
 | APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
@@ -588,11 +588,11 @@ catálogo do painel precisa saber:
   painel local vai para a conta real. Para testar sem isso, use um arquivo que
   a checagem de bytes recuse — ela roda antes do envio.
 
-As migrations `20260925090000_loja_catalogo`, `20260925160000_loja_foto_do_produto`
-e `20260925190000_loja_link` foram no push de 2026-09-25, pelo
-`prisma migrate deploy` do build do Render. `20260925230000_loja_operacao` e
-`20260926090000_loja_configuracoes` estão só no `motoboycity_dev` local e vão
-no próximo push.
+As migrations da loja online (`20260925090000_loja_catalogo`,
+`20260925160000_loja_foto_do_produto`, `20260925190000_loja_link`,
+`20260925230000_loja_operacao` e `20260926090000_loja_configuracoes`) foram
+nos pushes de 2026-09-25, pelo `prisma migrate deploy` do build do Render, e
+estão aplicadas também no `motoboycity_dev` local.
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -754,9 +754,8 @@ registradas no `changelog.md` de 2026-09-23.
    falhava em
    `admin-completed-delivery-actions.tsx` (hook depois de `return`), e por isso
    testes e builds do CI nem rodavam; dois testes do `detail` falhavam por mock
-   sem `walletTransaction`. Com a correção, todos os passos do CI passaram
-   localmente, E2E inteiro incluído (ver changelog de 25/09). Confirmar o CI
-   verde no GitHub depois do push.
+   sem `walletTransaction`. Com a correção, o CI ficou verde no GitHub no push
+   de 25/09 (`5840883`), E2E inteiro incluído.
 4. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.

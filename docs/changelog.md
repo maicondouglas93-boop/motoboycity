@@ -15608,3 +15608,43 @@ DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926090000_loja_c
 ```
 
 Logos já enviadas ficariam no ImageKit, na pasta `store-logos/`.
+
+## 2026-09-25 — Publicação da configuração da loja, e a loja que não abre
+
+**Publicação** (push autorizado pelo usuário: "Commit e push"). Quatro
+commits enviados para `main`: `3602075` (vitrine sem Clerk), `76242f5` (CI),
+`0df2a76` (decisões) e `5840883` (configuração da loja no banco). O CI ficou
+verde no GitHub — o primeiro desde 21/09 —, com typecheck, lint, testes, E2E
+e os três builds. Em produção, só leituras públicas: `/health/ready` com
+PostgreSQL e Redis ok; `/company/store/operation` respondendo 401 em vez de
+404, sinal de que a API nova subiu e o `migrate deploy` do build passou; no
+Vercel, `/pedir/minha-loja` abre (200) sem nenhum script do Clerk, e link
+inexistente responde "Loja não encontrada". Os painéis do Render e do Vercel
+não foram abertos.
+
+**A loja que não abre** (achado no navegador, com a API local desligada). A
+página do cliente é de servidor e busca a loja na API; sem resposta, o cliente
+via o erro padrão do Next, em inglês e sem saída.
+
+- `app/(loja)/pedir/[slug]/error.tsx` (novo): "A loja não abriu agora", com
+  "Tentar de novo", que pede a página ao servidor outra vez (`router.refresh`
+  e `reset`) — só refazer a tela repetiria o erro.
+- O título da aba e a cor da barra não derrubam mais a página: sem resposta da
+  API, ficam genéricos (`layout.tsx`).
+- Uma consulta à API por abertura, e não três: título, cor da barra e página
+  pediam a mesma loja, e o `cache` do React agora junta as três
+  (`lojaDoLink`, em `lib/loja-publica.ts`). Fora do servidor ele não memoriza,
+  e os testes do carregador seguem iguais.
+- O comentário do layout que dizia que a cor "é a de exemplo" foi corrigido.
+
+**Arquivos:** `apps/company-web/src/app/(loja)/pedir/[slug]/error.tsx` (novo),
+`app/(loja)/pedir/[slug]/layout.tsx`, `src/lib/loja-publica.ts`,
+`src/components/loja-online/loja-nao-abriu.test.tsx` (novo);
+`docs/agent-handoff.md` (publicação, migrations e CI).
+
+**Como foi validado:** com a API local desligada, `/pedir/franklim` mostrou
+"A loja não abriu agora" e o título "Loja"; com a API de volta, "Tentar de
+novo" abriu a loja. `vitest` — 50 arquivos, 351 testes (1 novo); `tsc` e
+`eslint` limpos.
+
+**Deploy:** este recorte não foi enviado.

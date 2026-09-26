@@ -12,15 +12,26 @@ import { identidadeDoLink } from '@/lib/loja-publica';
  * "MOTOboyCity — Empresa", que é o nome do painel da central — o cliente via o
  * nome do sistema de entregas onde deveria ver o da loja.
  *
- * O nome vem da loja do link; a cor, por enquanto, é a de exemplo — a
- * identidade visual ainda não está no banco.
+ * O nome e a cor vêm da loja do link. Se a API não responder, o título e a
+ * cor ficam genéricos em vez de derrubar a página: quem diz ao cliente que a
+ * loja não abriu é a própria página, com a saída "Tentar de novo".
  */
 
 type Parametros = { params: Promise<{ slug: string }> };
 
+/** A identidade, ou `undefined` se a API não respondeu — `null` é link sem loja. */
+async function identidadeOuNada(slug: string) {
+  try {
+    return await identidadeDoLink(slug);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function generateMetadata({ params }: Parametros): Promise<Metadata> {
   const { slug } = await params;
-  const loja = await identidadeDoLink(slug);
+  const loja = await identidadeOuNada(slug);
+  if (loja === undefined) return { title: 'Loja' };
   if (!loja) return { title: 'Loja não encontrada' };
   const base = `/pedir/${slug}`;
 
@@ -41,7 +52,7 @@ export async function generateMetadata({ params }: Parametros): Promise<Metadata
 /** A barra do navegador na cor da marca — no Android, mesmo sem instalar. */
 export async function generateViewport({ params }: Parametros): Promise<Viewport> {
   const { slug } = await params;
-  const loja = await identidadeDoLink(slug);
+  const loja = await identidadeOuNada(slug);
   return { themeColor: loja?.corDaMarca ?? LOJA_DE_EXEMPLO.corDaMarca };
 }
 
