@@ -708,10 +708,13 @@ registradas no `changelog.md` de 2026-09-23.
    valor na carteira depois é o mesmo; GPS impreciso bloqueia com "Tentar de
    novo"; e sem internet o modal libera em até 8 s com "Calculado ao confirmar",
    sem travar a entrega.
-3. **CI vermelho no `main` desde 21/09** — o Lint falha em
+3. **CI vermelho no `main` de 21/09 a 25/09 — corrigido em 25/09.** O Lint
+   falhava em
    `admin-completed-delivery-actions.tsx` (hook depois de `return`), e por isso
-   testes e builds do CI nem rodam. Há também dois testes do `detail` falhando
-   no `main` por mock sem `walletTransaction`. Deixado como tarefa separada.
+   testes e builds do CI nem rodavam; dois testes do `detail` falhavam por mock
+   sem `walletTransaction`. Com a correção, todos os passos do CI passaram
+   localmente, E2E inteiro incluído (ver changelog de 25/09). Confirmar o CI
+   verde no GitHub depois do push.
 4. **Smoke autenticado do OAuth aiqfome** — falta confirmar que o provedor
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.

@@ -40,14 +40,9 @@ export function AdminCompletedDeliveryActions({ token, delivery }: AdminComplete
   const [totalValue, setTotalValue] = useState(delivery.totalValue?.toString() ?? '');
   const [driverValue, setDriverValue] = useState(delivery.driverValue?.toString() ?? '');
 
-  const { financialAdjustment } = delivery;
-
-  // Se não tem a flag (versões antigas de API ou nulo), não renderiza.
-  if (!financialAdjustment) return null;
-
-  const isLocked = !financialAdjustment.allowed;
-  const lockMessage = financialAdjustment.blockedReason ? lockedReasons[financialAdjustment.blockedReason] : '';
-
+  // Os hooks vêm antes do retorno antecipado: chamados depois dele, mudam de
+  // quantidade quando `financialAdjustment` aparece ou some entre renderizações,
+  // e o React quebra a tela.
   const cancelMutation = useMutation({
     mutationFn: async () => {
       return adminDeliveriesApi.cancelCompleted(token, delivery.id, { reason: cancelReason });
@@ -71,6 +66,14 @@ export function AdminCompletedDeliveryActions({ token, delivery }: AdminComplete
       setUpdateOpen(false);
     },
   });
+
+  const { financialAdjustment } = delivery;
+
+  // Se não tem a flag (versões antigas de API ou nulo), não renderiza.
+  if (!financialAdjustment) return null;
+
+  const isLocked = !financialAdjustment.allowed;
+  const lockMessage = financialAdjustment.blockedReason ? lockedReasons[financialAdjustment.blockedReason] : '';
 
   return (
     <>

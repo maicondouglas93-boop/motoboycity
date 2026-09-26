@@ -15371,3 +15371,33 @@ lugar do login.
 
 **Deploy:** nada foi enviado. Depois do push, a vitrine abre em produção
 mesmo sem o Clerk configurado.
+
+## 2026-09-25 — CI: o lint do admin-web e os testes do detalhe da entrega
+
+Pedido do usuário ("Sim, corrija aqui", ao ser perguntado). O CI do `main`
+estava vermelho desde 21/09 e parava no Lint, antes dos testes e dos builds:
+ele não barrava erro novo antes do deploy.
+
+- `apps/admin-web/src/components/operations/admin-completed-delivery-actions.tsx`:
+  os dois `useMutation` vinham depois do `return null` antecipado. Além de
+  reprovar o lint (`react-hooks/rules-of-hooks`), isso quebraria a tela se
+  `financialAdjustment` aparecesse ou sumisse entre renderizações. Os hooks
+  passaram para antes do retorno; o comportamento não muda.
+- `apps/api/src/deliveries/deliveries.service.spec.ts`: o detalhe do admin
+  passou a consultar o repasse do entregador (`walletTransaction`), e o mock do
+  Prisma não tinha essa tabela — dois testes do GPS falhavam. Mock
+  acrescentado, e **6 testes novos** para o ajuste financeiro, que não tinha
+  nenhum: não concluído, faturado, repasse processado, sem repasse, liberado, e
+  a empresa, que não recebe a informação.
+
+**Como foi validado**, com os passos do CI na ordem dele: `pnpm typecheck` (8
+tarefas), `pnpm lint` (8; sobra 1 aviso antigo no driver-app, que não
+reprova), testes da API (100 suítes, 1327 passam, 1 pulado), testes de reset
+de pré-produção (11), testes do driver-app (26 suítes, 210), E2E da API
+inteiro (28 suítes, 251) e os builds da API, do painel da empresa e do admin.
+O E2E rodou num banco descartável com as migrations e o seed do CI, no índice
+9 do Redis, e com as variáveis de serviços externos (Asaas, Firebase,
+ImageKit, Google, aiqfome, Groq) vazias no processo — o `.env` local não as
+preenche, e nenhuma credencial real foi usada, como no CI.
+
+**Deploy:** nada foi enviado. O CI só fica verde no GitHub depois do push.

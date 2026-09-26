@@ -151,6 +151,7 @@ describe('DeliveriesService', () => {
       groupBy: jest.Mock;
     };
     driver: { findUnique: jest.Mock };
+    walletTransaction: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let pricingService: { quote: jest.Mock };
@@ -212,6 +213,9 @@ describe('DeliveriesService', () => {
         groupBy: jest.fn().mockResolvedValue([]),
       },
       driver: { findUnique: jest.fn() },
+      // O repasse do entregador, que o detalhe do admin consulta para dizer se o
+      // pedido concluído ainda aceita ajuste financeiro.
+      walletTransaction: { findUnique: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn().mockImplementation(async (cb: (tx: unknown) => unknown) => cb(tx)),
     };
     pricingService = { quote: jest.fn() };
@@ -1518,6 +1522,36 @@ describe('DeliveriesService', () => {
       const result = await service.detail(adminUser, 'delivery-1');
 
       expect(result.id).toBe('delivery-1');
+    });
+
+    it.each([
+      ['não concluído', 'ACCEPTED', null, 'PENDING', false, 'DELIVERY_NOT_COMPLETED'],
+      ['faturado', 'COMPLETED', 'invoice-1', 'PENDING', false, 'INVOICED'],
+      ['repasse já processado', 'COMPLETED', null, 'COMPLETED', false, 'DRIVER_REPASSE_NOT_PENDING'],
+      ['sem repasse', 'COMPLETED', null, null, false, 'DRIVER_REPASSE_NOT_PENDING'],
+      ['concluído, sem fatura e com repasse pendente', 'COMPLETED', null, 'PENDING', true, null],
+    ])(
+      'admin: ajuste financeiro de pedido %s',
+      async (_caso, status, invoiceId, repasse, allowed, blockedReason) => {
+        prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status, invoiceId }));
+        prisma.walletTransaction.findUnique.mockResolvedValue(
+          repasse === null ? null : { status: repasse },
+        );
+
+        const result = await service.detail(adminUser, 'delivery-1');
+
+        expect(result.financialAdjustment).toEqual({ allowed, blockedReason });
+      },
+    );
+
+    it('a empresa não recebe a informação de ajuste financeiro', async () => {
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status: 'COMPLETED' }));
+
+      const result = await service.detail(companyUser, 'delivery-1');
+
+      expect(result.financialAdjustment).toBeUndefined();
+      expect(prisma.walletTransaction.findUnique).not.toHaveBeenCalled();
     });
 
     it.each([
