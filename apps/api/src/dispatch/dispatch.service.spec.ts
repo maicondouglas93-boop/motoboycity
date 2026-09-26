@@ -880,6 +880,102 @@ describe('DispatchService', () => {
       expect(queue.add).not.toHaveBeenCalled();
       expect(realtimeGateway.emitToDriver).not.toHaveBeenCalled();
     });
+
+    /**
+     * O erro de produção: o GPS do motoboy grava em `drivers` enquanto o
+     * despacho espera a trava da linha, e o Postgres devolve 40001 — que o
+     * Prisma entrega como P2010, e não P2034. Antes subia como 500 para quem
+     * chamou o motoboy, com a corrida já criada.
+     */
+    const conflitoNaTravaDoMotoboy = () =>
+      new Prisma.PrismaClientKnownRequestError(
+        'Raw query failed. Code: `40001`. Message: `could not serialize access due to concurrent update`',
+        {
+          code: 'P2010',
+          clientVersion: '6.19.3',
+          meta: {
+            code: '40001',
+            message: 'could not serialize access due to concurrent update',
+          },
+        },
+      );
+    const pedidoParaOfertar = {
+      id: 'delivery-1',
+      status: 'AWAITING_DRIVER',
+      displayNumber: 7,
+      destinationKnownAtCreation: false,
+      totalValue: null,
+      driverValue: null,
+      platformValue: null,
+      distanceKm: null,
+      requiresReturn: true,
+      urgent: false,
+      paymentMethod: 'BILLED',
+      company: { regionId: 'region-1', tradeName: 'Loja de teste' },
+      serviceType: { name: 'Motofrete' },
+      addresses: [offerPickupAddress],
+      serviceTypeId: 'service-1',
+    };
+
+    it('repete a oferta ao mesmo motoboy quando a trava dele dá conflito de serialização', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(pedidoParaOfertar);
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.$queryRaw.mockRejectedValueOnce(conflitoNaTravaDoMotoboy());
+      tx.deliveryOffer.create.mockResolvedValue({
+        id: 'offer-1',
+        deliveryId: 'delivery-1',
+        driverId: 'driver-1',
+        offeredAt: new Date(),
+      });
+
+      await expect(service.dispatchDelivery('delivery-1')).resolves.toBeUndefined();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(tx.deliveryOffer.create).toHaveBeenCalledWith({
+        data: { deliveryId: 'delivery-1', driverId: 'driver-1', response: 'PENDING' },
+      });
+      expect(queue.add).toHaveBeenCalledWith(
+        'offer-expire',
+        { offerId: 'offer-1' },
+        expect.objectContaining({ jobId: 'expire-offer-1' }),
+      );
+    });
+
+    it('conflito que não passa: desiste do motoboy depois de 3 tentativas, sem lançar', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(pedidoParaOfertar);
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany
+        .mockResolvedValueOnce([{ driverId: 'driver-1' }])
+        .mockResolvedValueOnce([]);
+      tx.$queryRaw.mockRejectedValue(conflitoNaTravaDoMotoboy());
+
+      await expect(service.dispatchDelivery('delivery-1')).resolves.toBeUndefined();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+      expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledTimes(2);
+      expect(tx.deliveryOffer.create).not.toHaveBeenCalled();
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('um erro do banco que não é de serialização continua subindo', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(pedidoParaOfertar);
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([{ driverId: 'driver-1' }]);
+      tx.$queryRaw.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Raw query failed.', {
+          code: 'P2010',
+          clientVersion: '6.19.3',
+          meta: { code: '42P01', message: 'relation does not exist' },
+        }),
+      );
+
+      await expect(service.dispatchDelivery('delivery-1')).rejects.toThrow('Raw query failed.');
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('eligibility revalidation', () => {

@@ -16249,3 +16249,51 @@ DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926230000_loja_p
 
 Os webhooks criados nas contas das lojas ficam lá: apague-os pelo painel do
 Asaas de cada uma.
+
+## 2026-09-26 — "Internal server error" ao chamar motoboy: a oferta repete no conflito de serialização
+
+**Sintoma** (relatado por uma empresa, com print do "Chamar entregador"): o
+painel mostra "Internal server error", e ao recarregar a corrida está lá.
+
+**Causa, pelo log do Render** (lido no painel, com o usuário logado): 9
+`POST /deliveries` com 500 entre 11h e 14h16 de 26/09, e um
+`PUT /driver/presence`, todos com `PrismaClientKnownRequestError` P2010,
+`Raw query failed. Code: 40001 — could not serialize access due to concurrent
+update`, em `DispatchService.createPendingOffers`. O erro aparece no log desde
+23/09 (o mais antigo guardado), antes dos recortes da loja online: não veio
+deles. A oferta roda em Serializable e começa com `SELECT ... FROM "drivers"
+... FOR UPDATE`; se outra transação está gravando a linha do motoboy nesse
+momento — o GPS da entrega e o heartbeat gravam em `drivers` a cada poucos
+segundos, e com o banco a ~800 ms por requisição a linha fica travada boa parte
+do tempo —, o Postgres devolve 40001 ao liberar a trava. O `catch` só tratava
+P2034 (o código que o Prisma dá nas consultas do modelo); no `$queryRaw` o mesmo
+conflito chega como P2010, com o código do Postgres em `meta.code`, e subia até
+o controller. A corrida já estava gravada: por isso ela "aparece do nada", e a
+varredura de minuto a oferta depois.
+
+**Correção:** `conflitoDeSerializacao` reconhece P2034 e P2010 com 40001 ou
+40P01; num conflito, `createPendingOffers` refaz a transação inteira para o
+mesmo motoboy, até 3 vezes (a repetição reconfere presença, pedido, teto,
+punição e ofertas pendentes do zero); esgotadas, segue para o próximo motoboy,
+como o P2034 já fazia. P2002 continua como antes, e erro de outro tipo continua
+subindo. A trava da linha do motoboy não mudou: ela é o eixo comum com aceitar,
+pegar da vitrine e as ações do ADM, que rodam em Read Committed.
+
+**Arquivos:** `apps/api/src/dispatch/dispatch.service.ts`,
+`apps/api/src/dispatch/dispatch.service.spec.ts` (3 testes: o conflito que
+passa na segunda tentativa e oferta ao mesmo motoboy; o que não passa, 3
+tentativas e segue sem lançar; e o erro que não é de serialização, que sobe).
+
+**Como foi validado:** os dois testes de conflito falham com o código anterior
+e passam com o novo; o formato do erro conferido no Prisma local (`$queryRaw`
+com erro vira P2010 e `meta: { code, message }`) e no log do Render
+(`code: 'P2010'` e `code: '40001'`). Jest da API 1401 passam e 1 pulado;
+`tsc --noEmit` e eslint da API sem erro. Não reproduzido contra Postgres de
+verdade com duas transações concorrentes.
+
+**Publicação do recorte anterior (`be86503`, Pix online pela conta Asaas):**
+enviado para `main` em 26/09; CI verde; a migration
+`20260926230000_loja_pagamento_online` foi aplicada no build do Render; a rota
+`/company/store/asaas-account` responde 401; Vercel do company e do admin em
+success no status do commit. O Pix fica desligado até
+`STORE_ASAAS_ENCRYPTION_KEY` entrar no Render.

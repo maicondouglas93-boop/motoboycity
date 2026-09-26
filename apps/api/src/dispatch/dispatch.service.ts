@@ -65,6 +65,21 @@ function punishmentExpireJobId(punishmentId: string): string {
   return `punishment-expire-${punishmentId}`;
 }
 
+/** Quantas vezes a oferta ao mesmo motoboy é refeita num conflito de serialização. */
+const TENTATIVAS_DA_OFERTA = 3;
+
+/**
+ * O Postgres pediu para repetir a transação: falha de serialização (40001) ou
+ * deadlock (40P01). Nas consultas do modelo o Prisma traduz para P2034; no
+ * `$queryRaw` ela chega como P2010, com o código do Postgres em `meta.code`.
+ */
+function conflitoDeSerializacao(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code === 'P2034') return true;
+  const codigo = (error.meta as { code?: unknown } | undefined)?.code;
+  return error.code === 'P2010' && (codigo === '40001' || codigo === '40P01');
+}
+
 @Injectable()
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
@@ -1582,19 +1597,17 @@ export class DispatchService {
    * transação: cancelamento concorre com esse lock, e o índice parcial único
    * no banco é a última defesa contra dois processos criando PENDING.
    */
-  private async createPendingOffers({
-    deliveryIds,
-    driverId,
-    companyId,
-    regionId,
-    serviceTypeIds,
-  }: {
-    deliveryIds: string[];
-    driverId: string;
-    companyId: string;
-    regionId: string;
-    serviceTypeIds: string[];
-  }): Promise<PendingOfferCreationResult> {
+  private async createPendingOffers(
+    pedido: {
+      deliveryIds: string[];
+      driverId: string;
+      companyId: string;
+      regionId: string;
+      serviceTypeIds: string[];
+    },
+    tentativa = 1,
+  ): Promise<PendingOfferCreationResult> {
+    const { deliveryIds, driverId, companyId, regionId, serviceTypeIds } = pedido;
     if (!(await this.livePresence.isLive(driverId))) {
       return { retryNextDriver: true };
     }
@@ -1695,14 +1708,25 @@ export class DispatchService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
+      /**
+       * Em Serializable, o `FOR UPDATE` acima falha com 40001 quando outra
+       * transação mexeu na linha do motoboy enquanto esta esperava a trava — e
+       * quase sempre é o GPS ou o heartbeat dele, que gravam em `drivers` a
+       * cada poucos segundos, e não outro despacho. Sem repetir, o erro subia
+       * até quem chamou o motoboy (500 com a corrida já criada). A repetição
+       * reconfere tudo do zero; esgotada, segue para o próximo motoboy.
+       */
+      if (conflitoDeSerializacao(error) && tentativa < TENTATIVAS_DA_OFERTA) {
+        return this.createPendingOffers(pedido, tentativa + 1);
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        (error.code === 'P2002' || error.code === 'P2034')
+        (error.code === 'P2002' || conflitoDeSerializacao(error))
       ) {
         this.logger.debug(
           `Corrida de dispatch detectada para ${deliveryIds.join(', ')}; nenhuma oferta duplicada foi emitida.`,
         );
-        return { retryNextDriver: error.code === 'P2034' };
+        return { retryNextDriver: error.code !== 'P2002' };
       }
       throw error;
     }
