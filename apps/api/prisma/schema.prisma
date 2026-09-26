@@ -489,6 +489,7 @@ model Company {
   storeSettings   StoreSettings?
   storeSlugs      StoreSlug[]
   storeOperation  StoreOperation?
+  storeOrders     StoreOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2054,6 +2055,9 @@ model StoreSettings {
   /// O arquivo da logo no ImageKit. Nunca sai da API: é o que permite apagar a
   /// logo trocada ou removida.
   logoExternalFileId String?    @db.VarChar(100)
+  /// A página aceita pedido. Desligado por padrão: a loja liga quando estiver
+  /// pronta para receber — até lá, a página é vitrine.
+  acceptsOrders      Boolean    @default(false)
 
   company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   current StoreSlug @relation("LinkAtual", fields: [slug], references: [slug], onDelete: NoAction)
@@ -2108,4 +2112,82 @@ model StoreOperation {
   updatedAt DateTime @updatedAt
 
   @@map("store_operations")
+}
+
+/// A etapa do pedido da loja online. Os nomes são os das telas (`EtapaDoPedido`).
+enum StoreOrderStage {
+  NOVO
+  ACEITO
+  EM_PREPARO
+  PRONTO
+  SAIU_PARA_ENTREGA
+  ENTREGUE
+  CANCELADO
+}
+
+enum StoreOrderModality {
+  ENTREGA
+  RETIRADA
+}
+
+/// Quem leva o pedido de entrega: o motoboy do MOTOboyCity ou o da loja.
+enum StoreOrderCourier {
+  MOTOBOYCITY
+  LOJA
+}
+
+enum StoreOrderCanceller {
+  LOJA
+  CLIENTE
+  SISTEMA
+}
+
+/// O pedido feito na página da loja online. Não é a entrega: é o que a loja
+/// vendeu. Itens, endereço e valores são cópias da hora da compra — mudar o
+/// cardápio ou os bairros depois não muda o que o cliente comprou.
+model StoreOrder {
+  id              String               @id @default(uuid())
+  companyId       String
+  /// O número da venda na loja (1, 2, 3...): é o que a loja e o cliente falam.
+  number          Int
+  /// O cliente no login do Firebase (`uid`). Quem compra não é usuário do sistema.
+  customerAuthId  String               @db.VarChar(64)
+  customerName    String               @db.VarChar(80)
+  customerPhone   String               @db.VarChar(20)
+  modality        StoreOrderModality
+  stage           StoreOrderStage
+  /// Nulo na retirada.
+  courier         StoreOrderCourier?
+  /// `PassoDoPedido[]`: cada etapa e a hora em que o pedido chegou nela.
+  history         Json
+  scheduledStart  DateTime?
+  scheduledEnd    DateTime?
+  prepMinutes     Int
+  deliveryMinutes Int
+  /// Sem aceite até aqui, o pedido cai sozinho. Nulo: não há prazo.
+  acceptDeadline  DateTime?
+  /// `EnderecoDaEntrega`. Nulo na retirada.
+  address         Json?
+  /// `ItemDoPedido[]`.
+  items           Json
+  subtotal        Decimal              @db.Decimal(10, 2)
+  deliveryFee     Decimal              @db.Decimal(10, 2)
+  total           Decimal              @db.Decimal(10, 2)
+  /// `FormaDePagamento`.
+  paymentMethod   String               @db.VarChar(30)
+  changeFor       Decimal?             @db.Decimal(10, 2)
+  note            String?              @db.VarChar(200)
+  cancelReason    String?              @db.VarChar(200)
+  cancelledBy     StoreOrderCanceller?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId, stage])
+  @@index([companyId, customerAuthId, createdAt])
+  @@index([stage, acceptDeadline])
+  @@map("store_orders")
 }

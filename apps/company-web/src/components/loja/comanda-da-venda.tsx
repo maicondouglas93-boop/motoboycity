@@ -1,5 +1,8 @@
 import recibo from '@/components/orders/delivery-receipt.module.css';
 import type { VendaDaLoja } from '@/lib/loja-mock';
+
+/** O que a comanda usa da venda: tudo, menos o cadastro do cliente. */
+type VendaNaComanda = Omit<VendaDaLoja, 'cadastro'>;
 import { etapaParaALoja } from '@/lib/loja-pedido';
 import estilos from './comanda-da-venda.module.css';
 
@@ -28,7 +31,7 @@ function moeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function comoChega(venda: VendaDaLoja): string {
+function comoChega(venda: VendaNaComanda): string {
   if (venda.modalidade === 'RETIRADA') return 'Retirada na loja';
   return venda.entregaPor === 'LOJA'
     ? 'Entrega · entregador da loja'
@@ -40,7 +43,7 @@ export function ComandaDaVenda({
   loja,
   impressoEm,
 }: {
-  venda: VendaDaLoja;
+  venda: VendaNaComanda;
   loja: string;
   impressoEm: string;
 }) {

@@ -10,32 +10,34 @@
 
 Existe a área `/loja` no `company-web`. As telas do catálogo (Produtos,
 Organizar, cadastro e edição), as da operação (status, Horários, Tipos de
-pedido e Notificações) e Configurações **gravam na API** desde 2026-09-25; só
-Vendas é **demonstração**:
+pedido e Notificações) e Configurações **gravam na API** desde 2026-09-25, e
+Vendas desde 2026-09-26:
 
-| Tela                                   | O que faz                                                               |
-| -------------------------------------- | ----------------------------------------------------------------------- |
-| Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir — **API**            |
-| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento, agendados, comanda       |
-| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências — **API**              |
-| `/loja/produtos/organizar`             | Categorias e ordem do catálogo — **API**                                |
-| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só — **API**                           |
-| `/loja/horarios`                       | Semana, datas especiais, feriados, recado de fechada — **API**          |
-| `/loja/tipos-de-pedido`                | Entrega, retirada, agendado e recebimento (aceite e tempos) — **API**   |
-| `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente — **API**            |
-| `/loja/configuracoes`                  | Link, identidade, pagamento, bairros e coleta — **API**; Asaas em breve |
+| Tela                                   | O que faz                                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------- |
+| Status, no alto de todas as telas      | Aberta, fechada ou pausada; pausar, fechar e abrir — **API**                |
+| `/loja/vendas`                         | Fila por etapa, aceite, preparo, cancelamento, agendados, comanda — **API** |
+| `/loja/produtos`                       | Lista, filtros por situação, aviso de pendências — **API**                  |
+| `/loja/produtos/organizar`             | Categorias e ordem do catálogo — **API**                                    |
+| `/loja/produtos/novo` e `/[id]/editar` | Cadastro e edição, um formulário só — **API**                               |
+| `/loja/horarios`                       | Semana, datas especiais, feriados, recado de fechada — **API**              |
+| `/loja/tipos-de-pedido`                | Entrega, retirada, agendado e recebimento (aceite e tempos) — **API**       |
+| `/loja/notificacoes`                   | Avisos do lojista (notificação e som) e do cliente — **API**                |
+| `/loja/configuracoes`                  | Link, identidade, pagamento, bairros e coleta — **API**; Asaas em breve     |
 
-**Vendas ainda não usa backend.** Os dados de
-exemplo vêm de `apps/company-web/src/lib/loja-mock.ts`, e as vendas ficam no
-`localStorage` deste navegador, por `lib/loja-demo.ts` — é o que faz painel e
-página do cliente conversarem na demonstração, em abas do mesmo navegador. O
-painel copia para lá a operação que a API guardou, e a demonstração segue o
-horário e a pausa configurados. Os dois arquivos pedem para ser **apagados**, e
-não adaptados, por quem for ligar o pedido à API. As regras
-(`loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts`, `loja-operacao.ts`)
-ficam: o servidor precisa delas. A loja **não está no menu** do painel; as telas
-são alcançadas pela URL. O porquê está comentado no `NAV_ITEMS` do
-`top-nav.tsx`.
+**O pedido tem backend** (2026-09-26, migration `20260926120000_loja_pedido`):
+tabela `store_orders`, módulo `company/store-orders` e os contratos em
+`packages/*` (`store-checkout.schema.ts`, `store-order.ts`,
+`public-store-orders.ts`, `company-store-orders.ts`). As regras de horário, de
+etapa e de operação saíram do `company-web` para `packages/validation`
+(`store-*.rules.ts`), e o servidor refaz com elas a conta do checkout. Vendas lê
+e muda os pedidos pela API, e a Loja **está no menu** do painel. A loja só
+recebe pedido pela página quando liga **Pedidos pela página**, no alto de
+Vendas.
+
+Só a loja de exemplo (`/pedir/minha-loja`) ainda usa `loja-mock.ts` e o
+`localStorage` (`lib/loja-demo.ts`); os dois pedem para ser **apagados**, e não
+adaptados, junto com ela.
 
 **O catálogo tem backend, e o painel já o usa** (2026-09-25): tabelas `store_categories`, `store_products`, `store_product_sizes`,
 `store_option_groups` e `store_options` (migration
@@ -48,10 +50,11 @@ validação, para o painel e o servidor não discordarem.
 **O link da loja e a vitrine** (2026-09-25): a loja cria o link em
 Configurações (`store_settings` e `store_slugs`, migration
 `20260925190000_loja_link`), e `/pedir/<link>` mostra o cardápio publicado,
-pela rota pública `GET /public/stores/:slug`. É **vitrine**: mostra o horário,
-a situação (aberta, fechada, pausada, com o recado) e o tempo de entrega, mas
-não recebe pedido, e não mostra taxa nem pagamento, que ainda não estão no
-banco. Link antigo leva ao
+pela rota pública `GET /public/stores/:slug`, com o horário, a situação
+(aberta, fechada, pausada, com o recado), o tempo de entrega, a taxa dos bairros
+e as formas de pagamento. Recebe pedido quando a loja liga os pedidos pela
+página e o login do cliente está configurado; sem uma das duas, é **vitrine**.
+Link antigo leva ao
 atual; empresa pendente ou suspensa não aparece. `/pedir/minha-loja` continua
 sendo a demonstração inteira, com os dados de exemplo.
 
@@ -71,8 +74,8 @@ em `store_settings`, e as formas de pagamento e os bairros com taxa como dois
 blocos novos de `store_operations`. Pagamento online fica recusado até a conta
 Asaas existir.
 
-Não existe ainda: a conta Asaas da loja, o pedido da loja e o checkout ligado à
-API.
+Não existe ainda: a conta Asaas da loja (e com ela o pagamento online e o
+estorno), a corrida nascendo do pedido, o Web Push e o "Salvar cliente".
 
 ## Decisões já tomadas
 
@@ -135,14 +138,19 @@ API.
 19. **Cliente só vira cadastro se a loja salvar** (2026-09-25, usuário), com o
     aviso no checkout de que os dados vão para a loja. Fecha o "em aberto" do
     item 1.
+20. **Login do cliente pelo Firebase, só com Google** (2026-09-26, usuário). O
+    Clerk, escolhido antes, exige domínio próprio em produção, e ainda não há
+    domínio: a loja roda em `.vercel.app`. O Firebase já é do projeto (push do
+    motoboy) e aceita o endereço do Vercel como domínio autorizado.
 
 ## A fazer
 
 ### 1. Salvar o cliente com os dados do pedido do PWA
 
 > **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
-> O checkout já coleta telefone e endereço estruturado, e o endereço fica
-> salvo por conta do Clerk.
+> O checkout já coleta telefone e endereço estruturado, e cada pedido os grava
+> em `store_orders`; neste aparelho, o endereço fica guardado para o próximo
+> pedido.
 
 Na venda, oferecer o cadastro do cliente no registro que o painel já usa, para
 que ele deixe de ser comprador avulso e possa receber entrega pelo fluxo normal.
@@ -177,8 +185,9 @@ checkout de que os dados vão para a loja.
 
 ### 2. Aceite automático ou manual
 
-> **Desenhado nas telas de demonstração em 2026-09-23, e refeito com as etapas
-> do pedido em 2026-09-25**, em Tipos de pedido → Recebimento. Falta o backend.
+> **Desenhado nas telas de demonstração em 2026-09-23, refeito com as etapas
+> do pedido em 2026-09-25, e no servidor desde 2026-09-26**, em Tipos de pedido
+> → Recebimento. Falta o estorno, que depende do Asaas.
 
 Automático (padrão): o pedido nasce aceito. Manual: fica em "Novo" até alguém
 aceitar — e dá para mudar o tempo de preparo daquele pedido na hora de aceitar.
@@ -190,8 +199,10 @@ cancelamento vale nos dois modos: até o pedido ficar pronto, na entrega.
 **Prazo do aceite** (2026-09-25): cada loja escolhe, e vem ligado com 10
 minutos. Não aceito no prazo, o pedido é cancelado pelo sistema e o cliente é
 avisado. Para agora, o prazo conta do recebimento; agendado, vai até a hora de
-a cozinha começar. Regra em `prazoDoAceite` (`lib/loja-pedido.ts`); na
-integração, é um trabalho agendado no servidor.
+a cozinha começar. Regra em `prazoDoAceite` (`store-order.rules.ts`). No
+servidor, o pedido vencido cai na leitura seguinte da fila ou dos pedidos do
+cliente, sem tarefa agendada; o aviso ao cliente com a página fechada espera o
+Web Push.
 
 **Estorno** (decisão 18): pedido pago online e recusado, cancelado ou vencido
 é estornado inteiro, automaticamente, pela conta Asaas da loja — pela decisão
@@ -199,7 +210,9 @@ integração, é um trabalho agendado no servidor.
 
 ### 3. A empresa configura o valor da taxa de entrega cobrada no PWA
 
-> **Desenhado nas telas de demonstração em 2026-09-23.** Falta o backend.
+> **Desenhado nas telas de demonstração em 2026-09-23; os bairros com taxa
+> gravam na API desde 2026-09-25, e o checkout cobra a taxa do bairro desde
+> 2026-09-26.**
 
 A tela de Configurações já tem o checkbox "cobrar a entrega do cliente na
 página", mas **não tem onde pôr o valor**. Falta o campo.
@@ -252,8 +265,9 @@ prefixo porque `/loja` já é a área do painel neste mesmo app.
 
 Feito: cabeçalho com identidade, barra de categorias grudada no topo, cardápio
 em linhas com miniatura, folha do produto (tamanho, grupos, quantidade), sacola
-com checkout e lista de "Meus pedidos". O catálogo lê `loja-mock.ts`; a sacola
-e os pedidos ficam no `localStorage` do aparelho.
+com checkout e lista de "Meus pedidos". Na loja de verdade, o catálogo vem da
+API, o pedido é gravado nela e "Meus pedidos" a consulta; a sacola fica no
+`localStorage` do aparelho. A loja de exemplo guarda tudo no aparelho.
 
 **Sem barra de abas no rodapé, e isso foi decidido.** Ela brigaria com a barra
 da sacola, que é a mais importante da tela; "Home" e "Cardápio" seriam a mesma
@@ -268,8 +282,9 @@ X-Burguer (grupo obrigatório sem escolha disponível) e o Refrigerante
 problema que o aviso do painel existe para evitar.
 
 **Login exigido para comprar** (decisão de 2026-09-23). Navegar e montar a
-sacola não exige conta; fechar exige. A identidade é do Clerk, escopado ao grupo
-de rotas `(loja)` — ver `agent-handoff.md` para por que ele não toca o painel.
+sacola não exige conta; fechar exige. A identidade é do Firebase, só com Google
+(decisão 20), carregado só no grupo de rotas `(loja)` — ver `agent-handoff.md`
+para por que ele não toca o painel.
 
 A loja respeita horário por dia com mais de uma faixa, período depois da
 meia-noite, datas especiais (feriado, férias, horário especial), o ajuste da
@@ -300,9 +315,8 @@ comportamento sem internet e a instalação em aparelho real.
 Os avisos saem do navegador, com a página aberta em alguma aba: som e
 notificação para a loja, notificação para o cliente. Falta o Web Push de
 servidor, que avisa com o navegador fechado — da loja e do cliente (o que existe
-é FCM para o app Android do motoboy). E falta o backend inteiro: hoje o pedido
-termina no `localStorage`, e só chega à tela de vendas do painel aberta no mesmo
-navegador.
+é FCM para o app Android do motoboy). Enquanto isso, Vendas consulta a fila a
+cada 10 s e "Meus pedidos", a cada 20 s.
 
 **Contrato a alterar na integração:** `CompanyCustomerAddress` não tem bairro, e
 a taxa por bairro obriga o checkout a coletá-lo. Mexe em `packages/types`, na
@@ -318,15 +332,13 @@ validação e no cadastro de clientes do painel.
    2026-09-25. Falta a conta Asaas da loja.
 3. Ligar as telas do painel que já existem — ~~Produtos, Organizar, Horários,
    Tipos de pedido, Notificações, status e Configurações~~, feito em
-   2026-09-25. Falta Vendas, que depende do pedido no banco; **apagar** o
-   `loja-mock.ts` quando a última tela deixar de usá-lo.
+   2026-09-25 — ~~e Vendas~~, em 2026-09-26. Falta **apagar** a loja de
+   exemplo, com o `loja-mock.ts` e o `loja-demo.ts`.
 4. O PWA do cliente: ~~catálogo~~ (vitrine pelo link, feito em 2026-09-25),
-   carrinho, checkout (com telefone e endereço estruturado, por causa do item
-   1).
+   ~~carrinho e checkout (com telefone e endereço estruturado, por causa do item 1)~~, feitos em 2026-09-26. Pagamento online espera o Asaas.
 5. Pedido da loja virando entrega, com o aceite do item 2 — só para a loja que
    entrega pelo MOTOboyCity (decisão 15): as etapas até "Pronto" são do pedido;
    "Saiu para entrega" e "Entregue" vêm da corrida.
    Junto, o Web Push de servidor para os avisos da loja e do cliente.
 6. Salvar cliente a partir da venda (item 1).
-7. Pôr o item "Loja" de volta no `NAV_ITEMS` — no mesmo recorte em que as telas
-   deixarem de ser demonstração.
+7. ~~Pôr o item "Loja" de volta no `NAV_ITEMS`~~, feito em 2026-09-26.

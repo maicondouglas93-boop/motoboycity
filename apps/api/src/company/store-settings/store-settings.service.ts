@@ -40,6 +40,7 @@ function paraConfiguracao(loja: LojaGravada): StoreSettings {
     name: loja.name,
     suggestedSlug: loja.slug,
     identity: identidade(loja),
+    recebePedidos: loja.acceptsOrders,
   };
 }
 
@@ -83,6 +84,7 @@ export class StoreSettingsService {
       name: empresa.tradeName,
       suggestedSlug: suggestStoreSlug(empresa.tradeName),
       identity: IDENTIDADE_PADRAO,
+      recebePedidos: false,
     };
   }
 
@@ -131,6 +133,20 @@ export class StoreSettingsService {
         brandColor: payload.brandColor,
         actionColor: payload.actionColor,
       },
+    });
+    if (count === 0) throw semLink();
+    return this.daEmpresa(companyId);
+  }
+
+  /**
+   * Liga ou desliga os pedidos pela página. Desligada, a página volta a ser
+   * vitrine; os pedidos já feitos continuam em Vendas até terminar.
+   */
+  async updateAcceptsOrders(user: User, recebePedidos: boolean): Promise<StoreSettings> {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    const { count } = await this.prisma.storeSettings.updateMany({
+      where: { companyId },
+      data: { acceptsOrders: recebePedidos },
     });
     if (count === 0) throw semLink();
     return this.daEmpresa(companyId);
@@ -198,7 +214,13 @@ export class StoreSettingsService {
                 brandColor: true,
                 actionColor: true,
                 logoUrl: true,
+                acceptsOrders: true,
               },
+            },
+            addresses: {
+              where: { isPrimary: true },
+              take: 1,
+              select: { street: true, number: true, complement: true, city: true, state: true },
             },
           },
         },
@@ -212,6 +234,22 @@ export class StoreSettingsService {
       this.catalogo.publicCatalog(link.company.id),
       this.operacao.publicOperation(link.company.id),
     ]);
+    // A retirada é no endereço que a loja escolheu, ou no da empresa. O da
+    // empresa não tem bairro no cadastro: vai vazio.
+    const principal = link.company.addresses[0];
+    const enderecoDeRetirada =
+      operacao.retirada.endereco ??
+      (principal
+        ? {
+            rua: principal.street,
+            numero: principal.number,
+            complemento: principal.complement,
+            bairro: '',
+            cidade: principal.city,
+            estado: principal.state,
+          }
+        : null);
+
     return {
       kind: 'store',
       store: {
@@ -220,6 +258,8 @@ export class StoreSettingsService {
         identity: identidade(loja),
         ...cardapio,
         operacao,
+        recebePedidos: loja.acceptsOrders,
+        enderecoDeRetirada,
       },
     };
   }

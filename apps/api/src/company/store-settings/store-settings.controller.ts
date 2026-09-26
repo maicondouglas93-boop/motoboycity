@@ -13,8 +13,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import type { StoreSettings } from '@motoboycity/types';
 import {
+  storeAcceptsOrdersSchema,
   updateStoreIdentitySchema,
   updateStoreLinkSchema,
+  type StoreAcceptsOrdersPayload,
   type UpdateStoreIdentityPayload,
   type UpdateStoreLinkPayload,
 } from '@motoboycity/validation';
@@ -54,6 +56,14 @@ export class StoreSettingsController {
     @Body(new ZodValidationPipe(updateStoreIdentitySchema)) body: UpdateStoreIdentityPayload,
   ): Promise<StoreSettings> {
     return this.storeSettingsService.updateIdentity(user, body);
+  }
+
+  @Put('accepts-orders')
+  updateAcceptsOrders(
+    @CurrentUser() user: User,
+    @Body(new ZodValidationPipe(storeAcceptsOrdersSchema)) body: StoreAcceptsOrdersPayload,
+  ): Promise<StoreSettings> {
+    return this.storeSettingsService.updateAcceptsOrders(user, body.recebePedidos);
   }
 
   /** A logo vai por arquivo (campo `file`), e o servidor a guarda no ImageKit. */

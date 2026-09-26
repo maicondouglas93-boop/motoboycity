@@ -1,6 +1,11 @@
 import { cache } from 'react';
 import { ApiError, createPublicStoreApi } from '@motoboycity/api-client';
-import type { OperacaoPublica, PublicStore, PublicStoreProduct } from '@motoboycity/types';
+import type {
+  EnderecoDeRetirada,
+  OperacaoPublica,
+  PublicStore,
+  PublicStoreProduct,
+} from '@motoboycity/types';
 import {
   CATEGORIAS_DE_EXEMPLO,
   LOJA_DE_EXEMPLO,
@@ -9,15 +14,17 @@ import {
   type ProdutoDeExemplo,
 } from '@/lib/loja-mock';
 import type { TemaDaLoja } from '@/lib/contraste';
+import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 
 /**
  * De onde a página do cliente tira a loja: do banco, pelo link, ou da
  * demonstração, no link reservado a ela.
  *
- * A loja de verdade abre como VITRINE: mostra o cardápio publicado, o horário e
- * a situação dela, e não recebe pedido — o pedido ainda não chega à loja, e um
- * cliente de verdade acharia que pediu. A demonstração continua com o fluxo
- * inteiro, no `localStorage`, para mostrar como vai ser.
+ * A loja de verdade recebe pedido quando ela liga os pedidos pela página e o
+ * login do cliente está configurado neste deploy; sem as duas coisas, abre
+ * como VITRINE: o cardápio, o horário e a situação, sem pedido. A
+ * demonstração segue com o fluxo inteiro no `localStorage`, para mostrar como
+ * é.
  *
  * Roda no servidor: a página chega pronta, e o link antigo redireciona antes
  * de o navegador baixar qualquer coisa.
@@ -42,7 +49,7 @@ export interface IdentidadeDaLoja {
 }
 
 export interface CardapioDaPagina {
-  /** Loja de verdade: mostra o cardápio, e não recebe pedido. */
+  /** Mostra o cardápio, e não recebe pedido. */
   vitrine: boolean;
   identidade: IdentidadeDaLoja;
   categorias: CategoriaDeExemplo[];
@@ -52,6 +59,8 @@ export interface CardapioDaPagina {
    * configuração do `localStorage` — a mesma que o painel copia para lá.
    */
   operacao: OperacaoPublica | null;
+  /** Onde o cliente retira: o endereço que a loja escolheu, ou o da empresa. */
+  enderecoDeRetirada: EnderecoDeRetirada | null;
 }
 
 export type LojaDoLink =
@@ -117,6 +126,7 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
         categorias: CATEGORIAS_DE_EXEMPLO,
         produtos: PRODUTOS_DE_EXEMPLO,
         operacao: null,
+        enderecoDeRetirada: LOJA_DE_EXEMPLO.pontoDeColeta,
       },
     };
   }
@@ -129,11 +139,12 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
     return {
       tipo: 'loja',
       cardapio: {
-        vitrine: true,
+        vitrine: !(achado.store.recebePedidos && CONTA_DISPONIVEL),
         identidade: identidade(achado.store),
         categorias: achado.store.categories.map(({ id, name }) => ({ id, nome: name })),
         produtos: achado.store.products.map(produtoDaVitrine),
         operacao: achado.store.operacao,
+        enderecoDeRetirada: achado.store.enderecoDeRetirada,
       },
     };
   } catch (erro) {

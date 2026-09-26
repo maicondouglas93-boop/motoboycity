@@ -15648,3 +15648,179 @@ novo" abriu a loja. `vitest` — 50 arquivos, 351 testes (1 novo); `tsc` e
 `eslint` limpos.
 
 **Deploy:** este recorte não foi enviado.
+
+## 2026-09-26 — As regras da loja no pacote de validação
+
+**Decisão:** as regras de horário, de etapa do pedido e de operação da loja
+saem do `company-web` para `packages/validation`, sem mudar comportamento.
+
+**Motivo:** o pedido vai ao servidor, e o servidor tem de decidir com as mesmas
+regras que a página mostra: loja aberta, horário que dá para agendar, etapa
+seguinte, prazo do aceite, pedido mínimo, modalidades ligadas. Duas cópias
+acabariam discordando.
+
+- `store-schedule.rules.ts` (`situacaoDaLoja`, `horariosParaAgendar`,
+  `aplicarAjuste`...), `store-order.rules.ts` (`avancar`, `podeCancelar`,
+  `inicioDoPedido`, `prazoDoAceite`, `chamarMotoboyCity`, `TransicaoInvalida`) e
+  `store-operation.rules.ts`, exportados pelo índice do pacote.
+- `packages/validation` passa a depender de `@motoboycity/types` (só tipos).
+- `lib/loja-horario.ts`, `loja-pedido.ts` e `loja-operacao.ts` do painel viram
+  reexportações: nenhum consumidor mudou de import.
+
+**Arquivos:** `packages/validation/src/company/store-schedule.rules.ts`,
+`store-order.rules.ts`, `store-operation.rules.ts` (novos),
+`packages/validation/src/index.ts`, `packages/validation/package.json`,
+`pnpm-lock.yaml`, `apps/company-web/src/lib/loja-horario.ts`,
+`loja-pedido.ts`, `loja-operacao.ts`.
+
+**Como foi validado:** os testes das regras, que ficam no `company-web`,
+passam contra o código movido (validação da rodada inteira no fim da entrada
+seguinte).
+
+## 2026-09-26 — O pedido da loja online no banco, e o login do cliente pelo Firebase
+
+**Decisões do usuário:** trocar o Clerk por outro login ("nao sabia que o clerk
+nao iria funcionar com vercel.app") e entrar **só com Google**. O Clerk de
+produção exige domínio próprio, e ainda não há domínio: a loja roda em
+`motoboycity-company-web.vercel.app`. O Firebase Authentication é do mesmo
+projeto do push do motoboy, e aceita o endereço do Vercel como domínio
+autorizado.
+
+**Banco** — migration `20260926120000_loja_pedido`, aditiva: tabela
+`store_orders` (número por empresa com chave única, etapa, histórico, itens e
+endereço em JSONB, valores em `Decimal`, uid do Firebase do cliente), quatro
+enums (`StoreOrderStage`, `StoreOrderModality`, `StoreOrderCourier`,
+`StoreOrderCanceller`) e `store_settings.acceptsOrders`, desligado por padrão.
+Validada num banco descartável do Postgres local: aplicar todas, conferir
+igual ao schema, desfazer, conferir igual ao anterior, reaplicar — as quatro
+etapas ok. Aplicada no `motoboycity_dev` local (`prisma migrate diff` sem
+diferença). **Não foi para produção.**
+
+**API** — módulo `company/store-orders`:
+
+- `POST` e `GET /public/stores/:slug/orders` (cliente), atrás do
+  `ClienteDaLojaGuard`: token do Firebase conferido pelo `firebase-admin`, só
+  com o `FIREBASE_PROJECT_ID` que o push já usa. Sem ele, 503
+  `STORE_ORDERS_UNAVAILABLE`; sem token ou com token inválido, 401. O
+  `firebase-admin/auth` é importado na hora, porque o `jose` dele é ESM e quebra
+  o Jest. O `POST` tem limite de 10 por minuto.
+- O checkout refaz tudo no servidor, em centavos: modalidade ligada, itens e
+  preço do cardápio publicado, pedido mínimo, loja aberta ou horário agendado
+  válido, bairro atendido e a taxa dele, forma de pagamento (online recusado) e
+  troco. Total diferente do que o cliente viu: 409 `STORE_ORDER_TOTAL_CHANGED`,
+  com o total novo, sem gravar. Loja com os pedidos desligados: 409
+  `STORE_NOT_ACCEPTING_ORDERS`.
+- `GET /company/store/orders`, `PUT :id/stage`, `POST :id/cancel` e
+  `POST :id/call-motoboycity` (loja). Toda mudança é condicional ao
+  `updatedAt` lido (três tentativas); transição que a regra não permite, 409
+  `STORE_ORDER_STAGE_INVALID`. O NOVO que passou do prazo do aceite é cancelado
+  na leitura seguinte, como `SISTEMA`, sem tarefa agendada.
+- `PUT /company/store/settings/accepts-orders`; a loja pública passa a dizer se
+  recebe (`recebePedidos`) e o endereço de retirada.
+
+**Contratos:** `packages/types/src/store-order.ts` (novo) e os campos novos de
+`store-settings.ts`; `packages/validation/src/company/store-checkout.schema.ts`
+(novo); `packages/api-client/src/public-store-orders.ts` e
+`company-store-orders.ts` (novos) e `updateAcceptsOrders`.
+
+**Página do cliente** — o Clerk saiu inteiro (`@clerk/nextjs`,
+`@clerk/localizations`, `src/proxy.ts` e as páginas `sign-in`/`sign-up`), e o
+`firebase` entrou (`lib/firebase-da-loja.ts`: janela do Google, com
+redirecionamento quando o navegador a bloqueia). A loja recebe pedido quando a
+loja liga os pedidos **e** as quatro `NEXT_PUBLIC_FIREBASE_*` existem no build;
+senão, é vitrine, e a sacola diz por quê. A sacola manda o pedido à API e leva
+a "Meus pedidos", que consulta a API a cada 20 s. As páginas da sacola e dos
+pedidos ganharam carregador de servidor.
+
+**O pnpm e o React Native.** O `@firebase/auth` declara o AsyncStorage do React
+Native como dependência opcional, e o pnpm a ligava com a do driver-app, criando
+uma segunda cópia do react-native com o React do painel (19.2.8). Ela ficava no
+`node_modules/.pnpm` içado, e o `@react-native/jest-preset` do driver-app
+passava a carregá-la: seis testes do driver-app caíram com "Invalid hook call".
+`overrides`, `packageExtensions`, `ignoredOptionalDependencies` e
+`peerDependencyRules` não resolveram; um `.pnpmfile.cjs` na raiz tira essa
+dependência do `@firebase/auth`, e o lock ficou sem a cópia. Também saiu o
+`cache: 'no-store'` das duas leituras novas do `api-client`: o `RequestInit` do
+React Native não tem esse campo, e o typecheck do driver-app acusava. A API já
+responde `Cache-Control: no-store` nessas rotas.
+
+**Arquivos:** `.pnpmfile.cjs` (novo), `pnpm-lock.yaml`;
+`apps/api/prisma/schema.prisma`, a migration nova,
+`apps/api/src/company/store-orders/*` (novos, com dois specs),
+`apps/api/src/app.module.ts`, `store-settings.controller.ts`,
+`store-settings.service.ts` e o spec, `apps/api/test/store-orders.e2e-spec.ts`
+(novo), `apps/api/test/store-link.e2e-spec.ts`; os contratos acima;
+`apps/company-web/package.json`, `.env.example` (as quatro variáveis, vazias),
+`src/lib/conta-da-loja.ts`, `firebase-da-loja.ts` (novo), `loja-publica.ts`,
+`api-client.ts`, `src/app/(loja)/layout.tsx`,
+`src/app/(loja)/pedir/[slug]/sacola/*` e `pedidos/*`,
+`src/components/loja-online/conta.tsx`, `armazenamento.ts`,
+`folha-do-produto.tsx`, `loja-publica.tsx`, `pedidos-do-cliente.ts` (novo),
+`loja-publica.test.tsx`, `pedido-de-verdade.test.tsx` (novo);
+`docs/agent-handoff.md`, `architecture.md`, `plano-loja-online.md` (decisão 20)
+e `business-rules.md`.
+
+**Como foi validado:** `pnpm typecheck` 8/8; `pnpm lint` 8/8 (um aviso antigo,
+`no-void` em `driver-app/src/lib/apiClient.ts`, arquivo não tocado); Jest da
+API, 1359 passam e 1 pulado; Jest do driver-app, 210/210 (eram 6 falhas antes
+do `.pnpmfile.cjs`); vitest do `company-web`, 51 arquivos e 356 testes; E2E
+inteiro da API em banco e Redis descartáveis, 29 suítes e 252 testes, com o
+verificador do Firebase trocado por um de teste; `nest build` e `next build`
+dos dois painéis sem erro. **O checkout não foi feito no navegador**: sem a
+configuração do Firebase, a loja local é vitrine. Ficou coberto pelo E2E e
+pelos testes de tela.
+
+**Deploy:** nada foi enviado. Para o login funcionar em produção, falta o
+usuário ativar o Google no console do Firebase, autorizar o domínio do Vercel,
+cadastrar o app web e pôr as quatro `NEXT_PUBLIC_FIREBASE_*` no Vercel, com
+deploy novo; as variáveis do Clerk no Vercel podem sair.
+
+**Reverter** a migration, se preciso:
+
+```sql
+ALTER TABLE "store_orders" DROP CONSTRAINT "store_orders_companyId_fkey";
+ALTER TABLE "store_settings" DROP COLUMN "acceptsOrders";
+DROP TABLE "store_orders";
+DROP TYPE "StoreOrderStage";
+DROP TYPE "StoreOrderModality";
+DROP TYPE "StoreOrderCourier";
+DROP TYPE "StoreOrderCanceller";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260926120000_loja_pedido';
+```
+
+Os pedidos gravados se perdem junto com a tabela.
+
+## 2026-09-26 — Vendas com os pedidos de verdade, e a Loja no menu
+
+**Decisão:** a tela de Vendas deixa de ser demonstração e lê e muda os pedidos
+pela API; com isso, a Loja volta ao menu do painel.
+
+- `components/loja/vendas.ts` (novo): a fila da loja, relida a cada 10 s, e as
+  ações (avançar etapa, cancelar, passar ao MOTOboyCity), que atualizam a tela
+  com a resposta.
+- No alto de Vendas, **Pedidos pela página**: liga e desliga o
+  `acceptsOrders`, e avisa quando o login do cliente não está configurado.
+- "Chamar motoboy do MOTOboyCity" só marca o pedido: **a corrida ainda não
+  nasce dele**, e a tela diz para chamar pelo botão "Chamar" do painel. Nenhum
+  texto promete o que o sistema não faz.
+- Os avisos do lojista (pedido novo, cancelado, agendado, loja fechando) usam
+  a fila real e saem do layout da Loja para o do painel inteiro — o pedido chega
+  com a lojista em qualquer tela —, e só consultam a fila da empresa que ligou
+  os pedidos.
+- A comanda impressa usa o pedido e o nome da loja do banco.
+- Menu: item "Loja", que leva a Vendas e fica marcado em toda `/loja`, com o
+  ícone `Store` do lucide até existir a ilustração dele.
+
+**Arquivos:** `apps/company-web/src/components/loja/vendas.ts` (novo),
+`operacao.ts`, `avisos-da-loja.tsx`, `impressao-da-venda.tsx`,
+`comanda-da-venda.tsx`, `vendas.test.tsx` (reescrito), `configuracoes.test.tsx`;
+`src/app/(app)/layout.tsx`, `src/app/(app)/loja/layout.tsx`,
+`src/app/(app)/loja/vendas/page.tsx`; `src/components/layout/top-nav.tsx`.
+
+**Como foi validado:** a mesma rodada da entrada anterior, mais o navegador:
+um pedido de teste gravado por SQL no `motoboycity_dev` local, na empresa de
+teste `franklim`, passou de NOVO a ACEITO, EM_PREPARO e PRONTO por Vendas, e a
+comanda saiu com os itens, o troco e o nome da loja. O item "Loja" apareceu no
+menu e ficou marcado nas telas de `/loja`.
+
+**Deploy:** nada foi enviado.

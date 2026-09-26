@@ -507,9 +507,10 @@ nem buscando motoboy.
   depois do aceite e até o pedido sair, e o pedido passa a seguir o caminho da
   corrida, cobrada na fatura como as demais.
 
-Nas telas de demonstração (Tipos de pedido e Vendas) desde 2026-09-25; no
-backend, ainda não — o pedido da loja não existe no banco. Ver
-`docs/plano-loja-online.md`, decisão 15.
+No backend desde 2026-09-26: cada pedido guarda quem entrega ao nascer, e a
+loja passa um pedido ao MOTOboyCity em Vendas. **A corrida ainda não nasce
+sozinha do pedido**: a loja chama o motoboy pelo botão "Chamar" do painel, e a
+tela diz isso. Ver `docs/plano-loja-online.md`, decisão 15.
 
 ## Loja online: taxa, estorno e cadastro do cliente
 
@@ -527,6 +528,19 @@ Decisões de 2026-09-25, do usuário:
   tem "Salvar cliente" (ou "salvar este endereço", se o telefone já existe). O
   checkout avisa que os dados do pedido vão para a loja. Ninguém é cadastrado
   automaticamente.
+
+## Loja online: o login do cliente
+
+Decisão de 2026-09-26, do usuário: o cliente entra **só com Google**, pelo
+Firebase Authentication do mesmo projeto do push. Navegar e montar a sacola não
+pedem conta; fechar o pedido pede. O cliente da loja não é usuário do sistema:
+não tem senha nem sessão no MOTOboyCity, e o painel não enxerga a conta dele.
+O Clerk, escolhido antes, foi trocado porque exige domínio próprio em produção,
+e a loja roda no endereço do Vercel.
+
+A loja só recebe pedido pela página quando liga **Pedidos pela página** (em
+Vendas; vem desligado). Desligada — ou sem o login configurado —, a página
+mostra o cardápio como vitrine.
 
 ## Arquitetura de sessão/token
 

@@ -1,5 +1,5 @@
 import type { StoreCategory, StoreProduct } from './store-catalog.js';
-import type { OperacaoPublica } from './store-operation.js';
+import type { EnderecoDeRetirada, OperacaoPublica } from './store-operation.js';
 
 /** O fundo da página da loja. As duas cores são medidas contra ele. */
 export type StoreTheme = 'CLARO' | 'ESCURO';
@@ -29,6 +29,8 @@ export interface StoreSettings {
   name: string;
   suggestedSlug: string;
   identity: StoreIdentity;
+  /** A loja ligou os pedidos pela página. Desligado, a página é vitrine. */
+  recebePedidos: boolean;
 }
 
 /** O produto como o cliente vê: só o publicado aparece, e a data de edição não interessa. */
@@ -44,6 +46,13 @@ export interface PublicStore {
   products: PublicStoreProduct[];
   /** Horário, ajuste da hora, tipos de pedido, pagamento e bairros — sem os avisos. */
   operacao: OperacaoPublica;
+  /** A loja ligou os pedidos pela página. Desligado, a página é vitrine. */
+  recebePedidos: boolean;
+  /**
+   * Onde o cliente retira: o endereço que a loja escolheu, ou o da empresa — o
+   * mesmo de onde o motoboy retira. `null` se nenhum dos dois existe.
+   */
+  enderecoDeRetirada: EnderecoDeRetirada | null;
 }
 
 /**

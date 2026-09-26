@@ -21,6 +21,13 @@ export interface ItemEscolhido {
   nome: string;
   tamanho: string | null;
   escolhas: string[];
+  /**
+   * Os ids do tamanho e das escolhas: é por eles que o servidor confere o
+   * preço — nome muda, e dois adicionais podem se chamar igual. Sacola salva
+   * antes deles existirem não os tem.
+   */
+  tamanhoId?: string | null;
+  escolhaIds?: string[];
   quantidade: number;
   /** Preço unitário já com tamanho e escolhas somados. */
   unitario: number;
@@ -173,6 +180,8 @@ export function FolhaDoProduto({
                     nome: produto.nome,
                     tamanho: tamanho?.nome ?? null,
                     escolhas: escolhidas.map((escolha) => escolha.nome),
+                    tamanhoId: tamanho?.id ?? null,
+                    escolhaIds: escolhidas.map((escolha) => escolha.id),
                     quantidade,
                     unitario,
                   },

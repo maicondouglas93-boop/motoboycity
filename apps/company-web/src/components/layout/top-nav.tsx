@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Shield, UserRound } from 'lucide-react';
+import { LogOut, Shield, Store, UserRound, type LucideIcon } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DropdownMenu,
@@ -29,15 +29,22 @@ import { session } from '@/lib/session';
  * âmbar — a mesma cor que, na lista, significa entrega em movimento.
  */
 /**
- * A **Loja** existe em `/loja` e NÃO entra aqui de propósito.
- *
- * As telas dela são demonstração com dados de exemplo (`lib/loja-mock.ts`) e
- * não têm backend. Enquanto estiverem assim, um item no menu mostraria vendas
- * falsas às empresas de produção no primeiro deploy. Quem for ligar a loja à
- * API acrescenta o item aqui junto; até lá, chega-se nela pela URL.
+ * A **Loja** entrou no menu quando a última tela dela deixou de ser
+ * demonstração (Vendas, em 2026-09-26). Antes, um item aqui mostraria vendas
+ * falsas às empresas de produção. Leva a Vendas, e fica marcado em qualquer
+ * tela de `/loja`. O ícone é o do conjunto do painel até existir a ilustração
+ * dela, como a dos outros itens.
  */
-const NAV_ITEMS = [
+const NAV_ITEMS: Array<{
+  href: string;
+  label: string;
+  image?: string;
+  icon?: LucideIcon;
+  /** Marca o item em toda a área, e não só no endereço de `href`. */
+  area?: string;
+}> = [
   { href: '/pedidos', label: 'Pedidos', image: '/brand/navigation/pedidos-v1.png' },
+  { href: '/loja/vendas', label: 'Loja', icon: Store, area: '/loja' },
   { href: '/clientes', label: 'Clientes', image: '/brand/navigation/clientes-v1.png' },
   { href: '/relatorios', label: 'Relatórios', image: '/brand/navigation/relatorios-v1.png' },
   { href: '/financeiro', label: 'Financeiro', image: '/brand/navigation/financeiro-v1.png' },
@@ -78,8 +85,9 @@ export function TopNav() {
         </Link>
 
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto pb-1 lg:order-none lg:w-auto lg:min-w-0 lg:flex-1 lg:pb-0">
-          {NAV_ITEMS.map(({ href, label, image }) => {
-            const isActive = pathname === href || pathname.startsWith(`${href}/`);
+          {NAV_ITEMS.map(({ href, label, image, icon: Icon, area }) => {
+            const base = area ?? href;
+            const isActive = pathname === base || pathname.startsWith(`${base}/`);
             const isAiqfome = href === '/integracoes';
             return (
               <Link
@@ -94,7 +102,7 @@ export function TopNav() {
                     : 'border-transparent text-white/80 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
-                {isAiqfome ? (
+                {isAiqfome && image ? (
                   <Image
                     src={image}
                     alt="aiqfome"
@@ -105,15 +113,21 @@ export function TopNav() {
                   />
                 ) : (
                   <>
-                    <Image
-                      src={image}
-                      alt=""
-                      width={32}
-                      height={32}
-                      sizes="32px"
-                      loading="eager"
-                      className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
-                    />
+                    {image ? (
+                      <Image
+                        src={image}
+                        alt=""
+                        width={32}
+                        height={32}
+                        sizes="32px"
+                        loading="eager"
+                        className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                      />
+                    ) : Icon ? (
+                      <span className="flex size-8 shrink-0 items-center justify-center motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5">
+                        <Icon className="size-6" aria-hidden="true" />
+                      </span>
+                    ) : null}
                     {label}
                   </>
                 )}

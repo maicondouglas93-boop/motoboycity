@@ -36,4 +36,6 @@ export * from './company-page-protection';
 export * from './company-store-catalog';
 export * from './company-store-settings';
 export * from './company-store-operation';
+export * from './company-store-orders';
 export * from './public-store';
+export * from './public-store-orders';

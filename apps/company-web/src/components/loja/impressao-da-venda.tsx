@@ -2,27 +2,34 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { ArrowLeft, Printer } from 'lucide-react';
-import { useHidratado } from '@/components/loja-online/armazenamento';
 import styles from '@/components/orders/delivery-print-view.module.css';
 import { Button } from '@/components/ui/button';
-import { useVendas } from '@/lib/loja-demo';
-import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
+import { companyStoreSettingsApi } from '@/lib/api-client';
+import { session } from '@/lib/session';
 import { ComandaDaVenda } from './comanda-da-venda';
+import { CHAVE_DA_CONFIGURACAO } from './link-da-loja';
+import { useVendasDaLoja } from './vendas';
 
 /**
  * A tela de impressão de uma venda: os controles na tela, e só a comanda no
  * papel — o mesmo arranjo da impressão de entregas (`DeliveryPrintView`).
  *
- * DEMONSTRAÇÃO: a venda vem do `localStorage` deste navegador, como na tela de
- * Vendas. Na integração, vem da API, e a página passa a conferir que a venda é
- * da empresa de quem imprime.
+ * A venda vem da mesma consulta da tela de Vendas — só a da empresa de quem
+ * imprime, porque a API só devolve as dela.
  */
 export function ImpressaoDaVenda({ numero }: { numero: number }) {
-  const vendas = useVendas();
-  const hidratado = useHidratado();
-  const venda = vendas.find((item) => item.numero === numero);
+  const token = session.getToken();
+  const consulta = useVendasDaLoja();
+  const configuracao = useQuery({
+    queryKey: CHAVE_DA_CONFIGURACAO,
+    queryFn: () => companyStoreSettingsApi.settings(token as string),
+    enabled: Boolean(token),
+  });
+  const carregada = consulta.data !== undefined;
+  const venda = consulta.data?.find((item) => item.numero === numero);
   const [impressoEm, setImpressoEm] = useState(() => new Date().toISOString());
 
   async function imprimir() {
@@ -59,19 +66,25 @@ export function ImpressaoDaVenda({ numero }: { numero: number }) {
           Selecione a Elgin i8/i9 instalada, papel de 80 mm, escala 100% e desative cabeçalhos e
           rodapés do navegador.
         </p>
-        <p className="text-xs text-muted-foreground">
-          Demonstração: a venda vem deste navegador, como na tela de Vendas.
-        </p>
-        {!hidratado && <p role="status">Carregando pedido…</p>}
-        {hidratado && !venda && (
+        {consulta.isError && (
           <p role="alert" className="text-sm text-destructive">
-            O pedido #{numero} não está nas vendas deste navegador.
+            Não foi possível carregar o pedido.
+          </p>
+        )}
+        {!carregada && !consulta.isError && <p role="status">Carregando pedido…</p>}
+        {carregada && !venda && (
+          <p role="alert" className="text-sm text-destructive">
+            O pedido #{numero} não está entre as vendas dos últimos dois dias.
           </p>
         )}
       </header>
       {venda && (
         <div className={styles['paper']}>
-          <ComandaDaVenda venda={venda} loja={LOJA_DE_EXEMPLO.nome} impressoEm={impressoEm} />
+          <ComandaDaVenda
+            venda={venda}
+            loja={configuracao.data?.name ?? ''}
+            impressoEm={impressoEm}
+          />
         </div>
       )}
     </main>

@@ -25,7 +25,7 @@ function espelharNaDemonstracao(operacao: OperacaoDaLoja) {
   salvarOperacao(operacao);
 }
 
-export function useOperacaoDaLoja() {
+export function useOperacaoDaLoja(ativa = true) {
   const token = session.getToken();
   return useQuery({
     queryKey: CHAVE_DA_OPERACAO,
@@ -34,7 +34,7 @@ export function useOperacaoDaLoja() {
       espelharNaDemonstracao(operacao);
       return operacao;
     },
-    enabled: Boolean(token),
+    enabled: Boolean(token) && ativa,
   });
 }
 

@@ -31,6 +31,7 @@ function lojaGravada(mudancas: Record<string, unknown> = {}) {
     actionColor: '#15803d',
     logoUrl: null,
     logoExternalFileId: null,
+    acceptsOrders: false,
     createdAt: new Date('2026-09-25T10:00:00Z'),
     updatedAt: new Date('2026-09-25T10:00:00Z'),
     ...mudancas,
@@ -107,6 +108,7 @@ describe('StoreSettingsService', () => {
         name: 'Açaí do Centro',
         suggestedSlug: 'acai-do-centro',
         identity: IDENTIDADE_PADRAO,
+        recebePedidos: false,
       });
     });
 
@@ -156,6 +158,23 @@ describe('StoreSettingsService', () => {
       await expect(
         service.updateLink(membro, { slug: 'acai', name: 'Açaí' }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('pedidos pela página', () => {
+    it('liga os pedidos da loja; sem link, não há o que ligar', async () => {
+      prisma.storeSettings.findUnique.mockResolvedValue(lojaGravada({ acceptsOrders: true }));
+      const ligada = await service.updateAcceptsOrders(membro, true);
+      expect(prisma.storeSettings.updateMany).toHaveBeenCalledWith({
+        where: { companyId: EMPRESA },
+        data: { acceptsOrders: true },
+      });
+      expect(ligada.recebePedidos).toBe(true);
+
+      prisma.storeSettings.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.updateAcceptsOrders(membro, true)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STORE_LINK_REQUIRED' }),
+      });
     });
   });
 
@@ -248,7 +267,17 @@ describe('StoreSettingsService', () => {
           brandColor: '#fbbf24',
           actionColor: '#22c55e',
           logoUrl: 'https://ik.imagekit.io/x/logo.png',
+          acceptsOrders: false,
         },
+        addresses: [
+          {
+            street: 'Rua da Empresa',
+            number: '12',
+            complement: null,
+            city: 'Lajinha',
+            state: 'MG',
+          },
+        ],
       },
     });
 
@@ -301,6 +330,16 @@ describe('StoreSettingsService', () => {
       if (resposta.kind === 'store') {
         expect(resposta.store.operacao).toHaveProperty('funcionamento');
         expect(resposta.store.operacao).not.toHaveProperty('notificacoes');
+        // Pedido pela página só com a loja ligando; a retirada padrão é a da empresa.
+        expect(resposta.store.recebePedidos).toBe(false);
+        expect(resposta.store.enderecoDeRetirada).toEqual({
+          rua: 'Rua da Empresa',
+          numero: '12',
+          complemento: null,
+          bairro: '',
+          cidade: 'Lajinha',
+          estado: 'MG',
+        });
       }
     });
   });

@@ -17,7 +17,7 @@ Monorepo PNPM/Turborepo com quatro aplicações e três pacotes compartilhados.
 | `apps/company-web` | painel da empresa (Next.js) |
 | `apps/admin-web` | painel administrativo (Next.js) |
 | `apps/driver-app` | aplicativo do motoboy (React Native CLI) |
-| `packages/validation` | schemas Zod — a fronteira de entrada |
+| `packages/validation` | schemas Zod — a fronteira de entrada — e as regras da loja online que a página e a API aplicam iguais |
 | `packages/types` | formatos de resposta e payload |
 | `packages/api-client` | chamadas HTTP tipadas, usadas pelos três clientes |
 
@@ -48,9 +48,11 @@ link, e a cor que some contra o fundo é recusada pela régua de contraste de
 avisar —, e `GET /public/stores/:slug` aberto, sem login, só para empresa
 ativa — devolve a loja com o cardápio vendável (`publicCatalog`, do serviço do
 catálogo) e a operação sem os avisos (`publicOperation`), ou
-`{ kind: 'moved' }` para link antigo. No `company-web`, a página
-`/pedir/[slug]` é de servidor e decide entre demonstração, vitrine,
-redirecionamento e "não encontrada" (`lib/loja-publica.ts`).
+`{ kind: 'moved' }` para link antigo. `PUT accepts-orders` liga e desliga os
+pedidos pela página (`acceptsOrders`, desligado por padrão), e a loja pública
+diz se recebe (`recebePedidos`) e de onde se retira. No `company-web`, a página
+`/pedir/[slug]` é de servidor e decide entre demonstração, loja que recebe
+pedido, vitrine, redirecionamento e "não encontrada" (`lib/loja-publica.ts`).
 
 ### Operação da loja online
 
@@ -67,10 +69,10 @@ diferentes não se desfazem. A linha nasce na primeira gravação, com os padrõ
 nos outros blocos; sem ela, a leitura responde a semana fechada. O começo do
 ajuste é a hora do servidor, e fim no passado é recusado (400,
 `STORE_STATUS_ENDED`). Forma de pagamento online é recusada e tirada do que a
-página recebe enquanto a loja não tem conta Asaas. A regra de "aberta agora" é
-calculada por quem mostra
-(`lib/loja-horario.ts`, no fuso `America/Sao_Paulo`); quando houver pedido, o
-servidor decide de novo no checkout.
+página recebe enquanto a loja não tem conta Asaas. A regra de "aberta agora"
+mora em `packages/validation` (`store-schedule.rules.ts`, no fuso
+`America/Sao_Paulo`): a página mostra com ela, e o servidor decide de novo com
+ela no checkout.
 
 ### Catálogo da loja online
 
@@ -106,6 +108,34 @@ empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
   `components/loja/catalogo.ts`). Organizar muda a tela antes da resposta e
   grava numa fila serial (`scope` do TanStack Query), para a ordem dos cliques
   ser a ordem no servidor; a última gravação da fila relê o catálogo.
+
+### Pedido da loja online
+
+`store_orders`: o pedido que o cliente faz na página da loja, com número
+sequencial por empresa (`@@unique([companyId, number])`), a etapa
+(`StoreOrderStage`), o histórico de etapas, os itens e o endereço em JSONB (no
+formato de `PedidoDaLoja`, de `@motoboycity/types`), os valores em `Decimal` e
+o uid do Firebase do cliente (`customerAuthId`). Não é `Delivery`: vira corrida
+só quando a loja chama o motoboy, pelo caminho de sempre.
+
+Módulo `company/store-orders`, dois controllers:
+
+- **Cliente** — `POST` e `GET /public/stores/:slug/orders`, atrás do
+  `ClienteDaLojaGuard`: token do Firebase Authentication (Google) conferido pelo
+  `firebase-admin` com o `FIREBASE_PROJECT_ID` do push. Não é o JWT do sistema;
+  o cliente da loja não é usuário. Sem o projeto configurado, 503.
+- **Loja** — `GET /company/store/orders`, `PUT :id/stage`, `POST :id/cancel` e
+  `POST :id/call-motoboycity`, atrás de `JwtAuthGuard` + `CompanyOnlyGuard`.
+
+O checkout refaz no servidor tudo o que a página conferiu, com as regras de
+`packages/validation` (`store-schedule.rules.ts`, `store-order.rules.ts`,
+`store-operation.rules.ts` e o `storeCheckoutSchema`), e recusa com 409
+`STORE_ORDER_TOTAL_CHANGED` se o total não for o que o cliente viu. A etapa
+muda por atualização condicional ao `updatedAt` lido, e o NOVO que passou do
+prazo de aceite é cancelado na leitura seguinte (sem tarefa agendada). No
+`company-web`, Vendas (`components/loja/vendas.ts`) consulta a fila a cada 10 s
+e os pedidos do cliente (`components/loja-online/pedidos-do-cliente.ts`), a
+cada 20 s.
 
 ## 2. A cadeia de contratos
 

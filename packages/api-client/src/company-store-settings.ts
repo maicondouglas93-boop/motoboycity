@@ -1,5 +1,9 @@
 import type { StoreSettings } from '@motoboycity/types';
-import type { UpdateStoreIdentityPayload, UpdateStoreLinkPayload } from '@motoboycity/validation';
+import type {
+  StoreAcceptsOrdersPayload,
+  UpdateStoreIdentityPayload,
+  UpdateStoreLinkPayload,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -36,6 +40,19 @@ export function createCompanyStoreSettingsApi({ baseUrl }: CompanyStoreSettingsA
       payload: UpdateStoreIdentityPayload,
     ): Promise<StoreSettings> {
       const response = await apiFetch(`${baseUrl}/company/store/settings/identity`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<StoreSettings>(response);
+    },
+
+    /** Liga ou desliga os pedidos pela página. Recusado (409) antes de a loja ter link. */
+    async updateAcceptsOrders(
+      accessToken: string,
+      payload: StoreAcceptsOrdersPayload,
+    ): Promise<StoreSettings> {
+      const response = await apiFetch(`${baseUrl}/company/store/settings/accepts-orders`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

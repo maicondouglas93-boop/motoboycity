@@ -13,17 +13,18 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
  * não chega à loja.
  */
 
-// Nos testes não há chave do Clerk — é o caso de produção antes de a chave
-// existir. Se algum componente tentar usá-lo mesmo assim, o teste acusa.
-vi.mock('@clerk/nextjs', () => {
+// Nos testes não há configuração do Firebase — é o caso de produção antes de
+// ela existir. Se algum componente tentar usar o login mesmo assim, o teste
+// acusa.
+vi.mock('@/lib/firebase-da-loja', () => {
   const proibido = () => {
-    throw new Error('Clerk usado sem chave');
+    throw new Error('Login do Firebase usado sem configuração');
   };
   return {
-    useAuth: proibido,
-    SignInButton: proibido,
-    SignUpButton: proibido,
-    UserButton: proibido,
+    aoMudarOCliente: proibido,
+    entrarComGoogle: proibido,
+    sair: proibido,
+    tokenDoCliente: proibido,
   };
 });
 
@@ -111,6 +112,7 @@ const VITRINE: CardapioDaPagina = {
     },
   ],
   operacao: OPERACAO,
+  enderecoDeRetirada: null,
 };
 
 describe('Loja pública — vitrine', () => {
@@ -212,7 +214,7 @@ describe('Loja pública — vitrine', () => {
   });
 });
 
-describe('Loja pública — sem a chave do Clerk', () => {
+describe('Loja pública — sem a configuração do login', () => {
   it('a demonstração abre sem conta, e a sacola diz que ainda não dá para pedir', () => {
     render(
       <LojaPublica

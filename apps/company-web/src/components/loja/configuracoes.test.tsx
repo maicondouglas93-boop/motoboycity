@@ -45,6 +45,7 @@ const LOJA: StoreSettings = {
   name: 'Açaí do Zé',
   suggestedSlug: 'acai-do-ze',
   identity: { theme: 'CLARO', brandColor: '#c2410c', actionColor: '#15803d', logoUrl: null },
+  recebePedidos: false,
 };
 
 const OPERACAO: OperacaoDaLoja = {

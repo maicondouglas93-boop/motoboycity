@@ -558,12 +558,16 @@ Configurações, e o status da loja no alto da barra lateral.
 (rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`),
 e **Horários, Tipos de pedido, Notificações, o status e Configurações também**
 (rotas `/company/store/operation/*` e `/company/store/settings/*`; tabelas
-`store_operations` e `store_settings`). Só Vendas é demonstração, com dados de
-`apps/company-web/src/lib/loja-mock.ts` e um aviso na tela. `/pedir/<link>`
-abre a loja de verdade como **vitrine**: o cardápio publicado, a cara da loja
+`store_operations` e `store_settings`), **e Vendas também, desde 2026-09-26**
+(rotas `/company/store/orders/*`, tabela `store_orders`). `/pedir/<link>`
+abre a loja de verdade: o cardápio publicado, a cara da loja
 (logo, tema e cores), o horário, a situação (aberta, fechada, pausada, com o
 recado), o tempo de entrega, a faixa de taxa dos bairros e as formas de
-pagamento — tudo do banco —, mas sem pedido. A página é de servidor (`lib/loja-publica.ts` busca
+pagamento — tudo do banco. **Ela só recebe pedido com duas chaves ligadas**: a
+da loja (**Pedidos pela página**, no alto de Vendas; `acceptsOrders`, desligado
+por padrão) e a do login do cliente (as quatro `NEXT_PUBLIC_FIREBASE_*`, ver
+"Login do cliente da loja"). Faltando uma, a página é **vitrine**, e a sacola diz
+por quê. A página é de servidor (`lib/loja-publica.ts` busca
 `GET /public/stores/:slug`); link antigo redireciona, com 307 de propósito — a
 loja pode voltar a um link que já foi dela. Empresa pendente ou suspensa
 responde "Loja não encontrada". **`/pedir/minha-loja` é a demonstração**, com o
@@ -592,7 +596,11 @@ As migrations da loja online (`20260925090000_loja_catalogo`,
 `20260925160000_loja_foto_do_produto`, `20260925190000_loja_link`,
 `20260925230000_loja_operacao` e `20260926090000_loja_configuracoes`) foram
 nos pushes de 2026-09-25, pelo `prisma migrate deploy` do build do Render, e
-estão aplicadas também no `motoboycity_dev` local.
+estão aplicadas também no `motoboycity_dev` local. A do pedido,
+`20260926120000_loja_pedido` (tabela `store_orders`, quatro enums e a coluna
+`store_settings.acceptsOrders`), **ainda não foi para produção**: está só no
+`motoboycity_dev` local e foi validada em banco descartável. Entra no próximo
+push, pelo mesmo caminho; o rollback está no changelog.
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -631,21 +639,23 @@ pasta `store-logos/<empresa>`, troca protegida e a anterior apagada lá). Os
 textos das formas de pagamento saíram do `loja-mock.ts` para
 `lib/loja-pagamentos.ts`, porque a tela integrada os usa.
 
-**Uma parte ainda só no navegador.** As vendas gravam no `localStorage` por
-`lib/loja-demo.ts`, e o evento `storage` leva a mudança entre abas: aceitar um
-pedido muda o "Meus pedidos" do cliente aberto no mesmo navegador. É
-demonstração, e não sincronização. O painel copia para lá a operação que a API
-guardou (`espelharNaDemonstracao`), e por isso a loja de exemplo e Vendas
-continuam obedecendo ao horário e à pausa configurados. Quem integrar o pedido
-apaga `loja-demo.ts` junto com `loja-mock.ts`; as regras de
-`lib/loja-horario.ts`, `loja-pedido.ts`, `loja-avisos.ts` e `loja-operacao.ts`
-ficam, porque o servidor vai precisar delas. Em Configurações, o cartão do
-Asaas diz "ainda não disponível", em vez de mostrar campo que não grava.
+**Só a loja de exemplo ainda vive no navegador.** `/pedir/minha-loja` grava
+os pedidos no `localStorage` por `lib/loja-demo.ts`, e o painel copia para lá a
+operação que a API guardou (`espelharNaDemonstracao`), para o exemplo obedecer
+ao horário e à pausa configurados. Vendas não lê mais dali. Quem apagar a loja
+de exemplo apaga `loja-demo.ts`, `loja-mock.ts` e o espelho juntos. As regras
+de horário, de etapa do pedido e de operação moram em `packages/validation`
+(`store-schedule.rules.ts`, `store-order.rules.ts`, `store-operation.rules.ts`)
+desde 2026-09-26, porque a API decide com elas; `lib/loja-horario.ts`,
+`loja-pedido.ts` e `loja-operacao.ts` só as reexportam. Mudou uma regra? Rode
+`pnpm --filter @motoboycity/validation run build` — os apps a leem do `dist`.
+Em Configurações, o cartão do Asaas diz "ainda não disponível", em vez de
+mostrar campo que não grava.
 
-**Quem faz a entrega e a comanda** (2026-09-25, ainda na demonstração). A
+**Quem faz a entrega e a comanda** (2026-09-25). A
 loja escolhe em Tipos de pedido se entrega pelo MOTOboyCity ou com entregador
-próprio, e cada pedido guarda a escolha em `entregaPor` (`lib/loja-pedido.ts`);
-venda gravada antes disso não tem o campo e conta como MOTOboyCity. A comanda
+próprio, e cada pedido guarda a escolha ao nascer (`courier` no banco,
+`entregaPor` no tipo). A comanda
 da venda fica em `/loja/vendas/<número>/imprimir`, no grupo `(print)`, e usa o
 estilo do cupom de entrega (`delivery-receipt.module.css`) — mudar aquele
 arquivo muda as duas impressões.
@@ -656,44 +666,67 @@ resultado em qualquer máquina. Telas que dependem da hora usam o relógio únic
 de `lib/relogio.ts`: quem grava um ajuste acerta o relógio antes, e ele se acerta
 sozinho quando outra aba muda a loja.
 
-**A loja não está no menu, e isso é a trava.** Nenhum item aponta para `/loja`
-no `top-nav.tsx`; chega-se às telas pela URL direta. Enquanto houver tela de
-demonstração — Vendas é uma —, um item no menu mostraria vendas falsas às
-empresas de produção no primeiro deploy. As telas do catálogo, ligadas à API,
-não mudam isso. O motivo está comentado no próprio `top-nav.tsx`, junto do
-`NAV_ITEMS` — quem ligar a loja à API acrescenta o item ali no mesmo recorte.
+**A Loja está no menu desde 2026-09-26** (item "Loja", que leva a Vendas e
+fica marcado em toda `/loja`), porque Vendas deixou de ser demonstração. Os
+avisos do lojista (pedido novo, cancelado, agendado, loja fechando) moram no
+layout do painel inteiro, `app/(app)/layout.tsx`, e só consultam a fila da
+empresa que ligou os pedidos pela página.
 
-### Clerk: uma SEGUNDA autenticação neste app, e por que ela não toca o painel
+### Pedido da loja online — o que o servidor garante (2026-09-26)
 
-O `company-web` agora tem duas autenticações. O painel continua com a dele
-(`lib/session.ts`, JWT próprio) e a **loja do cliente** usa Clerk
-(`@clerk/nextjs`). Elas não se enxergam, e é assim que deve ser: quem compra um
-açaí não é usuário do sistema de entregas.
+Módulo `apps/api/src/company/store-orders/`. O cliente faz e acompanha o pedido
+por `POST` e `GET /public/stores/:slug/orders` (token do Firebase no
+`Authorization`); a loja lê a fila e muda a etapa por `/company/store/orders`.
+Quem mexer aqui precisa saber:
 
-O `clerk init` põe o `ClerkProvider` no layout RAIZ e um matcher que cobre o app
-inteiro. Isso foi desfeito de propósito: rodar um segundo middleware de
-autenticação por cima do painel que está em produção é risco sem contrapartida.
-No lugar:
+- **O servidor refaz a conta.** Preço, tamanho, escolhas, pedido mínimo, loja
+  aberta (ou o horário agendado), bairro atendido, forma de pagamento e troco
+  são conferidos com as regras de `@motoboycity/validation`, em centavos. A
+  página manda o total que mostrou (`totalVisto`); se o do servidor for outro,
+  responde 409 `STORE_ORDER_TOTAL_CHANGED` com o total novo, e a sacola pede
+  para o cliente conferir. Nada é gravado nesse caso.
+- **Mudança de etapa é condicional.** `mudar` só grava se o pedido ainda tiver
+  o `updatedAt` que leu (três tentativas, relendo); aceitar numa aba e cancelar
+  na outra não passa as duas. Transição que a regra não permite: 409
+  `STORE_ORDER_STAGE_INVALID`.
+- **O prazo do aceite vence na leitura.** Não há tarefa agendada: cada leitura
+  da fila ou dos pedidos do cliente cancela os NOVOS com `acceptDeadline`
+  vencido, como `SISTEMA`. Pedido não lido fica NOVO no banco até alguém olhar.
+- **O número é por loja**, o maior mais um, numa transação; dois pedidos no
+  mesmo instante esbarram na chave única e o segundo tenta de novo.
+- **A corrida ainda não nasce do pedido.** "Chamar motoboy do MOTOboyCity" em
+  Vendas só marca o pedido; a loja chama o motoboy pelo botão "Chamar" do
+  painel, como qualquer corrida, e a tela diz isso.
+- **Estorno e pagamento online não existem ainda**: a página só aceita
+  pagamento na entrega enquanto o Asaas da loja não estiver ligado.
 
-- as rotas da loja vivem no grupo `src/app/(loja)/` — que **não aparece na
-  URL** —, e só o layout desse grupo tem `ClerkProvider`;
-- `src/proxy.ts` tem matcher restrito a `/pedir`, `/sign-in`, `/sign-up` e
-  `/__clerk`.
+### Login do cliente da loja: Firebase, só com Google, e por que ele não toca o painel
 
-**Conferido:** `/login` do painel carrega com zero scripts do Clerk. Quem mexer
-aqui deve conferir isso de novo antes de subir — em especial quem acrescentar
-rotas ao painel, porque o matcher do proxy é uma lista de caminhos da loja.
+O `company-web` tem duas autenticações. O painel continua com a dele
+(`lib/session.ts`, JWT próprio) e a **loja do cliente** usa o Firebase
+Authentication, só com Google (`lib/firebase-da-loja.ts`, desde 2026-09-26). Elas
+não se enxergam, e é assim que deve ser: quem compra um açaí não é usuário do
+sistema de entregas. O Clerk, usado antes, saiu: em produção ele exige domínio
+próprio, e o painel roda em `.vercel.app`.
 
-As chaves ficam em `apps/company-web/.env.local`, que é ignorado pelo Git. Só
-existe instância de **desenvolvimento**; produção não está configurada, e quando
-estiver, as chaves vão no Vercel (é lá que o `company-web` roda) como variáveis
-de ambiente — nunca no repositório, que é público.
-
-**Sem a chave, a loja abre sem conta** (2026-09-25, `lib/conta-da-loja.ts`): o
-`ClerkProvider`, o middleware e as páginas de entrar só entram com a chave; sem
-ela, a vitrine funciona e a sacola diz que ainda não dá para pedir. A chave é
-lida no build — pôr a chave pede um deploy novo. Conferido com `next build` sem
-as chaves e `next start`: vitrine e sacola sem erro, zero script do Clerk.
+- É o **mesmo projeto do Firebase do push do motoboy**. A API confere o token
+  com o `firebase-admin` e só o `FIREBASE_PROJECT_ID` que o push já usa
+  (`cliente-da-loja.guard.ts`); sem ele, as rotas do cliente respondem 503
+  `STORE_ORDERS_UNAVAILABLE`. O `firebase-admin/auth` é importado só na hora,
+  porque o `jose` dele é ESM e quebra o Jest.
+- No navegador, o Firebase só carrega no grupo `src/app/(loja)/`, que **não
+  aparece na URL**; não há middleware nem página de entrar — o botão "Entrar com
+  Google" abre a janela do Google, e cai para o redirecionamento quando o
+  navegador bloqueia a janela.
+- Os quatro valores `NEXT_PUBLIC_FIREBASE_*` (ver `apps/company-web/.env.example`)
+  são a configuração do app web no console do Firebase: públicos por natureza. O
+  que protege é a lista de **domínios autorizados** em Authentication →
+  Settings. Vão no `.env.local` e no Vercel, e são lidos no build: pôr os
+  valores pede deploy novo. **Sem os quatro, a loja abre só como vitrine.**
+- `.pnpmfile.cjs` tira de `@firebase/auth` o peer opcional do AsyncStorage do
+  React Native. Sem isso, o pnpm criava uma segunda cópia do react-native com o
+  React do painel, e os testes do driver-app quebravam com "Invalid hook call".
+  Não apague esse arquivo sem rodar os testes do driver-app.
 
 A biblioteca de animação da loja (`motion`) segue o mesmo recorte: é carregada
 pelo `LazyMotion` no layout de `(loja)` e não chega ao painel — conferido, zero
@@ -760,7 +793,14 @@ registradas no `changelog.md` de 2026-09-23.
    devolve `state` junto com o `code`. A proteção não deve ser removida se ele
    omitir.
 5. **Rotação dos segredos** registrada no changelog da integração aiqfome.
-6. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+6. **Ligar o login do cliente da loja (Firebase).** No console do projeto
+   do push: Authentication → Sign-in method → ativar **Google**; Settings →
+   Authorized domains → incluir `motoboycity-company-web.vercel.app`;
+   Configurações do projeto → Seus apps → cadastrar um app **Web** e copiar
+   `apiKey`, `authDomain`, `projectId` e `appId` para as quatro
+   `NEXT_PUBLIC_FIREBASE_*` do Vercel (company-web) e do `.env.local`. Depois,
+   deploy novo. No Vercel, apagar as variáveis do Clerk, que não são mais lidas.
+7. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

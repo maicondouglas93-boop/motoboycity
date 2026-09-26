@@ -25,6 +25,7 @@ import {
   useSacola,
 } from '@/components/loja-online/armazenamento';
 import { ControleDaConta, useUsuarioId } from '@/components/loja-online/conta';
+import { usePedidosDoCliente } from '@/components/loja-online/pedidos-do-cliente';
 import { BarraDeCategorias } from '@/components/loja-online/barra-de-categorias';
 import { BarraDaSacola, type BarraDaSacolaApi } from '@/components/loja-online/barra-da-sacola';
 import { FolhaDaSacola } from '@/components/loja-online/folha-da-sacola';
@@ -79,7 +80,17 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
   // e encontra o que tinha escolhido, em vez de recomeçar do zero.
   const { itens: carrinho, setItens: setCarrinho } = useSacola(slug);
   const usuarioId = useUsuarioId();
-  const pedidos = usePedidos(slug, usuarioId);
+  // "Meus pedidos" só para quem já pediu: na loja de verdade, pelo servidor
+  // (uma leitura só); na demonstração, pelo navegador.
+  const pedidosDaDemonstracao = usePedidos(slug, usuarioId);
+  const doServidor = usePedidosDoCliente(
+    slug,
+    cardapio.operacao && !vitrine ? usuarioId : null,
+    null,
+  );
+  const jaPediu = cardapio.operacao
+    ? (doServidor.pedidos?.length ?? 0) > 0
+    : pedidosDaDemonstracao.length > 0;
 
   /*
    * A situação depende da hora, e o servidor não sabe a hora de quem abriu a
@@ -314,7 +325,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
               truncava o nome da loja, e a identidade não perde para um atalho
               que a maioria nunca usa. Só existe para quem já pediu neste
               aparelho. */}
-          {!vitrine && pedidos.length > 0 && (
+          {!vitrine && jaPediu && (
             <Link
               href={`/pedir/${slug}/pedidos`}
               className="mt-2 flex items-center gap-1.5 text-sm font-medium"

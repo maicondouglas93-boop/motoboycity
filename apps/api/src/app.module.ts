@@ -21,6 +21,7 @@ import { CompanyReportsModule } from './company/reports/company-reports.module';
 import { PageProtectionModule } from './company/page-protection/page-protection.module';
 import { StoreCatalogModule } from './company/store-catalog/store-catalog.module';
 import { StoreOperationModule } from './company/store-operation/store-operation.module';
+import { StoreOrdersModule } from './company/store-orders/store-orders.module';
 import { StoreSettingsModule } from './company/store-settings/store-settings.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { DeliveryOffersModule } from './delivery-offers/delivery-offers.module';
@@ -95,6 +96,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     StoreCatalogModule,
     StoreSettingsModule,
     StoreOperationModule,
+    StoreOrdersModule,
     DispatchModule,
     DriverPresenceModule,
     DeliveriesModule,

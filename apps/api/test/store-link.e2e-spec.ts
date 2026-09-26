@@ -102,6 +102,7 @@ describe('Link da loja online (e2e)', () => {
         actionColor: '#15803d',
         logoUrl: null,
       },
+      recebePedidos: false,
     });
 
     await request(servidor)

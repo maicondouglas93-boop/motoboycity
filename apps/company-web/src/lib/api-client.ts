@@ -16,8 +16,10 @@ import {
   createCompanyPageProtectionApi,
   createCompanyStoreCatalogApi,
   createCompanyStoreOperationApi,
+  createCompanyStoreOrdersApi,
   createCompanyStoreSettingsApi,
   createPublicStoreApi,
+  createPublicStoreOrdersApi,
   configureApiClient,
 } from '@motoboycity/api-client';
 import { pageProtectionSession } from './page-protection-session';
@@ -46,4 +48,6 @@ export const companyPageProtectionApi = createCompanyPageProtectionApi({ baseUrl
 export const companyStoreCatalogApi = createCompanyStoreCatalogApi({ baseUrl: apiBaseUrl });
 export const companyStoreSettingsApi = createCompanyStoreSettingsApi({ baseUrl: apiBaseUrl });
 export const companyStoreOperationApi = createCompanyStoreOperationApi({ baseUrl: apiBaseUrl });
+export const companyStoreOrdersApi = createCompanyStoreOrdersApi({ baseUrl: apiBaseUrl });
 export const publicStoreApi = createPublicStoreApi({ baseUrl: apiBaseUrl });
+export const publicStoreOrdersApi = createPublicStoreOrdersApi({ baseUrl: apiBaseUrl });

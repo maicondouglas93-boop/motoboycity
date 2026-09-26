@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AndamentoDoPedido, StoreSettings } from '@motoboycity/types';
 import {
   Bike,
   CalendarClock,
@@ -11,8 +13,8 @@ import {
   MapPin,
   MessageSquare,
   Phone,
+  Power,
   Printer,
-  RotateCcw,
   Store,
   Timer,
   UserPlus,
@@ -21,16 +23,16 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { mensagemDoErro } from '@/components/loja/catalogo';
+import { CHAVE_DA_CONFIGURACAO } from '@/components/loja/link-da-loja';
+import { useOperacaoDaLoja } from '@/components/loja/operacao';
+import { useAcaoNaVenda, useVendasDaLoja, type VendaNoPainel } from '@/components/loja/vendas';
+import { companyStoreSettingsApi } from '@/lib/api-client';
 import { useSomLiberado } from '@/lib/avisos-do-navegador';
-import {
-  chamarMotoboyCityPara,
-  mudarEtapa,
-  recomecarVendas,
-  useOperacao,
-  useVendas,
-} from '@/lib/loja-demo';
+import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 import { hora, momentoNaLoja, rotuloDoDia } from '@/lib/loja-horario';
-import { enderecoEmLinha, type CadastroDoCliente, type VendaDaLoja } from '@/lib/loja-mock';
+import { enderecoEmLinha, type CadastroDoCliente } from '@/lib/loja-mock';
+import { session } from '@/lib/session';
 import {
   acaoParaAvancar,
   caminhoDoPedido,
@@ -114,12 +116,12 @@ function moeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function quandoFoiFeita(venda: VendaDaLoja): Date {
+function quandoFoiFeita(venda: AndamentoDoPedido): Date {
   return quandoChegou(venda, 'NOVO') ?? new Date(0);
 }
 
 /** "amanhã, 12:00–12:30". */
-function janelaEmTexto(venda: VendaDaLoja, agora: Date): string | null {
+function janelaEmTexto(venda: AndamentoDoPedido, agora: Date): string | null {
   if (!venda.janela) return null;
   const inicio = new Date(venda.janela.inicio);
   const fim = new Date(venda.janela.fim);
@@ -127,15 +129,132 @@ function janelaEmTexto(venda: VendaDaLoja, agora: Date): string | null {
 }
 
 export default function LojaVendasPage() {
-  const vendas = useVendas();
-  const operacao = useOperacao();
+  const consulta = useVendasDaLoja();
+  const consultaDaOperacao = useOperacaoDaLoja();
+  const operacao = consultaDaOperacao.data;
+
+  return (
+    <div className="space-y-5">
+      <header>
+        <h1 className="text-2xl font-bold">Vendas</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pedidos que chegaram pela página da sua loja
+          {operacao
+            ? `. Aceite ${operacao.recebimento.modo === 'MANUAL' ? 'manual' : 'automático'} — muda em Tipos de pedido.`
+            : '.'}
+        </p>
+      </header>
+
+      <PedidosPelaPagina />
+
+      {consulta.isError || consultaDaOperacao.isError ? (
+        <Card>
+          <CardContent className="space-y-3 py-6">
+            <p className="text-sm text-destructive">Não foi possível carregar as vendas.</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                void consulta.refetch();
+                void consultaDaOperacao.refetch();
+              }}
+            >
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      ) : !consulta.data || !operacao ? (
+        <p className="text-sm text-muted-foreground">Carregando as vendas...</p>
+      ) : (
+        <Fila vendas={consulta.data} operacao={operacao} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Liga e desliga os pedidos pela página. Desligada, a página é vitrine: mostra
+ * o cardápio e não recebe pedido.
+ */
+function PedidosPelaPagina() {
+  const token = session.getToken();
+  const queryClient = useQueryClient();
+  const configuracao = useQuery({
+    queryKey: CHAVE_DA_CONFIGURACAO,
+    queryFn: () => companyStoreSettingsApi.settings(token as string),
+    enabled: Boolean(token),
+  });
+  const mudar = useMutation({
+    mutationFn: (recebePedidos: boolean) =>
+      companyStoreSettingsApi.updateAcceptsOrders(token as string, { recebePedidos }),
+    onSuccess: (salva) => queryClient.setQueryData<StoreSettings>(CHAVE_DA_CONFIGURACAO, salva),
+  });
+
+  const loja = configuracao.data;
+  if (!loja) return null;
+  const ligados = loja.recebePedidos;
+
+  return (
+    <Card className={ligados ? 'border-emerald-500/40' : 'border-dashed'}>
+      <CardContent className="space-y-2 py-3 text-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="min-w-60 flex-1">
+            <strong>
+              {ligados ? 'Pedidos pela página ligados.' : 'Pedidos pela página desligados.'}
+            </strong>{' '}
+            {ligados
+              ? 'O cliente pede pela página da sua loja, e o pedido chega aqui.'
+              : 'A página da loja mostra o cardápio, mas não recebe pedido.'}
+          </span>
+          {loja.slug !== null && (
+            <Button
+              type="button"
+              size="sm"
+              variant={ligados ? 'outline' : 'default'}
+              disabled={mudar.isPending}
+              onClick={() => mudar.mutate(!ligados)}
+            >
+              <Power className="size-4" /> {ligados ? 'Desligar' : 'Ligar os pedidos'}
+            </Button>
+          )}
+        </div>
+        {loja.slug === null && (
+          <p className="text-xs text-muted-foreground">
+            Crie o link da loja em{' '}
+            <Link href="/loja/configuracoes" className="underline underline-offset-2">
+              Configurações
+            </Link>{' '}
+            para poder ligar os pedidos.
+          </p>
+        )}
+        {!CONTA_DISPONIVEL && (
+          <p className="text-xs text-amber-800">
+            O login do cliente (com Google) ainda não está configurado neste endereço: mesmo com os
+            pedidos ligados, a página só aceita pedido depois dele.
+          </p>
+        )}
+        {mudar.isError && (
+          <p className="text-xs text-destructive" role="alert">
+            {mensagemDoErro(mudar.error, 'Não foi possível mudar os pedidos pela página.')}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Fila({
+  vendas,
+  operacao,
+}: {
+  vendas: VendaNoPainel[];
+  operacao: NonNullable<ReturnType<typeof useOperacaoDaLoja>['data']>;
+}) {
   const instante = useAgora();
   const somLiberado = useSomLiberado();
   const [aba, setAba] = useState<Aba>('andamento');
-  const [confirmarRecomeco, setConfirmarRecomeco] = useState(false);
 
   const agora = new Date(instante);
-  const manual = operacao.recebimento.modo === 'MANUAL';
 
   const agendados = vendas
     .filter((venda) => esperandoAHora(venda, agora))
@@ -158,7 +277,7 @@ export default function LojaVendasPage() {
   );
   const totalDoDia = deHoje.reduce((soma, venda) => soma + venda.total, 0);
 
-  const abas: Array<{ valor: Aba; texto: string; lista: VendaDaLoja[] }> = [
+  const abas: Array<{ valor: Aba; texto: string; lista: VendaNoPainel[] }> = [
     { valor: 'andamento', texto: 'Em andamento', lista: naFila },
     { valor: 'agendados', texto: 'Agendados', lista: agendados },
     { valor: 'concluidos', texto: 'Concluídos', lista: concluidas },
@@ -168,56 +287,6 @@ export default function LojaVendasPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold">Vendas</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pedidos que chegaram pela página da sua loja. Aceite {manual ? 'manual' : 'automático'} —
-          muda em Tipos de pedido.
-        </p>
-      </header>
-
-      <Card className="border-dashed">
-        <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-xs text-muted-foreground">
-          <span className="min-w-60 flex-1">
-            Demonstração: aparecem aqui os exemplos e os pedidos feitos na página da loja{' '}
-            <strong>neste navegador</strong>. Nada vai para o servidor.
-          </span>
-          {confirmarRecomeco ? (
-            <span className="flex items-center gap-2">
-              Apagar os pedidos desta demonstração?
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  recomecarVendas();
-                  setConfirmarRecomeco(false);
-                }}
-              >
-                Apagar
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setConfirmarRecomeco(false)}
-              >
-                Não
-              </Button>
-            </span>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setConfirmarRecomeco(true)}
-            >
-              <RotateCcw className="size-4" /> Recomeçar os exemplos
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Sem o primeiro clique, o navegador não deixa tocar som — e a lojista
           acharia que o aviso sonoro não funciona. */}
       {instante !== 0 && !somLiberado && operacao.notificacoes.lojista.NOVO_PEDIDO.som && (
@@ -298,7 +367,7 @@ export default function LojaVendasPage() {
                 </h2>
                 {daEtapa.map((venda) => (
                   <CartaoDaVenda
-                    key={venda.numero}
+                    key={venda.id}
                     venda={venda}
                     agora={agora}
                     preparoPadrao={operacao.recebimento.minutosDePreparo}
@@ -316,7 +385,7 @@ export default function LojaVendasPage() {
         <div className="space-y-2">
           {lista.map((venda) => (
             <CartaoDaVenda
-              key={venda.numero}
+              key={venda.id}
               venda={venda}
               agora={agora}
               preparoPadrao={operacao.recebimento.minutosDePreparo}
@@ -351,7 +420,7 @@ function CartaoDaVenda({
   prazoDoAceiteMin,
   quemEntregaNaLoja,
 }: {
-  venda: VendaDaLoja;
+  venda: VendaNoPainel;
   agora: Date;
   preparoPadrao: number;
   prazoDoAceiteMin: number | null;
@@ -363,6 +432,8 @@ function CartaoDaVenda({
   const [chamando, setChamando] = useState(false);
   const [motivo, setMotivo] = useState(MOTIVOS[0] ?? '');
   const [preparo, setPreparo] = useState(preparoPadrao);
+  const acaoNaVenda = useAcaoNaVenda();
+  const ocupado = acaoNaVenda.isPending;
 
   const proxima = proximaEtapa(venda.modalidade, venda.etapa);
   const acao = acaoParaAvancar(venda.modalidade, venda.etapa, venda.entregaPor);
@@ -376,7 +447,7 @@ function CartaoDaVenda({
   const mostrarQuemLeva =
     venda.modalidade === 'ENTREGA' && (quemEntregaNaLoja === 'LOJA' || pelaLoja);
   const janela = janelaEmTexto(venda, agora);
-  const cadastro = CADASTRO[venda.cadastro];
+  const cadastro = venda.cadastro === null ? null : CADASTRO[venda.cadastro];
   const inicioAgendado = inicioDoPreparo(venda);
   const caminho = caminhoDoPedido(venda.modalidade);
   const indiceAtual = caminho.indexOf(venda.etapa);
@@ -405,7 +476,8 @@ function CartaoDaVenda({
   } else if (venda.etapa === 'PRONTO' && pelaLoja) {
     tempo = 'Esperando o seu entregador sair';
   } else if (venda.etapa === 'PRONTO' && venda.modalidade === 'ENTREGA') {
-    tempo = 'Motoboy chamado';
+    // A corrida ainda não nasce do pedido: quem chama o motoboy é a loja.
+    tempo = 'Chame o motoboy pelo botão "Chamar", no alto do painel';
   } else if (venda.etapa === 'PRONTO') {
     tempo = 'Esperando o cliente buscar';
   }
@@ -501,7 +573,15 @@ function CartaoDaVenda({
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => mudarEtapa(venda.numero, 'ACEITO', { minutosDePreparo: preparo })}
+                  disabled={ocupado}
+                  onClick={() =>
+                    acaoNaVenda.mutate({
+                      tipo: 'avancar',
+                      id: venda.id,
+                      para: 'ACEITO',
+                      minutosDePreparo: preparo,
+                    })
+                  }
                 >
                   <Check className="size-4" /> Aceitar
                 </Button>
@@ -527,7 +607,16 @@ function CartaoDaVenda({
             )}
 
             {venda.etapa !== 'NOVO' && proxima && acao && (
-              <Button type="button" size="sm" onClick={() => mudarEtapa(venda.numero, proxima)}>
+              <Button
+                type="button"
+                size="sm"
+                disabled={ocupado}
+                onClick={() =>
+                  proxima !== 'NOVO' &&
+                  proxima !== 'CANCELADO' &&
+                  acaoNaVenda.mutate({ tipo: 'avancar', id: venda.id, para: proxima })
+                }
+              >
                 {acao}
               </Button>
             )}
@@ -546,7 +635,7 @@ function CartaoDaVenda({
 
             {vemDoMotoboy(venda.modalidade, venda.etapa, venda.entregaPor) && (
               <span className="text-xs text-muted-foreground">
-                Na versão final, esta etapa vem sozinha do aplicativo do motoboy.
+                Por enquanto marcada aqui: a corrida do MOTOboyCity ainda não nasce do pedido.
               </span>
             )}
             {venda.modalidade === 'ENTREGA' && !pelaLoja && venda.etapa === 'EM_PREPARO' && (
@@ -562,14 +651,16 @@ function CartaoDaVenda({
         {chamando && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
             <span className="w-full text-xs">
-              Este pedido vira corrida no MOTOboyCity e entra na sua fatura, como as demais. A saída
-              e a entrega passam a chegar do aplicativo do motoboy.
+              Este pedido passa a ser entregue por um motoboy do MOTOboyCity. Chame o motoboy pelo
+              botão &quot;Chamar&quot;, no alto do painel: a corrida entra na sua fatura, como as
+              demais.
             </span>
             <Button
               type="button"
               size="sm"
+              disabled={ocupado}
               onClick={() => {
-                chamarMotoboyCityPara(venda.numero);
+                acaoNaVenda.mutate({ tipo: 'chamarMotoboyCity', id: venda.id });
                 setChamando(false);
               }}
             >
@@ -601,8 +692,9 @@ function CartaoDaVenda({
               type="button"
               size="sm"
               variant="destructive"
+              disabled={ocupado}
               onClick={() => {
-                mudarEtapa(venda.numero, 'CANCELADO', { cancelamento: { motivo, por: 'LOJA' } });
+                acaoNaVenda.mutate({ tipo: 'cancelar', id: venda.id, motivo });
                 setCancelando(false);
               }}
             >
@@ -612,11 +704,15 @@ function CartaoDaVenda({
               Voltar
             </Button>
             <span className="w-full text-xs text-muted-foreground">
-              O cliente é avisado com o motivo.
-              {venda.pagamento.toLowerCase().includes('online') &&
-                ' Foi pago online: o estorno ainda não está definido no plano da loja.'}
+              O cliente vê o motivo em Meus pedidos.
             </span>
           </div>
+        )}
+
+        {acaoNaVenda.isError && (
+          <p className="text-xs text-destructive" role="alert">
+            {mensagemDoErro(acaoNaVenda.error, 'Não foi possível mudar o pedido.')}
+          </p>
         )}
 
         <div className="-ml-2 flex flex-wrap items-center gap-1">
@@ -674,16 +770,20 @@ function CartaoDaVenda({
                   {venda.telefone}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">{cadastro.texto}</p>
-              {cadastro.acao ? (
-                <Button variant="outline" size="sm" disabled>
-                  <UserPlus className="size-4" /> {cadastro.acao}
-                </Button>
-              ) : (
-                <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-                  <Check className="size-3.5" aria-hidden="true" />
-                  Nada a fazer.
-                </p>
+              {cadastro && (
+                <>
+                  <p className="text-xs text-muted-foreground">{cadastro.texto}</p>
+                  {cadastro.acao ? (
+                    <Button variant="outline" size="sm" disabled>
+                      <UserPlus className="size-4" /> {cadastro.acao}
+                    </Button>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+                      <Check className="size-3.5" aria-hidden="true" />
+                      Nada a fazer.
+                    </p>
+                  )}
+                </>
               )}
             </div>
 

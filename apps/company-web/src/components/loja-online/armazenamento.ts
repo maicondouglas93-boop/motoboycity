@@ -8,7 +8,8 @@ import type { ItemEscolhido } from './folha-do-produto';
 /**
  * Onde a loja guarda sacola, pedidos e endereço enquanto não há backend.
  *
- * A identidade de quem compra é do Clerk; o que essa pessoa comprou e para
+ * A identidade de quem compra é do login do Firebase (Google); o que essa
+ * pessoa comprou e para
  * onde, não. Fica aqui, no navegador, separado por conta — ver as chaves
  * abaixo, que não são todas iguais de propósito.
  *
@@ -263,23 +264,30 @@ export function guardarPedido(slug: string, usuarioId: string, pedido: PedidoGua
   const chave = chaveDosPedidos(slug, usuarioId);
   gravar(chave, [pedido, ...ler<PedidoGuardado[]>(chave, VAZIO)].slice(0, 20));
 
-  // Guardado à parte, e não lido do último pedido: assim continua valendo se o
-  // histórico for podado, e é o registro que vai para o banco na integração.
-  //
-  // Retirada não pergunta endereço, então não pode mexer no que está salvo. Uma
-  // versão anterior gravava o endereço do formulário mesmo assim — vazio, para
-  // quem nunca tinha entregado — e a conta passava a ter um "endereço salvo" em
-  // branco. Retirada atualiza nome e telefone; o endereço continua o da última
-  // entrega.
-  const anterior = ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
-  const salvo: ClienteSalvo = {
+  guardarCliente(slug, usuarioId, {
     nome: pedido.nome,
     telefone: pedido.telefone,
-    entrega: pedido.retirarNaLoja ? (anterior?.entrega ?? null) : pedido.entrega,
-  };
-  gravar(chaveDoCliente(slug, usuarioId), salvo);
-
+    entrega: pedido.retirarNaLoja ? null : pedido.entrega,
+  });
   gravar(chaveDaSacola(slug), []);
+}
+
+/**
+ * Guarda nome, telefone e endereço na conta, para o próximo checkout já nascer
+ * preenchido. Na loja de verdade o pedido fica no servidor; isto continua aqui.
+ *
+ * Guardado à parte, e não lido do último pedido: assim continua valendo se o
+ * histórico for podado. Retirada não pergunta endereço (`entrega: null`), então
+ * não mexe no que está salvo: uma versão anterior gravava o endereço vazio do
+ * formulário, e a conta passava a ter um "endereço salvo" em branco.
+ */
+export function guardarCliente(slug: string, usuarioId: string, dados: ClienteSalvo): void {
+  const anterior = ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
+  gravar(chaveDoCliente(slug, usuarioId), {
+    nome: dados.nome,
+    telefone: dados.telefone,
+    entrega: dados.entrega ?? anterior?.entrega ?? null,
+  } satisfies ClienteSalvo);
 }
 
 /**

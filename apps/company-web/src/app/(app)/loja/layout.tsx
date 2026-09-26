@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bell, Clock, Package, Settings, ShoppingBag, ShoppingCart, Store } from 'lucide-react';
-import { AvisosDaLoja } from '@/components/loja/avisos-da-loja';
 import { ControleDoStatus } from '@/components/loja/controle-do-status';
 
 /**
@@ -72,8 +71,6 @@ export default function LojaLayout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="min-w-0">{children}</div>
-
-      <AvisosDaLoja />
     </div>
   );
 }
