@@ -16473,3 +16473,42 @@ do `driver-app` 215/215. Não visto em aparelho.
 **Publicação de `c8dd4f8`** (motoboy de salário fixo): enviado para `main` em
 27/09; CI verde; a rota nova responde 401 no Render, com a migration aplicada no
 build; Vercel do company e do admin em success no status do commit.
+
+## 2026-09-27 — APK `pilot.28`: salário fixo e o motoboy só com o valor dele
+
+**Pedido do usuário:** "Commit, push e gerar o APK", depois de tirar o "Valor
+total" do detalhe do pedido.
+
+**O que o APK leva:** o `pilot.27` (valor antes de confirmar a entrega sem
+endereço, compilado em 23/09 e nunca enviado), o motoboy de salário fixo
+(`c8dd4f8`: sem valores para ele no app e sem Carteira no menu) e o detalhe do
+pedido sem "Valor total" para todos (`4d65169`).
+
+**Como foi feito**, pelo roteiro do handoff: `0861063` sobe a versão para
+`0.1.0-pilot.28`; worktree curta `C:\m28` nesse commit, com
+`google-services.json` e `local.properties` copiados; `pnpm install
+--frozen-lockfile` e o build do `validation`; `assembleRelease` com
+`-Pmotoboycity.versionCode=28`, `MOTOBOYCITY_APP_ENV=production` e a API do
+Render, pelo `cmd` com o `gradlew.bat` no caminho absoluto e `--no-daemon`. As
+senhas da chave vieram dos arquivos DPAPI do responsável, abertas só no
+processo, sem serem exibidas, e as variáveis foram apagadas no fim. Build em
+8 min 23 s. A worktree foi apagada com `rmdir /s /q` e `git worktree prune`.
+
+**Conferência:** `apksigner` — assinatura v2, um signatário, certificado
+`BD42D61D…50B9`, o oficial; `aapt` — `com.motoboycity.driverapp`,
+`versionCode` 28, `versionName` `0.1.0-pilot.28`, minSdk 24, targetSdk 36, as
+quatro ABIs. No bundle: `motoboycity-api.onrender.com`, `0.1.0-pilot.28`,
+`driverCompensation`, `SALARIED` e `Identificando a rua...` presentes;
+`localhost:3333`, `127.0.0.1`, `10.0.2.2`, `Valor total` e `0.1.0-pilot.27`
+ausentes.
+
+**Arquivo:** `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.28-vc28.apk`,
+75.279.493 bytes, SHA-256
+`AE597B78FE6A1CBB852D616D42BAAE7DFA76D230B0369AA80DB0BB3E970CCA96` (a cópia
+bate com o que o Gradle gerou).
+
+**Não feito:** envio e instalação nos aparelhos, e o ensaio em aparelho real —
+ficam com o responsável (handoff, pendência 9).
+
+**Publicação de `4d65169`** (sem "Valor total"): enviado para `main` em 27/09;
+só muda o app, que chega por este APK.

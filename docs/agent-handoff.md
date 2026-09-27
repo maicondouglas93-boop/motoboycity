@@ -181,7 +181,7 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 63 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido, avisos). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
-| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
+| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) nunca foi enviado; o `pilot.28` (27/09), que o inclui, está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -200,20 +200,21 @@ volta no próximo boot da API.
 
 ### APK pronto para distribuição
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.27-vc27.apk`
-SHA-256 `DE92D7FAFDB2AFDA012EEC94791DF6AC3206C05D0957EAF08FEF33557ABBB709`,
-75.187.653 bytes, `versionCode` 27, minSdk 24, targetSdk 36, assinatura v2,
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.28-vc28.apk` (27/09/2026)
+SHA-256 `AE597B78FE6A1CBB852D616D42BAAE7DFA76D230B0369AA80DB0BB3E970CCA96`,
+75.279.493 bytes, `versionCode` 28, minSdk 24, targetSdk 36, assinatura v2,
 ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o mesmo dos
-anteriores, então ele atualiza por cima de `pilot.26` e versões anteriores
-assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `f2d1795`.
-O `pilot.26` (`38a7773`) continua na mesma pasta.
+anteriores, então ele atualiza por cima do `pilot.27` e versões anteriores
+assinadas com essa chave. Pacote `com.motoboycity.driverapp`, origem `0861063`.
+Leva o que o `pilot.27` levava (nunca enviado) mais o motoboy de salário fixo
+(o app sem valores para ele) e o detalhe do pedido sem "Valor total" para todos.
+O `pilot.27` (`f2d1795`) continua na mesma pasta.
 
 O bundle carrega `motoboycity-api.onrender.com` e **não** carrega
-`localhost:3333`, `127.0.0.1` ou `10.0.2.2`. Versao JS `0.1.0-pilot.27`
-conferida no bundle, junto de `Calculando o valor...`, `Calculado ao confirmar`,
-`Seu GPS está impreciso agora` e `Não deu para calcular o valor agora` (as duas
-últimas em UTF-16, como previsto).
+`localhost:3333`, `127.0.0.1` ou `10.0.2.2`. Versao JS `0.1.0-pilot.28`
+conferida no bundle, junto de `driverCompensation`, `SALARIED` e
+`Identificando a rua...`; `Valor total` e `0.1.0-pilot.27` ausentes.
 
 **Armadilha ao conferir o bundle:** o Hermes guarda em UTF-16 toda string que
 tenha caractere nao-ASCII. Procurar texto acentuado lendo o bundle como texto
@@ -910,13 +911,13 @@ registradas no `changelog.md` de 2026-09-23.
    Asaas, cadastra uma chave Pix, gera a chave da API (Integrações → Chaves de
    API) e cola em Configurações → Recebimento online pelo Asaas. Testar antes
    com uma conta **sandbox**.
-9. **APK novo para o motoboy de salário fixo** (recorte de 27/09/2026). A API
-   e o ADM valem no push: a entrega dele já fica com a plataforma. Mas é o app
-   que esconde os valores, e o `pilot.27` (e anteriores) ainda os mostram.
-   Gerar e instalar um APK novo no aparelho dele antes de começar; conferir
-   oferta, Início, Disponíveis, Histórico, detalhe, confirmação e o menu sem
-   carteira. O mesmo APK tira o "Valor total" do detalhe do pedido para todos
-   os motoboys (pedido de 27/09): eles veem só o valor deles.
+9. **Instalar o `pilot.28`** (compilado em 27/09/2026, ainda não enviado). É
+   ele que esconde os valores do motoboy de salário fixo — o `pilot.27` e
+   anteriores ainda os mostram — e que tira o "Valor total" do detalhe do
+   pedido para todos. No aparelho do assalariado, antes de ele começar:
+   conferir oferta, Início, Disponíveis, Histórico, detalhe, confirmação e o
+   menu sem carteira. Nos outros, conferir que o valor do entregador continua
+   em todas essas telas. O teste do item 2 vale para o `pilot.28`.
 10. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
@@ -1070,7 +1071,7 @@ financeira foram consolidados em `583f67b`, enviados para `main` e publicados
 com sucesso no Render e nas duas Vercel. O CI geral ainda estava em execução na
 confirmação dos deploys; não foi usado para declarar a publicação aprovada.
 Não incluir mudanças de outras sessões em eventual publicação futura.
-O APK mais novo em `I:\MOTOboyCity\releases` e o `pilot.27`, compilado de `f2d1795`.
+O APK mais novo em `I:\MOTOboyCity\releases` e o `pilot.28`, compilado de `0861063`.
 
 Podem existir arquivos locais não rastreados (`.codex/`, `temp*.tsx`) deixados
 por outras sessões — **não os inclua em commit** e não os remova sem decisão do
