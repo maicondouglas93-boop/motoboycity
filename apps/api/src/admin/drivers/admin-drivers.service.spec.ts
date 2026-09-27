@@ -120,6 +120,47 @@ describe('AdminDriversService', () => {
     service = module.get(AdminDriversService);
   });
 
+  describe('updateCompensation', () => {
+    it('passa o motoboy a salário fixo e registra na auditoria', async () => {
+      prisma.driver.findUnique.mockResolvedValueOnce({
+        compensation: 'PER_DELIVERY',
+        user: { name: 'Motoboy Fixo' },
+      });
+      const detalhe = { id: 'driver-1', compensation: 'SALARIED' };
+      const detail = jest.spyOn(service, 'detail').mockResolvedValue(detalhe as never);
+
+      await expect(
+        service.updateCompensation('driver-1', { compensation: 'SALARIED' }, 'admin-1'),
+      ).resolves.toBe(detalhe);
+
+      expect(prisma.driver.update).toHaveBeenCalledWith({
+        where: { id: 'driver-1' },
+        data: { compensation: 'SALARIED' },
+      });
+      expect(detail).toHaveBeenCalledWith('driver-1');
+    });
+
+    it('a mesma remuneração não grava nada', async () => {
+      prisma.driver.findUnique.mockResolvedValueOnce({
+        compensation: 'SALARIED',
+        user: { name: 'Motoboy Fixo' },
+      });
+      jest.spyOn(service, 'detail').mockResolvedValue({} as never);
+
+      await service.updateCompensation('driver-1', { compensation: 'SALARIED' }, 'admin-1');
+
+      expect(prisma.driver.update).not.toHaveBeenCalled();
+    });
+
+    it('motoboy que não existe: 404', async () => {
+      prisma.driver.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.updateCompensation('driver-x', { compensation: 'SALARIED' }, 'admin-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('changePassword', () => {
     it('resolve o usuário do motoboy, troca a senha e encerra conexões antigas', async () => {
       prisma.driver.findFirst.mockResolvedValue({ userId: 'driver-user-1' });
@@ -257,6 +298,7 @@ describe('AdminDriversService', () => {
           approvalStatus: 'PENDING',
           accountStatus: 'ACTIVE',
           availability: 'UNAVAILABLE',
+          compensation: 'PER_DELIVERY',
           appVersion: null,
           lastSeenAt: null,
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -273,6 +315,7 @@ describe('AdminDriversService', () => {
           approvalStatus: 'APPROVED',
           accountStatus: 'SUSPENDED',
           availability: 'UNAVAILABLE',
+          compensation: 'SALARIED',
           appVersion: '1.0.0',
           lastSeenAt: new Date('2026-01-02T11:55:00.000Z'),
           createdAt: new Date('2026-01-02T00:00:00.000Z'),
@@ -307,6 +350,7 @@ describe('AdminDriversService', () => {
           approvalStatus: 'PENDING',
           accountStatus: 'ACTIVE',
           availability: 'UNAVAILABLE',
+          compensation: 'PER_DELIVERY',
           appVersion: null,
           lastSeenAt: null,
           createdAt: '2026-01-01T00:00:00.000Z',
@@ -325,6 +369,7 @@ describe('AdminDriversService', () => {
           approvalStatus: 'APPROVED',
           accountStatus: 'SUSPENDED',
           availability: 'UNAVAILABLE',
+          compensation: 'SALARIED',
           appVersion: '1.0.0',
           lastSeenAt: '2026-01-02T11:55:00.000Z',
           createdAt: '2026-01-02T00:00:00.000Z',

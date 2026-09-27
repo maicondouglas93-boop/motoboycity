@@ -66,6 +66,7 @@ import {
   LocationError,
   type LocationFix,
 } from '../lib/location';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { useDispatchStore } from '../store/dispatchStore';
@@ -184,6 +185,8 @@ function operationWasApplied(
 }
 
 export function DeliveryOperationScreen({ navigation, route }: Props) {
+  // Salario fixo: a entrega sai sem valores, aqui e na confirmacao.
+  const mostraValores = useMostraValores();
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -1194,12 +1197,17 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             </View>
           ) : null}
 
-          <OperationSection icon="money" title="Valores">
-            <View style={styles.valueRow}>
-              <Text style={styles.valueLabel}>Valor do entregador</Text>
-              <View style={styles.valueDots} />
-              <Text style={styles.value}>{valueLabel}</Text>
-            </View>
+          <OperationSection
+            icon={mostraValores ? 'money' : 'list'}
+            title={mostraValores ? 'Valores' : 'Pagamento'}
+          >
+            {mostraValores ? (
+              <View style={styles.valueRow}>
+                <Text style={styles.valueLabel}>Valor do entregador</Text>
+                <View style={styles.valueDots} />
+                <Text style={styles.value}>{valueLabel}</Text>
+              </View>
+            ) : null}
 
             <Text style={styles.paymentTitle}>Método de pagamento</Text>
             <View style={styles.paymentRow}>
@@ -1363,11 +1371,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         visible={deliverConfirmationOpen}
         summary={deliverConfirmationSummary(currentDelivery)}
         conferencia={conferenciaDestino}
+        mostraValores={mostraValores}
         confirmLabel={
           conferenciaDestino?.estado === 'capturando'
             ? 'Buscando sua localização...'
             : conferenciaDestino?.estado === 'identificando'
-              ? 'Calculando o valor...'
+              ? mostraValores
+                ? 'Calculando o valor...'
+                : 'Identificando a rua...'
               : operationBusy
                 ? 'Confirmando...'
                 : 'Confirmar entrega'
@@ -1471,7 +1482,11 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
       <ConfirmationModal
         visible={problemOpen}
         title="Informar problema?"
-        description="Você continuará responsável pelo pedido. A ocorrência será registrada, o valor normal da entrega será mantido e você deverá devolver a mercadoria à loja para concluir o repasse."
+        description={
+          mostraValores
+            ? 'Você continuará responsável pelo pedido. A ocorrência será registrada, o valor normal da entrega será mantido e você deverá devolver a mercadoria à loja para concluir o repasse.'
+            : 'Você continuará responsável pelo pedido. A ocorrência será registrada, e você deverá devolver a mercadoria à loja.'
+        }
         confirmLabel={
           operationBusy
             ? delivery.destinationKnownAtCreation
@@ -1494,7 +1509,7 @@ function OperationSection({
   title,
   children,
 }: {
-  icon: 'money' | 'pin' | 'person';
+  icon: 'money' | 'pin' | 'person' | 'list';
   title: string;
   children: React.ReactNode;
 }) {
@@ -1567,6 +1582,7 @@ function DeliverConfirmationModal({
   visible,
   summary,
   conferencia,
+  mostraValores,
   confirmLabel,
   disabled,
   onRetry,
@@ -1577,6 +1593,8 @@ function DeliverConfirmationModal({
   summary: DeliverConfirmationSummary;
   /** Preenchido so no pedido sem endereco, onde a rua vem do GPS de agora. */
   conferencia: ConferenciaDestino | null;
+  /** Salario fixo: a confirmacao fica so com o endereco. */
+  mostraValores: boolean;
   confirmLabel: string;
   disabled: boolean;
   onRetry: () => void;
@@ -1634,6 +1652,17 @@ function DeliverConfirmationModal({
 
             {(() => {
               const valor = valorDaConferencia(conferencia);
+              if (!mostraValores) {
+                // Sem valor; so o GPS impreciso, que impede fechar, continua aqui.
+                return valor?.estado === 'gpsImpreciso' ? (
+                  <View style={styles.confirmBlock}>
+                    <Text style={styles.confirmFallback}>
+                      {linhasDoValorConferido(valor).aviso}
+                    </Text>
+                    <PrimaryButton label="Tentar de novo" variant="outline" onPress={onRetry} />
+                  </View>
+                ) : null;
+              }
               // Pedido com endereco: o valor e o do pedido, congelado na criacao.
               if (valor === null) {
                 return (

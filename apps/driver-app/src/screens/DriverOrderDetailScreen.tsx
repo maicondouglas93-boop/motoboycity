@@ -27,6 +27,7 @@ import {
   formatDeliveryAddress,
   formatOperationDateTime,
 } from '../lib/deliveryOperation';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
@@ -83,6 +84,8 @@ async function openRecipientPhone(phone: string) {
 }
 
 export function DriverOrderDetailScreen({ navigation, route }: Props) {
+  // Salario fixo: o pedido mostra a distancia, sem valores.
+  const mostraValores = useMostraValores();
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,25 +183,32 @@ export function DriverOrderDetailScreen({ navigation, route }: Props) {
 
             {delivery.batchId ? <Text style={styles.batchLabel}>Pedido em lote</Text> : null}
 
-            <DetailSection icon="money" title="Valores">
-              <View style={styles.primaryValueRow}>
-                <Text style={styles.primaryValueLabel}>Valor do entregador</Text>
-                <View style={styles.dots} />
-                <Text style={styles.primaryValue}>
-                  {delivery.driverValue === null
-                    ? 'A calcular'
-                    : currencyFormatter.format(delivery.driverValue)}
-                </Text>
-              </View>
-              <View style={styles.valueGrid}>
-                <ValueItem
-                  label="Valor total"
-                  value={
-                    delivery.totalValue === null
+            <DetailSection
+              icon={mostraValores ? 'money' : 'pin'}
+              title={mostraValores ? 'Valores' : 'Distância'}
+            >
+              {mostraValores ? (
+                <View style={styles.primaryValueRow}>
+                  <Text style={styles.primaryValueLabel}>Valor do entregador</Text>
+                  <View style={styles.dots} />
+                  <Text style={styles.primaryValue}>
+                    {delivery.driverValue === null
                       ? 'A calcular'
-                      : currencyFormatter.format(delivery.totalValue)
-                  }
-                />
+                      : currencyFormatter.format(delivery.driverValue)}
+                  </Text>
+                </View>
+              ) : null}
+              <View style={styles.valueGrid}>
+                {mostraValores ? (
+                  <ValueItem
+                    label="Valor total"
+                    value={
+                      delivery.totalValue === null
+                        ? 'A calcular'
+                        : currencyFormatter.format(delivery.totalValue)
+                    }
+                  />
+                ) : null}
                 <ValueItem
                   label="Distância"
                   value={
@@ -207,7 +217,7 @@ export function DriverOrderDetailScreen({ navigation, route }: Props) {
                       : `${delivery.distanceKm.toFixed(1)} km`
                   }
                 />
-                {delivery.returnValue !== null ? (
+                {mostraValores && delivery.returnValue !== null ? (
                   <ValueItem
                     label="Inclui retorno"
                     value={currencyFormatter.format(delivery.returnValue)}

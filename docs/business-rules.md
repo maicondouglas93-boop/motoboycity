@@ -37,6 +37,25 @@ decidido (isso é configuração de implementação, não decisão de negócio
 bloqueante). A configuração global vale para tabelas gerais e como fallback
 das tabelas personalizadas antigas que ainda não possuem uma divisão própria.
 
+## Motoboy de salário fixo
+
+Decisão de 2026-09-27, do usuário: a central pode contratar motoboy com
+**salário fixo**, pago fora do sistema, em vez de por corrida.
+
+- A central escolhe na ficha do motoboy no ADM (cartão **Remuneração**): por
+  corrida (o padrão) ou salário fixo. Fica registrado na auditoria.
+- A entrega do motoboy de salário fixo é **100% da plataforma**: ao concluir, a
+  parte do motoboy soma na da plataforma e nada entra na carteira dele. A
+  empresa paga o mesmo de sempre.
+- **O app não mostra valores a ele**: nem na oferta, nem nos pedidos, no
+  histórico, no detalhe ou na confirmação da entrega, e o menu não tem carteira.
+  O que ele cobra do cliente na entrega (forma de pagamento) continua visível —
+  esse dinheiro é do cliente.
+- Ele entra na fila de despacho como os outros; a ordem da fila é a que o ADM
+  já edita.
+- Trocar a remuneração vale para as entregas concluídas depois da troca; o que
+  já está na carteira continua lá.
+
 ## Preços personalizados por empresa
 
 O admin pode manter uma tabela de preços própria para uma empresa e tipo de

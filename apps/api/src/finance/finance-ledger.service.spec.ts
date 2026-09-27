@@ -9,6 +9,8 @@ describe('FinanceLedgerService', () => {
     wallet: { upsert: jest.fn() },
     walletTransaction: { create: jest.fn() },
     walletUpdate: jest.fn(),
+    driverFindUnique: jest.fn(),
+    executeRaw: jest.fn(),
   };
 
   beforeEach(() => {
@@ -18,6 +20,8 @@ describe('FinanceLedgerService', () => {
     tx.wallet.upsert.mockResolvedValue({ id: 'wallet-1' });
     tx.walletTransaction.create.mockResolvedValue({ id: 'transaction-1' });
     tx.walletUpdate.mockResolvedValue({ id: 'wallet-1' });
+    tx.driverFindUnique.mockResolvedValue({ compensation: 'PER_DELIVERY' });
+    tx.executeRaw.mockResolvedValue(1);
   });
 
   it('agenda o crédito para 00:00 do dia escolhido pelo administrador', async () => {
@@ -59,8 +63,35 @@ describe('FinanceLedgerService', () => {
         update: tx.walletUpdate,
       },
       walletTransaction: tx.walletTransaction,
+      driver: { findUnique: tx.driverFindUnique },
+      $executeRaw: tx.executeRaw,
     };
   }
+
+  it('motoboy de salário fixo: a parte dele vai para a plataforma e a carteira não muda', async () => {
+    tx.driverFindUnique.mockResolvedValue({ compensation: 'SALARIED' });
+
+    await service.creditDriverRepasse(prismaTransaction() as never, {
+      id: 'delivery-fixo',
+      driverId: 'driver-fixo',
+      driverValue: 12,
+    });
+
+    expect(tx.driverFindUnique).toHaveBeenCalledWith({
+      where: { id: 'driver-fixo' },
+      select: { compensation: true },
+    });
+    expect(tx.executeRaw).toHaveBeenCalledTimes(1);
+    const [sql, ...valores] = tx.executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    expect(sql.join('?')).toMatch(
+      /"platformValue" = COALESCE\("platformValue", 0\) \+ COALESCE\("driverValue", 0\)/,
+    );
+    expect(sql.join('?')).toMatch(/"driverValue" = 0/);
+    expect(valores).toEqual(['delivery-fixo']);
+    expect(tx.wallet.upsert).not.toHaveBeenCalled();
+    expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+    expect(tx.walletUpdate).not.toHaveBeenCalled();
+  });
 
   it('cria crédito pendente e aumenta apenas o saldo bloqueado', async () => {
     await service.creditDriverRepasse(prismaTransaction() as never, {

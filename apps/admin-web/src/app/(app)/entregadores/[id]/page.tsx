@@ -20,6 +20,7 @@ import { ChangePasswordDialog } from '@/components/users/change-password-dialog'
 import { DriverDocumentsManager, EditDriverDialog } from '@/components/drivers/driver-maintenance';
 import { DriverPunishments } from '@/components/drivers/driver-punishments';
 import { DriverCompanyBlocks } from '@/components/drivers/driver-company-blocks';
+import { DriverCompensationCard } from '@/components/drivers/driver-compensation';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -179,6 +180,9 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
                 <Badge variant={driver.accountStatus === 'ACTIVE' ? 'secondary' : 'destructive'}>
                   Conta {accountLabel[driver.accountStatus] ?? driver.accountStatus}
                 </Badge>
+                {driver.compensation === 'SALARIED' && (
+                  <Badge variant="secondary">Salário fixo</Badge>
+                )}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <EditDriverDialog driver={driver} token={token} />
@@ -200,6 +204,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
 
           <DriverPunishments driverId={driver.id} token={token} />
           <DriverCompanyBlocks driverId={driver.id} token={token} />
+          <DriverCompensationCard driver={driver} token={token} />
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard

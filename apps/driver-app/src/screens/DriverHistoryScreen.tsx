@@ -24,6 +24,7 @@ import {
   normalizeHistoryPeriod,
   type HistoryPeriod,
 } from '../lib/historyPeriod';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
 import { colors } from '../theme/colors';
@@ -64,6 +65,8 @@ function groupByCompletionDay(deliveries: DeliveryListItem[]) {
 }
 
 export function DriverHistoryScreen({ navigation }: Props) {
+  // Salario fixo: o historico conta entregas, sem ganhos.
+  const mostraValores = useMostraValores();
   const [deliveries, setDeliveries] = useState<DeliveryListItem[]>([]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -118,10 +121,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
     setAppliedPeriod({});
   }
 
-  const totalEarnings = deliveries.reduce(
-    (sum, delivery) => sum + (delivery.driverValue ?? 0),
-    0,
-  );
+  const totalEarnings = deliveries.reduce((sum, delivery) => sum + (delivery.driverValue ?? 0), 0);
   const groups = useMemo(() => groupByCompletionDay(deliveries), [deliveries]);
   const periodLabel =
     appliedPeriod.from || appliedPeriod.to
@@ -215,12 +215,16 @@ export function DriverHistoryScreen({ navigation }: Props) {
           </View>
 
           <View style={styles.summaryRow}>
-            <View style={styles.summaryBlock}>
-              <Text style={styles.summaryLabel}>Ganhos no período</Text>
-              <Text style={styles.summaryValue}>{formatarDinheiro(totalEarnings)}</Text>
-            </View>
-            <View style={styles.summaryDivider} />
-            <View style={[styles.summaryBlock, styles.summaryRight]}>
+            {mostraValores ? (
+              <>
+                <View style={styles.summaryBlock}>
+                  <Text style={styles.summaryLabel}>Ganhos no período</Text>
+                  <Text style={styles.summaryValue}>{formatarDinheiro(totalEarnings)}</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+              </>
+            ) : null}
+            <View style={[styles.summaryBlock, mostraValores && styles.summaryRight]}>
               <Text style={styles.summaryLabel}>Entregas</Text>
               <Text style={styles.summaryValue}>{deliveries.length}</Text>
             </View>
@@ -281,11 +285,13 @@ export function DriverHistoryScreen({ navigation }: Props) {
                       <Text style={styles.distanceText}>
                         {formatarDistancia(delivery.distanceKm) || '—'}
                       </Text>
-                      <Text style={styles.amountText}>
-                        {delivery.driverValue === null
-                          ? 'A calcular'
-                          : formatarDinheiro(delivery.driverValue)}
-                      </Text>
+                      {mostraValores ? (
+                        <Text style={styles.amountText}>
+                          {delivery.driverValue === null
+                            ? 'A calcular'
+                            : formatarDinheiro(delivery.driverValue)}
+                        </Text>
+                      ) : null}
                     </View>
                   </Pressable>
                 ))}

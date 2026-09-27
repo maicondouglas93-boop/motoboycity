@@ -18,6 +18,7 @@ import {
   pararAlarmeDaOfertaNativa,
 } from '../lib/offerSession';
 import { remainingOfferSeconds } from '../lib/offerDeadline';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -97,6 +98,8 @@ export function IncomingOfferScreen({ navigation }: Props) {
   const [status, setStatus] = useState<'idle' | 'accepting' | 'declining'>('idle');
   const responseInFlight = useRef(false);
   const activeOfferId = offer?.offerId;
+  // Salario fixo: a oferta vem sem o "Voce recebe".
+  const mostraValores = useMostraValores();
 
   useEffect(() => {
     if (!activeOfferId) return;
@@ -215,7 +218,9 @@ export function IncomingOfferScreen({ navigation }: Props) {
       <View style={styles.centro}>
         <View style={styles.cartao}>
           <View style={styles.topo}>
-            {valorACalcular ? (
+            {!mostraValores ? (
+              <View style={styles.blocoValor} />
+            ) : valorACalcular ? (
               <Text style={styles.avisoValor}>
                 O valor será calculado conforme as entregas ocorrerem.
               </Text>

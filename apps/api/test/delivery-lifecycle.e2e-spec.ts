@@ -736,6 +736,66 @@ describe('Ciclo de vida da entrega — collect/deliver/completeReturn (e2e)', ()
     });
   });
 
+  describe('motoboy de salário fixo', () => {
+    it('a entrega fica inteira com a plataforma e nada entra na carteira dele', async () => {
+      const salario = await request(app.getHttpServer())
+        .patch(`/admin/drivers/${driver1Id}/compensation`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ compensation: 'SALARIED' })
+        .expect(200);
+      expect(salario.body.compensation).toBe('SALARIED');
+
+      try {
+        // O app lê daqui se mostra valores.
+        const perfil = await request(app.getHttpServer())
+          .get('/auth/me')
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .expect(200);
+        expect(perfil.body.driverCompensation).toBe('SALARIED');
+
+        await setAvailability(driver1Token, 'AVAILABLE');
+        const created = await request(app.getHttpServer())
+          .post('/deliveries')
+          .set('Authorization', `Bearer ${companyToken}`)
+          .send({ serviceTypeId, dropoffAddress: dropoff(1) })
+          .expect(201);
+        const deliveryId = created.body.id as string;
+
+        const offer = await pendingOfferFor(deliveryId);
+        await request(app.getHttpServer())
+          .patch(`/delivery-offers/${offer.id}/accept`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .expect(200);
+        await request(app.getHttpServer())
+          .patch(`/deliveries/${deliveryId}/collect`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .expect(200);
+        const delivered = await request(app.getHttpServer())
+          .patch(`/deliveries/${deliveryId}/deliver`)
+          .set('Authorization', `Bearer ${driver1Token}`)
+          .send({})
+          .expect(200);
+        expect(delivered.body.status).toBe('COMPLETED');
+
+        // A empresa paga o mesmo; a parte do motoboy passou para a plataforma.
+        const concluida = await prisma.delivery.findUniqueOrThrow({ where: { id: deliveryId } });
+        expect(Number(concluida.totalValue)).toBe(12.5);
+        expect(Number(concluida.driverValue)).toBe(0);
+        expect(Number(concluida.platformValue)).toBe(12.5);
+        await expect(
+          prisma.walletTransaction.count({ where: { relatedDeliveryId: deliveryId } }),
+        ).resolves.toBe(0);
+      } finally {
+        await setAvailability(driver1Token, 'UNAVAILABLE');
+        await request(app.getHttpServer())
+          .patch(`/admin/drivers/${driver1Id}/compensation`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ compensation: 'PER_DELIVERY' })
+          .expect(200);
+      }
+    });
+  });
+
   describe('requiresReturn com endereço conhecido', () => {
     it('deliver fica em DELIVERED; o retorno só fecha dentro do raio configurado', async () => {
       await setAvailability(driver1Token, 'AVAILABLE');

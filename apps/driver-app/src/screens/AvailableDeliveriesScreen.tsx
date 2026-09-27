@@ -23,6 +23,7 @@ import { reconcileAcceptedAssignment } from '../lib/acceptanceReconciliation';
 import { syncDeliveryTracking } from '../lib/deliveryTracking';
 import { formatDeliveryAddress } from '../lib/deliveryOperation';
 import { formatarDinheiro, formatarDistancia, formatarHora } from '../lib/format';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import { useDispatchStore } from '../store/dispatchStore';
 import type { RootStackParamList } from '../navigation/types';
@@ -68,6 +69,8 @@ function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
 /** Pedidos livres que o entregador autenticado pode assumir agora. */
 export function AvailableDeliveriesScreen({ navigation }: Props) {
   const punishment = useDispatchStore((state) => state.punishment);
+  // Salario fixo: a lista sai sem valor.
+  const mostraValores = useMostraValores();
   const [deliveries, setDeliveries] = useState<AvailableDeliveryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -246,10 +249,12 @@ export function AvailableDeliveriesScreen({ navigation }: Props) {
                       <Icon name="pin" size={18} color={colors.inkMuted} />
                       <Text style={styles.metaLabel}>{destination}</Text>
                     </View>
-                    <View style={styles.metaItem}>
-                      <Icon name="money" size={18} color={colors.success} />
-                      <Text style={styles.valueLabel}>{value}</Text>
-                    </View>
+                    {mostraValores ? (
+                      <View style={styles.metaItem}>
+                        <Icon name="money" size={18} color={colors.success} />
+                        <Text style={styles.valueLabel}>{value}</Text>
+                      </View>
+                    ) : null}
                   </View>
 
                   {delivery.batchId || delivery.requiresReturn ? (

@@ -17,6 +17,9 @@ interface CompletedDeliveryCredit {
  * criada na mesma transação que fecha a entrega. Enquanto estiver PENDING,
  * compõe o saldo bloqueado — portanto aparece para o motoboy e para o admin,
  * mas ainda não pode ser sacado.
+ *
+ * Motoboy de salário fixo (`SALARIED`) não tem repasse: a parte dele passa
+ * para a plataforma na própria entrega, e a carteira não muda.
  */
 @Injectable()
 export class FinanceLedgerService {
@@ -33,6 +36,26 @@ export class FinanceLedgerService {
       throw new InternalServerErrorException(
         'Não foi possível gerar o repasse: a entrega concluída não tem entregador ou valor definido.',
       );
+    }
+
+    const driver = await tx.driver.findUnique({
+      where: { id: delivery.driverId },
+      select: { compensation: true },
+    });
+    if (driver?.compensation === 'SALARIED') {
+      /*
+       * A entrega fica inteira com a plataforma: a parte do motoboy soma na da
+       * plataforma e zera. Lida do banco, e não do valor que chegou: concluir de
+       * novo soma zero, porque a primeira vez já zerou a parte do motoboy. A
+       * empresa paga o mesmo `totalValue` de sempre.
+       */
+      await tx.$executeRaw`
+        UPDATE "deliveries"
+        SET "platformValue" = COALESCE("platformValue", 0) + COALESCE("driverValue", 0),
+            "driverValue" = 0
+        WHERE "id" = ${delivery.id}
+      `;
+      return;
     }
 
     const { withdrawalWeekday } = await this.platformSettings.get();

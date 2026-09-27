@@ -10,6 +10,7 @@ import { formatarDinheiro } from '../lib/format';
 import { getDriverProfile } from '../lib/driverProfileCache';
 import { limparSessaoNativa } from '../lib/offerSession';
 import { desativarPush } from '../lib/push';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import type { RootStackParamList, ScreenNavigator } from '../navigation/types';
 
@@ -33,6 +34,8 @@ const MENU_ITEMS: MenuItem[] = [
 ];
 
 export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
+  // Salario fixo: sem carteira — nada entra nela, e o saldo seria um valor.
+  const mostraValores = useMostraValores();
   const [profile, setProfile] = useState<AuthUser | null>(null);
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
@@ -145,22 +148,24 @@ export function DrawerMenu({ visible, onClose, navigation }: DrawerMenuProps) {
             </View>
           </View>
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Abrir carteira"
-            style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-            onPress={() => open('Wallet')}
-          >
-            <View style={styles.iconBox}>
-              <Icon name="wallet" size={25} color={colors.actionSoft} />
-            </View>
-            <Text style={styles.label}>Carteira</Text>
-            {balance !== null ? (
-              <View style={styles.balancePill}>
-                <Text style={styles.balanceText}>{formatarDinheiro(balance)}</Text>
+          {mostraValores ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Abrir carteira"
+              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+              onPress={() => open('Wallet')}
+            >
+              <View style={styles.iconBox}>
+                <Icon name="wallet" size={25} color={colors.actionSoft} />
               </View>
-            ) : null}
-          </Pressable>
+              <Text style={styles.label}>Carteira</Text>
+              {balance !== null ? (
+                <View style={styles.balancePill}>
+                  <Text style={styles.balanceText}>{formatarDinheiro(balance)}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
 
           {MENU_ITEMS.map((item) => (
             <Pressable

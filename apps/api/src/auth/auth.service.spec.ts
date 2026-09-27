@@ -79,6 +79,37 @@ describe('AuthService', () => {
     service = module.get(AuthService);
   });
 
+  describe('me', () => {
+    const usuario = {
+      id: 'user-1',
+      name: 'Pessoa',
+      email: 'pessoa@example.com',
+      avatarUrl: null,
+    };
+
+    it('para o motoboy, diz como ele é pago', async () => {
+      prisma.driver.findUnique.mockResolvedValue({ compensation: 'SALARIED' });
+
+      await expect(service.me({ ...usuario, type: 'DRIVER' } as never)).resolves.toEqual({
+        ...usuario,
+        type: 'DRIVER',
+        driverCompensation: 'SALARIED',
+      });
+      expect(prisma.driver.findUnique).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+        select: { compensation: true },
+      });
+    });
+
+    it('para a empresa e o ADM, não consulta motoboy', async () => {
+      await expect(service.me({ ...usuario, type: 'COMPANY_MEMBER' } as never)).resolves.toEqual({
+        ...usuario,
+        type: 'COMPANY_MEMBER',
+      });
+      expect(prisma.driver.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('registerCompany', () => {
     it('cria User, Company e CompanyTeamMember quando os dados são válidos', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
@@ -500,11 +531,14 @@ describe('AuthService', () => {
         id: 'driver-1',
         approvalStatus: 'APPROVED',
         accountStatus: 'ACTIVE',
+        compensation: 'SALARIED',
       });
 
       const result = await service.login(driverLoginPayload);
 
       expect(result.driver).toEqual({ id: 'driver-1', approvalStatus: 'APPROVED' });
+      // O app guarda o perfil do login: o de salário fixo não pode ver valores até relê-lo.
+      expect(result.user.driverCompensation).toBe('SALARIED');
     });
 
     it('rejeita login de motoboy com cadastro REJECTED', async () => {

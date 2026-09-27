@@ -14,6 +14,7 @@ import type {
   ReplaceDriverServiceTypesPayload,
 } from '@motoboycity/types';
 import type {
+  AdminDriverCompensationPayload,
   AdminReviewDriverDocumentPayload,
   AdminUpdateDriverPayload,
   ChangeAdminPasswordPayload,
@@ -117,6 +118,20 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     ): Promise<AdminDriverDetail> {
       const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}`, {
         method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    /** Por corrida ou salário fixo: decide o repasse e os valores no app. */
+    async updateCompensation(
+      accessToken: string,
+      driverId: string,
+      payload: AdminDriverCompensationPayload,
+    ): Promise<AdminDriverDetail> {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/compensation`, {
+        method: 'PATCH',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

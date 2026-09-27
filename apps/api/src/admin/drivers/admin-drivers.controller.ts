@@ -30,8 +30,10 @@ import {
   type ListDriversQuery,
   type ReplaceDriverServiceTypesPayload,
   adminUpdateDriverSchema,
+  adminDriverCompensationSchema,
   adminDriverDocumentSchema,
   adminReviewDriverDocumentSchema,
+  type AdminDriverCompensationPayload,
   type AdminUpdateDriverPayload,
   type AdminDriverDocumentPayload,
   type AdminReviewDriverDocumentPayload,
@@ -152,6 +154,16 @@ export class AdminDriversController {
     @CurrentUser() admin: User,
   ) {
     return this.adminDriversService.update(id, body, admin.id);
+  }
+
+  @Patch(':id/compensation')
+  updateCompensation(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminDriverCompensationSchema))
+    body: AdminDriverCompensationPayload,
+    @CurrentUser() admin: User,
+  ) {
+    return this.adminDriversService.updateCompensation(id, body, admin.id);
   }
 
   @Post(':id/documents')

@@ -61,13 +61,26 @@ export function getDriverProfile(
 
 /** Atualiza o cache depois de login ou alteracao do proprio perfil. */
 export function setDriverProfile(token: string, profile: AuthUser): void {
+  // Salvar o proprio perfil devolve o usuario sem a remuneracao: ela continua a
+  // mesma, e perde-la faria o motoboy de salario fixo ver valores.
+  const driverCompensation =
+    profile.driverCompensation ??
+    (cacheEntry?.token === token ? cacheEntry.profile.driverCompensation : undefined);
   cacheVersion += 1;
   inFlight = undefined;
   cacheEntry = {
     token,
-    profile,
+    profile: driverCompensation ? { ...profile, driverCompensation } : profile,
     expiresAt: Date.now() + PROFILE_CACHE_TTL_MS,
   };
+}
+
+/**
+ * O ultimo perfil lido nesta sessao, mesmo vencido: e o que as telas usam para
+ * decidir o que mostrar enquanto a leitura nova nao chega.
+ */
+export function ultimoPerfilConhecido(): AuthUser | undefined {
+  return cacheEntry?.profile;
 }
 
 /** Impede que uma nova sessao reutilize dados da conta anterior. */

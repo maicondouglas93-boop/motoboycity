@@ -9,7 +9,8 @@ type PendingDeliveryCardProps = {
   companyName: string;
   serviceTypeName: string;
   distanceLabel: string;
-  amountLabel: string;
+  /** Sem ele o card nao mostra valor: o motoboy de salario fixo nao ve valores. */
+  amountLabel?: string;
   stops: ReadonlyArray<RouteStop>;
   batch: boolean;
   urgent: boolean;
@@ -46,7 +47,7 @@ export function PendingDeliveryCard({
 
         <View style={styles.values}>
           <Text style={styles.distance}>{distanceLabel}</Text>
-          <Text style={styles.amount}>{amountLabel}</Text>
+          {amountLabel ? <Text style={styles.amount}>{amountLabel}</Text> : null}
         </View>
       </View>
 

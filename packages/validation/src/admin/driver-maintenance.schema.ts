@@ -48,6 +48,15 @@ export const adminReviewDriverDocumentSchema = z.object({
   reviewStatus: z.enum(['APPROVED', 'REJECTED']),
 });
 
+/**
+ * Como o motoboy é pago. `SALARIED`: salário fixo, pago fora do sistema — a
+ * entrega dele fica com a plataforma, e o app não mostra valores a ele.
+ */
+export const adminDriverCompensationSchema = z.object({
+  compensation: z.enum(['PER_DELIVERY', 'SALARIED']),
+});
+
 export type AdminUpdateDriverPayload = z.infer<typeof adminUpdateDriverSchema>;
 export type AdminDriverDocumentPayload = z.infer<typeof adminDriverDocumentSchema>;
 export type AdminReviewDriverDocumentPayload = z.infer<typeof adminReviewDriverDocumentSchema>;
+export type AdminDriverCompensationPayload = z.infer<typeof adminDriverCompensationSchema>;

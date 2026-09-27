@@ -275,6 +275,9 @@ export default function DriversPage() {
                         {accountStatusLabel[driver.accountStatus]}
                       </Badge>
                     )}
+                    {driver.compensation === 'SALARIED' && (
+                      <Badge variant="secondary">Salário fixo</Badge>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 space-y-0.5">

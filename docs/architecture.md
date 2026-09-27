@@ -358,6 +358,14 @@ O repasse tem `idempotencyKey = driver-repasse:{deliveryId}` com índice único.
 Duas finalizações concorrentes: a segunda esbarra em P2002 e vira conflito
 legível — a proteção funcionando, não um erro a esconder.
 
+Motoboy de salário fixo (`Driver.compensation = SALARIED`, desde 2026-09-27):
+`FinanceLedgerService.creditDriverRepasse` não cria repasse. Na mesma
+transação da conclusão, soma a parte do motoboy na da plataforma e zera a dele,
+em SQL, lendo o banco — concluir de novo soma zero, e a invariante
+`driverValue + platformValue === totalValue` continua. O app sabe quem esconde
+valores por `driverCompensation`, que `/auth/me` e o login devolvem só para
+motoboy.
+
 Uma corrida de 0 km é cobrada pela **taxa base** da tabela, e o histórico
 registra que ela fechou no mesmo ponto da coleta — cobrança legítima, mas também
 o sintoma de um toque errado, e a fatura precisa poder ser explicada.

@@ -177,7 +177,7 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 
 | | |
 |---|---|
-| Commit publicado | `bd35d87`, a oferta ao motoboy repete no conflito de serialização (o "Internal server error" ao chamar motoboy), enviado para `main` em 26/09/2026: CI verde e "Deploy live" no Render às 14:40, lido nos eventos do serviço. Antes, no mesmo dia: `be86503`, Pix online pela conta Asaas de cada loja, enviado para `main` em 26/09/2026: CI verde, a rota nova (`/company/store/asaas-account`) responde 401 no Render (a migration `20260926230000_loja_pagamento_online` foi no build), `/health` ok, e o Vercel do company e do admin em success no status do commit. O Pix fica desligado até `STORE_ASAAS_ENCRYPTION_KEY` entrar no Render. Antes, no mesmo dia: `18b0d0d`, correção do build, com o Web Push de `840a0ce` (avisos da loja online com a página fechada), enviados para `main` em 26/09/2026. O `840a0ce` sozinho falhou no build do Render, do Vercel e do CI (ver "Armadilhas do ambiente"); com `18b0d0d`, CI verde, `/public/web-push` passou de 404 a 200 no Render (`chavePublica: null` até as chaves `WEB_PUSH_*` entrarem), `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes, no mesmo dia: `f94ff4a`, a corrida nasce do pedido da loja online: CI verde, a rota nova (`POST /company/store/orders/:id/ride`) passou de 404 a 401 no Render cerca de 3,5 min depois do push, `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes dele, no mesmo dia: `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre). CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
+| Commit publicado | `d0b3fa6`, "Salvar cliente" a partir da venda da loja online (só painel), enviado para `main` em 26/09/2026: CI verde e o Vercel do company e do admin em success no status do commit. Antes, no mesmo dia: `bd35d87`, a oferta ao motoboy repete no conflito de serialização (o "Internal server error" ao chamar motoboy), enviado para `main` em 26/09/2026: CI verde e "Deploy live" no Render às 14:40, lido nos eventos do serviço. Antes, no mesmo dia: `be86503`, Pix online pela conta Asaas de cada loja, enviado para `main` em 26/09/2026: CI verde, a rota nova (`/company/store/asaas-account`) responde 401 no Render (a migration `20260926230000_loja_pagamento_online` foi no build), `/health` ok, e o Vercel do company e do admin em success no status do commit. O Pix fica desligado até `STORE_ASAAS_ENCRYPTION_KEY` entrar no Render. Antes, no mesmo dia: `18b0d0d`, correção do build, com o Web Push de `840a0ce` (avisos da loja online com a página fechada), enviados para `main` em 26/09/2026. O `840a0ce` sozinho falhou no build do Render, do Vercel e do CI (ver "Armadilhas do ambiente"); com `18b0d0d`, CI verde, `/public/web-push` passou de 404 a 200 no Render (`chavePublica: null` até as chaves `WEB_PUSH_*` entrarem), `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes, no mesmo dia: `f94ff4a`, a corrida nasce do pedido da loja online: CI verde, a rota nova (`POST /company/store/orders/:id/ride`) passou de 404 a 401 no Render cerca de 3,5 min depois do push, `/health/ready` ok, e o Vercel do company e do admin em "Deployment has completed". Antes dele, no mesmo dia: `424db8a`, pedido da loja online, login do cliente pelo Firebase e Vendas de verdade (junto: `6c4dace`, a loja que não abre). CI verde no GitHub. API nova conferida pela rota nova (`/company/store/orders`, 404 → 401); a rota do cliente responde 401 `STORE_CUSTOMER_REQUIRED`, e não 503 — o `FIREBASE_PROJECT_ID` está no Render; `/health/ready` com PostgreSQL/Redis ok. No status do commit, o Vercel do company e do admin em "Deployment has completed"; `/pedir/minha-loja`, `/login` e `/loja/vendas` respondem 200. Painéis do Render e do Vercel não foram abertos |
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 63 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido, avisos). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
@@ -613,7 +613,11 @@ em banco descartável; está também no `motoboycity_dev` local. A do pagamento 
 `20260926230000_loja_pagamento_online` (a etapa `AGUARDANDO_PAGAMENTO`, o
 pagamento no pedido e `store_asaas_accounts`), foi no push de 2026-09-26
 (`be86503`), pelo mesmo caminho, depois de validada em banco descartável; o
-rollback só desfaz a etapa nova se nenhum pedido estiver nela.
+rollback só desfaz a etapa nova se nenhum pedido estiver nela. A do motoboy de
+salário fixo, `20260927090000_motoboy_salario_fixo` (enum `DriverCompensation`
+e `drivers.compensation`, padrão `PER_DELIVERY`), foi validada em banco
+descartável (aplicar, desfazer, reaplicar) e está no `motoboycity_dev` local;
+vai para produção no próximo push, pelo build do Render.
 
 **Como a loja funciona, no banco** (2026-09-25). Cada bloco é uma coluna JSONB
 de `store_operations` — horário, ajuste da hora, tipos de pedido, avisos —, e
@@ -906,7 +910,13 @@ registradas no `changelog.md` de 2026-09-23.
    Asaas, cadastra uma chave Pix, gera a chave da API (Integrações → Chaves de
    API) e cola em Configurações → Recebimento online pelo Asaas. Testar antes
    com uma conta **sandbox**.
-9. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+9. **APK novo para o motoboy de salário fixo** (recorte de 27/09/2026). A API
+   e o ADM valem no push: a entrega dele já fica com a plataforma. Mas é o app
+   que esconde os valores, e o `pilot.27` (e anteriores) ainda os mostram.
+   Gerar e instalar um APK novo no aparelho dele antes de começar; conferir
+   oferta, Início, Disponíveis, Histórico, detalhe, confirmação e o menu sem
+   carteira.
+10. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

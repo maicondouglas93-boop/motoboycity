@@ -8,6 +8,7 @@ import {
   type RegisterCompanyPayload,
   type RegisterDriverPayload,
 } from '@motoboycity/validation';
+import type { AuthUser } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import {
@@ -52,13 +53,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: User) {
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      type: user.type,
-      avatarUrl: user.avatarUrl,
-    };
+  me(@CurrentUser() user: User): Promise<AuthUser> {
+    return this.authService.me(user);
   }
 }

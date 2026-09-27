@@ -1,6 +1,12 @@
 export type DriverApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type DriverAccountStatus = 'ACTIVE' | 'SUSPENDED' | 'BLOCKED';
 export type DriverAvailability = 'AVAILABLE' | 'UNAVAILABLE';
+/**
+ * Como o motoboy é pago. `PER_DELIVERY`: a parte dele de cada entrega vai para
+ * a carteira (o padrão). `SALARIED`: salário fixo, pago fora do sistema — a
+ * entrega fica inteira com a plataforma, e o app não mostra valores a ele.
+ */
+export type DriverCompensation = 'PER_DELIVERY' | 'SALARIED';
 
 export interface DriverPresenceItem {
   availability: DriverAvailability;
@@ -69,6 +75,7 @@ export interface AdminDriverListItem {
   approvalStatus: DriverApprovalStatus;
   accountStatus: DriverAccountStatus;
   availability: DriverAvailability;
+  compensation: DriverCompensation;
   appVersion: string | null;
   lastSeenAt: string | null;
   createdAt: string;

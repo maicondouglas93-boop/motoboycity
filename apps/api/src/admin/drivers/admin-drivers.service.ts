@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type {
+  AdminDriverCompensationPayload,
   AdminDriverDocumentPayload,
   AdminReviewDriverDocumentPayload,
   AdminUpdateDriverPayload,
@@ -12,6 +13,7 @@ import {
   type DriverAccountStatus,
   type DriverApprovalStatus,
   type DriverAvailability,
+  type DriverCompensation,
 } from '@prisma/client';
 import type {
   AdminDriverListItem,
@@ -432,6 +434,44 @@ export class AdminDriversService {
     return this.detail(driverId);
   }
 
+  /**
+   * Por corrida ou salário fixo. Vale para as entregas concluídas daqui em
+   * diante: o repasse é decidido na conclusão, e o que já entrou na carteira
+   * continua lá.
+   */
+  async updateCompensation(
+    driverId: string,
+    payload: AdminDriverCompensationPayload,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    await this.prisma.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        select: { compensation: true, user: { select: { name: true } } },
+      });
+      if (!driver) throw new NotFoundException('Motoboy nao encontrado.');
+      if (driver.compensation === payload.compensation) return;
+      await tx.driver.update({
+        where: { id: driverId },
+        data: { compensation: payload.compensation },
+      });
+      await this.audit.record(
+        {
+          actorUserId,
+          action: 'DRIVER_COMPENSATION_CHANGED',
+          entityType: 'DRIVER',
+          entityId: driverId,
+          summary:
+            payload.compensation === 'SALARIED'
+              ? `Motoboy ${driver.user.name} passou a salário fixo: as entregas dele ficam com a plataforma.`
+              : `Motoboy ${driver.user.name} voltou a receber por corrida.`,
+        },
+        tx,
+      );
+    });
+    return this.detail(driverId);
+  }
+
   async uploadDocument(
     driverId: string,
     payload: AdminDriverDocumentPayload,
@@ -570,6 +610,7 @@ export class AdminDriversService {
       approvalStatus: DriverApprovalStatus;
       accountStatus: DriverAccountStatus;
       availability: DriverAvailability;
+      compensation: DriverCompensation;
       appVersion: string | null;
       lastSeenAt: Date | null;
       createdAt: Date;
@@ -595,6 +636,7 @@ export class AdminDriversService {
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
       availability: driver.availability,
+      compensation: driver.compensation,
       appVersion: driver.appVersion,
       lastSeenAt: driver.lastSeenAt?.toISOString() ?? null,
       createdAt: driver.createdAt.toISOString(),

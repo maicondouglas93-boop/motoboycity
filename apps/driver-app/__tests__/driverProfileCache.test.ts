@@ -4,6 +4,7 @@ import {
   clearDriverProfile,
   getDriverProfile,
   setDriverProfile,
+  ultimoPerfilConhecido,
 } from '../src/lib/driverProfileCache';
 
 jest.mock('../src/lib/apiClient', () => ({
@@ -88,5 +89,23 @@ describe('driverProfileCache', () => {
 
     await expect(getDriverProfile('token')).resolves.toMatchObject({ name: 'atualizado' });
     expect(me).not.toHaveBeenCalled();
+  });
+
+  it('salvar o proprio perfil nao apaga a remuneracao que veio do login', () => {
+    setDriverProfile('token', { ...profile('fixo'), driverCompensation: 'SALARIED' });
+    // O perfil salvo volta sem o campo: o de salario fixo continua sem ver valores.
+    setDriverProfile('token', profile('fixo com foto'));
+
+    expect(ultimoPerfilConhecido()).toMatchObject({
+      name: 'fixo com foto',
+      driverCompensation: 'SALARIED',
+    });
+  });
+
+  it('a remuneracao de outra conta nao passa para a nova', () => {
+    setDriverProfile('token-um', { ...profile('um'), driverCompensation: 'SALARIED' });
+    setDriverProfile('token-dois', profile('dois'));
+
+    expect(ultimoPerfilConhecido()?.driverCompensation).toBeUndefined();
   });
 });

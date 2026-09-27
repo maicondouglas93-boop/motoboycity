@@ -65,6 +65,7 @@ import {
 } from '../lib/location';
 import { DRIVER_APP_VERSION } from '../lib/appVersion';
 import { isTransientPresenceError, restoreDesiredPresence } from '../lib/presencePersistence';
+import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import { API_BASE_URL } from '../lib/config';
 import {
@@ -205,6 +206,8 @@ function availableDeliveryStops(delivery: AvailableDeliveryItem): RouteStop[] {
 
 export function HomeScreen({ navigation }: Props) {
   const isFocused = useIsFocused();
+  // Salario fixo: os cards saem sem valor.
+  const mostraValores = useMostraValores();
   const acceptingPendingRef = useRef(false);
   const presenceRecoveryRef = useRef<Promise<DriverPresenceItem | null> | null>(null);
   const socketRecoveryRef = useRef<Promise<void> | null>(null);
@@ -1476,9 +1479,11 @@ export function HomeScreen({ navigation }: Props) {
                         : formatarDistancia(delivery.distanceKm)
                     }
                     amountLabel={
-                      delivery.driverValue === null
-                        ? 'A calcular'
-                        : formatarDinheiro(delivery.driverValue)
+                      !mostraValores
+                        ? undefined
+                        : delivery.driverValue === null
+                          ? 'A calcular'
+                          : formatarDinheiro(delivery.driverValue)
                     }
                     countdownLabel={pickupCountdownLabel(delivery, pickupCountdownNow)}
                     stops={activeDeliveryStops(delivery)}
@@ -1516,9 +1521,11 @@ export function HomeScreen({ navigation }: Props) {
                       : 'Destino na entrega'
                   }
                   amountLabel={
-                    delivery.driverValue === null
-                      ? 'A calcular'
-                      : formatarDinheiro(delivery.driverValue)
+                    !mostraValores
+                      ? undefined
+                      : delivery.driverValue === null
+                        ? 'A calcular'
+                        : formatarDinheiro(delivery.driverValue)
                   }
                   stops={availableDeliveryStops(delivery)}
                   batch={Boolean(delivery.batchId)}

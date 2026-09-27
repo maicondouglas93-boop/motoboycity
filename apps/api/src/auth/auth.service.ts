@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import type {
   AdminPasswordChangeResult,
+  AuthUser,
   OwnPasswordChangeResult,
   RegisterCompanyResult as SharedRegisterCompanyResult,
   RegisterDriverResult as SharedRegisterDriverResult,
@@ -19,7 +20,7 @@ import type {
   RegisterCompanyPayload,
   RegisterDriverPayload,
 } from '@motoboycity/validation';
-import { Prisma, type User } from '@prisma/client';
+import { Prisma, type DriverCompensation, type User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { credentialFingerprint } from './credential-fingerprint';
 
@@ -45,7 +46,14 @@ export interface ReplacePasswordOptions {
 
 export interface LoginResult {
   accessToken: string;
-  user: { id: string; name: string; email: string; type: string; avatarUrl: string | null };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    type: string;
+    avatarUrl: string | null;
+    driverCompensation?: DriverCompensation;
+  };
   company?: { id: string; status: string };
   driver?: { id: string; approvalStatus: string };
 }
@@ -56,6 +64,26 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
   ) {}
+
+  /**
+   * O perfil de quem está logado. Para o motoboy, também como ele é pago: o
+   * app esconde os valores de quem tem salário fixo.
+   */
+  async me(user: User): Promise<AuthUser> {
+    const perfil: AuthUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      type: user.type,
+      avatarUrl: user.avatarUrl,
+    };
+    if (user.type !== 'DRIVER') return perfil;
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId: user.id },
+      select: { compensation: true },
+    });
+    return driver ? { ...perfil, driverCompensation: driver.compensation } : perfil;
+  }
 
   async registerCompany(
     payload: RegisterCompanyPayload,
@@ -346,6 +374,9 @@ export class AuthService {
         email: user.email,
         type: user.type,
         avatarUrl: user.avatarUrl ?? null,
+        // O app guarda este perfil ao entrar: sem isto, o motoboy de salário
+        // fixo veria valores até o perfil ser relido.
+        ...(driver && { driverCompensation: driver.compensation }),
       },
       ...(company && { company }),
       ...(driver && { driver: { id: driver.id, approvalStatus: driver.approvalStatus } }),
@@ -371,9 +402,15 @@ export class AuthService {
     return { id: membership.company.id, status: membership.company.status };
   }
 
-  private async findDriverForUser(
-    user: User,
-  ): Promise<{ id: string; approvalStatus: string; accountStatus: string } | undefined> {
+  private async findDriverForUser(user: User): Promise<
+    | {
+        id: string;
+        approvalStatus: string;
+        accountStatus: string;
+        compensation: DriverCompensation;
+      }
+    | undefined
+  > {
     if (user.type !== 'DRIVER') {
       return undefined;
     }
@@ -387,6 +424,7 @@ export class AuthService {
       id: driver.id,
       approvalStatus: driver.approvalStatus,
       accountStatus: driver.accountStatus,
+      compensation: driver.compensation,
     };
   }
 

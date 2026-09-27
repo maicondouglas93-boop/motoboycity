@@ -16355,3 +16355,94 @@ pedidos, e nenhum teste monta a sacola).
 **Publicação de `bd35d87`** (a oferta repete no conflito de serialização):
 enviado para `main` em 26/09; CI verde; "Deploy live" no Render às 14:40, lido
 nos eventos do serviço.
+
+## 2026-09-27 — Motoboy de salário fixo: a entrega fica com a plataforma, e o app não mostra valores
+
+**Pedido do usuário:** "vou contratar um motoboy que não vai receber por
+corrida, vai receber um salário fixo, as entregas serão 100% da plataforma,
+então ele não precisa saber e nem ver os valores no aplicativo". O salário é
+pago fora do sistema. Decisões tomadas sem perguntar, por serem o padrão: ele
+entra na fila de despacho normal (o ADM já edita a ordem), e o que ele cobra do
+cliente na entrega continua visível (é dinheiro do cliente).
+
+**Banco** — migration `20260927090000_motoboy_salario_fixo`, aditiva: enum
+`DriverCompensation` (`PER_DELIVERY`, `SALARIED`) e `drivers.compensation`,
+padrão `PER_DELIVERY` — todo motoboy existente continua por corrida. O SQL é o
+mesmo que o `prisma migrate diff` gera. Validada num banco descartável:
+aplicar todas, conferir, desfazer, voltar ao anterior e reaplicar — as quatro
+ok. Aplicada no `motoboycity_dev` local. **Não foi para produção.**
+
+**API:**
+
+- `FinanceLedgerService.creditDriverRepasse`, o único ponto que credita o
+  motoboy (conclusão pelo motoboy, pelo ADM e do retorno): com `SALARIED`, não
+  cria repasse nem mexe na carteira; soma a parte do motoboy na da plataforma e
+  zera a dele, em SQL, na mesma transação da conclusão. Lê do banco, e não do
+  valor que chegou: concluir de novo soma zero. A invariante
+  `driverValue + platformValue === totalValue` continua, e a empresa paga o mesmo.
+  Os quatro caminhos gravam o valor antes de chamar o repasse — conferido.
+- `PATCH /admin/drivers/:id/compensation` (`adminDriverCompensationSchema`),
+  com auditoria `DRIVER_COMPENSATION_CHANGED`; a lista e o detalhe do ADM
+  trazem `compensation`.
+- `/auth/me` e o login devolvem `driverCompensation`, só para motoboy. O login
+  também: o app guarda o perfil do login, e sem o campo o de salário fixo veria
+  valores até o perfil ser relido.
+
+**ADM:** cartão **Remuneração** na ficha do motoboy (por corrida ou salário
+fixo, com confirmação que diz o que muda), e o selo "Salário fixo" na ficha e
+na lista.
+
+**App do motoboy:** `useMostraValores` (`lib/remuneracao.ts`) lê o perfil em
+cache; só `SALARIED` esconde, e perfil sem o campo (API antiga) mostra, como
+sempre. Sem perfil lido na sessão, esconde até ler. Sem valores para ele:
+oferta ("Você recebe"), Início (em andamento e pendentes), Disponíveis,
+Histórico (sem "Ganhos no período"), detalhe do pedido (fica a distância),
+operação da entrega (a seção vira "Pagamento", com a cobrança do cliente) e a
+confirmação (fica o endereço, e o aviso de GPS impreciso); o menu não tem
+Carteira. O cache do perfil mantém a remuneração quando o motoboy salva o
+próprio perfil (a resposta vem sem o campo). Quem passar a salário fixo com o
+app aberto deixa de ver valores na próxima leitura do perfil (até 5 min).
+
+**Arquivos:** `apps/api/prisma/schema.prisma`, a migration nova;
+`apps/api/src/finance/finance-ledger.service.ts` e spec;
+`apps/api/src/admin/drivers/admin-drivers.service.ts`, controller e spec;
+`apps/api/src/auth/auth.service.ts`, controller e spec;
+`apps/api/test/delivery-lifecycle.e2e-spec.ts`; `packages/types/src/driver.ts`,
+`user.ts`; `packages/validation/src/admin/driver-maintenance.schema.ts`;
+`packages/api-client/src/admin-drivers.ts`; no `admin-web`,
+`components/drivers/driver-compensation.tsx` (novo) e as páginas
+`entregadores` e `entregadores/[id]`; no `driver-app`, `lib/remuneracao.ts`
+(novo), `lib/driverProfileCache.ts`, `components/DrawerMenu.tsx`,
+`PendingDeliveryCard.tsx`, as telas `IncomingOffer`, `Home`,
+`AvailableDeliveries`, `DriverHistory`, `DriverOrderDetail` e
+`DeliveryOperation`, e os testes `IncomingOfferScreen` e `driverProfileCache`;
+`docs/business-rules.md`, `architecture.md`, `agent-handoff.md` (com o registro
+da publicação de `d0b3fa6`).
+
+**Como foi validado:** os três pacotes compilados como no deploy
+(`--typeRoots` isolado); `pnpm typecheck` 8/8; `pnpm lint` 8/8 (o aviso antigo
+do driver-app); Jest da API 1407 passam e 1 pulado; driver-app 215/215; E2E
+inteiro isolado, 29 suítes e 256 testes — o novo liga o salário fixo pela rota
+do ADM, confere o `/auth/me`, conclui uma entrega e vê `driverValue` 0,
+`platformValue` igual ao total e nenhuma linha na carteira; builds da API e do
+ADM sem erro. A API local subiu com a migration e a rota responde (401 sem
+login). **Não visto na tela**: o cartão do ADM (o login do ADM local não é
+meu para digitar) e o app em aparelho — as telas foram cobertas por tipos e
+pelo teste da oferta com e sem valor.
+
+**Deploy:** a API e o ADM vão no push. **O app só esconde os valores com um APK
+novo**; o `pilot.27` e anteriores ainda os mostram.
+
+**Reverter** a migration, se preciso:
+
+```sql
+ALTER TABLE "drivers" DROP COLUMN "compensation";
+DROP TYPE "DriverCompensation";
+DELETE FROM "_prisma_migrations" WHERE "migration_name" = '20260927090000_motoboy_salario_fixo';
+```
+
+As entregas concluídas por motoboy de salário fixo ficam com `driverValue` 0:
+reverter não as devolve à carteira.
+
+**Publicação de `d0b3fa6`** ("Salvar cliente"): enviado para `main` em 26/09;
+CI verde; Vercel do company e do admin em success no status do commit.

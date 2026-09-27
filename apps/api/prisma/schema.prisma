@@ -64,6 +64,15 @@ enum DriverAvailability {
   UNAVAILABLE
 }
 
+/// Como o motoboy é pago. PER_DELIVERY: a parte do motoboy de cada entrega
+/// vai para a carteira dele (o padrão). SALARIED: contratado com salário fixo,
+/// pago fora do sistema — a entrega inteira fica com a plataforma, nada entra
+/// na carteira, e o app não mostra valores a ele.
+enum DriverCompensation {
+  PER_DELIVERY
+  SALARIED
+}
+
 enum VehicleStatus {
   ACTIVE
   INACTIVE
@@ -643,6 +652,7 @@ model Driver {
   accountStatus  DriverAccountStatus  @default(ACTIVE)
   availability   DriverAvailability   @default(UNAVAILABLE)
   appVersion     String?
+  compensation   DriverCompensation   @default(PER_DELIVERY)
 
   reviewedByUserId String?
   reviewedAt       DateTime?
