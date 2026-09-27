@@ -37,6 +37,10 @@ decidido (isso é configuração de implementação, não decisão de negócio
 bloqueante). A configuração global vale para tabelas gerais e como fallback
 das tabelas personalizadas antigas que ainda não possuem uma divisão própria.
 
+**O motoboy vê só o valor dele** (decisão de 2026-09-27, do usuário): o app
+não mostra o valor total da entrega — o que a empresa paga à central — nem a
+parte da plataforma.
+
 ## Motoboy de salário fixo
 
 Decisão de 2026-09-27, do usuário: a central pode contratar motoboy com

@@ -198,17 +198,9 @@ export function DriverOrderDetailScreen({ navigation, route }: Props) {
                   </Text>
                 </View>
               ) : null}
+              {/* O motoboy vê só o valor dele: o total é o que a empresa paga
+                  à central, e não diz respeito a ele (pedido de 27/09/2026). */}
               <View style={styles.valueGrid}>
-                {mostraValores ? (
-                  <ValueItem
-                    label="Valor total"
-                    value={
-                      delivery.totalValue === null
-                        ? 'A calcular'
-                        : currencyFormatter.format(delivery.totalValue)
-                    }
-                  />
-                ) : null}
                 <ValueItem
                   label="Distância"
                   value={

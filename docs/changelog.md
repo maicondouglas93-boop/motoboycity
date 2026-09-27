@@ -16446,3 +16446,30 @@ reverter não as devolve à carteira.
 
 **Publicação de `d0b3fa6`** ("Salvar cliente"): enviado para `main` em 26/09;
 CI verde; Vercel do company e do admin em success no status do commit.
+
+## 2026-09-27 — O motoboy vê só o valor dele: sai o "Valor total" do app
+
+**Pedido do usuário**, com print do detalhe do pedido #3090 no app: "não
+mostrar valor total ao motoboy, só o valor dele". O "Valor total" é o que a
+empresa paga à central.
+
+**Mudança:** a tela de detalhe do pedido (`DriverOrderDetailScreen`), a única
+do app que mostrava o total, fica com o valor do entregador, a distância e o
+retorno. Nenhuma outra tela mostrava o total ou a parte da plataforma
+(conferido por busca no `driver-app`). A API continua mandando esses campos no
+contrato do pedido, que é o mesmo da empresa; só a tela deixou de mostrá-los.
+Regra registrada em `business-rules.md` ("Comissão").
+
+**Arquivos:** `apps/driver-app/src/screens/DriverOrderDetailScreen.tsx`;
+`docs/business-rules.md`, `docs/agent-handoff.md` (com o registro da
+publicação de `c8dd4f8`).
+
+**Como foi validado:** `tsc`, eslint e prettier do `driver-app` sem erro; Jest
+do `driver-app` 215/215. Não visto em aparelho.
+
+**Deploy:** vai no próximo APK, junto com o do motoboy de salário fixo; o
+`pilot.27` continua mostrando o total.
+
+**Publicação de `c8dd4f8`** (motoboy de salário fixo): enviado para `main` em
+27/09; CI verde; a rota nova responde 401 no Render, com a migration aplicada no
+build; Vercel do company e do admin em success no status do commit.
