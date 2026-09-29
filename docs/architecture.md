@@ -120,7 +120,10 @@ MOTOboyCity entrega, a corrida nasce dele no aceite (`deliveryId`, 1:1),
 agendada para quando o pedido fica pronto, pela mesma criação do painel
 (`DeliveriesService.createFromStoreOrder`). "Pronto" libera a corrida
 agendada; cancelar o pedido a cancela (`cancelFromStoreOrder`, só antes de um
-motoboy aceitar). O pedido acompanha a corrida na leitura — coletada, saiu;
+motoboy aceitar) e tira o job da hora marcada. A corrida nasce e é ligada ao
+pedido em passos separados do cancelamento, então os dois lados se conferem
+depois de gravar (`recolherCorridaDoCancelado`, no fim de `chamarCorrida` e de
+`cancelar`): o pedido cancelado nunca fica com corrida agendada. O pedido acompanha a corrida na leitura — coletada, saiu;
 entregue, entregue —, e o que der errado com ela vira `rideIssue`, o aviso de
 Vendas, sem desfazer a etapa do pedido.
 

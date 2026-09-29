@@ -146,6 +146,7 @@ describe('DeliveriesService', () => {
       aggregate: jest.Mock;
       count: jest.Mock;
       findMany: jest.Mock;
+      findFirst: jest.Mock;
       findUnique: jest.Mock;
       update: jest.Mock;
       groupBy: jest.Mock;
@@ -208,6 +209,7 @@ describe('DeliveriesService', () => {
         aggregate: jest.fn(),
         count: jest.fn(),
         findMany: jest.fn(),
+        findFirst: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
         groupBy: jest.fn().mockResolvedValue([]),
@@ -1810,6 +1812,125 @@ describe('DeliveriesService', () => {
       await expect(service.releaseScheduled(companyUser, 'delivery-1')).rejects.toThrow(
         'já não está mais agendado',
       );
+    });
+  });
+
+  /**
+   * A loja online e o aiqfome cancelam a corrida do pedido que a loja cancelou.
+   * O que importa aqui: a corrida agendada SAI dos agendados e o job da hora
+   * marcada é removido, para nenhum motoboy ser chamado por um pedido morto.
+   */
+  describe('cancelamento pela loja (loja online e aiqfome)', () => {
+    it('a corrida agendada é cancelada, e o job da hora marcada sai da fila', async () => {
+      prisma.delivery.findFirst.mockResolvedValue(fullDeliveryRow({ status: 'SCHEDULED' }));
+
+      const resultado = await service.cancelFromStoreOrder(
+        'company-1',
+        'delivery-1',
+        'Pedido #42 da loja online cancelado pela loja: Item em falta',
+      );
+
+      expect(resultado).toBe('CANCELLED');
+      expect(prisma.delivery.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'delivery-1', companyId: 'company-1' } }),
+      );
+      expect(tx.delivery.updateMany).toHaveBeenCalledWith({
+        where: { id: 'delivery-1', status: 'SCHEDULED' },
+        data: { status: 'CANCELLED', statusChangedAt: expect.any(Date) },
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: {
+          deliveryId: 'delivery-1',
+          fromStatus: 'SCHEDULED',
+          toStatus: 'CANCELLED',
+          changedByUserId: null,
+          note: 'Pedido #42 da loja online cancelado pela loja: Item em falta',
+        },
+      });
+      expect(dispatchService.cancelScheduledActivation).toHaveBeenCalledWith('delivery-1');
+      expect(dispatchService.cancelPendingOfferForDelivery).not.toHaveBeenCalled();
+      expect(realtimeGateway.emitDeliveryUpdated).toHaveBeenCalledWith(
+        'company-1',
+        expect.objectContaining({ deliveryId: 'delivery-1', status: 'CANCELLED' }),
+      );
+    });
+
+    it('com o motoboy já a caminho, nada muda: é com a central', async () => {
+      prisma.delivery.findFirst.mockResolvedValue(fullDeliveryRow({ status: 'ACCEPTED' }));
+
+      await expect(service.cancelFromStoreOrder('company-1', 'delivery-1', 'x')).resolves.toBe(
+        'REVIEW',
+      );
+
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+      expect(dispatchService.cancelScheduledActivation).not.toHaveBeenCalled();
+    });
+
+    it('corrida já cancelada ou concluída não é mexida', async () => {
+      prisma.delivery.findFirst.mockResolvedValueOnce(fullDeliveryRow({ status: 'CANCELLED' }));
+      await expect(service.cancelFromStoreOrder('company-1', 'delivery-1', 'x')).resolves.toBe(
+        'TERMINAL',
+      );
+
+      prisma.delivery.findFirst.mockResolvedValueOnce(null);
+      await expect(service.cancelFromStoreOrder('company-1', 'delivery-1', 'x')).resolves.toBe(
+        'NOT_FOUND',
+      );
+      expect(tx.delivery.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('se a hora marcada chega no meio do cancelamento, relê e cancela a que já busca motoboy', async () => {
+      // Lida como agendada; quando a escrita chega, o job da hora já a passou
+      // para "buscando motoboy" — ainda sem motoboy, e portanto cancelável.
+      prisma.delivery.findFirst
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'SCHEDULED' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'AWAITING_DRIVER' }));
+      tx.delivery.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const resultado = await service.cancelFromStoreOrder('company-1', 'delivery-1', 'x');
+
+      expect(resultado).toBe('CANCELLED');
+      expect(tx.delivery.updateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 'delivery-1', status: 'AWAITING_DRIVER' },
+        data: { status: 'CANCELLED', statusChangedAt: expect.any(Date) },
+      });
+      // A oferta que já tinha saído para um motoboy deixa de valer.
+      expect(dispatchService.cancelPendingOfferForDelivery).toHaveBeenCalledWith('delivery-1');
+    });
+
+    it('se um motoboy aceita no meio do cancelamento, devolve REVIEW e não cancela', async () => {
+      prisma.delivery.findFirst
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'AWAITING_DRIVER' }))
+        .mockResolvedValueOnce(fullDeliveryRow({ status: 'ACCEPTED' }));
+      tx.delivery.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.cancelFromStoreOrder('company-1', 'delivery-1', 'x')).resolves.toBe(
+        'REVIEW',
+      );
+
+      expect(tx.deliveryStatusHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('o cancelamento no aiqfome também tira o agendado, com a frase padrão sem motivo', async () => {
+      prisma.delivery.findUnique.mockResolvedValue(fullDeliveryRow({ status: 'SCHEDULED' }));
+
+      const resultado = await service.cancelFromIntegration('integracao-1', '68670787');
+
+      expect(resultado).toBe('CANCELLED');
+      expect(prisma.delivery.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            integrationId_externalOrderId: {
+              integrationId: 'integracao-1',
+              externalOrderId: '68670787',
+            },
+          },
+        }),
+      );
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ toStatus: 'CANCELLED', note: 'Cancelado no aiqfome.' }),
+      });
+      expect(dispatchService.cancelScheduledActivation).toHaveBeenCalledWith('delivery-1');
     });
   });
 

@@ -1799,18 +1799,18 @@ export class DeliveriesService {
     externalOrderId: string,
     reason?: string,
   ): Promise<'CANCELLED' | 'NOT_FOUND' | 'TERMINAL' | 'REVIEW'> {
-    const delivery = await this.prisma.delivery.findUnique({
-      where: { integrationId_externalOrderId: { integrationId, externalOrderId } },
-      include: {
-        company: { select: { tradeName: true } },
-        driver: { include: { user: { select: { name: true } } } },
-      },
-    });
-    if (!delivery) return 'NOT_FOUND';
-    if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
-    if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
     const note = reason?.trim().slice(0, 500) || 'Cancelado no aiqfome.';
-    return (await this.cancelBySystem(delivery, note)) ? 'CANCELLED' : 'REVIEW';
+    return this.cancelUntilAccepted(
+      () =>
+        this.prisma.delivery.findUnique({
+          where: { integrationId_externalOrderId: { integrationId, externalOrderId } },
+          include: {
+            company: { select: { tradeName: true } },
+            driver: { include: { user: { select: { name: true } } } },
+          },
+        }),
+      note,
+    );
   }
 
   /**
@@ -1823,17 +1823,46 @@ export class DeliveriesService {
     deliveryId: string,
     note: string,
   ): Promise<'CANCELLED' | 'NOT_FOUND' | 'TERMINAL' | 'REVIEW'> {
-    const delivery = await this.prisma.delivery.findFirst({
-      where: { id: deliveryId, companyId },
-      include: {
-        company: { select: { tradeName: true } },
-        driver: { include: { user: { select: { name: true } } } },
-      },
-    });
-    if (!delivery) return 'NOT_FOUND';
-    if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
-    if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
-    return (await this.cancelBySystem(delivery, note)) ? 'CANCELLED' : 'REVIEW';
+    return this.cancelUntilAccepted(
+      () =>
+        this.prisma.delivery.findFirst({
+          where: { id: deliveryId, companyId },
+          include: {
+            company: { select: { tradeName: true } },
+            driver: { include: { user: { select: { name: true } } } },
+          },
+        }),
+      note,
+    );
+  }
+
+  /**
+   * O cancelamento de quem não é a empresa no painel (a loja online, o aiqfome):
+   * vale enquanto nenhum motoboy aceitou, e a escrita é condicional ao status
+   * lido. Se o status muda entre a leitura e a escrita, a corrida pode ter saído
+   * de `SCHEDULED` para `AWAITING_DRIVER` na mesma hora — ainda sem motoboy, e
+   * portanto cancelável. Por isso relê uma vez antes de desistir: sem isso, a loja
+   * ouvia "já tem motoboy" de uma corrida que só estava buscando, e ela seguia
+   * chamando quem nunca iria coletar.
+   */
+  private async cancelUntilAccepted(
+    load: () => Promise<
+      | (Delivery & {
+          company: { tradeName: string };
+          driver: { user: { name: string } } | null;
+        })
+      | null
+    >,
+    note: string,
+  ): Promise<'CANCELLED' | 'NOT_FOUND' | 'TERMINAL' | 'REVIEW'> {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const delivery = await load();
+      if (!delivery) return 'NOT_FOUND';
+      if (delivery.status === 'CANCELLED' || delivery.status === 'COMPLETED') return 'TERMINAL';
+      if (!COMPANY_CANCELLABLE_STATUSES.includes(delivery.status)) return 'REVIEW';
+      if (await this.cancelBySystem(delivery, note)) return 'CANCELLED';
+    }
+    return 'REVIEW';
   }
 
   /**

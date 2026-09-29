@@ -785,7 +785,52 @@ export class StoreOrdersService {
     await this.mudar(companyId, id, (pedido, agora) =>
       this.dadosDoCancelamento(pedido, agora, { motivo, por: 'LOJA' }),
     );
+    // Sem corrida na leitura de cima, ela ainda pode ter nascido no meio: o
+    // aceite cria a corrida e só depois a liga ao pedido.
+    if (!linha || !corridaViva(linha.delivery)) await this.recolherCorridaDoCancelado(companyId, id);
     return this.paraALojaPorId(companyId, id);
+  }
+
+  /**
+   * Tira a corrida de um pedido que já está cancelado — a que nasceu enquanto a
+   * loja cancelava, e por isso ficou agendada para chamar um motoboy que ninguém
+   * mais espera.
+   *
+   * O aceite cria a corrida e só depois grava a ligação com o pedido (`deliveryId`);
+   * o cancelamento lê a ligação e só depois grava a etapa. Cada lado confere o
+   * outro DEPOIS de gravar o seu (esta função roda no fim dos dois), então
+   * qualquer ordem em que os quatro passos se cruzem termina com um dos dois
+   * vendo o que o outro fez. Sem isto, os dois se cruzam sem se ver: o pedido
+   * fica cancelado e a corrida, viva.
+   *
+   * Não derruba quem chamou: o pedido já está cancelado, e a corrida que sobrar
+   * (um motoboy aceitou na mesma hora) é com a central.
+   */
+  private async recolherCorridaDoCancelado(companyId: string, id: string): Promise<void> {
+    try {
+      const linha = await this.prisma.storeOrder.findFirst({
+        where: { id, companyId },
+        include: COM_A_CORRIDA,
+      });
+      if (!linha || linha.stage !== 'CANCELADO' || !corridaViva(linha.delivery)) return;
+      const resultado = await this.entregas.cancelFromStoreOrder(
+        companyId,
+        linha.delivery.id,
+        `Pedido #${linha.number} da loja online cancelado: ${linha.cancelReason ?? 'sem motivo'}`.slice(
+          0,
+          500,
+        ),
+      );
+      if (resultado === 'REVIEW') {
+        this.logger.warn(
+          `Pedido ${id} cancelado, mas a corrida ${linha.delivery.id} já tem motoboy: é com a central.`,
+        );
+      }
+    } catch (erro) {
+      this.logger.warn(
+        `Não deu para tirar a corrida do pedido cancelado ${id}: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+    }
   }
 
   /** O pedido do entregador da loja passa para o MOTOboyCity — num dia de aperto. */
@@ -914,7 +959,10 @@ export class StoreOrdersService {
         where: { id, companyId },
         data: { rideIssue: motivoDaFalha(erro) },
       });
+      return;
     }
+    // A loja pode ter cancelado o pedido enquanto a corrida nascia.
+    await this.recolherCorridaDoCancelado(companyId, id);
   }
 
   /**

@@ -16678,3 +16678,47 @@ esqueleto foi visto isolado numa rota temporária, já removida. Local, com a AP
 na mesma máquina, a espera é curta demais para o olho; a diferença aparece com
 rede lenta. **Não conferido em produção** (só vai ao ar no push) nem com a
 aparência do esqueleto no tema escuro.
+
+## 2026-09-29 — Pedido cancelado pela loja não deixa corrida agendada para trás
+
+**Pedido do usuário:** o pedido que entra nos agendados para entregar com o
+MOTOboyCity, se a loja cancelar, tem que sair dos agendados, para não chamar o
+motoboy à toa.
+
+**O que já funcionava:** cancelar o pedido na loja online cancela a corrida
+(`cancelFromStoreOrder`, só antes de um motoboy aceitar) e remove o job da hora
+marcada; o cancelamento do aiqfome faz o mesmo (`cancelFromIntegration`). Havia
+teste só com o serviço de entregas simulado — o cancelamento real da corrida
+agendada (`cancelBySystem`) não tinha teste unitário.
+
+**Duas brechas achadas ao reler o caminho, e corrigidas:**
+
+- A corrida nasce e só depois é ligada ao pedido (`deliveryId`); o cancelamento
+  lê a ligação e só depois grava a etapa. Se a loja cancelava enquanto a corrida
+  nascia (aceite manual ou automático, logo após o pagamento do Pix), os dois se
+  cruzavam sem se ver: pedido cancelado e corrida agendada viva, que chamaria um
+  motoboy na hora marcada. Agora `recolherCorridaDoCancelado` roda no fim de
+  `chamarCorrida` e de `cancelar`, depois de cada lado gravar o seu: qualquer
+  ordem termina com um dos dois vendo o que o outro fez.
+- `cancelBySystem` é condicional ao status lido. Se a hora marcada chegava no
+  meio (agendada virando "buscando motoboy"), a escrita não pegava e a loja
+  ouvia "o motoboy já aceitou", de uma corrida ainda sem motoboy. Agora
+  `cancelUntilAccepted` relê uma vez antes de desistir, para a loja online e para
+  o aiqfome.
+
+**Decisão mantida:** pronto pelo MOTOboyCity, o pedido não se cancela mais em
+Vendas (`podeCancelar`) — a corrida já foi liberada e o motoboy chamado. Não mudei.
+
+**Arquivos:** `apps/api/src/company/store-orders/store-orders.service.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`, os testes
+`store-orders.vendas.spec.ts` (cinco casos) e `deliveries.service.spec.ts`
+(seis), e `docs/architecture.md`.
+
+**Como foi validado:** `tsc` e eslint da API sem erro; Jest da API inteiro (1418
+passaram, 1 já ignorado); E2E inteiro no banco descartável e Redis 9 (29 suítes,
+256 testes). Os três testes das brechas falham com o código anterior e passam com
+a correção (conferido revertendo os dois serviços por um instante). **Não
+reproduzido contra Postgres real com cancelamento e aceite concorrentes**: as
+duas corridas são simuladas nos testes. Não tocado: o aiqfome com mais de uma
+instância da API (o cancelamento poderia chegar antes da importação; com uma
+fila de um trabalhador só, a ordem é sequencial).

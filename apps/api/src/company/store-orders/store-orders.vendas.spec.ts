@@ -387,6 +387,103 @@ describe('StoreOrdersService — Vendas', () => {
     expect(banco.pedido.stage).toBe('EM_PREPARO');
   });
 
+  describe('a corrida que nasce enquanto a loja cancela', () => {
+    /** O pedido aceito, com a corrida ainda por nascer. */
+    const aceito = () =>
+      linha({
+        stage: 'ACEITO',
+        acceptDeadline: null,
+        history: [
+          { etapa: 'NOVO', em: RECEBIDO.toISOString() },
+          { etapa: 'ACEITO', em: RECEBIDO.toISOString() },
+        ],
+      });
+
+    it('o cancelamento chega antes de a corrida ser ligada ao pedido: ela sai junto', async () => {
+      banco.pedido = linha({
+        stage: 'NOVO',
+        history: [{ etapa: 'NOVO', em: RECEBIDO.toISOString() }],
+      });
+      // A loja cancela no meio do aceite: quando a corrida acaba de nascer, o
+      // pedido já está cancelado — e a corrida ainda não estava ligada a ele
+      // quando o cancelamento leu, então o cancelamento não a viu.
+      entregas.createFromStoreOrder.mockImplementation(() => {
+        banco.corrida = corrida();
+        banco.pedido = {
+          ...banco.pedido,
+          stage: 'CANCELADO',
+          cancelReason: 'Item em falta',
+          cancelledBy: 'LOJA',
+        };
+        return Promise.resolve({ id: 'corrida-1' });
+      });
+
+      await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
+
+      expect(entregas.cancelFromStoreOrder).toHaveBeenCalledWith(
+        EMPRESA,
+        'corrida-1',
+        'Pedido #42 da loja online cancelado: Item em falta',
+      );
+      expect(banco.corrida?.status).toBe('CANCELLED');
+    });
+
+    it('a corrida nasce entre a leitura do cancelamento e a gravação dele: sai junto', async () => {
+      banco.pedido = aceito();
+      const semCorrida = { ...banco.pedido, delivery: null };
+      prisma.storeOrder.findFirst.mockImplementationOnce(() => {
+        // A corrida nasce e é ligada logo depois de o cancelamento ler o pedido.
+        banco.corrida = corrida();
+        banco.pedido = { ...banco.pedido, deliveryId: 'corrida-1' };
+        return Promise.resolve(semCorrida);
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Cliente desistiu');
+
+      expect(banco.pedido.stage).toBe('CANCELADO');
+      expect(entregas.cancelFromStoreOrder).toHaveBeenCalledTimes(1);
+      expect(entregas.cancelFromStoreOrder).toHaveBeenCalledWith(
+        EMPRESA,
+        'corrida-1',
+        'Pedido #42 da loja online cancelado: Cliente desistiu',
+      );
+      expect(banco.corrida?.status).toBe('CANCELLED');
+    });
+
+    it('sem corrida nenhuma, cancelar não chama a entrega', async () => {
+      banco.pedido = aceito();
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(banco.pedido.stage).toBe('CANCELADO');
+      expect(entregas.cancelFromStoreOrder).not.toHaveBeenCalled();
+    });
+
+    it('a corrida já cancelada na leitura não é cancelada de novo', async () => {
+      banco.pedido = { ...aceito(), deliveryId: 'corrida-1' };
+      banco.corrida = corrida({ status: 'CANCELLED' });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(entregas.cancelFromStoreOrder).not.toHaveBeenCalled();
+    });
+
+    it('se a entrega falhar ao recolher a corrida, o pedido segue cancelado', async () => {
+      banco.pedido = aceito();
+      const semCorrida = { ...banco.pedido, delivery: null };
+      prisma.storeOrder.findFirst.mockImplementationOnce(() => {
+        banco.corrida = corrida();
+        banco.pedido = { ...banco.pedido, deliveryId: 'corrida-1' };
+        return Promise.resolve(semCorrida);
+      });
+      entregas.cancelFromStoreOrder.mockRejectedValue(new Error('banco fora'));
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Cliente desistiu');
+
+      expect(cancelado.etapa).toBe('CANCELADO');
+    });
+  });
+
   it('o pedido do entregador da loja passa para o MOTOboyCity, e pronto já busca motoboy', async () => {
     banco.pedido = linha({ stage: 'PRONTO', courier: 'LOJA' });
     await service.chamarMotoboy(membro, 'pedido-1');
