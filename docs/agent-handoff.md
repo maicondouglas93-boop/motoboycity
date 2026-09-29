@@ -552,7 +552,7 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
-Organizar, Cadastrar e Editar), Marketing (Promoções e Cupons), Horários, Tipos de pedido, Notificações e
+Organizar, Cadastrar e Editar), Marketing (Promoções, Cupons e Destaques), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
 **A aparência segue `docs/design-system.md`** (2026-09-29): cartão só com borda,
@@ -767,6 +767,26 @@ promoções") e a organização em `architecture.md` ("Promoções da loja onlin
   (não há login de cliente local), e o painel de Marketing no celular.
 
 ### Cupons da loja online — 2026-09-29
+
+### Destaques da loja online — 2026-09-29
+
+Terceira parte do Marketing, feita ANTES dos combos por pedido do usuário. Regras em
+`business-rules.md` ("Loja online: destaques") e a organização em `architecture.md` ("Destaques
+da loja online").
+
+- **Onde está a decisão do que aparece:** `packages/validation/src/company/store-highlight.rules.ts`
+  (`destaquesDaVitrine`), e só ali; a página só desenha. Mexer no que entra no destaque é mexer
+  nela, com `store-highlight.rules.spec.ts`.
+- **Precisa de migration no deploy:** `20260929230000_marketing_destaques` (a Render aplica ao
+  publicar). É aditiva: uma tabela. O SQL que desfaz é o `DROP` dela.
+- **A ordem é a lista inteira:** `PUT .../highlights/order` recusa lista que não seja exatamente a
+  dos destaques da loja. Quem mexe na tela precisa reler a lista quando isso acontece (a lista
+  já faz).
+- **O que ficou de fora de propósito:** destaque com imagem ou texto próprios (o cartão usa a
+  foto e o nome do produto); destaque por dia da semana ou horário (promoção já tem); arrastar
+  para ordenar (o painel usa subir e descer, como Organizar).
+- **Não conferido:** nada em produção; a fileira de cartões com toque de verdade no celular
+  (só vista no navegador, com o mouse).
 
 Segunda parte do Marketing. Regras em `business-rules.md` ("Loja online: cupons") e a
 organização em `architecture.md` ("Cupons da loja online").

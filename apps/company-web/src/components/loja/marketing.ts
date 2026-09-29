@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
   CupomDaLoja,
+  DestaqueDaLoja,
   PromocaoDaLoja,
   PromocaoPublica,
   TipoDePromocao,
@@ -247,4 +248,62 @@ export function regrasDoCupom(
     );
   }
   return partes;
+}
+
+/* ---------------------------------------------------------------------------
+ * Destaques
+ * ------------------------------------------------------------------------- */
+
+export const CHAVE_DOS_DESTAQUES = ['company', 'store', 'marketing', 'highlights'] as const;
+
+/** A fila das gravações de ordem: uma de cada vez, para a última vencer. */
+export const CHAVE_DA_ORDEM_DOS_DESTAQUES = [
+  'company',
+  'store',
+  'marketing',
+  'highlights-order',
+] as const;
+
+export function useDestaques() {
+  const token = session.getToken();
+  return useQuery({
+    queryKey: CHAVE_DOS_DESTAQUES,
+    queryFn: () => companyStoreMarketingApi.highlights(token as string),
+    enabled: Boolean(token),
+  });
+}
+
+/** Em que pé o destaque está: no ar, desligado, por começar ou encerrado. */
+export function situacaoDoDestaque(destaque: DestaqueDaLoja, agora: Date): SituacaoDaPromocao {
+  const feito = (codigo: CodigoDaSituacao, texto: string, classe: string): SituacaoDaPromocao => ({
+    codigo,
+    texto,
+    classe,
+    foraDoHorario: false,
+  });
+  if (!destaque.ativo) return feito('DESLIGADA', 'Desligado', 'bg-muted text-muted-foreground');
+  const datas = datasDoCupom(destaque, agora);
+  if (datas === 'VENCIDO') return feito('ENCERRADA', 'Encerrado', 'bg-muted text-muted-foreground');
+  if (datas === 'AINDA_NAO') {
+    return feito(
+      'AGENDADA',
+      'Agendado',
+      'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+    );
+  }
+  return feito(
+    'NO_AR',
+    'No ar',
+    'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+  );
+}
+
+/** "de 01/10/2026 a 31/10/2026", "a partir de …", "até …" — ou `null` se vale sempre. */
+export function periodoDoDestaque(destaque: Pick<DestaqueDaLoja, 'inicio' | 'fim'>): string | null {
+  if (destaque.inicio !== null && destaque.fim !== null) {
+    return `de ${dataCurta(destaque.inicio)} a ${dataCurta(destaque.fim)}`;
+  }
+  if (destaque.inicio !== null) return `a partir de ${dataCurta(destaque.inicio)}`;
+  if (destaque.fim !== null) return `até ${dataCurta(destaque.fim)}`;
+  return null;
 }

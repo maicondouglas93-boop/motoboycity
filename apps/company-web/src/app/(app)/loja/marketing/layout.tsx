@@ -13,6 +13,7 @@ const ABAS = [
   { href: '/loja/marketing', label: 'Visão geral', exata: true },
   { href: '/loja/marketing/promocoes', label: 'Promoções', exata: false },
   { href: '/loja/marketing/cupons', label: 'Cupons', exata: false },
+  { href: '/loja/marketing/destaques', label: 'Destaques', exata: false },
 ];
 
 export default function MarketingLayout({ children }: { children: ReactNode }) {

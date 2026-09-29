@@ -1,5 +1,9 @@
-import type { CupomDaLoja, PromocaoDaLoja } from '@motoboycity/types';
-import type { StoreCouponInput, StorePromotionInput } from '@motoboycity/validation';
+import type { CupomDaLoja, DestaqueDaLoja, PromocaoDaLoja } from '@motoboycity/types';
+import type {
+  StoreCouponInput,
+  StoreHighlightInput,
+  StorePromotionInput,
+} from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -124,6 +128,72 @@ export function createCompanyStoreMarketingApi({ baseUrl }: CompanyStoreMarketin
         headers: cabecalhos(accessToken),
       });
       return parseJsonOrThrow<{ deleted: true }>(response);
+    },
+
+    /** Todos os destaques da loja, ligados ou não, na ordem em que aparecem no cardápio. */
+    async highlights(accessToken: string): Promise<DestaqueDaLoja[]> {
+      const response = await apiFetch(`${raiz}/highlights`, { headers: cabecalhos(accessToken) });
+      return parseJsonOrThrow<DestaqueDaLoja[]>(response);
+    },
+
+    /** Recusado com 409 se a loja já tem o máximo (`STORE_HIGHLIGHT_LIMIT`). */
+    async createHighlight(accessToken: string, payload: StoreHighlightInput) {
+      const response = await apiFetch(`${raiz}/highlights`, {
+        method: 'POST',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DestaqueDaLoja>(response);
+    },
+
+    async updateHighlight(accessToken: string, id: string, payload: StoreHighlightInput) {
+      const response = await apiFetch(`${raiz}/highlights/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<DestaqueDaLoja>(response);
+    },
+
+    /** Liga ou desliga sem mexer no resto: o gesto mais comum na lista. */
+    async setHighlightActive(accessToken: string, id: string, ativo: boolean) {
+      const response = await apiFetch(`${raiz}/highlights/${encodeURIComponent(id)}/active`, {
+        method: 'PATCH',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify({ ativo }),
+      });
+      return parseJsonOrThrow<DestaqueDaLoja>(response);
+    },
+
+    /** A cópia nasce desligada e no fim da fila. */
+    async duplicateHighlight(accessToken: string, id: string) {
+      const response = await apiFetch(`${raiz}/highlights/${encodeURIComponent(id)}/duplicate`, {
+        method: 'POST',
+        headers: cabecalhos(accessToken),
+      });
+      return parseJsonOrThrow<DestaqueDaLoja>(response);
+    },
+
+    async deleteHighlight(accessToken: string, id: string) {
+      const response = await apiFetch(`${raiz}/highlights/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: cabecalhos(accessToken),
+      });
+      return parseJsonOrThrow<{ deleted: true }>(response);
+    },
+
+    /**
+     * A ordem nova: os ids de TODOS os destaques, do primeiro ao último. Uma lista
+     * velha (outra aba criou ou apagou um) é recusada com 409
+     * (`STORE_HIGHLIGHT_ORDER_STALE`). Devolve os destaques já na ordem gravada.
+     */
+    async reorderHighlights(accessToken: string, ids: string[]): Promise<DestaqueDaLoja[]> {
+      const response = await apiFetch(`${raiz}/highlights/order`, {
+        method: 'PUT',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify({ ids }),
+      });
+      return parseJsonOrThrow<DestaqueDaLoja[]>(response);
     },
   };
 }

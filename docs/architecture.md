@@ -253,6 +253,37 @@ No `company-web`: `/loja/marketing/cupons` (lista, `nova`, `[id]/editar`), `form
 e, no checkout, `cupom-do-checkout.tsx`. "Meus pedidos", Vendas e a comanda mostram o cupom; a
 comanda tira o cupom da conta da taxa.
 
+### Destaques da loja online
+
+`store_highlights`: o destaque da empresa, com o título, as datas (`startDate`/`endDate`, texto
+`AAAA-MM-DD`), `position` (a ordem entre os destaques, com buracos permitidos) e `productIds`,
+a lista de ids dos produtos NA ORDEM em que aparecem (a lista do Postgres preserva a ordem).
+`productIds` não tem chave estrangeira, de propósito: apagar o produto não apaga o destaque.
+Migration aditiva `20260929230000_marketing_destaques` (validada em banco descartável: aplica,
+fica igual ao schema, desfaz e reaplica).
+
+O que a página mostra é decidido no pacote compartilhado: `store-highlight.rules.ts` em
+`packages/validation` (`destaquesDaVitrine`: datas com a hora da tela, só os produtos à venda,
+sem repetir, e o destaque vazio some; `destaqueVigente`; os limites). `store-highlight.schema.ts`
+valida o destaque que a loja cadastra e a ordem (`storeHighlightOrderSchema`).
+
+Módulo `company/store-marketing`: `StoreHighlightsService` e o controller
+`company/store/marketing/highlights` (listar, criar, editar, ligar, duplicar, apagar e
+`PUT order`), com o mesmo isolamento das promoções e dos cupons: a empresa vem do login, o `id`
+da URL é sempre procurado junto dela (`updateMany`/`deleteMany` com `companyId`), e o destaque
+de outra loja responde 404 `STORE_HIGHLIGHT_NOT_FOUND`. Produto de outra empresa: 409
+`STORE_HIGHLIGHT_PRODUCT_NOT_FOUND`, igual ao id que não existe; passar de 10 destaques: 409
+`STORE_HIGHLIGHT_LIMIT`. `reorderHighlights` exige os ids de TODOS os destaques da loja (nem a
+mais nem a menos) e grava as posições numa transação; senão, 409
+`STORE_HIGHLIGHT_ORDER_STALE`. `destaquesPublicos` entra em `StoreSettingsService.publicStore`
+(`PublicStore.destaques`): os ligados, na ordem da loja, sem os que já acabaram.
+
+No `company-web`: `/loja/marketing/destaques` (lista com subir e descer, `nova`,
+`[id]/editar`), `formulario-de-destaque.tsx` e, no cardápio, `destaques-da-vitrine.tsx` (uma
+fileira de cartões que rola de lado por destaque, e o chip "Destaques" na barra de categorias).
+As gravações de ordem correm uma de cada vez (`scope` da mutação): quem sobe três vezes seguidas
+manda três listas, e a última vence.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

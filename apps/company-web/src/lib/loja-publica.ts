@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { ApiError, createPublicStoreApi } from '@motoboycity/api-client';
 import type {
   EnderecoDeRetirada,
+  DestaquePublico,
   OperacaoPublica,
   PromocaoPublica,
   PublicStore,
@@ -67,6 +68,11 @@ export interface CardapioDaPagina {
    * total da sacola — pelas mesmas regras que o servidor usa no pedido.
    */
   promocoes: PromocaoPublica[];
+  /**
+   * Os destaques ligados, na ordem da loja. A página filtra por data com a hora dela e
+   * mostra só os produtos que estão à venda (`destaquesDaVitrine`).
+   */
+  destaques: DestaquePublico[];
 }
 
 export type LojaDoLink =
@@ -134,6 +140,7 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
         operacao: null,
         enderecoDeRetirada: LOJA_DE_EXEMPLO.pontoDeColeta,
         promocoes: [],
+        destaques: [],
       },
     };
   }
@@ -153,6 +160,7 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
         operacao: achado.store.operacao,
         enderecoDeRetirada: achado.store.enderecoDeRetirada,
         promocoes: achado.store.promocoes ?? [],
+        destaques: achado.store.destaques ?? [],
       },
     };
   } catch (erro) {

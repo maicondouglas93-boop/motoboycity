@@ -697,6 +697,33 @@ promoções; combos e destaques vêm em seguida).
 - adivinhar códigos esbarra no login Google, que a conferência exige, e em 10 conferências
   por minuto por IP.
 
+## Loja online: destaques
+
+Decisão de 2026-09-29, do usuário: os **destaques** vêm antes dos combos (o restante da
+ordem que ele escolheu era promoções, cupons, combos, destaques).
+
+- um destaque é um **bloco com título no alto do cardápio** ("Mais pedidos", "Novidades"), com
+  os produtos que a loja escolheu, **na ordem em que escolheu**. Não muda preço nem cria regra
+  nova: o cartão abre a mesma folha do produto da lista, e mostra a promoção que o produto já
+  tem ("De / Por" e selo), pela mesma regra;
+- a loja tem **até 10 destaques**, cada um com **de 1 a 12 produtos** (mais que isso empurra o
+  cardápio de verdade para baixo, ou vira uma fileira que ninguém percorre até o fim);
+- a **ordem entre os destaques** é a da lista do painel, e se muda pelos botões subir e descer
+  (o mesmo gesto da tela Organizar, que funciona no celular sem arrastar). A ordem gravada é
+  sempre a lista INTEIRA: uma lista velha, de quando outra aba criou ou apagou um destaque, é
+  recusada em vez de desfazer o que a outra aba fez;
+- **período opcional**: datas de início e fim (calendário de Brasília, as duas pontas
+  incluídas); sem datas, aparece sempre, enquanto estiver ligado. O destaque que já acabou nem
+  vai para a página; o que ainda não começou vai, e a página o esconde até a data, com a hora
+  dela. Antes de a página saber a hora, aparecem só os destaques sem datas;
+- **só aparece o produto à venda**: o pausado, o rascunho, o que tem pendência que trava a venda
+  e o que foi apagado ficam de fora, e o destaque que ficou sem nenhum produto à venda **some**
+  (um bloco vazio no alto é pior do que nenhum). O painel avisa, no formulário, o produto que
+  não está à venda;
+- apagar um produto **não apaga** o destaque dele: o id que sumiu simplesmente não conta, e o
+  formulário o tira sozinho na próxima vez que se salva;
+- quando há destaque na página, a barra de categorias ganha um primeiro chip, "Destaques", que leva ao alto.
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

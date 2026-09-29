@@ -498,6 +498,7 @@ model Company {
   storeProducts        StoreProduct[]
   storePromotions      StorePromotion[]
   storeCoupons         StoreCoupon[]
+  storeHighlights      StoreHighlight[]
   storeSettings        StoreSettings?
   storeSlugs           StoreSlug[]
   storeOperation       StoreOperation?
@@ -2178,6 +2179,32 @@ model StoreCouponRedemption {
 
   @@index([couponId, customerAuthId])
   @@map("store_coupon_redemptions")
+}
+
+/// Destaque da loja online: um bloco com título no alto do cardápio ("Mais pedidos",
+/// "Novidades"), com os produtos que a loja escolheu, na ordem em que ela escolheu.
+/// `productIds` guarda essa ordem (a lista do Postgres a preserva) e não tem chave
+/// estrangeira, de propósito: apagar o produto não pode apagar o destaque, e um id que
+/// sumiu simplesmente não aparece. As datas são texto (`AAAA-MM-DD`) para nenhum fuso
+/// mexer nelas; sem elas, vale sempre. `position` é a ordem entre os destaques.
+model StoreHighlight {
+  id         String   @id @default(uuid())
+  companyId  String
+  title      String   @db.VarChar(40)
+  productIds String[]
+  startDate  String?  @db.VarChar(10)
+  endDate    String?  @db.VarChar(10)
+  /// 0, 1, 2...: quem vem primeiro no cardápio. Pode ter buraco (um destaque apagado).
+  position   Int
+  active     Boolean  @default(true)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, active, position])
+  @@map("store_highlights")
 }
 
 /// A loja online da empresa: por enquanto, o link e o nome que o cliente vê.

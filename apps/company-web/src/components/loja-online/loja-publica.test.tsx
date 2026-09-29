@@ -114,6 +114,7 @@ const VITRINE: CardapioDaPagina = {
   operacao: OPERACAO,
   enderecoDeRetirada: null,
   promocoes: [],
+  destaques: [],
 };
 
 describe('Loja pública — vitrine', () => {
@@ -298,5 +299,144 @@ describe('Loja pública — promoções no cardápio', () => {
     render(<LojaPublica slug="lanches-do-ze" cardapio={VITRINE} />);
 
     expect(screen.getByText('R$ 22,00').tagName).not.toBe('S');
+  });
+});
+
+describe('Loja pública — destaques no alto do cardápio', () => {
+  const destaque = (mudancas: Partial<CardapioDaPagina['destaques'][number]> = {}) => ({
+    id: 'd1',
+    titulo: 'Mais pedidos',
+    produtoIds: ['p1'],
+    inicio: null,
+    fim: null,
+    ...mudancas,
+  });
+  const comDestaques = (destaques: CardapioDaPagina['destaques']): CardapioDaPagina => ({
+    ...VITRINE,
+    destaques,
+  });
+
+  it('mostra o bloco com o título, o produto escolhido e o chip "Destaques" na barra', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comDestaques([destaque()])} />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Mais pedidos' })).toBeInTheDocument();
+    // O produto aparece no destaque e na lista: duas vezes.
+    expect(screen.getAllByText('X-Burger')).toHaveLength(2);
+    expect(screen.getByRole('link', { name: 'Destaques' })).toHaveAttribute(
+      'href',
+      '#secao-destaques',
+    );
+    expect(document.getElementById('secao-destaques')).not.toBeNull();
+  });
+
+  it('sem destaque, o cardápio é o de sempre, sem chip nem bloco', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comDestaques([])} />);
+
+    expect(screen.getAllByText('X-Burger')).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: 'Destaques' })).not.toBeInTheDocument();
+    expect(document.getElementById('secao-destaques')).toBeNull();
+  });
+
+  it('o destaque cujo produto não está à venda não aparece', () => {
+    naQuarta('12:00');
+    const pausado = comDestaques([destaque({ produtoIds: ['p1'] })]);
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={{
+          ...pausado,
+          produtos: pausado.produtos.map((produto) => ({ ...produto, situacao: 'pausado' })),
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Mais pedidos' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Destaques' })).not.toBeInTheDocument();
+  });
+
+  it('fora das datas some: o que já acabou e o que ainda não começou', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comDestaques([
+          destaque({ id: 'a', titulo: 'Acabou', fim: '2026-09-22' }),
+          destaque({ id: 'b', titulo: 'Vem aí', inicio: '2026-09-24' }),
+          destaque({ id: 'c', titulo: 'Hoje', inicio: '2026-09-23', fim: '2026-09-23' }),
+        ])}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Hoje' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Acabou' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vem aí' })).not.toBeInTheDocument();
+  });
+
+  it('respeita a ordem da loja entre os destaques', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comDestaques([
+          destaque({ id: 'a', titulo: 'Segundo da lista?' }),
+          destaque({ id: 'b', titulo: 'Novidades' }),
+        ])}
+      />,
+    );
+
+    const titulos = screen
+      .getAllByRole('heading', { level: 2 })
+      .map((titulo) => titulo.textContent)
+      .filter((texto) => texto === 'Segundo da lista?' || texto === 'Novidades');
+    expect(titulos).toEqual(['Segundo da lista?', 'Novidades']);
+  });
+
+  it('o produto em destaque mostra a promoção que ele já tem, pela mesma regra da lista', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={{
+          ...comDestaques([destaque()]),
+          promocoes: [
+            {
+              id: 'promo-1',
+              nome: 'X-Burger 20%',
+              tipo: 'PERCENTUAL',
+              alvo: 'PRODUTO',
+              produtoId: 'p1',
+              categoriaId: null,
+              percentual: 20,
+              precoPromocional: null,
+              leve: null,
+              pague: null,
+              inicio: null,
+              fim: null,
+              horaInicio: null,
+              horaFim: null,
+              diasDaSemana: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    // No destaque e na lista: o preço de antes riscado, o de agora, e o selo, duas vezes cada.
+    expect(screen.getAllByText('R$ 22,00').map((preco) => preco.tagName)).toEqual(['S', 'S']);
+    expect(screen.getAllByText('R$ 17,60')).toHaveLength(2);
+    expect(screen.getAllByText('20% OFF')).toHaveLength(2);
+  });
+
+  it('tocar no cartão abre a folha do produto', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comDestaques([destaque()])} />);
+
+    const cartao = screen.getAllByRole('button', { name: /X-Burger/ })[0]!;
+    fireEvent.click(cartao);
+
+    // A folha do produto abriu: numa vitrine, o botão dela diz que os pedidos vêm em breve.
+    expect(screen.getByRole('button', { name: /Pedidos em breve/ })).toBeInTheDocument();
   });
 });

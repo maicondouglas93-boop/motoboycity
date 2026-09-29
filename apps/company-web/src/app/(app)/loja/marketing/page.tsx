@@ -2,14 +2,16 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { Megaphone, Plus, Tag, Ticket } from 'lucide-react';
+import { Megaphone, Plus, Star, Tag, Ticket } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   situacaoDaPromocao,
   situacaoDoCupom,
+  situacaoDoDestaque,
   useCupons,
+  useDestaques,
   usePromocoes,
 } from '@/components/loja/marketing';
 import { useAgora } from '@/lib/relogio';
@@ -23,6 +25,7 @@ export default function MarketingPage() {
   const token = session.getToken();
   const promocoes = usePromocoes();
   const cupons = useCupons();
+  const destaques = useDestaques();
   const instante = useAgora();
 
   const resumo = useMemo(() => {
@@ -41,8 +44,12 @@ export default function MarketingPage() {
       cuponsNoAr: cupomNoAr,
       cuponsUsos: listaDeCupons.reduce((soma, cupom) => soma + cupom.usos, 0),
       cuponsTotal: listaDeCupons.length,
+      destaquesNoAr: (destaques.data ?? []).filter(
+        (destaque) => situacaoDoDestaque(destaque, agora).codigo === 'NO_AR',
+      ).length,
+      destaquesTotal: (destaques.data ?? []).length,
     };
-  }, [promocoes.data, cupons.data, instante]);
+  }, [promocoes.data, cupons.data, destaques.data, instante]);
 
   if (!token) return <p className="text-sm text-muted-foreground">Faça login para continuar.</p>;
 
@@ -164,6 +171,49 @@ export default function MarketingPage() {
               className={buttonVariants({ variant: 'secondary' })}
             >
               <Plus className="size-4" /> Novo cupom
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-0 py-0">
+        <CardContent className="flex flex-wrap items-center gap-4 py-5">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent">
+            <Star className="size-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-56 flex-1">
+            <h2 className="text-base font-semibold">Destaques</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Blocos no alto do cardápio — &ldquo;Mais pedidos&rdquo;, &ldquo;Novidades&rdquo; — com
+              os produtos que você escolher, na ordem que quiser, e um período se preferir.
+            </p>
+            {destaques.isSuccess && (
+              <p className="mt-1 text-sm">
+                {resumo.destaquesTotal === 0 ? (
+                  <>
+                    <Megaphone className="mr-1 inline size-3.5" aria-hidden="true" />
+                    Você ainda não criou nenhum.
+                  </>
+                ) : (
+                  <>
+                    {resumo.destaquesNoAr} no ar de {resumo.destaquesTotal}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/loja/marketing/destaques"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              Ver destaques
+            </Link>
+            <Link
+              href="/loja/marketing/destaques/nova"
+              className={buttonVariants({ variant: 'secondary' })}
+            >
+              <Plus className="size-4" /> Novo destaque
             </Link>
           </div>
         </CardContent>

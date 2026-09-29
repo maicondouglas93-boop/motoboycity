@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import type {
   ConferenciaDoCupom,
   CupomDaLoja,
+  DestaqueDaLoja,
   PedidoDaLoja,
   PromocaoDaLoja,
   PublicStoreLookup,
@@ -19,10 +20,10 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { WebPushService } from '../src/web-push/web-push.service';
 
 /**
- * Marketing (promoções e cupons) contra o banco de verdade: duas lojas, cada uma
- * vendo só as suas; a promoção no cardápio público; o preço do pedido calculado
- * no servidor com a promoção e com o cupom; e o uso de cada um contado,
- * devolvido e disputado.
+ * Marketing (promoções, cupons e destaques) contra o banco de verdade: duas lojas,
+ * cada uma vendo só as suas; a promoção e os destaques no cardápio público; o
+ * preço do pedido calculado no servidor com a promoção e com o cupom; e o uso de
+ * cada um contado, devolvido e disputado.
  *
  * O login do cliente (Firebase), o Google e o Web Push são simulados.
  */
@@ -807,6 +808,247 @@ describe('Promoções da loja (e2e)', () => {
         .delete(`/company/store/marketing/coupons/${cupom.id}`)
         .set(comoA())
         .expect(200);
+    });
+  });
+
+  describe('destaques', () => {
+    const raiz = '/company/store/marketing/highlights';
+    let sucoId = '';
+
+    const criar = async (corpo: object, como = comoA, status = 201) =>
+      (await request(servidor()).post(raiz).set(como()).send(corpo).expect(status))
+        .body as DestaqueDaLoja;
+    const lista = async (como = comoA) =>
+      (await request(servidor()).get(raiz).set(como()).expect(200)).body as DestaqueDaLoja[];
+    const vitrine = async (link: string) => (await vitrineDe(link)).destaques ?? [];
+
+    beforeAll(async () => {
+      // A loja A ganha um segundo produto, para a ordem dentro do destaque ter o que ordenar.
+      const suco = await request(servidor())
+        .post('/company/store/products')
+        .set(comoA())
+        .send({
+          categoryId: lojaA.secaoId,
+          name: 'Suco',
+          description: '',
+          price: 8,
+          status: 'PUBLISHED',
+          sizes: [],
+          optionGroups: [],
+        })
+        .expect(201);
+      sucoId = (suco.body as StoreProduct).id;
+      await prisma.storeHighlight.deleteMany({ where: { company: { document: lojaA.document } } });
+    });
+
+    it('cada loja vê, muda, reordena e apaga só os seus destaques; a outra recebe "não encontrado"', async () => {
+      await request(servidor()).get(raiz).expect(401);
+
+      const um = await criar({ titulo: 'Mais pedidos', produtoIds: [sucoId, lojaA.produtoId] });
+      const dois = await criar({ titulo: 'Novidades', produtoIds: [lojaA.produtoId] });
+      // O destaque nasce ligado, no fim da fila, com os produtos na ordem em que a loja os pôs.
+      expect(um).toMatchObject({
+        titulo: 'Mais pedidos',
+        produtoIds: [sucoId, lojaA.produtoId],
+        ativo: true,
+        posicao: 0,
+      });
+      expect(dois.posicao).toBe(1);
+
+      // A loja B não vê nada, e com os ids certos na mão não mexe em nada.
+      expect(await lista(comoB)).toEqual([]);
+      const naoAchado = { code: 'STORE_HIGHLIGHT_NOT_FOUND' };
+      const corpoDaB = { titulo: 'Da B', produtoIds: [lojaB.produtoId] };
+      expect(
+        (await request(servidor()).put(`${raiz}/${um.id}`).set(comoB()).send(corpoDaB).expect(404))
+          .body,
+      ).toMatchObject(naoAchado);
+      expect(
+        (
+          await request(servidor())
+            .patch(`${raiz}/${um.id}/active`)
+            .set(comoB())
+            .send({ ativo: false })
+            .expect(404)
+        ).body,
+      ).toMatchObject(naoAchado);
+      expect(
+        (await request(servidor()).post(`${raiz}/${um.id}/duplicate`).set(comoB()).expect(404))
+          .body,
+      ).toMatchObject(naoAchado);
+      expect(
+        (await request(servidor()).delete(`${raiz}/${um.id}`).set(comoB()).expect(404)).body,
+      ).toMatchObject(naoAchado);
+      // A B tampouco reordena os da A: a lista que ela manda não é a dela.
+      const alheia = await request(servidor())
+        .put(`${raiz}/order`)
+        .set(comoB())
+        .send({ ids: [dois.id, um.id] })
+        .expect(409);
+      expect(alheia.body.code).toBe('STORE_HIGHLIGHT_ORDER_STALE');
+      expect((await lista()).map((item) => [item.titulo, item.posicao])).toEqual([
+        ['Mais pedidos', 0],
+        ['Novidades', 1],
+      ]);
+
+      // Produto de outra loja não entra no destaque (e responde igual a um id que não existe).
+      const produtoAlheio = await request(servidor())
+        .post(raiz)
+        .set(comoB())
+        .send({ titulo: 'Roubo', produtoIds: [lojaA.produtoId] })
+        .expect(409);
+      expect(produtoAlheio.body.code).toBe('STORE_HIGHLIGHT_PRODUCT_NOT_FOUND');
+      await request(servidor())
+        .put(`${raiz}/${um.id}`)
+        .set(comoA())
+        .send({ titulo: 'Mais pedidos', produtoIds: [lojaB.produtoId] })
+        .expect(409);
+      expect((await lista())[0]!.produtoIds).toEqual([sucoId, lojaA.produtoId]);
+      expect(
+        await prisma.storeHighlight.count({ where: { company: { document: lojaB.document } } }),
+      ).toBe(0);
+
+      // Os dados chegam validados.
+      await request(servidor())
+        .post(raiz)
+        .set(comoA())
+        .send({ titulo: 'Sem produto', produtoIds: [] })
+        .expect(400);
+      await request(servidor())
+        .post(raiz)
+        .set(comoA())
+        .send({ titulo: 'X', produtoIds: [sucoId] })
+        .expect(400);
+
+      // Reordenar: a ordem inteira, e a lista devolvida já vem nela.
+      const reordenada = await request(servidor())
+        .put(`${raiz}/order`)
+        .set(comoA())
+        .send({ ids: [dois.id, um.id] })
+        .expect(200);
+      expect((reordenada.body as DestaqueDaLoja[]).map((item) => item.titulo)).toEqual([
+        'Novidades',
+        'Mais pedidos',
+      ]);
+      expect((await lista()).map((item) => item.titulo)).toEqual(['Novidades', 'Mais pedidos']);
+      // Uma lista velha (falta um) é recusada e não desfaz nada.
+      const velha = await request(servidor())
+        .put(`${raiz}/order`)
+        .set(comoA())
+        .send({ ids: [um.id] })
+        .expect(409);
+      expect(velha.body.code).toBe('STORE_HIGHLIGHT_ORDER_STALE');
+      expect((await lista()).map((item) => item.titulo)).toEqual(['Novidades', 'Mais pedidos']);
+
+      // Editar mantém a posição; duplicar cria desligado, no fim.
+      const editado = await request(servidor())
+        .put(`${raiz}/${um.id}`)
+        .set(comoA())
+        .send({ titulo: 'Campeões', produtoIds: [lojaA.produtoId, sucoId], fim: '2999-12-31' })
+        .expect(200);
+      expect(editado.body).toMatchObject({
+        titulo: 'Campeões',
+        produtoIds: [lojaA.produtoId, sucoId],
+        fim: '2999-12-31',
+        posicao: 1,
+      });
+      const copia = (
+        await request(servidor()).post(`${raiz}/${um.id}/duplicate`).set(comoA()).expect(201)
+      ).body as DestaqueDaLoja;
+      expect(copia).toMatchObject({ titulo: 'Campeões (cópia)', ativo: false, posicao: 2 });
+      await request(servidor()).delete(`${raiz}/${copia.id}`).set(comoA()).expect(200);
+    });
+
+    it('a página pública mostra só os destaques ligados e que não acabaram, na ordem da loja, sem dado interno', async () => {
+      const antes = await lista();
+      const [novidades, campeoes] = antes;
+      expect(antes.map((item) => item.titulo)).toEqual(['Novidades', 'Campeões']);
+
+      const publicos = await vitrine(lojaA.link);
+      expect(publicos.map((item) => item.titulo)).toEqual(['Novidades', 'Campeões']);
+      expect(publicos[1]).toMatchObject({
+        produtoIds: [lojaA.produtoId, sucoId],
+        inicio: null,
+        fim: '2999-12-31',
+      });
+      // O que é só da loja não vai para o cliente.
+      const bruto = JSON.stringify(publicos);
+      for (const interno of ['ativo', 'posicao', 'companyId', 'criadoEm']) {
+        expect(bruto).not.toContain(`"${interno}"`);
+      }
+      expect(await vitrine(lojaB.link)).toEqual([]);
+
+      // Desligado, sai da página; ligado, volta.
+      await request(servidor())
+        .patch(`${raiz}/${novidades!.id}/active`)
+        .set(comoA())
+        .send({ ativo: false })
+        .expect(200);
+      expect((await vitrine(lojaA.link)).map((item) => item.titulo)).toEqual(['Campeões']);
+      await request(servidor())
+        .patch(`${raiz}/${novidades!.id}/active`)
+        .set(comoA())
+        .send({ ativo: true })
+        .expect(200);
+
+      // A ordem que a loja escolhe é a da página.
+      await request(servidor())
+        .put(`${raiz}/order`)
+        .set(comoA())
+        .send({ ids: [campeoes!.id, novidades!.id] })
+        .expect(200);
+      expect((await vitrine(lojaA.link)).map((item) => item.titulo)).toEqual([
+        'Campeões',
+        'Novidades',
+      ]);
+
+      // O que já acabou não vai para a página; o que ainda não começou vai (a página o esconde até a data).
+      await request(servidor())
+        .put(`${raiz}/${novidades!.id}`)
+        .set(comoA())
+        .send({ titulo: 'Novidades', produtoIds: [lojaA.produtoId], fim: '2020-01-01' })
+        .expect(200);
+      expect((await vitrine(lojaA.link)).map((item) => item.titulo)).toEqual(['Campeões']);
+      await request(servidor())
+        .put(`${raiz}/${novidades!.id}`)
+        .set(comoA())
+        .send({ titulo: 'Novidades', produtoIds: [lojaA.produtoId], inicio: '2999-01-01' })
+        .expect(200);
+      expect((await vitrine(lojaA.link)).map((item) => [item.titulo, item.inicio])).toEqual([
+        ['Campeões', null],
+        ['Novidades', '2999-01-01'],
+      ]);
+    });
+
+    it('apagar o produto não apaga o destaque: o id que sumiu simplesmente não conta', async () => {
+      const [primeiro] = await lista();
+      const antes = await vitrine(lojaA.link);
+      expect(antes.length).toBeGreaterThan(0);
+
+      await prisma.storeProduct.delete({ where: { id: sucoId } });
+
+      // O destaque continua lá, com o id que sumiu; a página filtra pelos produtos à venda.
+      expect(await prisma.storeHighlight.count({ where: { id: primeiro!.id } })).toBe(1);
+      const depois = await vitrine(lojaA.link);
+      expect(depois.map((item) => item.titulo)).toEqual(antes.map((item) => item.titulo));
+      expect(JSON.stringify(depois)).toContain(sucoId);
+    });
+
+    it('a loja tem no máximo dez destaques', async () => {
+      await prisma.storeHighlight.deleteMany({ where: { company: { document: lojaA.document } } });
+      for (let n = 1; n <= 10; n += 1) {
+        await criar({ titulo: `Destaque ${n}`, produtoIds: [lojaA.produtoId] });
+      }
+
+      const recusado = await request(servidor())
+        .post(raiz)
+        .set(comoA())
+        .send({ titulo: 'Um a mais', produtoIds: [lojaA.produtoId] })
+        .expect(409);
+      expect(recusado.body.code).toBe('STORE_HIGHLIGHT_LIMIT');
+      // O limite é da loja: a B ainda cria.
+      await criar({ titulo: 'Da B', produtoIds: [lojaB.produtoId] }, comoB);
+      await prisma.storeHighlight.deleteMany({ where: { company: { document: lojaB.document } } });
     });
   });
 });

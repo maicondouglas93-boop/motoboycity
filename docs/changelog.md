@@ -17144,3 +17144,72 @@ resultado (um passa, o outro é recusado, e o uso fecha em 1), e não qual das r
 possíveis do perdedor aconteceu no primeiro caso (perdeu na gravação, ou já nem via o cupom).
 Também não há conferência de "primeira compra": o limite por cliente de 1 uso limita o uso,
 mas não olha o histórico do cliente.
+
+## 2026-09-29 — Loja online: Marketing, terceira parte — Destaques
+
+**Pedido do usuário:** "destaques primeiro" — o módulo de Marketing seguia pela ordem
+Promoções → Cupons → Combos → Destaques, e ele passou os Destaques à frente dos Combos. Do
+pedido original: destaques com título, produtos escolhidos, ordem que a loja controla e período;
+o painel usa subir e descer para ordenar (o mesmo gesto da tela Organizar, sem biblioteca de
+arrastar); o cardápio público os mostra; e uma loja não enxerga os dados da outra.
+
+**Decisão:**
+
+- Um destaque é um **bloco com título no alto do cardápio** ("Mais pedidos", "Novidades"), com os
+  produtos que a loja escolheu, na ordem em que escolheu. Não muda preço nem cria regra: o cartão
+  abre a mesma folha do produto da lista e mostra a promoção que o produto já tem ("De / Por" e
+  selo), pela mesma regra.
+- Limites: até **10 destaques** por loja e de **1 a 12 produtos** em cada (passando disso o
+  cardápio de verdade desce demais, ou a fileira vira uma que ninguém percorre até o fim).
+- **A ordem entre os destaques** se muda por subir e descer na lista do painel; a gravação é
+  sempre a lista INTEIRA (`PUT .../highlights/order`), e uma lista velha (outra aba criou ou
+  apagou um destaque) é recusada com 409, sem desfazer o que a outra aba fez. As gravações
+  correm uma de cada vez, e a tela muda antes da resposta.
+- **Período opcional** (datas, calendário de Brasília, as duas pontas incluídas). O destaque que
+  já acabou nem vai para a página; o que ainda não começou vai, e a página o esconde até a data
+  com a hora dela. Antes de saber a hora, a página mostra só os sem datas.
+- **Só aparece o produto à venda** (publicado e sem pendência que trave a venda), e o destaque
+  que ficou sem nenhum produto à venda some. A decisão é uma função só no pacote compartilhado
+  (`destaquesDaVitrine`), e a página só desenha.
+- Apagar um produto **não apaga** o destaque: `productIds` não tem chave estrangeira, o id que
+  sumiu não conta, e o formulário o tira sozinho ao salvar.
+- Isolamento, como nas promoções e nos cupons: toda rota resolve a empresa pelo login, o `id`
+  da URL é procurado junto dela; o destaque de outra loja responde 404, e produto de outra
+  empresa, 409 igual ao id inexistente.
+- Painel: aba **Destaques** em Marketing (lista com ordem, ligar/desligar, duplicar, excluir com
+  confirmação; formulário com os produtos em ordem — subir, descer, tirar —, busca para
+  adicionar, aviso no produto que não está à venda, período opcional e erro por campo). No
+  cardápio: um bloco por destaque, com uma fileira de cartões que rola de lado, e um primeiro
+  chip "Destaques" na barra de categorias.
+
+**Migration:** `20260929230000_marketing_destaques`, aditiva (uma tabela, `store_highlights`).
+Validada em banco descartável: aplica junto das outras, o banco fica igual ao schema, o SQL de
+desfazer (`DROP` da tabela) volta ao schema anterior, e reaplica. **A Render aplica ao
+publicar.**
+
+**Arquivos:** `packages/types` (`store-marketing.ts`, `store-settings.ts`), `packages/validation`
+(`store-highlight.rules.ts` e `store-highlight.schema.ts` novos, `index.ts`),
+`packages/api-client` (`company-store-marketing.ts`), `apps/api` (`prisma/schema.prisma`, a
+migration, `company/store-marketing/` (`store-highlights.service.ts`, `.controller.ts`,
+`store-marketing.module.ts` e specs), `store-settings.service.ts` e seu spec,
+`test/store-marketing.e2e-spec.ts`), `apps/company-web` (`lib/loja-publica.ts`,
+`components/loja/marketing.ts`, `formulario-de-destaque.tsx`, `loja-online/destaques-da-vitrine.tsx`,
+`loja-publica.tsx`, as telas `/loja/marketing/destaques/*`, a visão geral e o layout de Marketing)
+e os testes de cada um. Docs: `business-rules.md` ("Loja online: destaques"), `architecture.md`
+("Destaques da loja online") e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); eslint da API, do painel e dos
+pacotes; `validation`, `types` e `api-client` também com `--typeRoots` isolado, como o deploy;
+Jest da API (1660 passaram, 1 pulado); vitest do painel (542, 63 arquivos); build do painel; E2E
+inteiro no banco descartável (30 suítes, 270 testes), com cenários novos que conferem pelo HTTP o
+isolamento entre duas lojas (inclusive reordenar com os ids da outra), a ordem que a loja escolhe
+chegando à página, a lista velha recusada, o que já acabou e o que ainda não começou, o produto
+apagado, o limite de dez, e que nenhum dado interno vai para o cliente. As telas foram vistas no
+navegador, com dados de exemplo numa rota temporária já removida: o cardápio com os destaques e o
+chip na barra, a lista com subir e descer, e o formulário com os produtos em ordem.
+
+**Não conferido:** nada em produção; a fileira de cartões com toque de verdade no celular (só
+vista no navegador, com o mouse); o painel no modo escuro; e a criação simultânea de dois
+destaques quando a loja está com nove (podem passar de dez por uma corrida rara; a conferência do
+limite é uma leitura antes da gravação, sem trava). Por isso a ordem aceita listas de até 100
+destaques: a loja nessa situação ainda reordena, e só não cria outro até apagar um.

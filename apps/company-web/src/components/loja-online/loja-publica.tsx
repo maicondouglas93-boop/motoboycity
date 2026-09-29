@@ -17,6 +17,7 @@ import { horariosDaModalidade, modalidadesAtivas, textoDoTempo } from '@/lib/loj
 import { useOperacao } from '@/lib/loja-demo';
 import { ofertaNaVitrine, precificarSacola } from '@/lib/loja-promocoes';
 import { useAgora } from '@/lib/relogio';
+import { destaquesDaVitrine } from '@motoboycity/validation';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import { SeloDePromocao } from '@/components/loja-online/selo-de-promocao';
@@ -29,6 +30,7 @@ import {
 import { ControleDaConta, useUsuarioId } from '@/components/loja-online/conta';
 import { usePedidosDoCliente } from '@/components/loja-online/pedidos-do-cliente';
 import { BarraDeCategorias } from '@/components/loja-online/barra-de-categorias';
+import { DestaquesDaVitrine } from '@/components/loja-online/destaques-da-vitrine';
 import { BarraDaSacola, type BarraDaSacolaApi } from '@/components/loja-online/barra-da-sacola';
 import { FolhaDaSacola } from '@/components/loja-online/folha-da-sacola';
 import { VooParaASacola } from '@/components/loja-online/voo-para-a-sacola';
@@ -174,6 +176,30 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
   const categorias = useMemo(
     () => secoes.map(({ categoria }) => ({ id: categoria.id, nome: categoria.nome })),
     [secoes],
+  );
+
+  /*
+   * Os destaques no alto: só os que valem hoje (as datas, com a hora da tela) e só com
+   * os produtos que estão à venda. Sem a hora ainda, só os sem datas.
+   */
+  const vendaveisPorId = useMemo(
+    () => new Map(vendaveis.map((produto) => [produto.id, produto])),
+    [vendaveis],
+  );
+  const destaques = useMemo(
+    () =>
+      destaquesDaVitrine(
+        cardapio.destaques,
+        new Set(vendaveisPorId.keys()),
+        hidratado ? new Date(instante) : null,
+      ),
+    [cardapio.destaques, vendaveisPorId, hidratado, instante],
+  );
+  // "Destaques" é o primeiro toque da barra: leva ao alto, onde eles estão.
+  const categoriasDaBarra = useMemo(
+    () =>
+      destaques.length > 0 ? [{ id: 'destaques', nome: 'Destaques' }, ...categorias] : categorias,
+    [destaques.length, categorias],
   );
 
   // Posição de cada produto no cardápio inteiro, e não dentro da seção: a
@@ -397,9 +423,23 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
 
         {/* Grudada no topo: em cardápio longo, é ela que evita a rolagem
             infinita até achar bebida. */}
-        <BarraDeCategorias secoes={categorias} paleta={paleta} corDaMarca={marca.corDaMarca} />
+        <BarraDeCategorias
+          secoes={categoriasDaBarra}
+          paleta={paleta}
+          corDaMarca={marca.corDaMarca}
+        />
 
         <main className={itens > 0 ? 'pb-24' : 'pb-10'}>
+          <DestaquesDaVitrine
+            destaques={destaques}
+            produtos={vendaveisPorId}
+            promocoes={cardapio.promocoes}
+            agora={horaDaOferta}
+            paleta={paleta}
+            corDaMarca={marca.corDaMarca}
+            corDeAcao={marca.corDeAcao}
+            aoAbrir={setAberto}
+          />
           {secoes.map(({ categoria, produtos }) => (
             <section key={categoria.id} id={`secao-${categoria.id}`} className="scroll-mt-14">
               <h2

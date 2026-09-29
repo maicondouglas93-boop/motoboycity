@@ -137,3 +137,35 @@ export interface ConferenciaDoCupom {
   cupom: CupomPublico;
   desconto: number;
 }
+
+/* ---------------------------------------------------------------------------
+ * Destaques
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Um bloco com título no alto do cardápio ("Mais pedidos", "Novidades"), com os
+ * produtos que a loja escolheu, na ordem em que escolheu. Não muda preço nem
+ * cria regra nova: é só um lugar de honra no cardápio, e cada produto mostra a
+ * promoção que ele já tem.
+ *
+ * `inicio` e `fim` são datas do calendário da loja (`AAAA-MM-DD`, as duas pontas
+ * incluídas); sem elas, vale sempre. A página filtra por elas com a hora dela, e
+ * só mostra o produto que está à venda: o destaque sem nenhum produto à venda some.
+ */
+export interface DestaquePublico {
+  id: string;
+  titulo: string;
+  /** Na ordem em que a loja os pôs. */
+  produtoIds: string[];
+  inicio: string | null;
+  fim: string | null;
+}
+
+/** O destaque como a loja o vê no painel. */
+export interface DestaqueDaLoja extends DestaquePublico {
+  ativo: boolean;
+  /** A ordem entre os destaques, de 0 em diante. */
+  posicao: number;
+  criadoEm: string;
+  atualizadoEm: string;
+}

@@ -92,6 +92,7 @@ function cardapio(mudancas: Partial<CardapioDaPagina> = {}): CardapioDaPagina {
     operacao: OPERACAO,
     enderecoDeRetirada: null,
     promocoes: [],
+    destaques: [],
     ...mudancas,
   };
 }
