@@ -546,7 +546,9 @@ Decisões de 2026-09-26, do usuário:
 - **o tipo de serviço é da loja**, em Tipos de pedido → Entrega. Sem escolha,
   vale o primeiro tipo ativo, o mesmo que o botão "Chamar" traz marcado. O
   escolhido precisa estar ativo e ter tabela de preço na região;
-- **sem CEP digitado pelo cliente, vale o CEP da loja** (cidades de CEP único);
+- **sem CEP digitado pelo cliente, vale o CEP da loja** (cidades de CEP único). O
+  CEP digitado precisa estar completo (8 dígitos): em branco ou completo, nunca
+  pela metade. Cidade e UF do checkout já vêm as da loja (decisão de 2026-09-29);
 - **pago na entrega, o motoboy volta à loja**, com o dinheiro ou a maquininha,
   e a loja paga a taxa de retorno — igual ao aiqfome. Pago online, sem retorno;
 - **fora do horário da central, o pedido entra e a loja é avisada**: a corrida

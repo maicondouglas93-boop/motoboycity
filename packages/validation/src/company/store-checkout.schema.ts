@@ -40,7 +40,15 @@ const enderecoSchema = z.object({
   bairroId: z.string().trim().min(1, 'Escolha o bairro.').max(40),
   cidade: z.string().trim().min(1, 'Informe a cidade.').max(80, 'Use no máximo 80 caracteres.'),
   estado: textoCurto(2, 'Use a sigla do estado.'),
-  cep: textoCurto(9, 'CEP inválido.'),
+  /**
+   * Em branco (vale o CEP da loja) ou completo. Um CEP pela metade passava por
+   * aqui e era recusado só na hora de chamar o motoboy, quando o pedido já
+   * estava feito e a corrida não nascia.
+   */
+  cep: z
+    .string()
+    .trim()
+    .refine((cep) => cep === '' || /^\d{5}-?\d{3}$/.test(cep), 'CEP inválido. Use 8 dígitos.'),
   referencia: textoCurto(120, 'Use no máximo 120 caracteres na referência.').nullable(),
 });
 

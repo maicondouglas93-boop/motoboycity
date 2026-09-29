@@ -1023,6 +1023,7 @@ export class StoreOrdersService {
         'A empresa ainda não tem um endereço de coleta. Cadastre na tela inicial do painel.',
       );
     }
+    const cepDoCliente = entrega?.cep?.trim() ?? '';
     const pronto = prontoEm(pedido);
     const agendar = !agoraMesmo && pronto !== null && pronto.getTime() - Date.now() > 60_000;
     const referencia = [`Bairro ${entrega?.bairro ?? ''}`.trim(), entrega?.referencia]
@@ -1037,7 +1038,9 @@ export class StoreOrdersService {
         ...(entrega?.complemento ? { complement: entrega.complemento } : {}),
         city: entrega?.cidade ?? '',
         state: (entrega?.estado || coleta?.state || '').toUpperCase(),
-        zip: entrega?.cep || coleta?.zip || '',
+        // O CEP do cliente só vale completo; em branco ou pela metade (pedido
+        // gravado antes da validação), vale o da loja.
+        zip: /^\d{5}-?\d{3}$/.test(cepDoCliente) ? cepDoCliente : (coleta?.zip ?? ''),
         referenceNote: referencia,
       },
       recipientName: pedido.cliente.nome,

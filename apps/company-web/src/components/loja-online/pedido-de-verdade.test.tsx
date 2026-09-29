@@ -208,6 +208,77 @@ describe('Sacola da loja de verdade', () => {
     expect(mocks.checkout).not.toHaveBeenCalled();
   });
 
+  it('CEP pela metade: o erro aparece no campo, com foco, e nada é enviado; completo, segue', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 9 } as PedidoDaLoja);
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    const cep = await screen.findByLabelText('CEP');
+    fireEvent.change(cep, { target: { value: '36980' } });
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    expect(screen.getByText('Use 8 dígitos.')).toBeInTheDocument();
+    expect(cep).toHaveAttribute('aria-invalid', 'true');
+    expect(cep).toHaveFocus();
+    expect(mocks.checkout).not.toHaveBeenCalled();
+
+    fireEvent.change(cep, { target: { value: '36980-000' } });
+    expect(cep).not.toHaveAttribute('aria-invalid');
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ entrega: expect.objectContaining({ cep: '36980-000' }) }),
+      ),
+    );
+  });
+
+  it('sem endereço salvo, a cidade e a UF nascem as da loja; o endereço salvo não é trocado', async () => {
+    const daLoja = {
+      rua: 'Rua da Loja',
+      numero: '1',
+      complemento: null,
+      bairro: '',
+      cidade: 'Lajinha',
+      estado: 'MG',
+    };
+    window.localStorage.removeItem(`loja:${SLUG}:user_1:cliente`);
+    const { unmount } = render(
+      <Sacola slug={SLUG} cardapio={cardapio({ enderecoDeRetirada: daLoja })} />,
+    );
+
+    expect(await screen.findByLabelText('Cidade')).toHaveValue('Lajinha');
+    expect(screen.getByLabelText('UF')).toHaveValue('MG');
+    unmount();
+
+    // Com o endereço da conta, vale o da conta — ainda que a loja seja de outra cidade.
+    window.localStorage.setItem(
+      `loja:${SLUG}:user_1:cliente`,
+      JSON.stringify({
+        nome: 'Ana',
+        telefone: '33999887766',
+        entrega: {
+          rua: 'Rua A',
+          numero: '10',
+          complemento: null,
+          bairro: 'Centro',
+          cidade: 'Ipatinga',
+          estado: 'MG',
+          cep: '',
+          referencia: null,
+        },
+      }),
+    );
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({ enderecoDeRetirada: { ...daLoja, cidade: 'Lajinha' } })}
+      />,
+    );
+    expect(await screen.findByLabelText('Cidade')).toHaveValue('Ipatinga');
+  });
+
   it('o troco fica logo abaixo do Dinheiro, e antes da observação', async () => {
     render(<Sacola slug={SLUG} cardapio={cardapio()} />);
 

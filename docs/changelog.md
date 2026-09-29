@@ -16764,3 +16764,47 @@ rota temporária com dados de exemplo (já removida), no navegador — não impr
 na Elgin. **Não conferido:** o papel impresso (a caixa em bobina de 80 mm), e um
 pedido de verdade feito depois do deploy. A tela de Vendas e "Meus pedidos" do
 cliente seguem com as escolhas numa linha só; só a comanda mudou.
+
+## 2026-09-29 — Loja online: o endereço que vai ao motoboy (CEP completo, cidade e UF da loja)
+
+**Pergunta do usuário:** o endereço que o cliente digita na compra, quando a
+entrega é do MOTOboyCity, é entendido pelo sistema para calcular o valor da
+entrega?
+
+**Como funciona (lido no código, não testado com o Google):** a corrida nasce
+pelo mesmo caminho do painel (`createFromStoreOrder`). O texto
+`rua, número - complemento, cidade - UF, CEP` e o endereço da loja vão à Routes
+API do Google, que devolve a distância; o valor sai da tabela de preços por ela.
+Se o Google não acha rota, a corrida não nasce e Vendas mostra o aviso.
+
+**Dois defeitos achados e corrigidos:**
+
+- O checkout aceitava qualquer texto de até 9 caracteres no CEP (`36980`), e o
+  schema da corrida exige 8 ou 9: o pedido entrava, a corrida não nascia e a loja
+  via "endereço incompleto". Agora o CEP é em branco (vale o da loja) ou
+  completo — no checkout (erro no campo, foco nele), no schema da API
+  (`store-checkout.schema.ts`) e, para pedido gravado antes disto, na criação da
+  corrida, que usa o CEP da loja quando o do cliente não está completo.
+- Cidade e UF eram digitadas à mão, em branco. Um erro ali dava a distância, e o
+  preço, de outra cidade, sem aviso. Sem endereço salvo na conta, os campos agora
+  nascem com os da loja (`enderecoDeRetirada`); o endereço da conta não é trocado.
+
+**Não mudei, e fica anotado:** o bairro não vai ao Google (só como observação ao
+motoboy); a consulta de rota não pede que o Google leia o endereço como do
+Brasil (a de coordenadas pede); o cliente não marca o ponto no mapa. Não sei se
+mudar isso melhora ou piora sem testar com endereços reais, e isso exige a chave
+do Google, que só uso com autorização.
+
+**Arquivos:** `packages/validation/src/company/store-checkout.schema.ts`,
+`apps/api/src/company/store-orders/store-orders.service.ts` (+ testes em
+`store-orders.vendas.spec.ts` e `store-checkout.schema.spec.ts`, novo),
+`apps/company-web/src/app/(loja)/pedir/[slug]/sacola/sacola.tsx` (+ dois casos em
+`pedido-de-verdade.test.tsx`), `docs/business-rules.md`.
+
+**Como foi validado:** `tsc`, eslint, Jest da API (1429), vitest do painel (403),
+build do painel e E2E inteiro no banco descartável (29 suítes, 256 testes) sem
+erro. O `dist` de `packages/validation` foi recompilado (a API o lê de lá), e o
+pacote passou no `tsc` com `--typeRoots` isolado, como o deploy. O erro do CEP foi
+visto no celular (375px) num componente isolado, numa rota temporária já removida;
+o checkout inteiro não foi visto com a loja real (o painel local não tem login de
+empresa nem loja ligada). **Não conferido em produção.**

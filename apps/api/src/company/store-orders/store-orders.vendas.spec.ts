@@ -274,6 +274,21 @@ describe('StoreOrdersService — Vendas', () => {
     expect(aceito.avisoDaCorrida).toBeNull();
   });
 
+  it('a corrida leva o CEP do cliente só se ele estiver completo; senão, o da loja', async () => {
+    const cepDaCorrida = () => entregas.createFromStoreOrder.mock.calls.at(-1)![2].dropoffAddress.zip;
+
+    banco.pedido = linha({ address: { ...ENDERECO, cep: '37000-123' } });
+    await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
+    expect(cepDaCorrida()).toBe('37000-123');
+
+    // Pedido gravado antes de a validação existir: 5 dígitos não servem ao motoboy.
+    banco.pedido = linha({ address: { ...ENDERECO, cep: '36980' } });
+    banco.corrida = null;
+    await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
+    expect(cepDaCorrida()).toBe('36980-000');
+    expect(banco.pedido.rideIssue).toBeNull();
+  });
+
   it('a corrida que não nasce não desfaz o aceite: vira o aviso da corrida', async () => {
     entregas.createFromStoreOrder.mockRejectedValue(
       new ConflictException('O horário agendado está fora do horário de funcionamento.'),

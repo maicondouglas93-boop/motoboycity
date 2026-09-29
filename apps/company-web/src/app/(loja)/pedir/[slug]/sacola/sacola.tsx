@@ -73,7 +73,15 @@ import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
  */
 
 type CampoDoCheckout =
-  'nome' | 'telefone' | 'cpf' | 'rua' | 'numero' | 'bairro' | 'cidade' | 'estado';
+  | 'nome'
+  | 'telefone'
+  | 'cpf'
+  | 'rua'
+  | 'numero'
+  | 'bairro'
+  | 'cidade'
+  | 'estado'
+  | 'cep';
 
 /** A ordem em que os campos aparecem: o primeiro com erro é o que recebe o foco. */
 const ORDEM_DOS_CAMPOS: readonly CampoDoCheckout[] = [
@@ -82,6 +90,7 @@ const ORDEM_DOS_CAMPOS: readonly CampoDoCheckout[] = [
   'bairro',
   'cidade',
   'estado',
+  'cep',
   'nome',
   'telefone',
   'cpf',
@@ -213,7 +222,17 @@ function Conteudo({
 
   const [nome, setNome] = useState(anterior?.nome ?? '');
   const [telefone, setTelefone] = useState(anterior?.telefone ?? '');
-  const [entrega, setEntrega] = useState<EnderecoDaEntrega>(anterior?.entrega ?? ENDERECO_VAZIO);
+  // Sem endereço salvo, a cidade e a UF nascem as da loja: ela entrega por
+  // bairro da própria lista, então é na cidade dela. Digitadas à mão, um erro ali
+  // passava batido e a corrida saía com a distância — e o preço — de outra cidade.
+  const daLoja = cardapio.operacao ? cardapio.enderecoDeRetirada : null;
+  const [entrega, setEntrega] = useState<EnderecoDaEntrega>(
+    anterior?.entrega ?? {
+      ...ENDERECO_VAZIO,
+      cidade: daLoja?.cidade ?? '',
+      estado: daLoja?.estado ?? '',
+    },
+  );
   // A loja de verdade oferece o que gravou (o servidor já tirou as online sem
   // conta Asaas); a demonstração, as do exemplo.
   const oferecidas = cardapio.operacao?.pagamentos ?? formasOferecidas(loja);
@@ -327,6 +346,8 @@ function Conteudo({
     if (bairroEscolhido === null) erros.bairro = 'Escolha o bairro.';
     if (entrega.cidade.trim() === '') erros.cidade = 'Informe a cidade.';
     if (entrega.estado.trim().length !== 2) erros.estado = 'Use a sigla, como MG.';
+    // Em branco vale o CEP da loja; digitado, tem que estar completo.
+    if (!/^(\d{5}-?\d{3})?$/.test(entrega.cep.trim())) erros.cep = 'Use 8 dígitos.';
   }
   const temErro = Object.keys(erros).length > 0;
   const erroDe = (campo: CampoDoCheckout) => (tentou ? erros[campo] : undefined);
@@ -800,6 +821,7 @@ function Conteudo({
                               valor={entrega.cep}
                               aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
                               paleta={paleta}
+                              erro={erroDe('cep')}
                               inputMode="numeric"
                               autoComplete="postal-code"
                             />
