@@ -16808,3 +16808,45 @@ pacote passou no `tsc` com `--typeRoots` isolado, como o deploy. O erro do CEP f
 visto no celular (375px) num componente isolado, numa rota temporária já removida;
 o checkout inteiro não foi visto com a loja real (o painel local não tem login de
 empresa nem loja ligada). **Não conferido em produção.**
+
+## 2026-09-29 — Checkout da loja online: vários endereços (casa, trabalho...)
+
+**Pedido do usuário:** o cliente poder cadastrar mais de um endereço e, no
+checkout, escolher para onde vai a entrega — casa, trabalho, outro.
+
+**Decisão:** o cliente guarda até 5 endereços, cada um com um nome. No checkout,
+uma lista "Entregar em" mostra os guardados e "Outro endereço":
+
+- Um endereço da lista escolhido aparece como cartão (nome, rua, número,
+  complemento, bairro) com "Editar" e "Apagar" (em dois toques), e o formulário
+  fica recolhido. Escolher outro preenche o mesmo formulário de sempre.
+- "Outro endereço" abre o formulário em branco (cidade e UF da loja), com "Guardar
+  este endereço para os próximos pedidos" marcado e o nome do endereço, com
+  atalhos Casa e Trabalho (sugere o que ainda não existe). Repetido, com a lista
+  cheia ou desmarcado, não é guardado.
+- O formulário abre sozinho se o endereço escolhido não serve mais (o bairro saiu
+  da lista da loja, um campo veio vazio); na lista, o endereço fora da área diz
+  "bairro fora da área da loja".
+- Quem já tinha um endereço guardado vê "Casa" (palpite; renomeia ao editar).
+
+**Guardado no aparelho, por conta e por loja** (`localStorage`, `ClienteSalvo` em
+`armazenamento.ts`, com `enderecos` opcional), como o endereço único já era. Não
+há mudança de API, de contrato compartilhado nem de banco. **Limite, dito ao
+usuário:** os endereços não acompanham o cliente para outro celular nem para outra
+loja. Levá-los ao banco, por conta do Firebase, pede tabela e migration, rotas,
+`api-client` e tela — o passo seguinte, se o usuário quiser.
+
+**Arquivos:** `components/loja-online/enderecos-do-checkout.tsx` (novo),
+`armazenamento.ts` (`enderecosDaConta`, `comEnderecoDoPedido`, `guardarEnderecos`,
+`removerEndereco`, `apelidoSugerido`, `mesmoEndereco`; `guardarCliente` não apaga
+mais a lista), `app/(loja)/pedir/[slug]/sacola/sacola.tsx` (o formulário passou a
+ficar sob a lista, e foi reindentado por isso), testes em `armazenamento.test.ts` e
+`pedido-de-verdade.test.tsx`, `docs/business-rules.md`.
+
+**Como foi validado:** `tsc`, eslint, vitest do painel (417 testes) e build sem
+erro. O seletor foi visto no celular (375px) numa rota temporária, já removida, em
+dois estados (endereço marcado com Editar/Apagar, e "Outro endereço" com o nome);
+o checkout inteiro com login não foi aberto localmente (não há login de cliente
+nem loja ligada aqui). Três testes antigos do checkout passaram a abrir o
+formulário com "Editar", porque ele agora nasce recolhido para quem tem endereço
+guardado. **Não conferido em produção.**

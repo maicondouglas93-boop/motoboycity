@@ -193,6 +193,8 @@ describe('Sacola da loja de verdade', () => {
   it('campo do endereço vazio: o erro aparece nele, o foco vai para ele e nada é enviado', async () => {
     render(<Sacola slug={SLUG} cardapio={cardapio()} />);
 
+    // Com o endereço da conta escolhido, o formulário fica recolhido: "Editar" o abre.
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     const rua = await screen.findByLabelText('Rua');
     expect(rua).not.toHaveAttribute('aria-invalid');
     fireEvent.change(rua, { target: { value: '' } });
@@ -212,6 +214,7 @@ describe('Sacola da loja de verdade', () => {
     mocks.checkout.mockResolvedValue({ numero: 9 } as PedidoDaLoja);
     render(<Sacola slug={SLUG} cardapio={cardapio()} />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     const cep = await screen.findByLabelText('CEP');
     fireEvent.change(cep, { target: { value: '36980' } });
     fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
@@ -276,7 +279,212 @@ describe('Sacola da loja de verdade', () => {
         cardapio={cardapio({ enderecoDeRetirada: { ...daLoja, cidade: 'Lajinha' } })}
       />,
     );
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar' }));
     expect(await screen.findByLabelText('Cidade')).toHaveValue('Ipatinga');
+  });
+
+  describe('mais de um endereço', () => {
+    const CASA = {
+      rua: 'Rua A',
+      numero: '10',
+      complemento: null,
+      bairro: 'Centro',
+      cidade: 'Lajinha',
+      estado: 'MG',
+      cep: '',
+      referencia: null,
+    };
+    const TRABALHO = { ...CASA, rua: 'Av. Brasil', numero: '900', bairro: 'Industrial' };
+    const DOIS_BAIRROS = {
+      ...OPERACAO,
+      bairros: [
+        { id: 'b1', nome: 'Centro', taxa: 5 },
+        { id: 'b2', nome: 'Industrial', taxa: 8 },
+      ],
+    };
+    const guardarLista = (lista: Array<{ id: string; apelido: string; endereco: object }>) =>
+      window.localStorage.setItem(
+        `loja:${SLUG}:user_1:cliente`,
+        JSON.stringify({
+          nome: 'Ana',
+          telefone: '33999887766',
+          // O último usado é o primeiro da lista.
+          entrega: lista[0]?.endereco ?? CASA,
+          enderecos: lista,
+        }),
+      );
+    const lido = () =>
+      JSON.parse(window.localStorage.getItem(`loja:${SLUG}:user_1:cliente`) ?? 'null');
+
+    it('um endereço só: aparece como cartão "Casa", sem o formulário, e vai no pedido', async () => {
+      mocks.checkout.mockResolvedValue({ numero: 10 } as PedidoDaLoja);
+      render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+      const casa = await screen.findByRole('radio', { name: /Casa/ });
+      expect(casa).toBeChecked();
+      expect(screen.getByText('Rua A, 10 · Centro')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Rua')).not.toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Outro endereço/ })).not.toBeChecked();
+
+      fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+      await waitFor(() =>
+        expect(mocks.checkout).toHaveBeenCalledWith(
+          SLUG,
+          'token-do-google',
+          expect.objectContaining({
+            entrega: expect.objectContaining({ rua: 'Rua A', bairroId: 'b1' }),
+          }),
+        ),
+      );
+    });
+
+    it('escolhe o outro endereço da lista, e é o dele que vai; a taxa acompanha o bairro', async () => {
+      guardarLista([
+        { id: 'a', apelido: 'Casa', endereco: CASA },
+        { id: 'b', apelido: 'Trabalho', endereco: TRABALHO },
+      ]);
+      mocks.checkout.mockResolvedValue({ numero: 11 } as PedidoDaLoja);
+      render(<Sacola slug={SLUG} cardapio={cardapio({ operacao: DOIS_BAIRROS })} />);
+
+      expect(await screen.findByRole('radio', { name: /Casa/ })).toBeChecked();
+      fireEvent.click(screen.getByRole('radio', { name: /Trabalho/ }));
+      expect(screen.getByRole('radio', { name: /Trabalho/ })).toBeChecked();
+      expect(screen.getByText('Av. Brasil, 900 · Industrial')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+      await waitFor(() =>
+        expect(mocks.checkout).toHaveBeenCalledWith(
+          SLUG,
+          'token-do-google',
+          expect.objectContaining({
+            entrega: expect.objectContaining({ rua: 'Av. Brasil', bairroId: 'b2' }),
+            // 2 × 21 + 8 do Industrial.
+            totalVisto: 50,
+          }),
+        ),
+      );
+      // O último usado é o do trabalho, e os dois continuam guardados.
+      await waitFor(() => expect(lido().entrega).toMatchObject({ rua: 'Av. Brasil' }));
+      expect(lido().enderecos).toHaveLength(2);
+    });
+
+    it('"Outro endereço": formulário em branco (cidade e UF da loja), e o novo fica guardado com o nome', async () => {
+      guardarLista([{ id: 'a', apelido: 'Casa', endereco: CASA }]);
+      mocks.checkout.mockResolvedValue({ numero: 12 } as PedidoDaLoja);
+      const daLoja = {
+        rua: 'Rua da Loja',
+        numero: '1',
+        complemento: null,
+        bairro: '',
+        cidade: 'Lajinha',
+        estado: 'MG',
+      };
+      render(
+        <Sacola
+          slug={SLUG}
+          cardapio={cardapio({ operacao: DOIS_BAIRROS, enderecoDeRetirada: daLoja })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole('radio', { name: /Outro endereço/ }));
+
+      expect(screen.getByLabelText('Rua')).toHaveValue('');
+      expect(screen.getByLabelText('Cidade')).toHaveValue('Lajinha');
+      // Já existe uma Casa: a sugestão passa para Trabalho.
+      expect(screen.getByLabelText('Nome do endereço')).toHaveValue('Trabalho');
+      expect(screen.getByRole('checkbox', { name: /Guardar este endereço/ })).toBeChecked();
+
+      fireEvent.change(screen.getByLabelText('Rua'), { target: { value: 'Av. Brasil' } });
+      fireEvent.change(screen.getByLabelText('Número'), { target: { value: '900' } });
+      fireEvent.change(screen.getByLabelText('Bairro'), { target: { value: 'Industrial' } });
+      fireEvent.change(screen.getByLabelText('Nome do endereço'), {
+        target: { value: 'Escritório' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+      await waitFor(() =>
+        expect(mocks.checkout).toHaveBeenCalledWith(
+          SLUG,
+          'token-do-google',
+          expect.objectContaining({
+            entrega: expect.objectContaining({ rua: 'Av. Brasil', bairroId: 'b2' }),
+          }),
+        ),
+      );
+      await waitFor(() => expect(lido().enderecos).toHaveLength(2));
+      expect(lido().enderecos[1]).toMatchObject({
+        apelido: 'Escritório',
+        endereco: { rua: 'Av. Brasil', numero: '900', bairro: 'Industrial' },
+      });
+    });
+
+    it('desmarcado "Guardar este endereço", o pedido sai e a lista fica como estava', async () => {
+      guardarLista([{ id: 'a', apelido: 'Casa', endereco: CASA }]);
+      mocks.checkout.mockResolvedValue({ numero: 13 } as PedidoDaLoja);
+      render(
+        <Sacola
+          slug={SLUG}
+          cardapio={cardapio({
+            operacao: DOIS_BAIRROS,
+            enderecoDeRetirada: {
+              rua: 'Rua da Loja',
+              numero: '1',
+              complemento: null,
+              bairro: '',
+              cidade: 'Lajinha',
+              estado: 'MG',
+            },
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole('radio', { name: /Outro endereço/ }));
+      fireEvent.change(screen.getByLabelText('Rua'), { target: { value: 'Rua Emprestada' } });
+      fireEvent.change(screen.getByLabelText('Número'), { target: { value: '7' } });
+      fireEvent.change(screen.getByLabelText('Bairro'), { target: { value: 'Industrial' } });
+      fireEvent.click(screen.getByRole('checkbox', { name: /Guardar este endereço/ }));
+      expect(screen.queryByLabelText('Nome do endereço')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+      await waitFor(() => expect(mocks.checkout).toHaveBeenCalledOnce());
+      await waitFor(() => expect(lido().entrega).toMatchObject({ rua: 'Rua Emprestada' }));
+      expect(lido().enderecos).toHaveLength(1);
+    });
+
+    it('apagar pede confirmação e passa para o que sobrou', async () => {
+      guardarLista([
+        { id: 'a', apelido: 'Casa', endereco: CASA },
+        { id: 'b', apelido: 'Trabalho', endereco: TRABALHO },
+      ]);
+      render(<Sacola slug={SLUG} cardapio={cardapio({ operacao: DOIS_BAIRROS })} />);
+
+      fireEvent.click(await screen.findByRole('radio', { name: /Trabalho/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar' }));
+      // Um toque só pergunta; "Manter" desiste.
+      fireEvent.click(screen.getByRole('button', { name: 'Manter' }));
+      expect(screen.getByRole('radio', { name: /Trabalho/ })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Apagar mesmo' }));
+
+      expect(screen.queryByRole('radio', { name: /Trabalho/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Casa/ })).toBeChecked();
+      expect(lido().enderecos).toHaveLength(1);
+    });
+
+    it('endereço de um bairro que a loja não atende mais: avisa, e abre o formulário para trocar', async () => {
+      guardarLista([{ id: 'a', apelido: 'Casa', endereco: { ...CASA, bairro: 'Distrito' } }]);
+      render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+      expect(await screen.findByText(/bairro fora da área da loja/)).toBeInTheDocument();
+      // O formulário abre sozinho: o bairro precisa ser escolhido de novo.
+      expect(screen.getByLabelText('Bairro')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+      expect(screen.getByText('Escolha o bairro.')).toBeInTheDocument();
+      expect(mocks.checkout).not.toHaveBeenCalled();
+    });
   });
 
   it('o troco fica logo abaixo do Dinheiro, e antes da observação', async () => {

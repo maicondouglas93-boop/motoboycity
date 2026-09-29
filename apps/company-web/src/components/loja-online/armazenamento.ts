@@ -252,11 +252,89 @@ export function usePedidos(slug: string, usuarioId: string | null) {
   );
 }
 
+/** Um endereço que a conta guardou, com o nome pelo qual ela o reconhece. */
+export interface EnderecoSalvo {
+  id: string;
+  /** "Casa", "Trabalho", "Casa da mãe". */
+  apelido: string;
+  endereco: EnderecoDaEntrega;
+}
+
+/** Mais que isso vira uma lista para rolar, e ninguém usa o oitavo endereço. */
+export const MAX_ENDERECOS = 5;
+
 export interface ClienteSalvo {
   nome: string;
   telefone: string;
-  /** `null` para quem só retirou na loja até agora e nunca informou endereço. */
+  /**
+   * O último endereço usado — `null` para quem só retirou na loja até agora.
+   * Fica mesmo com a lista abaixo: é o que o checkout marca de saída.
+   */
   entrega: EnderecoDaEntrega | null;
+  /**
+   * Os endereços guardados. Falta em quem guardou o seu antes de a lista
+   * existir: para essa conta, o `entrega` é o único endereço (ver
+   * `enderecosDaConta`).
+   */
+  enderecos?: EnderecoSalvo[];
+}
+
+function normalizado(texto: string | null | undefined): string {
+  return (texto ?? '').trim().toLowerCase();
+}
+
+/** O mesmo lugar, para quem mora lá: rua, número, complemento e bairro. */
+export function mesmoEndereco(a: EnderecoDaEntrega, b: EnderecoDaEntrega | null): boolean {
+  return (
+    b !== null &&
+    normalizado(a.rua) === normalizado(b.rua) &&
+    normalizado(a.numero) === normalizado(b.numero) &&
+    normalizado(a.complemento) === normalizado(b.complemento) &&
+    normalizado(a.bairro) === normalizado(b.bairro)
+  );
+}
+
+/**
+ * Os endereços da conta. Quem guardou o seu antes de a lista existir tem só o
+ * `entrega`, que passa a ser o primeiro da lista — "Casa", porque é o palpite
+ * mais provável, e o cliente pode renomear ao editar.
+ */
+export function enderecosDaConta(cliente: ClienteSalvo | null): EnderecoSalvo[] {
+  if (!cliente) return [];
+  if (cliente.enderecos) return cliente.enderecos;
+  return cliente.entrega ? [{ id: 'primeiro', apelido: 'Casa', endereco: cliente.entrega }] : [];
+}
+
+/** "Casa" para o primeiro endereço, "Trabalho" para o segundo, e depois em branco. */
+export function apelidoSugerido(enderecos: EnderecoSalvo[]): string {
+  const usados = enderecos.map((salvo) => normalizado(salvo.apelido));
+  return ['Casa', 'Trabalho'].find((apelido) => !usados.includes(normalizado(apelido))) ?? '';
+}
+
+/**
+ * A lista depois de um pedido. Endereço escolhido da lista: guarda o que foi
+ * usado, com as edições e o apelido. Endereço novo: entra no fim, se o cliente
+ * quis guardar, se não repete um que já está lá e se ainda cabe.
+ */
+export function comEnderecoDoPedido(
+  atuais: EnderecoSalvo[],
+  usado: {
+    escolhidoId: string | null;
+    endereco: EnderecoDaEntrega;
+    apelido: string;
+    salvar: boolean;
+  },
+): EnderecoSalvo[] {
+  const apelido = usado.apelido.trim().slice(0, 20) || 'Endereço';
+  if (usado.escolhidoId !== null) {
+    return atuais.map((salvo) =>
+      salvo.id === usado.escolhidoId ? { ...salvo, apelido, endereco: usado.endereco } : salvo,
+    );
+  }
+  if (!usado.salvar || atuais.length >= MAX_ENDERECOS) return atuais;
+  if (atuais.some((salvo) => mesmoEndereco(salvo.endereco, usado.endereco))) return atuais;
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return [...atuais, { id, apelido, endereco: usado.endereco }];
 }
 
 /** Grava o pedido, guarda o endereço na conta e esvazia a sacola. */
@@ -287,7 +365,40 @@ export function guardarCliente(slug: string, usuarioId: string, dados: ClienteSa
     nome: dados.nome,
     telefone: dados.telefone,
     entrega: dados.entrega ?? anterior?.entrega ?? null,
+    // A lista tem o seu próprio caminho (`guardarEnderecos`): quem guarda o
+    // nome e o telefone não pode apagá-la.
+    ...(anterior?.enderecos ? { enderecos: anterior.enderecos } : {}),
   } satisfies ClienteSalvo);
+}
+
+/** Grava a lista de endereços da conta, sem mexer no resto do cadastro. */
+export function guardarEnderecos(
+  slug: string,
+  usuarioId: string,
+  enderecos: EnderecoSalvo[],
+): void {
+  const atual = ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
+  if (!atual) return;
+  gravar(chaveDoCliente(slug, usuarioId), { ...atual, enderecos } satisfies ClienteSalvo);
+}
+
+/**
+ * Tira um endereço da conta e devolve a lista que sobrou. Se era o último usado,
+ * o `entrega` também sai: sem isso o endereço apagado continuava aparecendo
+ * preenchido no formulário do próximo pedido.
+ */
+export function removerEndereco(slug: string, usuarioId: string, id: string): EnderecoSalvo[] {
+  const atual = ler<ClienteSalvo | null>(chaveDoCliente(slug, usuarioId), null);
+  const lista = enderecosDaConta(atual);
+  const removido = lista.find((salvo) => salvo.id === id);
+  const restantes = lista.filter((salvo) => salvo.id !== id);
+  if (!atual || !removido) return lista;
+  gravar(chaveDoCliente(slug, usuarioId), {
+    ...atual,
+    entrega: mesmoEndereco(removido.endereco, atual.entrega) ? null : atual.entrega,
+    enderecos: restantes,
+  } satisfies ClienteSalvo);
+  return restantes;
 }
 
 /**

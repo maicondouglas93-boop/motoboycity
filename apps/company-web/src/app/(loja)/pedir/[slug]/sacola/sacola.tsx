@@ -41,12 +41,19 @@ import { EsqueletoDoCheckout } from '@/components/loja-online/esqueleto-do-check
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import {
   ajustarQuantidade,
+  apelidoSugerido,
   clienteSalvo,
+  comEnderecoDoPedido,
+  enderecosDaConta,
   guardarCliente,
+  guardarEnderecos,
   guardarPedido,
+  mesmoEndereco,
   proximoNumero,
+  removerEndereco,
   useHidratado,
   useSacola,
+  type EnderecoSalvo,
 } from '@/components/loja-online/armazenamento';
 import {
   Campo,
@@ -57,6 +64,7 @@ import {
   Segmentado,
 } from '@/components/loja-online/campos-do-checkout';
 import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
+import { EnderecosSalvos, NomeDoEndereco } from '@/components/loja-online/enderecos-do-checkout';
 import estilos from '@/components/loja-online/loja.module.css';
 import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
 
@@ -73,15 +81,7 @@ import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
  */
 
 type CampoDoCheckout =
-  | 'nome'
-  | 'telefone'
-  | 'cpf'
-  | 'rua'
-  | 'numero'
-  | 'bairro'
-  | 'cidade'
-  | 'estado'
-  | 'cep';
+  'nome' | 'telefone' | 'cpf' | 'rua' | 'numero' | 'bairro' | 'cidade' | 'estado' | 'cep';
 
 /** A ordem em que os campos aparecem: o primeiro com erro é o que recebe o foco. */
 const ORDEM_DOS_CAMPOS: readonly CampoDoCheckout[] = [
@@ -226,13 +226,26 @@ function Conteudo({
   // bairro da própria lista, então é na cidade dela. Digitadas à mão, um erro ali
   // passava batido e a corrida saía com a distância — e o preço — de outra cidade.
   const daLoja = cardapio.operacao ? cardapio.enderecoDeRetirada : null;
-  const [entrega, setEntrega] = useState<EnderecoDaEntrega>(
-    anterior?.entrega ?? {
-      ...ENDERECO_VAZIO,
-      cidade: daLoja?.cidade ?? '',
-      estado: daLoja?.estado ?? '',
-    },
+  const enderecoNovo = (): EnderecoDaEntrega => ({
+    ...ENDERECO_VAZIO,
+    cidade: daLoja?.cidade ?? '',
+    estado: daLoja?.estado ?? '',
+  });
+  const [entrega, setEntrega] = useState<EnderecoDaEntrega>(anterior?.entrega ?? enderecoNovo());
+
+  /*
+   * Os endereços da conta (casa, trabalho...) e qual deles este pedido usa;
+   * `null` é um endereço digitado agora. O formulário abaixo é o mesmo nos dois
+   * casos: escolher um da lista só o preenche.
+   */
+  const [enderecos, setEnderecos] = useState<EnderecoSalvo[]>(() => enderecosDaConta(anterior));
+  const ultimoUsado = enderecos.find((salvo) =>
+    mesmoEndereco(salvo.endereco, anterior?.entrega ?? null),
   );
+  const [escolhido, setEscolhido] = useState<string | null>(ultimoUsado?.id ?? null);
+  const [editando, setEditando] = useState(false);
+  const [apelido, setApelido] = useState(ultimoUsado?.apelido ?? apelidoSugerido(enderecos));
+  const [salvarEndereco, setSalvarEndereco] = useState(true);
   // A loja de verdade oferece o que gravou (o servidor já tirou as online sem
   // conta Asaas); a demonstração, as do exemplo.
   const oferecidas = cardapio.operacao?.pagamentos ?? formasOferecidas(loja);
@@ -352,6 +365,58 @@ function Conteudo({
   const temErro = Object.keys(erros).length > 0;
   const erroDe = (campo: CampoDoCheckout) => (tentou ? erros[campo] : undefined);
 
+  /*
+   * O formulário fica recolhido enquanto o endereço escolhido da lista está bom.
+   * Abre sozinho se ele não serve mais — o bairro saiu da lista da loja, um
+   * campo veio vazio —, para o erro ter onde aparecer.
+   */
+  const CAMPOS_DO_ENDERECO: CampoDoCheckout[] = [
+    'rua',
+    'numero',
+    'bairro',
+    'cidade',
+    'estado',
+    'cep',
+  ];
+  const enderecoComProblema = CAMPOS_DO_ENDERECO.some((campo) => erros[campo]);
+  const formularioAberto = escolhido === null || editando || enderecoComProblema;
+
+  function escolherEndereco(id: string | null, lista: EnderecoSalvo[] = enderecos) {
+    const salvo = lista.find((item) => item.id === id);
+    setEscolhido(salvo ? salvo.id : null);
+    setEditando(false);
+    if (salvo) {
+      setEntrega(salvo.endereco);
+      setApelido(salvo.apelido);
+    } else {
+      setEntrega(enderecoNovo());
+      setApelido(apelidoSugerido(lista));
+      setSalvarEndereco(true);
+    }
+  }
+
+  function apagarEndereco(id: string) {
+    if (usuarioId === null) return;
+    const restantes = removerEndereco(slug, usuarioId, id);
+    setEnderecos(restantes);
+    escolherEndereco(restantes[0]?.id ?? null, restantes);
+  }
+
+  /** Depois do pedido feito: guarda o endereço novo, ou as edições do que foi usado. */
+  function guardarOsEnderecos(conta: string) {
+    if (retirar) return;
+    guardarEnderecos(
+      slug,
+      conta,
+      comEnderecoDoPedido(enderecos, {
+        escolhidoId: escolhido,
+        endereco: entrega,
+        apelido,
+        salvar: salvarEndereco,
+      }),
+    );
+  }
+
   function alterarQuantidade(indice: number, passo: number) {
     setItens((atual) => ajustarQuantidade(atual, indice, passo));
   }
@@ -432,6 +497,7 @@ function Conteudo({
       retirarNaLoja: retirar,
       janela,
     });
+    guardarOsEnderecos(usuarioId);
 
     // Na demonstração, a venda chega ao painel pelo mesmo navegador.
     registrarVenda({
@@ -518,6 +584,7 @@ function Conteudo({
         telefone: telefone.trim(),
         entrega: retirar ? null : entrega,
       });
+      guardarOsEnderecos(conta);
       setItens([]);
       router.push(`/pedir/${slug}/pedidos?novo=${pedido.numero}`);
     } catch (erro) {
@@ -743,97 +810,128 @@ function Conteudo({
                         transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
                         className="overflow-hidden"
                       >
-                        <div className={`space-y-3 ${modalidades.length > 1 ? 'pt-4' : ''}`}>
-                          <Campo
-                            id="rua"
-                            rotulo="Rua"
-                            valor={entrega.rua}
-                            aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
-                            paleta={paleta}
-                            erro={erroDe('rua')}
-                            autoComplete="address-line1"
-                          />
-                          <div className="grid grid-cols-2 gap-3">
-                            <Campo
-                              id="numero"
-                              rotulo="Número"
-                              valor={entrega.numero}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
+                        <div className={`space-y-4 ${modalidades.length > 1 ? 'pt-4' : ''}`}>
+                          {enderecos.length > 0 && (
+                            <EnderecosSalvos
+                              enderecos={enderecos}
+                              escolhido={escolhido}
+                              bairrosDaLoja={bairros.map((bairro) => bairro.nome)}
+                              aoEscolher={(id) => escolherEndereco(id)}
+                              aoEditar={() => setEditando(true)}
+                              aoApagar={apagarEndereco}
                               paleta={paleta}
-                              erro={erroDe('numero')}
                             />
-                            <Campo
-                              id="complemento"
-                              rotulo="Complemento"
-                              valor={entrega.complemento ?? ''}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, complemento: v || null }))}
-                              paleta={paleta}
-                              autoComplete="address-line2"
-                            />
-                          </div>
-                          {/* Lista, e não campo livre: o bairro define a taxa e
+                          )}
+                          {formularioAberto && (
+                            <div className="space-y-3">
+                              <Campo
+                                id="rua"
+                                rotulo="Rua"
+                                valor={entrega.rua}
+                                aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
+                                paleta={paleta}
+                                erro={erroDe('rua')}
+                                autoComplete="address-line1"
+                              />
+                              <div className="grid grid-cols-2 gap-3">
+                                <Campo
+                                  id="numero"
+                                  rotulo="Número"
+                                  valor={entrega.numero}
+                                  aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
+                                  paleta={paleta}
+                                  erro={erroDe('numero')}
+                                />
+                                <Campo
+                                  id="complemento"
+                                  rotulo="Complemento"
+                                  valor={entrega.complemento ?? ''}
+                                  aoMudar={(v) =>
+                                    setEntrega((e) => ({ ...e, complemento: v || null }))
+                                  }
+                                  paleta={paleta}
+                                  autoComplete="address-line2"
+                                />
+                              </div>
+                              {/* Lista, e não campo livre: o bairro define a taxa e
                               delimita a área que a loja atende. */}
-                          <CampoDeLista
-                            id="bairro"
-                            rotulo="Bairro"
-                            valor={entrega.bairro}
-                            aoMudar={(v) => setEntrega((e) => ({ ...e, bairro: v }))}
-                            paleta={paleta}
-                            erro={erroDe('bairro')}
-                            dica={
-                              bairros.length === 0
-                                ? 'Esta loja ainda não cadastrou bairros de entrega.'
-                                : 'Não achou o seu? A loja não entrega nele por enquanto.'
-                            }
-                          >
-                            <option value="">Escolha o bairro</option>
-                            {bairros.map((bairro) => (
-                              <option key={bairro.id} value={bairro.nome}>
-                                {bairro.nome} — {moeda(bairro.taxa)}
-                              </option>
-                            ))}
-                          </CampoDeLista>
-                          <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_7rem] gap-3">
-                            <Campo
-                              id="cidade"
-                              rotulo="Cidade"
-                              valor={entrega.cidade}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
-                              paleta={paleta}
-                              erro={erroDe('cidade')}
-                              autoComplete="address-level2"
-                            />
-                            <Campo
-                              id="estado"
-                              rotulo="UF"
-                              valor={entrega.estado}
-                              aoMudar={(v) =>
-                                setEntrega((e) => ({ ...e, estado: v.toUpperCase().slice(0, 2) }))
-                              }
-                              paleta={paleta}
-                              erro={erroDe('estado')}
-                              autoComplete="address-level1"
-                              maxLength={2}
-                            />
-                            <Campo
-                              id="cep"
-                              rotulo="CEP"
-                              valor={entrega.cep}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
-                              paleta={paleta}
-                              erro={erroDe('cep')}
-                              inputMode="numeric"
-                              autoComplete="postal-code"
-                            />
-                          </div>
-                          <Campo
-                            id="referencia"
-                            rotulo="Ponto de referência"
-                            valor={entrega.referencia ?? ''}
-                            aoMudar={(v) => setEntrega((e) => ({ ...e, referencia: v || null }))}
-                            paleta={paleta}
-                            dica="Portão, cor da casa, o que ajudar a achar."
-                          />
+                              <CampoDeLista
+                                id="bairro"
+                                rotulo="Bairro"
+                                valor={entrega.bairro}
+                                aoMudar={(v) => setEntrega((e) => ({ ...e, bairro: v }))}
+                                paleta={paleta}
+                                erro={erroDe('bairro')}
+                                dica={
+                                  bairros.length === 0
+                                    ? 'Esta loja ainda não cadastrou bairros de entrega.'
+                                    : 'Não achou o seu? A loja não entrega nele por enquanto.'
+                                }
+                              >
+                                <option value="">Escolha o bairro</option>
+                                {bairros.map((bairro) => (
+                                  <option key={bairro.id} value={bairro.nome}>
+                                    {bairro.nome} — {moeda(bairro.taxa)}
+                                  </option>
+                                ))}
+                              </CampoDeLista>
+                              <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_7rem] gap-3">
+                                <Campo
+                                  id="cidade"
+                                  rotulo="Cidade"
+                                  valor={entrega.cidade}
+                                  aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
+                                  paleta={paleta}
+                                  erro={erroDe('cidade')}
+                                  autoComplete="address-level2"
+                                />
+                                <Campo
+                                  id="estado"
+                                  rotulo="UF"
+                                  valor={entrega.estado}
+                                  aoMudar={(v) =>
+                                    setEntrega((e) => ({
+                                      ...e,
+                                      estado: v.toUpperCase().slice(0, 2),
+                                    }))
+                                  }
+                                  paleta={paleta}
+                                  erro={erroDe('estado')}
+                                  autoComplete="address-level1"
+                                  maxLength={2}
+                                />
+                                <Campo
+                                  id="cep"
+                                  rotulo="CEP"
+                                  valor={entrega.cep}
+                                  aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
+                                  paleta={paleta}
+                                  erro={erroDe('cep')}
+                                  inputMode="numeric"
+                                  autoComplete="postal-code"
+                                />
+                              </div>
+                              <Campo
+                                id="referencia"
+                                rotulo="Ponto de referência"
+                                valor={entrega.referencia ?? ''}
+                                aoMudar={(v) =>
+                                  setEntrega((e) => ({ ...e, referencia: v || null }))
+                                }
+                                paleta={paleta}
+                                dica="Portão, cor da casa, o que ajudar a achar."
+                              />
+                              <NomeDoEndereco
+                                novo={escolhido === null}
+                                apelido={apelido}
+                                aoMudarApelido={setApelido}
+                                salvar={salvarEndereco}
+                                aoMudarSalvar={setSalvarEndereco}
+                                quantosGuardados={enderecos.length}
+                                paleta={paleta}
+                              />
+                            </div>
+                          )}
                         </div>
                       </m.div>
                     )}

@@ -549,6 +549,10 @@ Decisões de 2026-09-26, do usuário:
 - **sem CEP digitado pelo cliente, vale o CEP da loja** (cidades de CEP único). O
   CEP digitado precisa estar completo (8 dígitos): em branco ou completo, nunca
   pela metade. Cidade e UF do checkout já vêm as da loja (decisão de 2026-09-29);
+- **o cliente guarda até 5 endereços** (Casa, Trabalho, Casa da mãe...) e escolhe no
+  checkout para onde vai cada pedido (decisão de 2026-09-29). Guardados no aparelho, por
+  conta e por loja, como o endereço único já era: **não acompanham o cliente para outro
+  celular**. Levá-los ao banco, por conta, é o passo seguinte;
 - **pago na entrega, o motoboy volta à loja**, com o dinheiro ou a maquininha,
   e a loja paga a taxa de retorno — igual ao aiqfome. Pago online, sem retorno;
 - **fora do horário da central, o pedido entra e a loja é avisada**: a corrida
