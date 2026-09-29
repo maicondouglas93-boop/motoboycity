@@ -178,8 +178,8 @@ export function LinkDaLoja() {
                 <Link2 className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                 <span>
                   {enderecoDaLoja(salva.slug)} — é este endereço que você manda no WhatsApp, põe no
-                  QR da mesa e na bio do Instagram. A página mostra os produtos publicados, e ainda
-                  não recebe pedidos.
+                  QR da mesa e na bio do Instagram. A página mostra os produtos publicados; para
+                  receber pedidos, ligue-os em Vendas.
                 </span>
               </p>
             ) : (

@@ -18,7 +18,7 @@ export function SecaoDeConfiguracao({
   children: ReactNode;
 }) {
   return (
-    <section className="grid gap-4 border-t pt-6 first:border-t-0 first:pt-0 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8">
+    <section className="grid gap-4 border-t pt-6 first-of-type:border-t-0 first-of-type:pt-0 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8">
       <header>
         <h2 className="text-base font-semibold">{titulo}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{descricao}</p>

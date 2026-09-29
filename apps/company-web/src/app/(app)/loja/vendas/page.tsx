@@ -343,7 +343,7 @@ function Fila({
       <div
         role="tablist"
         aria-label="Vendas por situação"
-        className="-mb-2 flex gap-5 overflow-x-auto border-b"
+        className="flex gap-5 overflow-x-auto shadow-[inset_0_-1px_0_0_var(--border)]"
       >
         {abas.map((item) => (
           <button
@@ -352,7 +352,7 @@ function Fila({
             role="tab"
             aria-selected={aba === item.valor}
             onClick={() => setAba(item.valor)}
-            className={`-mb-px shrink-0 border-b-2 py-2 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:py-3 ${
+            className={`shrink-0 border-b-2 py-2 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:py-3 ${
               aba === item.valor
                 ? 'border-portal font-semibold text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -726,7 +726,7 @@ function CartaoDaVenda({
         {/* Passar para o MOTOboyCity custa uma corrida e não tem volta pela
             loja: por isso pergunta antes, dizendo o que muda. */}
         {chamando && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-portal/30 bg-accent/50 p-2">
             <span className="w-full text-xs">
               Este pedido passa a ser entregue por um motoboy do MOTOboyCity: pronto, o motoboy é
               chamado na hora; antes, para quando ficar pronto. A corrida entra na sua fatura, como
@@ -854,10 +854,7 @@ function CartaoDaVenda({
                 pode virar texto cinza no meio do resto. */}
             {venda.observacao && (
               <p className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
-                <MessageSquare
-                  className="mt-0.5 size-4 shrink-0 text-warning"
-                  aria-hidden="true"
-                />
+                <MessageSquare className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
                 {venda.observacao}
               </p>
             )}

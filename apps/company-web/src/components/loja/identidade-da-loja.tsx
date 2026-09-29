@@ -221,7 +221,7 @@ function Formulario({ salva, onDescartar }: { salva: StoreSettings; onDescartar:
               key={item.valor}
               className={`flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors ${
                 cores.theme === item.valor
-                  ? 'border-primary bg-primary/10 font-semibold text-primary'
+                  ? 'border-portal bg-accent font-semibold text-accent-foreground'
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >

@@ -367,7 +367,7 @@ function Formulario({
                     key={opcao.valor}
                     className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm ${
                       rascunho.quemEntrega === opcao.valor
-                        ? 'border-primary bg-primary/5'
+                        ? 'border-portal bg-accent/50'
                         : 'hover:bg-muted/50'
                     }`}
                   >

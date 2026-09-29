@@ -448,7 +448,7 @@ export function FormularioDeProduto({
                   <button
                     type="button"
                     onClick={() => setNovaCategoria('')}
-                    className="text-xs font-medium text-primary hover:underline"
+                    className="text-xs font-medium text-portal hover:underline"
                   >
                     + Nova categoria
                   </button>
@@ -735,7 +735,7 @@ export function FormularioDeProduto({
                   </div>
 
                   {/* A regra traduzida, para a loja conferir sem aprender mín/máx. */}
-                  <p className="text-xs font-medium text-primary">{descreverGrupo(grupo)}</p>
+                  <p className="text-xs font-medium text-portal">{descreverGrupo(grupo)}</p>
 
                   <div className="space-y-2">
                     {grupo.escolhas.map((escolha) => (

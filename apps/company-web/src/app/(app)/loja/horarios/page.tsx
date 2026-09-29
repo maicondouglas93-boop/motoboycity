@@ -635,7 +635,7 @@ function DataEspecial({
               key={opcao.valor}
               className={`cursor-pointer rounded-md border px-2.5 py-1 text-xs transition-colors ${
                 excecao.tipo === opcao.valor
-                  ? 'border-primary bg-primary/10 font-semibold text-primary'
+                  ? 'border-portal bg-accent font-semibold text-accent-foreground'
                   : 'text-muted-foreground hover:bg-muted'
               }`}
             >

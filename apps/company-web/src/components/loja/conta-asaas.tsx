@@ -229,7 +229,7 @@ function Ligar({
           <label
             key={opcao.valor}
             className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 ${
-              ambiente === opcao.valor ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
+              ambiente === opcao.valor ? 'border-portal bg-accent/50' : 'hover:bg-muted/50'
             }`}
           >
             <input

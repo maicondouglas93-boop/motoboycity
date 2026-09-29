@@ -559,9 +559,11 @@ Configurações, e o status da loja no alto da barra lateral.
 raios de 6 a 12px, cor só para estado, ação principal em âmbar e uma por tela.
 O checkout do cliente (`sacola.tsx` e `components/loja-online/campos-do-checkout.tsx`)
 **não desabilita mais o botão de enviar** quando falta campo: ao tocar nele,
-cada campo mostra o seu erro e o primeiro recebe o foco. Não foi visto renderizado
-o painel interno (a sessão local não tem login de empresa): confira Vendas,
-Produtos e Configurações na tela antes de dar o recorte por bom.
+cada campo mostra o seu erro e o primeiro recebe o foco. O painel interno foi
+conferido em produção, no Chrome do usuário, em 29/09/2026 (Vendas, Produtos,
+Configurações, Horários, Tipos de pedido, Central operacional, Pedidos e
+Financeiro). O que não foi visto: o painel no celular, e as telas de Notificações
+e Organizar. A sessão local do navegador do Claude não tem login de empresa.
 
 **Produtos, Organizar, Cadastrar e Editar gravam na API desde 2026-09-25**
 (rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`),

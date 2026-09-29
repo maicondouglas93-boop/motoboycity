@@ -16603,3 +16603,39 @@ Notificações (só receberam tokens, raio e alvo de toque); Relatórios e dashb
 da loja, que não existem (saíram do desenho original); ilustração do item "Loja"
 no cabeçalho; abas de Vendas no `Tabs` do shadcn (o alinhamento do sublinhado dele
 não foi verificado). A lista está em "Ainda não uniformizado" do design system.
+
+## 2026-09-29 — Refinamento de UI: conferência em produção e cinco ajustes
+
+**Contexto:** o commit `bf6363f` (design system, painel da loja e checkout) foi
+publicado com a autorização do usuário de "publicar e conferir em produção",
+porque o painel interno não tinha login local para eu ver. CI verde e Vercel do
+painel em success. Conferido no Chrome do usuário, só olhando, sem enviar pedido:
+Vendas, Produtos, Configurações, Horários, Tipos de pedido, a Central operacional,
+Pedidos, Financeiro e o checkout real. As áreas fora da loja seguem íntegras.
+
+**O que a conferência achou, e foi corrigido:**
+
+- Vendas: a barra de abas tinha uma barra de rolagem vertical minúscula (o
+  `-mb-px` do botão passava do contêiner, que rola em `x`) e o `-mb-2` cobria o
+  título da seção seguinte ("Prontos · 1"). A linha da barra agora é um
+  `inset shadow` do contêiner, sem margem negativa.
+- Configurações: uma linha logo abaixo do título, porque o `:first-child` do
+  primeiro grupo era o cabeçalho da página; passou a `first-of-type`.
+- Restava âmbar como cor de texto e de seleção (o padrão que a auditoria
+  apontou, e que a primeira varredura não pegou por inteiro): o "Claro" do tema,
+  o tipo de exceção em Horários, "quem faz a entrega" em Tipos de pedido, o
+  ambiente do Asaas, o bloco de confirmação de "Chamar motoboy" em Vendas, e dois
+  textos no formulário de produto. Agora usam `portal`/`accent`.
+- O cartão "Link da sua loja" ainda dizia "e ainda não recebe pedidos", errado
+  desde 26/09 (a mesma frase que já saíra de Produtos). Diz agora que, para
+  receber pedidos, é preciso ligá-los em Vendas.
+
+**Arquivos:** `app/(app)/loja/vendas/page.tsx`, `horarios/page.tsx`,
+`tipos-de-pedido/page.tsx`; `components/loja/secao-de-configuracao.tsx`,
+`identidade-da-loja.tsx`, `conta-asaas.tsx`, `formulario-de-produto.tsx`,
+`link-da-loja.tsx`; `docs/agent-handoff.md`.
+
+**Como foi validado:** `tsc`, eslint e vitest do `company-web` (396 testes) sem
+erro depois dos ajustes. **Ainda não visto na tela**: as correções acima (só vão
+ao ar no push seguinte), o painel no celular, e as telas de Notificações e
+Organizar.
