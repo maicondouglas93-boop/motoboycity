@@ -549,6 +549,14 @@ Decisões de 2026-09-26, do usuário:
 - **sem CEP digitado pelo cliente, vale o CEP da loja** (cidades de CEP único). O
   CEP digitado precisa estar completo (8 dígitos): em branco ou completo, nunca
   pela metade. Cidade e UF do checkout já vêm as da loja (decisão de 2026-09-29);
+- **endereço que o Google não acha vira entrega avulsa** (decisão de 2026-09-29). O
+  cliente digita o endereço à mão, e o valor da corrida sai da distância até ele. Se o
+  Google não acha o endereço, só acha a região dele (`APPROXIMATE`), ou não acha caminho
+  até ele, a corrida **nasce** — avulsa, sem distância nem preço na criação, com o
+  endereço digitado guardado como referência (o motoboy o lê e navega por ele) e o valor
+  definido pelo GPS do motoboy na entrega. O motoboy lê na observação "ENDEREÇO NÃO
+  LOCALIZADO NO MAPA: confirme com o cliente". Rua achada sem o número serve para cobrar.
+  Falha do Google (rede, tempo, chave) não muda o modo: segue o aviso de sempre em Vendas;
 - **o cliente guarda até 5 endereços** (Casa, Trabalho, Casa da mãe...) e escolhe no
   checkout para onde vai cada pedido (decisão de 2026-09-29). Guardados no aparelho, por
   conta e por loja, como o endereço único já era: **não acompanham o cliente para outro

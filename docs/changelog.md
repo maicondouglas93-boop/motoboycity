@@ -16850,3 +16850,71 @@ o checkout inteiro com login não foi aberto localmente (não há login de clien
 nem loja ligada aqui). Três testes antigos do checkout passaram a abrir o
 formulário com "Editar", porque ele agora nasce recolhido para quem tem endereço
 guardado. **Não conferido em produção.**
+
+## 2026-09-29 — Loja online: endereço que o Google não acha vira entrega avulsa
+
+**Pergunta e decisão do usuário:** se o cliente digita o endereço errado e o Google
+não o acha, a corrida poderia nascer avulsa — valor definido pelo GPS do motoboy —,
+com o endereço do cliente aparecendo normal para o motoboy, só como referência? Sim,
+e com localização precisa exigida (respondido em Vendas: "Completa, endereço como
+referência" e "exigir localização precisa").
+
+**Como era:** o texto do endereço ia à Routes API; sem rota, a corrida não nascia e a
+loja via um aviso. Se o Google "achava" um lugar qualquer (a região, o CEP), a corrida
+nascia com a distância — e o preço — desse lugar, sem aviso.
+
+**O que mudou** (só para pedido da loja online; o painel e o aiqfome seguem como eram):
+
+- `GoogleMapsService.localizar(endereço)`: o ponto que o Google achou **com a precisão**
+  (`geocode` só devolve o de imóvel e joga fora o resto). `GoogleMapsNoRouteError`:
+  a ausência de rota tem classe própria — é a única falha da Routes API que fala do
+  endereço (continua sendo um `GoogleMapsApiError`).
+- `createFromStoreOrder` localiza antes de calcular. Não achou, ou achou só a região
+  (`APPROXIMATE`): a corrida nasce **avulsa**. Achou o endereço mas não o caminho: refaz
+  como avulsa. Achou o imóvel: cobra pelo endereço e guarda a coordenada (a mesma da
+  conferência de proximidade, sem segunda consulta).
+- Avulsa com **endereço de referência**: contrato aditivo `referenceAddress` em
+  `createDeliverySchema` (e em `CreateDeliveryPayload` de `packages/types`), só com
+  `destinationKnownAtCreation: false`, recusado em lote. Guardado como um DROPOFF **sem
+  coordenada**; o app do motoboy já mostra o endereço quando ele existe e navega pelo
+  texto. Na conclusão, ou no insucesso, o ponto do GPS entra nesse mesmo registro
+  (`gravarPontoCapturado`), e não num segundo DROPOFF. A edição do admin não apaga a
+  referência.
+- O motoboy lê, na observação: "ENDEREÇO NÃO LOCALIZADO NO MAPA: confirme com o cliente.
+  O valor será definido pelo seu GPS na entrega." O histórico da corrida e o painel do
+  admin registram o motivo. Não há mudança de banco.
+
+**Decisões dentro do que o usuário pediu, e que ficam ditas:**
+
+- "Precisa" = **até a rua** (`ROOFTOP`, `RANGE_INTERPOLATED` e `GEOMETRIC_CENTER`).
+  Exigir o imóvel mandaria a maioria dos pedidos de cidade pequena para avulsa, porque
+  o Google muitas vezes só tem o centro da rua. A rua achada sem número cobra pelo
+  endereço e não guarda coordenada (não serve para provar presença).
+- Falha passageira do Google (rede, tempo, chave) NÃO troca o modo: não diz nada do
+  endereço, e trocar esconderia o problema. Segue o aviso de sempre.
+
+**O que isso não resolve:** o Google achar, com precisão de rua, OUTRA rua parecida.
+Para isso seria preciso comparar o nome da rua achada com o digitado, e as abreviações
+(Av., Pe., Dr.) fariam muitos pedidos corretos caírem em avulsa; não fiz.
+
+**Efeito para o motoboy e para a loja:** a oferta mostra "valor a calcular na entrega";
+a loja só sabe o custo depois da entrega; não há conferência de proximidade (não há
+coordenada de destino).
+
+**Arquivos:** `packages/validation/src/deliveries/create-delivery.schema.ts`,
+`packages/types/src/delivery.ts`, `apps/api/src/maps/google-maps.service.ts`,
+`apps/api/src/deliveries/deliveries.service.ts`, testes em
+`deliveries.service.spec.ts` (oito casos novos e um de conclusão),
+`create-delivery-reference.spec.ts` (novo), `google-maps.service.spec.ts` e o E2E
+`store-orders.e2e-spec.ts` (o mock do Google ganhou `localizar`), `docs/business-rules.md`,
+`docs/architecture.md`.
+
+**Como foi validado:** `tsc` e eslint da API; Jest da API inteiro (1451 testes); `tsc`
+de `packages/validation` e `packages/types` com `--typeRoots` isolado, como o deploy
+(o `dist` de `validation` foi recompilado, a API o lê de lá); `tsc` do painel da empresa
+e do admin; E2E inteiro no banco descartável (29 suítes, 256 testes). **Não testado
+contra o Google de verdade** (a chave só entra com autorização): o comportamento real do
+`location_type` para os endereços da cidade é o que decide quantos pedidos caem em
+avulsa, e isso só se vê em produção. **Não conferido:** como as telas do painel mostram
+uma avulsa com endereço de referência; o app do motoboy com uma dessas (nenhum APK novo
+foi gerado, e não creio que precise).

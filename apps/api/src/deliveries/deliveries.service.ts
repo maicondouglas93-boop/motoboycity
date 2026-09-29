@@ -14,6 +14,7 @@ import type {
   CreateDeliveryBatchPayload,
   AdminMarkFailedPayload,
   CreateDeliveryPayload,
+  DeliveryAddressInput,
   DeliveryOperationsQuery,
   DeliveryStageTimesQuery,
   DeliverySummaryQuery,
@@ -47,7 +48,9 @@ import { ReturnNotSupportedError } from '../pricing/pricing-calculator';
 import { PricingService, type PricingQuoteInput } from '../pricing/pricing.service';
 import {
   GoogleMapsApiError,
+  GoogleMapsNoRouteError,
   GoogleMapsNotConfiguredError,
+  type PontoLocalizado,
   type ReverseGeocodedAddress,
 } from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
@@ -456,12 +459,181 @@ export class DeliveriesService {
     if (!owner) {
       throw new ConflictException('A empresa não tem um responsável ativo para chamar motoboy.');
     }
-    return this.createForResolvedCompany(
-      owner.user,
-      company,
-      { ...payload, idempotencyKey: this.deterministicUuid(`store-order:${chave}`) },
-      { historyNote },
+    const idempotencyKey = this.deterministicUuid(`store-order:${chave}`);
+    const criar = (dados: CreateDeliveryPayload, nota: string) =>
+      this.createForResolvedCompany(
+        owner.user,
+        company,
+        { ...dados, idempotencyKey },
+        { historyNote: nota },
+      );
+
+    /*
+     * O endereço que o cliente digitou nem sempre vira preço. Antes de calcular,
+     * o Google precisa ter ACHADO a rua; e se depois disso ele não achar caminho,
+     * também. Nos dois casos a corrida NÃO deixa de nascer nem sai com um valor
+     * de um lugar qualquer: nasce avulsa, com o endereço só como referência, e
+     * o valor sai do GPS do motoboy na entrega.
+     */
+    const destino = await this.destinoDoPedidoDaLoja(payload);
+    let motivo = destino.motivo;
+    let criada: DeliveryDetail;
+    try {
+      criada = await criar(destino.payload, this.notaDoDestino(historyNote, motivo));
+    } catch (erro) {
+      if (destino.payload.destinationKnownAtCreation === false || !this.semCaminho(erro)) {
+        throw erro;
+      }
+      motivo = 'o Google não achou um caminho até ele';
+      criada = await criar(
+        this.comoAvulsa(destino.payload),
+        this.notaDoDestino(historyNote, motivo),
+      );
+    }
+
+    if (motivo) {
+      this.logger.warn(
+        `Pedido da loja online ${criada.displayNumber} sem endereço localizável (${motivo}): entrega avulsa.`,
+      );
+      this.realtimeGateway.emitAdminActivity(
+        `Pedido #${criada.displayNumber} da loja online: endereço não localizado (${motivo}). ` +
+          'A entrega foi criada como avulsa: o valor sai do GPS do motoboy, e o endereço do cliente vai como referência.',
+      );
+    }
+    return criada;
+  }
+
+  /**
+   * O destino do pedido da loja online: o endereço vira preço só se o Google o
+   * achou. Sem endereço achado — ou só a região dele —, a entrega vai como
+   * avulsa. Rua achada sem o número (`GEOMETRIC_CENTER`) serve para cobrar, e
+   * não para provar presença: segue pelo caminho de sempre, sem coordenada.
+   *
+   * Falha do Google (rede, tempo, chave) não diz nada sobre o endereço: segue
+   * pelo caminho de sempre, que devolve o aviso de sempre — trocar o modo de
+   * cobrança por uma indisponibilidade nossa esconderia o problema.
+   */
+  private async destinoDoPedidoDaLoja(
+    payload: CreateDeliveryPayload,
+  ): Promise<{ payload: CreateDeliveryPayload; motivo: string | null }> {
+    const endereco = payload.dropoffAddress;
+    if (payload.destinationKnownAtCreation === false || !endereco) {
+      return { payload, motivo: null };
+    }
+    if (endereco.lat !== undefined) return { payload, motivo: null };
+
+    let ponto: PontoLocalizado | null;
+    try {
+      ponto = await this.googleMapsService.localizar(this.formatAddress(endereco));
+    } catch {
+      return { payload, motivo: null };
+    }
+    if (ponto === null) {
+      return { payload: this.comoAvulsa(payload), motivo: 'o Google não achou o endereço' };
+    }
+    if (ponto.precisao === 'APPROXIMATE') {
+      return {
+        payload: this.comoAvulsa(payload),
+        motivo: 'o Google só achou a região do endereço',
+      };
+    }
+    if (ponto.precisao === 'GEOMETRIC_CENTER') return { payload, motivo: null };
+    // Achou o imóvel: a mesma coordenada serve à conferência de proximidade, e
+    // poupa uma segunda consulta.
+    return {
+      payload: { ...payload, dropoffAddress: { ...endereco, lat: ponto.lat, lng: ponto.lng } },
+      motivo: null,
+    };
+  }
+
+  /**
+   * A mesma entrega, sem destino conhecido: o endereço digitado vira referência
+   * (sem coordenada), e o motoboy é avisado de que o valor sai do GPS dele.
+   */
+  private comoAvulsa(payload: CreateDeliveryPayload): CreateDeliveryPayload {
+    const { dropoffAddress, driverNote, ...resto } = payload;
+    const aviso =
+      'ENDEREÇO NÃO LOCALIZADO NO MAPA: confirme com o cliente. O valor será definido pelo seu GPS na entrega.';
+    let referencia: DeliveryAddressInput | undefined;
+    if (dropoffAddress) {
+      const { lat: _lat, lng: _lng, ...semPonto } = dropoffAddress;
+      referencia = semPonto;
+    }
+    return {
+      ...resto,
+      destinationKnownAtCreation: false,
+      ...(referencia ? { referenceAddress: referencia } : {}),
+      driverNote: [aviso, driverNote].filter(Boolean).join(' ').slice(0, 500),
+    };
+  }
+
+  private notaDoDestino(historyNote: string, motivo: string | null): string {
+    return motivo
+      ? `${historyNote} Endereço não localizado (${motivo}): entrega avulsa, com o valor definido pelo GPS do motoboy na entrega.`
+      : historyNote;
+  }
+
+  /** O Google não achou caminho até o endereço — e só isso (ver `DELIVERY_ROUTE_NOT_FOUND`). */
+  private semCaminho(erro: unknown): boolean {
+    if (!(erro instanceof ServiceUnavailableException)) return false;
+    const resposta = erro.getResponse();
+    return (
+      typeof resposta === 'object' &&
+      resposta !== null &&
+      (resposta as { code?: unknown }).code === 'DELIVERY_ROUTE_NOT_FOUND'
     );
+  }
+
+  private enderecoDeReferencia(
+    deliveryId: string,
+    endereco: DeliveryAddressInput,
+  ): Prisma.DeliveryAddressCreateManyInput {
+    return {
+      deliveryId,
+      type: 'DROPOFF',
+      street: endereco.street,
+      number: endereco.number,
+      complement: endereco.complement,
+      city: endereco.city,
+      state: endereco.state,
+      zip: endereco.zip,
+      referenceNote: endereco.referenceNote,
+      lat: null,
+      lng: null,
+    };
+  }
+
+  /**
+   * O ponto onde o motoboy entregou (destino por GPS). Se a entrega guarda o
+   * endereço do cliente como referência, o ponto entra NELA — o texto digitado
+   * continua ali, ao lado de onde a entrega de fato aconteceu; sem referência,
+   * nasce o registro só com a coordenada, como sempre foi.
+   */
+  private async gravarPontoCapturado(
+    tx: Prisma.TransactionClient,
+    deliveryId: string,
+    lat: number | null,
+    lng: number | null,
+  ): Promise<void> {
+    const atualizados = await tx.deliveryAddress.updateMany({
+      where: { deliveryId, type: 'DROPOFF' },
+      data: { lat, lng },
+    });
+    if (atualizados.count > 0) return;
+    await tx.deliveryAddress.create({
+      data: {
+        deliveryId,
+        type: 'DROPOFF',
+        street: null,
+        number: null,
+        complement: null,
+        city: null,
+        state: null,
+        zip: null,
+        lat,
+        lng,
+      },
+    });
   }
 
   /**
@@ -625,9 +797,17 @@ export class DeliveriesService {
           'O pedido mudou ou recebeu uma oferta durante a edicao. Atualize a tela e tente novamente.',
         );
       }
-      await tx.deliveryAddress.deleteMany({
-        where: { deliveryId: delivery.id, type: 'DROPOFF' },
-      });
+      // A avulsa que guarda o endereço só como referência o mantém: a edição não
+      // o mostra, e salvar sem tocar nele não pode apagá-lo.
+      const mantemAReferencia =
+        !destinationKnownAtCreation &&
+        !delivery.destinationKnownAtCreation &&
+        !payload.referenceAddress;
+      if (!mantemAReferencia) {
+        await tx.deliveryAddress.deleteMany({
+          where: { deliveryId: delivery.id, type: 'DROPOFF' },
+        });
+      }
       if (destinationKnownAtCreation) {
         const dropoff = payload.dropoffAddress!;
         await tx.deliveryAddress.create({
@@ -644,6 +824,10 @@ export class DeliveriesService {
             lat: dropoffCoordinate.lat,
             lng: dropoffCoordinate.lng,
           },
+        });
+      } else if (payload.referenceAddress) {
+        await tx.deliveryAddress.create({
+          data: this.enderecoDeReferencia(delivery.id, payload.referenceAddress),
         });
       }
       await tx.deliveryStatusHistory.create({
@@ -723,6 +907,14 @@ export class DeliveriesService {
           throw new InternalServerErrorException(
             'Cálculo de distância não está configurado. Contate o suporte.',
           );
+        }
+        // Só esta falha diz algo sobre o ENDEREÇO (o Google não achou caminho até
+        // ele): quem cria por pedido da loja online pode seguir sem o preço.
+        if (error instanceof GoogleMapsNoRouteError) {
+          throw new ServiceUnavailableException({
+            message: 'O Google não achou um caminho até o endereço deste pedido.',
+            code: 'DELIVERY_ROUTE_NOT_FOUND',
+          });
         }
         throw new ServiceUnavailableException(
           'Não foi possível calcular a distância deste pedido agora. Tente novamente em instantes.',
@@ -827,6 +1019,10 @@ export class DeliveriesService {
             lat: coordenadaDoDestino.lat,
             lng: coordenadaDoDestino.lng,
           });
+        } else if (payload.referenceAddress) {
+          // Sem coordenada, de propósito: o motoboy lê e navega pelo texto, e o
+          // ponto que vale — e cobra — é o do GPS dele, na hora da entrega.
+          addresses.push(this.enderecoDeReferencia(delivery.id, payload.referenceAddress));
         }
         await tx.deliveryAddress.createMany({ data: addresses });
 
@@ -2361,20 +2557,7 @@ export class DeliveriesService {
           throw new ConflictException('O insucesso já foi registrado por outra solicitação.');
         }
         if (deferredPricing) {
-          await tx.deliveryAddress.create({
-            data: {
-              deliveryId: id,
-              type: 'DROPOFF',
-              street: null,
-              number: null,
-              complement: null,
-              city: null,
-              state: null,
-              zip: null,
-              lat: deferredPricing.lat,
-              lng: deferredPricing.lng,
-            },
-          });
+          await this.gravarPontoCapturado(tx, id, deferredPricing.lat, deferredPricing.lng);
         }
         await tx.deliveryStatusHistory.create({
           data: {
@@ -2866,20 +3049,7 @@ export class DeliveriesService {
         }
 
         if (!delivery.destinationKnownAtCreation) {
-          await tx.deliveryAddress.create({
-            data: {
-              deliveryId: delivery.id,
-              type: 'DROPOFF',
-              street: null,
-              number: null,
-              complement: null,
-              city: null,
-              state: null,
-              zip: null,
-              lat: capturedLat,
-              lng: capturedLng,
-            },
-          });
+          await this.gravarPontoCapturado(tx, delivery.id, capturedLat, capturedLng);
         }
 
         await tx.deliveryStatusHistory.create({

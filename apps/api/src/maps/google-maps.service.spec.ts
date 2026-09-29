@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   GoogleMapsApiError,
+  GoogleMapsNoRouteError,
   GoogleMapsNotConfiguredError,
   GoogleMapsService,
   GoogleMapsTimeoutError,
@@ -103,6 +104,70 @@ describe('GoogleMapsService', () => {
       );
 
       await expect(service.geocode('Rua X, 1')).rejects.toBeInstanceOf(GoogleMapsApiError);
+    });
+  });
+
+  /**
+   * `localizar` diz onde o Google achou o endereço E com que precisão: é o que
+   * separa "achou a rua" (dá para cobrar) de "achou a região" (não dá), que
+   * `geocode` esconde por só servir à conferência de presença.
+   */
+  describe('localizar', () => {
+    function resultado(locationType?: string) {
+      return {
+        status: 'OK',
+        results: [
+          {
+            geometry: {
+              location: { lat: -20.1522, lng: -41.6232 },
+              ...(locationType ? { location_type: locationType } : {}),
+            },
+          },
+        ],
+      };
+    }
+
+    it.each(['ROOFTOP', 'RANGE_INTERPOLATED', 'GEOMETRIC_CENTER', 'APPROXIMATE'])(
+      'devolve o ponto com a precisão %s',
+      async (precisao) => {
+        config.get.mockReturnValue('fake-api-key');
+        fetchSpy.mockResolvedValue(jsonResponse(resultado(precisao)));
+
+        await expect(service.localizar('Rua X, 1')).resolves.toEqual({
+          lat: -20.1522,
+          lng: -41.6232,
+          precisao,
+        });
+      },
+    );
+
+    it('sem precisão declarada, vale o pior caso', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValue(jsonResponse(resultado()));
+
+      await expect(service.localizar('Rua X, 1')).resolves.toMatchObject({
+        precisao: 'APPROXIMATE',
+      });
+    });
+
+    it('devolve null quando o endereço não existe, e lança quando o problema é nosso', async () => {
+      config.get.mockReturnValue('fake-api-key');
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ status: 'ZERO_RESULTS' }));
+      await expect(service.localizar('Rua Inexistente, 999')).resolves.toBeNull();
+
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse({ status: 'REQUEST_DENIED', error_message: 'chave sem permissão' }),
+      );
+      await expect(service.localizar('Rua X, 1')).rejects.toBeInstanceOf(GoogleMapsApiError);
+    });
+
+    it('a chave ausente lança, sem chamar a API', async () => {
+      config.get.mockReturnValue(undefined);
+
+      await expect(service.localizar('Rua X, 1')).rejects.toBeInstanceOf(
+        GoogleMapsNotConfiguredError,
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -215,6 +280,17 @@ describe('GoogleMapsService', () => {
     fetchSpy.mockResolvedValue(jsonResponse({ routes: [] }));
 
     await expect(service.getDistance(request)).rejects.toThrow('sem rota válida');
+  });
+
+  it('a ausência de rota tem classe própria: é a única falha que fala do endereço', async () => {
+    config.get.mockReturnValue('fake-api-key');
+    fetchSpy.mockResolvedValue(jsonResponse({ routes: [] }));
+
+    const erro = await service.getDistance(request).catch((e: unknown) => e);
+
+    expect(erro).toBeInstanceOf(GoogleMapsNoRouteError);
+    // E continua sendo um GoogleMapsApiError, para quem já a tratava assim.
+    expect(erro).toBeInstanceOf(GoogleMapsApiError);
   });
 
   /**

@@ -125,7 +125,12 @@ agendada; cancelar o pedido a cancela (`cancelFromStoreOrder`, só antes de um
 motoboy aceitar) e tira o job da hora marcada. A corrida nasce e é ligada ao
 pedido em passos separados do cancelamento, então os dois lados se conferem
 depois de gravar (`recolherCorridaDoCancelado`, no fim de `chamarCorrida` e de
-`cancelar`): o pedido cancelado nunca fica com corrida agendada. O pedido acompanha a corrida na leitura — coletada, saiu;
+`cancelar`): o pedido cancelado nunca fica com corrida agendada. Se o Google não
+acha o endereço digitado (`GoogleMapsService.localizar`: nada, ou só a região) ou não
+acha caminho até ele (`GoogleMapsNoRouteError`), `createFromStoreOrder` cria a corrida
+avulsa (`destinationKnownAtCreation: false`) com o endereço em `referenceAddress`: um
+DROPOFF sem coordenada, que o motoboy lê, e cujo lat/lng recebe o ponto do GPS na
+entrega (`gravarPontoCapturado`, sem um segundo DROPOFF). Sem preço na criação. O pedido acompanha a corrida na leitura — coletada, saiu;
 entregue, entregue —, e o que der errado com ela vira `rideIssue`, o aviso de
 Vendas, sem desfazer a etapa do pedido.
 

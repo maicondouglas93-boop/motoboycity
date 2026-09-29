@@ -11,7 +11,11 @@ import type { User } from '@prisma/client';
 import { AdminPlatformSettingsService } from '../admin/platform-settings/admin-platform-settings.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
-import { GoogleMapsApiError, GoogleMapsNotConfiguredError } from '../maps/google-maps.service';
+import {
+  GoogleMapsApiError,
+  GoogleMapsNoRouteError,
+  GoogleMapsNotConfiguredError,
+} from '../maps/google-maps.service';
 import { GoogleMapsService } from '../maps/google-maps.service';
 import { PricingService } from '../pricing/pricing.service';
 import { ReturnNotSupportedError } from '../pricing/pricing-calculator';
@@ -156,7 +160,12 @@ describe('DeliveriesService', () => {
     $transaction: jest.Mock;
   };
   let pricingService: { quote: jest.Mock };
-  let googleMapsService: { getDistance: jest.Mock; geocode: jest.Mock; reverseGeocode: jest.Mock };
+  let googleMapsService: {
+    getDistance: jest.Mock;
+    geocode: jest.Mock;
+    localizar: jest.Mock;
+    reverseGeocode: jest.Mock;
+  };
   let dispatchService: {
     assertConfigured: jest.Mock;
     dispatchDelivery: jest.Mock;
@@ -175,7 +184,12 @@ describe('DeliveriesService', () => {
   };
   let tx: {
     delivery: { create: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
-    deliveryAddress: { createMany: jest.Mock; create: jest.Mock; deleteMany: jest.Mock };
+    deliveryAddress: {
+      createMany: jest.Mock;
+      create: jest.Mock;
+      deleteMany: jest.Mock;
+      updateMany: jest.Mock;
+    };
     deliveryStatusHistory: { create: jest.Mock };
   };
 
@@ -186,7 +200,13 @@ describe('DeliveriesService', () => {
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      deliveryAddress: { createMany: jest.fn(), create: jest.fn(), deleteMany: jest.fn() },
+      deliveryAddress: {
+        createMany: jest.fn(),
+        create: jest.fn(),
+        deleteMany: jest.fn(),
+        // Sem endereço de referência para atualizar: o ponto capturado nasce num registro novo.
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       deliveryStatusHistory: { create: jest.fn() },
     };
     prisma = {
@@ -224,6 +244,7 @@ describe('DeliveriesService', () => {
     googleMapsService = {
       getDistance: jest.fn(),
       geocode: jest.fn().mockResolvedValue(null),
+      localizar: jest.fn().mockResolvedValue(null),
       reverseGeocode: jest.fn().mockResolvedValue(null),
     };
     dispatchService = {
@@ -480,6 +501,196 @@ describe('DeliveriesService', () => {
       expect(tx.deliveryAddress.createMany).toHaveBeenCalledWith({
         data: [expect.objectContaining({ type: 'PICKUP' })],
       });
+    });
+  });
+
+  /**
+   * O pedido da loja online digita o endereço à mão. O Google precisa ter ACHADO a
+   * rua para o valor sair dele; senão a entrega nasce avulsa, com o endereço só
+   * como referência, e o valor sai do GPS do motoboy.
+   */
+  describe('createFromStoreOrder — endereço que o Google não acha', () => {
+    const pedidoDaLoja = {
+      serviceTypeId: 'st-1',
+      destinationKnownAtCreation: true,
+      dropoffAddress: dropoffPayload,
+      driverNote: 'Pagamento na entrega: dinheiro.',
+      customerPaymentMethod: 'CASH' as const,
+      requiresReturn: true,
+      urgent: false,
+      requiresDeliveryProof: false,
+      requiresCollectionRecipient: false,
+      pickupSurchargeChargedToDriver: false,
+    };
+    const criar = () =>
+      service.createFromStoreOrder('company-1', 'pedido-1:0', pedidoDaLoja, 'Pedido #42.');
+    const enderecosGravados = () =>
+      (tx.deliveryAddress.createMany.mock.calls[0]![0] as { data: Array<Record<string, unknown>> })
+        .data;
+
+    beforeEach(() => {
+      prisma.company.findUnique.mockResolvedValue({
+        id: 'company-1',
+        status: 'ACTIVE',
+        regionId: 'region-1',
+      });
+      // O responsável que cria em nome da empresa (`user`) e, na leitura do
+      // detalhe que fecha a criação, a empresa do usuário (`company`).
+      prisma.companyTeamMember.findFirst.mockResolvedValue({
+        user: companyUser,
+        company: { id: 'company-1', status: 'ACTIVE', regionId: 'region-1' },
+      });
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 7.5,
+        subtotal: 12.5,
+        returnValue: 3,
+        totalValue: 15.5,
+        driverValue: 13,
+        platformValue: 2.5,
+      });
+      tx.delivery.create.mockResolvedValue({ id: 'delivery-1' });
+      // Este caminho sempre tem chave de idempotência: antes de a entrega ser
+      // criada, procurá-la não acha nada (senão o teste "retomaria" uma entrega
+      // que não existe); depois, é o detalhe que fecha a criação.
+      prisma.delivery.findUnique.mockImplementation(() =>
+        Promise.resolve(tx.delivery.create.mock.calls.length > 0 ? fullDeliveryRow() : null),
+      );
+    });
+
+    it('imóvel achado: cobra pelo endereço e guarda a coordenada, sem consultar de novo', async () => {
+      googleMapsService.localizar.mockResolvedValue({
+        lat: -20.1,
+        lng: -41.7,
+        precisao: 'ROOFTOP',
+      });
+
+      await criar();
+
+      expect(googleMapsService.getDistance).toHaveBeenCalled();
+      expect(pricingService.quote).toHaveBeenCalled();
+      expect(googleMapsService.geocode).not.toHaveBeenCalled();
+      expect(enderecosGravados()[1]).toMatchObject({ type: 'DROPOFF', lat: -20.1, lng: -41.7 });
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ destinationKnownAtCreation: true, totalValue: 15.5 }),
+        }),
+      );
+      // Nada de aviso de endereço perdido: a criação de sempre só avisa que criou.
+      expect(realtimeGateway.emitAdminActivity).not.toHaveBeenCalledWith(
+        expect.stringContaining('endereço não localizado'),
+      );
+    });
+
+    it('rua achada sem o número: cobra pelo endereço, sem coordenada de imóvel', async () => {
+      googleMapsService.localizar.mockResolvedValue({
+        lat: -20.1,
+        lng: -41.7,
+        precisao: 'GEOMETRIC_CENTER',
+      });
+
+      await criar();
+
+      expect(pricingService.quote).toHaveBeenCalled();
+      // O centro da rua não prova presença: a conferência de proximidade não a usa.
+      expect(enderecosGravados()[1]).toMatchObject({ type: 'DROPOFF', lat: null, lng: null });
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ destinationKnownAtCreation: true }),
+        }),
+      );
+    });
+
+    it.each([
+      ['o Google não achou o endereço', null],
+      ['o Google só achou a região do endereço', { lat: -20, lng: -41, precisao: 'APPROXIMATE' }],
+    ])('%s: nasce avulsa, com o endereço como referência e sem preço', async (motivo, ponto) => {
+      googleMapsService.localizar.mockResolvedValue(ponto);
+
+      const criada = await criar();
+
+      expect(criada.id).toBe('delivery-1');
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
+      expect(pricingService.quote).not.toHaveBeenCalled();
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            destinationKnownAtCreation: false,
+            distanceKm: null,
+            totalValue: null,
+            driverValue: null,
+            requiresReturn: true,
+            // O motoboy é avisado, e a observação da loja segue depois do aviso.
+            driverNote: expect.stringMatching(
+              /^ENDEREÇO NÃO LOCALIZADO NO MAPA.*Pagamento na entrega: dinheiro\.$/,
+            ),
+          }),
+        }),
+      );
+      // O texto digitado fica na entrega, sem coordenada: é referência, não preço.
+      expect(enderecosGravados()[1]).toMatchObject({
+        type: 'DROPOFF',
+        street: dropoffPayload.street,
+        number: dropoffPayload.number,
+        lat: null,
+        lng: null,
+      });
+      expect(tx.deliveryStatusHistory.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          note: expect.stringContaining(`Endereço não localizado (${motivo})`),
+        }),
+      });
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        expect.stringContaining('endereço não localizado'),
+      );
+    });
+
+    it('achou o endereço mas não o caminho: refaz como avulsa, sem cobrar', async () => {
+      googleMapsService.localizar.mockResolvedValue({
+        lat: -20.1,
+        lng: -41.7,
+        precisao: 'ROOFTOP',
+      });
+      googleMapsService.getDistance.mockRejectedValue(new GoogleMapsNoRouteError());
+
+      await criar();
+
+      expect(pricingService.quote).not.toHaveBeenCalled();
+      expect(tx.delivery.create).toHaveBeenCalledTimes(1);
+      expect(tx.delivery.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ destinationKnownAtCreation: false, totalValue: null }),
+        }),
+      );
+      expect(enderecosGravados()[1]).toMatchObject({ street: dropoffPayload.street, lat: null });
+    });
+
+    it('falha do Google não diz nada do endereço: não muda o modo, e devolve o aviso de sempre', async () => {
+      googleMapsService.localizar.mockRejectedValue(new GoogleMapsApiError('rede'));
+      googleMapsService.getDistance.mockRejectedValue(new GoogleMapsApiError('rede'));
+
+      await expect(criar()).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('a chave não configurada continua sendo erro do sistema, e não do endereço', async () => {
+      googleMapsService.localizar.mockRejectedValue(new GoogleMapsNotConfiguredError());
+      googleMapsService.getDistance.mockRejectedValue(new GoogleMapsNotConfiguredError());
+
+      await expect(criar()).rejects.toBeInstanceOf(InternalServerErrorException);
+    });
+
+    it('pedido que já é avulso não consulta o Google para localizar', async () => {
+      await service.createFromStoreOrder(
+        'company-1',
+        'pedido-2:0',
+        { ...pedidoDaLoja, destinationKnownAtCreation: false, dropoffAddress: undefined },
+        'Pedido #43.',
+      );
+
+      expect(googleMapsService.localizar).not.toHaveBeenCalled();
+      expect(googleMapsService.getDistance).not.toHaveBeenCalled();
     });
   });
 
@@ -3348,6 +3559,40 @@ describe('DeliveriesService', () => {
           platformValue: 3,
         }),
       });
+    });
+
+    it('com endereço de referência: o ponto do GPS entra nele, e o texto digitado fica', async () => {
+      prisma.driver.findUnique.mockResolvedValue(driverRow);
+      prisma.delivery.findUnique.mockResolvedValue(
+        fullDeliveryRow({
+          driverId: 'driver-1',
+          status: 'COLLECTED',
+          destinationKnownAtCreation: false,
+          requiresReturn: false,
+          serviceType: { name: 'Moto' },
+        }),
+      );
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 8, durationMinutes: 25 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 12,
+        subtotal: 17,
+        returnValue: 0,
+        totalValue: 17,
+        driverValue: 14,
+        platformValue: 3,
+      });
+      // A entrega já tem o registro do endereço digitado.
+      tx.deliveryAddress.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.markDelivered(driverUser, 'delivery-1', { lat: -20.15, lng: -41.74 });
+
+      expect(tx.deliveryAddress.updateMany).toHaveBeenCalledWith({
+        where: { deliveryId: 'delivery-1', type: 'DROPOFF' },
+        data: { lat: -20.15, lng: -41.74 },
+      });
+      // Um segundo DROPOFF faria a tela escolher entre o texto e o ponto.
+      expect(tx.deliveryAddress.create).not.toHaveBeenCalled();
     });
 
     it('repete a rota com a origem geocodificada quando o endereco de origem nao gera rota', async () => {

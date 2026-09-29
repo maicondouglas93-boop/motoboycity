@@ -31,6 +31,13 @@ export const createDeliverySchema = z
     // destino por GPS ao marcar a entrega, preço calculado retroativamente.
     destinationKnownAtCreation: z.boolean().optional().default(true),
     dropoffAddress: deliveryAddressInputSchema.optional(),
+    /**
+     * Só com `destinationKnownAtCreation: false`: o endereço que o cliente
+     * digitou e o sistema não conseguiu localizar. Fica na entrega como
+     * REFERÊNCIA — o motoboy o lê e navega por ele —, mas não entra em distância
+     * nem em preço: o valor sai do GPS dele, na hora da entrega.
+     */
+    referenceAddress: deliveryAddressInputSchema.optional(),
     recipientName: z.string().trim().min(1).max(120).optional(),
     recipientPhone: z.string().trim().min(8).max(20).optional(),
     externalOrderNumber: z.string().trim().min(1).max(80).optional(),
@@ -65,6 +72,13 @@ export const createDeliverySchema = z
         message: 'Não informe endereço de entrega quando o destino é desconhecido na criação.',
       });
     }
+    if (data.destinationKnownAtCreation && data.referenceAddress) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['referenceAddress'],
+        message: 'O endereço de referência só existe quando o destino é desconhecido na criação.',
+      });
+    }
   });
 
 /**
@@ -79,6 +93,13 @@ export const createDeliveryBatchSchema = z.object({
     .max(50, 'Um lote pode ter no máximo 50 entregas.')
     .superRefine((deliveries, context) => {
       deliveries.forEach((delivery, index) => {
+        if (delivery.referenceAddress) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, 'referenceAddress'],
+            message: 'Pedidos em lote não aceitam endereço de referência nesta versão.',
+          });
+        }
         if (delivery.scheduledAt) {
           context.addIssue({
             code: z.ZodIssueCode.custom,

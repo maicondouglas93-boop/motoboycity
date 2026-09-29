@@ -100,6 +100,8 @@ export interface CreateDeliveryPayload {
   serviceTypeId: string;
   destinationKnownAtCreation?: boolean;
   dropoffAddress?: DeliveryAddressInput;
+  /** Só com `destinationKnownAtCreation: false`: o endereço digitado, só como referência. */
+  referenceAddress?: DeliveryAddressInput;
   recipientName?: string;
   recipientPhone?: string;
   externalOrderNumber?: string;

@@ -94,6 +94,16 @@ const pushDeTeste = {
   },
 };
 
+/**
+ * O que o Google "acha" para o endereço do pedido: por padrão, o imóvel. O teste
+ * troca por `null` (não achou) para ver a entrega nascer avulsa.
+ */
+let localizacao: { lat: number; lng: number; precisao: string } | null = {
+  lat: -20.15,
+  lng: -41.62,
+  precisao: 'ROOFTOP',
+};
+
 const suffix = String(Date.now()).slice(-8);
 const password = 'senhaSegura123';
 const empresa = {
@@ -136,6 +146,7 @@ describe('Pedido da loja online (e2e)', () => {
       .useValue({
         getDistance: async () => ({ distanceKm: 5, durationMinutes: 20 }),
         geocode: async () => null,
+        localizar: async () => localizacao,
         reverseGeocode: async () => null,
       })
       .overrideProvider(WebPushService)
@@ -524,14 +535,36 @@ describe('Pedido da loja online (e2e)', () => {
     expect(aceitoSemTipo.corrida).toBeNull();
     expect(aceitoSemTipo.avisoDaCorrida).toMatch(/não está mais ativo/);
     await prisma.serviceType.update({ where: { id: tipo.id }, data: { active: true } });
+    // E desta vez o Google não acha o endereço digitado: a corrida NASCE, avulsa —
+    // sem distância nem preço, com o endereço como referência —, e a loja não vê aviso.
+    localizacao = null;
     const deNovo = (
       await request(servidor)
         .post(`/company/store/orders/${semTipo.id}/ride`)
         .set(comoEmpresa())
         .expect(201)
     ).body as PedidoDaLoja;
+    localizacao = { lat: -20.15, lng: -41.62, precisao: 'ROOFTOP' };
     expect(deNovo.corrida?.situacao).toBe('AGENDADA');
     expect(deNovo.avisoDaCorrida).toBeNull();
+    const avulsa = await prisma.delivery.findFirstOrThrow({
+      where: { storeOrder: { id: semTipo.id }, status: 'SCHEDULED' },
+      include: { addresses: true, statusHistory: true },
+    });
+    expect(avulsa).toMatchObject({
+      destinationKnownAtCreation: false,
+      distanceKm: null,
+      totalValue: null,
+      driverValue: null,
+      requiresReturn: true,
+    });
+    expect(avulsa.driverNote).toMatch(/^ENDEREÇO NÃO LOCALIZADO NO MAPA/);
+    expect(avulsa.addresses.find((item) => item.type === 'DROPOFF')).toMatchObject({
+      street: 'Rua A',
+      lat: null,
+      lng: null,
+    });
+    expect(avulsa.statusHistory[0]!.note).toMatch(/Endereço não localizado/);
 
     // A central cancela a corrida: a loja vê o aviso e entrega com o próprio entregador.
     await prisma.delivery.updateMany({

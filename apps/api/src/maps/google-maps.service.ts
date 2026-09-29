@@ -52,6 +52,29 @@ export class GoogleMapsApiError extends Error {
   }
 }
 
+/**
+ * O Google entendeu os dois pontos e não ligou um ao outro. É a única falha da
+ * Routes API que diz algo sobre o ENDEREÇO (rede e tempo esgotado dizem sobre
+ * nós): por isso tem classe própria. A frase é a mesma de sempre.
+ */
+export class GoogleMapsNoRouteError extends GoogleMapsApiError {
+  constructor() {
+    super('Resposta da API do Google Maps sem rota válida.');
+    this.name = 'GoogleMapsNoRouteError';
+  }
+}
+
+/** O que o Google diz sobre a precisão do ponto que achou para um endereço. */
+export type PrecisaoDoPonto =
+  | 'ROOFTOP'
+  | 'RANGE_INTERPOLATED'
+  | 'GEOMETRIC_CENTER'
+  | 'APPROXIMATE';
+
+export interface PontoLocalizado extends Coordinate {
+  precisao: PrecisaoDoPonto;
+}
+
 interface RoutesApiRoute {
   distanceMeters?: number;
   duration?: string;
@@ -158,6 +181,23 @@ export class GoogleMapsService {
    * tempo esgotado), porque ai o problema e nosso e nao do endereco.
    */
   async geocode(address: string): Promise<Coordinate | null> {
+    const ponto = await this.localizar(address);
+    // Sem precisao de imovel o resultado nao e confiavel para conferir presenca.
+    if (!ponto || !PRECISOES_ACEITAS.has(ponto.precisao)) return null;
+    return { lat: ponto.lat, lng: ponto.lng };
+  }
+
+  /**
+   * O ponto que o Google achou para o endereço, COM a precisão dele — `geocode`
+   * só devolve o que serve para conferir presença (imóvel), e por isso joga fora
+   * o que serve para cobrar: a rua achada sem o número (`GEOMETRIC_CENTER`) erra
+   * por algumas dezenas de metros, e o quilômetro cobrado não sente. Já
+   * `APPROXIMATE` é o Google dizendo que não achou a rua e devolveu o bairro, o
+   * CEP ou a cidade: cobrar por ele é cobrar por um lugar qualquer.
+   *
+   * `null`: o Google não achou nada. Lança só falha de infraestrutura.
+   */
+  async localizar(address: string): Promise<PontoLocalizado | null> {
     const apiKey = this.config.get<string>('GOOGLE_MAPS_API_KEY');
     if (!apiKey) {
       throw new GoogleMapsNotConfiguredError();
@@ -203,11 +243,16 @@ export class GoogleMapsService {
     const local = geometria?.location;
     if (!local) return null;
 
-    // Sem precisao declarada o resultado nao e confiavel para conferir presenca.
-    const precisao = geometria?.location_type ?? '';
-    if (!PRECISOES_ACEITAS.has(precisao)) return null;
+    // Sem precisao declarada, vale o pior caso: ninguem sabe o quao longe esta.
+    const declarada = geometria?.location_type ?? '';
+    const precisao: PrecisaoDoPonto =
+      declarada === 'ROOFTOP' ||
+      declarada === 'RANGE_INTERPOLATED' ||
+      declarada === 'GEOMETRIC_CENTER'
+        ? declarada
+        : 'APPROXIMATE';
 
-    return { lat: local.lat, lng: local.lng };
+    return { lat: local.lat, lng: local.lng, precisao };
   }
 
   /**
@@ -339,7 +384,7 @@ export class GoogleMapsService {
       this.logger.warn(
         `Routes API sem rota: ${describeRouteRequest(request)}, HTTP ${response.status}, 0 rotas.`,
       );
-      throw new GoogleMapsApiError('Resposta da API do Google Maps sem rota válida.');
+      throw new GoogleMapsNoRouteError();
     }
     if (typeof route.duration !== 'string') {
       // Rota veio, mas sem o campo que a field mask pediu. E defeito de
