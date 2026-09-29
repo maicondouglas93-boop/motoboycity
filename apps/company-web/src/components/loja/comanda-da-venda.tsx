@@ -31,6 +31,20 @@ function moeda(valor: number): string {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/**
+ * "Adicionais" é o que o cliente pagou a mais, e o que a cozinha mais esquece:
+ * o grupo ganha caixa e negrito na comanda. Vale pelo nome do grupo, sem
+ * acento nem caixa, e por "Adicional" também — a loja escreve como quiser.
+ */
+function ehAdicional(grupo: string): boolean {
+  return grupo
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .startsWith('adicion');
+}
+
 function comoChega(venda: VendaNaComanda): string {
   if (venda.modalidade === 'RETIRADA') return 'Retirada na loja';
   return venda.entregaPor === 'LOJA'
@@ -87,8 +101,26 @@ export function ComandaDaVenda({
                 </span>
                 <span>{moeda(item.total)}</span>
               </p>
-              {item.escolhas.length > 0 && (
-                <p className={estilos['escolhas']}>{item.escolhas.join(' · ')}</p>
+              {item.grupos && item.grupos.length > 0 ? (
+                <div className={estilos['grupos']}>
+                  {item.grupos.map(({ grupo, opcoes }) => (
+                    <div
+                      key={grupo}
+                      className={estilos[ehAdicional(grupo) ? 'adicionais' : 'grupo']}
+                    >
+                      <p className={estilos['grupoNome']}>{grupo}:</p>
+                      <ul className={estilos['opcoes']}>
+                        {opcoes.map((opcao) => (
+                          <li key={opcao}>{opcao}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                item.escolhas.length > 0 && (
+                  <p className={estilos['escolhas']}>{item.escolhas.join(' · ')}</p>
+                )
               )}
             </li>
           ))}

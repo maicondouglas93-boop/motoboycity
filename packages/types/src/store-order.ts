@@ -82,6 +82,13 @@ export interface EnderecoDaEntrega {
   referencia: string | null;
 }
 
+/** O que o cliente marcou num grupo do cardápio: "Frutas", "Adicionais". */
+export interface EscolhasDoGrupo {
+  /** O nome do grupo, como estava no cardápio na hora da compra. */
+  grupo: string;
+  opcoes: string[];
+}
+
 /**
  * Uma linha do pedido como foi vendida: nomes e preços da hora da compra. Mudar
  * o cardápio depois não muda o que o cliente comprou.
@@ -90,7 +97,14 @@ export interface ItemDoPedido {
   produtoId: string;
   nome: string;
   tamanho: string | null;
+  /** Todas as escolhas, numa lista só. */
   escolhas: string[];
+  /**
+   * As mesmas escolhas, agrupadas como no cardápio e na ordem dele; só os
+   * grupos em que o cliente marcou algo. Falta nos pedidos feitos antes de o
+   * grupo ser gravado — quem lê cai em `escolhas`.
+   */
+  grupos?: EscolhasDoGrupo[];
   quantidade: number;
   /** Preço de uma unidade, com tamanho e escolhas. */
   unitario: number;

@@ -114,7 +114,9 @@ empresa resolvido pelo vínculo ativo, como nos demais módulos da empresa.
 `store_orders`: o pedido que o cliente faz na página da loja, com número
 sequencial por empresa (`@@unique([companyId, number])`), a etapa
 (`StoreOrderStage`), o histórico de etapas, os itens e o endereço em JSONB (no
-formato de `PedidoDaLoja`, de `@motoboycity/types`), os valores em `Decimal` e
+formato de `PedidoDaLoja`, de `@motoboycity/types`; cada item guarda as escolhas
+soltas (`escolhas`) e agrupadas como no cardápio (`grupos`, opcional: falta nos
+pedidos feitos antes de existir), os valores em `Decimal` e
 o uid do Firebase do cliente (`customerAuthId`). Não é `Delivery`: quando o
 MOTOboyCity entrega, a corrida nasce dele no aceite (`deliveryId`, 1:1),
 agendada para quando o pedido fica pronto, pela mesma criação do painel

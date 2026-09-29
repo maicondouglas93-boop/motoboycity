@@ -14,6 +14,7 @@ import type {
   Cancelamento,
   CorridaDoPedido,
   EnderecoDaEntrega,
+  EscolhasDoGrupo,
   FormaDePagamento,
   ItemDoPedido,
   JanelaAgendada,
@@ -120,10 +121,14 @@ function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): 
   const escolhidas = new Set(item.escolhas);
   let adicionais = 0;
   const nomes: string[] = [];
+  const grupos: EscolhasDoGrupo[] = [];
   let achadas = 0;
   for (const grupo of produto.optionGroups) {
     const doGrupo = grupo.options.filter((opcao) => escolhidas.has(opcao.id));
     achadas += doGrupo.length;
+    if (doGrupo.length > 0) {
+      grupos.push({ grupo: grupo.name, opcoes: doGrupo.map((opcao) => opcao.name) });
+    }
     for (const opcao of doGrupo) {
       if (!opcao.available) {
         throw new ConflictException({
@@ -160,6 +165,7 @@ function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): 
     nome: produto.name,
     tamanho,
     escolhas: nomes,
+    grupos,
     quantidade: item.quantidade,
     unitario: reais(unitario),
     total: reais(unitario * item.quantidade),

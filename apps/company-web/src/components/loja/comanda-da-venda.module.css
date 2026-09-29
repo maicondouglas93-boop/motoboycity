@@ -4,7 +4,7 @@
   padding: 0;
   list-style: none;
 }
-.itens li {
+.itens > li {
   margin: 1.5mm 0;
   break-inside: avoid;
 }
@@ -19,6 +19,38 @@
 .escolhas {
   padding-left: 4mm;
   font-size: 9pt;
+}
+/* As escolhas do item, uma categoria por bloco e uma opção por linha. */
+.grupos {
+  margin-top: 0.5mm;
+  padding-left: 4mm;
+  font-size: 9pt;
+}
+.grupo,
+.adicionais {
+  margin-top: 1mm;
+  break-inside: avoid;
+}
+.grupoNome {
+  font-weight: 700;
+}
+.opcoes {
+  margin: 0;
+  padding: 0 0 0 3mm;
+  list-style: none;
+}
+/*
+ * O que o cliente pagou a mais. Na caixa e em negrito, e não em fundo preto
+ * com letra branca: a bobina térmica só imprime o fundo se o driver deixar,
+ * e letra branca sem ele some do papel.
+ */
+.adicionais {
+  padding: 1mm 1.5mm;
+  border: 0.5mm solid #000;
+  font-weight: 800;
+}
+.adicionais .grupoNome {
+  text-transform: uppercase;
 }
 .total {
   margin-top: 1.5mm;

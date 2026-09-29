@@ -253,6 +253,11 @@ describe('StoreOrdersService', () => {
           nome: 'Açaí',
           tamanho: '500ml',
           escolhas: ['Morango', 'Chocolate'],
+          // Cada escolha com o grupo do cardápio de onde veio, na ordem dele.
+          grupos: [
+            { grupo: 'Adicionais', opcoes: ['Morango'] },
+            { grupo: 'Calda', opcoes: ['Chocolate'] },
+          ],
           quantidade: 2,
           unitario: 21.1,
           total: 42.2,
@@ -266,6 +271,33 @@ describe('StoreOrdersService', () => {
       customerAuthId: CLIENTE,
       acceptDeadline: null,
     });
+  });
+
+  it('o grupo em que o cliente não marcou nada não entra no pedido', async () => {
+    const feito = await service.checkout(
+      'acai',
+      CLIENTE,
+      pedido({
+        itens: [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['c1'], quantidade: 1 }],
+        totalVisto: 24.1,
+      }),
+    );
+
+    expect(feito.itens[0]).toMatchObject({
+      escolhas: ['Chocolate'],
+      grupos: [{ grupo: 'Calda', opcoes: ['Chocolate'] }],
+    });
+
+    const suco = await service.checkout(
+      'acai',
+      CLIENTE,
+      pedido({
+        // Dois sucos, para passar do pedido mínimo: 14,40 mais 6 de entrega.
+        itens: [{ produtoId: 'p2', tamanhoId: null, escolhas: [], quantidade: 2 }],
+        totalVisto: 20.4,
+      }),
+    );
+    expect(suco.itens[0]).toMatchObject({ escolhas: [], grupos: [] });
   });
 
   it('loja que não ligou os pedidos recusa', async () => {

@@ -46,7 +46,79 @@ function texto(): string {
   return screen.getByRole('article').textContent ?? '';
 }
 
+const COM_GRUPOS: VendaDaLoja = {
+  ...VENDA,
+  itens: [
+    {
+      nome: 'Açaí',
+      quantidade: 1,
+      tamanho: '500ml',
+      escolhas: ['Leite condensado', 'Leite em pó', 'Morango', 'Banana', 'Chocolate', 'Granola'],
+      grupos: [
+        { grupo: 'Complementos', opcoes: ['Leite condensado', 'Leite em pó'] },
+        { grupo: 'Frutas', opcoes: ['Morango', 'Banana'] },
+        { grupo: 'Cobertura', opcoes: ['Chocolate'] },
+        { grupo: 'Adicionais', opcoes: ['Granola'] },
+      ],
+      total: 22,
+    },
+  ],
+};
+
 describe('Comanda da venda', () => {
+  it('mostra as escolhas por categoria, uma por linha, na ordem do cardápio', () => {
+    render(
+      <ComandaDaVenda
+        venda={COM_GRUPOS}
+        loja="Açaí do Centro"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    expect(texto()).toContain('1× Açaí — 500ml');
+    const categorias = screen
+      .getAllByText(/:$/)
+      .map((elemento) => elemento.textContent)
+      .filter((linha) => ['Complementos:', 'Frutas:', 'Cobertura:', 'Adicionais:'].includes(linha!));
+    expect(categorias).toEqual(['Complementos:', 'Frutas:', 'Cobertura:', 'Adicionais:']);
+    // Uma opção por linha, na ordem em que o cardápio as tem.
+    const opcoes = ['Leite condensado', 'Leite em pó', 'Morango', 'Banana', 'Chocolate', 'Granola'];
+    expect(
+      screen
+        .getAllByRole('listitem')
+        .map((linha) => linha.textContent ?? '')
+        .filter((linha) => opcoes.includes(linha)),
+    ).toEqual(opcoes);
+    // Em categorias, e não numa linha só.
+    expect(texto()).not.toContain('Morango · Banana');
+  });
+
+  it('Adicionais ganha destaque, com ou sem acento e caixa, e só ele', () => {
+    render(
+      <ComandaDaVenda
+        venda={{
+          ...COM_GRUPOS,
+          itens: [
+            {
+              ...COM_GRUPOS.itens[0]!,
+              grupos: [
+                { grupo: 'Frutas', opcoes: ['Morango'] },
+                { grupo: 'ADICIONÁIS pagos', opcoes: ['Granola'] },
+              ],
+            },
+          ],
+        }}
+        loja="Açaí do Centro"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    const destacado = screen.getByText('ADICIONÁIS pagos:').closest('div');
+    const comum = screen.getByText('Frutas:').closest('div');
+    expect(destacado?.className).toContain('adicionais');
+    expect(comum?.className).not.toContain('adicionais');
+  });
+
   it('leva o que a cozinha e quem entrega precisam', () => {
     render(
       <ComandaDaVenda venda={VENDA} loja="Açaí do Centro" impressoEm="2026-09-25T22:15:00.000Z" />,

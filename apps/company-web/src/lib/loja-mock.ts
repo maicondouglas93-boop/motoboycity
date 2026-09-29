@@ -10,7 +10,12 @@
  * sobre o que está integrado.
  */
 
-import type { BairroAtendido, FormaDePagamento, GrupoDePagamento } from '@motoboycity/types';
+import type {
+  BairroAtendido,
+  EscolhasDoGrupo,
+  FormaDePagamento,
+  GrupoDePagamento,
+} from '@motoboycity/types';
 import type { TemaDaLoja } from '@/lib/contraste';
 import { descricaoDaForma } from '@/lib/loja-pagamentos';
 import { instanteNaLoja, momentoNaLoja, somarDias } from '@/lib/loja-horario';
@@ -300,6 +305,8 @@ export interface ItemDeVenda {
   tamanho: string | null;
   /** O que o cliente marcou nos grupos de escolhas, já com o preço somado. */
   escolhas: string[];
+  /** As mesmas escolhas, agrupadas como no cardápio. Ausente em venda antiga e na demonstração. */
+  grupos?: EscolhasDoGrupo[];
   total: number;
 }
 

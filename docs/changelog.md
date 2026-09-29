@@ -16722,3 +16722,45 @@ reproduzido contra Postgres real com cancelamento e aceite concorrentes**: as
 duas corridas são simuladas nos testes. Não tocado: o aiqfome com mais de uma
 instância da API (o cancelamento poderia chegar antes da importação; com uma
 fila de um trabalhador só, a ordem é sequencial).
+
+## 2026-09-29 — Comanda da loja: escolhas por categoria, com "Adicionais" em destaque
+
+**Pedido do usuário:** a comanda mostra o item com o tamanho e, embaixo, as
+escolhas separadas por categoria (Complementos, Frutas, Cobertura), uma por
+linha; "Adicionais" sempre em negrito, se possível chamando a atenção.
+
+**Causa:** o pedido só guardava os nomes das escolhas numa lista solta
+(`escolhas: string[]`), sem o grupo do cardápio de onde cada uma veio. A
+comanda as juntava numa linha ("Morango · Banana · Granola").
+
+**Decisão:**
+
+- Contrato aditivo: `ItemDoPedido.grupos?: EscolhasDoGrupo[]`
+  (`{ grupo, opcoes }`), na ordem do cardápio e só com os grupos em que o
+  cliente marcou algo. `escolhas` continua como estava. É JSONB em
+  `store_orders.items`: sem migration. Os pedidos já gravados não têm `grupos`, e
+  a comanda cai na linha única de antes para eles.
+- A API grava `grupos` ao precificar o item (`precificar`), no checkout.
+- A comanda mostra cada grupo como título, e as opções embaixo, uma por linha.
+  "Adicionais" (o grupo cujo nome começa com "adicion", sem acento nem caixa)
+  vai numa caixa, em negrito e com o título em maiúsculas. Não usei fundo preto
+  com letra branca: a bobina só imprime o fundo se o driver deixar, e letra
+  branca sem fundo some do papel.
+- O destaque é pelo NOME do grupo, e não por preço maior que zero: uma loja que
+  chame o grupo de "Extras" não terá caixa. Se preferir destacar tudo o que foi
+  cobrado a mais, é uma mudança à parte (o pedido teria de guardar o preço de
+  cada opção).
+
+**Arquivos:** `packages/types/src/store-order.ts`,
+`apps/api/src/company/store-orders/store-orders.service.ts` (+ spec, dois
+casos), `apps/company-web/src/components/loja/comanda-da-venda.tsx` e `.module.css`
+(+ teste, dois casos), `components/loja/vendas.ts`, `lib/loja-mock.ts`,
+`docs/architecture.md`.
+
+**Como foi validado:** `tsc` da API e do painel, eslint, Jest da API (1419
+testes), vitest do painel (401), build do painel e E2E inteiro no banco
+descartável (29 suítes, 256 testes) sem erro. A comanda foi vista na tela, numa
+rota temporária com dados de exemplo (já removida), no navegador — não impressa
+na Elgin. **Não conferido:** o papel impresso (a caixa em bobina de 80 mm), e um
+pedido de verdade feito depois do deploy. A tela de Vendas e "Meus pedidos" do
+cliente seguem com as escolhas numa linha só; só a comanda mudou.

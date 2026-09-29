@@ -52,6 +52,7 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
       quantidade: item.quantidade,
       tamanho: item.tamanho,
       escolhas: item.escolhas,
+      ...(item.grupos ? { grupos: item.grupos } : {}),
       total: item.total,
     })),
     pagamento: rotuloDoPagamento(pedido.pagamento),
