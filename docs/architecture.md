@@ -141,7 +141,7 @@ muda por atualização condicional ao `updatedAt` lido, e o NOVO que passou do
 prazo de aceite é cancelado pela varredura de minuto (fila BullMQ
 `store-orders`, `StoreOrdersScheduler`), que também leva o pedido à etapa que a
 corrida alcançou; a leitura faz o mesmo. Quem faz a mudança avisa, pelo Web
-Push (`StoreOrderNotificationsService` → `WebPushService`): a loja e o cliente,
+Aparência: `docs/design-system.md`. Push (`StoreOrderNotificationsService` → `WebPushService`): a loja e o cliente,
 nos aparelhos inscritos em `web_push_subscriptions`, conforme as escolhas de
 Notificações. O pago online (Pix) nasce `AGUARDANDO_PAGAMENTO`, com a cobrança
 na conta Asaas da própria loja (`company/store-asaas`: a chave dela cifrada em

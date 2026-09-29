@@ -161,7 +161,7 @@ function Formulario({
       </Button>
 
       {linhas.length === 0 ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+        <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
           Sem bairro nenhum, sua página não tem como calcular a entrega e não aceita pedido de
           entrega. Cadastre ao menos um.
         </p>

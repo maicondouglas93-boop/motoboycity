@@ -788,7 +788,7 @@ export function FormularioDeProduto({
 
                     {grupo.escolhas.length === 0 && (
                       <p
-                        className={`text-xs ${obrigatorio ? 'text-amber-700' : 'text-muted-foreground'}`}
+                        className={`text-xs ${obrigatorio ? 'text-warning' : 'text-muted-foreground'}`}
                       >
                         {obrigatorio
                           ? 'Grupo obrigatório e vazio: o cliente abre o produto e não consegue concluir o pedido.'
@@ -832,7 +832,7 @@ export function FormularioDeProduto({
           </CardHeader>
           <CardContent className="space-y-3">
             {bloqueios.length === 0 ? (
-              <p className="flex items-start gap-2 text-sm text-emerald-700">
+              <p className="flex items-start gap-2 text-sm text-success">
                 <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 {textoSemPendencia(atual)}
               </p>
@@ -851,7 +851,7 @@ export function FormularioDeProduto({
                     >
                       <AlertCircle
                         className={`mt-0.5 size-4 shrink-0 ${
-                          saiDoAr ? 'text-destructive' : 'text-amber-600'
+                          saiDoAr ? 'text-destructive' : 'text-warning'
                         }`}
                         aria-hidden="true"
                       />
@@ -917,7 +917,7 @@ export function FormularioDeProduto({
             </span>
           )}
           {salvar.isSuccess && (
-            <span className="text-xs text-emerald-700" role="status">
+            <span className="text-xs text-success" role="status">
               Salvo. Voltando para a lista...
             </span>
           )}

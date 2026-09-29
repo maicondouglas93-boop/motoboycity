@@ -17,7 +17,14 @@ export interface Paleta {
   superficie: string;
   texto: string;
   suave: string;
+  /** Separadores decorativos: não pedem contraste. */
   linha: string;
+  /** O contorno de um campo ou de uma opção: 3:1 sobre o fundo, para o
+   *  controle ser reconhecido (WCAG 1.4.11). Sai do texto misturado ao fundo,
+   *  e por isso acompanha o tema escolhido pela loja. */
+  contorno: string;
+  /** Mensagem de erro junto do campo. */
+  erro: string;
 }
 
 export function paletaDoTema(tema: TemaDaLoja): Paleta {
@@ -28,6 +35,8 @@ export function paletaDoTema(tema: TemaDaLoja): Paleta {
       texto: '#f2f3f5',
       suave: '#9aa1ac',
       linha: '#262a33',
+      contorno: 'color-mix(in srgb, #f2f3f5 50%, ' + fundoDoTema('ESCURO') + ')',
+      erro: '#fda29b',
     };
   }
   return {
@@ -36,6 +45,8 @@ export function paletaDoTema(tema: TemaDaLoja): Paleta {
     texto: '#17181c',
     suave: '#6b7280',
     linha: '#e6e6e9',
+    contorno: 'color-mix(in srgb, #17181c 50%, ' + fundoDoTema('CLARO') + ')',
+    erro: '#b42318',
   };
 }
 

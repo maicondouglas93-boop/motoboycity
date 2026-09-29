@@ -184,7 +184,7 @@ export default function LojaTiposDePedidoPage() {
   return (
     <div className="max-w-3xl space-y-5">
       <header>
-        <h1 className="text-2xl font-bold">Tipos de pedido</h1>
+        <h1>Tipos de pedido</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Entrega, retirada e agendamento: o que o cliente pode escolher na sua página, e como o
           pedido entra na loja.
@@ -775,7 +775,7 @@ function Formulario({
               oferece o remédio logo abaixo. */}
           {rascunho.modo === 'MANUAL' && (
             <>
-              <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+              <div className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
                 <p>
                   <strong>Se ninguém estiver olhando a tela, o pedido fica esperando.</strong> Deixe
                   o som e a notificação de pedido novo ligados em{' '}

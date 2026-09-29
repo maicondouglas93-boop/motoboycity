@@ -103,7 +103,7 @@ function Formulario({
             </legend>
 
             {semConta && (
-              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+              <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
                 O Pix pela página depende da sua conta Asaas, ligada em &quot;Recebimento online
                 pelo Asaas&quot;, abaixo — e com chave Pix ativa. Cartão online ainda não está
                 disponível.

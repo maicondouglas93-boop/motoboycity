@@ -157,7 +157,7 @@ describe('Sacola da loja de verdade', () => {
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(`/pedir/${SLUG}/pedidos?novo=7`));
   });
 
-  it('no Pix, pede o CPF de quem paga e o manda junto; sem ele, não segue', async () => {
+  it('no Pix, o erro do CPF aparece no campo, com foco nele; preenchido, o pedido segue', async () => {
     mocks.checkout.mockResolvedValue({ numero: 8 } as PedidoDaLoja);
     render(
       <Sacola
@@ -166,11 +166,19 @@ describe('Sacola da loja de verdade', () => {
       />,
     );
 
+    // O botão não fica desabilitado: desabilitado, ele não diz o que falta.
     const seguir = await screen.findByRole('button', { name: /Ir para o pagamento/ });
-    expect(seguir).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('CPF de quem paga o Pix'), {
-      target: { value: '529.982.247-25' },
-    });
+    expect(seguir).toBeEnabled();
+    fireEvent.click(seguir);
+
+    const cpf = screen.getByLabelText('CPF de quem paga o Pix');
+    expect(mocks.checkout).not.toHaveBeenCalled();
+    expect(cpf).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Informe o CPF de quem paga o Pix.')).toBeInTheDocument();
+    expect(cpf).toHaveFocus();
+
+    fireEvent.change(cpf, { target: { value: '529.982.247-25' } });
+    expect(cpf).not.toHaveAttribute('aria-invalid');
     fireEvent.click(screen.getByRole('button', { name: /Ir para o pagamento/ }));
 
     await waitFor(() =>
@@ -180,6 +188,63 @@ describe('Sacola da loja de verdade', () => {
         expect.objectContaining({ pagamento: 'PIX_ONLINE', cpf: '52998224725' }),
       ),
     );
+  });
+
+  it('campo do endereço vazio: o erro aparece nele, o foco vai para ele e nada é enviado', async () => {
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    const rua = await screen.findByLabelText('Rua');
+    expect(rua).not.toHaveAttribute('aria-invalid');
+    fireEvent.change(rua, { target: { value: '' } });
+    // Antes de tocar no botão, o campo vazio ainda não é tratado como erro.
+    expect(screen.queryByText('Informe a rua.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    expect(screen.getByText('Informe a rua.')).toBeInTheDocument();
+    expect(rua).toHaveAttribute('aria-invalid', 'true');
+    expect(rua).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('Falta preencher os campos marcados');
+    expect(mocks.checkout).not.toHaveBeenCalled();
+  });
+
+  it('o troco fica logo abaixo do Dinheiro, e antes da observação', async () => {
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    const dinheiro = await screen.findByRole('radio', { name: /Dinheiro/ });
+    const troco = screen.getByLabelText('Precisa de troco para quanto?');
+    const observacao = screen.getByLabelText('Alguma observação?');
+    const depois = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & 4);
+    expect(depois(dinheiro, troco)).toBe(true);
+    expect(depois(troco, observacao)).toBe(true);
+  });
+
+  it('as formas de pagamento falam com o cliente, e não com a loja', async () => {
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({
+          operacao: { ...OPERACAO, pagamentos: ['DINHEIRO', 'CREDITO_MAQUININHA'] },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText('Pagar na entrega')).toBeInTheDocument();
+    expect(screen.queryByText(/O cliente informa/)).not.toBeInTheDocument();
+    // O grupo já diz "na entrega": o título não repete "na maquininha".
+    expect(screen.getByRole('radio', { name: /^Crédito/ })).toBeInTheDocument();
+  });
+
+  it('a loja de verdade com Pix não mostra o aviso da demonstração', async () => {
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({ operacao: { ...OPERACAO, pagamentos: ['PIX_ONLINE'] } })}
+      />,
+    );
+
+    await screen.findByRole('button', { name: /Ir para o pagamento/ });
+    expect(screen.queryByText(/Nesta demonstração/)).not.toBeInTheDocument();
   });
 
   it('a recusa do servidor aparece com a frase dele, e a sacola fica', async () => {

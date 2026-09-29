@@ -123,7 +123,7 @@ function ContaLigada({
         </p>
       </div>
       {conta.ambiente === 'SANDBOX' && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+        <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
           É a conta de testes: o Pix dos pedidos é de mentira. Para receber de verdade, troque pela
           conta de produção.
         </p>

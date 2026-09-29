@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -47,7 +47,16 @@ import {
   useHidratado,
   useSacola,
 } from '@/components/loja-online/armazenamento';
+import {
+  Campo,
+  CampoDeLista,
+  CampoDeTexto,
+  OpcaoDaLista,
+  Secao,
+  Segmentado,
+} from '@/components/loja-online/campos-do-checkout';
 import { PorteiraDeLogin, useConta } from '@/components/loja-online/conta';
+import estilos from '@/components/loja-online/loja.module.css';
 import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
 
 /**
@@ -61,6 +70,48 @@ import { CURVA_FOLHA, DURACAO } from '@/components/loja-online/movimento';
  * pagamento e a retirada que gravou, e manda o pedido à API — que confere tudo
  * de novo. A demonstração segue com os dados de exemplo e o `localStorage`.
  */
+
+type CampoDoCheckout =
+  'nome' | 'telefone' | 'cpf' | 'rua' | 'numero' | 'bairro' | 'cidade' | 'estado';
+
+/** A ordem em que os campos aparecem: o primeiro com erro é o que recebe o foco. */
+const ORDEM_DOS_CAMPOS: readonly CampoDoCheckout[] = [
+  'rua',
+  'numero',
+  'bairro',
+  'cidade',
+  'estado',
+  'nome',
+  'telefone',
+  'cpf',
+];
+
+/**
+ * O que o CLIENTE lê em cada forma de pagamento.
+ *
+ * `FORMAS_DE_PAGAMENTO` serve também às Configurações, onde quem lê é a loja —
+ * "O cliente informa para quanto precisa de troco" fala com ela, e aparecia
+ * aqui, para o próprio cliente. O grupo já diz "na entrega" ou "online", então
+ * o título não repete: "Crédito", e não "Crédito na maquininha".
+ */
+const TEXTO_NA_SACOLA: Record<FormaDePagamento, { titulo: string; detalhe: string | null }> = {
+  PIX_ONLINE: {
+    titulo: 'Pix',
+    detalhe: 'O QR Code aparece logo depois do pedido. A loja só o recebe depois que você paga.',
+  },
+  CREDITO_ONLINE: {
+    titulo: 'Cartão de crédito',
+    detalhe: 'Você digita o cartão na página segura do Asaas, não aqui.',
+  },
+  DEBITO_ONLINE: {
+    titulo: 'Cartão de débito',
+    detalhe: 'Você digita o cartão na página segura do Asaas, não aqui.',
+  },
+  DINHEIRO: { titulo: 'Dinheiro', detalhe: null },
+  PIX_MAQUININHA: { titulo: 'Pix', detalhe: 'QR Code na maquininha, na hora de receber.' },
+  CREDITO_MAQUININHA: { titulo: 'Crédito', detalhe: 'Passado na maquininha, ao receber.' },
+  DEBITO_MAQUININHA: { titulo: 'Débito', detalhe: 'Passado na maquininha, ao receber.' },
+};
 
 /** A frase que o servidor mandou ao recusar, ou uma genérica. */
 function motivoDaRecusa(erro: unknown): string {
@@ -214,6 +265,9 @@ function Conteudo({
   const horario =
     dia?.horarios.find((item) => item.getTime() === horarioEscolhido) ?? dia?.horarios[0] ?? null;
   const [aviso, setAviso] = useState<string | null>(null);
+  // Só depois de tocar em "Fazer pedido" com algo faltando os erros aparecem:
+  // mostrar "informe o nome" num campo que a pessoa ainda nem chegou a ver é ruído.
+  const [tentou, setTentou] = useState(false);
 
   /**
    * "19:00 – 19:30" na entrega, "A partir de 19:00" na retirada. A janela
@@ -257,17 +311,28 @@ function Conteudo({
   const minimo = pedidoMinimoDa(operacao, modalidade);
   const faltaParaOMinimo = minimo !== null && subtotal < minimo ? minimo - subtotal : 0;
 
-  const faltando: string[] = [];
-  if (nome.trim() === '') faltando.push('seu nome');
-  if (telefone.trim().length < 10) faltando.push('o telefone');
-  // Na retirada o endereço não é pedido, então também não pode ser exigido.
-  if (pedeCpf && cpf.replace(/\D/g, '').length !== 11) faltando.push('o CPF, para o Pix');
-  if (!retirar) {
-    if (entrega.rua.trim() === '') faltando.push('a rua');
-    if (entrega.numero.trim() === '') faltando.push('o número');
-    if (bairroEscolhido === null) faltando.push('o bairro');
-    if (entrega.cidade.trim() === '') faltando.push('a cidade');
+  /*
+   * O que falta, campo por campo. O botão de enviar NÃO fica desabilitado por
+   * isso: desabilitado, ele não diz o que falta, e quem não acha o campo
+   * desiste. Ao tocar nele com algo faltando, cada campo mostra o seu erro e o
+   * primeiro recebe o foco.
+   */
+  const erros: Partial<Record<CampoDoCheckout, string>> = {};
+  if (nome.trim() === '') erros.nome = 'Informe seu nome.';
+  if (telefone.replace(/\D/g, '').length < 10) erros.telefone = 'Informe o telefone com DDD.';
+  if (pedeCpf && cpf.replace(/\D/g, '').length !== 11) {
+    erros.cpf = 'Informe o CPF de quem paga o Pix.';
   }
+  // Na retirada o endereço não é pedido, então também não pode ser exigido.
+  if (!retirar) {
+    if (entrega.rua.trim() === '') erros.rua = 'Informe a rua.';
+    if (entrega.numero.trim() === '') erros.numero = 'Informe o número.';
+    if (bairroEscolhido === null) erros.bairro = 'Escolha o bairro.';
+    if (entrega.cidade.trim() === '') erros.cidade = 'Informe a cidade.';
+    if (entrega.estado.trim().length !== 2) erros.estado = 'Use a sigla, como MG.';
+  }
+  const temErro = Object.keys(erros).length > 0;
+  const erroDe = (campo: CampoDoCheckout) => (tentou ? erros[campo] : undefined);
 
   function alterarQuantidade(indice: number, passo: number) {
     setItens((atual) => ajustarQuantidade(atual, indice, passo));
@@ -275,6 +340,16 @@ function Conteudo({
 
   function confirmar() {
     if (usuarioId === null) return;
+
+    if (temErro) {
+      setTentou(true);
+      setAviso(null);
+      const primeiro = ORDEM_DOS_CAMPOS.find((campo) => erros[campo]);
+      const elemento = primeiro ? document.getElementById(primeiro) : null;
+      elemento?.scrollIntoView?.({ block: 'center' });
+      elemento?.focus({ preventScroll: true });
+      return;
+    }
 
     /*
      * Confere de novo na hora de enviar: a página pode ter ficado aberta
@@ -434,25 +509,32 @@ function Conteudo({
     }
   }
 
-  const campo = {
-    backgroundColor: paleta.fundo,
-    borderColor: paleta.linha,
-    color: paleta.texto,
-  };
-
   return (
-    <div className="min-h-dvh" style={{ backgroundColor: paleta.fundo, color: paleta.texto }}>
+    <div
+      className="min-h-dvh"
+      style={
+        {
+          backgroundColor: paleta.fundo,
+          color: paleta.texto,
+          '--foco': paleta.texto,
+        } as CSSProperties
+      }
+    >
       <div className="h-1" style={{ backgroundColor: marca.corDaMarca }} />
 
-      <div className="mx-auto w-full max-w-lg pb-28">
+      <div className="mx-auto w-full max-w-lg pb-32">
         <header
-          className="flex items-center gap-2 border-b px-3 py-3"
+          className="flex items-center gap-1 border-b px-2 py-2"
           style={{ borderColor: paleta.linha }}
         >
-          <Link href={`/pedir/${slug}`} aria-label="Voltar ao cardápio" className="-ml-1 p-1">
+          <Link
+            href={`/pedir/${slug}`}
+            aria-label="Voltar ao cardápio"
+            className={`${estilos['foco']} flex size-10 items-center justify-center rounded-lg`}
+          >
             <ChevronLeft className="size-5" />
           </Link>
-          <h1 className="text-lg font-bold">Finalizar pedido</h1>
+          <h1 className="text-lg font-semibold">Finalizar pedido</h1>
         </header>
 
         {itens.length === 0 ? (
@@ -462,7 +544,7 @@ function Conteudo({
             </p>
             <Link
               href={`/pedir/${slug}`}
-              className="mt-4 inline-flex h-11 items-center rounded-xl px-5 text-sm font-semibold"
+              className={`${estilos['foco']} mt-4 inline-flex h-11 items-center rounded-lg px-5 text-sm font-semibold`}
               style={{ backgroundColor: marca.corDeAcao, color: textoSobre(marca.corDeAcao) }}
             >
               Ver o cardápio
@@ -478,29 +560,29 @@ function Conteudo({
                   style={{ borderColor: paleta.linha }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-[15px] font-medium">
+                    <p className="text-base font-medium">
                       {item.nome}
                       {item.tamanho && ` · ${item.tamanho}`}
                     </p>
                     {item.escolhas.length > 0 && (
-                      <p className="mt-0.5 text-[13px]" style={{ color: paleta.suave }}>
+                      <p className="mt-0.5 text-sm" style={{ color: paleta.suave }}>
                         {item.escolhas.join(', ')}
                       </p>
                     )}
-                    <p className="mt-1 text-[15px] font-semibold">
+                    <p className="mt-1 text-base font-semibold tabular-nums">
                       {moeda(item.unitario * item.quantidade)}
                     </p>
                   </div>
 
                   <div
-                    className="flex shrink-0 items-center gap-1 rounded-full border"
-                    style={{ borderColor: paleta.linha }}
+                    className="flex shrink-0 items-center rounded-lg border"
+                    style={{ borderColor: paleta.contorno }}
                   >
                     <button
                       type="button"
                       aria-label={`Menos um ${item.nome}`}
                       onClick={() => alterarQuantidade(indice, -1)}
-                      className="rounded-full p-2"
+                      className={`${estilos['foco']} flex size-10 items-center justify-center rounded-lg`}
                     >
                       {item.quantidade === 1 ? (
                         <Trash2 className="size-4" />
@@ -508,12 +590,14 @@ function Conteudo({
                         <Minus className="size-4" />
                       )}
                     </button>
-                    <span className="w-4 text-center text-sm font-medium">{item.quantidade}</span>
+                    <span className="w-6 text-center text-sm font-medium tabular-nums">
+                      {item.quantidade}
+                    </span>
                     <button
                       type="button"
                       aria-label={`Mais um ${item.nome}`}
                       onClick={() => alterarQuantidade(indice, 1)}
-                      className="rounded-full p-2"
+                      className={`${estilos['foco']} flex size-10 items-center justify-center rounded-lg`}
                     >
                       <Plus className="size-4" />
                     </button>
@@ -521,7 +605,7 @@ function Conteudo({
                 </div>
               ))}
 
-              <div className="space-y-1 px-4 py-3 text-sm">
+              <div className="space-y-1.5 px-4 py-4 text-sm tabular-nums">
                 <div className="flex justify-between" style={{ color: paleta.suave }}>
                   <span>Itens</span>
                   <span>{moeda(subtotal)}</span>
@@ -555,184 +639,221 @@ function Conteudo({
               />
             ) : (
               <>
-                {/* Nome e telefone ficam FORA da parte que recolhe: são
-                    obrigatórios também para retirar. Uma versão anterior os
-                    guardava junto do endereço, e quem escolhia retirada via
-                    "falta preencher o telefone" sem campo nenhum na tela. */}
-                <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
-                  <h2 className="px-4 pb-2 text-base font-bold">Seus dados</h2>
-                  <div className="space-y-3 px-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Campo
-                        id="nome"
-                        rotulo="Seu nome"
-                        valor={nome}
-                        aoMudar={setNome}
-                        estilo={campo}
-                        paleta={paleta}
-                        className="col-span-2"
-                      />
-                      <Campo
-                        id="telefone"
-                        rotulo="Telefone"
-                        valor={telefone}
-                        aoMudar={setTelefone}
-                        estilo={campo}
-                        paleta={paleta}
-                        inputMode="tel"
-                        dica={
-                          retirar
-                            ? 'É por ele que a loja avisa se precisar falar com você.'
-                            : 'É por ele que o motoboy liga se não achar o endereço.'
-                        }
-                        className="col-span-2"
-                      />
-                    </div>
-                    {/* A loja pode guardar o cliente no cadastro dela (decisão 19
-                        do plano): quem compra fica sabendo antes de mandar. */}
-                    <p className="text-xs" style={{ color: paleta.suave }}>
-                      {retirar ? 'Nome e telefone vão' : 'Nome, telefone e endereço vão'} para a
-                      loja, que pode guardá-los no cadastro de clientes dela.
-                    </p>
-                  </div>
-                </section>
+                {/*
+                 * Receber: a escolha e, logo abaixo dela, o que essa escolha
+                 * pede — tocou em "retirar", o endereço recolhe ali mesmo. Os
+                 * valores ficam guardados no estado da página, então voltar
+                 * para entrega traz tudo de volta como estava.
+                 *
+                 * Campos SEPARADOS, e não uma caixa de "endereço": é o formato
+                 * que o cadastro de clientes do painel exige
+                 * (`CompanyCustomerAddress`). Pedir tudo numa linha só deixaria
+                 * a loja sem como salvar este cliente sem redigitar.
+                 */}
+                <Secao
+                  titulo={
+                    modalidades.length > 1
+                      ? 'Como você quer receber'
+                      : retirar
+                        ? 'Retirada na loja'
+                        : 'Endereço de entrega'
+                  }
+                  paleta={paleta}
+                >
+                  {modalidades.length > 1 && (
+                    <Segmentado
+                      nome="recebimento"
+                      rotulo="Como você quer receber"
+                      valor={modalidade}
+                      aoMudar={setModalidade}
+                      opcoes={[
+                        { valor: 'ENTREGA', titulo: 'Entrega', detalhe: 'Levamos até você.' },
+                        {
+                          valor: 'RETIRADA',
+                          titulo: 'Retirar na loja',
+                          detalhe: 'Sem taxa de entrega.',
+                        },
+                      ]}
+                      paleta={paleta}
+                    />
+                  )}
 
-                {/* A escolha vem ANTES do endereço: quem vai retirar não deve
-                nem ver os campos que não vai preencher. Com uma modalidade só,
-                não há o que escolher — mas a retirada ainda precisa dizer onde. */}
-                {(modalidades.length > 1 || retirar) && (
-                  <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
-                    <h2 className="px-4 pb-2 text-base font-bold">
-                      {modalidades.length > 1 ? 'Como você quer receber' : 'Retirada na loja'}
-                    </h2>
-                    {modalidades.length > 1 &&
-                      (
-                        [
-                          { valor: 'ENTREGA', titulo: 'Entrega', detalhe: 'Levamos até você.' },
-                          {
-                            valor: 'RETIRADA',
-                            titulo: 'Retirar na loja',
-                            detalhe: 'Sem taxa de entrega.',
-                          },
-                        ] as const
-                      ).map((opcao) => (
-                        <label
-                          key={opcao.valor}
-                          className="flex items-center gap-3 border-b px-4 py-3 text-sm"
-                          style={{ borderColor: paleta.linha }}
-                        >
-                          <input
-                            type="radio"
-                            name="recebimento"
-                            className="size-4"
-                            style={{ accentColor: marca.corDeAcao }}
-                            checked={modalidade === opcao.valor}
-                            onChange={() => setModalidade(opcao.valor)}
-                          />
-                          <span>
-                            {opcao.titulo}
-                            <span className="block text-xs" style={{ color: paleta.suave }}>
-                              {opcao.detalhe}
-                            </span>
-                          </span>
-                        </label>
-                      ))}
-
-                    <AnimatePresence initial={false}>
-                      {retirar && (
-                        <m.p
-                          key="retire"
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                          className="overflow-hidden px-4 text-sm"
-                        >
-                          <span className="block pt-3">
-                            {enderecoDeRetirada ? (
-                              <>
-                                Retire em{' '}
-                                <strong>
-                                  {enderecoDeRetirada.rua}, {enderecoDeRetirada.numero}
-                                  {enderecoDeRetirada.complemento &&
-                                    ` — ${enderecoDeRetirada.complemento}`}
-                                </strong>
-                                <span className="block text-xs" style={{ color: paleta.suave }}>
-                                  {[enderecoDeRetirada.bairro, enderecoDeRetirada.cidade]
-                                    .filter(Boolean)
-                                    .join(', ')}
-                                  /{enderecoDeRetirada.estado}
-                                </span>
-                              </>
-                            ) : (
-                              'Retire na loja.'
-                            )}
-                            {operacao.retirada.instrucoes && (
-                              <span className="mt-1 block text-xs">
-                                {operacao.retirada.instrucoes}
+                  <AnimatePresence initial={false}>
+                    {retirar && (
+                      <m.div
+                        key="retire"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                        className="overflow-hidden"
+                      >
+                        <p className={`text-sm ${modalidades.length > 1 ? 'pt-4' : ''}`}>
+                          {enderecoDeRetirada ? (
+                            <>
+                              Retire em{' '}
+                              <strong>
+                                {enderecoDeRetirada.rua}, {enderecoDeRetirada.numero}
+                                {enderecoDeRetirada.complemento &&
+                                  ` — ${enderecoDeRetirada.complemento}`}
+                              </strong>
+                              <span className="block text-xs" style={{ color: paleta.suave }}>
+                                {[enderecoDeRetirada.bairro, enderecoDeRetirada.cidade]
+                                  .filter(Boolean)
+                                  .join(', ')}
+                                /{enderecoDeRetirada.estado}
                               </span>
-                            )}
-                          </span>
-                        </m.p>
-                      )}
-                    </AnimatePresence>
-                  </section>
-                )}
+                            </>
+                          ) : (
+                            'Retire na loja.'
+                          )}
+                          {operacao.retirada.instrucoes && (
+                            <span className="mt-1 block text-xs">
+                              {operacao.retirada.instrucoes}
+                            </span>
+                          )}
+                        </p>
+                      </m.div>
+                    )}
+
+                    {!retirar && (
+                      <m.div
+                        key="endereco"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                        className="overflow-hidden"
+                      >
+                        <div className={`space-y-3 ${modalidades.length > 1 ? 'pt-4' : ''}`}>
+                          <Campo
+                            id="rua"
+                            rotulo="Rua"
+                            valor={entrega.rua}
+                            aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
+                            paleta={paleta}
+                            erro={erroDe('rua')}
+                            autoComplete="address-line1"
+                          />
+                          <div className="grid grid-cols-2 gap-3">
+                            <Campo
+                              id="numero"
+                              rotulo="Número"
+                              valor={entrega.numero}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
+                              paleta={paleta}
+                              erro={erroDe('numero')}
+                            />
+                            <Campo
+                              id="complemento"
+                              rotulo="Complemento"
+                              valor={entrega.complemento ?? ''}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, complemento: v || null }))}
+                              paleta={paleta}
+                              autoComplete="address-line2"
+                            />
+                          </div>
+                          {/* Lista, e não campo livre: o bairro define a taxa e
+                              delimita a área que a loja atende. */}
+                          <CampoDeLista
+                            id="bairro"
+                            rotulo="Bairro"
+                            valor={entrega.bairro}
+                            aoMudar={(v) => setEntrega((e) => ({ ...e, bairro: v }))}
+                            paleta={paleta}
+                            erro={erroDe('bairro')}
+                            dica={
+                              bairros.length === 0
+                                ? 'Esta loja ainda não cadastrou bairros de entrega.'
+                                : 'Não achou o seu? A loja não entrega nele por enquanto.'
+                            }
+                          >
+                            <option value="">Escolha o bairro</option>
+                            {bairros.map((bairro) => (
+                              <option key={bairro.id} value={bairro.nome}>
+                                {bairro.nome} — {moeda(bairro.taxa)}
+                              </option>
+                            ))}
+                          </CampoDeLista>
+                          <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_7rem] gap-3">
+                            <Campo
+                              id="cidade"
+                              rotulo="Cidade"
+                              valor={entrega.cidade}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
+                              paleta={paleta}
+                              erro={erroDe('cidade')}
+                              autoComplete="address-level2"
+                            />
+                            <Campo
+                              id="estado"
+                              rotulo="UF"
+                              valor={entrega.estado}
+                              aoMudar={(v) =>
+                                setEntrega((e) => ({ ...e, estado: v.toUpperCase().slice(0, 2) }))
+                              }
+                              paleta={paleta}
+                              erro={erroDe('estado')}
+                              autoComplete="address-level1"
+                              maxLength={2}
+                            />
+                            <Campo
+                              id="cep"
+                              rotulo="CEP"
+                              valor={entrega.cep}
+                              aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
+                              paleta={paleta}
+                              inputMode="numeric"
+                              autoComplete="postal-code"
+                            />
+                          </div>
+                          <Campo
+                            id="referencia"
+                            rotulo="Ponto de referência"
+                            valor={entrega.referencia ?? ''}
+                            aoMudar={(v) => setEntrega((e) => ({ ...e, referencia: v || null }))}
+                            paleta={paleta}
+                            dica="Portão, cor da casa, o que ajudar a achar."
+                          />
+                        </div>
+                      </m.div>
+                    )}
+                  </AnimatePresence>
+                </Secao>
 
                 {/* Quando: só aparece se der para agendar. Sem agendamento, o
                     pedido é para agora, e perguntar seria uma escolha falsa. */}
                 {podeAgendar && (
-                  <section className="border-t pt-4" style={{ borderColor: paleta.linha }}>
-                    <h2 className="px-4 pb-2 text-base font-bold">Quando</h2>
-                    <label
-                      className="flex items-start gap-3 border-b px-4 py-3 text-sm"
-                      style={{ borderColor: paleta.linha, opacity: situacao.aberta ? 1 : 0.55 }}
-                    >
-                      <input
-                        type="radio"
-                        name="quando"
-                        className="mt-0.5 size-4"
-                        style={{ accentColor: marca.corDeAcao }}
-                        checked={quando === 'AGORA'}
-                        disabled={!situacao.aberta}
-                        onChange={() => {
-                          setQuando('AGORA');
-                          setAviso(null);
-                        }}
-                      />
-                      <span>
-                        Agora
-                        <span className="block text-xs" style={{ color: paleta.suave }}>
-                          {!situacao.aberta
+                  <Secao titulo="Quando" paleta={paleta}>
+                    <Segmentado
+                      nome="quando"
+                      rotulo="Quando"
+                      valor={quando}
+                      aoMudar={(valor) => {
+                        setQuando(valor);
+                        setAviso(null);
+                      }}
+                      opcoes={[
+                        {
+                          valor: 'AGORA',
+                          titulo: 'Agora',
+                          detalhe: !situacao.aberta
                             ? situacao.texto
                             : retirar
                               ? `Pronto em ${textoDoTempo(operacao, 'RETIRADA')}`
-                              : `Chega em ${textoDoTempo(operacao, 'ENTREGA')}`}
-                        </span>
-                      </span>
-                    </label>
-                    <label
-                      className="flex items-start gap-3 border-b px-4 py-3 text-sm"
-                      style={{ borderColor: paleta.linha }}
-                    >
-                      <input
-                        type="radio"
-                        name="quando"
-                        className="mt-0.5 size-4"
-                        style={{ accentColor: marca.corDeAcao }}
-                        checked={quando === 'AGENDAR'}
-                        onChange={() => {
-                          setQuando('AGENDAR');
-                          setAviso(null);
-                        }}
-                      />
-                      <span>
-                        Agendar
-                        <span className="block text-xs" style={{ color: paleta.suave }}>
-                          {retirar ? 'Escolha a hora de buscar.' : 'Escolha quando quer receber.'}
-                        </span>
-                      </span>
-                    </label>
+                              : `Chega em ${textoDoTempo(operacao, 'ENTREGA')}`,
+                          desabilitada: !situacao.aberta,
+                        },
+                        {
+                          valor: 'AGENDAR',
+                          titulo: 'Agendar',
+                          detalhe: retirar
+                            ? 'Escolha a hora de buscar.'
+                            : 'Escolha quando quer receber.',
+                        },
+                      ]}
+                      paleta={paleta}
+                    />
 
                     <AnimatePresence initial={false}>
                       {quando === 'AGENDAR' && dia && (
@@ -744,13 +865,13 @@ function Conteudo({
                           transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
                           className="overflow-hidden"
                         >
-                          <div className="space-y-3 px-4 pt-3">
+                          <div className="space-y-4 pt-4">
                             {/* Os dias numa fileira que rola de lado: sete
                                 botões não cabem na largura do celular. */}
                             <div
                               role="radiogroup"
                               aria-label="Dia"
-                              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
+                              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                             >
                               {dias.map((item) => {
                                 const escolhido = item.data === dia.data;
@@ -765,7 +886,7 @@ function Conteudo({
                                       setHorario(null);
                                       setAviso(null);
                                     }}
-                                    className="shrink-0 rounded-full border px-3 py-1.5 text-sm"
+                                    className={`${estilos['foco']} shrink-0 rounded-lg border px-3 py-2 text-sm`}
                                     style={
                                       escolhido
                                         ? {
@@ -773,7 +894,7 @@ function Conteudo({
                                             borderColor: marca.corDeAcao,
                                             color: textoSobre(marca.corDeAcao),
                                           }
-                                        : { borderColor: paleta.linha }
+                                        : { borderColor: paleta.contorno }
                                     }
                                   >
                                     {rotuloDoDiaComData(item.data, new Date(instante))}
@@ -781,161 +902,67 @@ function Conteudo({
                                 );
                               })}
                             </div>
-                            <div>
-                              <label htmlFor="horario" className="mb-1 block text-xs font-medium">
-                                {retirar ? 'Hora de buscar' : 'Janela de entrega'}
-                              </label>
-                              <select
-                                id="horario"
-                                value={horario?.getTime() ?? ''}
-                                onChange={(evento) => {
-                                  setHorario(Number(evento.target.value));
-                                  setAviso(null);
-                                }}
-                                className="h-11 w-full rounded-lg border px-3 text-sm"
-                                style={campo}
-                              >
-                                {dia.horarios.map((opcao) => (
-                                  <option key={opcao.getTime()} value={opcao.getTime()}>
-                                    {rotuloDaJanela(opcao, dia.data)}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                            <CampoDeLista
+                              id="horario"
+                              rotulo={retirar ? 'Hora de buscar' : 'Janela de entrega'}
+                              valor={horario?.getTime() ?? ''}
+                              aoMudar={(v) => {
+                                setHorario(Number(v));
+                                setAviso(null);
+                              }}
+                              paleta={paleta}
+                            >
+                              {dia.horarios.map((opcao) => (
+                                <option key={opcao.getTime()} value={opcao.getTime()}>
+                                  {rotuloDaJanela(opcao, dia.data)}
+                                </option>
+                              ))}
+                            </CampoDeLista>
                           </div>
                         </m.div>
                       )}
                     </AnimatePresence>
-                  </section>
+                  </Secao>
                 )}
 
-                {/*
-                 * Campos SEPARADOS, e não uma caixa de "endereço".
-                 *
-                 * É o formato que o cadastro de clientes do painel exige
-                 * (`CompanyCustomerAddress`). Pedir tudo numa linha só deixaria a
-                 * loja sem como salvar este cliente sem redigitar — que é a
-                 * funcionalidade inteira indo embora por causa de um campo.
-                 */}
-                {/* Logo abaixo da escolha, para causa e efeito ficarem
-                    lado a lado: tocou em "retirar", o endereço recolhe ali
-                    mesmo. Os valores ficam guardados no estado da página, então
-                    voltar para entrega traz tudo de volta como estava. */}
-                <AnimatePresence initial={false}>
-                  {!retirar && (
-                    <m.section
-                      key="endereco"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                      className="overflow-hidden"
-                    >
-                      <div className="mt-4 border-t pt-4" style={{ borderColor: paleta.linha }}>
-                        <h2 className="px-4 pb-2 text-base font-bold">Endereço de entrega</h2>
-                        <div className="space-y-3 px-4">
-                          <div className="grid grid-cols-2 gap-3">
-                            <Campo
-                              id="rua"
-                              rotulo="Rua"
-                              valor={entrega.rua}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, rua: v }))}
-                              estilo={campo}
-                              paleta={paleta}
-                              className="col-span-2"
-                            />
-                            <Campo
-                              id="numero"
-                              rotulo="Número"
-                              valor={entrega.numero}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, numero: v }))}
-                              estilo={campo}
-                              paleta={paleta}
-                            />
-                            <Campo
-                              id="complemento"
-                              rotulo="Complemento"
-                              valor={entrega.complemento ?? ''}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, complemento: v || null }))}
-                              estilo={campo}
-                              paleta={paleta}
-                            />
-                            {/* Lista, e não campo livre: o bairro define a taxa e
-                          delimita a área que a loja atende. */}
-                            <div className="col-span-2">
-                              <label htmlFor="bairro" className="mb-1 block text-xs font-medium">
-                                Bairro
-                              </label>
-                              <select
-                                id="bairro"
-                                value={entrega.bairro}
-                                onChange={(evento) =>
-                                  setEntrega((e) => ({ ...e, bairro: evento.target.value }))
-                                }
-                                className="h-11 w-full rounded-lg border px-3 text-sm"
-                                style={campo}
-                              >
-                                <option value="">Escolha o bairro</option>
-                                {bairros.map((bairro) => (
-                                  <option key={bairro.id} value={bairro.nome}>
-                                    {bairro.nome} — {moeda(bairro.taxa)}
-                                  </option>
-                                ))}
-                              </select>
-                              <p className="mt-1 text-xs" style={{ color: paleta.suave }}>
-                                {bairros.length === 0
-                                  ? 'Esta loja ainda não cadastrou bairros de entrega.'
-                                  : 'Não achou o seu? A loja não entrega nele por enquanto.'}
-                              </p>
-                            </div>
+                {/* Nome e telefone ficam FORA da parte que recolhe: são
+                    obrigatórios também para retirar. */}
+                <Secao titulo="Seus dados" paleta={paleta}>
+                  <div className="space-y-3">
+                    <Campo
+                      id="nome"
+                      rotulo="Seu nome"
+                      valor={nome}
+                      aoMudar={setNome}
+                      paleta={paleta}
+                      erro={erroDe('nome')}
+                      autoComplete="name"
+                    />
+                    <Campo
+                      id="telefone"
+                      rotulo="Telefone"
+                      valor={telefone}
+                      aoMudar={setTelefone}
+                      paleta={paleta}
+                      erro={erroDe('telefone')}
+                      inputMode="tel"
+                      autoComplete="tel"
+                      dica={
+                        retirar
+                          ? 'É por ele que a loja avisa se precisar falar com você.'
+                          : 'É por ele que o motoboy liga se não achar o endereço.'
+                      }
+                    />
+                  </div>
+                  {/* A loja pode guardar o cliente no cadastro dela (decisão 19
+                      do plano): quem compra fica sabendo antes de mandar. */}
+                  <p className="mt-4 text-xs text-pretty" style={{ color: paleta.suave }}>
+                    {retirar ? 'Nome e telefone vão' : 'Nome, telefone e endereço vão'} para a loja,
+                    que pode guardá‑los no cadastro de clientes dela.
+                  </p>
+                </Secao>
 
-                            <Campo
-                              id="cidade"
-                              rotulo="Cidade"
-                              valor={entrega.cidade}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, cidade: v }))}
-                              estilo={campo}
-                              paleta={paleta}
-                            />
-                            <Campo
-                              id="estado"
-                              rotulo="Estado"
-                              valor={entrega.estado}
-                              aoMudar={(v) =>
-                                setEntrega((e) => ({ ...e, estado: v.toUpperCase().slice(0, 2) }))
-                              }
-                              estilo={campo}
-                              paleta={paleta}
-                            />
-                            <Campo
-                              id="cep"
-                              rotulo="CEP"
-                              valor={entrega.cep}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, cep: v }))}
-                              estilo={campo}
-                              paleta={paleta}
-                              inputMode="numeric"
-                              className="col-span-2"
-                            />
-                            <Campo
-                              id="referencia"
-                              rotulo="Ponto de referência"
-                              valor={entrega.referencia ?? ''}
-                              aoMudar={(v) => setEntrega((e) => ({ ...e, referencia: v || null }))}
-                              estilo={campo}
-                              paleta={paleta}
-                              dica="Portão, cor da casa, o que ajudar a achar."
-                              className="col-span-2"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </m.section>
-                  )}
-                </AnimatePresence>
-
-                <section className="mt-4 border-t pt-4" style={{ borderColor: paleta.linha }}>
-                  <h2 className="px-4 pb-2 text-base font-bold">Pagamento</h2>
+                <Secao titulo="Pagamento" paleta={paleta}>
                   {(['ONLINE', 'ENTREGA'] as const).map((grupo) => {
                     const doGrupo = FORMAS_DE_PAGAMENTO.filter(
                       (forma) => forma.grupo === grupo && oferecidas.includes(forma.valor),
@@ -943,58 +970,107 @@ function Conteudo({
                     // Grupo sem forma nenhuma não aparece: um título sem opções
                     // embaixo faria o cliente procurar o que não existe.
                     if (doGrupo.length === 0) return null;
+                    const tituloDoGrupo =
+                      grupo === 'ENTREGA' && retirar
+                        ? 'Pagar na retirada'
+                        : GRUPOS_DE_PAGAMENTO[grupo].titulo;
 
                     return (
                       <div
                         key={grupo}
                         role="radiogroup"
-                        aria-label={GRUPOS_DE_PAGAMENTO[grupo].titulo}
+                        aria-label={tituloDoGrupo}
+                        className="mt-5 first:mt-0"
                       >
                         <p
-                          className="px-4 pt-3 pb-1 text-xs font-semibold tracking-wide uppercase"
+                          className="mb-1 text-xs font-semibold tracking-wide uppercase"
                           style={{ color: paleta.suave }}
                         >
-                          {GRUPOS_DE_PAGAMENTO[grupo].titulo}
+                          {tituloDoGrupo}
                         </p>
-                        {doGrupo.map((forma) => (
-                          <label
-                            key={forma.valor}
-                            className="flex items-start gap-3 border-b px-4 py-3 text-sm"
-                            style={{ borderColor: paleta.linha }}
-                          >
-                            <input
-                              type="radio"
-                              name="pagamento"
-                              className="mt-0.5 size-4"
-                              style={{ accentColor: marca.corDeAcao }}
-                              checked={pagamento === forma.valor}
-                              onChange={() => setPagamento(forma.valor)}
-                            />
-                            <span>
-                              {forma.titulo}
-                              <span className="block text-xs" style={{ color: paleta.suave }}>
-                                {forma.detalhe}
-                              </span>
-                            </span>
-                          </label>
-                        ))}
+                        {doGrupo.map((forma, posicao) => {
+                          const marcada = pagamento === forma.valor;
+                          const texto = TEXTO_NA_SACOLA[forma.valor];
+                          return (
+                            <OpcaoDaLista
+                              key={forma.valor}
+                              nome="pagamento"
+                              titulo={texto.titulo}
+                              detalhe={texto.detalhe}
+                              marcada={marcada}
+                              aoMarcar={() => setPagamento(forma.valor)}
+                              primeira={posicao === 0}
+                              paleta={paleta}
+                            >
+                              {/* O que só vale para esta forma aparece logo
+                                  abaixo dela, e não no fim da página: o troco é
+                                  o que o motoboy leva na mão, e o CPF é do Pix. */}
+                              <AnimatePresence initial={false}>
+                                {marcada && forma.valor === 'DINHEIRO' && (
+                                  <m.div
+                                    key="troco"
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="pb-3 pl-7">
+                                      <Campo
+                                        id="troco"
+                                        rotulo="Precisa de troco para quanto?"
+                                        valor={trocoPara}
+                                        aoMudar={setTrocoPara}
+                                        paleta={paleta}
+                                        inputMode="decimal"
+                                        dica="Deixe em branco se tiver o valor certo."
+                                      />
+                                    </div>
+                                  </m.div>
+                                )}
+                                {marcada && pedeCpf && forma.grupo === 'ONLINE' && (
+                                  <m.div
+                                    key="cpf"
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="pb-3 pl-7">
+                                      <Campo
+                                        id="cpf"
+                                        rotulo="CPF de quem paga o Pix"
+                                        valor={cpf}
+                                        aoMudar={setCpf}
+                                        paleta={paleta}
+                                        erro={erroDe('cpf')}
+                                        inputMode="numeric"
+                                        dica="O Asaas pede o CPF para gerar o Pix na conta da loja. Ele não fica guardado aqui."
+                                      />
+                                    </div>
+                                  </m.div>
+                                )}
+                              </AnimatePresence>
+                            </OpcaoDaLista>
+                          );
+                        })}
                       </div>
                     );
                   })}
 
-                  {/* Nenhum campo de cartão nesta tela, de propósito: crédito e
-                      débito online são digitados na página do Asaas. Nesta
-                      demonstração não há Asaas por trás, e a tela diz isso em
-                      vez de fingir uma cobrança. */}
+                  {/* Só na demonstração: lá não há Asaas por trás, e a tela diz
+                      isso em vez de fingir uma cobrança. Na loja de verdade o
+                      Pix gera a cobrança, e este texto estaria errado. */}
                   <AnimatePresence initial={false}>
-                    {pagaOnline && (
+                    {pagaOnline && cardapio.operacao === null && (
                       <m.p
                         key="aviso-online"
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                        className="overflow-hidden px-4 text-xs"
+                        className="overflow-hidden text-xs text-pretty"
                         style={{ color: paleta.suave }}
                       >
                         <span className="block pt-3">
@@ -1004,81 +1080,21 @@ function Conteudo({
                       </m.p>
                     )}
                   </AnimatePresence>
+                </Secao>
 
-                  {/* O que o cliente escreve tem que caber em algum lugar, senão
-                      vira ligação para a loja — ou pedido errado. */}
-                  <div className="px-4 pt-3">
-                    <label htmlFor="observacao" className="mb-1 block text-xs font-medium">
-                      Alguma observação?
-                    </label>
-                    <textarea
-                      id="observacao"
-                      value={observacao}
-                      onChange={(evento) => setObservacao(evento.target.value)}
-                      rows={2}
-                      maxLength={300}
-                      placeholder="Sem cebola, troca o refri por suco, apartamento no fundo…"
-                      className="w-full rounded-lg border px-3 py-2 text-sm"
-                      style={campo}
-                    />
-                  </div>
-
-                  {/* Troco perguntado aqui, e não na porta: é o que o motoboy
-                      precisa levar na mão, e ele sai antes de alguém ligar. */}
-                  <AnimatePresence initial={false}>
-                    {emDinheiro && (
-                      <m.div
-                        key="troco"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                        className="overflow-hidden px-4"
-                      >
-                        <div className="pt-3">
-                          <Campo
-                            id="troco"
-                            rotulo="Precisa de troco para quanto?"
-                            valor={trocoPara}
-                            aoMudar={setTrocoPara}
-                            estilo={campo}
-                            paleta={paleta}
-                            inputMode="decimal"
-                            dica="Deixe em branco se tiver o valor certo."
-                          />
-                        </div>
-                      </m.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* O CPF entra só no Pix, e diz para onde vai: o Asaas o
-                      exige para gerar a cobrança na conta da loja. */}
-                  <AnimatePresence initial={false}>
-                    {pedeCpf && (
-                      <m.div
-                        key="cpf"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                        className="overflow-hidden px-4"
-                      >
-                        <div className="pt-3">
-                          <Campo
-                            id="cpf"
-                            rotulo="CPF de quem paga o Pix"
-                            valor={cpf}
-                            aoMudar={setCpf}
-                            estilo={campo}
-                            paleta={paleta}
-                            inputMode="numeric"
-                            dica="O Asaas pede o CPF para gerar o Pix na conta da loja. Ele não fica guardado aqui."
-                          />
-                        </div>
-                      </m.div>
-                    )}
-                  </AnimatePresence>
-                </section>
+                {/* O que o cliente escreve tem que caber em algum lugar, senão
+                    vira ligação para a loja — ou pedido errado. */}
+                <Secao titulo="Alguma observação?" paleta={paleta}>
+                  <CampoDeTexto
+                    id="observacao"
+                    rotulo="Alguma observação?"
+                    valor={observacao}
+                    aoMudar={setObservacao}
+                    paleta={paleta}
+                    maxLength={300}
+                    placeholder="Sem cebola, troca o refri por suco, apartamento no fundo…"
+                  />
+                </Secao>
               </>
             )}
           </>
@@ -1087,7 +1103,7 @@ function Conteudo({
 
       {itens.length > 0 && usuarioId !== null && (
         <div
-          className="fixed inset-x-0 bottom-0 z-20 border-t p-3"
+          className="fixed inset-x-0 bottom-0 z-20 border-t px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
           style={{ backgroundColor: paleta.fundo, borderColor: paleta.linha }}
         >
           <div className="mx-auto max-w-lg">
@@ -1105,7 +1121,7 @@ function Conteudo({
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                  className="overflow-hidden text-xs font-medium"
+                  className="overflow-hidden text-sm font-medium"
                 >
                   <span className="block pb-2">{aviso}</span>
                 </m.p>
@@ -1116,32 +1132,33 @@ function Conteudo({
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                  className="overflow-hidden text-xs font-medium"
+                  className="overflow-hidden text-sm font-medium"
                 >
                   <span className="block pb-2">
                     Pedido mínimo de {moeda(minimo ?? 0)} em itens para entrega. Faltam{' '}
                     {moeda(faltaParaOMinimo)}.
                   </span>
                 </m.p>
-              ) : faltando.length > 0 ? (
+              ) : tentou && temErro ? (
                 <m.p
-                  key="faltando"
+                  key="revise"
+                  role="alert"
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: DURACAO.curta, ease: CURVA_FOLHA }}
-                  className="overflow-hidden text-xs"
-                  style={{ color: paleta.suave }}
+                  className="overflow-hidden text-sm font-medium"
+                  style={{ color: paleta.erro }}
                 >
-                  <span className="block pb-2">Falta preencher: {faltando.join(', ')}.</span>
+                  <span className="block pb-2">Falta preencher os campos marcados.</span>
                 </m.p>
               ) : null}
             </AnimatePresence>
             <button
               type="button"
-              disabled={enviando || indisponivel || faltando.length > 0 || faltaParaOMinimo > 0}
+              disabled={enviando || indisponivel || faltaParaOMinimo > 0}
               onClick={confirmar}
-              className="flex h-13 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold transition-opacity duration-200 disabled:opacity-40"
+              className={`${estilos['foco']} flex h-13 w-full items-center justify-between rounded-lg px-4 text-base font-semibold transition-opacity duration-200 disabled:opacity-40`}
               style={{ backgroundColor: marca.corDeAcao, color: textoSobre(marca.corDeAcao) }}
             >
               <span>
@@ -1157,53 +1174,10 @@ function Conteudo({
                           ? 'Agendar pedido'
                           : 'Fazer pedido'}
               </span>
-              <span>{moeda(total)}</span>
+              <span className="tabular-nums">{moeda(total)}</span>
             </button>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-function Campo({
-  id,
-  rotulo,
-  valor,
-  aoMudar,
-  estilo,
-  paleta,
-  dica,
-  inputMode,
-  className,
-}: {
-  id: string;
-  rotulo: string;
-  valor: string;
-  aoMudar: (valor: string) => void;
-  estilo: React.CSSProperties;
-  paleta: { suave: string };
-  dica?: string;
-  inputMode?: 'tel' | 'numeric' | 'decimal';
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <label htmlFor={id} className="mb-1 block text-xs font-medium">
-        {rotulo}
-      </label>
-      <input
-        id={id}
-        value={valor}
-        inputMode={inputMode}
-        onChange={(evento) => aoMudar(evento.target.value)}
-        className="h-11 w-full rounded-lg border px-3 text-sm"
-        style={estilo}
-      />
-      {dica && (
-        <p className="mt-1 text-xs" style={{ color: paleta.suave }}>
-          {dica}
-        </p>
       )}
     </div>
   );

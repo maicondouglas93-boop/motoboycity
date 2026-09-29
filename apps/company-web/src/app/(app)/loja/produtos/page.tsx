@@ -16,6 +16,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { companyStoreCatalogApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
@@ -133,9 +134,10 @@ export default function LojaProdutosPage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Produtos</h1>
+          <h1>Produtos</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             O que sua loja vende. Um produto por item do cardápio — os tamanhos ficam dentro dele.
+            Os publicados aparecem na página da loja.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -148,15 +150,6 @@ export default function LojaProdutosPage() {
         </div>
       </header>
 
-      {/* A página do cliente mostra o cardápio, mas ainda não recebe pedido. Ver
-          AGENTS.md, regra 8: nada de apresentar como integrado o que não está. */}
-      <Card className="border-dashed">
-        <CardContent className="py-3 text-xs text-muted-foreground">
-          Os produtos publicados aparecem na página da sua loja, no link que você cria em
-          Configurações. A página ainda não recebe pedidos.
-        </CardContent>
-      </Card>
-
       {erro && (
         <p className="text-sm text-destructive" role="alert">
           {erro}
@@ -164,7 +157,12 @@ export default function LojaProdutosPage() {
       )}
 
       {catalogo.isLoading && (
-        <p className="text-sm text-muted-foreground">Carregando produtos...</p>
+        <div className="space-y-px overflow-hidden rounded-lg border" role="status">
+          <span className="sr-only">Carregando produtos...</span>
+          <Skeleton className="h-[4.5rem] rounded-none" />
+          <Skeleton className="h-[4.5rem] rounded-none" />
+          <Skeleton className="h-[4.5rem] rounded-none" />
+        </div>
       )}
 
       {catalogo.isError && (
@@ -214,7 +212,7 @@ export default function LojaProdutosPage() {
           {/* Produto no ar que o cliente não consegue comprar. A loja não
               descobre isso sozinha: o sintoma é a venda que não entra. */}
           {quebrados.length > 0 && (
-            <Card className="border-destructive/40 bg-destructive/5">
+            <Card className="border-destructive/30 bg-destructive-soft">
               <CardContent className="flex flex-wrap items-center gap-2 py-3 text-sm">
                 <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
                 <span className="flex-1">
@@ -232,17 +230,17 @@ export default function LojaProdutosPage() {
             </Card>
           )}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1">
             {filtros.map((item) => (
               <button
                 key={item.valor}
                 type="button"
                 onClick={() => setFiltro(item.valor)}
                 aria-pressed={filtro === item.valor}
-                className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:py-2.5 ${
                   filtro === item.valor
-                    ? 'border-primary bg-primary/10 font-semibold text-primary'
-                    : 'text-muted-foreground hover:bg-muted'
+                    ? 'bg-accent font-semibold text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
                 {item.texto}
@@ -252,7 +250,7 @@ export default function LojaProdutosPage() {
               <button
                 type="button"
                 onClick={() => setFiltro('todos')}
-                className="rounded-full border border-destructive/40 bg-destructive/10 px-3 py-1 text-sm font-semibold text-destructive"
+                className="rounded-md bg-destructive-soft px-3 py-1.5 text-sm font-semibold text-destructive-text outline-none focus-visible:ring-2 focus-visible:ring-destructive pointer-coarse:py-2.5"
               >
                 Não podem ser comprados ({quebrados.length}) — limpar filtro
               </button>
@@ -277,7 +275,7 @@ export default function LojaProdutosPage() {
               value={categoria}
               onChange={(event) => setCategoria(event.target.value)}
               aria-label="Filtrar por categoria"
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-9 rounded-md border bg-card px-3 text-sm pointer-coarse:h-11"
             >
               <option value="">Todas as categorias</option>
               {categorias.map((item) => (
@@ -288,7 +286,7 @@ export default function LojaProdutosPage() {
             </select>
           </div>
 
-          <div className="space-y-2">
+          <Card className="gap-0 divide-y py-0">
             {lista.map(({ produto, bloqueiam, leves }) => {
               const opcoes = resumoDeOpcoes(produto);
               const rotulo = SITUACOES[produto.status];
@@ -298,117 +296,115 @@ export default function LojaProdutosPage() {
               const mudando = situacao.isPending && situacao.variables?.id === produto.id;
 
               return (
-                <Card
+                <div
                   key={produto.id}
-                  className={noArQuebrado ? 'border-destructive/40' : undefined}
+                  className={`flex flex-wrap items-center gap-4 px-4 py-3 ${
+                    noArQuebrado ? 'bg-destructive-soft/50' : ''
+                  }`}
                 >
-                  <CardContent className="flex flex-wrap items-center gap-4 py-4">
-                    {/* Miniatura, e não cartão com foto grande: produto sem
-                        foto continua íntegro em vez de virar um buraco. */}
-                    <div className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      {produto.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={produto.imageUrl}
-                          alt=""
-                          className="size-14 rounded-lg object-cover"
-                        />
-                      ) : (
-                        <ImageOff className="size-5 text-muted-foreground/60" aria-hidden="true" />
-                      )}
+                  {/* Miniatura, e não foto grande: produto sem foto continua
+                        íntegro em vez de virar um buraco. */}
+                  <div className="flex size-12 shrink-0 items-center justify-center rounded-md bg-muted">
+                    {produto.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={produto.imageUrl}
+                        alt=""
+                        className="size-12 rounded-md object-cover"
+                      />
+                    ) : (
+                      <ImageOff className="size-5 text-muted-foreground/60" aria-hidden="true" />
+                    )}
+                  </div>
+
+                  <div className="min-w-48 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{produto.name}</span>
+                      <Badge className={rotulo.classe} variant="secondary">
+                        {rotulo.texto}
+                      </Badge>
                     </div>
+                    {/* A seção e as opções numa linha só: cada uma como etiqueta
+                          própria pesava mais do que o nome do produto. */}
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {[nomeDaCategoria ?? 'Sem categoria', opcoes].filter(Boolean).join(' · ')}
+                    </p>
+                    {produto.description && (
+                      <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
+                        {produto.description}
+                      </p>
+                    )}
 
-                    <div className="min-w-48 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold">{produto.name}</span>
-                        <Badge className={rotulo.classe} variant="secondary">
-                          {rotulo.texto}
-                        </Badge>
-                        {nomeDaCategoria ? (
-                          <Badge variant="outline">{nomeDaCategoria}</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            Sem categoria
-                          </Badge>
-                        )}
-                      </div>
-                      {produto.description && (
-                        <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
-                          {produto.description}
-                        </p>
-                      )}
-                      {opcoes && <p className="mt-0.5 text-xs text-muted-foreground">{opcoes}</p>}
-
-                      {/* As que travam a venda aparecem por extenso; as demais,
+                    {/* As que travam a venda aparecem por extenso; as demais,
                           resumidas numa linha só. Dar a "sem descrição" o mesmo
                           destaque de "sem preço" faria as duas serem ignoradas. */}
-                      {bloqueiam.map((item) => (
-                        <p
-                          key={item.text}
-                          className="mt-1 flex items-start gap-1.5 text-xs text-destructive"
-                        >
-                          <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-                          {item.text}
-                        </p>
-                      ))}
-                      {leves.length > 0 && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Falta ainda: {leves.map((item) => item.text).join(', ')}.
-                        </p>
-                      )}
-                    </div>
+                    {bloqueiam.map((item) => (
+                      <p
+                        key={item.text}
+                        className="mt-1 flex items-start gap-1.5 text-xs text-destructive-text"
+                      >
+                        <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                        {item.text}
+                      </p>
+                    ))}
+                    {leves.length > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Falta ainda: {leves.map((item) => item.text).join(', ')}.
+                      </p>
+                    )}
+                  </div>
 
-                    <p className="font-semibold">{faixaDePreco(produto)}</p>
+                  <p className="font-semibold tabular-nums">{faixaDePreco(produto)}</p>
 
-                    <div className="flex items-center gap-1">
-                      {produto.status === 'PUBLISHED' ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={mudando}
-                          onClick={() => mudarSituacao(produto, 'PAUSED')}
-                        >
-                          Pausar
-                        </Button>
-                      ) : (
-                        /* Publicar com pendência que trava a venda seria pôr no
+                  <div className="flex items-center gap-1">
+                    {produto.status === 'PUBLISHED' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={mudando}
+                        onClick={() => mudarSituacao(produto, 'PAUSED')}
+                      >
+                        Pausar
+                      </Button>
+                    ) : (
+                      /* Publicar com pendência que trava a venda seria pôr no
                            ar um produto que ninguém consegue comprar — e o
                            servidor recusaria de todo jeito. */
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={mudando || bloqueiam.length > 0}
-                          title={
-                            bloqueiam.length > 0
-                              ? 'Resolva o que está em vermelho para poder publicar'
-                              : undefined
-                          }
-                          onClick={() => mudarSituacao(produto, 'PUBLISHED')}
-                        >
-                          {produto.status === 'DRAFT' ? 'Publicar' : 'Voltar a vender'}
-                        </Button>
-                      )}
-                      <Link
-                        href={`/loja/produtos/${produto.id}/editar`}
-                        aria-label={`Editar ${produto.name}`}
-                        className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={mudando || bloqueiam.length > 0}
+                        title={
+                          bloqueiam.length > 0
+                            ? 'Resolva o que está em vermelho para poder publicar'
+                            : undefined
+                        }
+                        onClick={() => mudarSituacao(produto, 'PUBLISHED')}
                       >
-                        <Pencil className="size-4" />
-                      </Link>
-                    </div>
-                  </CardContent>
-                </Card>
+                        {produto.status === 'DRAFT' ? 'Publicar' : 'Voltar a vender'}
+                      </Button>
+                    )}
+                    <Link
+                      href={`/loja/produtos/${produto.id}/editar`}
+                      aria-label={`Editar ${produto.name}`}
+                      className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                    >
+                      <Pencil className="size-4" />
+                    </Link>
+                  </div>
+                </div>
               );
             })}
 
             {lista.length === 0 && (
-              <Card>
-                <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                  Nenhum produto encontrado com esse filtro.
-                </CardContent>
-              </Card>
+              <div className="px-4 py-10 text-center">
+                <p className="text-sm font-medium">Nenhum produto encontrado.</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Mude o filtro ou a busca para ver os outros.
+                </p>
+              </div>
             )}
-          </div>
+          </Card>
         </>
       )}
     </div>

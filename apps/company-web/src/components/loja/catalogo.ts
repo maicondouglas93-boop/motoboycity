@@ -73,9 +73,9 @@ export function useFilaDoCatalogo() {
 }
 
 export const SITUACOES: Record<StoreProductStatus, { texto: string; classe: string }> = {
-  PUBLISHED: { texto: 'No ar', classe: 'bg-emerald-500/10 text-emerald-700' },
+  PUBLISHED: { texto: 'No ar', classe: 'bg-success-soft text-success' },
   DRAFT: { texto: 'Rascunho', classe: 'bg-muted text-muted-foreground' },
-  PAUSED: { texto: 'Pausado', classe: 'bg-amber-500/10 text-amber-700' },
+  PAUSED: { texto: 'Pausado', classe: 'bg-warning-soft text-warning' },
 };
 
 function moeda(valor: number): string {

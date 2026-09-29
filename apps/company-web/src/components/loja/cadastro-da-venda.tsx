@@ -94,7 +94,7 @@ export function CadastroDaVenda({ venda }: { venda: StoreOrderCustomerSource }) 
           </Button>
         </>
       ) : enderecoSalvo ? (
-        <p className="flex flex-wrap items-center gap-1.5 text-xs text-emerald-700">
+        <p className="flex flex-wrap items-center gap-1.5 text-xs text-success">
           <Check className="size-3.5" aria-hidden="true" />
           Já é seu cliente, e este endereço já está salvo nele.
           <Link href={`/clientes/${cliente.id}`} className="font-semibold hover:underline">

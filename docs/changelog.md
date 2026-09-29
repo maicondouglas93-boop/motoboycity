@@ -16512,3 +16512,94 @@ ficam com o responsável (handoff, pendência 9).
 
 **Publicação de `4d65169`** (sem "Valor total"): enviado para `main` em 27/09;
 só muda o app, que chega por este APK.
+
+## 2026-09-29 — Design system e refinamento da UI: base, painel da loja e checkout
+
+**Pedido do usuário:** auditar a UI/UX do sistema de loja online e depois
+implementar melhorias, "sem cara de site feito por IA", em 11 fases (explorar,
+auditar, propor, design system, componentes globais, telas, responsividade,
+estados, acessibilidade, verificação, revisão final). Regras: sem lógica de
+negócio nova, sem biblioteca nova, raio de 6 a 12px, sombra discreta, cor
+primária só onde importa, e "melhore o componente base em vez de criar
+exceções". O checkout foi apontado pelo usuário como a parte mais feia.
+
+**Auditoria (Fases 1 a 3)**, medida no código e na tela: as telas da loja já não
+tinham `rounded-2xl`, gradiente, `hover:scale` nem emoji; o excesso vinha da
+base. Cada `<Card>` (48 no painel) trazia raio de 21,6px, sombra azulada, anel,
+borda branca invisível e filete em gradiente; o fundo tinha dois gradientes e uma
+grade; o botão principal tinha brilho laranja e subia no hover. Contraste: o
+item ativo do menu (âmbar sobre claro) tinha 1,78:1, o contorno de campo 1,41:1,
+o placeholder 3,67:1 e o hover do botão 4,37:1. O painel da loja tinha 49 cores
+cruas do Tailwind e seis matizes nas etapas do pedido, sem usar os tokens de
+status que o próprio CSS define. No checkout: uma rolagem única de oito blocos do
+mesmo peso, troco longe do Dinheiro, três controles de escolha diferentes, campos
+de 14px, nenhum erro por campo, tema por 144 estilos inline.
+
+**Base (Fases 4 e 5)** — `docs/design-system.md` é o documento novo.
+
+- `globals.css`: `--radius` 10px e escala de 6/8/10/12 com teto em 12 (2xl, 3xl e
+  4xl valem 12); `--input` de 3,24:1; foco em verde-azulado (`--ring`); tokens
+  `success`, `warning`, `destructive-soft`, `destructive-text`, `colete-hover`
+  (6,75:1); comentários da paleta com os valores reais; bloco `.dark` removido
+  (nunca foi usado); sem gradiente no fundo, sem grade, cabeçalho chapado;
+  `.interactive-card` só troca a borda; `.auth-form-panel` sem blur.
+- `ui/`: Card (borda, sem sombra, anel nem gradiente), Button (sem brilho; alvos
+  de toque maiores com `pointer-coarse:`), Badge (6px, sem anel), Input, Select,
+  Checkbox, Tabs, Dialog (12px, sem blur nem gradiente), menus suspensos; e o
+  `Skeleton`, novo.
+- Cabeçalho: sem brilho nem pulo no botão "Chamar entregador", sem movimento nos
+  ícones, avatar sem gradiente.
+
+**Painel da loja (Fase 6)**: menu lateral com item ativo em `accent` (11,5:1);
+Vendas com o resumo do dia numa faixa só (o total à frente), abas com sublinhado,
+régua do cartão em verde-azulado, etapas em quatro cores, esqueleto e fila vazia
+que diz o que fazer; Produtos com uma lista única de divisórias, filtros sem
+cápsula, seção e opções numa linha, e o aviso "A página ainda não recebe pedidos"
+retirado, porque estava errado desde 26/09; Configurações em três grupos
+(Divulgação, Pagamento, Entrega e retirada) com `SecaoDeConfiguracao`; cores cruas
+trocadas por tokens em todas as telas da loja; `<h1>` sem a classe morta.
+
+**Checkout do cliente (Fase 6)**: ordem nova (como receber com o endereço logo
+abaixo, quando, dados, pagamento, observação); entrega/retirada e agora/agendar
+como seletor de duas opções; endereço em cinco linhas (cidade, UF e CEP juntos);
+troco logo abaixo do Dinheiro e CPF logo abaixo do Pix; campos de 16px com
+contorno de 3:1 e anel de foco na cor do texto da loja; `autocomplete` nos
+campos; erro escrito embaixo de cada campo com `aria-invalid`. **O botão de
+enviar deixou de ficar desabilitado**: ao tocar com algo faltando, os erros
+aparecem e o primeiro campo recebe o foco. O telefone passou a ser conferido por
+dígitos (10 ou mais), e a UF passou a ser exigida (a API já a exigia). A copy
+falava com a loja ("O cliente informa para quanto precisa de troco"): agora fala
+com o cliente, e em retirada o grupo é "Pagar na retirada". O aviso "Nesta
+demonstração o pedido é registrado direto, sem cobrança" aparecia também na loja
+de verdade com Pix, onde a cobrança existe: agora só na demonstração.
+
+**Arquivos:** `apps/company-web/src/app/globals.css`; `components/ui/` (`card`,
+`button`, `badge`, `input`, `select`, `checkbox`, `tabs`, `dialog`,
+`dropdown-menu`, `skeleton` novo); `components/layout/top-nav.tsx`;
+`app/(app)/loja/` (layout, vendas, produtos, configuracoes e a troca de cor e de
+`<h1>` em horarios, notificacoes, tipos-de-pedido e organizar);
+`components/loja/` (`secao-de-configuracao` novo, `catalogo.ts` e a troca de cor
+em seis componentes); `app/(loja)/pedir/[slug]/sacola/sacola.tsx`;
+`components/loja-online/` (`campos-do-checkout` novo, `paleta.ts`, `loja.module.css`);
+testes `pedido-de-verdade.test.tsx` e `produtos.test.tsx`; `docs/design-system.md`
+novo, `agent-handoff.md`, `architecture.md`. Nenhuma API, contrato, migration ou
+regra de negócio mudou.
+
+**Como foi validado:** `tsc` e eslint sem erro; vitest do `company-web` 56
+arquivos e 396 testes (5 novos no checkout: erro do CPF com foco, erro da rua,
+troco depois do Dinheiro, copy do cliente, aviso da demonstração; um teste de
+Produtos passou a afirmar o texto novo); build de produção sem erro. O checkout
+foi visto na tela, por uma rota temporária (apagada), no celular de 375px:
+entrega, retirada, agendamento, lista de pagamento e o estado de erro do CPF, com
+o foco indo para o campo. Antes, o checkout real em produção foi visto no Chrome
+do usuário, sem enviar pedido. **Não foi visto na tela**: o painel interno
+(Vendas, Produtos, Configurações, cabeçalho e menu), porque a sessão local não
+tem login de empresa e a senha não é minha; nem o app em aparelho real. O teto de
+12px de raio e o novo `Card` também valem para Pedidos, Financeiro, Clientes, a
+página de rastreio e o login, que não foram revisados um a um.
+
+**Não feito, de propósito:** as fases 7 a 9 para Horários, Tipos de pedido e
+Notificações (só receberam tokens, raio e alvo de toque); Relatórios e dashboard
+da loja, que não existem (saíram do desenho original); ilustração do item "Loja"
+no cabeçalho; abas de Vendas no `Tabs` do shadcn (o alinhamento do sublinhado dele
+não foi verificado). A lista está em "Ainda não uniformizado" do design system.

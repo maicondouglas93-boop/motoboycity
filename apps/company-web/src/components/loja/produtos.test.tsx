@@ -81,9 +81,11 @@ describe('Produtos', () => {
     );
   });
 
-  it('diz que a página do cliente mostra o cardápio, mas ainda não recebe pedido', async () => {
+  it('diz que os publicados aparecem na página da loja, sem afirmar que ela não recebe pedido', async () => {
     renderizar({ categories: [LANCHES], products: [produto({ id: 'X-Burger' })] });
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalled());
-    expect(screen.getByText(/A página ainda não recebe pedidos/)).toBeInTheDocument();
+    expect(screen.getByText(/Os publicados aparecem na página da loja/)).toBeInTheDocument();
+    // A página recebe pedidos desde 26/09: o aviso antigo estava errado.
+    expect(screen.queryByText(/ainda não recebe pedidos/)).not.toBeInTheDocument();
   });
 });

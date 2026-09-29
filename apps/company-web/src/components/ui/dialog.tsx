@@ -26,7 +26,7 @@ function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         data-slot="dialog-backdrop"
-        className="fixed inset-0 z-50 bg-asfalto/70 backdrop-blur-[4px] duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        className="fixed inset-0 z-50 bg-asfalto/60 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
       />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
@@ -36,14 +36,14 @@ function DialogContent({
            * baixa ele passa da altura da janela. Sem isto o botão de enviar
            * ficaria fora do alcance, sem nenhuma forma de rolar até ele.
            */
-          'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl border border-white/85 bg-card/98 text-card-foreground shadow-[0_34px_90px_-30px_rgba(3,24,31,0.72)] ring-1 ring-portal/15 backdrop-blur-xl duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
+          'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-lg duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
           className,
         )}
         {...props}
       >
         {children}
         <DialogPrimitive.Close
-          className="absolute top-4 right-4 rounded-lg border border-border/70 bg-card/80 p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-portal-soft hover:text-portal-deep focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="absolute top-3 right-3 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-label="Fechar"
         >
           <XIcon className="size-4" />
@@ -58,7 +58,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="dialog-header"
       className={cn(
-        'border-b bg-gradient-to-r from-portal-soft/70 to-card px-5 py-4 pr-12',
+        'border-b px-5 py-4 pr-12',
         className,
       )}
       {...props}

@@ -49,7 +49,7 @@ export default function LojaNotificacoesPage() {
   return (
     <div className="max-w-3xl space-y-5">
       <header>
-        <h1 className="text-2xl font-bold">Notificações</h1>
+        <h1>Notificações</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Quem fica sabendo do quê: você, quando o pedido chega; o cliente, a cada passo dele.
         </p>

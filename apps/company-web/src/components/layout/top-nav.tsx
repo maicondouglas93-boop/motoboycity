@@ -96,10 +96,10 @@ export function TopNav() {
                 aria-current={isActive ? 'page' : undefined}
                 aria-label={isAiqfome ? 'aiqfome — Integrações' : undefined}
                 title={isAiqfome ? 'Integrações aiqfome' : undefined}
-                className={`group flex shrink-0 items-center gap-2 rounded-xl border px-2 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-inset focus-visible:outline-none ${
+                className={`group flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-inset focus-visible:outline-none ${
                   isActive
-                    ? 'border-white/12 bg-white/12 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                    : 'border-transparent text-white/80 hover:border-white/8 hover:bg-white/[0.07] hover:text-white'
+                    ? 'bg-white/12 font-semibold text-white'
+                    : 'text-white/80 hover:bg-white/[0.07] hover:text-white'
                 }`}
               >
                 {isAiqfome && image ? (
@@ -121,10 +121,10 @@ export function TopNav() {
                         height={32}
                         sizes="32px"
                         loading="eager"
-                        className="size-8 shrink-0 object-contain motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5"
+                        className="size-8 shrink-0 object-contain"
                       />
                     ) : Icon ? (
-                      <span className="flex size-8 shrink-0 items-center justify-center motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5">
+                      <span className="flex size-8 shrink-0 items-center justify-center">
                         <Icon className="size-6" aria-hidden="true" />
                       </span>
                     ) : null}
@@ -156,7 +156,7 @@ export function TopNav() {
         <CallDriverDialog>
           <button
             type="button"
-            className="inline-flex shrink-0 items-center rounded-xl border border-white/15 bg-colete px-3 py-2 text-sm font-bold whitespace-nowrap text-asfalto shadow-[0_10px_26px_-12px_rgba(253,160,46,0.95),inset_0_1px_0_rgba(255,255,255,0.45)] transition-all hover:-translate-y-0.5 hover:bg-[#ffad45] hover:shadow-[0_14px_30px_-12px_rgba(253,160,46,0.95)] focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-offset-2 focus-visible:ring-offset-asfalto focus-visible:outline-none sm:px-4"
+            className="inline-flex h-9 shrink-0 items-center rounded-md bg-colete px-3 text-sm font-semibold whitespace-nowrap text-asfalto transition-colors hover:bg-colete-hover focus-visible:ring-2 focus-visible:ring-colete focus-visible:ring-offset-2 focus-visible:ring-offset-asfalto focus-visible:outline-none pointer-coarse:h-11 sm:px-4"
           >
             Chamar<span className="hidden sm:inline">&nbsp;entregador</span>
           </button>
@@ -164,9 +164,9 @@ export function TopNav() {
 
         <DropdownMenu>
           <DropdownMenuTrigger className="ml-auto flex shrink-0 items-center gap-2 rounded-full text-sm text-white/70 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-colete focus-visible:outline-none lg:ml-0">
-            <Avatar className="size-9 shadow-[0_6px_18px_-8px_rgba(0,0,0,0.8)] ring-1 ring-white/25">
+            <Avatar className="size-9 ring-1 ring-white/25">
               {userQuery.data?.avatarUrl && <AvatarImage src={userQuery.data.avatarUrl} alt="" />}
-              <AvatarFallback className="bg-gradient-to-br from-white/18 to-white/7 text-xs font-bold text-white">
+              <AvatarFallback className="bg-white/15 text-xs font-bold text-white">
                 {initials}
               </AvatarFallback>
             </Avatar>

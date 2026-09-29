@@ -191,7 +191,7 @@ export function LinkDaLoja() {
 
             {/* A lição que o código da central já deu: slug sem troca vira
                 papel morto quando a loja muda de nome. */}
-            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+            <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
               Se você trocar o endereço, o antigo continua funcionando e leva ao novo — seu panfleto
               e seu QR não deixam de valer. E o antigo continua seu: nenhuma outra loja pode
               pegá-lo.

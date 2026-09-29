@@ -555,6 +555,14 @@ O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
 Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
+**A aparência segue `docs/design-system.md`** (2026-09-29): cartão só com borda,
+raios de 6 a 12px, cor só para estado, ação principal em âmbar e uma por tela.
+O checkout do cliente (`sacola.tsx` e `components/loja-online/campos-do-checkout.tsx`)
+**não desabilita mais o botão de enviar** quando falta campo: ao tocar nele,
+cada campo mostra o seu erro e o primeiro recebe o foco. Não foi visto renderizado
+o painel interno (a sessão local não tem login de empresa): confira Vendas,
+Produtos e Configurações na tela antes de dar o recorte por bom.
+
 **Produtos, Organizar, Cadastrar e Editar gravam na API desde 2026-09-25**
 (rotas `/company/store/*`; ver "Catálogo da loja online" em `architecture.md`),
 e **Horários, Tipos de pedido, Notificações, o status e Configurações também**

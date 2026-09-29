@@ -137,7 +137,7 @@ export function ControleDoStatus() {
       : null;
   const fechando = faltam !== null && faltam <= operacao.notificacoes.minutosAntesDeFechar;
 
-  const cor = situacao.aberta ? 'bg-emerald-500' : pausada ? 'bg-amber-500' : 'bg-red-500';
+  const cor = situacao.aberta ? 'bg-success' : pausada ? 'bg-colete' : 'bg-destructive';
   const rotulo = situacao.aberta ? 'Aberta' : pausada ? 'Pausada' : 'Fechada';
 
   return (
@@ -165,9 +165,9 @@ export function ControleDoStatus() {
 
       {/* Fechando: a hora de decidir se fica mais um pouco, e não depois. */}
       {fechando && (
-        <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
+        <div className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-2 text-xs">
           <p className="flex items-center gap-1.5 font-medium">
-            <Clock className="size-3.5 text-amber-700" aria-hidden="true" />
+            <Clock className="size-3.5 text-warning" aria-hidden="true" />
             Fecha em {faltam} min
           </p>
           <Button

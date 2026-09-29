@@ -207,7 +207,7 @@ export default function LojaOrganizarPage() {
           >
             <ArrowLeft className="size-4" /> Produtos
           </Link>
-          <h1 className="text-2xl font-bold">Organizar o catálogo</h1>
+          <h1>Organizar o catálogo</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Esta é a ordem em que o cliente vê. O que estiver no topo é o que ele encontra primeiro.
           </p>

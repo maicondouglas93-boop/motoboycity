@@ -147,7 +147,7 @@ function Formulario({ salva, onDescartar }: { salva: StoreSettings; onDescartar:
   return (
     <>
       {semLoja && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+        <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
           Crie o link da loja, acima, para salvar a aparência: é por ele que a página existe.
         </p>
       )}

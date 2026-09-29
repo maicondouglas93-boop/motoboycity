@@ -139,7 +139,7 @@ export default function LojaHorariosPage() {
   return (
     <div className="max-w-3xl space-y-5">
       <header>
-        <h1 className="text-2xl font-bold">Horários</h1>
+        <h1>Horários</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Quando sua página aceita pedido. Fora desses horários o cliente vê o cardápio, mas só
           consegue agendar — ou esperar abrir.
@@ -521,11 +521,11 @@ function Formulario({
               className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
                 problema.grave
                   ? 'border-destructive/30 bg-destructive/5'
-                  : 'border-amber-500/30 bg-amber-500/5'
+                  : 'border-warning/30 bg-warning-soft'
               }`}
             >
               <AlertCircle
-                className={`mt-0.5 size-3.5 shrink-0 ${problema.grave ? 'text-destructive' : 'text-amber-700'}`}
+                className={`mt-0.5 size-3.5 shrink-0 ${problema.grave ? 'text-destructive' : 'text-warning'}`}
                 aria-hidden="true"
               />
               {problema.texto}

@@ -28,6 +28,17 @@
   }
 }
 
+/*
+ * Foco do teclado. A cor da loja vem inline, e estilo inline não tem :focus —
+ * por isso o anel mora aqui, na cor do texto da loja (`--foco`), que tem
+ * contraste com o fundo em qualquer tema e em qualquer cor de marca.
+ */
+.foco:focus-visible,
+.opcao:has(:focus-visible) {
+  outline: 2px solid var(--foco, currentColor);
+  outline-offset: 2px;
+}
+
 /* Quem pediu menos movimento vê o cardápio pronto, sem espera nenhuma. */
 @media (prefers-reduced-motion: reduce) {
   .entradaDaLinha {

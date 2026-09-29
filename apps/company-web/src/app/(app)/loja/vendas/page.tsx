@@ -22,6 +22,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { CadastroDaVenda } from '@/components/loja/cadastro-da-venda';
 import { mensagemDoErro } from '@/components/loja/catalogo';
 import { CHAVE_DA_CONFIGURACAO } from '@/components/loja/link-da-loja';
@@ -68,13 +69,16 @@ import { useAgora } from '@/lib/relogio';
 const CORES: Record<EtapaDoPedido, string> = {
   // A loja não vê o pedido nesta etapa; a cor existe porque o tipo tem a etapa.
   AGUARDANDO_PAGAMENTO: 'bg-muted text-muted-foreground',
-  NOVO: 'bg-amber-500/15 text-amber-800',
-  ACEITO: 'bg-sky-500/10 text-sky-700',
-  EM_PREPARO: 'bg-orange-500/10 text-orange-700',
-  PRONTO: 'bg-violet-500/10 text-violet-700',
-  SAIU_PARA_ENTREGA: 'bg-indigo-500/10 text-indigo-700',
-  ENTREGUE: 'bg-emerald-500/10 text-emerald-700',
-  CANCELADO: 'bg-destructive/10 text-destructive',
+  // Só o que muda o que a loja faz agora ganha cor: o que espera resposta
+  // (atenção), o que já saiu (andamento), o que terminou e o que caiu. O meio
+  // do preparo é neutro: a régua do cartão já mostra onde ele está.
+  NOVO: 'bg-warning-soft text-warning',
+  ACEITO: 'bg-secondary text-secondary-foreground',
+  EM_PREPARO: 'bg-secondary text-secondary-foreground',
+  PRONTO: 'bg-accent text-accent-foreground',
+  SAIU_PARA_ENTREGA: 'bg-accent text-accent-foreground',
+  ENTREGUE: 'bg-success-soft text-success',
+  CANCELADO: 'bg-destructive-soft text-destructive-text',
 };
 
 /** As seções da fila de agora, na ordem em que o pedido anda. */
@@ -130,7 +134,7 @@ export default function LojaVendasPage() {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-2xl font-bold">Vendas</h1>
+        <h1>Vendas</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Pedidos que chegaram pela página da sua loja
           {operacao
@@ -158,7 +162,12 @@ export default function LojaVendasPage() {
           </CardContent>
         </Card>
       ) : !consulta.data || !operacao ? (
-        <p className="text-sm text-muted-foreground">Carregando as vendas...</p>
+        <div className="space-y-2" role="status">
+          <span className="sr-only">Carregando as vendas...</span>
+          <Skeleton className="h-14" />
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+        </div>
       ) : (
         <Fila vendas={consulta.data} operacao={operacao} />
       )}
@@ -189,7 +198,7 @@ function PedidosPelaPagina() {
   const ligados = loja.recebePedidos;
 
   return (
-    <Card className={ligados ? 'border-emerald-500/40' : 'border-dashed'}>
+    <Card className={ligados ? 'border-border' : 'border-dashed'}>
       <CardContent className="space-y-2 py-3 text-sm">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <span className="min-w-60 flex-1">
@@ -222,7 +231,7 @@ function PedidosPelaPagina() {
           </p>
         )}
         {!CONTA_DISPONIVEL && (
-          <p className="text-xs text-amber-800">
+          <p className="text-xs text-warning">
             O login do cliente (com Google) ainda não está configurado neste endereço: mesmo com os
             pedidos ligados, a página só aceita pedido depois dele.
           </p>
@@ -291,9 +300,9 @@ function Fila({
       )}
 
       {esperandoAceite.length > 0 && (
-        <Card className="border-amber-500/40 bg-amber-500/5">
+        <Card className="border-warning/30 bg-warning-soft">
           <CardContent className="flex flex-wrap items-center gap-2 py-3 text-sm">
-            <Timer className="size-4 shrink-0 text-amber-700" aria-hidden="true" />
+            <Timer className="size-4 shrink-0 text-warning" aria-hidden="true" />
             <span>
               <strong>
                 {esperandoAceite.length === 1
@@ -306,30 +315,36 @@ function Fila({
         </Card>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent className="py-4">
-            <p className="text-xs text-muted-foreground">Vendas hoje</p>
-            <p className="mt-1 text-2xl font-bold">{deHoje.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <p className="text-xs text-muted-foreground">Total do dia</p>
-            <p className="mt-1 text-2xl font-bold">{moeda(totalDoDia)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <p className="text-xs text-muted-foreground">Ticket médio</p>
-            <p className="mt-1 text-2xl font-bold">
+      {/* O dia numa faixa só, com o total à frente. Três cartões do mesmo peso
+          faziam o resumo brigar com a fila, que é o trabalho desta tela. */}
+      <Card className="py-0">
+        <dl className="grid grid-cols-3 divide-x">
+          <div className="px-3 py-3 sm:px-4">
+            <dt className="text-xs text-muted-foreground">Total do dia</dt>
+            <dd className="mt-1 font-heading text-lg font-semibold tabular-nums sm:text-xl">
+              {moeda(totalDoDia)}
+            </dd>
+          </div>
+          <div className="px-3 py-3 sm:px-4">
+            <dt className="text-xs text-muted-foreground">Vendas hoje</dt>
+            <dd className="mt-1 font-heading text-lg font-semibold tabular-nums sm:text-xl">
+              {deHoje.length}
+            </dd>
+          </div>
+          <div className="px-3 py-3 sm:px-4">
+            <dt className="text-xs text-muted-foreground">Ticket médio</dt>
+            <dd className="mt-1 font-heading text-lg font-semibold tabular-nums sm:text-xl">
               {moeda(deHoje.length > 0 ? totalDoDia / deHoje.length : 0)}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+            </dd>
+          </div>
+        </dl>
+      </Card>
 
-      <div role="tablist" aria-label="Vendas por situação" className="flex flex-wrap gap-2">
+      <div
+        role="tablist"
+        aria-label="Vendas por situação"
+        className="-mb-2 flex gap-5 overflow-x-auto border-b"
+      >
         {abas.map((item) => (
           <button
             key={item.valor}
@@ -337,14 +352,16 @@ function Fila({
             role="tab"
             aria-selected={aba === item.valor}
             onClick={() => setAba(item.valor)}
-            className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+            className={`-mb-px shrink-0 border-b-2 py-2 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:py-3 ${
               aba === item.valor
-                ? 'border-primary bg-primary/10 font-semibold text-primary'
-                : 'text-muted-foreground hover:bg-muted'
+                ? 'border-portal font-semibold text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
             {item.texto}
-            <span className="ml-1.5 text-xs opacity-70">{item.lista.length}</span>
+            <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">
+              {item.lista.length}
+            </span>
           </button>
         ))}
       </div>
@@ -391,17 +408,24 @@ function Fila({
       )}
 
       {instante !== 0 && lista.length === 0 && (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed px-4 py-10 text-center">
+          <p className="text-sm font-medium">
             {aba === 'andamento'
-              ? 'Nenhum pedido em andamento agora.'
+              ? 'Nenhum pedido em andamento.'
               : aba === 'agendados'
-                ? 'Nenhum pedido agendado esperando a hora.'
+                ? 'Nenhum pedido agendado.'
                 : aba === 'concluidos'
                   ? 'Nenhum pedido entregue ainda.'
                   : 'Nenhum pedido cancelado.'}
-          </CardContent>
-        </Card>
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {aba === 'andamento'
+              ? 'Os pedidos novos aparecem aqui sozinhos, sem recarregar a página.'
+              : aba === 'agendados'
+                ? 'Pedidos para outro horário esperam aqui até a hora de começar.'
+                : 'Esta lista mostra os últimos dois dias.'}
+          </p>
+        </div>
       )}
     </div>
   );
@@ -486,7 +510,7 @@ function CartaoDaVenda({
   }
 
   return (
-    <Card className={venda.etapa === 'NOVO' ? 'border-amber-500/50' : undefined}>
+    <Card className={venda.etapa === 'NOVO' ? 'border-warning/40' : undefined}>
       <CardContent className="space-y-3 py-4">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
           <div className="min-w-24">
@@ -542,7 +566,7 @@ function CartaoDaVenda({
             {caminho.map((etapa, indice) => (
               <li
                 key={etapa}
-                className={`h-1.5 flex-1 rounded-full ${indice <= indiceAtual ? 'bg-primary' : 'bg-muted'}`}
+                className={`h-1.5 flex-1 rounded-full ${indice <= indiceAtual ? 'bg-portal' : 'bg-muted'}`}
                 title={nomeCurtoDaEtapa(etapa, venda.modalidade)}
               >
                 <span className="sr-only">
@@ -580,7 +604,7 @@ function CartaoDaVenda({
         {/* A corrida que não nasceu, foi cancelada ou não entregou: a loja
             decide — chamar de novo, ou levar com o próprio entregador. */}
         {venda.avisoDaCorrida && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning-soft p-2">
             <p className="w-full text-xs" role="status">
               {venda.avisoDaCorrida}
             </p>
@@ -829,9 +853,9 @@ function CartaoDaVenda({
             {/* O que o cliente escreveu vai para quem prepara, e por isso não
                 pode virar texto cinza no meio do resto. */}
             {venda.observacao && (
-              <p className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+              <p className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
                 <MessageSquare
-                  className="mt-0.5 size-4 shrink-0 text-amber-700"
+                  className="mt-0.5 size-4 shrink-0 text-warning"
                   aria-hidden="true"
                 />
                 {venda.observacao}
