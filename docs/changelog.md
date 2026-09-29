@@ -16639,3 +16639,42 @@ Pedidos, Financeiro e o checkout real. As áreas fora da loja seguem íntegras.
 erro depois dos ajustes. **Ainda não visto na tela**: as correções acima (só vão
 ao ar no push seguinte), o painel no celular, e as telas de Notificações e
 Organizar.
+
+## 2026-09-29 — Loja online: "Continuar" da sacola deixa de ser seco
+
+**Pedido do usuário:** ao tocar em "Continuar" na sacola, a transição para o
+checkout era seca, "sem carregamento nem nada".
+
+**Causa:** o botão era um `<Link>` sem nenhum estado de espera; não havia
+`loading.tsx` no app (a página `/pedir/[slug]/sacola` é de servidor e espera a
+API da loja, então a tela anterior ficava parada até a resposta); e depois da
+resposta o `Sacola` esperava a hidratação e o login do cliente mostrando só a
+faixa de 4px da marca, e o formulário surgia de uma vez.
+
+**Decisão:** três respostas, cada uma para uma espera:
+
+- O botão troca o rótulo por um spinner e "Abrindo…" no toque
+  (`useLinkStatus`, num componente filho do `Link`; sem animação para quem pediu
+  menos movimento).
+- `sacola/loading.tsx` mostra o esqueleto do checkout assim que a navegação
+  começa. A loja ainda não é conhecida ali, então usa a paleta clara neutra.
+- O mesmo esqueleto (`EsqueletoDoCheckout`, cores da loja) ocupa a espera da
+  hidratação e do login, no lugar da tela em branco; a troca de um para o outro
+  só muda cor, não layout. O conteúdo entra com um fade de 200ms (o cabeçalho, já
+  na tela, não pisca), desligado em `prefers-reduced-motion`.
+
+**Arquivos:** `components/loja-online/esqueleto-do-checkout.tsx` (novo),
+`app/(loja)/pedir/[slug]/sacola/loading.tsx` (novo),
+`components/loja-online/folha-da-sacola.tsx`,
+`app/(loja)/pedir/[slug]/sacola/sacola.tsx`,
+`components/loja-online/loja.module.css`,
+`components/loja-online/esqueleto-e-continuar.test.tsx` (novo, 3 testes).
+
+**Como foi validado:** `tsc`, eslint (`src`), vitest do `company-web` (57
+arquivos, 399 testes) e `pnpm run build` sem erro. Na tela, no servidor local e
+em 375px, com a loja de demonstração (`/pedir/minha-loja`): a sequência medida
+foi botão "Abrindo…" aos 4ms, esqueleto aos 73ms, formulário aos 98ms; o
+esqueleto foi visto isolado numa rota temporária, já removida. Local, com a API
+na mesma máquina, a espera é curta demais para o olho; a diferença aparece com
+rede lenta. **Não conferido em produção** (só vai ao ar no push) nem com a
+aparência do esqueleto no tema escuro.

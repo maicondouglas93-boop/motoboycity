@@ -37,6 +37,7 @@ import { publicStoreOrdersApi } from '@/lib/api-client';
 import { tokenDoCliente } from '@/lib/firebase-da-loja';
 import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { acertarRelogio, useAgora } from '@/lib/relogio';
+import { EsqueletoDoCheckout } from '@/components/loja-online/esqueleto-do-checkout';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import {
   ajustarQuantidade,
@@ -156,11 +157,7 @@ export function Sacola({ slug, cardapio }: { slug: string; cardapio: CardapioDaP
   const conta = useConta();
 
   if (!hidratado || !conta.carregada) {
-    return (
-      <div className="min-h-dvh" style={{ backgroundColor: paleta.fundo, color: paleta.texto }}>
-        <div className="h-1" style={{ backgroundColor: marca.corDaMarca }} />
-      </div>
-    );
+    return <EsqueletoDoCheckout paleta={paleta} corDaMarca={marca.corDaMarca} />;
   }
 
   // A loja ainda não recebe pedido pela página: dito aqui, antes de o cliente
@@ -522,7 +519,7 @@ function Conteudo({
     >
       <div className="h-1" style={{ backgroundColor: marca.corDaMarca }} />
 
-      <div className="mx-auto w-full max-w-lg pb-32">
+      <div className={`${estilos['entradaDaPagina']} mx-auto w-full max-w-lg pb-32`}>
         <header
           className="flex items-center gap-1 border-b px-2 py-2"
           style={{ borderColor: paleta.linha }}

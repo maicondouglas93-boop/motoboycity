@@ -39,9 +39,29 @@
   outline-offset: 2px;
 }
 
+/*
+ * O checkout chegando no lugar do esqueleto. Só o que vem depois do cabeçalho
+ * entra: o cabeçalho já estava na tela, igual, e piscar junto faria a troca
+ * parecer um recarregamento em vez de o formulário aparecer.
+ */
+.entradaDaPagina > :not(header) {
+  animation: entradaDaPagina 200ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+@keyframes entradaDaPagina {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 /* Quem pediu menos movimento vê o cardápio pronto, sem espera nenhuma. */
 @media (prefers-reduced-motion: reduce) {
-  .entradaDaLinha {
+  .entradaDaLinha,
+  .entradaDaPagina > :not(header) {
     animation: none;
   }
 }

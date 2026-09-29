@@ -114,7 +114,10 @@ suspenso, `shadow-lg` em diálogo: elevação é de quem flutua sobre a tela.
 
 ## Estados
 
-- **Carregando**: Skeleton.
+- **Carregando**: Skeleton. Toda ida a outra página tem resposta no toque: o
+  botão que leva diz "Abrindo…" (`useLinkStatus`) e a página de destino tem
+  `loading.tsx`. No checkout da loja é o `EsqueletoDoCheckout`, também usado na
+  espera do login do cliente, para a troca de um para o outro não piscar.
 - **Vazio**: uma frase que diz o que é, e uma que diz o que fazer, num bloco de
   borda tracejada.
 - **Erro**: o que houve e "Tentar novamente".
@@ -125,9 +128,10 @@ suspenso, `shadow-lg` em diálogo: elevação é de quem flutua sobre a tela.
 
 ## Movimento
 
-Só abrir e fechar (altura e opacidade, 150 a 220ms) e a entrada em cascata do
-cardápio. Nenhum hover move ou cresce o elemento. Quem pediu movimento reduzido
-não vê nem a cascata nem o pulsar do Skeleton.
+Só abrir e fechar (altura e opacidade, 150 a 220ms), a entrada em cascata do
+cardápio e o fade do checkout no lugar do esqueleto. Nenhum hover move ou cresce
+o elemento. Quem pediu movimento reduzido não vê nem a cascata, nem o fade, nem
+o pulsar do Skeleton, nem o giro do "Abrindo…".
 
 ## Acessibilidade
 

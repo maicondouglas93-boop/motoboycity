@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { Minus, Plus, Trash2, X } from 'lucide-react';
+import Link, { useLinkStatus } from 'next/link';
+import { Loader2, Minus, Plus, Trash2, X } from 'lucide-react';
 import { AnimatePresence, m } from 'motion/react';
 import { assinaturaDoItem } from './armazenamento';
 import { FolhaDeBaixo } from './folha-de-baixo';
@@ -9,6 +9,25 @@ import type { ItemEscolhido } from './folha-do-produto';
 import { CURVA_ENTRADA, CURVA_SAIDA, DURACAO } from './movimento';
 import { NumeroRolante } from './numero-rolante';
 import { moeda, textoSobre, type Paleta } from './paleta';
+
+/**
+ * O texto do botão "Continuar", que troca por "Abrindo…" no toque.
+ *
+ * `useLinkStatus` só enxerga o `<Link>` que o contém, por isso é um componente
+ * à parte, filho do link. O toque já é a resposta ao cliente: sem isto o botão
+ * ficava igual até a próxima tela chegar, e num 4G fraco parecia que o toque
+ * não tinha pegado — e o cliente tocava de novo.
+ */
+function RotuloDoContinuar() {
+  const { pending } = useLinkStatus();
+  if (!pending) return <>Continuar</>;
+  return (
+    <span className="inline-flex items-center gap-2" role="status">
+      <Loader2 aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+      Abrindo…
+    </span>
+  );
+}
 
 /**
  * A sacola aberta por cima do cardápio, sem sair dele.
@@ -74,7 +93,7 @@ export function FolhaDaSacola({
             className="flex h-12 w-full items-center justify-center rounded-xl text-sm font-semibold"
             style={{ backgroundColor: corDeAcao, color: textoSobre(corDeAcao) }}
           >
-            Continuar
+            <RotuloDoContinuar />
           </Link>
         </div>
       }
