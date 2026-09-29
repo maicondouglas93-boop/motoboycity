@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { CupomDaLoja, CupomPublico } from '@motoboycity/types';
+import type { CupomDaLoja, CupomDisponivel, CupomPublico } from '@motoboycity/types';
 import {
   CODIGO_DO_CUPOM,
   datasDoCupom,
@@ -60,6 +60,7 @@ function paraALoja(linha: StoreCoupon): CupomDaLoja {
     ...paraPublico(linha),
     id: linha.id,
     ativo: linha.active,
+    mostrarNoCheckout: linha.showInCheckout,
     inicio: linha.startDate,
     fim: linha.endDate,
     limiteDeUsos: linha.maxUses,
@@ -75,6 +76,9 @@ function dataBr(data: string): string {
   const [ano, mes, dia] = data.split('-');
   return `${dia}/${mes}/${ano}`;
 }
+
+/** A lista do checkout é para escolher com o olho: passando disso, vira um catálogo de códigos. */
+export const MAXIMO_DE_CUPONS_NA_LISTA = 12;
 
 function naoAchado(): NotFoundException {
   return new NotFoundException({
@@ -189,6 +193,7 @@ export class StoreCouponsService {
         productIds: original.productIds,
         categoryIds: original.categoryIds,
         appliesToPromoItems: original.appliesToPromoItems,
+        showInCheckout: original.showInCheckout,
         active: false,
       },
     });
@@ -257,6 +262,45 @@ export class StoreCouponsService {
       limiteDeUsos: linha.maxUses,
       limitePorCliente: linha.maxUsesPerCustomer,
     };
+  }
+
+  /**
+   * Os cupons da lista "Cupons" do checkout, para ESTE cliente agora: os que a loja marcou
+   * para aparecer, ligados, dentro das datas, com uso e dentro do limite por cliente. Chega
+   * ao cliente só o que ele precisa para escolher e para a página calcular o desconto — o
+   * que depende da sacola (pedido mínimo, itens alcançados) ela confere com as regras que
+   * recebe, e o servidor confere de novo ao aplicar e ao fazer o pedido.
+   */
+  async disponiveis(companyId: string, clienteId: string, agora: Date): Promise<CupomDisponivel[]> {
+    const linhas = await this.prisma.storeCoupon.findMany({
+      where: { companyId, active: true, showInCheckout: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+    });
+    const vigentes = linhas.filter(
+      (linha) =>
+        datasDoCupom({ inicio: linha.startDate, fim: linha.endDate }, agora) === 'VIGENTE' &&
+        !(linha.maxUses !== null && linha.usedCount >= linha.maxUses),
+    );
+
+    // Quantas vezes ESTE cliente usou cada um: só se pergunta quando algum cupom tem limite por cliente.
+    const comLimite = vigentes.filter((linha) => linha.maxUsesPerCustomer !== null);
+    const usos = new Map<string, number>();
+    if (comLimite.length > 0) {
+      const contados = await this.prisma.storeCouponRedemption.groupBy({
+        by: ['couponId'],
+        where: { couponId: { in: comLimite.map((linha) => linha.id) }, customerAuthId: clienteId },
+        _count: { _all: true },
+      });
+      for (const item of contados) usos.set(item.couponId, item._count._all);
+    }
+
+    return vigentes
+      .filter(
+        (linha) =>
+          linha.maxUsesPerCustomer === null || (usos.get(linha.id) ?? 0) < linha.maxUsesPerCustomer,
+      )
+      .slice(0, MAXIMO_DE_CUPONS_NA_LISTA)
+      .map((linha) => ({ ...paraPublico(linha), fim: linha.endDate }));
   }
 
   private async daEmpresa(companyId: string, id: string): Promise<StoreCoupon> {
@@ -328,6 +372,7 @@ export class StoreCouponsService {
       productIds: payload.produtoIds,
       categoryIds: payload.categoriaIds,
       appliesToPromoItems: payload.valeEmPromocao,
+      showInCheckout: payload.mostrarNoCheckout,
       active: payload.ativo,
     };
   }

@@ -1,4 +1,4 @@
-import type { ConferenciaDoCupom, PedidoDaLoja } from '@motoboycity/types';
+import type { ConferenciaDoCupom, CupomDisponivel, PedidoDaLoja } from '@motoboycity/types';
 import type { StoreCheckoutPayload, StoreCouponQuotePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
@@ -31,6 +31,18 @@ export function createPublicStoreOrdersApi({ baseUrl }: PublicStoreOrdersApiConf
         body: JSON.stringify(pedido),
       });
       return parseJsonOrThrow<PedidoDaLoja>(response);
+    },
+
+    /**
+     * A lista "Cupons" do checkout: os cupons que a loja quis mostrar e que ainda valem
+     * para este cliente (ligados, nas datas, com uso e dentro do limite dele). Cada um traz
+     * as regras, para a página dizer se serve à sacola de agora.
+     */
+    async cuponsDisponiveis(slug: string, tokenDoCliente: string): Promise<CupomDisponivel[]> {
+      const response = await apiFetch(`${base(slug)}/coupons`, {
+        headers: { Authorization: `Bearer ${tokenDoCliente}` },
+      });
+      return parseJsonOrThrow<CupomDisponivel[]>(response);
     },
 
     /**

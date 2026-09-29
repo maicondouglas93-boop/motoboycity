@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ApiError } from '@motoboycity/api-client';
-import type { CupomPublico, OperacaoPublica, PedidoDaLoja } from '@motoboycity/types';
+import type {
+  CupomDisponivel,
+  CupomPublico,
+  OperacaoPublica,
+  PedidoDaLoja,
+} from '@motoboycity/types';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sacola } from '@/app/(loja)/pedir/[slug]/sacola/sacola';
 import { OPERACAO_DE_EXEMPLO } from '@/lib/loja-mock';
@@ -15,6 +20,7 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
 const mocks = vi.hoisted(() => ({
   checkout: vi.fn(),
   conferirCupom: vi.fn(),
+  cuponsDisponiveis: vi.fn(),
   pedidos: vi.fn(),
   push: vi.fn(),
 }));
@@ -36,6 +42,7 @@ vi.mock('@/lib/api-client', () => ({
   publicStoreOrdersApi: {
     checkout: mocks.checkout,
     conferirCupom: mocks.conferirCupom,
+    cuponsDisponiveis: mocks.cuponsDisponiveis,
     pedidos: mocks.pedidos,
   },
 }));
@@ -98,6 +105,9 @@ function cardapio(mudancas: Partial<CardapioDaPagina> = {}): CardapioDaPagina {
 }
 
 beforeEach(() => {
+  // Sem cupom na lista, salvo nos testes que a preenchem.
+  mocks.cuponsDisponiveis.mockReset();
+  mocks.cuponsDisponiveis.mockResolvedValue([]);
   vi.useFakeTimers({ toFake: ['Date'] });
   // Quarta, meio-dia: a loja está aberta.
   vi.setSystemTime(new Date('2026-09-23T12:00:00-03:00'));
@@ -160,7 +170,7 @@ function cupomDe(mudancas: Partial<CupomPublico> = {}): CupomPublico {
 describe('Cupom no checkout', () => {
   /** Abre o campo, digita o código e toca em "Aplicar". */
   async function aplicar(codigo = 'bemvindo10') {
-    fireEvent.click(await screen.findByRole('button', { name: 'Tem um cupom de desconto?' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tem um código de cupom?' }));
     fireEvent.change(screen.getByLabelText('Código do cupom'), { target: { value: codigo } });
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
   }
@@ -243,7 +253,7 @@ describe('Cupom no checkout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remover' }));
 
     expect(screen.queryByText('− R$ 4,20')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Tem um cupom de desconto?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um código de cupom?' })).toBeInTheDocument();
   });
 
   it('a sacola que não serve ao cupom (pedido mínimo) mostra o motivo, sem desconto, e o pedido vai sem cupom', async () => {
@@ -290,7 +300,7 @@ describe('Cupom no checkout', () => {
     expect(await screen.findByText('Este cupom já foi usado todas as vezes.')).toBeInTheDocument();
     // O cupom saiu, e o total voltou ao de sempre: o cliente pode pedir sem ele.
     expect(screen.queryByText('− R$ 4,20')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Tem um cupom de desconto?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um código de cupom?' })).toBeInTheDocument();
   });
 
   it('na loja de demonstração não há cupom', async () => {
@@ -298,8 +308,180 @@ describe('Cupom no checkout', () => {
 
     await screen.findByRole('heading', { name: 'Finalizar pedido' });
     expect(
-      screen.queryByRole('button', { name: 'Tem um cupom de desconto?' }),
+      screen.queryByRole('button', { name: 'Tem um código de cupom?' }),
     ).not.toBeInTheDocument();
+  });
+});
+
+/** Um cupom da lista do checkout: as regras e o último dia. */
+function disponivel(mudancas: Partial<CupomDisponivel> = {}): CupomDisponivel {
+  return { ...cupomDe(), fim: null, ...mudancas };
+}
+
+describe('A área "Cupons" do checkout', () => {
+  const abrir = () => render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+  it('lista os cupons disponíveis, com o que cada um faz e o que dá a esta sacola', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([
+      disponivel({ pedidoMinimo: 30, fim: '2026-10-31' }),
+    ]);
+    abrir();
+
+    expect(await screen.findByRole('heading', { name: 'Cupons' })).toBeInTheDocument();
+    expect(await screen.findByText('BEMVINDO10')).toBeInTheDocument();
+    expect(screen.getByText('10% de desconto')).toBeInTheDocument();
+    // 2 x 21,00 = 42,00; 10% = 4,20.
+    expect(screen.getByText('Você economiza R$ 4,20 nesta sacola')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Pedido mínimo de R$ 30,00 · Não vale em itens em promoção · Válido até 31/10/2026',
+      ),
+    ).toBeInTheDocument();
+    expect(mocks.cuponsDisponiveis).toHaveBeenCalledWith(SLUG, 'token-do-google');
+  });
+
+  it('um toque em "Aplicar" confere no servidor e aplica: o total já vai com o desconto', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([disponivel()]);
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe(), desconto: 4.2 });
+    mocks.checkout.mockResolvedValue({ numero: 30 } as PedidoDaLoja);
+    abrir();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aplicar o cupom BEMVINDO10' }));
+
+    await waitFor(() =>
+      expect(mocks.conferirCupom).toHaveBeenCalledWith(SLUG, 'token-do-google', {
+        cupom: 'BEMVINDO10',
+        itens: [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1'], quantidade: 2 }],
+      }),
+    );
+    // Aplicado, a lista some e a linha do cupom entra, com o desconto no total.
+    expect(await screen.findByText('− R$ 4,20')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Cupons' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ cupom: 'BEMVINDO10', totalVisto: 42.8 }),
+      ),
+    );
+  });
+
+  it('o cupom que não serve a esta sacola aparece com o motivo, e o botão não deixa aplicar', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([disponivel({ pedidoMinimo: 100 })]);
+    abrir();
+
+    expect(
+      await screen.findByText(
+        'Faltam R$ 58,00 em itens para usar este cupom (pedido mínimo de R$ 100,00).',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aplicar o cupom BEMVINDO10' })).toBeDisabled();
+    expect(screen.queryByText(/Você economiza/)).not.toBeInTheDocument();
+  });
+
+  it('os que servem vêm primeiro, do maior desconto ao menor, e o melhor vem marcado', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([
+      disponivel({ codigo: 'FRETE5', tipo: 'VALOR', percentual: null, valor: 5 }),
+      disponivel({ codigo: 'GRANDE100', pedidoMinimo: 500 }),
+      disponivel({ codigo: 'VINTE', percentual: 20 }),
+    ]);
+    abrir();
+
+    await screen.findByText('VINTE');
+    const codigos = screen
+      .getAllByRole('button', { name: /^Aplicar o cupom / })
+      .map((botao) => (botao.getAttribute('aria-label') ?? '').replace('Aplicar o cupom ', ''));
+    // 20% de 42,00 = 8,40; R$ 5,00; e o de mínimo alto, que não serve, por último.
+    expect(codigos).toEqual(['VINTE', 'FRETE5', 'GRANDE100']);
+    expect(screen.getAllByText('Melhor desconto')).toHaveLength(1);
+    expect(screen.getByText('Você economiza R$ 8,40 nesta sacola')).toBeInTheDocument();
+  });
+
+  it('com um cupom só que serve, ele não leva o selo de "melhor"', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([disponivel()]);
+    abrir();
+
+    await screen.findByText('BEMVINDO10');
+    expect(screen.queryByText('Melhor desconto')).not.toBeInTheDocument();
+  });
+
+  it('sem cupom disponível, diz isso, e o código digitado continua ao alcance', async () => {
+    abrir();
+
+    expect(await screen.findByText('Nenhum cupom disponível no momento.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um código de cupom?' })).toBeInTheDocument();
+  });
+
+  it('enquanto procura, avisa; se a lista não carrega, diz sem alarme e deixa digitar o código', async () => {
+    mocks.cuponsDisponiveis.mockRejectedValue(new Error('sem rede'));
+    abrir();
+
+    expect(
+      await screen.findByText('Não deu para carregar a lista de cupons agora.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um código de cupom?' })).toBeInTheDocument();
+  });
+
+  it('o servidor recusa o cupom do cartão (acabou nesse meio tempo): a frase dele aparece', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValue([disponivel()]);
+    mocks.conferirCupom.mockRejectedValue(
+      new ApiError(409, {
+        message: 'Este cupom já foi usado todas as vezes.',
+        code: 'STORE_COUPON_EXHAUSTED',
+      }),
+    );
+    abrir();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aplicar o cupom BEMVINDO10' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Este cupom já foi usado todas as vezes.',
+    );
+    expect(screen.queryByText('Remover')).not.toBeInTheDocument();
+  });
+
+  it('remover o cupom aplicado devolve a lista, relida do servidor', async () => {
+    mocks.cuponsDisponiveis.mockResolvedValueOnce([disponivel()]).mockResolvedValue([]);
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe(), desconto: 4.2 });
+    abrir();
+    fireEvent.click(await screen.findByRole('button', { name: 'Aplicar o cupom BEMVINDO10' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remover' }));
+
+    // Relida: o cupom que acabou de sair não volta se o servidor já não o lista.
+    expect(await screen.findByText('Nenhum cupom disponível no momento.')).toBeInTheDocument();
+    expect(mocks.cuponsDisponiveis).toHaveBeenCalledTimes(2);
+  });
+
+  it('digitar o código de um cupom secreto continua funcionando', async () => {
+    mocks.conferirCupom.mockResolvedValue({
+      cupom: cupomDe({ codigo: 'CONVITE20' }),
+      desconto: 4.2,
+    });
+    abrir();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Tem um código de cupom?' }));
+    fireEvent.change(screen.getByLabelText('Código do cupom'), { target: { value: 'convite20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
+
+    await waitFor(() =>
+      expect(mocks.conferirCupom).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ cupom: 'CONVITE20' }),
+      ),
+    );
+    expect(await screen.findByText('Cupom CONVITE20', { selector: 'span' })).toBeInTheDocument();
+  });
+
+  it('na loja de demonstração não há área de cupons, nem chamada ao servidor', async () => {
+    render(<Sacola slug={SLUG} cardapio={cardapio({ operacao: null })} />);
+
+    await screen.findByRole('heading', { name: 'Finalizar pedido' });
+    expect(screen.queryByRole('heading', { name: 'Cupons' })).not.toBeInTheDocument();
+    expect(mocks.cuponsDisponiveis).not.toHaveBeenCalled();
   });
 });
 

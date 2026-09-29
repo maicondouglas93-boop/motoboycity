@@ -17213,3 +17213,68 @@ vista no navegador, com o mouse); o painel no modo escuro; e a criação simult�
 destaques quando a loja está com nove (podem passar de dez por uma corrida rara; a conferência do
 limite é uma leitura antes da gravação, sem trava). Por isso a ordem aceita listas de até 100
 destaques: a loja nessa situação ainda reordena, e só não cria outro até apagar um.
+
+## 2026-09-29 — Loja online: área "Cupons" no checkout
+
+**Pedido do usuário:** "no checkout pode ter uma área cupons, cliente entra e vê se tem um
+cupom válido disponível". Isso muda uma decisão dos Cupons, que dizia que a página não
+recebia a lista de cupons (quem não soubesse o código não o via).
+
+**Decisão:**
+
+- A lista existe, mas **quem decide o que aparece é a loja**, cupom a cupom: nova escolha
+  "Mostrar este cupom no checkout" (`store_coupons.showInCheckout`). Marcada, o cupom aparece
+  para todo cliente que entra; desmarcada, ele continua **secreto** (só por código — o convite,
+  o cupom de um cliente só). O cupom novo nasce marcado no formulário; no banco o padrão é
+  `false`, então os cupons que já existiam **continuam secretos** até a loja marcar: nenhum
+  código escondido vira público por causa desta mudança.
+- `GET /public/stores/:slug/orders/coupons` (login do cliente, 30 por minuto) devolve, para
+  ESTE cliente agora, só o que vale: marcado para aparecer, ligado, dentro das datas, com uso
+  e dentro do limite por cliente (quem já usou o cupom de 1 uso por cliente não o vê; se o
+  pedido é cancelado, ele volta). No máximo 12, o mais novo primeiro. Cada item traz as regras
+  e o último dia — nada de usos, limites ou datas de criação.
+- Na página, a área **"Cupons"** mostra cada cupom com o que faz, as condições e, **para a
+  sacola de agora**, quanto desconta ou por que não serve (faltam R$ X para o mínimo; os itens
+  já estão em promoção), pela mesma regra do servidor (`aplicarCupom`), recalculada a cada
+  mudança da sacola. Os que servem vêm primeiro, do maior desconto ao menor, e o maior leva
+  o selo "Melhor desconto" (só quando há mais de um que serve). Um toque em "Aplicar" confere
+  no servidor e aplica. Sem cupom disponível, a página diz "Nenhum cupom disponível no
+  momento"; se a lista não carrega, diz sem alarme e deixa digitar. "Tem um código de cupom?"
+  continua para o cupom secreto. Ao remover o cupom aplicado, a lista é relida.
+- A lista é conveniência e não decide nada: ao aplicar e ao fazer o pedido o servidor confere
+  tudo de novo, como se o cliente tivesse digitado o código.
+- Painel: a lista de cupons diz quais aparecem no checkout e quais são "só com o código", e o
+  resumo do formulário também.
+- Os textos do cupom (`descricaoDoCupom`, `condicoesDoCupom`) passaram para
+  `lib/loja-cupons.ts`, para o painel e o checkout lerem os mesmos.
+
+**Migration:** `20260929250000_cupons_no_checkout`, aditiva (uma coluna, `showInCheckout`,
+`NOT NULL DEFAULT false`). Validada em banco descartável: aplica junto das outras, o banco fica
+igual ao schema, o SQL de desfazer (`DROP COLUMN`) volta ao schema anterior, e reaplica. **A
+Render aplica ao publicar.**
+
+**Arquivos:** `packages/types` (`store-marketing.ts`), `packages/validation`
+(`store-coupon.schema.ts`), `packages/api-client` (`public-store-orders.ts`), `apps/api`
+(`prisma/schema.prisma`, a migration, `store-coupons.service.ts`, `store-orders.service.ts` e
+`public-store-orders.controller.ts`, os specs desses e `test/store-marketing.e2e-spec.ts`),
+`apps/company-web` (`lib/loja-cupons.ts` novo, `loja-online/cupom-do-checkout.tsx`, `sacola.tsx`,
+`components/loja/marketing.ts`, `formulario-de-cupom.tsx`) e os testes de cada um. Docs:
+`business-rules.md` (a regra que dizia que a página não recebia a lista foi trocada),
+`architecture.md` e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); eslint da API, do painel e dos
+pacotes; `validation`, `types` e `api-client` também com `--typeRoots` isolado, como o deploy;
+Jest da API (1670 passaram, 1 pulado); vitest do painel (557); build do painel; E2E inteiro no
+banco descartável (30 suítes, 271 testes), com um cenário novo que confere pelo HTTP que a lista
+traz só o visível, ligado e dentro das datas, que o cupom da outra loja e o secreto não
+aparecem, que o secreto continua valendo por código, que quem usou o cupom de 1 uso não o vê
+(e o outro cliente vê) e que ele volta quando o pedido é cancelado, e que a loja esconde o
+cupom e ele some da lista sem deixar de valer por código. Os cartões foram vistos no navegador,
+a 375px, numa rota temporária já removida.
+
+**Não conferido:** nada em produção; o checkout logado com a lista de ponta a ponta no
+navegador contra o servidor (não há login de cliente local: o caminho foi coberto por E2E e por
+testes com a API simulada); e o painel no modo escuro. Também: um teste de reordenação de
+destaques falhou uma vez numa rodada completa (passou nas duas seguintes e sozinho); a causa era
+o teste assumir que a tela mudava no mesmo instante do clique, e ele foi trocado por um servidor
+de mentira que guarda a ordem e por esperas explícitas.

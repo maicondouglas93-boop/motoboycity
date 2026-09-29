@@ -143,6 +143,23 @@ describe('Marketing — visão geral, destaques', () => {
   });
 });
 
+/**
+ * Um servidor de mentira que GUARDA a ordem: ler devolve o que foi gravado, como o de verdade.
+ * Sem isso, a releitura que vem depois de cada gravação traria a ordem de antes e desfaria, na
+ * tela, o que o teste acabou de mover — e o teste ficaria dependendo de quem chega primeiro.
+ */
+function servidorQueGuardaAOrdem() {
+  let guardados = TRES;
+  mocks.highlights.mockImplementation(() => Promise.resolve(guardados));
+  mocks.reorderHighlights.mockImplementation((_token: string, ids: string[]) => {
+    guardados = ids.map((id, indice) => ({
+      ...TRES.find((item) => item.id === id)!,
+      posicao: indice,
+    }));
+    return Promise.resolve(guardados);
+  });
+}
+
 describe('Destaques — a lista', () => {
   it('lista na ordem da loja, com a situação, os produtos e o período', async () => {
     mocks.highlights.mockResolvedValue([
@@ -182,39 +199,32 @@ describe('Destaques — a lista', () => {
   });
 
   it('descer muda a lista na hora e grava a ordem INTEIRA', async () => {
-    mocks.highlights.mockResolvedValue(TRES);
-    mocks.reorderHighlights.mockResolvedValue([
-      { ...TRES[1]!, posicao: 0 },
-      { ...TRES[0]!, posicao: 1 },
-      TRES[2]!,
-    ]);
+    servidorQueGuardaAOrdem();
     comQuery(<DestaquesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Descer Mais pedidos' }));
 
     // A tela já mostra a ordem nova, antes de a API responder.
-    expect(titulosNaTela()).toEqual(['Novidades', 'Mais pedidos', 'Almoço']);
+    await waitFor(() => expect(titulosNaTela()).toEqual(['Novidades', 'Mais pedidos', 'Almoço']));
     await waitFor(() =>
       expect(mocks.reorderHighlights).toHaveBeenCalledWith('token', ['b', 'a', 'c']),
     );
   });
 
   it('subir move um lugar para cima', async () => {
-    mocks.highlights.mockResolvedValue(TRES);
-    mocks.reorderHighlights.mockResolvedValue(TRES);
+    servidorQueGuardaAOrdem();
     comQuery(<DestaquesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Subir Almoço' }));
 
-    expect(titulosNaTela()).toEqual(['Mais pedidos', 'Almoço', 'Novidades']);
+    await waitFor(() => expect(titulosNaTela()).toEqual(['Mais pedidos', 'Almoço', 'Novidades']));
     await waitFor(() =>
       expect(mocks.reorderHighlights).toHaveBeenCalledWith('token', ['a', 'c', 'b']),
     );
   });
 
   it('dois toques seguidos gravam uma lista de cada vez, cada uma a partir do que a tela mostra', async () => {
-    mocks.highlights.mockResolvedValue(TRES);
-    mocks.reorderHighlights.mockResolvedValue(TRES);
+    servidorQueGuardaAOrdem();
     comQuery(<DestaquesPage />);
 
     // O "Mais pedidos" desce duas vezes seguidas, antes de a primeira resposta chegar.
@@ -222,7 +232,7 @@ describe('Destaques — a lista', () => {
     fireEvent.click(descer);
     fireEvent.click(screen.getByRole('button', { name: 'Descer Mais pedidos' }));
 
-    expect(titulosNaTela()).toEqual(['Novidades', 'Almoço', 'Mais pedidos']);
+    await waitFor(() => expect(titulosNaTela()).toEqual(['Novidades', 'Almoço', 'Mais pedidos']));
     await waitFor(() => expect(mocks.reorderHighlights).toHaveBeenCalledTimes(2));
     expect(mocks.reorderHighlights.mock.calls.map(([, ids]) => ids)).toEqual([
       ['b', 'a', 'c'],

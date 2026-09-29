@@ -241,17 +241,27 @@ no alcance, 409 `STORE_COUPON_TARGET_NOT_FOUND`; código repetido, 409
 `STORE_COUPON_CODE_TAKEN`). `paraOPedido` procura o cupom por (empresa, código) e confere o
 que é do cupom e deste cliente: ligado, datas, limite total e limite por cliente.
 
-No cliente, `POST /public/stores/:slug/orders/coupon` ("aplicar cupom", com `ClienteDaLojaGuard`
-e 10 por minuto) devolve as regras do cupom e o desconto de agora, sem gravar; a página
-recalcula o desconto a cada mudança da sacola. `StoreOrdersService.checkout` refaz tudo: a
+No cliente, `GET /public/stores/:slug/orders/coupons` (a lista "Cupons" do checkout, com
+`ClienteDaLojaGuard` e 30 por minuto) devolve os cupons que a loja marcou para aparecer
+(`showInCheckout`, coluna `store_coupons.showInCheckout`, padrão `false` no banco: o cupom de
+antes dela era secreto) e que ainda valem para ESTE cliente — `StoreCouponsService.disponiveis`:
+ligados, nas datas, com uso e dentro do limite por cliente (uma contagem agrupada dos registros
+de uso, só quando algum cupom tem esse limite), até 12, o mais novo primeiro. Cada item é
+`CupomDisponivel`: as regras e o último dia, sem usos nem limites.
+`POST /public/stores/:slug/orders/coupon` ("aplicar cupom", com `ClienteDaLojaGuard` e 10 por
+minuto) devolve as regras do cupom e o desconto de agora, sem gravar; a página recalcula o
+desconto a cada mudança da sacola. `StoreOrdersService.checkout` refaz tudo: a
 sacola sai de `precificarSacola` (a mesma da conferência), o cupom passa por `conferirCupom`
 antes do total visto, e `gravarComNumero` conta o uso na transação (`UPDATE` condicional, que
 trava a linha; a contagem por cliente vem depois dele) e cria o registro de uso. `mudar`
 devolve o uso ao ir a `CANCELADO` (`devolverUsoDoCupom`, que só devolve se apagou o registro).
 
 No `company-web`: `/loja/marketing/cupons` (lista, `nova`, `[id]/editar`), `formulario-de-cupom.tsx`
-e, no checkout, `cupom-do-checkout.tsx`. "Meus pedidos", Vendas e a comanda mostram o cupom; a
-comanda tira o cupom da conta da taxa.
+e, no checkout, `cupom-do-checkout.tsx` (a lista de cartões, `CartoesDeCupom`, cada um avaliado
+com `aplicarCupom` sobre `sacola.regra`, e a digitação do código). Os textos do cupom
+(`descricaoDoCupom`, `condicoesDoCupom`) moram em `lib/loja-cupons.ts`, para o painel e o cliente
+lerem os mesmos. "Meus pedidos", Vendas e a comanda mostram o cupom; a comanda tira o cupom da
+conta da taxa.
 
 ### Destaques da loja online
 

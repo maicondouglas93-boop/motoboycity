@@ -59,6 +59,20 @@ describe('storeCouponSchema', () => {
     });
   });
 
+  it('o cupom nasce escondido do checkout: mostrar é uma escolha da loja', () => {
+    expect(
+      storeCouponSchema.parse({ codigo: 'BEMVINDO10', tipo: 'PERCENTUAL', percentual: 10 }),
+    ).toMatchObject({ mostrarNoCheckout: false });
+    expect(
+      storeCouponSchema.parse({
+        codigo: 'BEMVINDO10',
+        tipo: 'PERCENTUAL',
+        percentual: 10,
+        mostrarNoCheckout: true,
+      }),
+    ).toMatchObject({ mostrarNoCheckout: true });
+  });
+
   it('o que o tipo não usa é descartado', () => {
     const percentual = storeCouponSchema.parse({ ...base, valor: 30 });
     const fixo = storeCouponSchema.parse({

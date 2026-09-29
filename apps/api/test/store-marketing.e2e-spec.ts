@@ -769,6 +769,82 @@ describe('Promoções da loja (e2e)', () => {
         .expect(200);
     });
 
+    it('a lista "Cupons" do checkout mostra só o que a loja quis mostrar e que ainda vale para o cliente', async () => {
+      zerarLimite();
+      const lista = (link: string, quem: string) =>
+        request(servidor()).get(`/public/stores/${link}/orders/coupons`).set(cliente(quem));
+      const codigos = async (link: string, quem: string) =>
+        ((await lista(link, quem).expect(200)).body as Array<{ codigo: string }>)
+          .map((item) => item.codigo)
+          .sort();
+
+      const publico = await criar(
+        dezPorCento({ codigo: 'VITRINE10', mostrarNoCheckout: true, limitePorCliente: 1 }),
+      );
+      const secreto = await criar(dezPorCento({ codigo: 'SECRETO10' }));
+      await criar(dezPorCento({ codigo: 'DESLIGADO10', mostrarNoCheckout: true, ativo: false }));
+      await criar(dezPorCento({ codigo: 'VENCIDO10', mostrarNoCheckout: true, fim: '2020-01-01' }));
+      await criar(
+        dezPorCento({ codigo: 'FUTURO10', mostrarNoCheckout: true, inicio: '2999-01-01' }),
+      );
+      // O cupom da loja B, também visível, não aparece na A.
+      await criar(dezPorCento({ codigo: 'DA-LOJA-B', mostrarNoCheckout: true }), comoB);
+      expect(publico.mostrarNoCheckout).toBe(true);
+      expect(secreto.mostrarNoCheckout).toBe(false);
+
+      // Sem login, não lista.
+      await request(servidor()).get(`/public/stores/${lojaA.link}/orders/coupons`).expect(401);
+
+      // O cliente vê só o visível, ligado e dentro das datas; o secreto continua valendo por código.
+      expect(await codigos(lojaA.link, 'cliente-a')).toEqual(['VITRINE10']);
+      await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'SECRETO10').expect(200);
+      expect(await codigos(lojaB.link, 'cliente-a')).toEqual(['DA-LOJA-B']);
+
+      // O que a lista traz são as regras e o último dia — nada do que é só da loja.
+      const [item] = (await lista(lojaA.link, 'cliente-a').expect(200)).body as Array<
+        Record<string, unknown>
+      >;
+      expect(item).toEqual({
+        codigo: 'VITRINE10',
+        tipo: 'PERCENTUAL',
+        percentual: 10,
+        valor: null,
+        pedidoMinimo: null,
+        descontoMaximo: null,
+        valeEmPromocao: false,
+        produtoIds: [],
+        categoriaIds: [],
+        fim: null,
+      });
+
+      // Quem já usou o cupom de 1 uso por cliente não o vê mais; o outro cliente ainda vê.
+      const feito = (
+        await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'VITRINE10').expect(201)
+      ).body as PedidoDaLoja;
+      expect(await codigos(lojaA.link, 'cliente-a')).toEqual([]);
+      expect(await codigos(lojaA.link, 'cliente-b')).toEqual(['VITRINE10']);
+
+      // Cancelado o pedido, o uso volta, e o cupom volta para a lista dele.
+      await request(servidor())
+        .post(`/company/store/orders/${feito.id}/cancel`)
+        .set(comoA())
+        .send({ motivo: 'Cliente desistiu' })
+        .expect(201);
+      expect(await codigos(lojaA.link, 'cliente-a')).toEqual(['VITRINE10']);
+
+      // A loja esconde o cupom: some da lista, mas o código segue valendo.
+      await editar(
+        publico.id,
+        dezPorCento({ codigo: 'VITRINE10', mostrarNoCheckout: false }),
+      ).expect(200);
+      expect(await codigos(lojaA.link, 'cliente-a')).toEqual([]);
+      await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'VITRINE10').expect(200);
+
+      await prisma.storeCoupon.deleteMany({
+        where: { company: { document: { in: [lojaA.document, lojaB.document] } } },
+      });
+    });
+
     it('com um uso só, dois pedidos ao mesmo tempo: um leva o cupom, o outro é recusado', async () => {
       zerarLimite();
       const cupom = await criar(dezPorCento({ codigo: 'CORRIDA1', limiteDeUsos: 1 }));

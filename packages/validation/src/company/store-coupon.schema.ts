@@ -63,6 +63,8 @@ export const storeCouponSchema = z
       .max(100, 'Escolha no máximo 100 seções.')
       .default([]),
     valeEmPromocao: z.boolean().default(false),
+    /** Nasce escondido: mostrar um cupom a todos os clientes é uma escolha da loja. */
+    mostrarNoCheckout: z.boolean().default(false),
     ativo: z.boolean().default(true),
   })
   .superRefine((cupom, contexto) => {

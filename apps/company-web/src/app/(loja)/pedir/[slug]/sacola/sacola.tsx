@@ -737,6 +737,7 @@ function Conteudo({
                 <CupomDoCheckout
                   slug={slug}
                   itens={itens}
+                  regra={sacola.regra}
                   aplicado={cupom}
                   recusa={doCupom.recusa}
                   paleta={paleta}

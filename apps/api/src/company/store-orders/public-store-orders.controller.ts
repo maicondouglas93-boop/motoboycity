@@ -12,7 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { ConferenciaDoCupom, PedidoDaLoja } from '@motoboycity/types';
+import type { ConferenciaDoCupom, CupomDisponivel, PedidoDaLoja } from '@motoboycity/types';
 import {
   storeCheckoutSchema,
   storeCouponQuoteSchema,
@@ -61,6 +61,19 @@ export class PublicStoreOrdersController {
    * "Já paguei": confere o Pix no Asaas agora, em vez de esperar o aviso dele.
    * Poucas por minuto: cada uma é uma consulta ao Asaas.
    */
+  /**
+   * A lista "Cupons" do checkout: os cupons que a loja quis mostrar e que ainda valem para
+   * este cliente. Exige o login: o limite por cliente é dele.
+   */
+  @Get('coupons')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  cuponsDisponiveis(
+    @Param('slug', new ZodValidationPipe(storeSlugLookupSchema)) slug: string,
+    @ClienteAtual() cliente: ClienteDaLoja,
+  ): Promise<CupomDisponivel[]> {
+    return this.storeOrdersService.cuponsDisponiveis(slug, cliente.id);
+  }
+
   /**
    * "Aplicar cupom": confere o código para este cliente e esta sacola, e devolve as
    * regras do cupom e o desconto de agora. Não grava nada. O limite é o do pedido:

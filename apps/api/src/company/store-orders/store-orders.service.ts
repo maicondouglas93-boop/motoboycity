@@ -14,6 +14,7 @@ import type {
   Cancelamento,
   ConferenciaDoCupom,
   CorridaDoPedido,
+  CupomDisponivel,
   EnderecoDaEntrega,
   EscolhasDoGrupo,
   FormaDePagamento,
@@ -755,6 +756,15 @@ export class StoreOrdersService {
     const feito = paraPedido(gravado);
     await this.avisos.pedidoNovo(companyId, feito);
     return comWhatsappDaLoja(feito, whatsappDaLoja);
+  }
+
+  /**
+   * A lista "Cupons" do checkout: os cupons que a loja quis mostrar e que ainda valem para
+   * ESTE cliente agora. Nada é gravado, e o que depende da sacola a página confere.
+   */
+  async cuponsDisponiveis(slug: string, clienteId: string): Promise<CupomDisponivel[]> {
+    const companyId = await this.lojaQueRecebe(slug);
+    return this.cupons.disponiveis(companyId, clienteId, new Date());
   }
 
   /**

@@ -2151,6 +2151,10 @@ model StoreCoupon {
   productIds          String[]
   categoryIds         String[]
   appliesToPromoItems Boolean         @default(false)
+  /// O cupom aparece na lista "Cupons" do checkout, para o cliente aplicar com um toque.
+  /// Desligado, só usa quem tem o código. Nasce desligado no banco: o cupom de antes desta
+  /// coluna era secreto (só por código), e continua sendo até a loja mudar.
+  showInCheckout      Boolean         @default(false)
   active              Boolean         @default(true)
 
   company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)

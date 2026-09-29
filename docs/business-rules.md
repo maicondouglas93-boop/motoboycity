@@ -666,10 +666,27 @@ Decisões de 2026-09-29, do usuário. Marketing entrega em quatro partes, nesta 
 Decisões de 2026-09-29, do usuário. É a segunda parte do Marketing (depois das
 promoções; combos e destaques vêm em seguida).
 
-- o cliente digita o **código** no checkout ("Tem um cupom de desconto?"). O código é da
-  loja: em maiúsculas, de 3 a 20 letras, números, hífen ou sublinhado, **único dentro da
-  loja** — duas lojas podem ter o mesmo, e o cupom de uma nunca vale na outra. A página não
-  recebe a lista de cupons: quem não sabe o código não o vê;
+- o cliente usa o cupom no checkout de dois jeitos: **escolhendo na lista "Cupons"** ou
+  **digitando o código** ("Tem um código de cupom?"). O código é da loja: em maiúsculas, de 3
+  a 20 letras, números, hífen ou sublinhado, **único dentro da loja** — duas lojas podem ter
+  o mesmo, e o cupom de uma nunca vale na outra;
+- **a lista "Cupons" do checkout só mostra o que a loja quis mostrar.** Cada cupom tem a
+  escolha "Mostrar este cupom no checkout": marcada, ele aparece na lista para todo cliente
+  que entra; desmarcada, o cupom é **secreto** e só usa quem tem o código (o convite, o cupom
+  de um cliente só). O cupom novo nasce marcado, e é fácil de desmarcar. Os cupons que já
+  existiam antes da lista continuaram secretos, até a loja marcar;
+- a lista traz, para cada cliente, **só o cupom que ainda vale para ele agora**: ligado, dentro
+  das datas, com uso e dentro do limite por cliente (quem já usou o cupom de 1 uso por cliente
+  não o vê; se o pedido é cancelado, o cupom volta). Sem cupom disponível, a página diz
+  "Nenhum cupom disponível no momento". No máximo 12, o mais novo primeiro;
+- cada cartão da lista mostra o que o cupom faz, as condições (mínimo, se vale em item em
+  promoção, até quando) e, **para a sacola de agora**, quanto desconta — ou por que não serve
+  (faltam R$ X para o mínimo; os itens já estão em promoção). Os que servem vêm primeiro, do
+  maior desconto ao menor, e o de maior desconto leva o selo "Melhor desconto" (só quando há
+  mais de um que serve). Muda a sacola, muda o cartão: é a mesma regra do servidor, calculada
+  na página;
+- a lista é conveniência, e não decide nada: ao aplicar e ao fazer o pedido, o servidor
+  confere o cupom de novo, como se o cliente o tivesse digitado;
 - **dois tipos**: percentual (1% a 100%, com teto opcional em reais) e valor fixo. O
   desconto é sobre o que o cliente paga pelos itens que o cupom alcança (com os adicionais),
   nunca passa disso, e a **taxa de entrega não tem cupom**;

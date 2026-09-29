@@ -800,9 +800,14 @@ organização em `architecture.md` ("Cupons da loja online").
 - **Cuidado ao mexer no total:** `total = subtotal - couponDiscount + deliveryFee`, e o
   `subtotal` continua sendo os itens depois das promoções. Quem calcula "taxa" a partir do
   total precisa somar o cupom de volta (foi o que a comanda passou a fazer).
-- **O que ficou de fora de propósito:** cupom de entrega grátis; cupom de primeira compra (o
-  limite por cliente de 1 uso já dá o efeito); lista pública de cupons; cupom por forma de
-  pagamento.
+- **A lista "Cupons" do checkout** (2026-09-29, a pedido do usuário): `showInCheckout` é uma
+  escolha por cupom. O que a página mostra vem de `GET .../orders/coupons`; se mexer no que
+  entra na lista, mexa em `StoreCouponsService.disponiveis`, que tem spec. Migration
+  `20260929250000_cupons_no_checkout` (uma coluna, padrão `false`: os cupons de antes continuam
+  secretos). Não é lista pública: exige o login do cliente, porque o limite por cliente é dele.
+- **O que ficou de fora de propósito:** cupom de entrega grátis; cupom só de primeira compra (o
+  limite por cliente de 1 uso limita o uso, mas não confere se é a primeira compra); cupom por
+  forma de pagamento.
 - **Não conferido:** nada em produção; o checkout logado com cupom de ponta a ponta no
   navegador (não há login de cliente local), e o painel de cupons no celular real.
 

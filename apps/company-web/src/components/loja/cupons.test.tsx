@@ -78,6 +78,7 @@ function cupom(mudancas: Partial<CupomDaLoja> = {}): CupomDaLoja {
     valeEmPromocao: false,
     produtoIds: [],
     categoriaIds: [],
+    mostrarNoCheckout: false,
     ativo: true,
     inicio: null,
     fim: null,
@@ -155,6 +156,21 @@ describe('Cupons — a lista', () => {
     expect(regras).toHaveTextContent('só em item sem promoção');
     expect(regras).toHaveTextContent('12 de 100 usos');
     expect(regras).toHaveTextContent('1 uso por cliente');
+  });
+
+  it('a lista diz quais cupons aparecem no checkout e quais são só por código', async () => {
+    mocks.coupons.mockResolvedValue([
+      cupom({ id: 'a', codigo: 'VITRINE', mostrarNoCheckout: true }),
+      cupom({ id: 'b', codigo: 'SECRETO', mostrarNoCheckout: false }),
+    ]);
+    comQuery(<CuponsPage />);
+
+    await screen.findByText('VITRINE');
+    const textos = screen
+      .getAllByText(/aparece no checkout|só com o código/)
+      .map((item) => item.textContent);
+    expect(textos[0]).toContain('aparece no checkout');
+    expect(textos[1]).toContain('só com o código');
   });
 
   it('o cupom de valor fixo e o que vale em promoção dizem isso', async () => {
@@ -309,10 +325,60 @@ describe('Cupons — o formulário', () => {
         produtoIds: [],
         categoriaIds: [],
         valeEmPromocao: false,
+        mostrarNoCheckout: true,
         ativo: true,
       }),
     );
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/loja/marketing/cupons'));
+  });
+
+  it('o cupom novo nasce marcado para aparecer no checkout, e a loja pode escondê-lo', async () => {
+    mocks.createCoupon.mockResolvedValue(cupom());
+    comQuery(<FormularioDeCupom />);
+
+    const mostrar = await screen.findByRole('checkbox', { name: /Mostrar este cupom no checkout/ });
+    expect(mostrar).toBeChecked();
+    expect(screen.getByText(/só usa quem tem o código/)).toBeInTheDocument();
+
+    fireEvent.click(mostrar);
+    fireEvent.change(screen.getByLabelText('Código'), { target: { value: 'CONVITE20' } });
+    fireEvent.change(screen.getByLabelText('Desconto (%)'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Criar cupom' }));
+
+    await waitFor(() => expect(mocks.createCoupon).toHaveBeenCalledTimes(1));
+    expect(mocks.createCoupon).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({ codigo: 'CONVITE20', mostrarNoCheckout: false }),
+    );
+  });
+
+  it('editar respeita o que o cupom já era: o secreto continua secreto', async () => {
+    mocks.updateCoupon.mockResolvedValue(cupom());
+    comQuery(<FormularioDeCupom cupom={cupom({ mostrarNoCheckout: false })} />);
+
+    expect(
+      await screen.findByRole('checkbox', { name: /Mostrar este cupom no checkout/ }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+
+    await waitFor(() =>
+      expect(mocks.updateCoupon).toHaveBeenCalledWith(
+        'token',
+        'cupom-1',
+        expect.objectContaining({ mostrarNoCheckout: false }),
+      ),
+    );
+  });
+
+  it('o resumo do formulário diz se o cupom aparece no checkout ou é só por código', async () => {
+    comQuery(<FormularioDeCupom />);
+
+    fireEvent.change(await screen.findByLabelText('Código'), { target: { value: 'BEMVINDO10' } });
+    fireEvent.change(screen.getByLabelText('Desconto (%)'), { target: { value: '10' } });
+    expect(await screen.findByText(/aparece no checkout/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Mostrar este cupom no checkout/ }));
+    expect(await screen.findByText(/só com o código/)).toBeInTheDocument();
   });
 
   it('cupom de valor fixo manda o valor, e não o percentual', async () => {

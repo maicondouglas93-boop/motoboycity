@@ -112,10 +112,23 @@ export interface CupomPublico {
   categoriaIds: string[];
 }
 
+/**
+ * Um cupom da lista "Cupons" do checkout: as regras (a página calcula o desconto de cada um
+ * para a sacola de agora) e até quando vale. Só chega ao cliente o que a loja marcou para
+ * aparecer no checkout, e que ainda vale PARA ELE agora — ligado, dentro das datas, com uso e
+ * dentro do limite por cliente. Nada de usos, limites ou datas de criação.
+ */
+export interface CupomDisponivel extends CupomPublico {
+  /** Último dia em que vale (`AAAA-MM-DD`), ou `null`: sem prazo. */
+  fim: string | null;
+}
+
 /** O cupom como a loja o vê no painel. */
 export interface CupomDaLoja extends CupomPublico {
   id: string;
   ativo: boolean;
+  /** Aparece na lista "Cupons" do checkout. Desligado, só usa quem tem o código. */
+  mostrarNoCheckout: boolean;
   /** Datas do calendário da loja, `AAAA-MM-DD`, as duas pontas incluídas. */
   inicio: string | null;
   fim: string | null;

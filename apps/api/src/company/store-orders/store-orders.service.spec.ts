@@ -145,7 +145,7 @@ describe('StoreOrdersService', () => {
   };
   let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
   let marketing: { promocoesDoPedido: jest.Mock };
-  let cupons: { paraOPedido: jest.Mock };
+  let cupons: { paraOPedido: jest.Mock; disponiveis: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
     company: { id: EMPRESA, status: 'ACTIVE', storeSettings: { acceptsOrders } },
@@ -244,7 +244,7 @@ describe('StoreOrdersService', () => {
     };
     avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
     marketing = { promocoesDoPedido: jest.fn().mockResolvedValue([]) };
-    cupons = { paraOPedido: jest.fn() };
+    cupons = { paraOPedido: jest.fn(), disponiveis: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -1048,6 +1048,29 @@ describe('StoreOrdersService', () => {
           comCupom({ pagamento: 'PIX_ONLINE', cpf: '52998224725', totalVisto: 43.98 }),
         ).rejects.toMatchObject({ response: { code: 'STORE_COUPON_UNAVAILABLE' } });
         expect(asaas.apagarCobranca).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('a lista "Cupons" do checkout', () => {
+      it('lista os cupons da loja para este cliente, na hora de agora', async () => {
+        const disponivel = { ...cupom(), fim: null };
+        cupons.disponiveis.mockResolvedValue([disponivel]);
+
+        await expect(service.cuponsDisponiveis('acai', CLIENTE)).resolves.toEqual([disponivel]);
+        expect(cupons.disponiveis).toHaveBeenCalledWith(EMPRESA, CLIENTE, MEIO_DIA);
+      });
+
+      it('loja que não recebe pedido, ou que não existe, não lista nada', async () => {
+        prisma.storeSlug.findUnique.mockResolvedValue(lojaQueRecebe(false));
+        await expect(service.cuponsDisponiveis('acai', CLIENTE)).rejects.toMatchObject({
+          response: { code: 'STORE_NOT_ACCEPTING_ORDERS' },
+        });
+
+        prisma.storeSlug.findUnique.mockResolvedValue(null);
+        await expect(service.cuponsDisponiveis('nao-existe', CLIENTE)).rejects.toMatchObject({
+          response: { code: 'STORE_NOT_FOUND' },
+        });
+        expect(cupons.disponiveis).not.toHaveBeenCalled();
       });
     });
 

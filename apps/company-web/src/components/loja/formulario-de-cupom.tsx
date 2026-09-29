@@ -50,6 +50,7 @@ interface Rascunho {
   produtoIds: string[];
   categoriaIds: string[];
   valeEmPromocao: boolean;
+  mostrarNoCheckout: boolean;
 }
 
 function rascunhoDe(cupom?: CupomDaLoja): Rascunho {
@@ -73,6 +74,8 @@ function rascunhoDe(cupom?: CupomDaLoja): Rascunho {
     produtoIds: cupom?.produtoIds ?? [],
     categoriaIds: cupom?.categoriaIds ?? [],
     valeEmPromocao: cupom?.valeEmPromocao ?? false,
+    // Cupom novo nasce aparecendo: é o que a maioria das lojas quer, e é fácil de desmarcar.
+    mostrarNoCheckout: cupom?.mostrarNoCheckout ?? true,
   };
 }
 
@@ -105,6 +108,7 @@ function paraOPayload(r: Rascunho, ativo: boolean): StoreCouponInput {
     produtoIds: r.soAlguns ? r.produtoIds : [],
     categoriaIds: r.soAlguns ? r.categoriaIds : [],
     valeEmPromocao: r.valeEmPromocao,
+    mostrarNoCheckout: r.mostrarNoCheckout,
     ativo,
   };
 }
@@ -399,6 +403,21 @@ export function FormularioDeCupom({ cupom }: { cupom?: CupomDaLoja }) {
               <span className="block text-xs text-muted-foreground">
                 Desligado, o cupom não se soma à promoção: o item em promoção fica de fora e o
                 desconto é só dos itens a preço cheio.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={r.mostrarNoCheckout}
+              onCheckedChange={(valor) => mudar({ mostrarNoCheckout: valor === true })}
+            />
+            <span>
+              Mostrar este cupom no checkout
+              <span className="block text-xs text-muted-foreground">
+                O cliente vê o cupom na lista &ldquo;Cupons&rdquo; e aplica com um toque, sem
+                digitar. Desmarcado, o cupom é secreto: só usa quem tem o código.
               </span>
             </span>
           </label>

@@ -51,6 +51,7 @@ function linha(mudancas: Partial<StoreCoupon> = {}): StoreCoupon {
     productIds: [],
     categoryIds: [],
     appliesToPromoItems: false,
+    showInCheckout: false,
     active: true,
     createdAt: new Date('2026-09-20T10:00:00Z'),
     updatedAt: new Date('2026-09-20T10:00:00Z'),
@@ -77,12 +78,16 @@ describe('StoreCouponsService', () => {
     type Where = {
       id?: string;
       companyId?: string;
+      active?: boolean;
+      showInCheckout?: boolean;
       code?: string | { startsWith: string };
       companyId_code?: { companyId: string; code: string };
     };
     const cruzar = (where: Where) => (item: StoreCoupon) =>
       (where.id === undefined || item.id === where.id) &&
       (where.companyId === undefined || item.companyId === where.companyId) &&
+      (where.active === undefined || item.active === where.active) &&
+      (where.showInCheckout === undefined || item.showInCheckout === where.showInCheckout) &&
       (where.companyId_code === undefined ||
         (item.companyId === where.companyId_code.companyId &&
           item.code === where.companyId_code.code)) &&
@@ -93,7 +98,16 @@ describe('StoreCouponsService', () => {
 
     const prisma = {
       storeCoupon: {
-        findMany: jest.fn(({ where }) => Promise.resolve(banco.filter(cruzar(where)))),
+        // Respeita a única ordem que o serviço pede: o mais novo primeiro.
+        findMany: jest.fn(({ where, orderBy }) => {
+          const achados = banco.filter(cruzar(where));
+          const maisNovoPrimeiro = Array.isArray(orderBy) && orderBy[0]?.createdAt === 'desc';
+          return Promise.resolve(
+            maisNovoPrimeiro
+              ? [...achados].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              : achados,
+          );
+        }),
         findFirst: jest.fn(({ where }) => Promise.resolve(banco.find(cruzar(where)) ?? null)),
         findUnique: jest.fn(({ where }) => Promise.resolve(banco.find(cruzar(where)) ?? null)),
         create: jest.fn(({ data }) => {
@@ -154,6 +168,20 @@ describe('StoreCouponsService', () => {
         }),
       },
       storeCouponRedemption: {
+        groupBy: jest.fn(({ where }) => {
+          const contagem = new Map<string, number>();
+          for (const uso of usos) {
+            if (
+              (where.couponId.in as string[]).includes(uso.couponId) &&
+              uso.customerAuthId === where.customerAuthId
+            ) {
+              contagem.set(uso.couponId, (contagem.get(uso.couponId) ?? 0) + 1);
+            }
+          }
+          return Promise.resolve(
+            [...contagem].map(([couponId, total]) => ({ couponId, _count: { _all: total } })),
+          );
+        }),
         count: jest.fn(({ where }) =>
           Promise.resolve(
             usos.filter(
@@ -491,6 +519,121 @@ describe('StoreCouponsService', () => {
           message: 'Você já usou este cupom 2 vezes, que é o limite.',
         },
       });
+    });
+  });
+  describe('a lista "Cupons" do checkout', () => {
+    const lista = (cliente = 'cliente-1', empresa = LOJA_A, agora = QUARTA) =>
+      service.disponiveis(empresa, cliente, agora);
+    /** O cupom que a loja quis mostrar. */
+    const visivel = (mudancas: Partial<StoreCoupon> = {}) =>
+      banco.push(
+        linha({
+          id: `cupom-${banco.length + 1}`,
+          code: `CUPOM${banco.length + 1}`,
+          showInCheckout: true,
+          ...mudancas,
+        }),
+      );
+
+    it('mostra só o que a loja marcou; o cupom secreto (só por código) não aparece', async () => {
+      visivel({ code: 'PUBLICO10' });
+      visivel({ code: 'SECRETO10', showInCheckout: false });
+
+      expect((await lista()).map((cupom) => cupom.codigo)).toEqual(['PUBLICO10']);
+      // Mas o secreto continua valendo para quem digita o código.
+      await expect(
+        service.paraOPedido(LOJA_A, 'cliente-1', 'secreto10', QUARTA),
+      ).resolves.toMatchObject({
+        codigo: 'SECRETO10',
+      });
+    });
+
+    it('traz as regras e o último dia, e nada do que é só da loja', async () => {
+      visivel({
+        code: 'BEMVINDO10',
+        minOrder: new Prisma.Decimal(30),
+        maxDiscount: new Prisma.Decimal(15),
+        endDate: '2026-10-31',
+        maxUses: 100,
+        usedCount: 7,
+        maxUsesPerCustomer: 1,
+        productIds: [ACAI],
+      });
+
+      const [cupom] = await lista();
+
+      expect(cupom).toEqual({
+        codigo: 'BEMVINDO10',
+        tipo: 'PERCENTUAL',
+        percentual: 10,
+        valor: null,
+        pedidoMinimo: 30,
+        descontoMaximo: 15,
+        valeEmPromocao: false,
+        produtoIds: [ACAI],
+        categoriaIds: [],
+        fim: '2026-10-31',
+      });
+      expect(JSON.stringify(cupom)).not.toMatch(/usos|usedCount|limite|maxUses|companyId|id"/);
+    });
+
+    it('o desligado, o vencido, o que ainda não começou e o esgotado ficam de fora', async () => {
+      visivel({ code: 'VALE' });
+      visivel({ code: 'DESLIGADO', active: false });
+      visivel({ code: 'VENCIDO', endDate: '2026-09-22' });
+      visivel({ code: 'FUTURO', startDate: '2026-09-24' });
+      visivel({ code: 'ESGOTADO', maxUses: 5, usedCount: 5 });
+      visivel({ code: 'HOJE', startDate: '2026-09-23', endDate: '2026-09-23' });
+
+      expect((await lista()).map((cupom) => cupom.codigo).sort()).toEqual(['HOJE', 'VALE']);
+    });
+
+    it('o limite por cliente é dele: quem já usou não vê, quem não usou vê', async () => {
+      visivel({ id: 'cupom-1', code: 'UMA-VEZ', maxUsesPerCustomer: 1 });
+      visivel({ id: 'cupom-2', code: 'DUAS-VEZES', maxUsesPerCustomer: 2 });
+      visivel({ id: 'cupom-3', code: 'SEM-LIMITE' });
+      usos.push(
+        { couponId: 'cupom-1', customerAuthId: 'cliente-1' },
+        { couponId: 'cupom-2', customerAuthId: 'cliente-1' },
+        { couponId: 'cupom-3', customerAuthId: 'cliente-1' },
+      );
+
+      expect((await lista('cliente-1')).map((cupom) => cupom.codigo).sort()).toEqual([
+        'DUAS-VEZES',
+        'SEM-LIMITE',
+      ]);
+      // O outro cliente nunca usou nenhum.
+      expect((await lista('cliente-2')).map((cupom) => cupom.codigo).sort()).toEqual([
+        'DUAS-VEZES',
+        'SEM-LIMITE',
+        'UMA-VEZ',
+      ]);
+    });
+
+    it('cada loja lista só os dela', async () => {
+      visivel({ code: 'DA-A' });
+      visivel({ companyId: LOJA_B, code: 'DA-B' });
+
+      expect((await lista('cliente-1', LOJA_A)).map((cupom) => cupom.codigo)).toEqual(['DA-A']);
+      expect((await lista('cliente-1', LOJA_B)).map((cupom) => cupom.codigo)).toEqual(['DA-B']);
+    });
+
+    it('o mais novo primeiro, e no máximo doze', async () => {
+      for (let n = 1; n <= 15; n += 1) {
+        visivel({ code: `CUPOM-${n}`, createdAt: new Date(Date.UTC(2026, 8, 20, 10, 0, n)) });
+      }
+
+      const cupons = await lista();
+
+      expect(cupons).toHaveLength(12);
+      expect(cupons[0]!.codigo).toBe('CUPOM-15');
+    });
+
+    it('sem cupom nenhum visível, a lista é vazia, e nem consulta os usos do cliente', async () => {
+      visivel({ code: 'SECRETO', showInCheckout: false });
+
+      expect(await lista()).toEqual([]);
+      expect(banco).toHaveLength(1);
     });
   });
 });

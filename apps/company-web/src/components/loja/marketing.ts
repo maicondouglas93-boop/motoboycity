@@ -10,6 +10,7 @@ import type {
 } from '@motoboycity/types';
 import { datasDoCupom, momentoNaLoja, promocaoVigente } from '@motoboycity/validation';
 import { companyStoreMarketingApi } from '@/lib/api-client';
+import { descricaoDoCupom } from '@/lib/loja-cupons';
 import { session } from '@/lib/session';
 
 /**
@@ -182,14 +183,8 @@ function emReais(valor: number): string {
   return `R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** O que o cupom faz, numa frase: "10% de desconto (até R$ 15,00)", "R$ 5,00 de desconto". */
-export function descricaoDoCupom(
-  cupom: Pick<CupomDaLoja, 'tipo' | 'percentual' | 'valor' | 'descontoMaximo'>,
-): string {
-  if (cupom.tipo === 'VALOR') return `${emReais(cupom.valor ?? 0)} de desconto`;
-  const base = `${cupom.percentual ?? 0}% de desconto`;
-  return cupom.descontoMaximo !== null ? `${base} (até ${emReais(cupom.descontoMaximo)})` : base;
-}
+// O texto do cupom mora em `lib/loja-cupons.ts`: o checkout do cliente lê o mesmo.
+export { descricaoDoCupom };
 
 /**
  * As regras do cupom que a lista mostra em letra miúda: mínimo, onde vale, se
@@ -202,6 +197,7 @@ export function regrasDoCupom(
     | 'produtoIds'
     | 'categoriaIds'
     | 'valeEmPromocao'
+    | 'mostrarNoCheckout'
     | 'inicio'
     | 'fim'
     | 'limiteDeUsos'
@@ -224,6 +220,7 @@ export function regrasDoCupom(
     partes.push('em todos os itens');
   }
   partes.push(cupom.valeEmPromocao ? 'vale em item em promoção' : 'só em item sem promoção');
+  partes.push(cupom.mostrarNoCheckout ? 'aparece no checkout' : 'só com o código');
   if (cupom.inicio !== null && cupom.fim !== null) {
     partes.push(`de ${dataCurta(cupom.inicio)} a ${dataCurta(cupom.fim)}`);
   } else if (cupom.inicio !== null) {
