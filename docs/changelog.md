@@ -16918,3 +16918,71 @@ contra o Google de verdade** (a chave só entra com autorização): o comportame
 avulsa, e isso só se vê em produção. **Não conferido:** como as telas do painel mostram
 uma avulsa com endereço de referência; o app do motoboy com uma dessas (nenhum APK novo
 foi gerado, e não creio que precise).
+
+## 2026-09-29 — Loja online: Pix direto, sem gateway
+
+**Pedido do usuário:** o lojista ativa o pagamento online pelo Pix sem gateway; o
+cliente paga pelo Pix e aparece um aviso para enviar o comprovante pelo WhatsApp.
+Respostas dele às duas dúvidas: **um Pix exclui o outro** (o do Asaas e este) e o
+pedido **aparece logo** para a loja. E, no meio do trabalho: "coloca o botão de
+copiar o Pix também, para usar no Pix copia e cola".
+
+**Decisão:**
+
+- Nova forma `PIX_DIRETO` ("Pix direto na sua chave"), fora de
+  `FORMAS_DE_PAGAMENTO_ONLINE` (que é o que passa pelo Asaas). A loja cadastra o tipo
+  da chave (celular, CPF/CNPJ, e-mail ou aleatória — o tipo é escolhido, e não
+  adivinhado: onze dígitos servem a um CPF e a um celular, e o Pix escreve cada um de um
+  jeito), o nome (até 25) e a cidade (até 15) que o banco mostra, e o WhatsApp.
+  `storePaymentsSchema` recusa os dois Pix juntos e confere a chave pelo tipo (CPF e
+  CNPJ pelos dígitos de conferência).
+- O código é um BR Code estático com valor, gerado no servidor em `checkout` com o
+  número do pedido (`gerarPixCopiaECola`), gravado em `store_orders.pixPayload`. O CRC
+  confere com o exemplo do manual do Banco Central (`1D3D`, verificado também com o
+  `crc_hqx` do Python).
+- O pedido nasce como pedido comum (não `AGUARDANDO_PAGAMENTO`): aparece na fila na
+  hora, marcado "Pix a conferir", e segue o aceite da loja. A loja toca em "Confirmar
+  Pix recebido" (dois toques), o que grava `paidAt` (`POST /company/store/orders/:id/confirm-pix`,
+  idempotente). `paymentStatus` fica nulo: nada do Asaas (estorno, varredura, webhook)
+  toca esses pedidos. Cancelado depois de confirmado, Vendas lembra a loja de devolver.
+- A corrida do MOTOboyCity leva `PREPAID`, sem retorno e com a nota "Pago por Pix direto
+  para a loja. NÃO cobrar do cliente" (`pagoAntes`).
+- A chave (que pode ser o CPF de quem vende) não vai à página pública: `OperacaoPublica`
+  a omite, e a forma só é oferecida se há chave. O cliente a recebe dentro do código do
+  próprio pedido, e o painel não a copia para o `localStorage` da demonstração.
+- Cliente: em "Meus pedidos", o QR (`qrcode.react`), o **botão "Copiar código do Pix"
+  como ação principal** (no celular ninguém escaneia a própria tela), e o aviso em
+  destaque para enviar o comprovante, com o botão do WhatsApp (`wa.me`, com o pedido e o
+  valor já na mensagem). Confirmado, o código some.
+- A comanda diz "PIX A CONFERIR (COMPROVANTE NO WHATSAPP) — NÃO COBRAR NA ENTREGA" ou
+  "PIX CONFIRMADO — NÃO COBRAR".
+
+**Banco:** uma coluna aditiva, `store_operations.pixDirect JSONB` (migration
+`20260929170000_loja_pix_direto`). Validada em banco descartável: aplicar, igual ao
+schema, desfazer (`DROP COLUMN "pixDirect"`) e reaplicar. **Não aplicada em nenhum
+ambiente compartilhado.** Dependência nova no `company-web`: `qrcode.react` 4.2.0.
+
+**Riscos assumidos, ditos ao usuário:** ninguém confirma o pagamento sozinho; o mesmo
+QR pode ser pago duas vezes; e com aceite automático a corrida nasce antes de a loja
+conferir o comprovante.
+
+**Arquivos:** `packages/types` (`store-operation.ts`, `store-order.ts`),
+`packages/validation` (`pix-direto.ts` novo, `store-operation.schema.ts`,
+`store-checkout.schema.ts`, `index.ts`), `packages/api-client/src/company-store-orders.ts`,
+`apps/api` (`prisma/schema.prisma` e a migration, `store-operation.service.ts`,
+`store-orders.service.ts` e `.controller.ts`), `apps/company-web` (`pagamentos-da-loja.tsx`,
+`pix-direto-da-loja.tsx`, `pix-direto-do-pedido.tsx`, `vendas.ts`, `vendas/page.tsx`,
+`comanda-da-venda.tsx`, `sacola.tsx`, `meus-pedidos.tsx`, `loja-pagamentos.ts`, `operacao.ts`,
+`loja-demo.ts`, `loja-mock.ts`) e os testes de cada um. O rótulo do Pix do Asaas, nas
+Configurações, passou de "Pix" para "Pix pelo Asaas", para os dois não se confundirem.
+
+**Como foi validado:** `tsc` e eslint da API, do painel e dos pacotes (`validation` e
+`types` também com `--typeRoots` isolado, como o deploy); Jest da API (1487), vitest do
+painel (441), build do painel; E2E inteiro no banco descartável (29 suítes, 257 testes),
+com um cenário novo que faz o caminho todo contra o banco: configura, confere que a chave
+não chega à página pública, pede, vê o código e o WhatsApp só do cliente, confirma duas
+vezes (a hora não muda), cancela sem estorno e recusa o que não é Pix direto. O painel do
+cliente e os campos de configuração foram vistos no celular (375px), numa rota temporária
+já removida. **Não conferido:** o QR lido por um banco de verdade (só o formato e o CRC),
+o checkout inteiro logado (não há login de cliente nem loja ligada localmente), e nada em
+produção. O `mc-api` local foi parado para regenerar o cliente do Prisma.

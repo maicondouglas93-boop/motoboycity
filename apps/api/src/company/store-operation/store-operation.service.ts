@@ -5,6 +5,7 @@ import type {
   FormaDePagamento,
   OperacaoDaLoja,
   OperacaoPublica,
+  PixDiretoDaLoja,
 } from '@motoboycity/types';
 import {
   FORMAS_DE_PAGAMENTO_ONLINE,
@@ -78,6 +79,7 @@ export const OPERACAO_INICIAL: OperacaoDaLoja = {
     },
   },
   pagamentos: ['DINHEIRO'],
+  pixDireto: null,
   bairros: [],
 };
 
@@ -134,6 +136,7 @@ export function completarOperacao(linha: StoreOperation | null): OperacaoDaLoja 
       cliente: { ...base.notificacoes.cliente, ...avisos.cliente },
     },
     pagamentos: (linha.paymentMethods as unknown as FormaDePagamento[] | null) ?? base.pagamentos,
+    pixDireto: (linha.pixDirect as unknown as PixDiretoDaLoja | null) ?? base.pixDireto,
     bairros: (linha.deliveryAreas as unknown as BairroAtendido[] | null) ?? base.bairros,
   };
 }
@@ -170,13 +173,16 @@ export class StoreOperationService {
    * recusa, e a página confere de novo.
    */
   async publicOperation(companyId: string): Promise<OperacaoPublica> {
-    const { notificacoes: _avisos, ...publica } = await this.daEmpresa(companyId);
+    // A chave Pix não sai daqui: a página pública só fica sabendo SE a loja
+    // recebe Pix direto, e o cliente a vê dentro do QR do pedido dele.
+    const { notificacoes: _avisos, pixDireto, ...publica } = await this.daEmpresa(companyId);
     const recebePix = publica.pagamentos.some(eOnline) && (await this.asaas.recebePix(companyId));
     return {
       ...publica,
-      pagamentos: publica.pagamentos.filter(
-        (forma) => !eOnline(forma) || (recebePix && ONLINE_PRONTAS.includes(forma)),
-      ),
+      pagamentos: publica.pagamentos.filter((forma) => {
+        if (forma === 'PIX_DIRETO') return pixDireto !== null;
+        return !eOnline(forma) || (recebePix && ONLINE_PRONTAS.includes(forma));
+      }),
     };
   }
 
@@ -288,7 +294,10 @@ export class StoreOperationService {
     return this.gravar(user, { notifications: comoJson(avisos) });
   }
 
-  async updatePayments(user: User, { pagamentos }: StorePaymentsPayload): Promise<OperacaoDaLoja> {
+  async updatePayments(
+    user: User,
+    { pagamentos, pixDireto }: StorePaymentsPayload,
+  ): Promise<OperacaoDaLoja> {
     const online = pagamentos.filter(eOnline);
     if (online.some((forma) => !ONLINE_PRONTAS.includes(forma))) {
       throw new BadRequestException({
@@ -296,17 +305,33 @@ export class StoreOperationService {
         code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE',
       });
     }
-    if (online.length > 0) {
-      const companyId = await this.catalogo.resolveCompanyId(user);
-      if (!(await this.asaas.recebePix(companyId))) {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    if (online.length > 0 && !(await this.asaas.recebePix(companyId))) {
+      throw new BadRequestException({
+        message:
+          'Para receber Pix pela página, ligue a sua conta Asaas em Configurações — e ela precisa ter uma chave Pix ativa.',
+        code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE',
+      });
+    }
+    if (pagamentos.includes('PIX_DIRETO')) {
+      // Sem o campo (aba aberta antes de ele existir), vale a chave já gravada.
+      const chave = pixDireto === undefined ? (await this.daEmpresa(companyId)).pixDireto : pixDireto;
+      if (chave === null) {
         throw new BadRequestException({
           message:
-            'Para receber Pix pela página, ligue a sua conta Asaas em Configurações — e ela precisa ter uma chave Pix ativa.',
-          code: 'STORE_PAYMENT_ONLINE_UNAVAILABLE',
+            'Para receber o Pix direto, informe a chave Pix, o nome que aparece no banco e o WhatsApp da loja.',
+          code: 'STORE_PIX_DIRECT_INCOMPLETE',
         });
       }
     }
-    return this.gravar(user, { paymentMethods: comoJson(pagamentos) });
+    return this.gravar(user, {
+      paymentMethods: comoJson(pagamentos),
+      // Ausente: fica o que estava. `null`: apaga. A chave é guardada mesmo com a
+      // forma desmarcada, para religar sem digitar tudo de novo.
+      ...(pixDireto === undefined
+        ? {}
+        : { pixDirect: pixDireto === null ? Prisma.DbNull : comoJson(pixDireto) }),
+    });
   }
 
   updateDeliveryAreas(user: User, { bairros }: StoreDeliveryAreasPayload): Promise<OperacaoDaLoja> {

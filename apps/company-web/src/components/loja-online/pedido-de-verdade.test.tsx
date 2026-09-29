@@ -487,6 +487,36 @@ describe('Sacola da loja de verdade', () => {
     });
   });
 
+  it('Pix direto: sem CPF, e o pedido sai como um pedido comum, para a loja conferir depois', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 14 } as PedidoDaLoja);
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({ operacao: { ...OPERACAO, pagamentos: ['PIX_DIRETO', 'DINHEIRO'] } })}
+      />,
+    );
+
+    // O Pix aparece no grupo de pagar agora, com o que acontece depois do pedido.
+    const pix = await screen.findByRole('radio', { name: /^Pix/ });
+    fireEvent.click(pix);
+    expect(
+      screen.getByText(/Depois de pagar, envie o comprovante pelo WhatsApp da loja/),
+    ).toBeInTheDocument();
+    // O CPF é do Asaas: aqui não há cobrança para gerar.
+    expect(screen.queryByLabelText('CPF de quem paga o Pix')).not.toBeInTheDocument();
+    // E o botão não leva a página de pagamento nenhuma: o pedido sai na hora.
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ pagamento: 'PIX_DIRETO', cpf: null }),
+      ),
+    );
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(`/pedir/${SLUG}/pedidos?novo=14`));
+  });
+
   it('o troco fica logo abaixo do Dinheiro, e antes da observação', async () => {
     render(<Sacola slug={SLUG} cardapio={cardapio()} />);
 

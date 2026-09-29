@@ -912,4 +912,193 @@ describe('Pedido da loja online (e2e)', () => {
       (vitrine.body as Extract<PublicStoreLookup, { kind: 'store' }>).store.operacao.pagamentos,
     ).not.toContain('PIX_ONLINE');
   });
+
+  it('o Pix direto: sem gateway, o pedido aparece na hora e a loja confirma o comprovante', async () => {
+    const servidor = app.getHttpServer();
+    (app.get(ThrottlerStorage) as unknown as { storage: Map<string, unknown> }).storage.clear();
+    const chave = {
+      tipoDeChave: 'CELULAR',
+      chave: '(33) 99988-7766',
+      nomeDoRecebedor: 'Pedido E2E',
+      cidade: 'Lajinha',
+      whatsapp: '(33) 98877-6655',
+    };
+    const gravar = (corpo: object) =>
+      request(servidor).put('/company/store/operation/payments').set(comoEmpresa()).send(corpo);
+    const pedirPixDireto = (pagamento = 'PIX_DIRETO') =>
+      request(servidor)
+        .post(`/public/stores/${link}/orders`)
+        .set(comoCliente('cliente-a'))
+        .send({
+          modalidade: 'ENTREGA',
+          itens: [{ produtoId, tamanhoId: null, escolhas: [], quantidade: 2 }],
+          agendadoPara: null,
+          cliente: { nome: 'Ana', telefone: '33999887766' },
+          entrega: {
+            rua: 'Rua A',
+            numero: '10',
+            complemento: null,
+            bairroId: 'b1',
+            cidade: 'Lajinha',
+            estado: 'MG',
+            cep: '',
+            referencia: null,
+          },
+          pagamento,
+          trocoPara: null,
+          observacao: null,
+          // O preço do produto subiu para 25 no primeiro teste: 2 x 25 + 5 de entrega.
+          totalVisto: 55,
+        });
+    const daFila = async (id: string) =>
+      (
+        (await request(servidor).get('/company/store/orders').set(comoEmpresa()).expect(200))
+          .body as PedidoDaLoja[]
+      ).find((pedido) => pedido.id === id);
+
+    // Sem a chave, o Pix direto não liga; um Pix ou o outro, nunca os dois.
+    expect((await gravar({ pagamentos: ['DINHEIRO', 'PIX_DIRETO'] }).expect(400)).body.code).toBe(
+      'STORE_PIX_DIRECT_INCOMPLETE',
+    );
+    await gravar({ pagamentos: ['PIX_ONLINE', 'PIX_DIRETO'], pixDireto: chave }).expect(400);
+    // A chave é conferida pelo tipo: um CPF inválido não passa como CPF.
+    await gravar({
+      pagamentos: ['DINHEIRO', 'PIX_DIRETO'],
+      pixDireto: { ...chave, tipoDeChave: 'CPF_CNPJ', chave: '111.111.111-11' },
+    }).expect(400);
+
+    // Com a chave, liga — sem a conta Asaas, que aqui já foi desligada.
+    const ligado = await gravar({ pagamentos: ['DINHEIRO', 'PIX_DIRETO'], pixDireto: chave }).expect(
+      200,
+    );
+    expect((ligado.body as OperacaoDaLoja).pixDireto).toMatchObject({
+      chave: '(33) 99988-7766',
+      whatsapp: '33988776655',
+    });
+
+    // A página pública sabe que há Pix direto, mas a chave não sai da loja.
+    const vitrine = await request(servidor).get(`/public/stores/${link}`).expect(200);
+    const publica = (vitrine.body as Extract<PublicStoreLookup, { kind: 'store' }>).store.operacao;
+    expect(publica.pagamentos).toContain('PIX_DIRETO');
+    expect(publica).not.toHaveProperty('pixDireto');
+    expect(JSON.stringify(vitrine.body)).not.toContain('99988');
+
+    // O pedido nasce na fila da loja, na hora: nada de "aguardando pagamento".
+    // (Neste arquivo a loja aceita à mão, então ele espera o aceite como "novo".)
+    const feito = (await pedirPixDireto().expect(201)).body as PedidoDaLoja;
+    expect(feito.etapa).toBe('NOVO');
+    expect(await daFila(feito.id)).toBeDefined();
+    expect(feito.pixDireto).toMatchObject({
+      situacao: 'AGUARDANDO',
+      whatsapp: '5533988776655',
+      confirmadoEm: null,
+    });
+    // O código do Pix: o valor do pedido, o número dele e o CRC de quem o lê.
+    const codigo = feito.pixDireto!.copiaECola!;
+    expect(codigo).toMatch(/^000201/);
+    expect(codigo).toContain('br.gov.bcb.pix0114+5533999887766');
+    expect(codigo).toContain('540555.00');
+    expect(codigo).toContain(`PEDIDO${feito.numero}`);
+    expect(codigo).toMatch(/6304[0-9A-F]{4}$/);
+    const gravado = await prisma.storeOrder.findUniqueOrThrow({ where: { id: feito.id } });
+    expect(gravado).toMatchObject({
+      paymentMethod: 'PIX_DIRETO',
+      pixPayload: codigo,
+      paymentStatus: null,
+      paidAt: null,
+    });
+    // Sem cobrança nenhuma. Aceito, a corrida nasce sem dinheiro para cobrar.
+    expect(gravado.paymentProviderId).toBeNull();
+    await request(servidor)
+      .put(`/company/store/orders/${feito.id}/stage`)
+      .set(comoEmpresa())
+      .send({ para: 'ACEITO' })
+      .expect(200);
+    const corrida = await prisma.delivery.findFirstOrThrow({
+      where: { storeOrder: { id: feito.id } },
+    });
+    expect(corrida).toMatchObject({ customerPaymentMethod: 'PREPAID', requiresReturn: false });
+    expect(corrida.driverNote).toContain('NÃO cobrar do cliente');
+
+    // A loja vê o Pix a conferir — sem o código, que é do cliente.
+    expect((await daFila(feito.id))!.pixDireto).toEqual({
+      situacao: 'AGUARDANDO',
+      copiaECola: null,
+      whatsapp: null,
+      confirmadoEm: null,
+    });
+    // O cliente vê o código e o WhatsApp para o comprovante.
+    const doCliente = (
+      (
+        await request(servidor)
+          .get(`/public/stores/${link}/orders`)
+          .set(comoCliente('cliente-a'))
+          .expect(200)
+      ).body as PedidoDaLoja[]
+    ).find((pedido) => pedido.id === feito.id)!;
+    expect(doCliente.pixDireto).toMatchObject({ copiaECola: codigo, whatsapp: '5533988776655' });
+    // E o outro cliente não vê o pedido dele.
+    const doOutro = (
+      await request(servidor)
+        .get(`/public/stores/${link}/orders`)
+        .set(comoCliente('cliente-b'))
+        .expect(200)
+    ).body as PedidoDaLoja[];
+    expect(doOutro.map((pedido) => pedido.id)).not.toContain(feito.id);
+
+    // A loja confere o comprovante e confirma: a hora fica gravada uma vez só.
+    const confirmar = () =>
+      request(servidor).post(`/company/store/orders/${feito.id}/confirm-pix`).set(comoEmpresa());
+    const confirmado = (await confirmar().expect(201)).body as PedidoDaLoja;
+    expect(confirmado.pixDireto).toMatchObject({ situacao: 'CONFIRMADO' });
+    const primeiraHora = (
+      await prisma.storeOrder.findUniqueOrThrow({ where: { id: feito.id } })
+    ).paidAt;
+    expect(primeiraHora).not.toBeNull();
+    await confirmar().expect(201);
+    expect(
+      (await prisma.storeOrder.findUniqueOrThrow({ where: { id: feito.id } })).paidAt,
+    ).toEqual(primeiraHora);
+    // Confirmado, o código some do cliente: não se paga duas vezes.
+    const depois = (
+      (
+        await request(servidor)
+          .get(`/public/stores/${link}/orders`)
+          .set(comoCliente('cliente-a'))
+          .expect(200)
+      ).body as PedidoDaLoja[]
+    ).find((pedido) => pedido.id === feito.id)!;
+    expect(depois.pixDireto).toMatchObject({ situacao: 'CONFIRMADO', copiaECola: null });
+
+    // Cancelado depois de confirmado: nada de estorno no Asaas — devolver é com a loja.
+    const cancelado = (
+      await request(servidor)
+        .post(`/company/store/orders/${feito.id}/cancel`)
+        .set(comoEmpresa())
+        .send({ motivo: 'Item em falta' })
+        .expect(201)
+    ).body as PedidoDaLoja;
+    expect(cancelado.etapa).toBe('CANCELADO');
+    expect(cancelado.pixDireto).toMatchObject({ situacao: 'CONFIRMADO' });
+    expect(cancelado.pagamentoOnline).toBeNull();
+    expect(
+      (await prisma.storeOrder.findUniqueOrThrow({ where: { id: feito.id } })).paymentStatus,
+    ).toBeNull();
+    // E um pedido cancelado já não se confirma.
+    expect((await confirmar().expect(409)).body.code).toBe('STORE_ORDER_STAGE_INVALID');
+
+    // Só o que é Pix direto se confirma, e a chave apagada tira a forma da página.
+    const emDinheiro = (await pedirPixDireto('DINHEIRO').expect(201)).body as PedidoDaLoja;
+    const recusada = await request(servidor)
+      .post(`/company/store/orders/${emDinheiro.id}/confirm-pix`)
+      .set(comoEmpresa())
+      .expect(409);
+    expect(recusada.body.code).toBe('STORE_ORDER_NOT_PIX_DIRECT');
+    await gravar({ pagamentos: ['DINHEIRO', 'PIX_DIRETO'], pixDireto: null }).expect(400);
+    await gravar({ pagamentos: ['DINHEIRO'], pixDireto: null }).expect(200);
+    const semChave = await request(servidor).get(`/public/stores/${link}`).expect(200);
+    expect(
+      (semChave.body as Extract<PublicStoreLookup, { kind: 'store' }>).store.operacao.pagamentos,
+    ).not.toContain('PIX_DIRETO');
+  });
 });

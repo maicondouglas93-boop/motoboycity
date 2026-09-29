@@ -140,11 +140,16 @@ describe('StoreOrdersService — Vendas', () => {
         findFirstOrThrow: jest.fn().mockImplementation(() => Promise.resolve(comCorrida())),
         // Grava só se o pedido ainda estiver como foi lido, como o banco.
         updateMany: jest.fn().mockImplementation(({ where, data }) => {
-          const { updatedAt, rideAttempt, paymentStatus } = where as {
+          const { updatedAt, rideAttempt, paymentStatus, paidAt } = where as {
             updatedAt?: Date;
             rideAttempt?: number;
             paymentStatus?: string | { in: string[] };
+            paidAt?: null;
           };
+          // "Só se ainda não foi confirmado": a confirmação repetida não regrava a hora.
+          if (paidAt === null && banco.pedido.paidAt !== null) {
+            return Promise.resolve({ count: 0 });
+          }
           if (paymentStatus !== undefined) {
             const aceitas = typeof paymentStatus === 'string' ? [paymentStatus] : paymentStatus.in;
             if (!aceitas.includes(banco.pedido.paymentStatus ?? '')) {
@@ -496,6 +501,95 @@ describe('StoreOrdersService — Vendas', () => {
       const cancelado = await service.cancelar(membro, 'pedido-1', 'Cliente desistiu');
 
       expect(cancelado.etapa).toBe('CANCELADO');
+    });
+  });
+
+  describe('Pix direto na fila de Vendas', () => {
+    const CODIGO = '00020126360014br.gov.bcb.pix0114+5533999887766520400005303986540548.205802BR5913LANCHES DO ZE6007LAJINHA62120508PEDIDO426304D4D7';
+    const pixDireto = (mudancas: Partial<StoreOrder> = {}) =>
+      linha({
+        paymentMethod: 'PIX_DIRETO',
+        pixPayload: CODIGO,
+        stage: 'ACEITO',
+        acceptDeadline: null,
+        courier: 'LOJA',
+        ...mudancas,
+      });
+
+    it('a loja vê o Pix a conferir — sem o código, que é do cliente — e o pedido já está na fila', async () => {
+      banco.pedido = pixDireto();
+
+      const [pedido] = await service.vendas(membro);
+
+      expect(pedido!.etapa).toBe('ACEITO');
+      expect(pedido!.pixDireto).toEqual({
+        situacao: 'AGUARDANDO',
+        copiaECola: null,
+        whatsapp: null,
+        confirmadoEm: null,
+      });
+    });
+
+    it('confirmar grava a hora e o pedido passa a mostrar o Pix confirmado', async () => {
+      banco.pedido = pixDireto();
+
+      const confirmado = await service.confirmarPixDireto(membro, 'pedido-1');
+
+      expect(banco.pedido.paidAt).toEqual(AGORA);
+      expect(confirmado.pixDireto).toMatchObject({
+        situacao: 'CONFIRMADO',
+        confirmadoEm: AGORA.toISOString(),
+      });
+      // Nada de Asaas, nem de mudança de etapa: só a loja dizendo que conferiu.
+      expect(confirmado.etapa).toBe('ACEITO');
+      expect(banco.pedido.paymentStatus).toBeNull();
+    });
+
+    it('confirmar de novo não muda a hora da primeira confirmação', async () => {
+      banco.pedido = pixDireto();
+      await service.confirmarPixDireto(membro, 'pedido-1');
+      const primeira = banco.pedido.paidAt;
+
+      jest.setSystemTime(new Date(AGORA.getTime() + 10 * 60_000));
+      const denovo = await service.confirmarPixDireto(membro, 'pedido-1');
+
+      expect(banco.pedido.paidAt).toEqual(primeira);
+      expect(denovo.pixDireto?.confirmadoEm).toBe(primeira!.toISOString());
+    });
+
+    it('pedido que não é Pix direto, e pedido cancelado, não se confirmam', async () => {
+      banco.pedido = linha({ paymentMethod: 'DINHEIRO' });
+      await expect(service.confirmarPixDireto(membro, 'pedido-1')).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_NOT_PIX_DIRECT' },
+      });
+
+      banco.pedido = pixDireto({ stage: 'CANCELADO' });
+      await expect(service.confirmarPixDireto(membro, 'pedido-1')).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_STAGE_INVALID' },
+      });
+      expect(banco.pedido.paidAt).toBeNull();
+    });
+
+    it('cancelar um Pix direto já confirmado NÃO tenta estornar no Asaas: devolver é com a loja', async () => {
+      banco.pedido = pixDireto({ stage: 'EM_PREPARO', paidAt: AGORA });
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(cancelado.etapa).toBe('CANCELADO');
+      expect(asaas.estornar).not.toHaveBeenCalled();
+      expect(contasAsaas.contaParaCobrar).not.toHaveBeenCalled();
+      // O aviso de que o cliente pagou continua valendo, para a loja devolver.
+      expect(cancelado.pixDireto).toMatchObject({ situacao: 'CONFIRMADO' });
+    });
+
+    it('a corrida de um Pix direto não volta à loja com dinheiro', async () => {
+      banco.pedido = pixDireto({ courier: 'MOTOBOYCITY', stage: 'NOVO' });
+
+      await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
+
+      const [, , payload] = entregas.createFromStoreOrder.mock.calls[0]!;
+      expect(payload).toMatchObject({ customerPaymentMethod: 'PREPAID', requiresReturn: false });
+      expect(payload.driverNote).toContain('NÃO cobrar do cliente');
     });
   });
 

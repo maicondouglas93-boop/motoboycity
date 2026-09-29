@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { hasValidCpfCheckDigits } from './company-customer.schema';
 import {
+  FORMAS_DE_PAGAMENTO_DIRETAS,
   FORMAS_DE_PAGAMENTO_NA_ENTREGA,
   FORMAS_DE_PAGAMENTO_ONLINE,
 } from './store-operation.schema';
@@ -72,7 +73,11 @@ export const storeCheckoutSchema = z
         ),
     }),
     entrega: enderecoSchema.nullable(),
-    pagamento: z.enum([...FORMAS_DE_PAGAMENTO_ONLINE, ...FORMAS_DE_PAGAMENTO_NA_ENTREGA]),
+    pagamento: z.enum([
+      ...FORMAS_DE_PAGAMENTO_ONLINE,
+      ...FORMAS_DE_PAGAMENTO_DIRETAS,
+      ...FORMAS_DE_PAGAMENTO_NA_ENTREGA,
+    ]),
     trocoPara: z.number().positive('Informe o valor para o troco.').max(99999.99).nullable(),
     /**
      * Só no pagamento online: o Asaas não cria cobrança sem o CPF de quem paga.

@@ -120,7 +120,7 @@ describe('Recebimento online pelo Asaas', () => {
 describe('Formas de pagamento com a conta Asaas', () => {
   it('sem a conta, o Pix fica travado; com a conta e chave Pix, entra; cartão, ainda não', async () => {
     abrir(<PagamentosDaLoja />);
-    expect(await screen.findByLabelText('Pix')).toHaveAttribute('aria-disabled', 'true');
+    expect(await screen.findByLabelText('Pix pelo Asaas')).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('com a conta ligada, o Pix é gravado junto com as formas na entrega', async () => {
@@ -128,10 +128,10 @@ describe('Formas de pagamento com a conta Asaas', () => {
     abrir(<PagamentosDaLoja />);
 
     await waitFor(() =>
-      expect(screen.getByLabelText('Pix')).not.toHaveAttribute('aria-disabled', 'true'),
+      expect(screen.getByLabelText('Pix pelo Asaas')).not.toHaveAttribute('aria-disabled', 'true'),
     );
     expect(screen.getByLabelText('Cartão de crédito')).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(screen.getByLabelText('Pix'));
+    fireEvent.click(screen.getByLabelText('Pix pelo Asaas'));
     fireEvent.click(screen.getByRole('button', { name: 'Salvar formas de pagamento' }));
 
     await waitFor(() =>

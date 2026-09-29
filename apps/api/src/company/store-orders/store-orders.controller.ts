@@ -88,6 +88,15 @@ export class StoreOrdersController {
     return this.storeOrdersService.chamarDeNovo(user, id);
   }
 
+  /**
+   * A loja conferiu o comprovante do Pix direto e confirma o pagamento. Repetir a
+   * confirmação não muda nada.
+   */
+  @Post(':id/confirm-pix')
+  confirmarPixDireto(@CurrentUser() user: User, @Param('id') id: string): Promise<PedidoDaLoja> {
+    return this.storeOrdersService.confirmarPixDireto(user, id);
+  }
+
   /** O pedido que o MOTOboyCity não vai levar passa ao entregador da loja. */
   @Post(':id/own-courier')
   entregarComALoja(@CurrentUser() user: User, @Param('id') id: string): Promise<PedidoDaLoja> {

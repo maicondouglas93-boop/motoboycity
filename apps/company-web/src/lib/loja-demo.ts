@@ -60,6 +60,7 @@ export function completarOperacao(salva: Partial<OperacaoDaLoja> | null): Operac
       cliente: { ...base.notificacoes.cliente, ...salva.notificacoes?.cliente },
     },
     pagamentos: salva.pagamentos ?? base.pagamentos,
+    pixDireto: salva.pixDireto ?? base.pixDireto,
     bairros: salva.bairros ?? base.bairros,
   };
 }

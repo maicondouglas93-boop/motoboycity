@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pixDiretoSchema } from './pix-direto';
 
 /**
  * Como a loja funciona, em blocos: o horário, o ajuste da hora, os tipos de
@@ -156,12 +157,39 @@ export const FORMAS_DE_PAGAMENTO_NA_ENTREGA = [
   'DEBITO_MAQUININHA',
 ] as const;
 
-export const storePaymentsSchema = z.object({
-  pagamentos: z
-    .array(z.enum([...FORMAS_DE_PAGAMENTO_ONLINE, ...FORMAS_DE_PAGAMENTO_NA_ENTREGA]))
-    .min(1, 'Marque pelo menos uma forma: sem ela, o cliente não consegue fechar o pedido.')
-    .refine((formas) => new Set(formas).size === formas.length, 'Cada forma aparece uma vez.'),
-});
+/**
+ * Pagar agora, direto na chave Pix da loja, sem gateway. Fica FORA de
+ * `FORMAS_DE_PAGAMENTO_ONLINE` de propósito: "online" é o que passa pelo Asaas
+ * (cobrança, webhook, estorno), e o Pix direto não passa por nada disso.
+ */
+export const FORMAS_DE_PAGAMENTO_DIRETAS = ['PIX_DIRETO'] as const;
+
+export const storePaymentsSchema = z
+  .object({
+    pagamentos: z
+      .array(
+        z.enum([
+          ...FORMAS_DE_PAGAMENTO_ONLINE,
+          ...FORMAS_DE_PAGAMENTO_DIRETAS,
+          ...FORMAS_DE_PAGAMENTO_NA_ENTREGA,
+        ]),
+      )
+      .min(1, 'Marque pelo menos uma forma: sem ela, o cliente não consegue fechar o pedido.')
+      .refine((formas) => new Set(formas).size === formas.length, 'Cada forma aparece uma vez.'),
+    /**
+     * A chave do Pix direto. Ausente: fica o que já estava gravado (aba aberta
+     * antes de o campo existir). `null`: apaga. Obrigatória com `PIX_DIRETO`
+     * marcado — conferido de novo no servidor, que também olha o que já está lá.
+     */
+    pixDireto: pixDiretoSchema.nullable().optional(),
+  })
+  .refine(
+    (dados) => !(dados.pagamentos.includes('PIX_ONLINE') && dados.pagamentos.includes('PIX_DIRETO')),
+    {
+      message: 'Escolha um Pix só: pelo Asaas ou direto na sua chave.',
+      path: ['pagamentos'],
+    },
+  );
 
 /**
  * O nome do bairro como chave: sem acento, sem maiúscula e sem espaço sobrando.

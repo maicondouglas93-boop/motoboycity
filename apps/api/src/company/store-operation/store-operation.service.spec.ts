@@ -36,6 +36,7 @@ function linha(mudancas: Partial<StoreOperation> = {}): StoreOperation {
     notifications: {},
     paymentMethods: null,
     deliveryAreas: null,
+    pixDirect: null,
     createdAt: new Date('2026-09-25T10:00:00Z'),
     updatedAt: new Date('2026-09-25T10:00:00Z'),
     ...mudancas,
@@ -188,6 +189,130 @@ describe('StoreOperationService', () => {
 
     contaAsaas.recebePix.mockResolvedValue(true);
     expect((await service.publicOperation(EMPRESA)).pagamentos).toEqual(['PIX_ONLINE', 'DINHEIRO']);
+  });
+
+  describe('Pix direto (na chave da loja, sem gateway)', () => {
+    const CHAVE = {
+      tipoDeChave: 'CELULAR' as const,
+      chave: '(33) 99988-7766',
+      nomeDoRecebedor: 'Lanches do Ze',
+      cidade: 'Lajinha',
+      whatsapp: '33999887766',
+    };
+    const pagamentos = (formas: string[], pixDireto?: unknown) =>
+      storePaymentsSchema.parse({ pagamentos: formas, ...(pixDireto === undefined ? {} : { pixDireto }) });
+
+    it('grava a forma e a chave; a loja não precisa da conta Asaas', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(linha());
+
+      await service.updatePayments(membro, pagamentos(['DINHEIRO', 'PIX_DIRETO'], CHAVE));
+
+      expect(prisma.storeOperation.upsert.mock.calls[0]![0].update).toEqual({
+        paymentMethods: ['DINHEIRO', 'PIX_DIRETO'],
+        pixDirect: { ...CHAVE, whatsapp: '33999887766' },
+      });
+      expect(contaAsaas.recebePix).not.toHaveBeenCalled();
+    });
+
+    it('sem chave, não liga o Pix direto; a chave já gravada vale para uma aba antiga', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(linha());
+      await expect(
+        service.updatePayments(membro, pagamentos(['PIX_DIRETO'])),
+      ).rejects.toMatchObject({ response: { code: 'STORE_PIX_DIRECT_INCOMPLETE' } });
+      expect(prisma.storeOperation.upsert).not.toHaveBeenCalled();
+
+      // Aba aberta antes de o campo existir: não manda a chave, e a gravada vale.
+      prisma.storeOperation.findUnique.mockResolvedValue(linha({ pixDirect: CHAVE }));
+      await service.updatePayments(membro, pagamentos(['PIX_DIRETO']));
+      expect(prisma.storeOperation.upsert.mock.calls[0]![0].update).toEqual({
+        paymentMethods: ['PIX_DIRETO'],
+      });
+    });
+
+    it('desmarcar a forma guarda a chave; enviar null a apaga', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(linha({ pixDirect: CHAVE }));
+
+      await service.updatePayments(membro, pagamentos(['DINHEIRO']));
+      expect(prisma.storeOperation.upsert.mock.calls[0]![0].update).toEqual({
+        paymentMethods: ['DINHEIRO'],
+      });
+
+      await service.updatePayments(membro, pagamentos(['DINHEIRO'], null));
+      expect(prisma.storeOperation.upsert.mock.calls[1]![0].update).toEqual({
+        paymentMethods: ['DINHEIRO'],
+        pixDirect: Prisma.DbNull,
+      });
+    });
+
+    it('um Pix ou outro: o Pix pelo Asaas e o direto não convivem', () => {
+      const resultado = storePaymentsSchema.safeParse({
+        pagamentos: ['PIX_ONLINE', 'PIX_DIRETO'],
+        pixDireto: CHAVE,
+      });
+      expect(resultado.success).toBe(false);
+      if (!resultado.success) {
+        expect(resultado.error.issues[0]).toMatchObject({
+          path: ['pagamentos'],
+          message: 'Escolha um Pix só: pelo Asaas ou direto na sua chave.',
+        });
+      }
+    });
+
+    it('a chave é conferida pelo tipo escolhido: CPF e celular não se confundem', () => {
+      const chaveDe = (tipoDeChave: string, chave: string) =>
+        storePaymentsSchema.safeParse({
+          pagamentos: ['PIX_DIRETO'],
+          pixDireto: { ...CHAVE, tipoDeChave, chave },
+        });
+      // Onze dígitos são um celular válido e um CPF inválido.
+      expect(chaveDe('CELULAR', '33999887766').success).toBe(true);
+      expect(chaveDe('CPF_CNPJ', '33999887766').success).toBe(false);
+      expect(chaveDe('CPF_CNPJ', '529.982.247-25').success).toBe(true);
+      expect(chaveDe('EMAIL', 'loja@exemplo.com').success).toBe(true);
+      expect(chaveDe('EMAIL', 'loja@exemplo').success).toBe(false);
+      expect(chaveDe('ALEATORIA', '123e4567-e12b-12d1-a456-426655440000').success).toBe(true);
+      expect(chaveDe('ALEATORIA', '123e4567').success).toBe(false);
+    });
+
+    it('o nome e a cidade cabem no que o Pix aceita, e o WhatsApp leva o DDD', () => {
+      const com = (mudancas: object) =>
+        storePaymentsSchema.safeParse({
+          pagamentos: ['PIX_DIRETO'],
+          pixDireto: { ...CHAVE, ...mudancas },
+        });
+      expect(com({ nomeDoRecebedor: 'N'.repeat(26) }).success).toBe(false);
+      expect(com({ cidade: 'C'.repeat(16) }).success).toBe(false);
+      expect(com({ whatsapp: '99887766' }).success).toBe(false);
+      // Com ou sem o 55 do país: é o mesmo número.
+      const resultado = com({ whatsapp: '+55 (33) 99988-7766' });
+      expect(resultado.success && resultado.data.pixDireto?.whatsapp).toBe('33999887766');
+    });
+
+    it('a página do cliente sabe SE há Pix direto, mas nunca recebe a chave', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(
+        linha({ paymentMethods: ['PIX_DIRETO', 'DINHEIRO'], pixDirect: CHAVE }),
+      );
+
+      const publica = await service.publicOperation(EMPRESA);
+
+      expect(publica.pagamentos).toEqual(['PIX_DIRETO', 'DINHEIRO']);
+      expect(publica).not.toHaveProperty('pixDireto');
+      expect(JSON.stringify(publica)).not.toContain('99988-7766');
+    });
+
+    it('Pix direto gravado sem chave (apagada depois) não chega à página do cliente', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(
+        linha({ paymentMethods: ['PIX_DIRETO', 'DINHEIRO'], pixDirect: null }),
+      );
+
+      expect((await service.publicOperation(EMPRESA)).pagamentos).toEqual(['DINHEIRO']);
+    });
+
+    it('o painel da loja recebe a chave que gravou', async () => {
+      prisma.storeOperation.findUnique.mockResolvedValue(linha({ pixDirect: CHAVE }));
+
+      expect((await service.operation(membro)).pixDireto).toEqual(CHAVE);
+    });
   });
 
   it('tipo de serviço da corrida: ativo e com preço na região; sem o campo, fica o gravado', async () => {

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   cancelar: vi.fn(),
   chamarMotoboyCity: vi.fn(),
   chamarDeNovo: vi.fn(),
+  confirmarPixDireto: vi.fn(),
   entregarComALoja: vi.fn(),
   operation: vi.fn(),
   settings: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/lib/api-client', () => ({
     cancelar: mocks.cancelar,
     chamarMotoboyCity: mocks.chamarMotoboyCity,
     chamarDeNovo: mocks.chamarDeNovo,
+    confirmarPixDireto: mocks.confirmarPixDireto,
     entregarComALoja: mocks.entregarComALoja,
   },
   companyStoreOperationApi: { operation: mocks.operation },
@@ -91,6 +93,7 @@ function pedido(mudancas: Partial<PedidoDaLoja> = {}): PedidoDaLoja {
     corrida: null,
     avisoDaCorrida: null,
     pagamentoOnline: null,
+    pixDireto: null,
     ...mudancas,
   };
 }
@@ -247,6 +250,113 @@ describe('Vendas — entregador da loja', () => {
     const imprimir = within(await cartao(42)).getByRole('link', { name: 'Imprimir' });
     expect(imprimir).toHaveAttribute('href', '/loja/vendas/42/imprimir');
     expect(imprimir).toHaveAttribute('target', '_blank');
+  });
+});
+
+describe('Vendas — Pix direto (na chave da loja)', () => {
+  const aConferir = (mudancas: Partial<PedidoDaLoja> = {}) =>
+    pedido({
+      etapa: 'ACEITO',
+      pagamento: 'PIX_DIRETO',
+      pixDireto: { situacao: 'AGUARDANDO', copiaECola: null, whatsapp: null, confirmadoEm: null },
+      ...mudancas,
+    });
+
+  it('o pedido já está na fila, marcado "Pix a conferir", com o passo que falta', async () => {
+    mocks.vendas.mockResolvedValue([aConferir()]);
+    abrir();
+
+    const doPedido = within(await cartao(42));
+    expect(doPedido.getByText('Pix a conferir')).toBeInTheDocument();
+    expect(doPedido.getByText(/1 item · Pix direto/)).toBeInTheDocument();
+    expect(doPedido.getByRole('status', { name: '' })).toBeDefined();
+    expect(
+      doPedido.getByText(/o cliente deve enviar o comprovante pelo WhatsApp/),
+    ).toBeInTheDocument();
+    expect(doPedido.getByText(/Confira no extrato se entrou R\$\s*23,00/)).toBeInTheDocument();
+  });
+
+  it('confirmar pede um segundo toque, e só então diz à API que o Pix entrou', async () => {
+    mocks.vendas.mockResolvedValue([aConferir()]);
+    mocks.confirmarPixDireto.mockResolvedValue(
+      aConferir({
+        pixDireto: {
+          situacao: 'CONFIRMADO',
+          copiaECola: null,
+          whatsapp: null,
+          confirmadoEm: AGORA.toISOString(),
+        },
+      }),
+    );
+    abrir();
+
+    const doPedido = within(await cartao(42));
+    fireEvent.click(doPedido.getByRole('button', { name: 'Confirmar Pix recebido' }));
+    // O primeiro toque só pergunta: nada foi enviado, e dá para desistir.
+    expect(mocks.confirmarPixDireto).not.toHaveBeenCalled();
+    fireEvent.click(doPedido.getByRole('button', { name: 'Ainda não' }));
+    expect(doPedido.getByRole('button', { name: 'Confirmar Pix recebido' })).toBeInTheDocument();
+
+    fireEvent.click(doPedido.getByRole('button', { name: 'Confirmar Pix recebido' }));
+    fireEvent.click(doPedido.getByRole('button', { name: /Sim, o Pix entrou/ }));
+
+    await waitFor(() => expect(mocks.confirmarPixDireto).toHaveBeenCalledWith('token', 'pedido-1'));
+    const depois = within(await cartao(42));
+    expect(await depois.findByText('Pix confirmado')).toBeInTheDocument();
+    expect(
+      depois.queryByRole('button', { name: 'Confirmar Pix recebido' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('cancelado depois de confirmado: a loja é lembrada de devolver o valor', async () => {
+    mocks.vendas.mockResolvedValue([
+      aConferir({
+        etapa: 'CANCELADO',
+        cancelamento: { motivo: 'Item em falta', por: 'LOJA' },
+        pixDireto: {
+          situacao: 'CONFIRMADO',
+          copiaECola: null,
+          whatsapp: null,
+          confirmadoEm: AGORA.toISOString(),
+        },
+      }),
+    ]);
+    abrir();
+
+    // Os cancelados ficam na aba deles.
+    fireEvent.click(await screen.findByRole('tab', { name: /Cancelados/ }));
+    const doPedido = within(await cartao(42));
+    expect(doPedido.getByText(/devolva R\$\s*23,00 ao cliente/)).toBeInTheDocument();
+    expect(
+      doPedido.queryByRole('button', { name: 'Confirmar Pix recebido' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('cancelado sem ter sido confirmado: não há o que confirmar nem devolver', async () => {
+    mocks.vendas.mockResolvedValue([
+      aConferir({
+        etapa: 'CANCELADO',
+        cancelamento: { motivo: 'Sem comprovante', por: 'LOJA' },
+      }),
+    ]);
+    abrir();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Cancelados/ }));
+    const doPedido = within(await cartao(42));
+    expect(
+      doPedido.queryByRole('button', { name: 'Confirmar Pix recebido' }),
+    ).not.toBeInTheDocument();
+    expect(doPedido.queryByText(/devolva/)).not.toBeInTheDocument();
+  });
+
+  it('pedido em dinheiro não mostra nada de Pix direto', async () => {
+    abrir();
+
+    const doPedido = within(await cartao(42));
+    expect(doPedido.queryByText('Pix a conferir')).not.toBeInTheDocument();
+    expect(
+      doPedido.queryByRole('button', { name: 'Confirmar Pix recebido' }),
+    ).not.toBeInTheDocument();
   });
 });
 

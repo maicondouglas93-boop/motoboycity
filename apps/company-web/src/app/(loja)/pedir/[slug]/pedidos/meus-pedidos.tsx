@@ -34,6 +34,7 @@ import { ConfirmacaoDoPedido } from '@/components/loja-online/confirmacao';
 import { ConviteParaInstalar } from '@/components/loja-online/convite-para-instalar';
 import { AvisosDoPedido } from '@/components/loja-online/avisos-do-pedido';
 import { PagamentoPix } from '@/components/loja-online/pagamento-pix';
+import { PixDiretoDoPedido } from '@/components/loja-online/pix-direto-do-pedido';
 
 /**
  * Onde o cliente responde sozinho a pergunta que ele faria à loja no WhatsApp:
@@ -272,6 +273,9 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
                   cor={marca.corDeAcao}
                   aoMudar={doServidor.substituir}
                 />
+              )}
+              {doServidorDesse && (
+                <PixDiretoDoPedido pedido={doServidorDesse} paleta={paleta} cor={marca.corDeAcao} />
               )}
 
               {!andamento && instante !== 0 && (

@@ -155,7 +155,7 @@ describe('Configurações — pagamento', () => {
   it('online fica travado sem a conta Asaas; na entrega, grava o que for marcado', async () => {
     abrir();
     const pagamento = await cartao('Formas de pagamento');
-    expect(await within(pagamento).findByLabelText('Pix')).toHaveAttribute('aria-disabled', 'true');
+    expect(await within(pagamento).findByLabelText('Pix pelo Asaas')).toHaveAttribute('aria-disabled', 'true');
 
     fireEvent.click(within(pagamento).getByLabelText('Débito na maquininha'));
     fireEvent.click(within(pagamento).getByRole('button', { name: 'Salvar formas de pagamento' }));

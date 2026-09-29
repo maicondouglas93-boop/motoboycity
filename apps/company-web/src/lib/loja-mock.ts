@@ -236,6 +236,7 @@ export const OPERACAO_DE_EXEMPLO: OperacaoDaLoja = {
     },
   },
   pagamentos: LOJA_DE_EXEMPLO.pagamentos,
+  pixDireto: null,
   bairros: LOJA_DE_EXEMPLO.bairros,
 };
 

@@ -34,6 +34,7 @@ export * from './company/company-customer.schema';
 export * from './company/page-protection.schema';
 export * from './company/store-catalog.schema';
 export * from './company/store-settings.schema';
+export * from './company/pix-direto';
 export * from './company/store-operation.schema';
 export * from './company/store-identity.schema';
 export * from './company/store-schedule.rules';

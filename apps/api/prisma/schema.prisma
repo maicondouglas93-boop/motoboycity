@@ -2120,6 +2120,11 @@ model StoreOperation {
   /// Os bairros atendidos, com a taxa de cada um (`BairroAtendido[]`). Nulo até
   /// a loja salvar: sem bairro, a página não aceita entrega.
   deliveryAreas  Json?
+  /// A chave do Pix direto (`PixDiretoDaLoja`): a chave, o nome e a cidade que o
+  /// banco mostra, e o WhatsApp do comprovante. Guardada mesmo com a forma
+  /// desligada. A chave pode ser o CPF de quem vende: só o painel da loja e o QR
+  /// do pedido do próprio cliente a mostram — a página pública nunca.
+  pixDirect      Json?
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

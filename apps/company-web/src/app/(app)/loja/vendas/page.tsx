@@ -448,6 +448,8 @@ function CartaoDaVenda({
   const [expandida, setExpandida] = useState(false);
   const [cancelando, setCancelando] = useState(false);
   const [chamando, setChamando] = useState(false);
+  // Confirmar o Pix é dizer que o dinheiro entrou: pede um segundo toque.
+  const [confirmandoPix, setConfirmandoPix] = useState(false);
   const [motivo, setMotivo] = useState(MOTIVOS[0] ?? '');
   const [preparo, setPreparo] = useState(preparoPadrao);
   const acaoNaVenda = useAcaoNaVenda();
@@ -475,6 +477,8 @@ function CartaoDaVenda({
   const mostrarQuemLeva =
     venda.modalidade === 'ENTREGA' && (quemEntregaNaLoja === 'LOJA' || pelaLoja);
   const janela = janelaEmTexto(venda, agora);
+  // Pix direto sem a confirmação da loja, num pedido que ainda vale.
+  const aConferir = venda.pixDireto?.situacao === 'AGUARDANDO' && venda.etapa !== 'CANCELADO';
   const inicioAgendado = inicioDoPreparo(venda);
   const caminho = caminhoDoPedido(venda.modalidade);
   const indiceAtual = caminho.indexOf(venda.etapa);
@@ -544,6 +548,15 @@ function CartaoDaVenda({
                   {PAGAMENTO_NA_VENDA[venda.pagamentoOnline.situacao]}
                 </Badge>
               )}
+              {venda.pixDireto && (
+                <Badge
+                  variant="outline"
+                  className={`gap-1 ${aConferir ? 'border-warning/40 bg-warning-soft' : ''}`}
+                >
+                  <Check className="size-3" aria-hidden="true" />
+                  {venda.pixDireto.situacao === 'CONFIRMADO' ? 'Pix confirmado' : 'Pix a conferir'}
+                </Badge>
+              )}
               {janela && (
                 <Badge variant="outline" className="gap-1">
                   <CalendarClock className="size-3" aria-hidden="true" />
@@ -582,6 +595,56 @@ function CartaoDaVenda({
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Timer className="size-3.5" aria-hidden="true" />
             {tempo}
+          </p>
+        )}
+
+        {/* Sem gateway, nada confirma o Pix: o cliente manda o comprovante pelo
+            WhatsApp, e é a loja quem diz que o dinheiro entrou. */}
+        {aConferir && (
+          <div className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-2">
+            <p className="text-xs" role="status">
+              Pix direto: o cliente deve enviar o comprovante pelo WhatsApp. Confira no extrato se
+              entrou {moeda(venda.total)} antes de confirmar.
+            </p>
+            {confirmandoPix ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={ocupado}
+                  onClick={() => {
+                    acaoNaVenda.mutate({ tipo: 'confirmarPixDireto', id: venda.id });
+                    setConfirmandoPix(false);
+                  }}
+                >
+                  <Check className="size-4" /> Sim, o Pix entrou
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmandoPix(false)}
+                >
+                  Ainda não
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={ocupado}
+                onClick={() => setConfirmandoPix(true)}
+              >
+                Confirmar Pix recebido
+              </Button>
+            )}
+          </div>
+        )}
+
+        {venda.etapa === 'CANCELADO' && venda.pixDireto?.situacao === 'CONFIRMADO' && (
+          <p className="text-xs" role="status">
+            O Pix deste pedido já estava confirmado: devolva {moeda(venda.total)} ao cliente.
           </p>
         )}
 

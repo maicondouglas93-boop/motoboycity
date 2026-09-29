@@ -24,7 +24,7 @@ export interface DescricaoDaForma {
 export const GRUPOS_DE_PAGAMENTO: Record<GrupoDePagamento, { titulo: string; detalhe: string }> = {
   ONLINE: {
     titulo: 'Pagar agora, online',
-    detalhe: 'Pelo Asaas, direto na conta da loja.',
+    detalhe: 'Pelo Asaas, ou direto na sua chave Pix.',
   },
   ENTREGA: {
     titulo: 'Pagar na entrega',
@@ -51,9 +51,17 @@ export const FORMAS_DE_PAGAMENTO: DescricaoDaForma[] = [
   {
     valor: 'PIX_ONLINE',
     grupo: 'ONLINE',
-    titulo: 'Pix',
+    titulo: 'Pix pelo Asaas',
     curto: 'Pix',
     detalhe: 'O QR Code aparece logo depois do pedido; a loja recebe o pedido quando o Pix é pago.',
+  },
+  {
+    valor: 'PIX_DIRETO',
+    grupo: 'ONLINE',
+    titulo: 'Pix direto na sua chave',
+    curto: 'Pix',
+    detalhe:
+      'Sem gateway: o cliente paga na sua chave e envia o comprovante pelo seu WhatsApp. O pedido aparece na hora; você confere e confirma em Vendas.',
   },
   {
     valor: 'CREDITO_ONLINE',
@@ -111,6 +119,7 @@ export function rotuloDoPagamento(valor: FormaDePagamento): string {
     PIX_ONLINE: 'Pix online',
     CREDITO_ONLINE: 'Crédito online',
     DEBITO_ONLINE: 'Débito online',
+    PIX_DIRETO: 'Pix direto',
     DINHEIRO: 'Dinheiro na entrega',
     PIX_MAQUININHA: 'Pix na maquininha',
     CREDITO_MAQUININHA: 'Crédito na maquininha',

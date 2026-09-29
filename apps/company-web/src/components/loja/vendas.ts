@@ -1,7 +1,12 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CorridaDoPedido, PagamentoOnlineDoPedido, PedidoDaLoja } from '@motoboycity/types';
+import type {
+  CorridaDoPedido,
+  PagamentoOnlineDoPedido,
+  PedidoDaLoja,
+  PixDiretoDoPedido,
+} from '@motoboycity/types';
 import { companyStoreOrdersApi } from '@/lib/api-client';
 import type { VendaDaLoja } from '@/lib/loja-mock';
 import { rotuloDoPagamento } from '@/lib/loja-pagamentos';
@@ -30,6 +35,8 @@ export type VendaNoPainel = Omit<VendaDaLoja, 'cadastro'> & {
   avisoDaCorrida: string | null;
   /** O Pix do pedido pago online. */
   pagamentoOnline: PagamentoOnlineDoPedido | null;
+  /** O Pix direto na chave da loja: a conferir, ou já confirmado por ela. */
+  pixDireto: PixDiretoDoPedido | null;
 };
 
 export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
@@ -63,6 +70,7 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
     corrida: pedido.corrida,
     avisoDaCorrida: pedido.avisoDaCorrida,
     pagamentoOnline: pedido.pagamentoOnline,
+    pixDireto: pedido.pixDireto ?? null,
   };
 }
 
@@ -87,6 +95,7 @@ export type AcaoNaVenda =
   | { tipo: 'cancelar'; id: string; motivo: string }
   | { tipo: 'chamarMotoboyCity'; id: string }
   | { tipo: 'chamarDeNovo'; id: string }
+  | { tipo: 'confirmarPixDireto'; id: string }
   | { tipo: 'entregarComALoja'; id: string };
 
 /**
@@ -110,6 +119,9 @@ export function useAcaoNaVenda() {
         return companyStoreOrdersApi.cancelar(chave, acao.id, { motivo: acao.motivo });
       }
       if (acao.tipo === 'chamarDeNovo') return companyStoreOrdersApi.chamarDeNovo(chave, acao.id);
+      if (acao.tipo === 'confirmarPixDireto') {
+        return companyStoreOrdersApi.confirmarPixDireto(chave, acao.id);
+      }
       if (acao.tipo === 'entregarComALoja') {
         return companyStoreOrdersApi.entregarComALoja(chave, acao.id);
       }

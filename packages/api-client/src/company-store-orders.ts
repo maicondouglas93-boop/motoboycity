@@ -50,6 +50,14 @@ export function createCompanyStoreOrdersApi({ baseUrl }: CompanyStoreOrdersApiCo
       return enviar(accessToken, `/${id}/ride`, 'POST');
     },
 
+    /**
+     * A loja conferiu o comprovante do Pix direto e confirma o pagamento. Repetir
+     * não muda nada; 409 se o pedido não é Pix direto ou já caiu.
+     */
+    confirmarPixDireto(accessToken: string, id: string) {
+      return enviar(accessToken, `/${id}/confirm-pix`, 'POST');
+    },
+
     /** O pedido que o MOTOboyCity não vai levar passa ao entregador da loja. */
     entregarComALoja(accessToken: string, id: string) {
       return enviar(accessToken, `/${id}/own-courier`, 'POST');

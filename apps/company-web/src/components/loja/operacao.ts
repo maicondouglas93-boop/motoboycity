@@ -22,7 +22,9 @@ export const CHAVE_DA_OPERACAO = ['company', 'store', 'operation'] as const;
  * pausar no painel ainda pausa a loja de exemplo. Some junto com `loja-demo.ts`.
  */
 function espelharNaDemonstracao(operacao: OperacaoDaLoja) {
-  salvarOperacao(operacao);
+  // A chave Pix pode ser o CPF de quem vende, e a loja de exemplo não a usa:
+  // ela não é copiada para o `localStorage`.
+  salvarOperacao({ ...operacao, pixDireto: null });
 }
 
 export function useOperacaoDaLoja(ativa = true) {

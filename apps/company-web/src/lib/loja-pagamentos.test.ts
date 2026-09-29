@@ -53,11 +53,12 @@ describe('resumoDosPagamentos', () => {
 });
 
 describe('catálogo de formas', () => {
-  it('são dois grupos: três online e quatro na entrega', () => {
+  it('são dois grupos: quatro online (dois Pix, dois cartões) e quatro na entrega', () => {
     const online = FORMAS_DE_PAGAMENTO.filter((forma) => forma.grupo === 'ONLINE');
     const entrega = FORMAS_DE_PAGAMENTO.filter((forma) => forma.grupo === 'ENTREGA');
     expect(online.map((forma) => forma.valor)).toEqual([
       'PIX_ONLINE',
+      'PIX_DIRETO',
       'CREDITO_ONLINE',
       'DEBITO_ONLINE',
     ]);

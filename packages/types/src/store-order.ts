@@ -153,6 +153,29 @@ export interface PagamentoOnlineDoPedido {
   aviso: string | null;
 }
 
+/**
+ * O Pix direto do pedido: o cliente paga na chave da loja e envia o comprovante
+ * pelo WhatsApp dela; a loja confere e confirma em Vendas.
+ *
+ * `AGUARDANDO`: ainda não confirmado — o pedido já está na fila, com este aviso.
+ * `CONFIRMADO`: a loja conferiu o comprovante.
+ */
+export interface PixDiretoDoPedido {
+  situacao: 'AGUARDANDO' | 'CONFIRMADO';
+  /**
+   * O Pix copia e cola, com o valor do pedido. Só enquanto aguarda, e só para o
+   * cliente: pago, ele não deve ser pago de novo.
+   */
+  copiaECola: string | null;
+  /**
+   * O WhatsApp da loja, com o DDI (`5533999887766`), para o comprovante. Só o
+   * cliente o recebe, junto do QR; a loja já o conhece.
+   */
+  whatsapp: string | null;
+  /** ISO. Quando a loja confirmou. */
+  confirmadoEm: string | null;
+}
+
 /** A corrida que nasceu do pedido, como Vendas a mostra. */
 export interface CorridaDoPedido {
   /** O número da corrida no painel de Pedidos. */
@@ -189,6 +212,8 @@ export interface PedidoDaLoja extends AndamentoDoPedido {
   corrida: CorridaDoPedido | null;
   /** O Pix do pedido pago online. `null`: pagamento na entrega. */
   pagamentoOnline: PagamentoOnlineDoPedido | null;
+  /** O Pix direto na chave da loja. Ausente ou `null`: o pedido não é dessa forma. */
+  pixDireto?: PixDiretoDoPedido | null;
   /**
    * O que a loja precisa resolver na corrida: ela não nasceu, foi cancelada
    * pela central, o motoboy não conseguiu entregar. `null` quando está tudo

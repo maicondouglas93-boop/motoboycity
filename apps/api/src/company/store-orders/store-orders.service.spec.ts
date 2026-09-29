@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { OperacaoPublica, PublicStoreProduct } from '@motoboycity/types';
-import type { StoreCheckoutPayload } from '@motoboycity/validation';
+import { crc16, type StoreCheckoutPayload } from '@motoboycity/validation';
 import { Prisma } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -121,7 +121,11 @@ describe('StoreOrdersService', () => {
     $transaction: jest.Mock;
   };
   let catalogo: { publicCatalog: jest.Mock };
-  let operacaoDaLoja: { publicOperation: jest.Mock; tipoDeServicoDaCorrida: jest.Mock };
+  let operacaoDaLoja: {
+    publicOperation: jest.Mock;
+    operacaoDaEmpresa: jest.Mock;
+    tipoDeServicoDaCorrida: jest.Mock;
+  };
   let entregas: { createFromStoreOrder: jest.Mock };
   let contasAsaas: { recebePix: jest.Mock; contaParaCobrar: jest.Mock };
   let asaas: {
@@ -190,6 +194,8 @@ describe('StoreOrdersService', () => {
     };
     operacaoDaLoja = {
       publicOperation: jest.fn().mockResolvedValue(operacao()),
+      // A operação inteira, com a chave Pix que a página pública não recebe.
+      operacaoDaEmpresa: jest.fn().mockResolvedValue({ pixDireto: null }),
       tipoDeServicoDaCorrida: jest.fn().mockResolvedValue('6f1c1d52-8a0e-4b8e-9d1a-3c2b1a0f9e8d'),
     };
     entregas = { createFromStoreOrder: jest.fn().mockResolvedValue({ id: 'corrida-1' }) };
@@ -502,6 +508,125 @@ describe('StoreOrdersService', () => {
     // A cobrança criada antes da falha é apagada, e o pedido nem chega a existir.
     expect(asaas.apagarCobranca).toHaveBeenCalledWith(expect.anything(), 'pay_1');
     expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+  });
+
+  describe('Pix direto (na chave da loja, sem gateway)', () => {
+    const CHAVE_DA_LOJA = {
+      tipoDeChave: 'CELULAR',
+      chave: '(33) 99988-7766',
+      nomeDoRecebedor: 'Lanches do Ze',
+      cidade: 'Lajinha',
+      whatsapp: '33988776655',
+    };
+
+    beforeEach(() => {
+      operacaoDaLoja.publicOperation.mockResolvedValue(
+        operacao({ pagamentos: ['DINHEIRO', 'PIX_DIRETO'] }),
+      );
+      operacaoDaLoja.operacaoDaEmpresa.mockResolvedValue({ pixDireto: CHAVE_DA_LOJA });
+    });
+
+    const pedirComPixDireto = () =>
+      service.checkout('acai', CLIENTE, pedido({ pagamento: 'PIX_DIRETO' }));
+
+    it('o pedido aparece na hora, com o Pix a conferir: aceito, com corrida, avisando a loja', async () => {
+      const feito = await pedirComPixDireto();
+
+      // Nada de "aguardando pagamento": a loja vê o pedido já, e decide.
+      expect(feito.etapa).toBe('ACEITO');
+      expect(feito.pixDireto).toMatchObject({ situacao: 'AGUARDANDO', confirmadoEm: null });
+      expect(feito.pagamentoOnline).toBeNull();
+      expect(avisos.pedidoNovo).toHaveBeenCalledTimes(1);
+      expect(entregas.createFromStoreOrder).toHaveBeenCalledTimes(1);
+      // Nenhuma cobrança no Asaas, e nem o CPF é pedido.
+      expect(asaas.criarCobrancaPix).not.toHaveBeenCalled();
+      expect(asaas.clienteDoCpf).not.toHaveBeenCalled();
+    });
+
+    it('o código do Pix leva o valor do pedido, o número dele e a chave da loja', async () => {
+      const feito = await pedirComPixDireto();
+      const codigo = feito.pixDireto!.copiaECola!;
+
+      expect(codigo).toContain('br.gov.bcb.pix0114+5533999887766');
+      expect(codigo).toContain('5405' + '48.20');
+      expect(codigo).toContain('0508PEDIDO42');
+      expect(codigo).toContain('LANCHES DO ZE');
+      // O CRC final é o do que vem antes dele: um byte trocado e o banco recusa.
+      expect(codigo.slice(-4)).toBe(crc16(codigo.slice(0, -4)));
+      // É o mesmo que foi gravado no pedido, sem passar pelo Asaas.
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect(data).toMatchObject({ paymentMethod: 'PIX_DIRETO', pixPayload: codigo });
+      expect(data.paymentStatus).toBeUndefined();
+      expect(data.paidAt).toBeUndefined();
+    });
+
+    it('o cliente recebe o WhatsApp da loja, com o DDI, para mandar o comprovante', async () => {
+      const feito = await pedirComPixDireto();
+
+      expect(feito.pixDireto?.whatsapp).toBe('5533988776655');
+    });
+
+    it('o motoboy não cobra nada na porta e não volta à loja com dinheiro', async () => {
+      await pedirComPixDireto();
+
+      const [, , payload] = entregas.createFromStoreOrder.mock.calls[0]!;
+      expect(payload).toMatchObject({ customerPaymentMethod: 'PREPAID', requiresReturn: false });
+      expect(payload.driverNote).toContain('Pago por Pix direto para a loja. NÃO cobrar do cliente.');
+    });
+
+    it('a loja sem a chave (apagada depois de o cliente abrir a página) recusa o pedido', async () => {
+      operacaoDaLoja.operacaoDaEmpresa.mockResolvedValue({ pixDireto: null });
+
+      await expect(pedirComPixDireto()).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_PAYMENT_UNAVAILABLE' },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+    });
+
+    it('a forma que a página não oferece (loja sem a chave) é recusada pela lista pública', async () => {
+      operacaoDaLoja.publicOperation.mockResolvedValue(operacao({ pagamentos: ['DINHEIRO'] }));
+
+      await expect(pedirComPixDireto()).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_PAYMENT_UNAVAILABLE' },
+      });
+    });
+
+    it('em "Meus pedidos" o cliente vê o código e o WhatsApp; confirmado ou cancelado, o código some', async () => {
+      await pedirComPixDireto();
+      prisma.storeSlug.findUnique.mockResolvedValue({ companyId: EMPRESA });
+      const linha = { ...(await prisma.storeOrder.create.mock.results.at(-1)!.value), delivery: null };
+      const dele = (mudancas: object) =>
+        prisma.storeOrder.findMany.mockResolvedValue([{ ...linha, ...mudancas }]);
+
+      dele({});
+      const [aguardando] = await service.pedidosDoCliente('acai', CLIENTE);
+      expect(aguardando!.pixDireto).toMatchObject({
+        situacao: 'AGUARDANDO',
+        copiaECola: linha.pixPayload,
+        whatsapp: '5533988776655',
+      });
+
+      dele({ paidAt: new Date('2026-09-23T15:20:00.000Z') });
+      const [confirmado] = await service.pedidosDoCliente('acai', CLIENTE);
+      expect(confirmado!.pixDireto).toMatchObject({
+        situacao: 'CONFIRMADO',
+        copiaECola: null,
+        confirmadoEm: '2026-09-23T15:20:00.000Z',
+      });
+
+      dele({ stage: 'CANCELADO' });
+      const [cancelado] = await service.pedidosDoCliente('acai', CLIENTE);
+      expect(cancelado!.pixDireto).toMatchObject({ situacao: 'AGUARDANDO', copiaECola: null });
+    });
+
+    it('quem não tem pedido de Pix direto não faz a consulta da configuração', async () => {
+      prisma.storeSlug.findUnique.mockResolvedValue({ companyId: EMPRESA });
+      prisma.storeOrder.findMany.mockResolvedValue([]);
+
+      await service.pedidosDoCliente('acai', CLIENTE);
+
+      expect(operacaoDaLoja.operacaoDaEmpresa).not.toHaveBeenCalled();
+    });
   });
 
   it('o pedido novo avisa a loja (e o cliente) pelo serviço de avisos', async () => {

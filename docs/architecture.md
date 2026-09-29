@@ -60,7 +60,22 @@ Como a loja funciona: horário, ajuste da hora (aberta, fechada ou pausada
 agora), tipos de pedido, avisos, formas de pagamento e bairros atendidos (com a
 taxa de cada um). `store_operations`, 1:1 com a empresa, com um
 JSONB por bloco — o formato é o `OperacaoDaLoja` de `@motoboycity/types`, o
-mesmo que as telas editam. Módulo `company/store-operation`: `GET
+mesmo que as telas editam.
+
+**Pix direto** (`PIX_DIRETO`): forma de pagamento sem gateway, com a chave da loja em
+`store_operations.pixDirect` (JSONB, `PixDiretoDaLoja`; coluna aditiva, migration
+`20260929170000_loja_pix_direto`). Fica FORA de `FORMAS_DE_PAGAMENTO_ONLINE` de
+propósito — "online" é o que passa pelo Asaas — e não convive com `PIX_ONLINE`
+(`storePaymentsSchema`). A chave (que pode ser o CPF de quem vende) **não** vai à
+página pública (`OperacaoPublica` a omite; a forma só é oferecida se há chave); o
+cliente a recebe dentro do código do Pix do PRÓPRIO pedido. O código é um BR Code
+estático com valor (`gerarPixCopiaECola`, em `packages/validation/src/company/pix-direto.ts`,
+conferido contra o exemplo do manual do Banco Central) montado em `checkout`, com o número do
+pedido, e gravado em `store_orders.pixPayload`. A confirmação é a loja tocando em
+"Confirmar Pix recebido" (`POST /company/store/orders/:id/confirm-pix`), que grava
+`paidAt`; `paymentStatus` fica nulo, então nada do Asaas (estorno, varredura, webhook)
+toca esses pedidos. Para o cliente, `PedidoDaLoja.pixDireto` traz o código (só enquanto
+aguarda) e o WhatsApp da loja; para a loja, só a situação. Módulo `company/store-operation`: `GET
 /company/store/operation` e um `PUT` por bloco (`schedule`, `status`,
 `order-types`, `notifications`, `payments`, `delivery-areas`), cada um validado
 pelo schema do bloco em

@@ -557,6 +557,19 @@ Decisões de 2026-09-26, do usuário:
   definido pelo GPS do motoboy na entrega. O motoboy lê na observação "ENDEREÇO NÃO
   LOCALIZADO NO MAPA: confirme com o cliente". Rua achada sem o número serve para cobrar.
   Falha do Google (rede, tempo, chave) não muda o modo: segue o aviso de sempre em Vendas;
+- **Pix direto, sem gateway** (decisão de 2026-09-29, do usuário). A loja recebe na
+  chave Pix dela: cadastra o tipo e a chave, o nome e a cidade que o banco mostra, e o
+  WhatsApp, em Configurações → Formas de pagamento. **É um Pix ou o outro**: o Pix pelo
+  Asaas e o Pix direto não ficam ligados juntos. O pedido **aparece na hora** na fila de
+  Vendas, marcado "Pix a conferir", e segue o aceite da loja (automático ou manual). O
+  cliente vê o QR e o copia e cola, com o valor e o número do pedido, e um aviso para
+  **enviar o comprovante pelo WhatsApp da loja** (botão que já leva o pedido e o valor na
+  mensagem). **Nada confirma o pagamento sozinho**: quem confere o extrato e toca em
+  "Confirmar Pix recebido" é a loja. O motoboy do MOTOboyCity **não cobra nada** na porta
+  nem volta à loja com dinheiro. Cancelado depois de confirmado, **não há estorno
+  automático**: Vendas lembra a loja de devolver o valor. Riscos assumidos: o mesmo QR
+  pode ser pago duas vezes, e com aceite automático a corrida nasce antes de a loja
+  conferir o comprovante;
 - **o cliente guarda até 5 endereços** (Casa, Trabalho, Casa da mãe...) e escolhe no
   checkout para onde vai cada pedido (decisão de 2026-09-29). Guardados no aparelho, por
   conta e por loja, como o endereço único já era: **não acompanham o cliente para outro

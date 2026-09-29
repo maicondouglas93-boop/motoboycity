@@ -140,17 +140,50 @@ export interface NotificacaoDoLojista {
  * Como o cliente paga: agora, online pelo Asaas — direto na conta da loja —, ou
  * na entrega, em dinheiro ou na maquininha da loja. Crédito e débito online
  * passam pela página do próprio Asaas; nenhum número de cartão toca o sistema.
+ *
+ * `PIX_DIRETO` é o Pix sem gateway: o cliente paga na chave Pix da própria loja
+ * e envia o comprovante pelo WhatsApp dela, que confere e confirma em Vendas.
+ * Nada confirma o pagamento sozinho, por isso ele NÃO é uma forma "online" no
+ * sentido do Asaas: o pedido aparece na hora, com o Pix a conferir. E é ou ele
+ * ou `PIX_ONLINE` — nunca os dois na mesma loja.
  */
 export type FormaDePagamento =
   | 'PIX_ONLINE'
   | 'CREDITO_ONLINE'
   | 'DEBITO_ONLINE'
+  | 'PIX_DIRETO'
   | 'DINHEIRO'
   | 'PIX_MAQUININHA'
   | 'CREDITO_MAQUININHA'
   | 'DEBITO_MAQUININHA';
 
 export type GrupoDePagamento = 'ONLINE' | 'ENTREGA';
+
+/**
+ * Que tipo de chave Pix a loja cadastrou. A loja escolhe o tipo, e o sistema não
+ * o adivinha: onze dígitos tanto podem ser um CPF quanto um celular, e o código
+ * do Pix escreve cada um de um jeito — errar aqui gera um QR que o banco recusa.
+ */
+export type TipoDeChavePix = 'CPF_CNPJ' | 'CELULAR' | 'EMAIL' | 'ALEATORIA';
+
+/**
+ * O Pix direto da loja: a chave que recebe, o nome e a cidade que o banco mostra
+ * ao cliente antes de ele confirmar, e o WhatsApp para onde vai o comprovante.
+ *
+ * Só o servidor e o painel da loja o leem: a página pública NÃO recebe a chave
+ * (pode ser o CPF de quem vende). O cliente a vê dentro do QR do PRÓPRIO pedido.
+ */
+export interface PixDiretoDaLoja {
+  tipoDeChave: TipoDeChavePix;
+  /** Como a loja digitou; o sistema normaliza ao montar o código do Pix. */
+  chave: string;
+  /** Até 25 caracteres, como o banco mostra ao pagador. */
+  nomeDoRecebedor: string;
+  /** Até 15 caracteres. */
+  cidade: string;
+  /** DDD e número, só dígitos (10 ou 11). */
+  whatsapp: string;
+}
 
 /**
  * Um bairro que a loja atende, com a taxa que ELA cobra do cliente — que não é
@@ -210,11 +243,19 @@ export interface OperacaoDaLoja {
     repetirSom: boolean;
     cliente: Record<EventoDoCliente, boolean>;
   };
-  /** As formas que a loja aceita. As online só valem com a conta Asaas da loja. */
+  /**
+   * As formas que a loja aceita. As online só valem com a conta Asaas da loja, e
+   * o Pix direto só com a chave cadastrada em `pixDireto`.
+   */
   pagamentos: FormaDePagamento[];
+  /** A chave do Pix direto. Guardada mesmo com a forma desligada; `null` até cadastrar. */
+  pixDireto: PixDiretoDaLoja | null;
   /** Os bairros atendidos na entrega. Sem nenhum, a página não aceita entrega. */
   bairros: BairroAtendido[];
 }
 
-/** O que a página do cliente recebe: tudo, menos como a loja quer ser avisada. */
-export type OperacaoPublica = Omit<OperacaoDaLoja, 'notificacoes'>;
+/**
+ * O que a página do cliente recebe: tudo, menos como a loja quer ser avisada e
+ * a chave Pix dela — que só chega ao cliente dentro do QR do pedido dele.
+ */
+export type OperacaoPublica = Omit<OperacaoDaLoja, 'notificacoes' | 'pixDireto'>;

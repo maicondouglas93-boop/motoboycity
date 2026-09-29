@@ -109,6 +109,11 @@ const TEXTO_NA_SACOLA: Record<FormaDePagamento, { titulo: string; detalhe: strin
     titulo: 'Pix',
     detalhe: 'O QR Code aparece logo depois do pedido. A loja só o recebe depois que você paga.',
   },
+  PIX_DIRETO: {
+    titulo: 'Pix',
+    detalhe:
+      'O QR Code aparece logo depois do pedido. Depois de pagar, envie o comprovante pelo WhatsApp da loja.',
+  },
   CREDITO_ONLINE: {
     titulo: 'Cartão de crédito',
     detalhe: 'Você digita o cartão na página segura do Asaas, não aqui.',
@@ -330,7 +335,10 @@ function Conteudo({
   const taxa = retirar ? 0 : (bairroEscolhido?.taxa ?? 0);
   const total = subtotal + taxa;
   const emDinheiro = pagamento === 'DINHEIRO';
-  const pagaOnline = descricaoDaForma(pagamento).grupo === 'ONLINE';
+  // "Online" aqui é o que passa pelo Asaas: pede CPF e leva à cobrança. O Pix
+  // direto também é pagar agora, mas o pedido sai na hora e o cliente paga na
+  // chave da loja, com o comprovante indo pelo WhatsApp.
+  const pagaOnline = pagamento !== 'PIX_DIRETO' && descricaoDaForma(pagamento).grupo === 'ONLINE';
   // A loja de exemplo não cobra nada; o CPF só vale na de verdade.
   const pedeCpf = pagaOnline && cardapio.operacao !== null;
 

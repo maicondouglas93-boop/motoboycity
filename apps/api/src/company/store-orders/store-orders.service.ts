@@ -21,6 +21,7 @@ import type {
   PagamentoOnlineDoPedido,
   PassoDoPedido,
   PedidoDaLoja,
+  PixDiretoDoPedido,
   PublicStoreProduct,
   SituacaoDaCorrida,
 } from '@motoboycity/types';
@@ -32,10 +33,12 @@ import {
   chamarMotoboyCity,
   concluido,
   createDeliverySchema,
+  gerarPixCopiaECola,
   horariosDaModalidade,
   inicioDoPedido,
   momentoNaLoja,
   modalidadesAtivas,
+  normalizarChavePix,
   pagamentoConfirmado,
   pedidoMinimoDa,
   pelaCorrida,
@@ -45,6 +48,7 @@ import {
   prontoEm,
   segueACorrida,
   situacaoDaLoja,
+  whatsappComDdi,
   type CreateDeliveryPayload,
   type StoreCheckoutPayload,
   type StoreOrderStagePayload,
@@ -293,6 +297,24 @@ function paraPedido(linha: StoreOrder): PedidoDaLoja {
     corrida: null,
     avisoDaCorrida: null,
     pagamentoOnline: paraPagamento(linha),
+    pixDireto: paraPixDireto(linha),
+  };
+}
+
+/**
+ * O Pix direto do pedido: o código só enquanto aguarda a conferência (pago, ele
+ * não deve ser pago de novo) e só se o pedido não caiu. O WhatsApp da loja não
+ * mora no pedido, e sim na configuração dela: quem entrega o pedido ao cliente o
+ * acrescenta (`comWhatsappDaLoja`).
+ */
+function paraPixDireto(linha: StoreOrder): PixDiretoDoPedido | null {
+  if (linha.paymentMethod !== 'PIX_DIRETO') return null;
+  const confirmado = linha.paidAt !== null;
+  return {
+    situacao: confirmado ? 'CONFIRMADO' : 'AGUARDANDO',
+    copiaECola: !confirmado && linha.stage !== 'CANCELADO' ? linha.pixPayload : null,
+    whatsapp: null,
+    confirmadoEm: linha.paidAt ? linha.paidAt.toISOString() : null,
   };
 }
 
@@ -323,6 +345,9 @@ function paraALoja(linha: LinhaDoPedido): PedidoDaLoja {
     pagamentoOnline: pedido.pagamentoOnline
       ? { ...pedido.pagamentoOnline, aviso: linha.paymentIssue }
       : null,
+    // A loja não precisa do código nem do próprio WhatsApp: só de saber se já
+    // conferiu o comprovante.
+    pixDireto: pedido.pixDireto ? { ...pedido.pixDireto, copiaECola: null } : null,
   };
 }
 
@@ -352,6 +377,28 @@ function eOnline(forma: FormaDePagamento): boolean {
   return (FORMAS_DE_PAGAMENTO_ONLINE as readonly string[]).includes(forma);
 }
 
+/**
+ * O cliente já pagou antes de o pedido chegar: online pelo Asaas, ou no Pix direto
+ * na chave da loja. Nos dois, o motoboy NÃO cobra nada na porta e não volta à loja
+ * com dinheiro. No Pix direto o pagamento pode ainda estar sem conferência — quem
+ * decide não entregar sem ele é a loja, em Vendas, e não o motoboy na rua.
+ */
+function pagoAntes(forma: FormaDePagamento): boolean {
+  return eOnline(forma) || forma === 'PIX_DIRETO';
+}
+
+/** O pedido com o WhatsApp da loja no Pix direto: só o cliente o recebe, junto do QR. */
+function comWhatsappDaLoja(pedido: PedidoDaLoja, whatsapp: string | null): PedidoDaLoja {
+  if (!pedido.pixDireto) return pedido;
+  return {
+    ...pedido,
+    pixDireto: {
+      ...pedido.pixDireto,
+      whatsapp: whatsapp ? whatsappComDdi(whatsapp) : null,
+    },
+  };
+}
+
 function reaisPorExtenso(valor: number): string {
   return `R$ ${valor.toFixed(2).replace('.', ',')}`;
 }
@@ -360,6 +407,7 @@ const COMO_O_CLIENTE_PAGA: Record<FormaDePagamento, string> = {
   PIX_ONLINE: 'Pix online',
   CREDITO_ONLINE: 'crédito online',
   DEBITO_ONLINE: 'débito online',
+  PIX_DIRETO: 'Pix direto para a loja',
   DINHEIRO: 'dinheiro',
   PIX_MAQUININHA: 'Pix na maquininha',
   CREDITO_MAQUININHA: 'crédito na maquininha',
@@ -374,7 +422,9 @@ const COMO_O_CLIENTE_PAGA: Record<FormaDePagamento, string> = {
 function notaDoMotoboy(pedido: PedidoDaLoja): string {
   const pagamento = eOnline(pedido.pagamento)
     ? 'Pago online.'
-    : `Pagamento na entrega: ${COMO_O_CLIENTE_PAGA[pedido.pagamento]}. Cobrar ${reaisPorExtenso(pedido.total)}.`;
+    : pedido.pagamento === 'PIX_DIRETO'
+      ? 'Pago por Pix direto para a loja. NÃO cobrar do cliente.'
+      : `Pagamento na entrega: ${COMO_O_CLIENTE_PAGA[pedido.pagamento]}. Cobrar ${reaisPorExtenso(pedido.total)}.`;
   const troco =
     pedido.pagamento === 'DINHEIRO' && pedido.trocoPara !== null
       ? ` Troco para ${reaisPorExtenso(pedido.trocoPara)}.`
@@ -386,7 +436,7 @@ function notaDoMotoboy(pedido: PedidoDaLoja): string {
 function pagamentoDaCorrida(
   forma: FormaDePagamento,
 ): CreateDeliveryPayload['customerPaymentMethod'] {
-  if (eOnline(forma)) return 'PREPAID';
+  if (pagoAntes(forma)) return 'PREPAID';
   if (forma === 'DINHEIRO') return 'CASH';
   if (forma === 'PIX_MAQUININHA') return 'PIX';
   return 'CARD';
@@ -546,6 +596,37 @@ export class StoreOrdersService {
     };
     const prazo = prazoDoAceite(andamento, prazoDoAceiteMin);
 
+    /*
+     * Pix direto: o código nasce com o valor do pedido e o número dele (o
+     * identificador no extrato), então só pode ser montado quando o número existe
+     * — por isso vai como função para a gravação. A chave sai da configuração da
+     * loja, e não da página pública, que não a recebe.
+     */
+    let pixDoNumero: ((numero: number) => { pixPayload: string }) | undefined;
+    let whatsappDaLoja: string | null = null;
+    if (pedido.pagamento === 'PIX_DIRETO') {
+      const configuracao = (await this.operacao.operacaoDaEmpresa(companyId)).pixDireto;
+      const chave = configuracao
+        ? normalizarChavePix(configuracao.tipoDeChave, configuracao.chave)
+        : null;
+      if (!configuracao || !chave) {
+        throw recusa(
+          'Esta forma de pagamento não está disponível nesta loja.',
+          'STORE_ORDER_PAYMENT_UNAVAILABLE',
+        );
+      }
+      whatsappDaLoja = configuracao.whatsapp;
+      pixDoNumero = (numero) => ({
+        pixPayload: gerarPixCopiaECola({
+          chave,
+          nomeDoRecebedor: configuracao.nomeDoRecebedor,
+          cidade: configuracao.cidade,
+          valor: reais(total),
+          identificador: `PEDIDO${numero}`,
+        }),
+      });
+    }
+
     const id = randomUUID();
     const pix = online
       ? await this.gerarPix(companyId, id, clienteId, {
@@ -584,7 +665,7 @@ export class StoreOrdersService {
 
     let gravado: StoreOrder;
     try {
-      gravado = await this.gravarComNumero(companyId, dados);
+      gravado = await this.gravarComNumero(companyId, dados, pixDoNumero);
     } catch (erro) {
       // Sem pedido, a cobrança não pode ficar no Asaas esperando pagamento.
       if (pix) await this.apagarCobranca(companyId, pix.paymentProviderId);
@@ -592,11 +673,13 @@ export class StoreOrdersService {
     }
     // O Pix ainda não foi pago: nada de corrida, nem de aviso à loja.
     if (online) return paraPedido(gravado);
-    // Aceite automático: o pedido nasce aceito, e a corrida nasce com ele.
+    // Aceite automático: o pedido nasce aceito, e a corrida nasce com ele. No Pix
+    // direto também: o pedido aparece na hora, com o Pix a conferir — é a loja
+    // quem decide, em Vendas, se cancela por falta de comprovante.
     if (gravado.stage === 'ACEITO') await this.chamarCorrida(companyId, gravado.id);
     const feito = paraPedido(gravado);
     await this.avisos.pedidoNovo(companyId, feito);
-    return feito;
+    return comWhatsappDaLoja(feito, whatsappDaLoja);
   }
 
   /**
@@ -682,7 +765,12 @@ export class StoreOrdersService {
         take: 30,
       });
     const linhas = await this.acompanharCorridas(link.companyId, await consulta(), consulta);
-    return linhas.map(paraPedido);
+    // O WhatsApp da loja só é buscado se algum pedido é Pix direto: o comprovante
+    // vai para ele.
+    const whatsapp = linhas.some((linha) => linha.paymentMethod === 'PIX_DIRETO')
+      ? ((await this.operacao.operacaoDaEmpresa(link.companyId)).pixDireto?.whatsapp ?? null)
+      : null;
+    return linhas.map((linha) => comWhatsappDaLoja(paraPedido(linha), whatsapp));
   }
 
   /*
@@ -837,6 +925,33 @@ export class StoreOrdersService {
         `Não deu para tirar a corrida do pedido cancelado ${id}: ${erro instanceof Error ? erro.message : String(erro)}`,
       );
     }
+  }
+
+  /**
+   * A loja conferiu o comprovante do Pix direto — o cliente o mandou pelo
+   * WhatsApp — e confirma. É a única forma de o pagamento ser dado como recebido:
+   * nada chega do banco. Idempotente, e só o primeiro toque grava a hora.
+   */
+  async confirmarPixDireto(user: User, id: string): Promise<PedidoDaLoja> {
+    const companyId = await this.catalogo.resolveCompanyId(user);
+    const linha = await this.linhaDaLoja(companyId, id);
+    if (linha.paymentMethod !== 'PIX_DIRETO') {
+      throw new ConflictException({
+        message: 'Este pedido não é pago por Pix direto.',
+        code: 'STORE_ORDER_NOT_PIX_DIRECT',
+      });
+    }
+    if (linha.stage === 'CANCELADO') {
+      throw new ConflictException({
+        message: 'Este pedido foi cancelado. Se o cliente pagou, devolva o Pix a ele.',
+        code: 'STORE_ORDER_STAGE_INVALID',
+      });
+    }
+    await this.prisma.storeOrder.updateMany({
+      where: { id, companyId, paidAt: null },
+      data: { paidAt: new Date() },
+    });
+    return this.paraALojaPorId(companyId, id);
   }
 
   /** O pedido do entregador da loja passa para o MOTOboyCity — num dia de aperto. */
@@ -1048,7 +1163,7 @@ export class StoreOrdersService {
       externalOrderNumber: `Loja #${pedido.numero}`,
       driverNote: notaDoMotoboy(pedido),
       customerPaymentMethod: pagamentoDaCorrida(pedido.pagamento),
-      requiresReturn: !eOnline(pedido.pagamento),
+      requiresReturn: !pagoAntes(pedido.pagamento),
       ...(agendar && pronto ? { scheduledAt: pronto.toISOString() } : {}),
     });
   }
@@ -1519,6 +1634,7 @@ export class StoreOrdersService {
   private async gravarComNumero(
     companyId: string,
     dados: Omit<Prisma.StoreOrderUncheckedCreateInput, 'companyId' | 'number'>,
+    doNumero?: (numero: number) => { pixPayload: string },
   ): Promise<StoreOrder> {
     for (let tentativa = 1; ; tentativa += 1) {
       try {
@@ -1527,8 +1643,12 @@ export class StoreOrdersService {
             where: { companyId },
             _max: { number: true },
           });
+          const numero = (ultimo._max.number ?? 0) + 1;
           return tx.storeOrder.create({
-            data: { ...dados, companyId, number: (ultimo._max.number ?? 0) + 1 },
+            // O que depende do número (o identificador do Pix direto) é montado
+            // aqui, na tentativa que de fato o usa: uma repetição por número
+            // ocupado refaz o código com o número novo.
+            data: { ...dados, ...(doNumero?.(numero) ?? {}), companyId, number: numero },
           });
         });
       } catch (erro) {

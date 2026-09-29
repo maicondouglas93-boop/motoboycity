@@ -1,8 +1,13 @@
 import recibo from '@/components/orders/delivery-receipt.module.css';
 import type { VendaDaLoja } from '@/lib/loja-mock';
 
-/** O que a comanda usa da venda: tudo, menos o cadastro do cliente. */
-type VendaNaComanda = Omit<VendaDaLoja, 'cadastro'>;
+/**
+ * O que a comanda usa da venda: tudo, menos o cadastro do cliente — e, no Pix
+ * direto, se a loja já conferiu o comprovante.
+ */
+type VendaNaComanda = Omit<VendaDaLoja, 'cadastro'> & {
+  pixDireto?: { situacao: 'AGUARDANDO' | 'CONFIRMADO' } | null;
+};
 import { etapaParaALoja } from '@/lib/loja-pedido';
 import estilos from './comanda-da-venda.module.css';
 
@@ -69,6 +74,7 @@ export function ComandaDaVenda({
   // chega como código, e não como texto.
   const pagoOnline = venda.pagamento.toLowerCase().includes('online');
   const troco = venda.trocoPara === null ? 0 : venda.trocoPara - venda.total;
+  const pixDireto = venda.pixDireto ?? null;
 
   return (
     <article className={recibo['receipt']} aria-label={`Comanda do pedido #${venda.numero}`}>
@@ -179,9 +185,13 @@ export function ComandaDaVenda({
         {/* O que quem entrega faz com o dinheiro: nada, ou cobrar — e com
             quanto de troco no bolso. */}
         <p className={estilos['destaque']}>
-          {pagoOnline
-            ? 'JÁ PAGO — NÃO COBRAR'
-            : `COBRAR ${moeda(venda.total)} NA ${venda.modalidade === 'ENTREGA' ? 'ENTREGA' : 'RETIRADA'}`}
+          {pixDireto
+            ? pixDireto.situacao === 'CONFIRMADO'
+              ? 'PIX CONFIRMADO — NÃO COBRAR'
+              : 'PIX A CONFERIR (COMPROVANTE NO WHATSAPP) — NÃO COBRAR NA ENTREGA'
+            : pagoOnline
+              ? 'JÁ PAGO — NÃO COBRAR'
+              : `COBRAR ${moeda(venda.total)} NA ${venda.modalidade === 'ENTREGA' ? 'ENTREGA' : 'RETIRADA'}`}
         </p>
         {venda.trocoPara !== null && (
           <p className={estilos['destaque']}>

@@ -79,7 +79,9 @@ describe('Comanda da venda', () => {
     const categorias = screen
       .getAllByText(/:$/)
       .map((elemento) => elemento.textContent)
-      .filter((linha) => ['Complementos:', 'Frutas:', 'Cobertura:', 'Adicionais:'].includes(linha!));
+      .filter((linha) =>
+        ['Complementos:', 'Frutas:', 'Cobertura:', 'Adicionais:'].includes(linha!),
+      );
     expect(categorias).toEqual(['Complementos:', 'Frutas:', 'Cobertura:', 'Adicionais:']);
     // Uma opção por linha, na ordem em que o cardápio as tem.
     const opcoes = ['Leite condensado', 'Leite em pó', 'Morango', 'Banana', 'Chocolate', 'Granola'];
@@ -163,5 +165,42 @@ describe('Comanda da venda', () => {
     expect(texto()).toContain('JÁ PAGO — NÃO COBRAR');
     expect(texto()).toContain('Retirada na loja');
     expect(texto()).not.toContain('ENDEREÇO DE ENTREGA');
+  });
+
+  it('Pix direto a conferir: não cobra na porta, e avisa que o comprovante ainda não foi conferido', () => {
+    render(
+      <ComandaDaVenda
+        venda={{
+          ...VENDA,
+          pagamento: 'Pix direto',
+          trocoPara: null,
+          pixDireto: { situacao: 'AGUARDANDO' },
+        }}
+        loja="Açaí do Centro"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    expect(texto()).toContain('PIX A CONFERIR (COMPROVANTE NO WHATSAPP) — NÃO COBRAR NA ENTREGA');
+    expect(texto()).not.toMatch(/COBRAR R\$/);
+    expect(texto()).not.toContain('JÁ PAGO');
+  });
+
+  it('Pix direto confirmado pela loja: confirmado, não cobrar', () => {
+    render(
+      <ComandaDaVenda
+        venda={{
+          ...VENDA,
+          pagamento: 'Pix direto',
+          trocoPara: null,
+          pixDireto: { situacao: 'CONFIRMADO' },
+        }}
+        loja="Açaí do Centro"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    expect(texto()).toContain('PIX CONFIRMADO — NÃO COBRAR');
+    expect(texto()).not.toContain('A CONFERIR');
   });
 });

@@ -1,10 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import type { FormaDePagamento } from '@motoboycity/types';
+import type { FormaDePagamento, PixDiretoDaLoja } from '@motoboycity/types';
+import { pixDiretoSchema } from '@motoboycity/validation';
 import { mensagemDoErro } from '@/components/loja/catalogo';
 import { recebePix, useContaAsaas } from '@/components/loja/conta-asaas';
 import { useGravarOperacao, useOperacaoDaLoja } from '@/components/loja/operacao';
+import {
+  PixDiretoDaLojaCampos,
+  rascunhoDoPix,
+  type CampoDoPix,
+  type RascunhoDoPix,
+} from '@/components/loja/pix-direto-da-loja';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -13,13 +20,25 @@ import { FORMAS_DE_PAGAMENTO, GRUPOS_DE_PAGAMENTO, descricaoDaForma } from '@/li
 
 /**
  * Receber online é pelo Asaas, direto na conta da loja: o Pix, com a conta
- * ligada e com chave Pix ativa. Cartão online fica para depois. O servidor
- * confere o mesmo, e esconde da página o que não vale.
+ * ligada e com chave Pix ativa. Cartão online fica para depois. O Pix direto,
+ * na chave da própria loja, não precisa de conta nenhuma — só dos dados dele,
+ * conferidos ao salvar. O servidor confere o mesmo, e esconde da página o que
+ * não vale.
  */
 function disponivel(forma: FormaDePagamento, pix: boolean): boolean {
+  if (forma === 'PIX_DIRETO') return true;
   if (descricaoDaForma(forma).grupo !== 'ONLINE') return true;
   return forma === 'PIX_ONLINE' && pix;
 }
+
+/** É um Pix ou o outro: marcar um desmarca o outro. */
+const OUTRO_PIX: Partial<Record<FormaDePagamento, FormaDePagamento>> = {
+  PIX_ONLINE: 'PIX_DIRETO',
+  PIX_DIRETO: 'PIX_ONLINE',
+};
+
+/** O primeiro campo com erro, na ordem em que aparecem na tela. */
+const ORDEM_DOS_CAMPOS_DO_PIX: CampoDoPix[] = ['chave', 'nomeDoRecebedor', 'cidade', 'whatsapp'];
 
 function ordenadas(formas: FormaDePagamento[]): string {
   return JSON.stringify([...formas].sort());
@@ -54,6 +73,7 @@ export function PagamentosDaLoja() {
             key={`${versao}-${pix}`}
             pix={pix}
             salvas={consulta.data.pagamentos}
+            pixSalvo={consulta.data.pixDireto}
             onDescartar={() => setVersao((atual) => atual + 1)}
           />
         )}
@@ -65,24 +85,64 @@ export function PagamentosDaLoja() {
 function Formulario({
   pix,
   salvas,
+  pixSalvo,
   onDescartar,
 }: {
   pix: boolean;
   salvas: FormaDePagamento[];
+  pixSalvo: PixDiretoDaLoja | null;
   onDescartar: () => void;
 }) {
   const [formas, setFormas] = useState<FormaDePagamento[]>(salvas);
+  const [inicial] = useState<RascunhoDoPix>(() => rascunhoDoPix(pixSalvo));
+  const [rascunho, setRascunho] = useState<RascunhoDoPix>(inicial);
+  const [tentou, setTentou] = useState(false);
   const gravar = useGravarOperacao(companyStoreOperationApi.updatePayments);
 
   // Só as formas que valem: online marcada sem conta não chega ao cliente, e
   // contá-la deixaria desmarcar a última forma que ele de fato enxerga.
   const efetivas = formas.filter((forma) => disponivel(forma, pix));
-  const mudou = ordenadas(efetivas) !== ordenadas(salvas.filter((forma) => disponivel(forma, pix)));
+  const direto = efetivas.includes('PIX_DIRETO');
+  const mudouPix = direto && JSON.stringify(rascunho) !== JSON.stringify(inicial);
+  const mudou =
+    ordenadas(efetivas) !== ordenadas(salvas.filter((forma) => disponivel(forma, pix))) || mudouPix;
+
+  // O que falta nos dados do Pix, campo por campo — só mostrado depois de tentar
+  // salvar, para o formulário não nascer coberto de erro.
+  const conferido = direto ? pixDiretoSchema.safeParse(rascunho) : null;
+  const errosDoPix: Partial<Record<CampoDoPix, string>> = {};
+  if (tentou && conferido && !conferido.success) {
+    for (const problema of conferido.error.issues) {
+      const campo = problema.path[0] as CampoDoPix | undefined;
+      if (campo && !errosDoPix[campo]) errosDoPix[campo] = problema.message;
+    }
+  }
 
   function alternar(forma: FormaDePagamento) {
-    setFormas((atual) =>
-      atual.includes(forma) ? atual.filter((item) => item !== forma) : [...atual, forma],
-    );
+    setFormas((atual) => {
+      if (atual.includes(forma)) return atual.filter((item) => item !== forma);
+      // Um Pix ou o outro: marcar um desmarca o outro.
+      const outro = OUTRO_PIX[forma];
+      return [...atual.filter((item) => item !== outro), forma];
+    });
+  }
+
+  function salvar() {
+    if (conferido && !conferido.success) {
+      setTentou(true);
+      const primeiro = ORDEM_DOS_CAMPOS_DO_PIX.find((campo) =>
+        conferido.error.issues.some((problema) => problema.path[0] === campo),
+      );
+      const elemento = primeiro ? document.getElementById(`pix-${primeiro}`) : null;
+      elemento?.scrollIntoView?.({ block: 'center' });
+      elemento?.focus({ preventScroll: true });
+      return;
+    }
+    gravar.mutate({
+      pagamentos: efetivas,
+      // Sem o Pix direto marcado, a chave que já estava gravada fica como está.
+      ...(conferido?.success ? { pixDireto: conferido.data } : {}),
+    });
   }
 
   return (
@@ -104,9 +164,14 @@ function Formulario({
 
             {semConta && (
               <p className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs">
-                O Pix pela página depende da sua conta Asaas, ligada em &quot;Recebimento online
-                pelo Asaas&quot;, abaixo — e com chave Pix ativa. Cartão online ainda não está
-                disponível.
+                O Pix pelo Asaas depende da sua conta Asaas, ligada em &quot;Recebimento online pelo
+                Asaas&quot;, abaixo — e com chave Pix ativa. O Pix direto não precisa dela. Cartão
+                online ainda não está disponível.
+              </p>
+            )}
+            {grupo === 'ONLINE' && (
+              <p className="text-xs text-muted-foreground">
+                É um Pix ou o outro: marcar um desmarca o outro.
               </p>
             )}
 
@@ -128,7 +193,7 @@ function Formulario({
                     onCheckedChange={() => alternar(forma.valor)}
                     aria-label={forma.titulo}
                   />
-                  <span>
+                  <span className="min-w-0 flex-1">
                     {forma.titulo}
                     <span className="block text-xs text-muted-foreground">{forma.detalhe}</span>
                     {ultima && (
@@ -141,6 +206,14 @@ function Formulario({
                 </label>
               );
             })}
+
+            {grupo === 'ONLINE' && direto && (
+              <PixDiretoDaLojaCampos
+                valor={rascunho}
+                aoMudar={(campo, texto) => setRascunho((atual) => ({ ...atual, [campo]: texto }))}
+                erros={errosDoPix}
+              />
+            )}
 
             {/* A maquininha é da loja, e o motoboy é da central. Quem marca
                 essas opções precisa saber que a máquina sai com a entrega — e
@@ -159,7 +232,7 @@ function Formulario({
         <Button
           type="button"
           disabled={!mudou || efetivas.length === 0 || gravar.isPending}
-          onClick={() => gravar.mutate({ pagamentos: efetivas })}
+          onClick={salvar}
         >
           {gravar.isPending ? 'Salvando...' : 'Salvar formas de pagamento'}
         </Button>
