@@ -1,11 +1,16 @@
+import { ConflictException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { OperacaoPublica, PublicStoreProduct } from '@motoboycity/types';
-import type { PromocaoPublica } from '@motoboycity/types';
+import type { CupomPublico, PromocaoPublica } from '@motoboycity/types';
 import { crc16, type StoreCheckoutPayload } from '@motoboycity/validation';
 import { Prisma } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import {
+  StoreCouponsService,
+  type CupomDoServidor,
+} from '../store-marketing/store-coupons.service';
 import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import {
   OPERACAO_INICIAL,
@@ -122,6 +127,7 @@ describe('StoreOrdersService', () => {
     storeSettings: { findUnique: jest.Mock };
     $transaction: jest.Mock;
     $executeRaw: jest.Mock;
+    storeCouponRedemption: { count: jest.Mock; create: jest.Mock };
   };
   let catalogo: { publicCatalog: jest.Mock };
   let operacaoDaLoja: {
@@ -139,6 +145,7 @@ describe('StoreOrdersService', () => {
   };
   let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
   let marketing: { promocoesDoPedido: jest.Mock };
+  let cupons: { paraOPedido: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
     company: { id: EMPRESA, status: 'ACTIVE', storeSettings: { acceptsOrders } },
@@ -170,11 +177,13 @@ describe('StoreOrdersService', () => {
             paidAt: null,
             paymentIssue: null,
             paymentCheckedAt: null,
+            couponCode: null,
             ...data,
             address: data.address === Prisma.DbNull ? null : data.address,
             subtotal: new Prisma.Decimal(data.subtotal),
             deliveryFee: new Prisma.Decimal(data.deliveryFee),
             total: new Prisma.Decimal(data.total),
+            couponDiscount: new Prisma.Decimal(data.couponDiscount ?? 0),
             changeFor: data.changeFor === null ? null : new Prisma.Decimal(data.changeFor),
           }),
         ),
@@ -191,8 +200,13 @@ describe('StoreOrdersService', () => {
       },
       storeSettings: { findUnique: jest.fn().mockResolvedValue({ name: 'Açaí do Zé' }) },
       $transaction: jest.fn(),
-      // O uso da promoção: uma linha alterada quando ainda há uso.
+      // O uso da promoção e do cupom: uma linha alterada quando ainda há uso.
       $executeRaw: jest.fn().mockResolvedValue(1),
+      // O uso do cupom por este cliente, e o registro que o pedido cria.
+      storeCouponRedemption: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
     prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
     catalogo = {
@@ -230,6 +244,7 @@ describe('StoreOrdersService', () => {
     };
     avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
     marketing = { promocoesDoPedido: jest.fn().mockResolvedValue([]) };
+    cupons = { paraOPedido: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -242,6 +257,8 @@ describe('StoreOrdersService', () => {
         { provide: StoreAsaasClient, useValue: asaas },
         // Sem promoção por padrão: os testes de sempre são de preço cheio.
         { provide: StoreMarketingService, useValue: marketing },
+        // Sem cupom por padrão: só os testes do cupom o configuram.
+        { provide: StoreCouponsService, useValue: cupons },
         { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
@@ -783,6 +800,309 @@ describe('StoreOrdersService', () => {
         total: 36.3,
         totalOriginal: 54.3,
         promocao: { rotulo: 'Leve 3, pague 2', desconto: 18 },
+      });
+    });
+  });
+
+  describe('cupom no pedido', () => {
+    /** 10% em tudo, sem limites: o cupom mais simples. */
+    function cupom(mudancas: Partial<CupomDoServidor> = {}): CupomDoServidor {
+      return {
+        id: 'cupom-1',
+        codigo: 'BEMVINDO10',
+        tipo: 'PERCENTUAL',
+        percentual: 10,
+        valor: null,
+        pedidoMinimo: null,
+        descontoMaximo: null,
+        valeEmPromocao: false,
+        produtoIds: [],
+        categoriaIds: [],
+        usos: 0,
+        limiteDeUsos: null,
+        limitePorCliente: null,
+        ...mudancas,
+      };
+    }
+    /** Açaí 20% OFF: o item de 21,10 passa a custar 17,50 mais adicionais. */
+    const promocaoDoAcai: PromocaoPublica = {
+      id: 'promo-1',
+      nome: 'Açaí 20% OFF',
+      tipo: 'PERCENTUAL',
+      alvo: 'PRODUTO',
+      produtoId: 'p1',
+      categoriaId: null,
+      percentual: 20,
+      precoPromocional: null,
+      leve: null,
+      pague: null,
+      inicio: null,
+      fim: null,
+      horaInicio: null,
+      horaFim: null,
+      diasDaSemana: [],
+    };
+    const comCupom = (mudancas: Partial<StoreCheckoutPayload> = {}) =>
+      service.checkout('acai', CLIENTE, pedido({ cupom: 'bemvindo10', ...mudancas }));
+
+    it('desconta o cupom dos itens, deixa a taxa cheia e guarda o cupom no pedido', async () => {
+      cupons.paraOPedido.mockResolvedValue(cupom());
+
+      // 42,20 de itens; 10% = 4,22; mais 6,00 de entrega = 43,98.
+      const feito = await comCupom({ totalVisto: 43.98 });
+
+      expect(feito).toMatchObject({
+        subtotal: 42.2,
+        taxaDeEntrega: 6,
+        total: 43.98,
+        cupom: { codigo: 'BEMVINDO10', desconto: 4.22 },
+      });
+      expect(cupons.paraOPedido).toHaveBeenCalledWith(EMPRESA, CLIENTE, 'bemvindo10', MEIO_DIA);
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect(data).toMatchObject({
+        subtotal: 42.2,
+        total: 43.98,
+        couponCode: 'BEMVINDO10',
+        couponDiscount: 4.22,
+      });
+    });
+
+    it('o uso é contado na transação do pedido, com o registro de quem usou', async () => {
+      cupons.paraOPedido.mockResolvedValue(cupom({ limitePorCliente: 2 }));
+
+      await comCupom({ totalVisto: 43.98 });
+
+      expect(prisma.$transaction).toHaveBeenCalled();
+      // A conta leva o id do cupom e a empresa: uma loja não gasta uso de outra.
+      const [, cupomId, empresa] = prisma.$executeRaw.mock.calls[0]!;
+      expect(cupomId).toBe('cupom-1');
+      expect(empresa).toBe(EMPRESA);
+      expect(prisma.storeCouponRedemption.count).toHaveBeenCalledWith({
+        where: { couponId: 'cupom-1', customerAuthId: CLIENTE },
+      });
+      // O registro do uso é o do pedido gravado: mesmo id, mesmo cliente.
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect(prisma.storeCouponRedemption.create).toHaveBeenCalledWith({
+        data: { couponId: 'cupom-1', orderId: data.id, customerAuthId: CLIENTE },
+      });
+    });
+
+    it('recusa o total sem cupom que a página mostrou antes, e diz o total novo', async () => {
+      cupons.paraOPedido.mockResolvedValue(cupom());
+
+      await expect(comCupom({ totalVisto: 48.2 })).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_TOTAL_CHANGED', total: 43.98 },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(prisma.storeCouponRedemption.create).not.toHaveBeenCalled();
+    });
+
+    it('pedido sem cupom não consulta cupom nenhum, nem conta uso', async () => {
+      await service.checkout('acai', CLIENTE, pedido());
+
+      expect(cupons.paraOPedido).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.storeCouponRedemption.create).not.toHaveBeenCalled();
+      expect(prisma.storeOrder.create.mock.calls[0][0].data).toMatchObject({
+        couponCode: null,
+        couponDiscount: 0,
+      });
+    });
+
+    it('o cupom recusado pelo que é do cupom (vencido, sem uso, do outro cliente) não deixa pedido', async () => {
+      cupons.paraOPedido.mockRejectedValue(
+        new ConflictException({
+          message: 'Este cupom venceu em 01/09/2026.',
+          code: 'STORE_COUPON_EXPIRED',
+        }),
+      );
+
+      await expect(comCupom()).rejects.toMatchObject({
+        response: { code: 'STORE_COUPON_EXPIRED', message: 'Este cupom venceu em 01/09/2026.' },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+    });
+
+    describe('junto das promoções', () => {
+      it('o item em promoção fica fora do cupom, e ele diz por quê', async () => {
+        marketing.promocoesDoPedido.mockResolvedValue([promocaoDoAcai]);
+        cupons.paraOPedido.mockResolvedValue(cupom());
+
+        await expect(comCupom({ totalVisto: 41 })).rejects.toMatchObject({
+          response: {
+            code: 'STORE_COUPON_NO_ELIGIBLE_ITEMS',
+            message: 'Os itens da sua sacola já estão em promoção, e este cupom não vale junto.',
+          },
+        });
+        expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      });
+
+      it('só o item sem promoção recebe o cupom', async () => {
+        marketing.promocoesDoPedido.mockResolvedValue([promocaoDoAcai]);
+        cupons.paraOPedido.mockResolvedValue(cupom());
+        const comSuco = pedido({
+          itens: [
+            { produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1', 'c1'], quantidade: 2 },
+            { produtoId: 'p2', tamanhoId: null, escolhas: [], quantidade: 1 },
+          ],
+          cupom: 'BEMVINDO10',
+          // Açaí 2 x (14,40 + 3,10) = 35,00; suco 7,20; itens 42,20; cupom 10% de 7,20 = 0,72; entrega 6,00.
+          totalVisto: 47.48,
+        });
+
+        const feito = await service.checkout('acai', CLIENTE, comSuco);
+
+        expect(feito).toMatchObject({ subtotal: 42.2, cupom: { desconto: 0.72 }, total: 47.48 });
+      });
+
+      it('com "vale em promoção", o cupom desconta sobre o que o cliente já paga', async () => {
+        marketing.promocoesDoPedido.mockResolvedValue([promocaoDoAcai]);
+        cupons.paraOPedido.mockResolvedValue(cupom({ valeEmPromocao: true }));
+
+        // Itens 35,00 com a promoção; 10% = 3,50; mais 6,00 de entrega = 37,50.
+        const feito = await comCupom({ totalVisto: 37.5 });
+
+        expect(feito).toMatchObject({ subtotal: 35, cupom: { desconto: 3.5 }, total: 37.5 });
+      });
+    });
+
+    describe('o que depende da sacola', () => {
+      it('o pedido mínimo do cupom conta os itens e diz quanto falta', async () => {
+        cupons.paraOPedido.mockResolvedValue(cupom({ pedidoMinimo: 50 }));
+
+        await expect(comCupom()).rejects.toMatchObject({
+          response: {
+            code: 'STORE_COUPON_BELOW_MINIMUM',
+            message: 'Faltam R$ 7,80 em itens para usar este cupom (pedido mínimo de R$ 50,00).',
+          },
+        });
+      });
+
+      it('um cupom que não alcança nenhum item da sacola é recusado', async () => {
+        cupons.paraOPedido.mockResolvedValue(cupom({ produtoIds: ['p2'] }));
+
+        await expect(comCupom()).rejects.toMatchObject({
+          response: {
+            code: 'STORE_COUPON_NO_ELIGIBLE_ITEMS',
+            message: 'Este cupom não vale para os itens da sua sacola.',
+          },
+        });
+      });
+
+      it('o pedido mínimo da LOJA conta antes do cupom: o cupom não tira o pedido do mínimo', async () => {
+        const comMinimo = operacao();
+        comMinimo.entrega = { ...comMinimo.entrega, pedidoMinimo: 40 };
+        operacaoDaLoja.publicOperation.mockResolvedValue(comMinimo);
+        // 42,20 passam dos 40 da loja; o cupom de R$ 5,00 leva os itens a 37,20, e tudo bem.
+        cupons.paraOPedido.mockResolvedValue(cupom({ tipo: 'VALOR', percentual: null, valor: 5 }));
+
+        const feito = await comCupom({ totalVisto: 43.2 });
+
+        expect(feito.total).toBe(43.2);
+      });
+    });
+
+    describe('as disputas na hora de gravar', () => {
+      it('o último uso levado por outro pedido: recusa, e nada é gravado', async () => {
+        cupons.paraOPedido.mockResolvedValue(cupom({ limiteDeUsos: 5, usos: 4 }));
+        // Outro pedido levou o último uso no meio: o UPDATE condicional não acha linha.
+        prisma.$executeRaw.mockResolvedValue(0);
+
+        await expect(comCupom({ totalVisto: 43.98 })).rejects.toMatchObject({
+          response: { code: 'STORE_COUPON_UNAVAILABLE' },
+        });
+        expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+        expect(prisma.storeCouponRedemption.create).not.toHaveBeenCalled();
+        expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+        expect(avisos.pedidoNovo).not.toHaveBeenCalled();
+      });
+
+      it('o limite por cliente fechado por outro pedido do mesmo cliente: recusa', async () => {
+        cupons.paraOPedido.mockResolvedValue(cupom({ limitePorCliente: 1 }));
+        // Na leitura ele ainda não tinha usado; na gravação, o outro pedido já aparece.
+        prisma.storeCouponRedemption.count.mockResolvedValue(1);
+
+        await expect(comCupom({ totalVisto: 43.98 })).rejects.toMatchObject({
+          response: { code: 'STORE_COUPON_CUSTOMER_LIMIT' },
+        });
+        expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+        expect(prisma.storeCouponRedemption.create).not.toHaveBeenCalled();
+      });
+
+      it('a cobrança do Pix online sai com o total já com o cupom, e cai se o cupom é recusado', async () => {
+        operacaoDaLoja.publicOperation.mockResolvedValue(
+          operacao({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] }),
+        );
+        cupons.paraOPedido.mockResolvedValue(cupom());
+
+        await comCupom({ pagamento: 'PIX_ONLINE', cpf: '52998224725', totalVisto: 43.98 });
+        expect(asaas.criarCobrancaPix).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ value: 43.98 }),
+        );
+
+        // O uso acabou entre a leitura e a gravação: a cobrança criada é apagada.
+        prisma.$executeRaw.mockResolvedValue(0);
+        await expect(
+          comCupom({ pagamento: 'PIX_ONLINE', cpf: '52998224725', totalVisto: 43.98 }),
+        ).rejects.toMatchObject({ response: { code: 'STORE_COUPON_UNAVAILABLE' } });
+        expect(asaas.apagarCobranca).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('aplicar cupom (a conferência da sacola)', () => {
+      const sacola = {
+        cupom: 'bemvindo10',
+        itens: [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1', 'c1'], quantidade: 2 }],
+      };
+
+      it('devolve as regras do cupom, sem o que é só da loja, e o desconto de agora', async () => {
+        cupons.paraOPedido.mockResolvedValue(
+          cupom({ usos: 7, limiteDeUsos: 50, limitePorCliente: 1 }),
+        );
+
+        const conferencia = await service.conferirCupomDaSacola('acai', CLIENTE, sacola);
+
+        expect(conferencia.desconto).toBe(4.22);
+        const publico: CupomPublico = conferencia.cupom;
+        expect(publico).toEqual({
+          codigo: 'BEMVINDO10',
+          tipo: 'PERCENTUAL',
+          percentual: 10,
+          valor: null,
+          pedidoMinimo: null,
+          descontoMaximo: null,
+          valeEmPromocao: false,
+          produtoIds: [],
+          categoriaIds: [],
+        });
+        // Nada é gravado: o uso só conta quando o pedido é feito.
+        expect(prisma.$executeRaw).not.toHaveBeenCalled();
+        expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      });
+
+      it('recusa com o motivo, pelo cupom ou pela sacola', async () => {
+        cupons.paraOPedido.mockResolvedValue(cupom({ pedidoMinimo: 50 }));
+
+        await expect(service.conferirCupomDaSacola('acai', CLIENTE, sacola)).rejects.toMatchObject({
+          response: { code: 'STORE_COUPON_BELOW_MINIMUM' },
+        });
+      });
+
+      it('não conferiu com loja que não recebe pedido, nem com item que saiu do cardápio', async () => {
+        prisma.storeSlug.findUnique.mockResolvedValue(lojaQueRecebe(false));
+        await expect(service.conferirCupomDaSacola('acai', CLIENTE, sacola)).rejects.toMatchObject({
+          response: { code: 'STORE_NOT_ACCEPTING_ORDERS' },
+        });
+
+        prisma.storeSlug.findUnique.mockResolvedValue(lojaQueRecebe());
+        await expect(
+          service.conferirCupomDaSacola('acai', CLIENTE, {
+            cupom: 'bemvindo10',
+            itens: [{ produtoId: 'sumiu', tamanhoId: null, escolhas: [], quantidade: 1 }],
+          }),
+        ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_ITEM_UNAVAILABLE' } });
       });
     });
   });

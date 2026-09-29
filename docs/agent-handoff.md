@@ -552,7 +552,7 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
-Organizar, Cadastrar e Editar), Marketing (Promoções), Horários, Tipos de pedido, Notificações e
+Organizar, Cadastrar e Editar), Marketing (Promoções e Cupons), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
 **A aparência segue `docs/design-system.md`** (2026-09-29): cartão só com borda,
@@ -751,8 +751,8 @@ Quem mexer aqui precisa saber:
 
 ### Promoções da loja online — 2026-09-29
 
-Primeira parte do módulo Marketing (as outras, na ordem que o usuário escolheu: cupons,
-combos e destaques, ainda não existem). Regras em `business-rules.md` ("Loja online:
+Primeira parte do módulo Marketing (a segunda, Cupons, está logo abaixo; combos e
+destaques, na ordem que o usuário escolheu, ainda não existem). Regras em `business-rules.md` ("Loja online:
 promoções") e a organização em `architecture.md` ("Promoções da loja online").
 
 - **Onde está a conta:** `packages/validation/src/company/store-pricing.rules.ts`, e só
@@ -761,10 +761,30 @@ promoções") e a organização em `architecture.md` ("Promoções da loja onlin
   dela (`store-pricing.rules.spec.ts`), para a página e o servidor continuarem batendo.
 - **Precisa de migration no deploy:** `20260929190000_marketing_promocoes` (a Render
   aplica ao publicar). É aditiva; o SQL que desfaz é o `DROP` da tabela e dos dois enums.
-- **O que ficou de fora de propósito:** cupom, combo, destaque; promoção por cliente ou
+- **O que ficou de fora de propósito:** combo, destaque; promoção por cliente ou
   por forma de pagamento; e o preço promocional para produto com tamanhos (só o % serve).
 - **Não conferido:** nada em produção; o checkout logado de ponta a ponta no navegador
   (não há login de cliente local), e o painel de Marketing no celular.
+
+### Cupons da loja online — 2026-09-29
+
+Segunda parte do Marketing. Regras em `business-rules.md` ("Loja online: cupons") e a
+organização em `architecture.md` ("Cupons da loja online").
+
+- **Onde está a conta:** `packages/validation/src/company/store-coupon.rules.ts`, e só ali;
+  o cupom entra DEPOIS das promoções, sobre as linhas que `aplicarPromocoes` devolve. Mexer
+  em preço de cupom é mexer nela, com `store-coupon.rules.spec.ts`.
+- **Precisa de migration no deploy:** `20260929210000_marketing_cupons` (a Render aplica ao
+  publicar). É aditiva: duas tabelas e duas colunas em `store_orders` (com valor padrão). O
+  SQL que desfaz é o `DROP` das colunas, das tabelas e do enum.
+- **Cuidado ao mexer no total:** `total = subtotal - couponDiscount + deliveryFee`, e o
+  `subtotal` continua sendo os itens depois das promoções. Quem calcula "taxa" a partir do
+  total precisa somar o cupom de volta (foi o que a comanda passou a fazer).
+- **O que ficou de fora de propósito:** cupom de entrega grátis; cupom de primeira compra (o
+  limite por cliente de 1 uso já dá o efeito); lista pública de cupons; cupom por forma de
+  pagamento.
+- **Não conferido:** nada em produção; o checkout logado com cupom de ponta a ponta no
+  navegador (não há login de cliente local), e o painel de cupons no celular real.
 
 ### Avisos com a página fechada (Web Push) — 2026-09-26
 

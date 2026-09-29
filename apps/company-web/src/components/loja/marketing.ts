@@ -1,8 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { PromocaoDaLoja, PromocaoPublica, TipoDePromocao } from '@motoboycity/types';
-import { momentoNaLoja, promocaoVigente } from '@motoboycity/validation';
+import type {
+  CupomDaLoja,
+  PromocaoDaLoja,
+  PromocaoPublica,
+  TipoDePromocao,
+} from '@motoboycity/types';
+import { datasDoCupom, momentoNaLoja, promocaoVigente } from '@motoboycity/validation';
 import { companyStoreMarketingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -122,4 +127,124 @@ export function descricaoDaPromocao(promocao: PromocaoPublica): string {
         ? 'Leve 2, o segundo é grátis'
         : `Segundo com ${promocao.percentual ?? 0}% de desconto`;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Cupons
+ * ------------------------------------------------------------------------- */
+
+export const CHAVE_DOS_CUPONS = ['company', 'store', 'marketing', 'coupons'] as const;
+
+export function useCupons() {
+  const token = session.getToken();
+  return useQuery({
+    queryKey: CHAVE_DOS_CUPONS,
+    queryFn: () => companyStoreMarketingApi.coupons(token as string),
+    enabled: Boolean(token),
+  });
+}
+
+/** Um cupom que já usou tudo o que podia. */
+export function cupomEsgotado(cupom: CupomDaLoja): boolean {
+  return cupom.limiteDeUsos !== null && cupom.usos >= cupom.limiteDeUsos;
+}
+
+/** Em que pé o cupom está: no ar, desligado, por começar, encerrado ou esgotado. */
+export function situacaoDoCupom(cupom: CupomDaLoja, agora: Date): SituacaoDaPromocao {
+  const feito = (codigo: CodigoDaSituacao, texto: string, classe: string): SituacaoDaPromocao => ({
+    codigo,
+    texto,
+    classe,
+    foraDoHorario: false,
+  });
+  if (!cupom.ativo) return feito('DESLIGADA', 'Desligado', 'bg-muted text-muted-foreground');
+  if (cupomEsgotado(cupom)) {
+    return feito('ESGOTADA', 'Esgotado', 'bg-destructive-soft text-destructive-text');
+  }
+  const datas = datasDoCupom(cupom, agora);
+  if (datas === 'VENCIDO') return feito('ENCERRADA', 'Encerrado', 'bg-muted text-muted-foreground');
+  if (datas === 'AINDA_NAO') {
+    return feito(
+      'AGENDADA',
+      'Agendado',
+      'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+    );
+  }
+  return feito(
+    'NO_AR',
+    'No ar',
+    'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+  );
+}
+
+function emReais(valor: number): string {
+  return `R$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** O que o cupom faz, numa frase: "10% de desconto (até R$ 15,00)", "R$ 5,00 de desconto". */
+export function descricaoDoCupom(
+  cupom: Pick<CupomDaLoja, 'tipo' | 'percentual' | 'valor' | 'descontoMaximo'>,
+): string {
+  if (cupom.tipo === 'VALOR') return `${emReais(cupom.valor ?? 0)} de desconto`;
+  const base = `${cupom.percentual ?? 0}% de desconto`;
+  return cupom.descontoMaximo !== null ? `${base} (até ${emReais(cupom.descontoMaximo)})` : base;
+}
+
+/**
+ * As regras do cupom que a lista mostra em letra miúda: mínimo, onde vale, se
+ * vale em item em promoção, período e limites. Só o que o cupom tem.
+ */
+export function regrasDoCupom(
+  cupom: Pick<
+    CupomDaLoja,
+    | 'pedidoMinimo'
+    | 'produtoIds'
+    | 'categoriaIds'
+    | 'valeEmPromocao'
+    | 'inicio'
+    | 'fim'
+    | 'limiteDeUsos'
+    | 'limitePorCliente'
+  > & {
+    /** Quantos pedidos já usaram. Sem isto (o formulário, antes de salvar), diz só o limite. */
+    usos?: number;
+  },
+): string[] {
+  const partes: string[] = [];
+  if (cupom.pedidoMinimo !== null) partes.push(`a partir de ${emReais(cupom.pedidoMinimo)}`);
+  const produtos = cupom.produtoIds.length;
+  const secoes = cupom.categoriaIds.length;
+  if (produtos + secoes > 0) {
+    const onde: string[] = [];
+    if (produtos > 0) onde.push(`${produtos} ${produtos === 1 ? 'produto' : 'produtos'}`);
+    if (secoes > 0) onde.push(`${secoes} ${secoes === 1 ? 'seção' : 'seções'}`);
+    partes.push(`só em ${onde.join(' e ')}`);
+  } else {
+    partes.push('em todos os itens');
+  }
+  partes.push(cupom.valeEmPromocao ? 'vale em item em promoção' : 'só em item sem promoção');
+  if (cupom.inicio !== null && cupom.fim !== null) {
+    partes.push(`de ${dataCurta(cupom.inicio)} a ${dataCurta(cupom.fim)}`);
+  } else if (cupom.inicio !== null) {
+    partes.push(`a partir de ${dataCurta(cupom.inicio)}`);
+  } else if (cupom.fim !== null) {
+    partes.push(`até ${dataCurta(cupom.fim)}`);
+  }
+  if (cupom.limiteDeUsos !== null) {
+    partes.push(
+      cupom.usos === undefined
+        ? `limitado a ${cupom.limiteDeUsos} pedidos`
+        : `${cupom.usos} de ${cupom.limiteDeUsos} usos`,
+    );
+  } else if (cupom.usos !== undefined && cupom.usos > 0) {
+    partes.push(`${cupom.usos} ${cupom.usos === 1 ? 'uso' : 'usos'}`);
+  }
+  if (cupom.limitePorCliente !== null) {
+    partes.push(
+      cupom.limitePorCliente === 1
+        ? '1 uso por cliente'
+        : `${cupom.limitePorCliente} usos por cliente`,
+    );
+  }
+  return partes;
 }

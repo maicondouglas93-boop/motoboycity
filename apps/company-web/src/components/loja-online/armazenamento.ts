@@ -161,6 +161,8 @@ export interface PedidoGuardado {
   linhas?: { total: number; promocao: { rotulo: string; desconto: number } | null }[];
   subtotal: number;
   taxaDeEntrega: number;
+  /** O cupom usado, como estava na compra. Ausente: sem cupom. */
+  cupom?: { codigo: string; desconto: number } | null;
   total: number;
   pagamento: string;
   /** Só quando o pagamento é em dinheiro. */

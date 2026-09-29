@@ -54,6 +54,7 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
     cliente: pedido.cliente.nome,
     telefone: pedido.cliente.telefone,
     total: pedido.total,
+    ...(pedido.cupom ? { cupom: pedido.cupom } : {}),
     itens: pedido.itens.map((item) => ({
       nome: item.nome,
       quantidade: item.quantidade,

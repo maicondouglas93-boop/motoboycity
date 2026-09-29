@@ -100,6 +100,7 @@ function comoGuardado(pedido: PedidoDaLoja): PedidoGuardado {
     })),
     subtotal: pedido.subtotal,
     taxaDeEntrega: pedido.taxaDeEntrega,
+    cupom: pedido.cupom ?? null,
     total: pedido.total,
     pagamento: rotuloDoPagamento(pedido.pagamento),
     trocoPara: pedido.trocoPara,
@@ -320,6 +321,15 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
                     </span>
                   </li>
                 ))}
+                {pedido.cupom && (
+                  <li
+                    className="flex justify-between gap-3 font-medium"
+                    style={{ color: marca.corDaMarca }}
+                  >
+                    <span>Cupom {pedido.cupom.codigo}</span>
+                    <span className="shrink-0">− {moeda(pedido.cupom.desconto)}</span>
+                  </li>
+                )}
               </ul>
 
               <div className="mt-3 space-y-1 text-xs" style={{ color: paleta.suave }}>

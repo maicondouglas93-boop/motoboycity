@@ -1,11 +1,14 @@
-import type { PromocaoPublica } from '@motoboycity/types';
+import type { CupomPublico, PromocaoPublica } from '@motoboycity/types';
 import {
+  aplicarCupom,
   aplicarPromocoes,
   emCentavos,
   emReais,
+  mensagemDoCupom,
   ofertaDoProduto,
   rotuloDaPromocao,
   type LinhaParaPrecificar,
+  type LinhaPrecificada,
 } from '@motoboycity/validation';
 import type { ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import type { ProdutoDeExemplo } from '@/lib/loja-mock';
@@ -46,6 +49,8 @@ export interface SacolaPrecificada {
   subtotal: number;
   /** Quanto as promoções tiraram do que custaria. */
   economia: number;
+  /** As linhas como a regra as devolveu: é sobre elas que o cupom desconta. */
+  regra: LinhaPrecificada[];
 }
 
 /** A sacola com as promoções aplicadas; uma linha para cada item, na ordem dele. */
@@ -73,13 +78,15 @@ export function precificarSacola(
     };
   });
 
-  const resultado =
-    agora === null || promocoes.length === 0
-      ? null
-      : aplicarPromocoes(linhasDaRegra, promocoes, new Date(agora));
+  // Sem hora conhecida não há promoção: a mesma regra, com a lista vazia, dá o preço cheio.
+  const resultado = aplicarPromocoes(
+    linhasDaRegra,
+    agora === null ? [] : promocoes,
+    new Date(agora ?? 0),
+  );
 
   const linhas = itens.map((item, indice): LinhaDaSacola => {
-    const feita = resultado?.linhas[indice];
+    const feita = resultado.linhas[indice];
     if (!feita) {
       const cheio = emCentavos(item.unitario) * item.quantidade;
       return { original: emReais(cheio), total: emReais(cheio), promocao: null };
@@ -107,7 +114,31 @@ export function precificarSacola(
     linhas,
     subtotal: emReais(totalEmCentavos),
     economia: emReais(originalEmCentavos - totalEmCentavos),
+    regra: resultado.linhas,
   };
+}
+
+export interface CupomNaSacola {
+  /** Quanto o cupom tira do total desta sacola; zero se não vale. */
+  desconto: number;
+  /** Por que ele não vale para esta sacola agora (o mínimo, por exemplo), ou `null`. */
+  recusa: string | null;
+}
+
+/**
+ * O desconto do cupom que o cliente aplicou, sobre a sacola de agora, pela mesma
+ * regra do servidor (`aplicarCupom`). Recalcula a cada mudança da sacola: o cupom
+ * que deixou de valer (tirou-se um item, o pedido caiu abaixo do mínimo) não
+ * some — a página diz por quê, e o desconto volta quando a sacola voltar a servir.
+ */
+export function cupomNaSacola(
+  sacola: SacolaPrecificada,
+  cupom: CupomPublico | null,
+): CupomNaSacola {
+  if (!cupom) return { desconto: 0, recusa: null };
+  const resultado = aplicarCupom(sacola.regra, cupom);
+  if (!resultado.ok) return { desconto: 0, recusa: mensagemDoCupom(resultado) };
+  return { desconto: emReais(resultado.descontoCentavos), recusa: null };
 }
 
 export interface OfertaNaVitrine {

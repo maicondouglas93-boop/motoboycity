@@ -497,6 +497,7 @@ model Company {
   storeCategories      StoreCategory[]
   storeProducts        StoreProduct[]
   storePromotions      StorePromotion[]
+  storeCoupons         StoreCoupon[]
   storeSettings        StoreSettings?
   storeSlugs           StoreSlug[]
   storeOperation       StoreOperation?
@@ -2110,6 +2111,75 @@ model StorePromotion {
   @@map("store_promotions")
 }
 
+/// Cupom de desconto da loja online: o cliente digita o código no checkout.
+enum StoreCouponType {
+  /// `percent` sobre os itens que o cupom alcança.
+  PERCENT
+  /// `amount` em reais, nunca mais que o que os itens alcançados custam.
+  FIXED
+}
+
+/// O cupom que a loja cria em Marketing → Cupons. O código é guardado em maiúsculas
+/// (`A-Z`, `0-9`, `-`, `_`) e é único DENTRO da loja: duas lojas podem ter o mesmo.
+/// O que está vazio não limita: sem datas, vale sempre; sem `productIds` e
+/// `categoryIds`, vale em todos os itens. Só vale em item SEM promoção automática,
+/// salvo `appliesToPromoItems`. As datas são texto (`AAAA-MM-DD`) para nenhum fuso
+/// mexer nelas. `productIds` e `categoryIds` não têm chave estrangeira de propósito:
+/// apagar o produto não pode apagar o cupom, e um id que sumiu simplesmente não casa.
+model StoreCoupon {
+  id                  String          @id @default(uuid())
+  companyId           String
+  code                String          @db.VarChar(20)
+  type                StoreCouponType
+  /// `PERCENT`: de 1 a 100.
+  percent             Int?
+  /// `FIXED`: o valor do desconto.
+  amount              Decimal?        @db.Decimal(10, 2)
+  /// O pedido só usa o cupom com os itens (já com as promoções) a partir deste valor.
+  minOrder            Decimal?        @db.Decimal(10, 2)
+  /// `PERCENT`: o teto do desconto em reais.
+  maxDiscount         Decimal?        @db.Decimal(10, 2)
+  startDate           String?         @db.VarChar(10)
+  endDate             String?         @db.VarChar(10)
+  /// Nulo: sem limite. Conta PEDIDOS.
+  maxUses             Int?
+  /// Nulo: sem limite. Conta pedidos de um mesmo cliente (o `uid` do Firebase).
+  maxUsesPerCustomer  Int?
+  /// Quantos pedidos já o usaram. O pedido cancelado devolve o uso.
+  usedCount           Int             @default(0)
+  productIds          String[]
+  categoryIds         String[]
+  appliesToPromoItems Boolean         @default(false)
+  active              Boolean         @default(true)
+
+  company     Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  redemptions StoreCouponRedemption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, active])
+  @@map("store_coupons")
+}
+
+/// Um uso do cupom: nasce na mesma transação do pedido e some quando o pedido é
+/// cancelado. É daqui que sai "quantas vezes ESTE cliente usou". O `orderId` é
+/// único: um pedido usa um cupom, uma vez.
+model StoreCouponRedemption {
+  id             String   @id @default(uuid())
+  couponId       String
+  orderId        String   @unique
+  customerAuthId String   @db.VarChar(64)
+  createdAt      DateTime @default(now())
+
+  coupon StoreCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  order  StoreOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([couponId, customerAuthId])
+  @@map("store_coupon_redemptions")
+}
+
 /// A loja online da empresa: por enquanto, o link e o nome que o cliente vê.
 /// Nasce no primeiro "salvar" do link, nas Configurações da loja; antes disso a
 /// empresa não tem loja aberta ao público.
@@ -2270,9 +2340,14 @@ model StoreOrder {
   address            Json?
   /// `ItemDoPedido[]`.
   items              Json
+  /// Os itens já com as promoções, e antes do cupom.
   subtotal           Decimal                  @db.Decimal(10, 2)
   deliveryFee        Decimal                  @db.Decimal(10, 2)
+  /// `subtotal` - `couponDiscount` + `deliveryFee`: o que o cliente paga.
   total              Decimal                  @db.Decimal(10, 2)
+  /// O cupom usado, como estava na compra (editar ou apagar o cupom depois não muda o pedido).
+  couponCode         String?                  @db.VarChar(20)
+  couponDiscount     Decimal                  @default(0) @db.Decimal(10, 2)
   /// `FormaDePagamento`.
   paymentMethod      String                   @db.VarChar(30)
   changeFor          Decimal?                 @db.Decimal(10, 2)
@@ -2305,8 +2380,9 @@ model StoreOrder {
   /// A última conferência com o Asaas: segura novas tentativas de estorno.
   paymentCheckedAt   DateTime?
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  delivery Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  company          Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  delivery         Delivery?              @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  couponRedemption StoreCouponRedemption?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

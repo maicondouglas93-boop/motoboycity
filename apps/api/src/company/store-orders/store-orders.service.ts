@@ -12,6 +12,7 @@ import {
 import type {
   AndamentoDoPedido,
   Cancelamento,
+  ConferenciaDoCupom,
   CorridaDoPedido,
   EnderecoDaEntrega,
   EscolhasDoGrupo,
@@ -29,6 +30,7 @@ import {
   FORMAS_DE_PAGAMENTO_ONLINE,
   MOTIVO_DO_PRAZO,
   TransicaoInvalida,
+  aplicarCupom,
   aplicarPromocoes,
   avancar,
   chamarMotoboyCity,
@@ -37,6 +39,7 @@ import {
   gerarPixCopiaECola,
   horariosDaModalidade,
   inicioDoPedido,
+  mensagemDoCupom,
   momentoNaLoja,
   modalidadesAtivas,
   normalizarChavePix,
@@ -52,7 +55,10 @@ import {
   situacaoDaLoja,
   whatsappComDdi,
   type CreateDeliveryPayload,
+  type LinhaPrecificada,
+  type ResultadoDoCupom,
   type StoreCheckoutPayload,
+  type StoreCouponQuotePayload,
   type StoreOrderStagePayload,
   type WebPushSubscriptionPayload,
 } from '@motoboycity/validation';
@@ -71,6 +77,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
 import { StoreAsaasClient } from '../store-asaas/store-asaas.client';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import {
+  StoreCouponsService,
+  publicoDoCupom,
+  type CupomDoServidor,
+} from '../store-marketing/store-coupons.service';
 import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
 import { StoreOrderNotificationsService } from './store-order-notifications.service';
@@ -89,6 +100,20 @@ function recusa(message: string, code: string, extra: Record<string, unknown> = 
 }
 
 type ItemPedido = StoreCheckoutPayload['itens'][number];
+
+/**
+ * O cupom não vale para ESTA sacola (o que o cupom em si permite, o
+ * `StoreCouponsService` já conferiu): a frase é a mesma que a página mostra.
+ */
+function recusaDoCupom(resultado: Extract<ResultadoDoCupom, { ok: false }>): ConflictException {
+  return new ConflictException({
+    message: mensagemDoCupom(resultado),
+    code:
+      resultado.motivo === 'ABAIXO_DO_MINIMO'
+        ? 'STORE_COUPON_BELOW_MINIMUM'
+        : 'STORE_COUPON_NO_ELIGIBLE_ITEMS',
+  });
+}
 
 /**
  * A linha conferida contra o cardápio, e o que a promoção precisa dela: o preço
@@ -310,6 +335,9 @@ function paraPedido(linha: StoreOrder): PedidoDaLoja {
     itens: linha.items as unknown as ItemDoPedido[],
     subtotal: Number(linha.subtotal),
     taxaDeEntrega: Number(linha.deliveryFee),
+    cupom: linha.couponCode
+      ? { codigo: linha.couponCode, desconto: Number(linha.couponDiscount) }
+      : null,
     total: Number(linha.total),
     pagamento: linha.paymentMethod as PedidoDaLoja['pagamento'],
     trocoPara: linha.changeFor === null ? null : Number(linha.changeFor),
@@ -501,6 +529,7 @@ export class StoreOrdersService {
     private readonly contasAsaas: StoreAsaasAccountService,
     private readonly asaas: StoreAsaasClient,
     private readonly marketing: StoreMarketingService,
+    private readonly cupons: StoreCouponsService,
   ) {}
 
   async checkout(
@@ -524,48 +553,14 @@ export class StoreOrdersService {
       );
     }
 
-    const produtos = new Map(cardapio.products.map((produto) => [produto.id, produto]));
-    const precificados = pedido.itens.map((item) => precificar(item, produtos.get(item.produtoId)));
-
-    /*
-     * Promoções: a MESMA conta que a página fez (`aplicarPromocoes`, em
-     * `@motoboycity/validation`) — o servidor só aceita o pedido se o total bater
-     * com o que o cliente viu. O `total` da linha passa a ser o que se paga; o
-     * quanto custaria e a promoção que agiu ficam na linha, como estavam na hora
-     * da compra.
-     */
-    const promocoes = await this.marketing.promocoesDoPedido(companyId);
-    const promovidas = aplicarPromocoes(
-      precificados.map((linha, indice) => ({
-        chave: String(indice),
-        produtoId: linha.item.produtoId,
-        categoriaId: linha.categoriaId,
-        tamanhoId: linha.tamanhoId,
-        quantidade: linha.item.quantidade,
-        baseCentavos: linha.baseCentavos,
-        adicionaisCentavos: linha.adicionaisCentavos,
-      })),
-      promocoes,
+    // Os itens conferidos contra o cardápio e já com as promoções: é a MESMA conta
+    // que a conferência do cupom faz, e a que a página fez.
+    const { itens, promovidas, subtotal } = await this.precificarSacola(
+      companyId,
+      pedido.itens,
+      cardapio,
       agora,
     );
-    const itens: ItemDoPedido[] = precificados.map(({ item }, indice) => {
-      const promovida = promovidas.linhas[indice];
-      const aplicada = promocoes.find((promocao) => promocao.id === promovida?.promocaoId);
-      if (!promovida || !aplicada || promovida.descontoCentavos <= 0) return item;
-      return {
-        ...item,
-        total: reais(promovida.totalCentavos),
-        totalOriginal: reais(promovida.originalCentavos),
-        promocao: {
-          id: aplicada.id,
-          nome: aplicada.nome,
-          desconto: reais(promovida.descontoCentavos),
-          rotulo: rotuloDaPromocao(aplicada),
-        },
-      };
-    });
-    // O que o cliente paga pelos itens, já com as promoções.
-    const subtotal = itens.reduce((soma, item) => soma + centavos(item.total), 0);
 
     const minimo = pedidoMinimoDa(operacao, pedido.modalidade);
     if (minimo !== null && subtotal < centavos(minimo)) {
@@ -574,6 +569,17 @@ export class StoreOrdersService {
         'STORE_ORDER_BELOW_MINIMUM',
       );
     }
+
+    /*
+     * O cupom: procurado na loja e conferido para ESTE cliente agora, e o desconto
+     * refeito aqui sobre a sacola — o que o cliente viu (`totalVisto`) já vem com
+     * ele, e só vale se bater. O pedido mínimo da LOJA conta antes dele: o cupom
+     * não ajuda a passar do mínimo que a loja pôs.
+     */
+    const doCupom = pedido.cupom
+      ? await this.conferirCupom(companyId, clienteId, pedido.cupom, promovidas.linhas, agora)
+      : null;
+    const descontoDoCupom = doCupom?.descontoCentavos ?? 0;
 
     let janela: JanelaAgendada | null = null;
     if (pedido.agendadoPara === null) {
@@ -619,7 +625,7 @@ export class StoreOrdersService {
       );
     }
 
-    const total = subtotal + taxa;
+    const total = subtotal - descontoDoCupom + taxa;
     if (Math.abs(centavos(pedido.totalVisto) - total) > 0) {
       throw new ConflictException({
         message: `O total mudou para R$ ${reais(total).toFixed(2).replace('.', ',')}. Confira a sacola.`,
@@ -718,6 +724,8 @@ export class StoreOrdersService {
       items: itens as unknown as Prisma.InputJsonValue,
       subtotal: reais(subtotal),
       deliveryFee: reais(taxa),
+      couponCode: doCupom?.cupom.codigo ?? null,
+      couponDiscount: reais(descontoDoCupom),
       total: reais(total),
       paymentMethod: pedido.pagamento,
       changeFor: pedido.trocoPara,
@@ -726,7 +734,13 @@ export class StoreOrdersService {
 
     let gravado: StoreOrder;
     try {
-      gravado = await this.gravarComNumero(companyId, dados, pixDoNumero, promovidas.usadas);
+      gravado = await this.gravarComNumero(
+        companyId,
+        dados,
+        pixDoNumero,
+        promovidas.usadas,
+        doCupom?.cupom ?? null,
+      );
     } catch (erro) {
       // Sem pedido, a cobrança não pode ficar no Asaas esperando pagamento.
       if (pix) await this.apagarCobranca(companyId, pix.paymentProviderId);
@@ -741,6 +755,112 @@ export class StoreOrdersService {
     const feito = paraPedido(gravado);
     await this.avisos.pedidoNovo(companyId, feito);
     return comWhatsappDaLoja(feito, whatsappDaLoja);
+  }
+
+  /**
+   * "Aplicar cupom": o cliente digitou o código na sacola. Confere o cupom para
+   * ele e para esta sacola, com a mesma conta do pedido, e devolve as regras do
+   * cupom — a página recalcula o desconto a cada mudança da sacola — e o desconto
+   * de agora. Nada é gravado: o uso só conta quando o pedido é feito.
+   */
+  async conferirCupomDaSacola(
+    slug: string,
+    clienteId: string,
+    { cupom, itens }: StoreCouponQuotePayload,
+  ): Promise<ConferenciaDoCupom> {
+    const companyId = await this.lojaQueRecebe(slug);
+    const cardapio = await this.catalogo.publicCatalog(companyId);
+    const agora = new Date();
+    const sacola = await this.precificarSacola(companyId, itens, cardapio, agora);
+    const conferido = await this.conferirCupom(
+      companyId,
+      clienteId,
+      cupom,
+      sacola.promovidas.linhas,
+      agora,
+    );
+    return {
+      cupom: publicoDoCupom(conferido.cupom),
+      desconto: reais(conferido.descontoCentavos),
+    };
+  }
+
+  /**
+   * Os itens da sacola conferidos contra o cardápio e já com as promoções: a
+   * conta que o checkout e a conferência do cupom dividem. O `total` da linha é o
+   * que se paga; o quanto custaria e a promoção que agiu ficam na linha, como
+   * estavam na hora da compra.
+   */
+  private async precificarSacola(
+    companyId: string,
+    entrada: ItemPedido[],
+    cardapio: Awaited<ReturnType<StoreCatalogService['publicCatalog']>>,
+    agora: Date,
+  ): Promise<{
+    itens: ItemDoPedido[];
+    promovidas: { linhas: LinhaPrecificada[]; usadas: string[] };
+    subtotal: number;
+  }> {
+    const produtos = new Map(cardapio.products.map((produto) => [produto.id, produto]));
+    const precificados = entrada.map((item) => precificar(item, produtos.get(item.produtoId)));
+
+    /*
+     * Promoções: a MESMA conta que a página fez (`aplicarPromocoes`, em
+     * `@motoboycity/validation`) — o servidor só aceita o pedido se o total bater
+     * com o que o cliente viu.
+     */
+    const promocoes = await this.marketing.promocoesDoPedido(companyId);
+    const promovidas = aplicarPromocoes(
+      precificados.map((linha, indice) => ({
+        chave: String(indice),
+        produtoId: linha.item.produtoId,
+        categoriaId: linha.categoriaId,
+        tamanhoId: linha.tamanhoId,
+        quantidade: linha.item.quantidade,
+        baseCentavos: linha.baseCentavos,
+        adicionaisCentavos: linha.adicionaisCentavos,
+      })),
+      promocoes,
+      agora,
+    );
+    const itens: ItemDoPedido[] = precificados.map(({ item }, indice) => {
+      const promovida = promovidas.linhas[indice];
+      const aplicada = promocoes.find((promocao) => promocao.id === promovida?.promocaoId);
+      if (!promovida || !aplicada || promovida.descontoCentavos <= 0) return item;
+      return {
+        ...item,
+        total: reais(promovida.totalCentavos),
+        totalOriginal: reais(promovida.originalCentavos),
+        promocao: {
+          id: aplicada.id,
+          nome: aplicada.nome,
+          desconto: reais(promovida.descontoCentavos),
+          rotulo: rotuloDaPromocao(aplicada),
+        },
+      };
+    });
+    // O que o cliente paga pelos itens, já com as promoções.
+    const subtotal = itens.reduce((soma, item) => soma + centavos(item.total), 0);
+    return { itens, promovidas, subtotal };
+  }
+
+  /**
+   * O cupom digitado, conferido: primeiro o que é do cupom e deste cliente (existe
+   * na loja, está ligado, nas datas, com uso e dentro do limite dele), depois o
+   * que depende da sacola (itens alcançados, pedido mínimo). Cada recusa diz o
+   * que houve.
+   */
+  private async conferirCupom(
+    companyId: string,
+    clienteId: string,
+    codigo: string,
+    linhas: LinhaPrecificada[],
+    agora: Date,
+  ): Promise<{ cupom: CupomDoServidor; descontoCentavos: number }> {
+    const cupom = await this.cupons.paraOPedido(companyId, clienteId, codigo, agora);
+    const resultado = aplicarCupom(linhas, cupom);
+    if (!resultado.ok) throw recusaDoCupom(resultado);
+    return { cupom, descontoCentavos: resultado.descontoCentavos };
   }
 
   /**
@@ -1648,7 +1768,10 @@ export class StoreOrdersService {
         // não chega aqui, e o aviso não sai duas vezes.
         await this.avisos.etapaMudou(companyId, paraPedido(linha), depois);
         // O pedido caiu: as promoções que ele usou voltam a ter esse uso.
-        if (depois.etapa === 'CANCELADO') await this.devolverUsosDePromocao(linha);
+        if (depois.etapa === 'CANCELADO') {
+          await this.devolverUsosDePromocao(linha);
+          await this.devolverUsoDoCupom(linha);
+        }
         // Pago online e cancelado — pela loja, pelo prazo do aceite —: o
         // dinheiro volta inteiro, sozinho (decisão 18).
         if (depois.etapa === 'CANCELADO' && linha.paymentStatus === 'PAGO') {
@@ -1691,6 +1814,32 @@ export class StoreOrdersService {
   }
 
   /**
+   * O pedido cancelado devolve o uso do cupom, uma vez: o que apaga o registro do
+   * uso é quem devolve, e um segundo cancelamento não acha mais registro nenhum.
+   * Devolve também ao limite por cliente, que se conta pelos registros. Como nas
+   * promoções, não derruba o cancelamento.
+   */
+  private async devolverUsoDoCupom(linha: StoreOrder): Promise<void> {
+    if (!linha.couponCode) return;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const uso = await tx.storeCouponRedemption.findUnique({ where: { orderId: linha.id } });
+        if (!uso) return;
+        const { count } = await tx.storeCouponRedemption.deleteMany({ where: { id: uso.id } });
+        if (count !== 1) return;
+        await tx.storeCoupon.updateMany({
+          where: { id: uso.couponId, companyId: linha.companyId, usedCount: { gt: 0 } },
+          data: { usedCount: { decrement: 1 } },
+        });
+      });
+    } catch (erro) {
+      this.logger.warn(
+        `Não deu para devolver o uso do cupom do pedido ${linha.id}: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+    }
+  }
+
+  /**
    * A loja do link, se ela recebe pedido agora. Link antigo também vale: é a
    * mesma loja, e o pedido não pode cair só porque a página estava aberta
    * quando ela trocou de endereço.
@@ -1726,6 +1875,7 @@ export class StoreOrdersService {
     dados: Omit<Prisma.StoreOrderUncheckedCreateInput, 'companyId' | 'number'>,
     doNumero?: (numero: number) => { pixPayload: string },
     promocoesUsadas: string[] = [],
+    cupomUsado: CupomDoServidor | null = null,
   ): Promise<StoreOrder> {
     for (let tentativa = 1; ; tentativa += 1) {
       try {
@@ -1748,17 +1898,60 @@ export class StoreOrdersService {
               });
             }
           }
+          /*
+           * O uso do cupom, pelo mesmo caminho: só se ele ainda está ligado e com
+           * uso. O `UPDATE` trava a linha do cupom até o fim da transação, então os
+           * pedidos que usam o MESMO cupom passam um de cada vez — e a contagem por
+           * cliente logo abaixo enxerga o pedido que acabou de ser gravado. Dois
+           * pedidos do mesmo cliente ao mesmo tempo não furam o limite dele.
+           */
+          if (cupomUsado) {
+            const alteradas = await tx.$executeRaw`
+              UPDATE "store_coupons"
+              SET "usedCount" = "usedCount" + 1
+              WHERE "id" = ${cupomUsado.id}
+                AND "companyId" = ${companyId}
+                AND "active" = true
+                AND ("maxUses" IS NULL OR "usedCount" < "maxUses")`;
+            if (alteradas !== 1) {
+              throw new ConflictException({
+                message: 'Este cupom acabou de ficar indisponível. Tire o cupom ou tente outro.',
+                code: 'STORE_COUPON_UNAVAILABLE',
+              });
+            }
+            if (cupomUsado.limitePorCliente !== null) {
+              const dele = await tx.storeCouponRedemption.count({
+                where: { couponId: cupomUsado.id, customerAuthId: dados.customerAuthId },
+              });
+              if (dele >= cupomUsado.limitePorCliente) {
+                throw new ConflictException({
+                  message: 'Você já usou este cupom o máximo de vezes.',
+                  code: 'STORE_COUPON_CUSTOMER_LIMIT',
+                });
+              }
+            }
+          }
           const ultimo = await tx.storeOrder.aggregate({
             where: { companyId },
             _max: { number: true },
           });
           const numero = (ultimo._max.number ?? 0) + 1;
-          return tx.storeOrder.create({
+          const gravado = await tx.storeOrder.create({
             // O que depende do número (o identificador do Pix direto) é montado
             // aqui, na tentativa que de fato o usa: uma repetição por número
             // ocupado refaz o código com o número novo.
             data: { ...dados, ...(doNumero?.(numero) ?? {}), companyId, number: numero },
           });
+          if (cupomUsado) {
+            await tx.storeCouponRedemption.create({
+              data: {
+                couponId: cupomUsado.id,
+                orderId: gravado.id,
+                customerAuthId: dados.customerAuthId,
+              },
+            });
+          }
+          return gravado;
         });
       } catch (erro) {
         const repetido =

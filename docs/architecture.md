@@ -215,6 +215,44 @@ No `company-web`, o painel fica em `/loja/marketing` (visão geral) e
 `formulario-de-promocao.tsx`. O cardápio (`loja-publica.tsx`), a folha do produto, a
 sacola, o checkout, "Meus pedidos", Vendas e a comanda mostram o desconto.
 
+### Cupons da loja online
+
+`store_coupons` (enum `StoreCouponType`) e `store_coupon_redemptions`, mais `couponCode` e
+`couponDiscount` em `store_orders`. Migration aditiva `20260929210000_marketing_cupons`
+(validada em banco descartável: aplica, fica igual ao schema, desfaz e reaplica). O código é
+único por empresa (`@@unique([companyId, code])`); `productIds` e `categoryIds` são listas
+de ids sem chave estrangeira, de propósito (apagar o produto não apaga o cupom). O registro de
+uso (`orderId` único) nasce na transação do pedido e some no cancelamento: é dele que sai
+"quantas vezes ESTE cliente usou".
+
+**A conta é do pacote compartilhado**, como a das promoções: `store-coupon.rules.ts` em
+`packages/validation` (`aplicarCupom`, `datasDoCupom`, `mensagemDoCupom`,
+`normalizarCodigoDoCupom`) recebe as linhas que `aplicarPromocoes` devolveu e desconta só das
+que não têm promoção (ou de todas, no cupom que liga `valeEmPromocao`). O servidor e a página
+(`cupomNaSacola`, em `loja-promocoes.ts`) chamam o mesmo código. `store-coupon.schema.ts` valida
+o cupom que a loja cadastra; `storeCouponQuoteSchema` e o campo `cupom` do `storeCheckoutSchema`
+valem no lado do cliente.
+
+Módulo `company/store-marketing`: `StoreCouponsService` e o controller
+`company/store/marketing/coupons` (listar, criar, editar, ligar, duplicar, apagar), com o
+mesmo isolamento das promoções (empresa pelo login; `updateMany`/`deleteMany` com `companyId`;
+o cupom de outra loja responde 404 `STORE_COUPON_NOT_FOUND`; produto ou seção de outra empresa
+no alcance, 409 `STORE_COUPON_TARGET_NOT_FOUND`; código repetido, 409
+`STORE_COUPON_CODE_TAKEN`). `paraOPedido` procura o cupom por (empresa, código) e confere o
+que é do cupom e deste cliente: ligado, datas, limite total e limite por cliente.
+
+No cliente, `POST /public/stores/:slug/orders/coupon` ("aplicar cupom", com `ClienteDaLojaGuard`
+e 10 por minuto) devolve as regras do cupom e o desconto de agora, sem gravar; a página
+recalcula o desconto a cada mudança da sacola. `StoreOrdersService.checkout` refaz tudo: a
+sacola sai de `precificarSacola` (a mesma da conferência), o cupom passa por `conferirCupom`
+antes do total visto, e `gravarComNumero` conta o uso na transação (`UPDATE` condicional, que
+trava a linha; a contagem por cliente vem depois dele) e cria o registro de uso. `mudar`
+devolve o uso ao ir a `CANCELADO` (`devolverUsoDoCupom`, que só devolve se apagou o registro).
+
+No `company-web`: `/loja/marketing/cupons` (lista, `nova`, `[id]/editar`), `formulario-de-cupom.tsx`
+e, no checkout, `cupom-do-checkout.tsx`. "Meus pedidos", Vendas e a comanda mostram o cupom; a
+comanda tira o cupom da conta da taxa.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

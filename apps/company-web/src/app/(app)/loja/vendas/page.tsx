@@ -902,6 +902,12 @@ function CartaoDaVenda({
                   <span className="shrink-0">{moeda(item.total)}</span>
                 </li>
               ))}
+              {venda.cupom && (
+                <li className="flex justify-between gap-4 text-emerald-700 dark:text-emerald-400">
+                  <span className="font-medium">Cupom {venda.cupom.codigo}</span>
+                  <span className="shrink-0">− {moeda(venda.cupom.desconto)}</span>
+                </li>
+              )}
             </ul>
 
             {/* O cliente do PWA vira cliente da loja aqui, com os dados que

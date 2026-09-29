@@ -203,4 +203,41 @@ describe('Comanda da venda', () => {
     expect(texto()).toContain('PIX CONFIRMADO — NÃO COBRAR');
     expect(texto()).not.toContain('A CONFERIR');
   });
+  describe('com cupom', () => {
+    // 58,00 de itens, cupom de 5,80, taxa de 6,00: o cliente paga 58,20.
+    const COM_CUPOM: VendaDaLoja = {
+      ...VENDA,
+      total: 58.2,
+      cupom: { codigo: 'BEMVINDO10', desconto: 5.8 },
+    };
+
+    it('mostra o cupom entre os itens e a taxa, e a taxa continua sendo a taxa', () => {
+      render(
+        <ComandaDaVenda
+          venda={COM_CUPOM}
+          loja="Açaí do Centro"
+          impressoEm="2026-09-25T22:15:00.000Z"
+        />,
+      );
+
+      const comanda = texto();
+      expect(comanda).toContain('Cupom BEMVINDO10');
+      expect(comanda).toMatch(/Cupom BEMVINDO10\s*− R\$\s*5,80/);
+      // Sem o desconto na conta, a taxa sairia como 0,20.
+      expect(comanda).toMatch(/Taxa de entrega\s*R\$\s*6,00/);
+      expect(comanda).toMatch(/COBRAR R\$\s58,20 NA ENTREGA/);
+    });
+
+    it('sem cupom, a comanda não fala de cupom', () => {
+      render(
+        <ComandaDaVenda
+          venda={VENDA}
+          loja="Açaí do Centro"
+          impressoEm="2026-09-25T22:15:00.000Z"
+        />,
+      );
+
+      expect(texto()).not.toContain('Cupom');
+    });
+  });
 });

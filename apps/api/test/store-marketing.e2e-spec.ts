@@ -5,6 +5,8 @@ import { randomBytes } from 'node:crypto';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import type {
+  ConferenciaDoCupom,
+  CupomDaLoja,
   PedidoDaLoja,
   PromocaoDaLoja,
   PublicStoreLookup,
@@ -17,9 +19,10 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { WebPushService } from '../src/web-push/web-push.service';
 
 /**
- * Marketing → Promoções contra o banco de verdade: duas lojas, cada uma vendo
- * só as suas; a promoção no cardápio público; o preço do pedido calculado no
- * servidor com ela; e o uso contado, devolvido e disputado.
+ * Marketing (promoções e cupons) contra o banco de verdade: duas lojas, cada uma
+ * vendo só as suas; a promoção no cardápio público; o preço do pedido calculado
+ * no servidor com a promoção e com o cupom; e o uso de cada um contado,
+ * devolvido e disputado.
  *
  * O login do cliente (Firebase), o Google e o Web Push são simulados.
  */
@@ -80,7 +83,13 @@ describe('Promoções da loja (e2e)', () => {
       >
     ).store;
 
-  const pedidoDe = (link: string, produtoId: string, quem: string, totalVisto: number) =>
+  const pedidoDe = (
+    link: string,
+    produtoId: string,
+    quem: string,
+    totalVisto: number,
+    cupom: string | null = null,
+  ) =>
     request(servidor())
       .post(`/public/stores/${link}/orders`)
       .set(cliente(quem))
@@ -103,6 +112,17 @@ describe('Promoções da loja (e2e)', () => {
         trocoPara: null,
         observacao: null,
         totalVisto,
+        cupom,
+      });
+
+  /** "Aplicar cupom" na sacola de duas unidades do produto (2 x 22,50 = 45,00). */
+  const aplicarCupom = (link: string, produtoId: string, quem: string, codigo: string) =>
+    request(servidor())
+      .post(`/public/stores/${link}/orders/coupon`)
+      .set(cliente(quem))
+      .send({
+        cupom: codigo,
+        itens: [{ produtoId, tamanhoId: null, escolhas: [], quantidade: 2 }],
       });
 
   /** Cadastra a loja: empresa ativa, link, um produto de R$ 22,50, horário, bairro e pedidos ligados. */
@@ -443,5 +463,350 @@ describe('Promoções da loja (e2e)', () => {
     const cheio = (await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 50).expect(201))
       .body as PedidoDaLoja;
     expect(cheio.total).toBe(50);
+  });
+
+  describe('cupons', () => {
+    /** 10% em tudo, sem limite: o cupom mais simples. */
+    const dezPorCento = (mudancas: object = {}) => ({
+      codigo: 'BEMVINDO10',
+      tipo: 'PERCENTUAL',
+      percentual: 10,
+      ...mudancas,
+    });
+    const criar = async (corpo: object, como = comoA) =>
+      (
+        await request(servidor())
+          .post('/company/store/marketing/coupons')
+          .set(como())
+          .send(corpo)
+          .expect(201)
+      ).body as CupomDaLoja;
+    const editar = (id: string, corpo: object) =>
+      request(servidor()).put(`/company/store/marketing/coupons/${id}`).set(comoA()).send(corpo);
+    const usosDe = async (id: string) =>
+      (await prisma.storeCoupon.findUniqueOrThrow({ where: { id } })).usedCount;
+
+    beforeAll(async () => {
+      // As promoções dos testes de cima não entram na conta dos cupons.
+      await prisma.storePromotion.deleteMany({ where: { company: { document: lojaA.document } } });
+      await prisma.storeOrder.deleteMany({ where: { company: { document: lojaA.document } } });
+    });
+
+    it('cada loja vê, muda e apaga só os seus cupons; o mesmo código vale nas duas, sem se cruzar', async () => {
+      await request(servidor()).get('/company/store/marketing/coupons').expect(401);
+
+      const cupom = await criar(dezPorCento({ codigo: 'isolado 10', pedidoMinimo: 20 }));
+      // O código vai para maiúsculas e sem espaços.
+      expect(cupom).toMatchObject({ codigo: 'ISOLADO10', ativo: true, usos: 0, pedidoMinimo: 20 });
+
+      const listaB = await request(servidor())
+        .get('/company/store/marketing/coupons')
+        .set(comoB())
+        .expect(200);
+      expect(listaB.body).toEqual([]);
+
+      // A loja B, com o id certo do cupom de A na mão, não mexe em nada.
+      const raiz = `/company/store/marketing/coupons/${cupom.id}`;
+      const naoAchado = { code: 'STORE_COUPON_NOT_FOUND' };
+      expect(
+        (await request(servidor()).put(raiz).set(comoB()).send(dezPorCento()).expect(404)).body,
+      ).toMatchObject(naoAchado);
+      expect(
+        (
+          await request(servidor())
+            .patch(`${raiz}/active`)
+            .set(comoB())
+            .send({ ativo: false })
+            .expect(404)
+        ).body,
+      ).toMatchObject(naoAchado);
+      expect(
+        (await request(servidor()).post(`${raiz}/duplicate`).set(comoB()).expect(404)).body,
+      ).toMatchObject(naoAchado);
+      expect((await request(servidor()).delete(raiz).set(comoB()).expect(404)).body).toMatchObject(
+        naoAchado,
+      );
+      expect(await prisma.storeCoupon.findUniqueOrThrow({ where: { id: cupom.id } })).toMatchObject(
+        { active: true, percent: 10, code: 'ISOLADO10' },
+      );
+
+      // B cria o MESMO código: são cupons diferentes, cada um da sua loja.
+      const daB = await criar(dezPorCento({ codigo: 'ISOLADO10' }), comoB);
+      expect(daB.id).not.toBe(cupom.id);
+      // O cupom da B não vale na loja A, e o da A não vale na B.
+      await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'ISOLADO10').expect(200);
+      await prisma.storeCoupon.update({ where: { id: daB.id }, data: { code: 'SOB20' } });
+      await aplicarCupom(lojaB.link, lojaB.produtoId, 'cliente-a', 'SOB20').expect(200);
+      const cruzado = await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'SOB20').expect(
+        404,
+      );
+      expect(cruzado.body.code).toBe('STORE_COUPON_NOT_FOUND');
+
+      // O alcance também é da loja: produto de outra empresa não entra no cupom.
+      const alheio = await request(servidor())
+        .post('/company/store/marketing/coupons')
+        .set(comoB())
+        .send(dezPorCento({ codigo: 'ALHEIO1', produtoIds: [lojaA.produtoId] }))
+        .expect(409);
+      expect(alheio.body.code).toBe('STORE_COUPON_TARGET_NOT_FOUND');
+
+      // Código repetido na mesma loja, e código inválido.
+      const repetido = await request(servidor())
+        .post('/company/store/marketing/coupons')
+        .set(comoA())
+        .send(dezPorCento({ codigo: 'isolado10' }))
+        .expect(409);
+      expect(repetido.body.code).toBe('STORE_COUPON_CODE_TAKEN');
+      await request(servidor())
+        .post('/company/store/marketing/coupons')
+        .set(comoA())
+        .send(dezPorCento({ codigo: 'pro mo!' }))
+        .expect(400);
+
+      // Duplicar dá outro código, desligado; apagar a cópia não toca o original.
+      const copia = (await request(servidor()).post(`${raiz}/duplicate`).set(comoA()).expect(201))
+        .body as CupomDaLoja;
+      expect(copia).toMatchObject({ codigo: 'ISOLADO10-2', ativo: false, usos: 0 });
+      await request(servidor())
+        .delete(`/company/store/marketing/coupons/${copia.id}`)
+        .set(comoA())
+        .expect(200);
+      await request(servidor()).delete(raiz).set(comoA()).expect(200);
+      await prisma.storeCoupon.deleteMany({ where: { company: { document: lojaB.document } } });
+    });
+
+    it('aplicar cupom devolve as regras e o desconto; o pedido sai com ele, e o uso é contado e devolvido', async () => {
+      zerarLimite();
+      const cupom = await criar(dezPorCento({ limitePorCliente: 1 }));
+
+      // Aplicar: as regras do cupom e o desconto de agora, sem o que é só da loja.
+      const conferencia = (
+        await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'bemvindo10').expect(200)
+      ).body as ConferenciaDoCupom;
+      expect(conferencia).toMatchObject({
+        desconto: 4.5,
+        cupom: { codigo: 'BEMVINDO10', tipo: 'PERCENTUAL', percentual: 10, valeEmPromocao: false },
+      });
+      const bruto = JSON.stringify(conferencia);
+      for (const interno of ['usos', 'limiteDeUsos', 'limitePorCliente', 'ativo', 'companyId']) {
+        expect(bruto).not.toContain(`"${interno}"`);
+      }
+      // Sem conta, não aplica.
+      await request(servidor())
+        .post(`/public/stores/${lojaA.link}/orders/coupon`)
+        .send({ cupom: 'BEMVINDO10', itens: [] })
+        .expect(401);
+      // Aplicar não gasta uso.
+      expect(await usosDe(cupom.id)).toBe(0);
+
+      // O pedido: 2 x 22,50 = 45,00; cupom 10% = 4,50; entrega 5,00.
+      const semCupom = await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 50, 'BEMVINDO10');
+      expect(semCupom.status).toBe(409);
+      expect(semCupom.body).toMatchObject({ code: 'STORE_ORDER_TOTAL_CHANGED', total: 45.5 });
+
+      const feito = (
+        await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'bemvindo10').expect(201)
+      ).body as PedidoDaLoja;
+      expect(feito).toMatchObject({
+        subtotal: 45,
+        taxaDeEntrega: 5,
+        total: 45.5,
+        cupom: { codigo: 'BEMVINDO10', desconto: 4.5 },
+      });
+      expect(await usosDe(cupom.id)).toBe(1);
+      expect(await prisma.storeCouponRedemption.count({ where: { couponId: cupom.id } })).toBe(1);
+      // O painel vê o cupom no pedido.
+      const naFila = (
+        (await request(servidor()).get('/company/store/orders').set(comoA()).expect(200))
+          .body as PedidoDaLoja[]
+      ).find((pedido) => pedido.id === feito.id);
+      expect(naFila).toMatchObject({ cupom: { codigo: 'BEMVINDO10', desconto: 4.5 }, total: 45.5 });
+
+      // O limite por cliente é dele: o mesmo cliente já usou, o outro pode.
+      const denovo = await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'BEMVINDO10');
+      expect(denovo.status).toBe(409);
+      expect(denovo.body).toMatchObject({
+        code: 'STORE_COUPON_CUSTOMER_LIMIT',
+        message: 'Você já usou este cupom.',
+      });
+      const recusado = await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'BEMVINDO10');
+      expect(recusado.status).toBe(409);
+      expect(recusado.body.code).toBe('STORE_COUPON_CUSTOMER_LIMIT');
+      const doOutro = (
+        await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-b', 45.5, 'BEMVINDO10').expect(201)
+      ).body as PedidoDaLoja;
+      expect(await usosDe(cupom.id)).toBe(2);
+
+      // Cancelado, o pedido devolve o uso — e o cliente pode usar de novo.
+      const cancelar = (id: string) =>
+        request(servidor())
+          .post(`/company/store/orders/${id}/cancel`)
+          .set(comoA())
+          .send({ motivo: 'Cliente desistiu' });
+      await cancelar(feito.id).expect(201);
+      expect(await usosDe(cupom.id)).toBe(1);
+      // Cancelar de novo não devolve outro.
+      await cancelar(feito.id);
+      expect(await usosDe(cupom.id)).toBe(1);
+      expect(await prisma.storeCouponRedemption.count({ where: { couponId: cupom.id } })).toBe(1);
+      const depoisDeCancelar = await pedidoDe(
+        lojaA.link,
+        lojaA.produtoId,
+        'cliente-a',
+        45.5,
+        'BEMVINDO10',
+      ).expect(201);
+      await cancelar((depoisDeCancelar.body as PedidoDaLoja).id).expect(201);
+      await cancelar(doOutro.id).expect(201);
+      expect(await usosDe(cupom.id)).toBe(0);
+
+      await request(servidor())
+        .delete(`/company/store/marketing/coupons/${cupom.id}`)
+        .set(comoA())
+        .expect(200);
+    });
+
+    it('cupom e promoção não se somam, e cada recusa do cupom diz o que houve', async () => {
+      zerarLimite();
+      const cupom = await criar(dezPorCento({ codigo: 'REGRAS10' }));
+      const conferir = async (status: number) => {
+        const resposta = await aplicarCupom(lojaA.link, lojaA.produtoId, 'cliente-a', 'REGRAS10');
+        expect(resposta.status).toBe(status);
+        return resposta.body;
+      };
+
+      // Com promoção de 20% no produto, o cupom não vale junto...
+      const promocao = (
+        await request(servidor())
+          .post('/company/store/marketing/promotions')
+          .set(comoA())
+          .send(vinteAoProduto())
+          .expect(201)
+      ).body as PromocaoDaLoja;
+      expect(await conferir(409)).toMatchObject({
+        code: 'STORE_COUPON_NO_ELIGIBLE_ITEMS',
+        message: 'Os itens da sua sacola já estão em promoção, e este cupom não vale junto.',
+      });
+      // ...e o pedido também o recusa, sem gravar nada.
+      const semAlcance = await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 41, 'REGRAS10');
+      expect(semAlcance.status).toBe(409);
+      expect(semAlcance.body.code).toBe('STORE_COUPON_NO_ELIGIBLE_ITEMS');
+      expect(await usosDe(cupom.id)).toBe(0);
+
+      // Ligado o "vale em promoção", desconta sobre o que o cliente já paga:
+      // 2 x (22,50 - 20%) = 36,00; 10% = 3,60.
+      expect(
+        (
+          await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', valeEmPromocao: true })).expect(
+            200,
+          )
+        ).body,
+      ).toMatchObject({ valeEmPromocao: true });
+      expect(await conferir(200)).toMatchObject({ desconto: 3.6 });
+      const somados = (
+        await pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 37.4, 'REGRAS10').expect(201)
+      ).body as PedidoDaLoja;
+      expect(somados).toMatchObject({
+        subtotal: 36,
+        cupom: { desconto: 3.6 },
+        total: 37.4,
+      });
+      expect(somados.itens[0]!.promocao).toMatchObject({ id: promocao.id });
+
+      // Sem a promoção, o cupom volta ao valor cheio; o teto do desconto e o mínimo valem.
+      await request(servidor())
+        .delete(`/company/store/marketing/promotions/${promocao.id}`)
+        .set(comoA())
+        .expect(200);
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', descontoMaximo: 2 })).expect(200);
+      expect(await conferir(200)).toMatchObject({ desconto: 2 });
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', pedidoMinimo: 100 })).expect(200);
+      expect(await conferir(409)).toMatchObject({
+        code: 'STORE_COUPON_BELOW_MINIMUM',
+        message: 'Faltam R$ 55,00 em itens para usar este cupom (pedido mínimo de R$ 100,00).',
+      });
+      // O cupom que não alcança o produto da sacola.
+      await editar(
+        cupom.id,
+        dezPorCento({ codigo: 'REGRAS10', produtoIds: [], categoriaIds: [lojaA.secaoId] }),
+      ).expect(200);
+      expect(await conferir(200)).toMatchObject({ desconto: 4.5 });
+      const outraSecao = await request(servidor())
+        .post('/company/store/categories')
+        .set(comoA())
+        .send({ name: 'Bebidas' })
+        .expect(201);
+      await editar(
+        cupom.id,
+        dezPorCento({ codigo: 'REGRAS10', categoriaIds: [outraSecao.body.id as string] }),
+      ).expect(200);
+      expect(await conferir(409)).toMatchObject({
+        code: 'STORE_COUPON_NO_ELIGIBLE_ITEMS',
+        message: 'Este cupom não vale para os itens da sua sacola.',
+      });
+
+      // As datas, o desligado e o esgotado, cada um com a sua frase.
+      const ontem = '2020-01-01';
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', fim: ontem })).expect(200);
+      expect(await conferir(409)).toMatchObject({
+        code: 'STORE_COUPON_EXPIRED',
+        message: 'Este cupom venceu em 01/01/2020.',
+      });
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', inicio: '2999-12-31' })).expect(200);
+      expect(await conferir(409)).toMatchObject({
+        code: 'STORE_COUPON_NOT_STARTED',
+        message: 'Este cupom vale a partir de 31/12/2999.',
+      });
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', ativo: false })).expect(200);
+      expect(await conferir(409)).toMatchObject({ code: 'STORE_COUPON_INACTIVE' });
+      await editar(cupom.id, dezPorCento({ codigo: 'REGRAS10', limiteDeUsos: 1 })).expect(200);
+      await prisma.storeCoupon.update({ where: { id: cupom.id }, data: { usedCount: 1 } });
+      expect(await conferir(409)).toMatchObject({ code: 'STORE_COUPON_EXHAUSTED' });
+      await request(servidor())
+        .delete(`/company/store/marketing/coupons/${cupom.id}`)
+        .set(comoA())
+        .expect(200);
+    });
+
+    it('com um uso só, dois pedidos ao mesmo tempo: um leva o cupom, o outro é recusado', async () => {
+      zerarLimite();
+      const cupom = await criar(dezPorCento({ codigo: 'CORRIDA1', limiteDeUsos: 1 }));
+
+      const [um, outro] = await Promise.all([
+        pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'CORRIDA1'),
+        pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-b', 45.5, 'CORRIDA1'),
+      ]);
+
+      expect([um.status, outro.status].sort()).toEqual([201, 409]);
+      const recusado = um.status === 409 ? um : outro;
+      // Perdeu na gravação (o uso acabou no meio) ou já nem via mais o cupom.
+      expect(['STORE_COUPON_UNAVAILABLE', 'STORE_COUPON_EXHAUSTED']).toContain(recusado.body.code);
+      expect(await usosDe(cupom.id)).toBe(1);
+      expect(await prisma.storeCouponRedemption.count({ where: { couponId: cupom.id } })).toBe(1);
+      await request(servidor())
+        .delete(`/company/store/marketing/coupons/${cupom.id}`)
+        .set(comoA())
+        .expect(200);
+    });
+
+    it('o mesmo cliente com dois pedidos ao mesmo tempo não fura o limite por cliente', async () => {
+      zerarLimite();
+      const cupom = await criar(dezPorCento({ codigo: 'CORRIDA2', limitePorCliente: 1 }));
+
+      const respostas = await Promise.all([
+        pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'CORRIDA2'),
+        pedidoDe(lojaA.link, lojaA.produtoId, 'cliente-a', 45.5, 'CORRIDA2'),
+      ]);
+
+      expect(respostas.map((resposta) => resposta.status).sort()).toEqual([201, 409]);
+      const recusada = respostas.find((resposta) => resposta.status === 409)!;
+      expect(recusada.body.code).toBe('STORE_COUPON_CUSTOMER_LIMIT');
+      expect(await usosDe(cupom.id)).toBe(1);
+      expect(await prisma.storeCouponRedemption.count({ where: { couponId: cupom.id } })).toBe(1);
+      await request(servidor())
+        .delete(`/company/store/marketing/coupons/${cupom.id}`)
+        .set(comoA())
+        .expect(200);
+    });
   });
 });

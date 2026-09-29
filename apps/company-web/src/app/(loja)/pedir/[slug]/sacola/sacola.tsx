@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, Minus, Plus, Trash2 } from 'lucide-react';
 import { ApiError } from '@motoboycity/api-client';
+import type { CupomPublico } from '@motoboycity/types';
+import { emCentavos, emReais } from '@motoboycity/validation';
 import {
   FORMAS_DE_PAGAMENTO,
   GRUPOS_DE_PAGAMENTO,
@@ -37,10 +39,11 @@ import { publicStoreOrdersApi } from '@/lib/api-client';
 import { tokenDoCliente } from '@/lib/firebase-da-loja';
 import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { acertarRelogio, useAgora } from '@/lib/relogio';
-import { precificarSacola } from '@/lib/loja-promocoes';
+import { cupomNaSacola, precificarSacola } from '@/lib/loja-promocoes';
 import { EsqueletoDoCheckout } from '@/components/loja-online/esqueleto-do-checkout';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import { SeloDePromocao } from '@/components/loja-online/selo-de-promocao';
+import { CupomDoCheckout } from '@/components/loja-online/cupom-do-checkout';
 import {
   ajustarQuantidade,
   apelidoSugerido,
@@ -301,6 +304,8 @@ function Conteudo({
   const horario =
     dia?.horarios.find((item) => item.getTime() === horarioEscolhido) ?? dia?.horarios[0] ?? null;
   const [aviso, setAviso] = useState<string | null>(null);
+  // O cupom que o servidor conferiu para esta sacola. Só a loja de verdade tem.
+  const [cupom, setCupom] = useState<CupomPublico | null>(null);
   // Só depois de tocar em "Fazer pedido" com algo faltando os erros aparecem:
   // mostrar "informe o nome" num campo que a pessoa ainda nem chegou a ver é ruído.
   const [tentou, setTentou] = useState(false);
@@ -339,9 +344,13 @@ function Conteudo({
     [itens, cardapio.produtos, cardapio.promocoes, instante],
   );
   const subtotal = sacola.subtotal;
+  // O cupom sobre os itens que ele alcança (só os sem promoção, salvo o cupom que diz o
+  // contrário). Se a sacola de agora não o serve, o desconto é zero e a tela diz por quê.
+  const doCupom = cupomNaSacola(sacola, cupom);
+  const descontoDoCupom = doCupom.desconto;
   // Retirada não tem entrega, logo não tem taxa: o cliente busca no balcão.
   const taxa = retirar ? 0 : (bairroEscolhido?.taxa ?? 0);
-  const total = subtotal + taxa;
+  const total = emReais(emCentavos(subtotal) - emCentavos(descontoDoCupom) + emCentavos(taxa));
   const emDinheiro = pagamento === 'DINHEIRO';
   // "Online" aqui é o que passa pelo Asaas: pede CPF e leva à cobrança. O Pix
   // direto também é pagar agora, mas o pedido sai na hora e o cliente paga na
@@ -594,6 +603,8 @@ function Conteudo({
         observacao: nota,
         totalVisto: total,
         cpf: pedeCpf ? cpf.replace(/\D/g, '') : null,
+        // O cupom que não vale para a sacola de agora não vai: o total visto é sem ele.
+        cupom: cupom && doCupom.recusa === null ? cupom.codigo : null,
       });
       guardarCliente(slug, conta, {
         nome: nome.trim(),
@@ -604,6 +615,9 @@ function Conteudo({
       setItens([]);
       router.push(`/pedir/${slug}/pedidos?novo=${pedido.numero}`);
     } catch (erro) {
+      // O servidor recusou o cupom (venceu, acabou, já foi usado): ele sai da sacola, e o
+      // cliente pode fazer o pedido sem ele, com a mensagem dizendo o motivo.
+      if (erro instanceof ApiError && erro.body?.code?.startsWith('STORE_COUPON_')) setCupom(null);
       setAviso(motivoDaRecusa(erro));
     } finally {
       setEnviando(false);
@@ -719,6 +733,20 @@ function Conteudo({
                 </div>
               ))}
 
+              {cardapio.operacao !== null && usuarioId !== null && (
+                <CupomDoCheckout
+                  slug={slug}
+                  itens={itens}
+                  aplicado={cupom}
+                  recusa={doCupom.recusa}
+                  paleta={paleta}
+                  corDaMarca={marca.corDaMarca}
+                  corDeAcao={marca.corDeAcao}
+                  aoAplicar={setCupom}
+                  aoRemover={() => setCupom(null)}
+                />
+              )}
+
               <div className="space-y-1.5 px-4 py-4 text-sm tabular-nums">
                 <div className="flex justify-between" style={{ color: paleta.suave }}>
                   <span>Itens</span>
@@ -731,6 +759,15 @@ function Conteudo({
                   >
                     <span>Promoções</span>
                     <span>− {moeda(sacola.economia)}</span>
+                  </div>
+                )}
+                {descontoDoCupom > 0 && cupom && (
+                  <div
+                    className="flex justify-between font-medium"
+                    style={{ color: marca.corDaMarca }}
+                  >
+                    <span>Cupom {cupom.codigo}</span>
+                    <span>− {moeda(descontoDoCupom)}</span>
                   </div>
                 )}
                 <div className="flex justify-between" style={{ color: paleta.suave }}>

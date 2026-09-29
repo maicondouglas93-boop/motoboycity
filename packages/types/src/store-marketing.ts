@@ -71,3 +71,69 @@ export interface PromocaoDaLoja extends PromocaoPublica {
   criadaEm: string;
   atualizadaEm: string;
 }
+
+/* ---------------------------------------------------------------------------
+ * Cupons
+ * ------------------------------------------------------------------------- */
+
+/**
+ * O cupom que o cliente digita no checkout. Só vale em item SEM promoção
+ * automática, salvo o cupom que liga `valeEmPromocao`; nunca se soma à promoção
+ * do mesmo item. A conta é a mesma na página e no servidor —
+ * `store-coupon.rules.ts`, em `@motoboycity/validation`.
+ *
+ * - `PERCENTUAL`: "10% OFF", com teto opcional (`descontoMaximo`).
+ * - `VALOR`: "R$ 5,00 de desconto", nunca mais que o que os itens alcançados custam.
+ */
+export type TipoDeCupom = 'PERCENTUAL' | 'VALOR';
+
+/**
+ * O que a página recebe DEPOIS de o cliente digitar o código — e só então: a
+ * loja não publica a lista de cupons. É o suficiente para a página recalcular o
+ * desconto a cada mudança da sacola, sem perguntar ao servidor de novo; o que só o
+ * servidor sabe (usos, limite por cliente) ele confere na conferência e no pedido.
+ */
+export interface CupomPublico {
+  /** Em maiúsculas, como a loja o cadastrou. */
+  codigo: string;
+  tipo: TipoDeCupom;
+  /** `PERCENTUAL`: de 1 a 100. */
+  percentual: number | null;
+  /** `VALOR`: o desconto, em reais. */
+  valor: number | null;
+  /** Os itens da sacola, já com as promoções, precisam somar isto ao menos. */
+  pedidoMinimo: number | null;
+  /** `PERCENTUAL`: o desconto não passa disto. */
+  descontoMaximo: number | null;
+  /** Vale também nos itens que já têm promoção. Desligado de saída. */
+  valeEmPromocao: boolean;
+  /** Vazios os dois: vale em todos os itens. Senão, no produto OU na seção listados. */
+  produtoIds: string[];
+  categoriaIds: string[];
+}
+
+/** O cupom como a loja o vê no painel. */
+export interface CupomDaLoja extends CupomPublico {
+  id: string;
+  ativo: boolean;
+  /** Datas do calendário da loja, `AAAA-MM-DD`, as duas pontas incluídas. */
+  inicio: string | null;
+  fim: string | null;
+  /** `null`: sem limite. Conta pedidos, e não unidades. */
+  limiteDeUsos: number | null;
+  /** `null`: sem limite. Conta pedidos do mesmo cliente. */
+  limitePorCliente: number | null;
+  /** Quantos pedidos já o usaram; o pedido cancelado devolve o uso. */
+  usos: number;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+/**
+ * A resposta de "aplicar cupom" no checkout: o cupom (para a página recalcular)
+ * e o desconto que ele dá à sacola que o cliente mandou.
+ */
+export interface ConferenciaDoCupom {
+  cupom: CupomPublico;
+  desconto: number;
+}

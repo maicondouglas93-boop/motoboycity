@@ -6,6 +6,7 @@ import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { AsaasProviderError } from '../../finance/asaas/asaas.client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreCouponsService } from '../store-marketing/store-coupons.service';
 import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import {
   OPERACAO_INICIAL,
@@ -62,6 +63,8 @@ function linha(mudancas: Partial<StoreOrder> = {}): StoreOrder {
     subtotal: new Prisma.Decimal(40),
     deliveryFee: new Prisma.Decimal(5),
     total: new Prisma.Decimal(45),
+    couponCode: null,
+    couponDiscount: new Prisma.Decimal(0),
     paymentMethod: 'DINHEIRO',
     changeFor: new Prisma.Decimal(50),
     note: null,
@@ -119,6 +122,9 @@ describe('StoreOrdersService — Vendas', () => {
     };
     companyAddress: { findFirst: jest.Mock };
     storePromotion: { updateMany: jest.Mock };
+    storeCoupon: { updateMany: jest.Mock };
+    storeCouponRedemption: { findUnique: jest.Mock; deleteMany: jest.Mock };
+    $transaction: jest.Mock;
   };
   let entregas: {
     createFromStoreOrder: jest.Mock;
@@ -172,7 +178,14 @@ describe('StoreOrdersService — Vendas', () => {
         findFirst: jest.fn().mockResolvedValue({ zip: '36980-000', state: 'MG' }),
       },
       storePromotion: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      storeCoupon: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      storeCouponRedemption: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
     entregas = {
       createFromStoreOrder: jest.fn().mockImplementation(() => {
         banco.corrida = corrida();
@@ -223,6 +236,8 @@ describe('StoreOrdersService — Vendas', () => {
         { provide: StoreAsaasAccountService, useValue: contasAsaas },
         { provide: StoreAsaasClient, useValue: asaas },
         // Sem promoção: os testes de sempre continuam sendo de preço cheio.
+        // A fila da loja não confere cupom: só devolve o uso no cancelamento.
+        { provide: StoreCouponsService, useValue: {} },
         {
           provide: StoreMarketingService,
           useValue: { promocoesDoPedido: jest.fn().mockResolvedValue([]) },
@@ -570,6 +585,69 @@ describe('StoreOrdersService — Vendas', () => {
       await service.cancelar(membro, 'pedido-1', 'de novo').catch(() => undefined);
 
       expect(prisma.storePromotion.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('o uso do cupom no cancelamento', () => {
+    const uso = { id: 'uso-1', couponId: 'cupom-1', orderId: 'pedido-1', customerAuthId: 'uid-1' };
+    const comCupom = (mudancas: Partial<StoreOrder> = {}) =>
+      linha({ couponCode: 'BEMVINDO10', couponDiscount: new Prisma.Decimal(4), ...mudancas });
+
+    it('o pedido cancelado devolve o uso do cupom, e o registro do uso some', async () => {
+      banco.pedido = comCupom();
+      prisma.storeCouponRedemption.findUnique.mockResolvedValue(uso);
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeCouponRedemption.findUnique).toHaveBeenCalledWith({
+        where: { orderId: 'pedido-1' },
+      });
+      expect(prisma.storeCouponRedemption.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'uso-1' },
+      });
+      expect(prisma.storeCoupon.updateMany).toHaveBeenCalledWith({
+        where: { id: 'cupom-1', companyId: EMPRESA, usedCount: { gt: 0 } },
+        data: { usedCount: { decrement: 1 } },
+      });
+    });
+
+    it('se outro cancelamento já apagou o registro, não devolve de novo', async () => {
+      banco.pedido = comCupom();
+      prisma.storeCouponRedemption.findUnique.mockResolvedValue(uso);
+      prisma.storeCouponRedemption.deleteMany.mockResolvedValue({ count: 0 });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeCoupon.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('pedido sem cupom não mexe em cupom nenhum', async () => {
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeCouponRedemption.findUnique).not.toHaveBeenCalled();
+      expect(prisma.storeCoupon.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('se devolver o uso falha, o cancelamento vale do mesmo jeito', async () => {
+      banco.pedido = comCupom();
+      prisma.storeCouponRedemption.findUnique.mockRejectedValue(new Error('banco fora'));
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(cancelado.etapa).toBe('CANCELADO');
+    });
+
+    it('o pedido mostra o cupom que usou, e o total já com ele', async () => {
+      banco.pedido = comCupom({ total: new Prisma.Decimal(41) });
+
+      const [visto] = await service.vendas(membro);
+
+      expect(visto).toMatchObject({
+        subtotal: 40,
+        taxaDeEntrega: 5,
+        cupom: { codigo: 'BEMVINDO10', desconto: 4 },
+        total: 41,
+      });
     });
   });
 

@@ -1,5 +1,5 @@
-import type { PromocaoDaLoja } from '@motoboycity/types';
-import type { StorePromotionInput } from '@motoboycity/validation';
+import type { CupomDaLoja, PromocaoDaLoja } from '@motoboycity/types';
+import type { StoreCouponInput, StorePromotionInput } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 
@@ -68,6 +68,58 @@ export function createCompanyStoreMarketingApi({ baseUrl }: CompanyStoreMarketin
 
     async deletePromotion(accessToken: string, id: string) {
       const response = await apiFetch(`${raiz}/promotions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: cabecalhos(accessToken),
+      });
+      return parseJsonOrThrow<{ deleted: true }>(response);
+    },
+
+    /** Todos os cupons da loja, ligados ou não, o mais novo primeiro. */
+    async coupons(accessToken: string): Promise<CupomDaLoja[]> {
+      const response = await apiFetch(`${raiz}/coupons`, { headers: cabecalhos(accessToken) });
+      return parseJsonOrThrow<CupomDaLoja[]>(response);
+    },
+
+    /** Recusado com 409 se o código já existe na loja (`STORE_COUPON_CODE_TAKEN`). */
+    async createCoupon(accessToken: string, payload: StoreCouponInput) {
+      const response = await apiFetch(`${raiz}/coupons`, {
+        method: 'POST',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<CupomDaLoja>(response);
+    },
+
+    async updateCoupon(accessToken: string, id: string, payload: StoreCouponInput) {
+      const response = await apiFetch(`${raiz}/coupons/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<CupomDaLoja>(response);
+    },
+
+    /** Liga ou desliga sem mexer no resto: o gesto mais comum na lista. */
+    async setCouponActive(accessToken: string, id: string, ativo: boolean) {
+      const response = await apiFetch(`${raiz}/coupons/${encodeURIComponent(id)}/active`, {
+        method: 'PATCH',
+        headers: cabecalhos(accessToken, true),
+        body: JSON.stringify({ ativo }),
+      });
+      return parseJsonOrThrow<CupomDaLoja>(response);
+    },
+
+    /** A cópia nasce desligada, sem os usos, e com um código livre (`CODIGO-2`). */
+    async duplicateCoupon(accessToken: string, id: string) {
+      const response = await apiFetch(`${raiz}/coupons/${encodeURIComponent(id)}/duplicate`, {
+        method: 'POST',
+        headers: cabecalhos(accessToken),
+      });
+      return parseJsonOrThrow<CupomDaLoja>(response);
+    },
+
+    async deleteCoupon(accessToken: string, id: string) {
+      const response = await apiFetch(`${raiz}/coupons/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: cabecalhos(accessToken),
       });

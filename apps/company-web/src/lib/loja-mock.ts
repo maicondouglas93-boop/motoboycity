@@ -360,7 +360,10 @@ export type CadastroDoCliente = 'novo' | 'jaCadastrado' | 'enderecoNovo';
 export interface VendaDaLoja extends AndamentoDoPedido {
   cliente: string;
   telefone: string;
+  /** O que o cliente paga: os itens, menos o cupom, mais a taxa de entrega. */
   total: number;
+  /** O cupom usado, como estava na compra. Ausente: sem cupom. */
+  cupom?: { codigo: string; desconto: number } | null;
   itens: ItemDeVenda[];
   pagamento: string;
   /** Preenchido só quando o cliente paga em dinheiro. */

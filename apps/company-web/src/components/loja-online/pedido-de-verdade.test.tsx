@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ApiError } from '@motoboycity/api-client';
-import type { OperacaoPublica, PedidoDaLoja } from '@motoboycity/types';
+import type { CupomPublico, OperacaoPublica, PedidoDaLoja } from '@motoboycity/types';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sacola } from '@/app/(loja)/pedir/[slug]/sacola/sacola';
 import { OPERACAO_DE_EXEMPLO } from '@/lib/loja-mock';
@@ -14,6 +14,7 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
 
 const mocks = vi.hoisted(() => ({
   checkout: vi.fn(),
+  conferirCupom: vi.fn(),
   pedidos: vi.fn(),
   push: vi.fn(),
 }));
@@ -32,7 +33,11 @@ vi.mock('@/lib/firebase-da-loja', () => ({
   tokenDoCliente: () => Promise.resolve('token-do-google'),
 }));
 vi.mock('@/lib/api-client', () => ({
-  publicStoreOrdersApi: { checkout: mocks.checkout, pedidos: mocks.pedidos },
+  publicStoreOrdersApi: {
+    checkout: mocks.checkout,
+    conferirCupom: mocks.conferirCupom,
+    pedidos: mocks.pedidos,
+  },
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mocks.push }),
@@ -133,6 +138,168 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+/** 10% em tudo, sem limite: o cupom mais simples. */
+function cupomDe(mudancas: Partial<CupomPublico> = {}): CupomPublico {
+  return {
+    codigo: 'BEMVINDO10',
+    tipo: 'PERCENTUAL',
+    percentual: 10,
+    valor: null,
+    pedidoMinimo: null,
+    descontoMaximo: null,
+    valeEmPromocao: false,
+    produtoIds: [],
+    categoriaIds: [],
+    ...mudancas,
+  };
+}
+
+describe('Cupom no checkout', () => {
+  /** Abre o campo, digita o código e toca em "Aplicar". */
+  async function aplicar(codigo = 'bemvindo10') {
+    fireEvent.click(await screen.findByRole('button', { name: 'Tem um cupom de desconto?' }));
+    fireEvent.change(screen.getByLabelText('Código do cupom'), { target: { value: codigo } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar' }));
+  }
+
+  it('aplica: confere no servidor com a sacola, mostra o desconto, e o pedido leva o total com ele', async () => {
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe(), desconto: 4.2 });
+    mocks.checkout.mockResolvedValue({ numero: 20 } as PedidoDaLoja);
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    await aplicar();
+
+    // O código vai em maiúsculas, com a sacola por ids: o servidor refaz a conta.
+    await waitFor(() =>
+      expect(mocks.conferirCupom).toHaveBeenCalledWith(SLUG, 'token-do-google', {
+        cupom: 'BEMVINDO10',
+        itens: [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1'], quantidade: 2 }],
+      }),
+    );
+    // 2 x 21,00 = 42,00; 10% = 4,20; mais 5,00 de entrega = 42,80.
+    expect(await screen.findByText('Cupom BEMVINDO10', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByText('− R$ 4,20')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ cupom: 'BEMVINDO10', totalVisto: 42.8 }),
+      ),
+    );
+  });
+
+  it('sem cupom aplicado, o pedido vai sem cupom e com o total de sempre', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 21 } as PedidoDaLoja);
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ cupom: null, totalVisto: 47 }),
+      ),
+    );
+    expect(mocks.conferirCupom).not.toHaveBeenCalled();
+  });
+
+  it('o servidor recusa o código: a frase dele aparece no campo, e nenhum cupom fica aplicado', async () => {
+    mocks.conferirCupom.mockRejectedValue(
+      new ApiError(409, {
+        message: 'Este cupom venceu em 01/09/2026.',
+        code: 'STORE_COUPON_EXPIRED',
+      }),
+    );
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    await aplicar();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Este cupom venceu em 01/09/2026.');
+    expect(screen.queryByText('Remover')).not.toBeInTheDocument();
+  });
+
+  it('código em branco pede o código, sem ir ao servidor', async () => {
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    await aplicar('');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Digite o código do cupom.');
+    expect(mocks.conferirCupom).not.toHaveBeenCalled();
+  });
+
+  it('remover tira o desconto e volta ao total sem cupom', async () => {
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe(), desconto: 4.2 });
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+    await aplicar();
+    expect(await screen.findByText('− R$ 4,20')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remover' }));
+
+    expect(screen.queryByText('− R$ 4,20')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um cupom de desconto?' })).toBeInTheDocument();
+  });
+
+  it('a sacola que não serve ao cupom (pedido mínimo) mostra o motivo, sem desconto, e o pedido vai sem cupom', async () => {
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe({ pedidoMinimo: 100 }), desconto: 0 });
+    mocks.checkout.mockResolvedValue({ numero: 22 } as PedidoDaLoja);
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+
+    await aplicar();
+
+    expect(
+      await screen.findByText(
+        'Faltam R$ 58,00 em itens para usar este cupom (pedido mínimo de R$ 100,00).',
+      ),
+    ).toBeInTheDocument();
+    // O cupom continua aplicado (com a frase), mas o desconto é zero.
+    expect(screen.getByRole('button', { name: 'Remover' })).toBeInTheDocument();
+    expect(screen.queryByText(/− R\$ /)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ cupom: null, totalVisto: 47 }),
+      ),
+    );
+  });
+
+  it('o servidor recusa o cupom na hora do pedido: ele sai da sacola e a frase aparece', async () => {
+    mocks.conferirCupom.mockResolvedValue({ cupom: cupomDe(), desconto: 4.2 });
+    mocks.checkout.mockRejectedValue(
+      new ApiError(409, {
+        message: 'Este cupom já foi usado todas as vezes.',
+        code: 'STORE_COUPON_EXHAUSTED',
+      }),
+    );
+    render(<Sacola slug={SLUG} cardapio={cardapio()} />);
+    await aplicar();
+    expect(await screen.findByText('− R$ 4,20')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    expect(await screen.findByText('Este cupom já foi usado todas as vezes.')).toBeInTheDocument();
+    // O cupom saiu, e o total voltou ao de sempre: o cliente pode pedir sem ele.
+    expect(screen.queryByText('− R$ 4,20')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tem um cupom de desconto?' })).toBeInTheDocument();
+  });
+
+  it('na loja de demonstração não há cupom', async () => {
+    render(<Sacola slug={SLUG} cardapio={cardapio({ operacao: null })} />);
+
+    await screen.findByRole('heading', { name: 'Finalizar pedido' });
+    expect(
+      screen.queryByRole('button', { name: 'Tem um cupom de desconto?' }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('Sacola da loja de verdade', () => {

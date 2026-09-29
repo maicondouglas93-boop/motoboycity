@@ -96,6 +96,12 @@ export const storeCheckoutSchema = z
      * de cobrar diferente do que o cliente aceitou.
      */
     totalVisto: z.number().min(0).max(999999.99),
+    /**
+     * O código do cupom que o cliente aplicou, ou nada. Não decide nada: o servidor
+     * o procura na loja, confere tudo (datas, usos, itens) e refaz o desconto —
+     * o `totalVisto` já vem com ele.
+     */
+    cupom: z.string().trim().min(1).max(40).nullable().optional(),
   })
   .refine((pedido) => pedido.modalidade === 'RETIRADA' || pedido.entrega !== null, {
     message: 'Informe o endereço da entrega.',
@@ -113,6 +119,25 @@ export const storeCheckoutSchema = z
   );
 
 export type StoreCheckoutPayload = z.infer<typeof storeCheckoutSchema>;
+
+/**
+ * "Aplicar cupom" no checkout: o código e a sacola. O servidor confere o cupom
+ * contra a loja e devolve as regras dele, para a página recalcular o desconto a
+ * cada mudança da sacola.
+ */
+export const storeCouponQuoteSchema = z.object({
+  cupom: z
+    .string({ error: 'Informe o código do cupom.' })
+    .trim()
+    .min(1, 'Informe o código do cupom.')
+    .max(40, 'Esse código é comprido demais.'),
+  itens: z
+    .array(itemSchema)
+    .min(1, 'A sacola está vazia.')
+    .max(50, 'Use no máximo 50 itens diferentes num pedido.'),
+});
+
+export type StoreCouponQuotePayload = z.infer<typeof storeCouponQuoteSchema>;
 
 /*
  * O que a loja faz com o pedido, no painel. As regras de cada passo (que etapa

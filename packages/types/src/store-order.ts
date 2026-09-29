@@ -202,9 +202,13 @@ export interface PedidoDaLoja extends AndamentoDoPedido {
   criadoEm: string;
   cliente: { nome: string; telefone: string };
   itens: ItemDoPedido[];
+  /** Os itens já com as promoções, e antes do cupom. */
   subtotal: number;
   /** Zero na retirada. */
   taxaDeEntrega: number;
+  /** O cupom usado, como estava na compra. Ausente ou `null`: sem cupom. */
+  cupom?: { codigo: string; desconto: number } | null;
+  /** `subtotal` menos o cupom, mais a taxa: o que o cliente paga. */
   total: number;
   pagamento: FormaDePagamento;
   /** Só no dinheiro: para quanto o cliente precisa de troco. */

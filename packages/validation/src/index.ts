@@ -40,6 +40,8 @@ export * from './company/store-identity.schema';
 export * from './company/store-schedule.rules';
 export * from './company/store-pricing.rules';
 export * from './company/store-marketing.schema';
+export * from './company/store-coupon.rules';
+export * from './company/store-coupon.schema';
 export * from './company/store-order.rules';
 export * from './company/store-operation.rules';
 export * from './company/store-checkout.schema';

@@ -17061,3 +17061,86 @@ navegador (a conta e o pedido foram cobertos por E2E e por testes com a API simu
 não pelo navegador contra o servidor); o painel no modo escuro; e a disputa do último uso
 só garante o resultado (um pedido passa, o outro é recusado por uma de duas razões, e o uso
 fecha em 1), e não qual das duas recusas aconteceu.
+
+## 2026-09-29 — Loja online: Marketing, segunda parte — Cupons
+
+**Pedido do usuário:** seguir o módulo de Marketing pela ordem que ele escolheu
+(Promoções → **Cupons** → Combos → Destaques). Regras que ele já tinha decidido: o cupom só
+vale em item sem promoção automática, com um "vale também em itens em promoção" que cada
+cupom liga (desligado de saída); a regra de preço é uma só, sem duplicar; o checkout é o que
+já existe; e uma loja não enxerga os dados da outra. Do pedido original: código, % ou valor
+fixo, pedido mínimo, desconto máximo, limite total e por cliente, datas, produtos e seções, e
+erros claros no checkout.
+
+**Decisão:**
+
+- O cliente digita o código no checkout ("Tem um cupom de desconto?"). O servidor confere o
+  cupom para aquele cliente e aquela sacola (`POST /public/stores/:slug/orders/coupon`) e
+  devolve as REGRAS dele — a página recalcula o desconto a cada mudança da sacola, pela mesma
+  conta do servidor. A loja não publica a lista de cupons.
+- **Uma regra só:** `packages/validation/src/company/store-coupon.rules.ts`. O cupom entra
+  DEPOIS das promoções, sobre as linhas que `aplicarPromocoes` devolve: só desconta item sem
+  promoção (ou todos, no cupom que liga `valeEmPromocao`), sobre o que o cliente paga (com
+  adicionais), nunca passa do que esses itens custam nem do teto do cupom em %, e a taxa de
+  entrega não tem cupom. O pedido mínimo do cupom conta a sacola inteira já com as
+  promoções, e o da loja conta antes do cupom.
+- O código é único DENTRO da loja (`@@unique([companyId, code])`): duas lojas podem ter o
+  mesmo, e o cupom de uma nunca vale na outra. Toda rota do painel resolve a empresa pelo
+  login e filtra por ela; o cupom de outra loja responde 404, e produto ou seção de outra
+  empresa no alcance, 409 igual ao id inexistente.
+- **O uso** é contado por um `UPDATE` condicional dentro da transação do pedido, que trava a
+  linha do cupom; a contagem por cliente vem depois dele e enxerga o pedido que acabou de
+  gravar. Um registro de uso (`store_coupon_redemptions`, `orderId` único) nasce com o pedido
+  e some no cancelamento, que devolve o uso ao total e ao cliente uma vez.
+- O pedido guarda `couponCode` e `couponDiscount`: `subtotal` continua sendo os itens depois
+  das promoções e `total = subtotal − cupom + taxa`. A cobrança do Pix (Asaas) e o código do
+  Pix direto saem com o total já com o cupom. Editar ou apagar o cupom depois não muda pedido
+  feito.
+- Cada recusa diz o motivo em português: não encontrado, desligado, ainda não começou, venceu
+  em tal data, esgotado, "você já usou", faltam R$ X para o mínimo, não vale para os itens
+  (ou os itens já estão em promoção). Na hora do pedido, o cupom recusado sai da sacola e a
+  frase aparece; a conferência tem 10 tentativas por minuto por IP e exige o login Google.
+- Painel: aba **Cupons** em Marketing (lista com busca e filtro por situação, ligar/desligar,
+  copiar o código, duplicar, excluir com confirmação; formulário com as regras extras só quando
+  se pede, erro por campo e um resumo "Como fica"). "Meus pedidos", Vendas e a comanda mostram
+  o cupom, e a comanda passou a tirá-lo da conta da taxa de entrega (sem isso, a taxa sairia
+  menor do que é).
+
+**Migration:** `20260929210000_marketing_cupons`, aditiva (`store_coupons`,
+`store_coupon_redemptions`, o enum `StoreCouponType` e duas colunas em `store_orders`, com
+valor padrão). Validada em banco descartável: aplica junto das outras, o banco fica igual ao
+schema, o SQL de desfazer (DROP das colunas, das tabelas e do enum) volta ao schema anterior,
+e reaplica. **A Render aplica ao publicar.**
+
+**Arquivos:** `packages/types` (`store-marketing.ts`, `store-order.ts`), `packages/validation`
+(`store-coupon.rules.ts` e `store-coupon.schema.ts` novos, `store-checkout.schema.ts`,
+`index.ts`), `packages/api-client` (`company-store-marketing.ts`, `public-store-orders.ts`),
+`apps/api` (`prisma/schema.prisma`, a migration, `company/store-marketing/`
+(`store-coupons.service.ts`, `.controller.ts`, `store-marketing.module.ts` e specs),
+`store-orders.service.ts` e `public-store-orders.controller.ts`,
+`test/store-marketing.e2e-spec.ts`), `apps/company-web` (`lib/loja-promocoes.ts`,
+`lib/loja-mock.ts`, `components/loja/marketing.ts`, `formulario-de-cupom.tsx`, `vendas.ts`,
+`comanda-da-venda.tsx`, `loja-online/cupom-do-checkout.tsx`, `armazenamento.ts`, `sacola.tsx`,
+`meus-pedidos.tsx`, as telas `/loja/marketing/cupons/*`, a visão geral e o layout de
+Marketing, Vendas) e os testes de cada um. Docs: `business-rules.md` ("Loja online: cupons"),
+`architecture.md` ("Cupons da loja online") e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); eslint da API, do painel e
+dos pacotes; `validation`, `types` e `api-client` também com `--typeRoots` isolado, como o
+deploy; Jest da API (1626 passaram, 1 pulado); vitest do painel (511, 62 arquivos); build do
+painel; E2E inteiro no banco descartável (30 suítes, 266 testes), com cenários novos que
+conferem pelo HTTP o isolamento entre duas lojas (inclusive o mesmo código nas duas), a
+conferência do cupom, o pedido com o preço calculado no servidor, o limite por cliente, a
+devolução do uso no cancelamento (e que cancelar de novo não devolve outro), cupom com
+promoção, cada recusa, e duas disputas (o último uso levado por dois pedidos, e o mesmo
+cliente com dois pedidos ao mesmo tempo). As telas foram vistas no navegador, com dados de
+exemplo numa rota temporária já removida: lista, formulário, visão geral e os três estados do
+campo no checkout (fechado, digitando com erro, aplicado e recusado pelo mínimo), a 375px.
+
+**Não conferido:** nada em produção; o checkout logado com o cupom de ponta a ponta no
+navegador contra o servidor (não há login de cliente local: o caminho foi coberto por E2E e
+por testes com a API simulada); o painel no modo escuro; e nas disputas, o teste garante o
+resultado (um passa, o outro é recusado, e o uso fecha em 1), e não qual das recusas
+possíveis do perdedor aconteceu no primeiro caso (perdeu na gravação, ou já nem via o cupom).
+Também não há conferência de "primeira compra": o limite por cliente de 1 uso limita o uso,
+mas não olha o histórico do cliente.

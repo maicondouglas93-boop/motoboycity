@@ -661,6 +661,42 @@ Decisões de 2026-09-29, do usuário. Marketing entrega em quatro partes, nesta 
 - quando os **cupons** existirem, valem só nos itens sem promoção automática, salvo um
   "vale também em itens em promoção" que cada cupom liga (desligado de saída).
 
+## Loja online: cupons
+
+Decisões de 2026-09-29, do usuário. É a segunda parte do Marketing (depois das
+promoções; combos e destaques vêm em seguida).
+
+- o cliente digita o **código** no checkout ("Tem um cupom de desconto?"). O código é da
+  loja: em maiúsculas, de 3 a 20 letras, números, hífen ou sublinhado, **único dentro da
+  loja** — duas lojas podem ter o mesmo, e o cupom de uma nunca vale na outra. A página não
+  recebe a lista de cupons: quem não sabe o código não o vê;
+- **dois tipos**: percentual (1% a 100%, com teto opcional em reais) e valor fixo. O
+  desconto é sobre o que o cliente paga pelos itens que o cupom alcança (com os adicionais),
+  nunca passa disso, e a **taxa de entrega não tem cupom**;
+- **não se soma à promoção**: o cupom só age em item SEM promoção automática. O cupom que a
+  loja marca como "vale também em itens em promoção" (desligado de saída, cupom a cupom)
+  desconta sobre o que o cliente já paga, o preço com a promoção. Se todos os itens da sacola
+  têm promoção, o cupom é recusado dizendo isso;
+- onde vale: em todos os itens, ou só nos produtos e seções escolhidos (produto OU seção);
+- o **pedido mínimo do cupom** conta os itens da sacola inteira, já com as promoções, antes
+  do cupom e sem a entrega. O pedido mínimo da **loja** também conta antes do cupom: o cupom
+  não tira o pedido do mínimo que a loja pôs;
+- quando vale: datas (calendário de Brasília, as duas pontas incluídas), limite total de
+  pedidos e **limite por cliente** (o cliente é a conta Google dele). O uso conta por pedido,
+  e o pedido cancelado devolve o uso, uma vez, ao total e ao cliente;
+- o uso é contado por um `UPDATE` condicional dentro da transação do pedido, que trava a
+  linha do cupom: com um uso sobrando e dois pedidos juntos um passa e o outro é recusado, e
+  dois pedidos do mesmo cliente ao mesmo tempo não furam o limite dele;
+- cada recusa diz o motivo em português: não encontrado, desligado, ainda não começou, venceu
+  em tal data, esgotado, "você já usou", faltam R$ X para o mínimo, não vale para os itens
+  (ou os itens já estão em promoção);
+- o pedido guarda o cupom como estava na compra: `subtotal` são os itens já com as promoções
+  e antes do cupom, e `total` é `subtotal` menos o cupom, mais a taxa. Editar, desligar ou
+  apagar o cupom depois não muda o pedido feito. A cobrança do Pix (Asaas) e o código do Pix
+  direto saem com o total já com o cupom;
+- adivinhar códigos esbarra no login Google, que a conferência exige, e em 10 conferências
+  por minuto por IP.
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

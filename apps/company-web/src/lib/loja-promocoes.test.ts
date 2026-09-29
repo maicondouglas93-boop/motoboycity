@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { PromocaoPublica } from '@motoboycity/types';
+import type { CupomPublico, PromocaoPublica } from '@motoboycity/types';
 import type { ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import type { ProdutoDeExemplo } from '@/lib/loja-mock';
-import { ofertaNaVitrine, precificarSacola } from './loja-promocoes';
+import { cupomNaSacola, ofertaNaVitrine, precificarSacola } from './loja-promocoes';
 
 /**
  * A página traduz sacola e cardápio para a regra que o servidor usa; a conta em
@@ -186,5 +186,67 @@ describe('ofertaNaVitrine', () => {
     expect(ofertaNaVitrine(SUCO, [promocao()], AGORA)).toBeNull();
     expect(ofertaNaVitrine(ACAI, [promocao()], null)).toBeNull();
     expect(ofertaNaVitrine(ACAI, [], AGORA)).toBeNull();
+  });
+});
+
+describe('cupomNaSacola', () => {
+  function cupom(mudancas: Partial<CupomPublico> = {}): CupomPublico {
+    return {
+      codigo: 'BEMVINDO10',
+      tipo: 'PERCENTUAL',
+      percentual: 10,
+      valor: null,
+      pedidoMinimo: null,
+      descontoMaximo: null,
+      valeEmPromocao: false,
+      produtoIds: [],
+      categoriaIds: [],
+      ...mudancas,
+    };
+  }
+  const semPromocao = () => precificarSacola([acai(2)], [ACAI], [], AGORA);
+  const comPromocao = () => precificarSacola([acai(2)], [ACAI], [promocao()], AGORA);
+
+  it('sem cupom, não desconta nada', () => {
+    expect(cupomNaSacola(semPromocao(), null)).toEqual({ desconto: 0, recusa: null });
+  });
+
+  it('desconta o percentual dos itens, pelo que o cliente paga', () => {
+    // 2 x 21,10 = 42,20; 10% = 4,22.
+    expect(cupomNaSacola(semPromocao(), cupom())).toEqual({ desconto: 4.22, recusa: null });
+  });
+
+  it('o item em promoção fica fora do cupom, e a página diz por quê', () => {
+    expect(cupomNaSacola(comPromocao(), cupom())).toEqual({
+      desconto: 0,
+      recusa: 'Os itens da sua sacola já estão em promoção, e este cupom não vale junto.',
+    });
+  });
+
+  it('com "vale em promoção", desconta sobre o que o cliente já paga', () => {
+    // Com a promoção de 20% o açaí custa 35,00 (2 x 14,40 + 2 x 3,10); 10% = 3,50.
+    expect(cupomNaSacola(comPromocao(), cupom({ valeEmPromocao: true }))).toEqual({
+      desconto: 3.5,
+      recusa: null,
+    });
+  });
+
+  it('o pedido mínimo do cupom conta a sacola, e a frase diz quanto falta', () => {
+    expect(cupomNaSacola(semPromocao(), cupom({ pedidoMinimo: 50 }))).toEqual({
+      desconto: 0,
+      recusa: 'Faltam R$ 7,80 em itens para usar este cupom (pedido mínimo de R$ 50,00).',
+    });
+  });
+
+  it('o cupom de valor fixo nunca passa do que os itens custam', () => {
+    const fixo = cupom({ tipo: 'VALOR', percentual: null, valor: 100 });
+
+    expect(cupomNaSacola(semPromocao(), fixo).desconto).toBe(42.2);
+  });
+
+  it('antes de a página saber a hora, o cupom age sobre o preço cheio', () => {
+    const semHora = precificarSacola([acai(2)], [ACAI], [promocao()], null);
+
+    expect(cupomNaSacola(semHora, cupom()).desconto).toBe(4.22);
   });
 });

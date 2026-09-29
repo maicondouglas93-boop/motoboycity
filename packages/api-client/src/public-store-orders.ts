@@ -1,5 +1,5 @@
-import type { PedidoDaLoja } from '@motoboycity/types';
-import type { StoreCheckoutPayload } from '@motoboycity/validation';
+import type { ConferenciaDoCupom, PedidoDaLoja } from '@motoboycity/types';
+import type { StoreCheckoutPayload, StoreCouponQuotePayload } from '@motoboycity/validation';
 import { parseJsonOrThrow } from './api-error';
 import { apiFetch } from './http';
 import { semCorpoOuErro, type InscricaoDoNavegador } from './web-push';
@@ -31,6 +31,25 @@ export function createPublicStoreOrdersApi({ baseUrl }: PublicStoreOrdersApiConf
         body: JSON.stringify(pedido),
       });
       return parseJsonOrThrow<PedidoDaLoja>(response);
+    },
+
+    /**
+     * "Aplicar cupom": confere o código para este cliente e esta sacola. Devolve as
+     * regras do cupom (a página recalcula o desconto quando a sacola muda) e o
+     * desconto de agora. Nada é gravado: o uso só conta no pedido. Recusado com 404
+     * (`STORE_COUPON_NOT_FOUND`) ou 409, com o motivo na mensagem.
+     */
+    async conferirCupom(
+      slug: string,
+      tokenDoCliente: string,
+      conferencia: StoreCouponQuotePayload,
+    ): Promise<ConferenciaDoCupom> {
+      const response = await apiFetch(`${base(slug)}/coupon`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokenDoCliente}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(conferencia),
+      });
+      return parseJsonOrThrow<ConferenciaDoCupom>(response);
     },
 
     /** Os pedidos deste cliente nesta loja, do mais novo ao mais antigo. */

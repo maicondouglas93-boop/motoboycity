@@ -68,8 +68,10 @@ export function ComandaDaVenda({
 }) {
   const feitaEm = venda.historico[0]?.em ?? impressoEm;
   const somaDosItens = venda.itens.reduce((soma, item) => soma + item.total, 0);
-  // A venda guarda o total; o que passa da soma dos itens é a taxa de entrega.
-  const taxa = Math.round((venda.total - somaDosItens) * 100) / 100;
+  const cupom = venda.cupom ?? null;
+  // A venda guarda o total; o que passa da soma dos itens, com o cupom já descontado, é
+  // a taxa de entrega.
+  const taxa = Math.round((venda.total - somaDosItens + (cupom?.desconto ?? 0)) * 100) / 100;
   // O mesmo critério da tela de Vendas: na integração, a forma de pagamento
   // chega como código, e não como texto.
   const pagoOnline = venda.pagamento.toLowerCase().includes('online');
@@ -176,6 +178,12 @@ export function ComandaDaVenda({
           <span>Itens</span>
           <span>{moeda(somaDosItens)}</span>
         </p>
+        {cupom && (
+          <p className={estilos['linha']}>
+            <span>Cupom {cupom.codigo}</span>
+            <span>− {moeda(cupom.desconto)}</span>
+          </p>
+        )}
         {taxa > 0 && (
           <p className={estilos['linha']}>
             <span>Taxa de entrega</span>
