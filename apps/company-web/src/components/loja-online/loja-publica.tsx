@@ -15,9 +15,11 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { situacaoDaLoja } from '@/lib/loja-horario';
 import { horariosDaModalidade, modalidadesAtivas, textoDoTempo } from '@/lib/loja-operacao';
 import { useOperacao } from '@/lib/loja-demo';
+import { ofertaNaVitrine, precificarSacola } from '@/lib/loja-promocoes';
 import { useAgora } from '@/lib/relogio';
 import { FolhaDoProduto, type ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
+import { SeloDePromocao } from '@/components/loja-online/selo-de-promocao';
 import {
   ajustarQuantidade,
   juntarNaSacola,
@@ -194,7 +196,15 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
   }, [carrinho]);
 
   const itens = carrinho.reduce((soma, item) => soma + item.quantidade, 0);
-  const total = carrinho.reduce((soma, item) => soma + item.unitario * item.quantidade, 0);
+
+  // As promoções, pela mesma regra do servidor. Antes de hidratar a página não
+  // sabe a hora, e mostra o preço cheio em vez de prometer o que pode não valer.
+  const horaDaOferta = hidratado ? instante : null;
+  const sacola = useMemo(
+    () => precificarSacola(carrinho, cardapio.produtos, cardapio.promocoes, horaDaOferta),
+    [carrinho, cardapio.produtos, cardapio.promocoes, horaDaOferta],
+  );
+  const total = sacola.subtotal;
 
   // Estáveis, porque o voo não pode recomeçar a cada renderização da página.
   const medirAlvo = useCallback(() => barra.current?.alvo() ?? null, []);
@@ -401,6 +411,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
 
               {produtos.map((produto) => {
                 const quantidade = naSacola.get(produto.id) ?? 0;
+                const oferta = ofertaNaVitrine(produto, cardapio.promocoes, horaDaOferta);
                 return (
                   <button
                     key={produto.id}
@@ -435,10 +446,35 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                             >
                               a partir de{' '}
                             </span>
-                            {moeda(Math.min(...produto.tamanhos.map((t) => t.preco)))}
+                            {oferta?.por != null && oferta.de != null && (
+                              <s
+                                className="mr-1.5 text-[13px] font-normal"
+                                style={{ color: paleta.suave }}
+                              >
+                                {moeda(oferta.de)}
+                              </s>
+                            )}
+                            {moeda(
+                              oferta?.por ?? Math.min(...produto.tamanhos.map((t) => t.preco)),
+                            )}
                           </>
                         ) : (
-                          moeda(produto.precoUnico ?? 0)
+                          <>
+                            {oferta?.por != null && oferta.de != null && (
+                              <s
+                                className="mr-1.5 text-[13px] font-normal"
+                                style={{ color: paleta.suave }}
+                              >
+                                {moeda(oferta.de)}
+                              </s>
+                            )}
+                            {moeda(oferta?.por ?? produto.precoUnico ?? 0)}
+                          </>
+                        )}
+                        {oferta && (
+                          <span className="ml-2 align-middle">
+                            <SeloDePromocao rotulo={oferta.rotulo} corDeAcao={marca.corDeAcao} />
+                          </span>
                         )}
                       </span>
                     </span>
@@ -524,6 +560,8 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
             corDeAcao={marca.corDeAcao}
             aberta={podePedir}
             rotuloFechada={vitrine ? 'Pedidos em breve' : undefined}
+            promocoes={cardapio.promocoes}
+            instante={horaDaOferta}
             onFechar={() => setAberto(null)}
             onAdicionar={adicionar}
           />
@@ -535,6 +573,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
           <FolhaDaSacola
             key="sacola"
             itens={carrinho}
+            linhas={sacola.linhas}
             total={total}
             slug={slug}
             paleta={paleta}

@@ -893,6 +893,11 @@ function CartaoDaVenda({
                         {item.escolhas.join(' · ')}
                       </span>
                     )}
+                    {item.promocao && (
+                      <span className="block text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                        {item.promocao.rotulo} · desconto de {moeda(item.promocao.desconto)}
+                      </span>
+                    )}
                   </span>
                   <span className="shrink-0">{moeda(item.total)}</span>
                 </li>

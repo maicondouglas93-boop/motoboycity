@@ -153,6 +153,12 @@ export interface PedidoGuardado {
   /** ISO, para a tela poder calcular a previsão de entrega. */
   criadoEm: string;
   itens: ItemEscolhido[];
+  /**
+   * O que cada item custou, na ordem de `itens`, quando o servidor já aplicou
+   * promoção. Ausente: o item custou `unitario × quantidade` (pedido guardado
+   * no aparelho, ou de antes das promoções).
+   */
+  linhas?: { total: number; promocao: { rotulo: string; desconto: number } | null }[];
   subtotal: number;
   taxaDeEntrega: number;
   total: number;

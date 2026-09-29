@@ -37,8 +37,10 @@ import { publicStoreOrdersApi } from '@/lib/api-client';
 import { tokenDoCliente } from '@/lib/firebase-da-loja';
 import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { acertarRelogio, useAgora } from '@/lib/relogio';
+import { precificarSacola } from '@/lib/loja-promocoes';
 import { EsqueletoDoCheckout } from '@/components/loja-online/esqueleto-do-checkout';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
+import { SeloDePromocao } from '@/components/loja-online/selo-de-promocao';
 import {
   ajustarQuantidade,
   apelidoSugerido,
@@ -330,7 +332,13 @@ function Conteudo({
    */
   const bairroEscolhido = bairros.find((bairro) => bairro.nome === entrega.bairro) ?? null;
 
-  const subtotal = itens.reduce((soma, item) => soma + item.unitario * item.quantidade, 0);
+  // Os itens com as promoções, pela mesma regra que o servidor usa no pedido: o
+  // `totalVisto` que vai na chamada é exatamente este, e o servidor recusa se não bater.
+  const sacola = useMemo(
+    () => precificarSacola(itens, cardapio.produtos, cardapio.promocoes, instante),
+    [itens, cardapio.produtos, cardapio.promocoes, instante],
+  );
+  const subtotal = sacola.subtotal;
   // Retirada não tem entrega, logo não tem taxa: o cliente busca no balcão.
   const taxa = retirar ? 0 : (bairroEscolhido?.taxa ?? 0);
   const total = subtotal + taxa;
@@ -520,12 +528,12 @@ function Conteudo({
       cliente: nome.trim(),
       telefone: telefone.trim(),
       total,
-      itens: itens.map((item) => ({
+      itens: itens.map((item, indice) => ({
         nome: item.nome,
         quantidade: item.quantidade,
         tamanho: item.tamanho,
         escolhas: item.escolhas,
-        total: item.unitario * item.quantidade,
+        total: sacola.linhas[indice]?.total ?? item.unitario * item.quantidade,
       })),
       pagamento: rotuloDoPagamento(pagamento),
       trocoPara: troco,
@@ -663,8 +671,21 @@ function Conteudo({
                       </p>
                     )}
                     <p className="mt-1 text-base font-semibold tabular-nums">
-                      {moeda(item.unitario * item.quantidade)}
+                      {sacola.linhas[indice]?.promocao && (
+                        <s className="mr-1.5 text-sm font-normal" style={{ color: paleta.suave }}>
+                          {moeda(sacola.linhas[indice]?.original ?? 0)}
+                        </s>
+                      )}
+                      {moeda(sacola.linhas[indice]?.total ?? item.unitario * item.quantidade)}
                     </p>
+                    {sacola.linhas[indice]?.promocao && (
+                      <p className="mt-1">
+                        <SeloDePromocao
+                          rotulo={sacola.linhas[indice].promocao.rotulo}
+                          corDeAcao={marca.corDeAcao}
+                        />
+                      </p>
+                    )}
                   </div>
 
                   <div
@@ -701,8 +722,17 @@ function Conteudo({
               <div className="space-y-1.5 px-4 py-4 text-sm tabular-nums">
                 <div className="flex justify-between" style={{ color: paleta.suave }}>
                   <span>Itens</span>
-                  <span>{moeda(subtotal)}</span>
+                  <span>{moeda(subtotal + sacola.economia)}</span>
                 </div>
+                {sacola.economia > 0 && (
+                  <div
+                    className="flex justify-between font-medium"
+                    style={{ color: marca.corDaMarca }}
+                  >
+                    <span>Promoções</span>
+                    <span>− {moeda(sacola.economia)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between" style={{ color: paleta.suave }}>
                   <span>
                     {retirar

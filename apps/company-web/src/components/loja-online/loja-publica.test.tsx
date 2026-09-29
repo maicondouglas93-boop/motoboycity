@@ -113,6 +113,7 @@ const VITRINE: CardapioDaPagina = {
   ],
   operacao: OPERACAO,
   enderecoDeRetirada: null,
+  promocoes: [],
 };
 
 describe('Loja pública — vitrine', () => {
@@ -242,5 +243,60 @@ describe('Loja pública — sem a configuração do login', () => {
     );
     expect(screen.getByText('Pedidos por aqui em breve')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Entrar e pedir' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Loja pública — promoções no cardápio', () => {
+  const promocao = {
+    id: 'promo-1',
+    nome: 'X-Burger 20%',
+    tipo: 'PERCENTUAL',
+    alvo: 'PRODUTO',
+    produtoId: 'p1',
+    categoriaId: null,
+    percentual: 20,
+    precoPromocional: null,
+    leve: null,
+    pague: null,
+    inicio: null,
+    fim: null,
+    horaInicio: null,
+    horaFim: null,
+    diasDaSemana: [],
+  } as const;
+
+  it('o produto em promoção mostra o preço de antes riscado, o de agora e o selo', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={{ ...VITRINE, promocoes: [{ ...promocao, diasDaSemana: [] }] }}
+      />,
+    );
+
+    expect(screen.getByText('R$ 22,00').tagName).toBe('S');
+    expect(screen.getByText('R$ 17,60')).toBeInTheDocument();
+    expect(screen.getByText('20% OFF')).toBeInTheDocument();
+  });
+
+  it('a promoção de outro dia da semana não aparece', () => {
+    // A quarta é o dia 3; a promoção é só de sexta e sábado.
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={{ ...VITRINE, promocoes: [{ ...promocao, diasDaSemana: [5, 6] }] }}
+      />,
+    );
+
+    expect(screen.getByText('R$ 22,00').tagName).not.toBe('S');
+    expect(screen.queryByText('20% OFF')).not.toBeInTheDocument();
+  });
+
+  it('sem promoção o cardápio é o de sempre', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={VITRINE} />);
+
+    expect(screen.getByText('R$ 22,00').tagName).not.toBe('S');
   });
 });

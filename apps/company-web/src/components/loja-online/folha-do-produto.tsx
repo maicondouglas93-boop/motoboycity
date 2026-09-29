@@ -2,9 +2,12 @@
 
 import { useState } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
+import type { PromocaoPublica } from '@motoboycity/types';
 import type { GrupoDeExemplo, ProdutoDeExemplo, TamanhoDeExemplo } from '@/lib/loja-mock';
+import { precificarSacola } from '@/lib/loja-promocoes';
 import { FolhaDeBaixo } from './folha-de-baixo';
 import { moeda, textoSobre, type Paleta } from './paleta';
+import { SeloDePromocao } from './selo-de-promocao';
 
 /**
  * Folha que sobe de baixo, e não caixa centralizada.
@@ -52,10 +55,15 @@ export function FolhaDoProduto({
   corDeAcao,
   aberta,
   rotuloFechada = 'Loja fechada',
+  promocoes = [],
+  instante = null,
   onFechar,
   onAdicionar,
 }: {
   produto: ProdutoDeExemplo;
+  /** As promoções ligadas da loja, e a hora da tela (`null` antes de hidratar). */
+  promocoes?: PromocaoPublica[];
+  instante?: number | null;
   paleta: Paleta;
   corDeAcao: string;
   /** Loja fechada: dá para olhar o cardápio, não dá para pedir. */
@@ -84,6 +92,30 @@ export function FolhaDoProduto({
     grupo.escolhas.filter((escolha) => (marcadas[grupo.id] ?? []).includes(escolha.id)),
   );
   const unitario = base + escolhidas.reduce((soma, escolha) => soma + escolha.preco, 0);
+
+  /*
+   * O que este item custa com a promoção, pela regra que o servidor usa. Vale
+   * para o item sozinho: o que já está na sacola entra na conta ali, e o
+   * "leve 3" pode fechar com unidades de linhas diferentes.
+   */
+  const precificado = precificarSacola(
+    [
+      {
+        produtoId: produto.id,
+        nome: produto.nome,
+        tamanho: null,
+        escolhas: [],
+        tamanhoId: tamanho?.id ?? null,
+        quantidade,
+        unitario,
+      },
+    ],
+    [produto],
+    promocoes,
+    instante,
+  ).linhas[0];
+  const promocao = precificado?.promocao ?? null;
+  const totalDoItem = precificado?.total ?? unitario * quantidade;
 
   /*
    * O mesmo mínimo que o painel verifica, aqui do lado de quem compra. Se um
@@ -120,6 +152,11 @@ export function FolhaDoProduto({
         >
           <div className="min-w-0 flex-1">
             <h2 className="text-lg leading-tight font-semibold">{produto.nome}</h2>
+            {promocao && (
+              <p className="mt-1">
+                <SeloDePromocao rotulo={promocao.rotulo} corDeAcao={corDeAcao} />
+              </p>
+            )}
             {produto.descricao && (
               <p className="mt-1 text-sm" style={{ color: paleta.suave }}>
                 {produto.descricao}
@@ -192,7 +229,14 @@ export function FolhaDoProduto({
               style={{ backgroundColor: corDeAcao, color: textoSobre(corDeAcao) }}
             >
               <span>{aberta ? 'Adicionar' : rotuloFechada}</span>
-              <span>{moeda(unitario * quantidade)}</span>
+              <span>
+                {promocao && (
+                  <s className="mr-1.5 text-xs font-normal opacity-70">
+                    {moeda(unitario * quantidade)}
+                  </s>
+                )}
+                {moeda(totalDoItem)}
+              </span>
             </button>
           </div>
         </div>

@@ -16986,3 +16986,78 @@ cliente e os campos de configuração foram vistos no celular (375px), numa rota
 já removida. **Não conferido:** o QR lido por um banco de verdade (só o formato e o CRC),
 o checkout inteiro logado (não há login de cliente nem loja ligada localmente), e nada em
 produção. O `mc-api` local foi parado para regenerar o cliente do Prisma.
+
+## 2026-09-29 — Loja online: Marketing, primeira parte — Promoções
+
+**Pedido do usuário:** um módulo de Marketing e Promoções para o lojista (combos,
+promoções, destaques e cupons), integrado ao cardápio público e ao checkout que já
+existem, sem duplicar a regra de preço e com uma loja sem acesso aos dados da outra.
+Adaptado à pilha real (NestJS, Prisma e Postgres, e não Firebase): a segurança é o
+`companyId` resolvido pelo login em toda consulta, mais testes. Respostas dele às
+perguntas: entrega na ordem **Promoções → Cupons → Combos → Destaques**; promoção e
+combo não se somam (vale o melhor preço por item); o cupom só vale em item sem promoção
+automática, com um "vale também em item em promoção" por cupom, desligado de saída; o
+combo será um tipo de produto (fica para a etapa dele). Esta entrega é só a primeira
+parte.
+
+**Decisão:**
+
+- Quatro tipos de promoção: desconto em %, preço promocional (só produto de preço único),
+  leve X pague Y e segundo item com desconto; num produto ou numa seção; com datas,
+  horário e dias da semana (relógio de Brasília) e limite de usos.
+- **Uma regra só:** `packages/validation/src/company/store-pricing.rules.ts`, em centavos
+  inteiros, chamada pelo servidor (no pedido) e pelas telas (`loja-promocoes.ts` só
+  traduz sacola e cardápio para ela). O desconto age no preço do produto ou do tamanho, e
+  não nos adicionais; promoções não se acumulam (vale a que mais desconta, no empate a
+  mais antiga); nunca sobe o preço. O servidor continua recusando o pedido cujo total não
+  bate com o que o cliente viu (409 `STORE_ORDER_TOTAL_CHANGED`).
+- **O uso é contado por pedido**, por `UPDATE` condicional dentro da transação que grava
+  o pedido; com um uso sobrando e dois pedidos juntos, um leva e o outro é recusado
+  (`STORE_PROMOTION_EXHAUSTED`). Pedido cancelado devolve o uso, uma vez.
+- O item do pedido guarda a conta (`unitario` sem promoção, `total`, `totalOriginal` e a
+  promoção como estava), para editar ou apagar a promoção depois não mudar pedido feito.
+- Isolamento: toda rota resolve a empresa pelo login; o `id` da URL é procurado junto da
+  empresa (`updateMany`/`deleteMany` com `companyId`); a promoção de outra loja responde
+  404, e produto ou seção de outra empresa como alvo, 409 igual ao id inexistente. A página
+  pública recebe só as ligadas e não esgotadas, sem usos nem limite.
+- Tela: menu **Marketing** na loja, com Visão geral (quantas no ar, agendadas e pedidos
+  com promoção) e Promoções (lista com busca e filtro por situação, ligar/desligar,
+  duplicar, excluir com confirmação, formulário que só mostra os campos do tipo escolhido,
+  erro por campo e prévia "De / Por"). No cardápio, na folha do produto, na sacola, no
+  checkout, em "Meus pedidos", em Vendas e na comanda aparece o desconto. Só existem as
+  abas que funcionam.
+
+**Migration:** `20260929190000_marketing_promocoes`, aditiva (tabela `store_promotions` e
+dois enums). Validada em banco descartável: aplica junto das outras, o banco fica igual ao
+schema, o SQL de desfazer (DROP da tabela e dos enums) volta ao schema anterior, e reaplica.
+**A Render aplica ao publicar.**
+
+**Arquivos:** `packages/types` (`store-marketing.ts` novo, `store-order.ts`,
+`store-settings.ts`, `index.ts`), `packages/validation` (`store-pricing.rules.ts` e
+`store-marketing.schema.ts` novos, `index.ts`), `packages/api-client`
+(`company-store-marketing.ts` novo, `index.ts`), `apps/api` (`prisma/schema.prisma`, a
+migration, `company/store-marketing/` novo — serviço, controller, módulo e specs —,
+`store-orders.service.ts` e `.module.ts`, `store-settings.service.ts` e `.module.ts`,
+`app.module.ts`, `test/store-marketing.e2e-spec.ts`), `apps/company-web` (`lib/loja-promocoes.ts`,
+`lib/loja-publica.ts`, `lib/loja-mock.ts`, `lib/api-client.ts`, `components/loja/marketing.ts`,
+`formulario-de-promocao.tsx`, `vendas.ts`, `comanda-da-venda.tsx`, `loja-online/`
+(`loja-publica.tsx`, `folha-do-produto.tsx`, `folha-da-sacola.tsx`, `selo-de-promocao.tsx`,
+`armazenamento.ts`), `sacola.tsx`, `meus-pedidos.tsx`, as telas `/loja/marketing/*`, o menu
+da loja e a tela Vendas) e os testes de cada um. Docs: `business-rules.md` ("Loja online:
+promoções"), `architecture.md` ("Promoções da loja online") e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); eslint da API, do painel e
+dos pacotes; `validation`, `types` e `api-client` também com `--typeRoots` isolado, como o
+deploy; Jest da API (1557 passaram, 1 pulado); vitest do painel (472, 61 arquivos); build do
+painel; E2E inteiro no banco descartável (30 suítes, 261 testes), com um arquivo novo que
+confere pelo HTTP o isolamento entre duas lojas, a promoção na página pública, o preço do
+pedido calculado no servidor, o uso contado e devolvido e a disputa do último uso. As telas
+foram vistas no navegador, com dados de exemplo numa rota temporária já removida: lista,
+formulário (novo e edição), visão geral, linha do cardápio com "De / Por", folha do produto,
+sacola e barra da sacola, a 375px e no tamanho do painel.
+
+**Não conferido:** nada em produção; o painel e a página ligados a uma API de verdade no
+navegador (a conta e o pedido foram cobertos por E2E e por testes com a API simulada, mas
+não pelo navegador contra o servidor); o painel no modo escuro; e a disputa do último uso
+só garante o resultado (um pedido passa, o outro é recusado por uma de duas razões, e o uso
+fecha em 1), e não qual das duas recusas aconteceu.

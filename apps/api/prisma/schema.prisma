@@ -496,6 +496,7 @@ model Company {
   pageProtections      CompanyPageProtection[]
   storeCategories      StoreCategory[]
   storeProducts        StoreProduct[]
+  storePromotions      StorePromotion[]
   storeSettings        StoreSettings?
   storeSlugs           StoreSlug[]
   storeOperation       StoreOperation?
@@ -1951,8 +1952,9 @@ model StoreCategory {
   name      String @db.VarChar(60)
   position  Int
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  products StoreProduct[]
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  products   StoreProduct[]
+  promotions StorePromotion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1987,6 +1989,7 @@ model StoreProduct {
   category     StoreCategory?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   sizes        StoreProductSize[]
   optionGroups StoreOptionGroup[]
+  promotions   StorePromotion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2042,6 +2045,69 @@ model StoreOption {
 
   @@index([groupId, position])
   @@map("store_options")
+}
+
+/// O tipo da promoção (Marketing → Promoções). Os nomes são os das telas.
+enum StorePromotionType {
+  PERCENTUAL
+  PRECO
+  LEVE_PAGUE
+  SEGUNDO_COM_DESCONTO
+}
+
+/// Onde ela vale: um produto, ou todos os de uma seção do cardápio.
+enum StorePromotionTarget {
+  PRODUTO
+  CATEGORIA
+}
+
+/// Uma promoção da loja online. O desconto é do PRODUTO (o preço do tamanho), e
+/// não dos adicionais; cada produto recebe UMA promoção por compra, a que mais
+/// baixa o preço (`packages/validation/src/company/store-pricing.rules.ts`).
+///
+/// Datas e horas são do calendário e do relógio da loja, guardadas como texto
+/// (`AAAA-MM-DD`, `HH:MM`) para nenhum fuso mexer nelas. O que está vazio não
+/// limita. Apagar o produto ou a seção leva a promoção junto: uma promoção sem
+/// alvo não teria o que baixar.
+model StorePromotion {
+  id         String               @id @default(uuid())
+  companyId  String
+  /// O nome que a loja deu, para achá-la na lista. O cliente lê o rótulo.
+  name       String               @db.VarChar(60)
+  type       StorePromotionType
+  target     StorePromotionTarget
+  productId  String?
+  categoryId String?
+  /// `PERCENTUAL` e `SEGUNDO_COM_DESCONTO`.
+  percent    Int?
+  /// `PRECO`: o preço novo do produto.
+  promoPrice Decimal?             @db.Decimal(10, 2)
+  /// `LEVE_PAGUE`: leva `buyQty`, paga `payQty`.
+  buyQty     Int?
+  payQty     Int?
+  startDate  String?              @db.VarChar(10)
+  endDate    String?              @db.VarChar(10)
+  startTime  String?              @db.VarChar(5)
+  endTime    String?              @db.VarChar(5)
+  /// 0 = domingo. Vazio: todos os dias.
+  weekdays   Int[]
+  /// Nulo: sem limite. Conta PEDIDOS, e não unidades.
+  maxUses    Int?
+  /// Quantos pedidos já a usaram. O pedido cancelado devolve o uso.
+  usedCount  Int                  @default(0)
+  active     Boolean              @default(true)
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product  StoreProduct?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category StoreCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, active])
+  @@index([productId])
+  @@index([categoryId])
+  @@map("store_promotions")
 }
 
 /// A loja online da empresa: por enquanto, o link e o nome que o cliente vê.

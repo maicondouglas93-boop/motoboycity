@@ -552,7 +552,7 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
-Organizar, Cadastrar e Editar), Horários, Tipos de pedido, Notificações e
+Organizar, Cadastrar e Editar), Marketing (Promoções), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
 **A aparência segue `docs/design-system.md`** (2026-09-29): cartão só com borda,
@@ -748,6 +748,23 @@ Quem mexer aqui precisa saber:
   troco. Decisões do usuário, 2026-09-26.
 - **Estorno e pagamento online não existem ainda**: a página só aceita
   pagamento na entrega enquanto o Asaas da loja não estiver ligado.
+
+### Promoções da loja online — 2026-09-29
+
+Primeira parte do módulo Marketing (as outras, na ordem que o usuário escolheu: cupons,
+combos e destaques, ainda não existem). Regras em `business-rules.md` ("Loja online:
+promoções") e a organização em `architecture.md` ("Promoções da loja online").
+
+- **Onde está a conta:** `packages/validation/src/company/store-pricing.rules.ts`, e só
+  ali. Nenhuma tela faz conta de desconto: `apps/company-web/src/lib/loja-promocoes.ts`
+  traduz a sacola e o cardápio para essa regra. Mexer no preço é mexer nela, com o teste
+  dela (`store-pricing.rules.spec.ts`), para a página e o servidor continuarem batendo.
+- **Precisa de migration no deploy:** `20260929190000_marketing_promocoes` (a Render
+  aplica ao publicar). É aditiva; o SQL que desfaz é o `DROP` da tabela e dos dois enums.
+- **O que ficou de fora de propósito:** cupom, combo, destaque; promoção por cliente ou
+  por forma de pagamento; e o preço promocional para produto com tamanhos (só o % serve).
+- **Não conferido:** nada em produção; o checkout logado de ponta a ponta no navegador
+  (não há login de cliente local), e o painel de Marketing no celular.
 
 ### Avisos com a página fechada (Web Push) — 2026-09-26
 

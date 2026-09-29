@@ -86,6 +86,7 @@ function cardapio(mudancas: Partial<CardapioDaPagina> = {}): CardapioDaPagina {
     produtos: [],
     operacao: OPERACAO,
     enderecoDeRetirada: null,
+    promocoes: [],
     ...mudancas,
   };
 }
@@ -155,6 +156,65 @@ describe('Sacola da loja de verdade', () => {
       }),
     );
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(`/pedir/${SLUG}/pedidos?novo=7`));
+  });
+
+  it('com promoção, mostra o desconto e manda o total já com ele — o servidor confere', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 12 } as PedidoDaLoja);
+    const acai = {
+      id: 'p1',
+      nome: 'Açaí',
+      descricao: '',
+      categoriaId: 'c1',
+      imagemUrl: null,
+      precoUnico: null,
+      situacao: 'publicado' as const,
+      tamanhos: [{ id: 't1', nome: '500ml', preco: 18, disponivel: true }],
+      grupos: [],
+    };
+    render(
+      <Sacola
+        slug={SLUG}
+        cardapio={cardapio({
+          produtos: [acai],
+          promocoes: [
+            {
+              id: 'promo-1',
+              nome: 'Açaí 20%',
+              tipo: 'PERCENTUAL',
+              alvo: 'PRODUTO',
+              produtoId: 'p1',
+              categoriaId: null,
+              percentual: 20,
+              precoPromocional: null,
+              leve: null,
+              pague: null,
+              inicio: null,
+              fim: null,
+              horaInicio: null,
+              horaFim: null,
+              diasDaSemana: [],
+            },
+          ],
+        })}
+      />,
+    );
+
+    // 2 × (18,00 − 20%) + 2 × 3,00 de adicional = 34,80; com a taxa de 5, 39,80.
+    expect(await screen.findByText('20% OFF')).toBeInTheDocument();
+    // O de antes aparece riscado na linha, e sem riscar no resumo dos itens.
+    expect(screen.getAllByText('R$ 42,00').map((elemento) => elemento.tagName)).toContain('S');
+    expect(screen.getByText('R$ 34,80')).toBeInTheDocument();
+    expect(screen.getByText(/Promoções/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({ totalVisto: 39.8 }),
+      ),
+    );
   });
 
   it('no Pix, o erro do CPF aparece no campo, com foco nele; preenchido, o pedido segue', async () => {

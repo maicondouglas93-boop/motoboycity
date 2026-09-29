@@ -1,10 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { OperacaoPublica, PublicStoreProduct } from '@motoboycity/types';
+import type { PromocaoPublica } from '@motoboycity/types';
 import { crc16, type StoreCheckoutPayload } from '@motoboycity/validation';
 import { Prisma } from '@prisma/client';
 import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import {
   OPERACAO_INICIAL,
   StoreOperationService,
@@ -119,6 +121,7 @@ describe('StoreOrdersService', () => {
     companyAddress: { findFirst: jest.Mock };
     storeSettings: { findUnique: jest.Mock };
     $transaction: jest.Mock;
+    $executeRaw: jest.Mock;
   };
   let catalogo: { publicCatalog: jest.Mock };
   let operacaoDaLoja: {
@@ -135,6 +138,7 @@ describe('StoreOrdersService', () => {
     apagarCobranca: jest.Mock;
   };
   let avisos: { pedidoNovo: jest.Mock; etapaMudou: jest.Mock };
+  let marketing: { promocoesDoPedido: jest.Mock };
 
   const lojaQueRecebe = (acceptsOrders = true) => ({
     company: { id: EMPRESA, status: 'ACTIVE', storeSettings: { acceptsOrders } },
@@ -187,6 +191,8 @@ describe('StoreOrdersService', () => {
       },
       storeSettings: { findUnique: jest.fn().mockResolvedValue({ name: 'Açaí do Zé' }) },
       $transaction: jest.fn(),
+      // O uso da promoção: uma linha alterada quando ainda há uso.
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
     prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
     catalogo = {
@@ -223,6 +229,7 @@ describe('StoreOrdersService', () => {
       apagarCobranca: jest.fn().mockResolvedValue(undefined),
     };
     avisos = { pedidoNovo: jest.fn(), etapaMudou: jest.fn() };
+    marketing = { promocoesDoPedido: jest.fn().mockResolvedValue([]) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -233,6 +240,8 @@ describe('StoreOrdersService', () => {
         { provide: DeliveriesService, useValue: entregas },
         { provide: StoreAsaasAccountService, useValue: contasAsaas },
         { provide: StoreAsaasClient, useValue: asaas },
+        // Sem promoção por padrão: os testes de sempre são de preço cheio.
+        { provide: StoreMarketingService, useValue: marketing },
         { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
@@ -571,7 +580,9 @@ describe('StoreOrdersService', () => {
 
       const [, , payload] = entregas.createFromStoreOrder.mock.calls[0]!;
       expect(payload).toMatchObject({ customerPaymentMethod: 'PREPAID', requiresReturn: false });
-      expect(payload.driverNote).toContain('Pago por Pix direto para a loja. NÃO cobrar do cliente.');
+      expect(payload.driverNote).toContain(
+        'Pago por Pix direto para a loja. NÃO cobrar do cliente.',
+      );
     });
 
     it('a loja sem a chave (apagada depois de o cliente abrir a página) recusa o pedido', async () => {
@@ -594,7 +605,10 @@ describe('StoreOrdersService', () => {
     it('em "Meus pedidos" o cliente vê o código e o WhatsApp; confirmado ou cancelado, o código some', async () => {
       await pedirComPixDireto();
       prisma.storeSlug.findUnique.mockResolvedValue({ companyId: EMPRESA });
-      const linha = { ...(await prisma.storeOrder.create.mock.results.at(-1)!.value), delivery: null };
+      const linha = {
+        ...(await prisma.storeOrder.create.mock.results.at(-1)!.value),
+        delivery: null,
+      };
       const dele = (mudancas: object) =>
         prisma.storeOrder.findMany.mockResolvedValue([{ ...linha, ...mudancas }]);
 
@@ -626,6 +640,150 @@ describe('StoreOrdersService', () => {
       await service.pedidosDoCliente('acai', CLIENTE);
 
       expect(operacaoDaLoja.operacaoDaEmpresa).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('promoções no pedido', () => {
+    /** 20% OFF no açaí (p1). */
+    function promo(
+      mudancas: Partial<PromocaoPublica> & { usos?: number; limiteDeUsos?: number | null } = {},
+    ) {
+      return {
+        id: 'promo-1',
+        nome: 'Açaí 20% OFF',
+        tipo: 'PERCENTUAL',
+        alvo: 'PRODUTO',
+        produtoId: 'p1',
+        categoriaId: null,
+        percentual: 20,
+        precoPromocional: null,
+        leve: null,
+        pague: null,
+        inicio: null,
+        fim: null,
+        horaInicio: null,
+        horaFim: null,
+        diasDaSemana: [],
+        usos: 0,
+        limiteDeUsos: null,
+        ...mudancas,
+      } as PromocaoPublica & { usos: number; limiteDeUsos: number | null };
+    }
+    /** Açaí 500ml com morango e chocolate, 2 unidades: 42,20 sem promoção. */
+    const comPromocao = (mudancas: Partial<StoreCheckoutPayload> = {}) =>
+      service.checkout('acai', CLIENTE, pedido({ totalVisto: 41, ...mudancas }));
+
+    it('o preço do produto baixa, o dos adicionais não, e a linha guarda o que custaria', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([promo()]);
+
+      const feito = await comPromocao();
+
+      // 2 x (18,00 - 20%) + os adicionais cheios (3,10 x 2) = 35,00.
+      expect(feito).toMatchObject({ subtotal: 35, taxaDeEntrega: 6, total: 41 });
+      expect(feito.itens[0]).toMatchObject({
+        unitario: 21.1,
+        total: 35,
+        totalOriginal: 42.2,
+        promocao: { id: 'promo-1', nome: 'Açaí 20% OFF', desconto: 7.2, rotulo: '20% OFF' },
+      });
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect(data).toMatchObject({ subtotal: 35, total: 41 });
+    });
+
+    it('o servidor recusa o total sem promoção que a página mostrou antes, e diz o novo', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([promo()]);
+
+      await expect(comPromocao({ totalVisto: 48.2 })).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_TOTAL_CHANGED', total: 41 },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+    });
+
+    it('sem promoção que sirva, o pedido é de preço cheio e nenhum uso é contado', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([
+        promo({ produtoId: 'p2' }),
+        promo({ id: 'vencida', fim: '2026-09-01' }),
+      ]);
+
+      const feito = await service.checkout('acai', CLIENTE, pedido());
+
+      expect(feito.total).toBe(48.2);
+      expect(feito.itens[0]).not.toHaveProperty('promocao');
+      expect(feito.itens[0]).not.toHaveProperty('totalOriginal');
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('não acumula: duas promoções no mesmo produto, vale a de maior desconto, e só ela é usada', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([
+        promo({ id: 'dez', percentual: 10 }),
+        promo({ id: 'trinta', percentual: 30, nome: 'Açaí 30%' }),
+      ]);
+
+      // 2 x (18,00 - 30%) + 6,20 de adicionais = 31,40 + 6 de entrega.
+      const feito = await comPromocao({ totalVisto: 37.4 });
+
+      expect(feito.itens[0]!.promocao).toMatchObject({ id: 'trinta', desconto: 10.8 });
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('cada promoção usada conta um uso, dentro da transação do pedido', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([promo()]);
+
+      await comPromocao();
+
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      // A conta leva o id da promoção e a empresa: uma loja não gasta uso da outra.
+      const [, promocaoId, empresa] = prisma.$executeRaw.mock.calls[0]!;
+      expect(promocaoId).toBe('promo-1');
+      expect(empresa).toBe(EMPRESA);
+    });
+
+    it('a promoção que acabou entre a página e o pedido recusa, e nenhum pedido é gravado', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([promo({ limiteDeUsos: 5, usos: 4 })]);
+      // Outro pedido levou o último uso no meio: o UPDATE condicional não acha linha.
+      prisma.$executeRaw.mockResolvedValue(0);
+
+      await expect(comPromocao()).rejects.toMatchObject({
+        response: { code: 'STORE_PROMOTION_EXHAUSTED' },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+      expect(avisos.pedidoNovo).not.toHaveBeenCalled();
+    });
+
+    it('o pedido mínimo conta o que o cliente paga pelos itens, já com a promoção', async () => {
+      const comMinimo = operacao();
+      comMinimo.entrega = { ...comMinimo.entrega, pedidoMinimo: 40 };
+      operacaoDaLoja.publicOperation.mockResolvedValue(comMinimo);
+
+      // Sem promoção, 42,20 passa dos R$ 40; com ela, 35,00 não passa.
+      await expect(service.checkout('acai', CLIENTE, pedido())).resolves.toBeDefined();
+      marketing.promocoesDoPedido.mockResolvedValue([promo()]);
+      await expect(comPromocao()).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_BELOW_MINIMUM' },
+      });
+    });
+
+    it('leve 3, pague 2 no pedido: a unidade grátis sai do total', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([
+        promo({ tipo: 'LEVE_PAGUE', percentual: null, leve: 3, pague: 2, nome: 'Leve 3' }),
+      ]);
+      const tres = [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['c1'], quantidade: 3 }];
+
+      // 3 x 18,10 = 54,30, menos uma unidade de 18,00 (o produto, sem o adicional).
+      const feito = await service.checkout(
+        'acai',
+        CLIENTE,
+        pedido({ itens: tres, totalVisto: 42.3 }),
+      );
+
+      expect(feito.subtotal).toBe(36.3);
+      expect(feito.itens[0]).toMatchObject({
+        total: 36.3,
+        totalOriginal: 54.3,
+        promocao: { rotulo: 'Leve 3, pague 2', desconto: 18 },
+      });
     });
   });
 

@@ -107,6 +107,11 @@ export function ComandaDaVenda({
                 </span>
                 <span>{moeda(item.total)}</span>
               </p>
+              {item.promocao && (
+                <p className={estilos['escolhas']}>
+                  PROMOÇÃO {item.promocao.rotulo} (− {moeda(item.promocao.desconto)})
+                </p>
+              )}
               {item.grupos && item.grupos.length > 0 ? (
                 <div className={estilos['grupos']}>
                   {item.grupos.map(({ grupo, opcoes }) => (

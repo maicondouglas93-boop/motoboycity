@@ -1,4 +1,5 @@
 import type { StoreCategory, StoreProduct } from './store-catalog.js';
+import type { PromocaoPublica } from './store-marketing.js';
 import type { EnderecoDeRetirada, OperacaoPublica } from './store-operation.js';
 
 /** O fundo da página da loja. As duas cores são medidas contra ele. */
@@ -44,6 +45,11 @@ export interface PublicStore {
   categories: StoreCategory[];
   /** Só o que dá para comprar, na ordem do cardápio. */
   products: PublicStoreProduct[];
+  /**
+   * As promoções ligadas e ainda com usos, para a página calcular o preço com as
+   * mesmas regras do servidor. Ausente: nenhuma.
+   */
+  promocoes?: PromocaoPublica[];
   /** Horário, ajuste da hora, tipos de pedido, pagamento e bairros — sem os avisos. */
   operacao: OperacaoPublica;
   /** A loja ligou os pedidos pela página. Desligado, a página é vitrine. */

@@ -20,6 +20,7 @@ import { CompanyCustomersModule } from './company/customers/company-customers.mo
 import { CompanyReportsModule } from './company/reports/company-reports.module';
 import { PageProtectionModule } from './company/page-protection/page-protection.module';
 import { StoreCatalogModule } from './company/store-catalog/store-catalog.module';
+import { StoreMarketingModule } from './company/store-marketing/store-marketing.module';
 import { StoreOperationModule } from './company/store-operation/store-operation.module';
 import { StoreOrdersModule } from './company/store-orders/store-orders.module';
 import { StoreSettingsModule } from './company/store-settings/store-settings.module';
@@ -94,6 +95,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     CompanyReportsModule,
     PageProtectionModule,
     StoreCatalogModule,
+    StoreMarketingModule,
     StoreSettingsModule,
     StoreOperationModule,
     StoreOrdersModule,

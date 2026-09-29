@@ -29,6 +29,7 @@ import {
   FORMAS_DE_PAGAMENTO_ONLINE,
   MOTIVO_DO_PRAZO,
   TransicaoInvalida,
+  aplicarPromocoes,
   avancar,
   chamarMotoboyCity,
   concluido,
@@ -46,6 +47,7 @@ import {
   podeChamarMotoboyCity,
   prazoDoAceite,
   prontoEm,
+  rotuloDaPromocao,
   segueACorrida,
   situacaoDaLoja,
   whatsappComDdi,
@@ -69,6 +71,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StoreAsaasAccountService } from '../store-asaas/store-asaas-account.service';
 import { StoreAsaasClient } from '../store-asaas/store-asaas.client';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
 import { StoreOrderNotificationsService } from './store-order-notifications.service';
 
@@ -88,11 +91,23 @@ function recusa(message: string, code: string, extra: Record<string, unknown> = 
 type ItemPedido = StoreCheckoutPayload['itens'][number];
 
 /**
+ * A linha conferida contra o cardápio, e o que a promoção precisa dela: o preço
+ * do produto sem os adicionais (é o que o desconto age) e a seção dele.
+ */
+interface ItemPrecificado {
+  item: ItemDoPedido;
+  categoriaId: string | null;
+  tamanhoId: string | null;
+  baseCentavos: number;
+  adicionaisCentavos: number;
+}
+
+/**
  * O preço de uma linha da sacola, conferido contra o cardápio publicado. Cada
  * recusa diz o nome do que mudou: "o tamanho 700ml acabou" leva o cliente a
  * trocar o item; "item inválido" o faz desistir.
  */
-function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): ItemDoPedido {
+function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): ItemPrecificado {
   if (!produto) {
     throw new ConflictException({
       message: 'Um item da sacola saiu do cardápio. Confira a sacola e tente de novo.',
@@ -165,14 +180,20 @@ function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): 
 
   const unitario = centavos(base) + adicionais;
   return {
-    produtoId: produto.id,
-    nome: produto.name,
-    tamanho,
-    escolhas: nomes,
-    grupos,
-    quantidade: item.quantidade,
-    unitario: reais(unitario),
-    total: reais(unitario * item.quantidade),
+    item: {
+      produtoId: produto.id,
+      nome: produto.name,
+      tamanho,
+      escolhas: nomes,
+      grupos,
+      quantidade: item.quantidade,
+      unitario: reais(unitario),
+      total: reais(unitario * item.quantidade),
+    },
+    categoriaId: produto.categoryId,
+    tamanhoId: item.tamanhoId,
+    baseCentavos: centavos(base),
+    adicionaisCentavos: adicionais,
   };
 }
 
@@ -479,6 +500,7 @@ export class StoreOrdersService {
     private readonly avisos: StoreOrderNotificationsService,
     private readonly contasAsaas: StoreAsaasAccountService,
     private readonly asaas: StoreAsaasClient,
+    private readonly marketing: StoreMarketingService,
   ) {}
 
   async checkout(
@@ -503,7 +525,46 @@ export class StoreOrdersService {
     }
 
     const produtos = new Map(cardapio.products.map((produto) => [produto.id, produto]));
-    const itens = pedido.itens.map((item) => precificar(item, produtos.get(item.produtoId)));
+    const precificados = pedido.itens.map((item) => precificar(item, produtos.get(item.produtoId)));
+
+    /*
+     * Promoções: a MESMA conta que a página fez (`aplicarPromocoes`, em
+     * `@motoboycity/validation`) — o servidor só aceita o pedido se o total bater
+     * com o que o cliente viu. O `total` da linha passa a ser o que se paga; o
+     * quanto custaria e a promoção que agiu ficam na linha, como estavam na hora
+     * da compra.
+     */
+    const promocoes = await this.marketing.promocoesDoPedido(companyId);
+    const promovidas = aplicarPromocoes(
+      precificados.map((linha, indice) => ({
+        chave: String(indice),
+        produtoId: linha.item.produtoId,
+        categoriaId: linha.categoriaId,
+        tamanhoId: linha.tamanhoId,
+        quantidade: linha.item.quantidade,
+        baseCentavos: linha.baseCentavos,
+        adicionaisCentavos: linha.adicionaisCentavos,
+      })),
+      promocoes,
+      agora,
+    );
+    const itens: ItemDoPedido[] = precificados.map(({ item }, indice) => {
+      const promovida = promovidas.linhas[indice];
+      const aplicada = promocoes.find((promocao) => promocao.id === promovida?.promocaoId);
+      if (!promovida || !aplicada || promovida.descontoCentavos <= 0) return item;
+      return {
+        ...item,
+        total: reais(promovida.totalCentavos),
+        totalOriginal: reais(promovida.originalCentavos),
+        promocao: {
+          id: aplicada.id,
+          nome: aplicada.nome,
+          desconto: reais(promovida.descontoCentavos),
+          rotulo: rotuloDaPromocao(aplicada),
+        },
+      };
+    });
+    // O que o cliente paga pelos itens, já com as promoções.
     const subtotal = itens.reduce((soma, item) => soma + centavos(item.total), 0);
 
     const minimo = pedidoMinimoDa(operacao, pedido.modalidade);
@@ -665,7 +726,7 @@ export class StoreOrdersService {
 
     let gravado: StoreOrder;
     try {
-      gravado = await this.gravarComNumero(companyId, dados, pixDoNumero);
+      gravado = await this.gravarComNumero(companyId, dados, pixDoNumero, promovidas.usadas);
     } catch (erro) {
       // Sem pedido, a cobrança não pode ficar no Asaas esperando pagamento.
       if (pix) await this.apagarCobranca(companyId, pix.paymentProviderId);
@@ -881,7 +942,8 @@ export class StoreOrdersService {
     );
     // Sem corrida na leitura de cima, ela ainda pode ter nascido no meio: o
     // aceite cria a corrida e só depois a liga ao pedido.
-    if (!linha || !corridaViva(linha.delivery)) await this.recolherCorridaDoCancelado(companyId, id);
+    if (!linha || !corridaViva(linha.delivery))
+      await this.recolherCorridaDoCancelado(companyId, id);
     return this.paraALojaPorId(companyId, id);
   }
 
@@ -1585,6 +1647,8 @@ export class StoreOrdersService {
         // Quem fez a mudança é quem avisa: a outra aba, que perdeu a disputa,
         // não chega aqui, e o aviso não sai duas vezes.
         await this.avisos.etapaMudou(companyId, paraPedido(linha), depois);
+        // O pedido caiu: as promoções que ele usou voltam a ter esse uso.
+        if (depois.etapa === 'CANCELADO') await this.devolverUsosDePromocao(linha);
         // Pago online e cancelado — pela loja, pelo prazo do aceite —: o
         // dinheiro volta inteiro, sozinho (decisão 18).
         if (depois.etapa === 'CANCELADO' && linha.paymentStatus === 'PAGO') {
@@ -1598,6 +1662,32 @@ export class StoreOrdersService {
       message: 'O pedido mudou enquanto você mexia nele. Tente de novo.',
       code: 'STORE_ORDER_STALE',
     });
+  }
+
+  /**
+   * O pedido cancelado devolve o uso das promoções que gastou. Não derruba o
+   * cancelamento: o pedido já caiu, e um contador fora do lugar por um uso se
+   * corrige sozinho na próxima edição da promoção.
+   */
+  private async devolverUsosDePromocao(linha: StoreOrder): Promise<void> {
+    const ids = [
+      ...new Set(
+        (linha.items as unknown as ItemDoPedido[]).flatMap((item) =>
+          item.promocao ? [item.promocao.id] : [],
+        ),
+      ),
+    ];
+    if (ids.length === 0) return;
+    try {
+      await this.prisma.storePromotion.updateMany({
+        where: { id: { in: ids }, companyId: linha.companyId, usedCount: { gt: 0 } },
+        data: { usedCount: { decrement: 1 } },
+      });
+    } catch (erro) {
+      this.logger.warn(
+        `Não deu para devolver o uso das promoções do pedido ${linha.id}: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+    }
   }
 
   /**
@@ -1635,10 +1725,29 @@ export class StoreOrdersService {
     companyId: string,
     dados: Omit<Prisma.StoreOrderUncheckedCreateInput, 'companyId' | 'number'>,
     doNumero?: (numero: number) => { pixPayload: string },
+    promocoesUsadas: string[] = [],
   ): Promise<StoreOrder> {
     for (let tentativa = 1; ; tentativa += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          // O uso de cada promoção é contado AQUI, na mesma transação do pedido, e
+          // só se ainda há uso: dois pedidos ao mesmo tempo não passam do limite
+          // (o segundo encontra zero linhas alteradas), e um pedido que não é
+          // gravado não gasta uso nenhum.
+          for (const promocaoId of promocoesUsadas) {
+            const alteradas = await tx.$executeRaw`
+              UPDATE "store_promotions"
+              SET "usedCount" = "usedCount" + 1
+              WHERE "id" = ${promocaoId}
+                AND "companyId" = ${companyId}
+                AND ("maxUses" IS NULL OR "usedCount" < "maxUses")`;
+            if (alteradas !== 1) {
+              throw new ConflictException({
+                message: 'Uma promoção do seu pedido acabou. Confira a sacola e tente de novo.',
+                code: 'STORE_PROMOTION_EXHAUSTED',
+              });
+            }
+          }
           const ultimo = await tx.storeOrder.aggregate({
             where: { companyId },
             _max: { number: true },

@@ -177,6 +177,44 @@ aceito; cancelado depois de pago, é estornado pela mesma conta. No
 e os pedidos do cliente (`components/loja-online/pedidos-do-cliente.ts`), a
 cada 20 s.
 
+### Promoções da loja online
+
+`store_promotions` (enums `StorePromotionType` e `StorePromotionTarget`): a promoção da
+empresa, presa a um produto ou a uma seção (`productId` / `categoryId`, com cascata), com
+datas (`startDate`/`endDate`, texto `AAAA-MM-DD`), horário (`startTime`/`endTime`), dias da
+semana (`weekdays`), `maxUses` e `usedCount`. Migration aditiva
+`20260929190000_marketing_promocoes` (validada em banco descartável: aplica, fica igual
+ao schema, desfaz e reaplica).
+
+**Uma regra só, no pacote compartilhado.** `packages/validation/src/company/store-pricing.rules.ts`
+faz toda a conta, em centavos inteiros: `promocaoVigente`, `descontoDaPromocao`,
+`aplicarPromocoes` (o carrinho: agrupa as unidades do mesmo produto e tamanho, escolhe a
+promoção que mais desconta e reparte o desconto do grupo pelas linhas sem perder
+centavo) e `ofertaDoProduto` (o "De / Por" da vitrine). O servidor e as telas
+(`apps/company-web/src/lib/loja-promocoes.ts`, que só traduz sacola e cardápio para essa
+regra) chamam o mesmo código; é por isso que o total que a página mostra bate com o do
+servidor. Antes de a página conhecer a hora (hidratação) ela mostra preço cheio.
+
+Módulo `company/store-marketing`: `StoreMarketingService` e o controller
+`company/store/marketing/promotions` (listar, criar, editar, ligar/desligar, duplicar e
+apagar), atrás de `JwtAuthGuard` + `CompanyOnlyGuard`. Toda rota resolve a empresa pelo
+login e filtra por ela; o `id` da URL é sempre procurado junto da empresa
+(`updateMany`/`deleteMany` com `companyId` na condição), e a de outra loja responde 404
+`STORE_PROMOTION_NOT_FOUND`. Produto ou seção de outra empresa como alvo: 409
+`STORE_PROMOTION_TARGET_NOT_FOUND`, a mesma resposta de um id que não existe. A página
+pública (`PublicStore.promocoes`, de `StoreSettingsService.publicStore`) recebe só as
+ligadas e não esgotadas, sem usos, limite nem datas de criação.
+
+No pedido (`StoreOrdersService.checkout`), `precificar` devolve base e adicionais de cada
+linha, `aplicarPromocoes` desconta, e `gravarComNumero` conta o uso da promoção na mesma
+transação do pedido; `mudar` devolve o uso quando o pedido vai a `CANCELADO`.
+
+No `company-web`, o painel fica em `/loja/marketing` (visão geral) e
+`/loja/marketing/promocoes` (lista, `nova` e `[id]/editar`), com
+`components/loja/marketing.ts` (consulta e a situação em português) e
+`formulario-de-promocao.tsx`. O cardápio (`loja-publica.tsx`), a folha do produto, a
+sacola, o checkout, "Meus pedidos", Vendas e a comanda mostram o desconto.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

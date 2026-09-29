@@ -4,6 +4,7 @@ import { DeliveriesModule } from '../../deliveries/deliveries.module';
 import { WebPushModule } from '../../web-push/web-push.module';
 import { StoreAsaasModule } from '../store-asaas/store-asaas.module';
 import { StoreCatalogModule } from '../store-catalog/store-catalog.module';
+import { StoreMarketingModule } from '../store-marketing/store-marketing.module';
 import { StoreOperationModule } from '../store-operation/store-operation.module';
 import { ClienteDaLojaGuard, VerificadorDoCliente } from './cliente-da-loja.guard';
 import { PublicStoreOrdersController } from './public-store-orders.controller';
@@ -18,6 +19,7 @@ import { StoreOrdersService } from './store-orders.service';
 @Module({
   imports: [
     StoreCatalogModule,
+    StoreMarketingModule,
     StoreOperationModule,
     DeliveriesModule,
     WebPushModule,

@@ -10,6 +10,7 @@ import { ImageKitService } from '../../media/imagekit.service';
 import type { UploadedImageFile } from '../../media/supported-image';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import {
   OPERACAO_INICIAL,
   StoreOperationService,
@@ -95,6 +96,10 @@ describe('StoreSettingsService', () => {
         { provide: StoreCatalogService, useValue: catalogo },
         { provide: StoreOperationService, useValue: operacao },
         { provide: ImageKitService, useValue: imageKit },
+        {
+          provide: StoreMarketingService,
+          useValue: { promocoesPublicas: jest.fn().mockResolvedValue([]) },
+        },
       ],
     }).compile();
     service = module.get(StoreSettingsService);

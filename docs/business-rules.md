@@ -628,6 +628,39 @@ Decisões de 2026-09-26, do usuário:
   da loja; as tarifas do Asaas não voltam. Sem saldo, o estorno é tentado de
   novo a cada 15 minutos, e a loja vê o aviso em Vendas.
 
+## Loja online: promoções
+
+Decisões de 2026-09-29, do usuário. Marketing entrega em quatro partes, nesta ordem:
+**Promoções**, cupons, combos e destaques; só a primeira existe.
+
+- quatro tipos: **desconto em %** (1% a 90%), **preço promocional** (só produto de preço
+  único, e menor que o de hoje), **leve X, pague Y** (leve de 2 a 10) e **segundo item com
+  desconto** (1% a 100%). Vale num produto ou numa seção inteira;
+- **o desconto é do produto, e não dos adicionais**: "20% OFF no açaí" não muda o preço da
+  granola. A promoção age sobre o preço do produto (ou do tamanho escolhido);
+- **promoções não se acumulam**: cada produto (no mesmo tamanho) recebe UMA promoção, a
+  que dá mais desconto naquela compra; no empate, a mais antiga. Uma promoção nunca sobe
+  o preço. No "leve 3", contam as unidades do mesmo produto e tamanho ainda que venham em
+  linhas separadas, com adicionais diferentes;
+- quando vale: datas, horário e dias da semana, no relógio de Brasília. O horário que passa
+  da meia-noite (22:00 às 02:00) conta no dia em que começou. Sem nada marcado, vale o tempo
+  todo enquanto estiver ligada;
+- **limite de usos**: conta um uso **por pedido** (e não por unidade). O pedido cancelado
+  devolve o uso, uma vez. Esgotada, a promoção some da página. O uso é contado por um
+  `UPDATE` condicional dentro da transação que grava o pedido: com um uso sobrando e dois
+  pedidos ao mesmo tempo, um leva a promoção e o outro é recusado
+  (`STORE_PROMOTION_EXHAUSTED`);
+- o **pedido mínimo** conta os itens já com o desconto; a **taxa de entrega** não tem
+  desconto;
+- o pedido guarda a conta: cada item traz o preço sem promoção (`unitario`), o que custou
+  (`total`), o que custaria (`totalOriginal`) e a promoção como estava na compra. Editar,
+  desligar ou apagar a promoção depois não muda o pedido feito;
+- o preço é sempre o do servidor: a página mostra o "De / Por" e o total pela mesma regra
+  (`packages/validation`), e o pedido é recusado com 409 `STORE_ORDER_TOTAL_CHANGED`, dizendo
+  o total novo, se o que o cliente viu não bater;
+- quando os **cupons** existirem, valem só nos itens sem promoção automática, salvo um
+  "vale também em itens em promoção" que cada cupom liga (desligado de saída).
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

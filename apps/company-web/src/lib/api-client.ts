@@ -16,6 +16,7 @@ import {
   createCompanyPageProtectionApi,
   createCompanyStoreAsaasApi,
   createCompanyStoreCatalogApi,
+  createCompanyStoreMarketingApi,
   createCompanyStoreOperationApi,
   createCompanyStoreOrdersApi,
   createCompanyStoreSettingsApi,
@@ -48,6 +49,7 @@ export const companyIntegrationsApi = createCompanyIntegrationsApi({ baseUrl: ap
 export const notificationsApi = createNotificationsApi({ baseUrl: apiBaseUrl });
 export const companyPageProtectionApi = createCompanyPageProtectionApi({ baseUrl: apiBaseUrl });
 export const companyStoreCatalogApi = createCompanyStoreCatalogApi({ baseUrl: apiBaseUrl });
+export const companyStoreMarketingApi = createCompanyStoreMarketingApi({ baseUrl: apiBaseUrl });
 export const companyStoreAsaasApi = createCompanyStoreAsaasApi({ baseUrl: apiBaseUrl });
 export const companyStoreSettingsApi = createCompanyStoreSettingsApi({ baseUrl: apiBaseUrl });
 export const companyStoreOperationApi = createCompanyStoreOperationApi({ baseUrl: apiBaseUrl });

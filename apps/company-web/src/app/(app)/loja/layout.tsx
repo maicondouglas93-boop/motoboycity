@@ -3,7 +3,16 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, Clock, Package, Settings, ShoppingBag, ShoppingCart, Store } from 'lucide-react';
+import {
+  Bell,
+  Clock,
+  Megaphone,
+  Package,
+  Settings,
+  ShoppingBag,
+  ShoppingCart,
+  Store,
+} from 'lucide-react';
 import { ControleDoStatus } from '@/components/loja/controle-do-status';
 
 /**
@@ -22,6 +31,7 @@ import { ControleDoStatus } from '@/components/loja/controle-do-status';
 const ITENS = [
   { href: '/loja/vendas', label: 'Vendas', icon: ShoppingCart },
   { href: '/loja/produtos', label: 'Produtos', icon: Package },
+  { href: '/loja/marketing', label: 'Marketing', icon: Megaphone },
   { href: '/loja/horarios', label: 'Horários', icon: Clock },
   { href: '/loja/tipos-de-pedido', label: 'Tipos de pedido', icon: ShoppingBag },
   { href: '/loja/notificacoes', label: 'Notificações', icon: Bell },

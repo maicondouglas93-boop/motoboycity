@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ImageKitModule } from '../../media/imagekit.module';
 import { StoreCatalogModule } from '../store-catalog/store-catalog.module';
+import { StoreMarketingModule } from '../store-marketing/store-marketing.module';
 import { StoreOperationModule } from '../store-operation/store-operation.module';
 import { PublicStoreController } from './public-store.controller';
 import { StoreSettingsController } from './store-settings.controller';
 import { StoreSettingsService } from './store-settings.service';
 
 @Module({
-  imports: [ImageKitModule, StoreCatalogModule, StoreOperationModule],
+  imports: [ImageKitModule, StoreCatalogModule, StoreMarketingModule, StoreOperationModule],
   controllers: [StoreSettingsController, PublicStoreController],
   providers: [StoreSettingsService],
 })

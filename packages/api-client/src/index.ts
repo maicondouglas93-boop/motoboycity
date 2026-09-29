@@ -36,6 +36,7 @@ export * from './company-integrations';
 export * from './notifications';
 export * from './company-page-protection';
 export * from './company-store-catalog';
+export * from './company-store-marketing';
 export * from './company-store-settings';
 export * from './company-store-operation';
 export * from './company-store-orders';

@@ -9,6 +9,8 @@ import type { ItemEscolhido } from './folha-do-produto';
 import { CURVA_ENTRADA, CURVA_SAIDA, DURACAO } from './movimento';
 import { NumeroRolante } from './numero-rolante';
 import { moeda, textoSobre, type Paleta } from './paleta';
+import { SeloDePromocao } from './selo-de-promocao';
+import type { LinhaDaSacola } from '@/lib/loja-promocoes';
 
 /**
  * O texto do botão "Continuar", que troca por "Abrindo…" no toque.
@@ -43,6 +45,7 @@ function RotuloDoContinuar() {
  */
 export function FolhaDaSacola({
   itens,
+  linhas,
   total,
   slug,
   paleta,
@@ -51,6 +54,8 @@ export function FolhaDaSacola({
   onFechar,
 }: {
   itens: ItemEscolhido[];
+  /** O que cada item custa com as promoções, na ordem de `itens`. */
+  linhas: LinhaDaSacola[];
   total: number;
   slug: string;
   paleta: Paleta;
@@ -129,8 +134,24 @@ export function FolhaDaSacola({
                     </p>
                   )}
                   <p className="mt-1 text-[15px] font-semibold">
-                    <NumeroRolante valor={item.unitario * item.quantidade} formatar={moeda} />
+                    {linhas[indice]?.promocao && (
+                      <s className="mr-1.5 text-[13px] font-normal" style={{ color: paleta.suave }}>
+                        {moeda(linhas[indice]?.original ?? 0)}
+                      </s>
+                    )}
+                    <NumeroRolante
+                      valor={linhas[indice]?.total ?? item.unitario * item.quantidade}
+                      formatar={moeda}
+                    />
                   </p>
+                  {linhas[indice]?.promocao && (
+                    <p className="mt-1">
+                      <SeloDePromocao
+                        rotulo={linhas[indice].promocao.rotulo}
+                        corDeAcao={corDeAcao}
+                      />
+                    </p>
+                  )}
                 </div>
 
                 <div

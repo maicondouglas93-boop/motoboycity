@@ -3,6 +3,7 @@ import { ApiError, createPublicStoreApi } from '@motoboycity/api-client';
 import type {
   EnderecoDeRetirada,
   OperacaoPublica,
+  PromocaoPublica,
   PublicStore,
   PublicStoreProduct,
 } from '@motoboycity/types';
@@ -61,6 +62,11 @@ export interface CardapioDaPagina {
   operacao: OperacaoPublica | null;
   /** Onde o cliente retira: o endereço que a loja escolheu, ou o da empresa. */
   enderecoDeRetirada: EnderecoDeRetirada | null;
+  /**
+   * As promoções ligadas da loja. É delas que a página tira o "De / Por" e o
+   * total da sacola — pelas mesmas regras que o servidor usa no pedido.
+   */
+  promocoes: PromocaoPublica[];
 }
 
 export type LojaDoLink =
@@ -127,6 +133,7 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
         produtos: PRODUTOS_DE_EXEMPLO,
         operacao: null,
         enderecoDeRetirada: LOJA_DE_EXEMPLO.pontoDeColeta,
+        promocoes: [],
       },
     };
   }
@@ -145,6 +152,7 @@ export const lojaDoLink = cache(async function lojaDoLink(slug: string): Promise
         produtos: achado.store.products.map(produtoDaVitrine),
         operacao: achado.store.operacao,
         enderecoDeRetirada: achado.store.enderecoDeRetirada,
+        promocoes: achado.store.promocoes ?? [],
       },
     };
   } catch (erro) {

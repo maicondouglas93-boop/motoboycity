@@ -106,9 +106,17 @@ export interface ItemDoPedido {
    */
   grupos?: EscolhasDoGrupo[];
   quantidade: number;
-  /** Preço de uma unidade, com tamanho e escolhas. */
+  /** Preço de uma unidade, com tamanho e escolhas, SEM promoção. */
   unitario: number;
+  /**
+   * O que a linha custa, já com a promoção: é o que o cliente paga, e o que a
+   * soma do pedido usa. Sem promoção, é `unitario * quantidade`.
+   */
   total: number;
+  /** Quanto a linha custaria sem a promoção. Ausente: não houve desconto. */
+  totalOriginal?: number;
+  /** A promoção que baixou a linha, como estava na hora da compra. */
+  promocao?: { id: string; nome: string; desconto: number; rotulo: string };
 }
 
 /**

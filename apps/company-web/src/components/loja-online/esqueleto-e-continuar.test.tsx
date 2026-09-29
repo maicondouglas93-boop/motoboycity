@@ -42,6 +42,7 @@ const paleta = paletaDoTema('CLARO');
 function abrirASacola() {
   render(
     <FolhaDaSacola
+      linhas={[]}
       itens={[
         {
           produtoId: 'p1',

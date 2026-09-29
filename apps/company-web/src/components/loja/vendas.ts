@@ -61,6 +61,9 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
       escolhas: item.escolhas,
       ...(item.grupos ? { grupos: item.grupos } : {}),
       total: item.total,
+      ...(item.promocao
+        ? { promocao: { rotulo: item.promocao.rotulo, desconto: item.promocao.desconto } }
+        : {}),
     })),
     pagamento: rotuloDoPagamento(pedido.pagamento),
     trocoPara: pedido.trocoPara,

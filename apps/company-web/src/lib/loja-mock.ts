@@ -308,7 +308,10 @@ export interface ItemDeVenda {
   escolhas: string[];
   /** As mesmas escolhas, agrupadas como no cardápio. Ausente em venda antiga e na demonstração. */
   grupos?: EscolhasDoGrupo[];
+  /** O que a linha custa, já com a promoção: é o que o cliente paga. */
   total: number;
+  /** A promoção que baixou a linha, como estava na compra. Ausente: sem desconto. */
+  promocao?: { rotulo: string; desconto: number };
 }
 
 /**

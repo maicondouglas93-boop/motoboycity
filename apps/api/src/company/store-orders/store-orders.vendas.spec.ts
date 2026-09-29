@@ -6,6 +6,7 @@ import { DeliveriesService } from '../../deliveries/deliveries.service';
 import { AsaasProviderError } from '../../finance/asaas/asaas.client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import {
   OPERACAO_INICIAL,
   StoreOperationService,
@@ -117,6 +118,7 @@ describe('StoreOrdersService — Vendas', () => {
       updateMany: jest.Mock;
     };
     companyAddress: { findFirst: jest.Mock };
+    storePromotion: { updateMany: jest.Mock };
   };
   let entregas: {
     createFromStoreOrder: jest.Mock;
@@ -169,6 +171,7 @@ describe('StoreOrdersService — Vendas', () => {
       companyAddress: {
         findFirst: jest.fn().mockResolvedValue({ zip: '36980-000', state: 'MG' }),
       },
+      storePromotion: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     entregas = {
       createFromStoreOrder: jest.fn().mockImplementation(() => {
@@ -219,6 +222,11 @@ describe('StoreOrdersService — Vendas', () => {
         { provide: DeliveriesService, useValue: entregas },
         { provide: StoreAsaasAccountService, useValue: contasAsaas },
         { provide: StoreAsaasClient, useValue: asaas },
+        // Sem promoção: os testes de sempre continuam sendo de preço cheio.
+        {
+          provide: StoreMarketingService,
+          useValue: { promocoesDoPedido: jest.fn().mockResolvedValue([]) },
+        },
         { provide: StoreOrderNotificationsService, useValue: avisos },
       ],
     }).compile();
@@ -280,7 +288,8 @@ describe('StoreOrdersService — Vendas', () => {
   });
 
   it('a corrida leva o CEP do cliente só se ele estiver completo; senão, o da loja', async () => {
-    const cepDaCorrida = () => entregas.createFromStoreOrder.mock.calls.at(-1)![2].dropoffAddress.zip;
+    const cepDaCorrida = () =>
+      entregas.createFromStoreOrder.mock.calls.at(-1)![2].dropoffAddress.zip;
 
     banco.pedido = linha({ address: { ...ENDERECO, cep: '37000-123' } });
     await service.avancarEtapa(membro, 'pedido-1', { para: 'ACEITO' });
@@ -504,8 +513,69 @@ describe('StoreOrdersService — Vendas', () => {
     });
   });
 
+  describe('o uso das promoções no cancelamento', () => {
+    const item = (mudancas: object = {}) => ({
+      produtoId: 'p1',
+      nome: 'Açaí',
+      tamanho: '500ml',
+      escolhas: [],
+      quantidade: 2,
+      unitario: 20,
+      total: 32,
+      totalOriginal: 40,
+      promocao: { id: 'promo-1', nome: 'Açaí 20%', desconto: 8, rotulo: '20% OFF' },
+      ...mudancas,
+    });
+
+    it('o pedido cancelado devolve o uso de cada promoção que gastou, uma vez', async () => {
+      banco.pedido = linha({
+        items: [item(), item({ produtoId: 'p2' }), item({ promocao: undefined })],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      // Duas linhas com a mesma promoção devolvem UM uso: ela foi gasta uma vez.
+      expect(prisma.storePromotion.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.storePromotion.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['promo-1'] }, companyId: EMPRESA, usedCount: { gt: 0 } },
+        data: { usedCount: { decrement: 1 } },
+      });
+    });
+
+    it('o pedido sem promoção não mexe em nenhuma', async () => {
+      banco.pedido = linha({ items: [item({ promocao: undefined })] });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storePromotion.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('se devolver o uso falha, o cancelamento vale do mesmo jeito', async () => {
+      banco.pedido = linha({ items: [item()] });
+      prisma.storePromotion.updateMany.mockRejectedValue(new Error('banco fora'));
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(cancelado.etapa).toBe('CANCELADO');
+    });
+
+    it('cancelar um pedido que já caiu não devolve o uso de novo', async () => {
+      banco.pedido = linha({
+        stage: 'CANCELADO',
+        cancelReason: 'Item em falta',
+        cancelledBy: 'LOJA',
+        items: [item()],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'de novo').catch(() => undefined);
+
+      expect(prisma.storePromotion.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Pix direto na fila de Vendas', () => {
-    const CODIGO = '00020126360014br.gov.bcb.pix0114+5533999887766520400005303986540548.205802BR5913LANCHES DO ZE6007LAJINHA62120508PEDIDO426304D4D7';
+    const CODIGO =
+      '00020126360014br.gov.bcb.pix0114+5533999887766520400005303986540548.205802BR5913LANCHES DO ZE6007LAJINHA62120508PEDIDO426304D4D7';
     const pixDireto = (mudancas: Partial<StoreOrder> = {}) =>
       linha({
         paymentMethod: 'PIX_DIRETO',

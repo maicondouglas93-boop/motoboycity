@@ -10,6 +10,7 @@ import { ImageKitService } from '../../media/imagekit.service';
 import { detectSupportedImage, type UploadedImageFile } from '../../media/supported-image';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreCatalogService } from '../store-catalog/store-catalog.service';
+import { StoreMarketingService } from '../store-marketing/store-marketing.service';
 import { StoreOperationService } from '../store-operation/store-operation.service';
 
 /**
@@ -67,6 +68,7 @@ export class StoreSettingsService {
     private readonly catalogo: StoreCatalogService,
     private readonly operacao: StoreOperationService,
     private readonly imageKit: ImageKitService,
+    private readonly marketing: StoreMarketingService,
   ) {}
 
   async settings(user: User): Promise<StoreSettings> {
@@ -230,9 +232,10 @@ export class StoreSettingsService {
     if (!link || !loja || link.company.status !== 'ACTIVE') throw naoExiste();
     if (loja.slug !== slug) return { kind: 'moved', slug: loja.slug };
 
-    const [cardapio, operacao] = await Promise.all([
+    const [cardapio, operacao, promocoes] = await Promise.all([
       this.catalogo.publicCatalog(link.company.id),
       this.operacao.publicOperation(link.company.id),
+      this.marketing.promocoesPublicas(link.company.id),
     ]);
     // A retirada é no endereço que a loja escolheu, ou no da empresa. O da
     // empresa não tem bairro no cadastro: vai vazio.
@@ -257,6 +260,7 @@ export class StoreSettingsService {
         name: loja.name,
         identity: identidade(loja),
         ...cardapio,
+        promocoes,
         operacao,
         recebePedidos: loja.acceptsOrders,
         enderecoDeRetirada,

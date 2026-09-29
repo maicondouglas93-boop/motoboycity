@@ -92,6 +92,12 @@ function comoGuardado(pedido: PedidoDaLoja): PedidoGuardado {
       quantidade: item.quantidade,
       unitario: item.unitario,
     })),
+    linhas: pedido.itens.map((item) => ({
+      total: item.total,
+      promocao: item.promocao
+        ? { rotulo: item.promocao.rotulo, desconto: item.promocao.desconto }
+        : null,
+    })),
     subtotal: pedido.subtotal,
     taxaDeEntrega: pedido.taxaDeEntrega,
     total: pedido.total,
@@ -299,9 +305,18 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
                           {item.escolhas.join(', ')}
                         </span>
                       )}
+                      {pedido.linhas?.[indice]?.promocao && (
+                        <span
+                          className="block text-xs font-medium"
+                          style={{ color: marca.corDaMarca }}
+                        >
+                          {pedido.linhas[indice].promocao.rotulo} · você economizou{' '}
+                          {moeda(pedido.linhas[indice].promocao.desconto)}
+                        </span>
+                      )}
                     </span>
                     <span className="shrink-0" style={{ color: paleta.suave }}>
-                      {moeda(item.unitario * item.quantidade)}
+                      {moeda(pedido.linhas?.[indice]?.total ?? item.unitario * item.quantidade)}
                     </span>
                   </li>
                 ))}
