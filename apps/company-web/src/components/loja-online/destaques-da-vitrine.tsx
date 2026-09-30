@@ -107,6 +107,14 @@ export function DestaquesDaVitrine({
                         <SeloDePromocao rotulo={oferta.rotulo} corDeAcao={corDeAcao} />
                       </span>
                     )}
+                    {produto.restam != null && (
+                      <span
+                        className="mt-1 block text-xs font-medium"
+                        style={{ color: corDaMarca }}
+                      >
+                        {produto.restam === 1 ? 'Resta 1 unidade' : `Restam ${produto.restam}`}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

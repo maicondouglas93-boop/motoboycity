@@ -28,6 +28,8 @@ const CLIENTE = 'user_cliente';
 const MEIO_DIA = new Date('2026-09-23T12:00:00-03:00');
 
 const ACAI: PublicStoreProduct = {
+  esgotado: false,
+  restam: null,
   id: 'p1',
   categoryId: 'c1',
   name: 'Açaí',
@@ -127,6 +129,8 @@ describe('StoreOrdersService', () => {
     storeSettings: { findUnique: jest.Mock };
     $transaction: jest.Mock;
     $executeRaw: jest.Mock;
+    $queryRaw: jest.Mock;
+    storeProduct: { findMany: jest.Mock; findFirst: jest.Mock };
     storeCouponRedemption: { count: jest.Mock; create: jest.Mock };
   };
   let catalogo: { publicCatalog: jest.Mock };
@@ -202,6 +206,10 @@ describe('StoreOrdersService', () => {
       $transaction: jest.fn(),
       // O uso da promoção e do cupom: uma linha alterada quando ainda há uso.
       $executeRaw: jest.fn().mockResolvedValue(1),
+      // A baixa do estoque devolve a linha com o estoque que sobrou; `null` é o produto sem controle.
+      $queryRaw: jest.fn().mockResolvedValue([{ stock: null }]),
+      // A leitura do estoque, antes da cobrança: nenhum produto com controle, salvo nos testes que o põem.
+      storeProduct: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
       // O uso do cupom por este cliente, e o registro que o pedido cria.
       storeCouponRedemption: {
         count: jest.fn().mockResolvedValue(0),
@@ -801,6 +809,181 @@ describe('StoreOrdersService', () => {
         totalOriginal: 54.3,
         promocao: { rotulo: 'Leve 3, pague 2', desconto: 18 },
       });
+    });
+  });
+
+  describe('estoque', () => {
+    /** O produto p1 com estoque controlado, como o banco o devolve. */
+    const comEstoque = (estoque: number | null) =>
+      prisma.storeProduct.findMany.mockResolvedValue([{ id: 'p1', name: 'Açaí', stock: estoque }]);
+    /** Açaí 500ml (18 + 3 + 0,10) x quantidade, mais 6 de entrega. */
+    const pedirAcai = (quantidade: number, totalVisto: number, mudancas = {}) =>
+      service.checkout(
+        'acai',
+        CLIENTE,
+        pedido({
+          itens: [{ produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1', 'c1'], quantidade }],
+          totalVisto,
+          ...mudancas,
+        }),
+      );
+
+    it('sem controle de estoque, o pedido passa como sempre, sem marcar nada', async () => {
+      const feito = await service.checkout('acai', CLIENTE, pedido());
+
+      expect(feito.itens[0]).not.toHaveProperty('baixouEstoque');
+      // A baixa roda para o produto, e o `null` que volta diz que ele não tem controle.
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('pede mais do que resta: recusa dizendo quantas restam, e nada é cobrado nem gravado', async () => {
+      comEstoque(1);
+
+      await expect(service.checkout('acai', CLIENTE, pedido())).rejects.toMatchObject({
+        response: {
+          code: 'STORE_ORDER_OUT_OF_STOCK',
+          message: 'Só resta 1 unidade de Açaí. Diminua a quantidade na sacola.',
+          produtoId: 'p1',
+          restam: 1,
+        },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+      expect(avisos.pedidoNovo).not.toHaveBeenCalled();
+    });
+
+    it('estoque zerado: "esgotou", com a frase certa', async () => {
+      comEstoque(0);
+
+      await expect(service.checkout('acai', CLIENTE, pedido())).rejects.toMatchObject({
+        response: {
+          code: 'STORE_ORDER_OUT_OF_STOCK',
+          message: 'Açaí esgotou. Tire da sacola e peça de novo.',
+          restam: 0,
+        },
+      });
+    });
+
+    it('a quantidade certa no estoque passa, e o último item se leva', async () => {
+      comEstoque(2);
+      prisma.$queryRaw.mockResolvedValue([{ stock: 0 }]);
+
+      const feito = await service.checkout('acai', CLIENTE, pedido());
+
+      expect(feito.total).toBe(48.2);
+    });
+
+    it('linhas do mesmo produto somam: tamanhos e escolhas diferentes dividem o estoque', async () => {
+      comEstoque(2);
+      const duasLinhas = pedido({
+        itens: [
+          { produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1', 'c1'], quantidade: 1 },
+          { produtoId: 'p1', tamanhoId: 't1', escolhas: ['c1'], quantidade: 2 },
+        ],
+        totalVisto: 0,
+      });
+
+      await expect(service.checkout('acai', CLIENTE, duasLinhas)).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_OUT_OF_STOCK', restam: 2 },
+      });
+    });
+
+    it('a baixa é uma só por produto, com a soma das unidades, e leva a empresa', async () => {
+      comEstoque(10);
+      prisma.$queryRaw.mockResolvedValue([{ stock: 7 }]);
+
+      await pedirAcai(3, 6 + 63.3 - 0);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      // Os valores do template: unidades, produto, empresa, unidades (a conta e o limite).
+      const [, unidades, produtoId, empresa, limite] = prisma.$queryRaw.mock.calls[0]!;
+      expect([unidades, produtoId, empresa, limite]).toEqual([3, 'p1', EMPRESA, 3]);
+    });
+
+    it('o produto que baixou o estoque leva o sinal no pedido, para o cancelamento devolver', async () => {
+      comEstoque(10);
+      prisma.$queryRaw.mockResolvedValue([{ stock: 8 }]);
+
+      const feito = await service.checkout('acai', CLIENTE, pedido());
+
+      expect(feito.itens[0]).toMatchObject({ produtoId: 'p1', baixouEstoque: true });
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect((data.items as Array<{ baixouEstoque?: boolean }>)[0]).toMatchObject({
+        baixouEstoque: true,
+      });
+    });
+
+    it('só os produtos com controle levam o sinal: o do meio, sem controle, não', async () => {
+      catalogo.publicCatalog.mockResolvedValue({
+        categories: [],
+        products: [ACAI, { ...SUCO, esgotado: false, restam: null }],
+      });
+      prisma.storeProduct.findMany.mockResolvedValue([
+        { id: 'p1', name: 'Açaí', stock: 10 },
+        { id: 'p2', name: 'Suco', stock: null },
+      ]);
+      // Em ordem de id: p1 (com controle: sobra 8), depois p2 (sem: volta null).
+      prisma.$queryRaw
+        .mockResolvedValueOnce([{ stock: 8 }])
+        .mockResolvedValueOnce([{ stock: null }]);
+      const dois = pedido({
+        itens: [
+          { produtoId: 'p2', tamanhoId: null, escolhas: [], quantidade: 1 },
+          { produtoId: 'p1', tamanhoId: 't1', escolhas: ['e1', 'c1'], quantidade: 2 },
+        ],
+        totalVisto: 6 + 7.2 + 42.2,
+      });
+
+      const feito = await service.checkout('acai', CLIENTE, dois);
+
+      // As baixas correm em ordem de produto, e não na ordem da sacola: pedidos com os mesmos
+      // produtos não se travam um ao outro.
+      expect(prisma.$queryRaw.mock.calls.map((chamada) => chamada[2])).toEqual(['p1', 'p2']);
+      const porProduto = Object.fromEntries(
+        feito.itens.map((item) => [item.produtoId, item.baixouEstoque]),
+      );
+      expect(porProduto).toEqual({ p2: undefined, p1: true });
+    });
+
+    it('outro pedido levou as unidades entre a leitura e a gravação: recusa, e nada é gravado', async () => {
+      comEstoque(2);
+      // O UPDATE condicional não acha linha: já não havia as unidades.
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.storeProduct.findFirst.mockResolvedValue({ name: 'Açaí', stock: 1 });
+
+      await expect(service.checkout('acai', CLIENTE, pedido())).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_OUT_OF_STOCK', restam: 1 },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(entregas.createFromStoreOrder).not.toHaveBeenCalled();
+      expect(avisos.pedidoNovo).not.toHaveBeenCalled();
+    });
+
+    it('a cobrança do Pix criada antes cai se o estoque acaba na gravação', async () => {
+      operacaoDaLoja.publicOperation.mockResolvedValue(
+        operacao({ pagamentos: ['DINHEIRO', 'PIX_ONLINE'] }),
+      );
+      comEstoque(5);
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.storeProduct.findFirst.mockResolvedValue({ name: 'Açaí', stock: 0 });
+
+      await expect(
+        service.checkout('acai', CLIENTE, pedido({ pagamento: 'PIX_ONLINE', cpf: '52998224725' })),
+      ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_OUT_OF_STOCK' } });
+
+      expect(asaas.criarCobrancaPix).toHaveBeenCalledTimes(1);
+      expect(asaas.apagarCobranca).toHaveBeenCalledTimes(1);
+    });
+
+    it('a falta de estoque vem antes de cupom e de total: quem pede o que não tem ouve isso primeiro', async () => {
+      comEstoque(0);
+      cupons.paraOPedido.mockRejectedValue(new Error('não devia chegar ao cupom'));
+
+      await expect(
+        service.checkout('acai', CLIENTE, pedido({ cupom: 'BEMVINDO10', totalVisto: 1 })),
+      ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_OUT_OF_STOCK' } });
+      expect(cupons.paraOPedido).not.toHaveBeenCalled();
     });
   });
 

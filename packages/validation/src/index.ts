@@ -44,6 +44,7 @@ export * from './company/store-coupon.rules';
 export * from './company/store-coupon.schema';
 export * from './company/store-highlight.rules';
 export * from './company/store-highlight.schema';
+export * from './company/store-stock.rules';
 export * from './company/store-order.rules';
 export * from './company/store-operation.rules';
 export * from './company/store-checkout.schema';

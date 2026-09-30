@@ -741,6 +741,41 @@ ordem que ele escolheu era promoções, cupons, combos, destaques).
   formulário o tira sozinho na próxima vez que se salva;
 - quando há destaque na página, a barra de categorias ganha um primeiro chip, "Destaques", que leva ao alto.
 
+## Loja online: estoque
+
+Pedido do usuário em 2026-09-30: "um campo opcional para informar estoque".
+
+- o estoque é **opcional, por produto**. O campo "Unidades em estoque" nasce vazio, e **vazio
+  quer dizer sem controle**: o produto vende sem limite, como sempre. Nenhum produto que já
+  existia passa a ter controle por causa desta mudança;
+- com um número, o controle **vale de verdade** (não é só um aviso): cada pedido baixa as
+  unidades, e o que pede mais do que resta é recusado com uma frase que diz o que fazer
+  ("X esgotou. Tire da sacola e peça de novo." / "Só restam N unidades de X. Diminua a
+  quantidade na sacola."). O último item não é vendido duas vezes: a baixa é atômica, dentro
+  da transação que grava o pedido;
+- **zero é um estoque** e quer dizer esgotado: o produto continua no ar (o status não muda),
+  aparece como "Esgotado" na página e não se pede. Apagar o campo tira o controle;
+- **o estoque é do produto**, não do tamanho: os tamanhos dividem o mesmo número. Um pedido com
+  2 "Pequeno" e 1 "Grande" baixa 3;
+- **cancelar devolve** as unidades, uma vez, só das linhas que de fato baixaram (o pedido feito
+  antes de o produto ter controle não devolve nada, para o cancelamento não fabricar estoque) e
+  só se o produto ainda tem controle. Vale para todo cancelamento, de quem for, porque todos
+  passam pelo mesmo ponto;
+- o número que se digita é **a reposição**: para repor, troca-se o número. Salvar o produto sem
+  mexer no campo não manda o estoque, então quem só mudou o preço não desfaz as vendas que
+  aconteceram com a tela aberta;
+- **o cliente não vê o número exato**: a página só sabe "esgotado" e, com **5 unidades ou
+  menos**, "Restam N". Com mais que isso, não sabe nada, e a loja não expõe o quanto tem;
+- na página, o cliente não passa do que resta (o "+" trava, na folha do produto e na sacola), e
+  o servidor confere de novo ao fazer o pedido. Com mais de 5 unidades a página não sabe o
+  número, então a sacola pode ser maior que o estoque e o cliente só ouve isso ao pedir (a
+  frase diz quantas restam). O produto esgotado não entra nos destaques;
+- no painel: inteiro de 0 a 999.999. A lista de produtos mostra "Estoque: N" (ou "Estoque
+  zerado") e os selos "Estoque baixo" (de 1 a 5) e "Esgotado".
+- **fora de propósito:** estoque por tamanho ou por opção; reservar unidades enquanto o
+  pagamento está pendente (a baixa acontece quando o pedido é gravado, e o cancelamento a
+  devolve); histórico de movimentação; pausar o produto sozinho quando zera.
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

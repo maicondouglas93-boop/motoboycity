@@ -51,6 +51,18 @@ export interface ProdutoNoFormulario {
   categoriaId: string;
   imagemUrl: string | null;
   precoUnico: string;
+  /**
+   * Quantas unidades a loja tem. Vazio: sem controle de estoque, que é como o produto nasce.
+   * O produto todo tem um estoque só: os tamanhos o dividem.
+   */
+  estoque: string;
+  /**
+   * O estoque como estava quando o formulário abriu — não se edita. O estoque anda sozinho
+   * (cada pedido baixa, cada cancelamento devolve): quem abriu o produto para mudar o preço
+   * e salvou dez minutos depois NÃO pode desfazer as vendas do meio. Só o estoque que a
+   * lojista de fato mudou vai para a API; o resto o servidor deixa como está.
+   */
+  estoqueOriginal: string;
   tamanhos: LinhaDeTamanho[];
   grupos: GrupoNoFormulario[];
 }
@@ -66,6 +78,7 @@ export const LIMITES_DO_PRODUTO = {
   grupos: 20,
   escolhasPorGrupo: 50,
   preco: 99999.99,
+  estoque: 999_999,
 } as const;
 
 /** O mesmo que a API aceita: ela confere de novo, pelos bytes. */
@@ -118,6 +131,8 @@ export function produtoParaFormulario(produto?: StoreProduct): ProdutoNoFormular
     categoriaId: produto?.categoryId ?? '',
     imagemUrl: produto?.imageUrl ?? null,
     precoUnico: precoParaTexto(produto?.price ?? null),
+    estoque: produto?.stock == null ? '' : String(produto.stock),
+    estoqueOriginal: produto?.stock == null ? '' : String(produto.stock),
     tamanhos:
       produto?.sizes.map((tamanho) => ({
         chave: tamanho.id,
@@ -196,6 +211,22 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
   const usaTamanhos = estado.tamanhos.length > 0;
   const price = usaTamanhos ? null : lerPreco(estado.precoUnico, 'Preço', erros);
 
+  // O estoque só vai se a lojista o mudou: ver `estoqueOriginal`.
+  const estoqueMudou = estado.estoque.trim() !== estado.estoqueOriginal.trim();
+  let stock: number | null = null;
+  if (estoqueMudou) {
+    const valor = inteiro(estado.estoque);
+    if (valor !== null && Number.isNaN(valor)) {
+      erros.push(
+        `Estoque: "${estado.estoque.trim()}" não é um número inteiro. Deixe vazio para não controlar.`,
+      );
+    } else if (valor !== null && valor > LIMITES_DO_PRODUTO.estoque) {
+      erros.push('Estoque: o valor passa do máximo, 999.999.');
+    } else {
+      stock = valor;
+    }
+  }
+
   const sizes = estado.tamanhos
     .filter((linha) => !emBranco(linha))
     .map((linha) => {
@@ -265,6 +296,7 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
       description: estado.descricao.trim(),
       price,
       status,
+      ...(estoqueMudou ? { stock } : {}),
       sizes,
       optionGroups,
     },

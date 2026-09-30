@@ -22,6 +22,7 @@ const ACAI: StoreProduct = {
   imageUrl: null,
   price: null,
   status: 'PUBLISHED',
+  stock: null,
   sizes: [
     { id: '33333333-3333-4333-8333-333333333331', name: '300ml', price: 12, available: true },
     { id: '33333333-3333-4333-8333-333333333332', name: '500ml', price: 18.5, available: false },
@@ -267,5 +268,81 @@ describe('saidasDoFormulario', () => {
       'Salvar e publicar → PUBLISHED',
       'Salvar rascunho → DRAFT',
     ]);
+  });
+  describe('estoque no formulário', () => {
+    const com = (stock: number | null) => produtoParaFormulario({ ...ACAI, stock });
+    const mudar = (estoque: string, base = com(12)) => ({ ...base, estoque });
+
+    it('o estoque do produto vira o texto do campo, e o campo lembra como abriu', () => {
+      expect(com(12)).toMatchObject({ estoque: '12', estoqueOriginal: '12' });
+      expect(com(0)).toMatchObject({ estoque: '0', estoqueOriginal: '0' });
+      expect(com(null)).toMatchObject({ estoque: '', estoqueOriginal: '' });
+      expect(produtoParaFormulario()).toMatchObject({ estoque: '', estoqueOriginal: '' });
+    });
+
+    it('sem mexer no campo, o estoque NÃO vai: quem só mudou o preço não desfaz as vendas do meio', () => {
+      const montagem = montarPayload(com(12), 'PUBLISHED');
+
+      expect(montagem.ok).toBe(true);
+      if (montagem.ok) expect(montagem.payload).not.toHaveProperty('stock');
+    });
+
+    it('produto novo sem estoque também não manda nada', () => {
+      const montagem = montarPayload(
+        { ...produtoParaFormulario(), nome: 'Bolo', precoUnico: '10,00' },
+        'DRAFT',
+      );
+
+      expect(montagem.ok).toBe(true);
+      if (montagem.ok) expect(montagem.payload).not.toHaveProperty('stock');
+    });
+
+    it('mudou o número: vai o número novo', () => {
+      const montagem = montarPayload(mudar('30'), 'PUBLISHED');
+
+      expect(montagem).toMatchObject({ ok: true, payload: { stock: 30 } });
+    });
+
+    it('apagou o campo: vai null, que tira o controle', () => {
+      expect(montarPayload(mudar(''), 'PUBLISHED')).toMatchObject({
+        ok: true,
+        payload: { stock: null },
+      });
+      expect(montarPayload(mudar('   '), 'PUBLISHED')).toMatchObject({
+        ok: true,
+        payload: { stock: null },
+      });
+    });
+
+    it('zero é um estoque (esgotado), e não "sem controle"', () => {
+      expect(montarPayload(mudar('0'), 'PUBLISHED')).toMatchObject({
+        ok: true,
+        payload: { stock: 0 },
+      });
+    });
+
+    it('produto novo com número digitado manda o número', () => {
+      const montagem = montarPayload(
+        { ...produtoParaFormulario(), nome: 'Bolo', precoUnico: '10,00', estoque: '5' },
+        'DRAFT',
+      );
+
+      expect(montagem).toMatchObject({ ok: true, payload: { stock: 5 } });
+    });
+
+    it('o que não é número inteiro impede salvar, dizendo como corrigir', () => {
+      for (const invalido of ['dez', '2,5', '-1', '1e3']) {
+        const montagem = montarPayload(mudar(invalido), 'PUBLISHED');
+        expect(montagem.ok).toBe(false);
+        if (!montagem.ok) {
+          expect(montagem.erros[0]).toContain(`Estoque: "${invalido}" não é um número inteiro`);
+        }
+      }
+      const grande = montarPayload(mudar('1000000'), 'PUBLISHED');
+      expect(grande).toMatchObject({
+        ok: false,
+        erros: ['Estoque: o valor passa do máximo, 999.999.'],
+      });
+    });
   });
 });

@@ -20,6 +20,7 @@ function produto(extra: Partial<StoreProduct> & Pick<StoreProduct, 'id'>): Store
     imageUrl: null,
     price: 22,
     status: 'PUBLISHED',
+    stock: null,
     sizes: [],
     optionGroups: [],
     updatedAt: '2026-09-25T12:00:00.000Z',
@@ -87,5 +88,50 @@ describe('Produtos', () => {
     expect(screen.getByText(/Os publicados aparecem na página da loja/)).toBeInTheDocument();
     // A página recebe pedidos desde 26/09: o aviso antigo estava errado.
     expect(screen.queryByText(/ainda não recebe pedidos/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Produtos — estoque', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('motoboycity.accessToken', 'token');
+    mocks.catalog.mockReset();
+    mocks.updateProductStatus.mockReset();
+  });
+
+  it('mostra o estoque de quem controla, e nada de quem não controla', async () => {
+    renderizar({
+      categories: [LANCHES],
+      products: [
+        produto({ id: 'Com-estoque', stock: 40 }),
+        produto({ id: 'Sem-controle', stock: null }),
+      ],
+    });
+
+    expect(await screen.findByText(/Estoque: 40/)).toBeInTheDocument();
+    expect(screen.queryByText(/Estoque:/, { selector: 'p' })).toBeInTheDocument();
+    // Só um dos dois tem estoque na linha.
+    expect(screen.getAllByText(/Estoque:/)).toHaveLength(1);
+  });
+
+  it('estoque zerado: o produto aparece como Esgotado, ainda que esteja no ar', async () => {
+    renderizar({ categories: [LANCHES], products: [produto({ id: 'Acabou', stock: 0 })] });
+
+    expect(await screen.findByText('Esgotado')).toBeInTheDocument();
+    expect(screen.getByText('No ar')).toBeInTheDocument();
+    expect(screen.getByText(/Estoque zerado/)).toBeInTheDocument();
+  });
+
+  it('poucas unidades avisam "Estoque baixo"; muitas, não', async () => {
+    renderizar({
+      categories: [LANCHES],
+      products: [
+        produto({ id: 'Quase-acabando', stock: 3 }),
+        produto({ id: 'Bastante', stock: 60 }),
+      ],
+    });
+
+    expect(await screen.findByText('Estoque baixo')).toBeInTheDocument();
+    expect(screen.getAllByText('Estoque baixo')).toHaveLength(1);
+    expect(screen.queryByText('Esgotado')).not.toBeInTheDocument();
   });
 });

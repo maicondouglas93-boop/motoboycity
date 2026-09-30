@@ -17278,3 +17278,67 @@ testes com a API simulada); e o painel no modo escuro. Também: um teste de reor
 destaques falhou uma vez numa rodada completa (passou nas duas seguintes e sozinho); a causa era
 o teste assumir que a tela mudava no mesmo instante do clique, e ele foi trocado por um servidor
 de mentira que guarda a ordem e por esperas explícitas.
+
+## 2026-09-30 — Loja online: estoque opcional por produto
+
+**Pedido do usuário:** "adicione um campo opcional para informar estoque".
+
+**Decisão:** o estoque é **opcional e vale de verdade quando preenchido**. Vazio é sem controle
+(o produto vende sem limite, como antes: nenhum produto existente passa a ter controle);
+com um número, cada pedido baixa as unidades, o pedido que pede mais do que resta é recusado, e
+no zero o produto aparece como "Esgotado" (o status não muda). A alternativa considerada, um
+campo só informativo, foi descartada: o número no painel e a venda de um item que já acabou
+seriam contradição.
+
+- **Servidor decide:** `checkout` confere o estoque depois de precificar a sacola e antes do
+  cupom e do Pix (409 `STORE_ORDER_OUT_OF_STOCK`, com `produtoId` e `restam`, e uma frase que diz
+  o que fazer). A baixa que vale é um `UPDATE ... WHERE stock IS NULL OR stock >= n RETURNING`
+  dentro da transação do pedido, produto a produto em ordem de id (sem deadlock entre pedidos
+  com os mesmos produtos); zero linhas desfaz tudo (promoção, cupom, outras baixas) e apaga a
+  cobrança Pix. Os tamanhos de um produto dividem o mesmo estoque.
+- **Cancelar devolve, uma vez:** as linhas do pedido cujo produto tinha controle na hora da
+  compra ganham `baixouEstoque: true` no JSON dos itens (sem migration); `mudar`, o único que
+  grava `CANCELADO`, devolve só essas linhas. Pedido de antes do controle não devolve nada; a
+  falha de devolver só é registrada, não derruba o cancelamento.
+- **O cliente não vê o número:** `PublicStoreProduct` perdeu `stock` e ganhou `esgotado` e
+  `restam` (só de 1 a 5). A página mostra "Esgotado" e "Restam N", trava o "+" na folha do
+  produto e na sacola, e avisa o item que esgotou depois de entrar na sacola. Esgotado não vira
+  destaque.
+- **Editar não desfaz vendas:** `stock` ausente no corpo do produto deixa como está; `null` tira
+  o controle. O painel só manda o campo se o texto mudou.
+- **Painel:** cartão "Estoque (opcional)" no formulário do produto; a lista mostra "Estoque: N",
+  "Estoque zerado" e os selos "Estoque baixo" (1 a 5) e "Esgotado".
+
+**Migration:** `20260930090000_produto_com_estoque`, aditiva (`ALTER TABLE "store_products" ADD
+COLUMN "stock" INTEGER`, sem valor padrão). Validada em banco descartável: aplica junto das
+outras, o banco fica igual ao schema, o SQL de desfazer (`DROP COLUMN`) volta ao schema
+anterior, e reaplica. **A Render aplica ao publicar.**
+
+**Arquivos:** `packages/types` (`store-catalog.ts`, `store-settings.ts`, `store-order.ts`),
+`packages/validation` (`store-stock.rules.ts` novo, `store-catalog.schema.ts`, `index.ts`),
+`apps/api` (`prisma/schema.prisma`, a migration, `store-catalog.service.ts`,
+`store-orders.service.ts`, os specs desses, `store-stock.rules.spec.ts` e
+`test/store-stock.e2e-spec.ts` novos), `apps/company-web` (`lib/loja-estoque.ts` novo,
+`lib/loja-mock.ts`, `lib/loja-publica.ts`, `produto-no-formulario.ts`,
+`formulario-de-produto.tsx`, `loja/produtos/page.tsx`, `folha-do-produto.tsx`,
+`folha-da-sacola.tsx`, `loja-publica.tsx`, `destaques-da-vitrine.tsx`, `sacola.tsx`) e os
+testes de cada um. Docs: `business-rules.md`, `architecture.md` e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); `pnpm lint` (sem erro; um
+aviso antigo em `driver-app/apiClient.ts`, fora deste recorte); `validation`, `types` e
+`api-client` também com `--typeRoots` isolado, como o deploy; Jest da API (117 suítes, 1701
+passaram, 1 pulado); vitest do painel (64 arquivos, 597); build do painel e da API; E2E inteiro
+no banco descartável (31 suítes, 276 testes), com cenários novos pelo HTTP: o campo opcional e
+o formato público sem o número; edição (ausente mantém, `null` tira o controle) e validação; o
+pedido baixa, as recusas dizem quantas restam, e cancelar devolve uma vez; pedido de antes do
+controle não devolve; os tamanhos dividem o estoque; e, com dois pedidos ao mesmo tempo pela
+última unidade, só um passa. A lista de produtos, o formulário e a loja (linha "Restam N
+unidades" e "Esgotado" esmaecido) foram vistos no navegador, a 375px, numa rota temporária já
+removida.
+
+**Não conferido:** nada em produção; o checkout logado com estoque curto de ponta a ponta no
+navegador (não há login de cliente local: o caminho foi coberto por E2E e por testes com a API
+simulada); o painel no modo escuro. Limites conhecidos: com mais de 5 unidades a página não
+sabe o número, então a sacola pode passar do estoque e o cliente só ouve isso ao pedir; e o
+estoque devolvido no cancelamento soma ao número atual, sem olhar se o lojista o repôs à mão no
+meio.

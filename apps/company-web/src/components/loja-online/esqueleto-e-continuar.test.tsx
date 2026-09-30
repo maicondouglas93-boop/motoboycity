@@ -43,6 +43,8 @@ function abrirASacola() {
   render(
     <FolhaDaSacola
       linhas={[]}
+      podeAumentar={[]}
+      avisos={[]}
       itens={[
         {
           produtoId: 'p1',

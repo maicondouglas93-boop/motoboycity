@@ -19,6 +19,8 @@ const ACAI: PublicStoreProduct = {
   description: 'Batido na hora',
   imageUrl: 'https://ik.imagekit.io/motoboycity/acai.jpg',
   price: null,
+  esgotado: false,
+  restam: null,
   sizes: [{ id: 't1', name: '500ml', price: 18.5, available: true }],
   optionGroups: [
     {
@@ -139,6 +141,8 @@ describe('a loja pelo link', () => {
       imagemUrl: 'https://ik.imagekit.io/motoboycity/acai.jpg',
       precoUnico: null,
       situacao: 'publicado',
+      esgotado: false,
+      restam: null,
       tamanhos: [{ id: 't1', nome: '500ml', preco: 18.5, disponivel: true }],
       grupos: [
         {

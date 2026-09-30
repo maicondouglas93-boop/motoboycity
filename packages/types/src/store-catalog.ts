@@ -54,6 +54,13 @@ export interface StoreProduct {
   /** Sem tamanhos, o preço. Com tamanhos, `null`: o preço vem de cada um. */
   price: number | null;
   status: StoreProductStatus;
+  /**
+   * Quantas unidades a loja tem, do produto todo (os tamanhos dividem o mesmo estoque).
+   * `null`: sem controle, que é como todo produto nasce. Com número, cada pedido baixa a
+   * quantidade pedida, o pedido cancelado devolve, e em zero o produto fica "esgotado" na
+   * página — sem mudar o `status`, que é escolha da loja.
+   */
+  stock: number | null;
   sizes: StoreProductSize[];
   optionGroups: StoreOptionGroup[];
   updatedAt: string;

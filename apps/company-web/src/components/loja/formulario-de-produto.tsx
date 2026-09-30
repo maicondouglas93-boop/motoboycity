@@ -663,6 +663,33 @@ export function FormularioDeProduto({
 
         <Card>
           <CardHeader>
+            <CardTitle>Estoque (opcional)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="max-w-40 space-y-2">
+              <Label htmlFor="estoque">Unidades em estoque</Label>
+              <Input
+                id="estoque"
+                inputMode="numeric"
+                placeholder="Sem controle"
+                value={estado.estoque}
+                onChange={(event) =>
+                  setEstado((antes) => ({ ...antes, estoque: event.target.value }))
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Deixe vazio para não controlar: o produto vende sem limite, como sempre. Com um
+              número, cada pedido baixa as unidades e o produto fica &ldquo;Esgotado&rdquo; na
+              página quando chega a zero — o pedido cancelado devolve.{' '}
+              {usaTamanhos ? 'Os tamanhos dividem o mesmo estoque. ' : ''}
+              Para repor, é só trocar o número.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>Grupos de escolhas</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">

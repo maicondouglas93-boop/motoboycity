@@ -46,6 +46,8 @@ function RotuloDoContinuar() {
 export function FolhaDaSacola({
   itens,
   linhas,
+  podeAumentar,
+  avisos,
   total,
   slug,
   paleta,
@@ -56,6 +58,10 @@ export function FolhaDaSacola({
   itens: ItemEscolhido[];
   /** O que cada item custa com as promoções, na ordem de `itens`. */
   linhas: LinhaDaSacola[];
+  /** Na ordem de `itens`: ainda cabe mais uma unidade (o estoque curto do produto não deixa passar). */
+  podeAumentar: boolean[];
+  /** Na ordem de `itens`: o que o estoque não sustenta mais (esgotou, ou sobrou menos), ou `null`. */
+  avisos: Array<string | null>;
   total: number;
   slug: string;
   paleta: Paleta;
@@ -133,6 +139,11 @@ export function FolhaDaSacola({
                       {item.escolhas.join(', ')}
                     </p>
                   )}
+                  {avisos[indice] && (
+                    <p className="mt-1 text-[13px] font-medium" style={{ color: paleta.erro }}>
+                      {avisos[indice]}
+                    </p>
+                  )}
                   <p className="mt-1 text-[15px] font-semibold">
                     {linhas[indice]?.promocao && (
                       <s className="mr-1.5 text-[13px] font-normal" style={{ color: paleta.suave }}>
@@ -178,6 +189,7 @@ export function FolhaDaSacola({
                   <button
                     type="button"
                     aria-label={`Mais um ${item.nome}`}
+                    disabled={!(podeAumentar[indice] ?? true)}
                     onClick={() => onAjustar(indice, 1)}
                     className="rounded-full p-2"
                   >

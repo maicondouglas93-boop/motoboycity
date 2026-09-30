@@ -13,6 +13,7 @@ import type {
   StoreProduct,
 } from '@motoboycity/types';
 import {
+  estoqueNaVitrine,
   storeProductIssues,
   type ReorderStoreCategoriesPayload,
   type ReorderStoreProductsPayload,
@@ -63,6 +64,7 @@ function paraProduto(linha: ProdutoGravado): StoreProduct {
     imageUrl: linha.imageUrl,
     price: linha.price === null ? null : Number(linha.price),
     status: linha.status,
+    stock: linha.stock,
     sizes: linha.sizes.map((tamanho) => ({
       id: tamanho.id,
       name: tamanho.name,
@@ -188,7 +190,11 @@ export class StoreCatalogService {
       categories: categorias
         .filter((categoria) => comProduto.has(categoria.id))
         .map(({ id, name }) => ({ id, name })),
-      products: vendaveis.map(({ status: _status, updatedAt: _editado, ...publico }) => publico),
+      // O estoque exato é da loja: a página recebe só se esgotou e, com poucas unidades, quantas restam.
+      products: vendaveis.map(({ status: _status, updatedAt: _editado, stock, ...publico }) => ({
+        ...publico,
+        ...estoqueNaVitrine(stock),
+      })),
     };
   }
 
@@ -298,6 +304,7 @@ export class StoreCatalogService {
         description: payload.description,
         price: precoUnico(payload),
         status: payload.status,
+        stock: payload.stock ?? null,
         position,
         sizes: {
           create: payload.sizes.map((tamanho, indice) => ({
@@ -424,6 +431,9 @@ export class StoreCatalogService {
             description: payload.description,
             price: precoUnico(payload),
             status: payload.status,
+            // Sem `stock` no corpo, o que está gravado fica: o pedido que baixou o estoque
+            // no meio da edição não é desfeito por quem só mudou o preço.
+            ...(payload.stock !== undefined ? { stock: payload.stock } : {}),
             position,
           },
           include: PRODUTO_COMPLETO,

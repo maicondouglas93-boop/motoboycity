@@ -101,6 +101,8 @@ export function produtoDaVitrine(produto: PublicStoreProduct): ProdutoDeExemplo 
     imagemUrl: produto.imageUrl,
     precoUnico: produto.price,
     situacao: 'publicado',
+    esgotado: produto.esgotado,
+    restam: produto.restam,
     tamanhos: produto.sizes.map((tamanho) => ({
       id: tamanho.id,
       nome: tamanho.name,

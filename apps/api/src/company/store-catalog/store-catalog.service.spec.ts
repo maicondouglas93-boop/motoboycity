@@ -32,6 +32,7 @@ function produtoGravado(mudancas: Record<string, unknown> = {}) {
     imageExternalFileId: null,
     price: null,
     status: 'DRAFT',
+    stock: null,
     position: 0,
     createdAt: new Date('2026-09-25T09:00:00Z'),
     updatedAt: new Date('2026-09-25T10:00:00Z'),
@@ -353,6 +354,58 @@ describe('StoreCatalogService', () => {
       ]);
     });
 
+    describe('estoque (opcional)', () => {
+      it('o produto nasce sem controle; com número, o número é gravado', async () => {
+        prisma.storeProduct.create.mockResolvedValue(produtoGravado());
+
+        await service.createProduct(membro, payload());
+        await service.createProduct(membro, payload({ stock: 7 }));
+        await service.createProduct(membro, payload({ stock: null }));
+
+        expect(prisma.storeProduct.create.mock.calls.map(([args]) => args.data.stock)).toEqual([
+          null,
+          7,
+          null,
+        ]);
+      });
+
+      it('editar sem falar de estoque NÃO mexe no que está gravado', async () => {
+        prisma.storeProduct.findFirst.mockResolvedValue(produtoGravado({ stock: 12 }));
+        prisma.storeOptionGroup.update.mockResolvedValue({ id: GRUPO });
+        prisma.storeProduct.update.mockResolvedValue(produtoGravado());
+
+        await service.updateProduct(membro, PRODUTO, payload());
+
+        // O pedido que baixou o estoque no meio da edição não é desfeito por quem só mudou o preço.
+        expect(prisma.storeProduct.update.mock.calls[0][0].data).not.toHaveProperty('stock');
+      });
+
+      it('editar com número troca o estoque, e com null tira o controle', async () => {
+        prisma.storeProduct.findFirst.mockResolvedValue(produtoGravado({ stock: 12 }));
+        prisma.storeOptionGroup.update.mockResolvedValue({ id: GRUPO });
+        prisma.storeProduct.update.mockResolvedValue(produtoGravado());
+
+        await service.updateProduct(membro, PRODUTO, payload({ stock: 30 }));
+        await service.updateProduct(membro, PRODUTO, payload({ stock: null }));
+        await service.updateProduct(membro, PRODUTO, payload({ stock: 0 }));
+
+        expect(prisma.storeProduct.update.mock.calls.map(([args]) => args.data.stock)).toEqual([
+          30,
+          null,
+          0,
+        ]);
+      });
+
+      it('o painel recebe o estoque do produto', async () => {
+        prisma.storeCategory.findMany.mockResolvedValue([{ id: CATEGORIA_A, name: 'Açaí' }]);
+        prisma.storeProduct.findMany.mockResolvedValue([produtoGravado({ stock: 4 })]);
+
+        const cardapio = await service.catalog(membro);
+
+        expect(cardapio.products[0]).toMatchObject({ stock: 4 });
+      });
+    });
+
     it('categoria de outra empresa é recusada', async () => {
       prisma.storeCategory.findFirst.mockResolvedValue(null);
       await expect(service.createProduct(membro, payload())).rejects.toBeInstanceOf(
@@ -544,6 +597,47 @@ describe('StoreCatalogService', () => {
       expect(cardapio.products.map((produto) => produto.id)).toEqual([PRODUTO]);
       expect(cardapio.products[0]).not.toHaveProperty('status');
       expect(cardapio.products[0]).not.toHaveProperty('updatedAt');
+    });
+  });
+
+  describe('cardápio público — estoque', () => {
+    it('o estoque exato é da loja: a página recebe só se esgotou e, com poucas unidades, quantas restam', async () => {
+      prisma.storeCategory.findMany.mockResolvedValue([{ id: CATEGORIA_A, name: 'Açaí' }]);
+      prisma.storeProduct.findMany.mockResolvedValue([
+        produtoGravado({ id: 'sem-controle', status: 'PUBLISHED', stock: null }),
+        produtoGravado({ id: 'muito', status: 'PUBLISHED', stock: 50 }),
+        produtoGravado({ id: 'poucas', status: 'PUBLISHED', stock: 3 }),
+        produtoGravado({ id: 'uma', status: 'PUBLISHED', stock: 1 }),
+        produtoGravado({ id: 'zero', status: 'PUBLISHED', stock: 0 }),
+      ]);
+
+      const { products } = await service.publicCatalog(EMPRESA);
+
+      const vitrine = Object.fromEntries(
+        products.map((produto) => [produto.id, [produto.esgotado, produto.restam]]),
+      );
+      expect(vitrine).toEqual({
+        'sem-controle': [false, null],
+        // Cinquenta é "tem bastante": o número não vai para a página.
+        muito: [false, null],
+        poucas: [false, 3],
+        uma: [false, 1],
+        zero: [true, null],
+      });
+      // Nenhum produto leva o número exato.
+      for (const produto of products) expect(produto).not.toHaveProperty('stock');
+    });
+
+    it('o produto esgotado continua no cardápio: dá para ver, não dá para pedir', async () => {
+      prisma.storeCategory.findMany.mockResolvedValue([{ id: CATEGORIA_A, name: 'Açaí' }]);
+      prisma.storeProduct.findMany.mockResolvedValue([
+        produtoGravado({ status: 'PUBLISHED', stock: 0 }),
+      ]);
+
+      const cardapio = await service.publicCatalog(EMPRESA);
+
+      expect(cardapio.products.map((produto) => produto.id)).toEqual([PRODUTO]);
+      expect(cardapio.categories).toHaveLength(1);
     });
   });
 

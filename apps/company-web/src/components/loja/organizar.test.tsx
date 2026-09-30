@@ -30,6 +30,7 @@ function produto(id: string, categoryId: string | null): StoreProduct {
     imageUrl: null,
     price: 10,
     status: 'PUBLISHED',
+    stock: null,
     sizes: [],
     optionGroups: [],
     updatedAt: '2026-09-25T12:00:00.000Z',

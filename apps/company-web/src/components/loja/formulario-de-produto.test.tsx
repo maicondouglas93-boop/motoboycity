@@ -39,6 +39,7 @@ const NO_AR: StoreProduct = {
   imageUrl: null,
   price: 22,
   status: 'PUBLISHED',
+  stock: null,
   sizes: [],
   optionGroups: [
     {
@@ -297,5 +298,97 @@ describe('Formulário de produto — foto', () => {
     await waitFor(() =>
       expect(mocks.push).toHaveBeenCalledWith(`/loja/produtos/${criado.id}/editar?foto=falhou`),
     );
+  });
+});
+
+describe('Formulário de produto — estoque opcional', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('motoboycity/accessToken', 'token');
+    window.localStorage.setItem('motoboycity.accessToken', 'token');
+    for (const mock of Object.values(mocks)) mock.mockReset();
+  });
+
+  it('o campo existe, vazio e opcional, e explica o que o estoque faz', () => {
+    renderizar();
+
+    expect(screen.getByLabelText('Unidades em estoque')).toHaveValue('');
+    expect(screen.getByLabelText('Unidades em estoque')).toHaveAttribute(
+      'placeholder',
+      'Sem controle',
+    );
+    expect(screen.getByText(/Deixe vazio para não controlar/)).toBeInTheDocument();
+  });
+
+  it('cadastra com estoque: o número vai na chamada', async () => {
+    mocks.createProduct.mockResolvedValue({ ...NO_AR, optionGroups: [], stock: 12 });
+    renderizar();
+
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'X-Burger' } });
+    fireEvent.change(screen.getByLabelText('Preço único'), { target: { value: '22,00' } });
+    fireEvent.change(screen.getByLabelText('Categoria'), { target: { value: LANCHES.id } });
+    fireEvent.change(screen.getByLabelText('Unidades em estoque'), { target: { value: '12' } });
+    fireEvent.click(botao('Publicar produto'));
+
+    await waitFor(() => expect(mocks.createProduct).toHaveBeenCalledTimes(1));
+    expect(mocks.createProduct.mock.calls[0]![1]).toMatchObject({ stock: 12 });
+  });
+
+  it('na edição o campo abre com o estoque, e salvar sem mexer nele não o manda', async () => {
+    mocks.updateProduct.mockResolvedValue({ ...NO_AR, stock: 12 });
+    renderizar({ ...NO_AR, stock: 12 });
+
+    expect(screen.getByLabelText('Unidades em estoque')).toHaveValue('12');
+    // Só o preço muda.
+    fireEvent.change(screen.getByLabelText('Preço único'), { target: { value: '24,00' } });
+    fireEvent.click(botao('Salvar alterações'));
+
+    await waitFor(() => expect(mocks.updateProduct).toHaveBeenCalledTimes(1));
+    const corpo = mocks.updateProduct.mock.calls[0]![2];
+    expect(corpo).toMatchObject({ price: 24 });
+    expect(corpo).not.toHaveProperty('stock');
+  });
+
+  it('trocar o número repõe o estoque', async () => {
+    mocks.updateProduct.mockResolvedValue({ ...NO_AR, stock: 30 });
+    renderizar({ ...NO_AR, stock: 12 });
+
+    fireEvent.change(screen.getByLabelText('Unidades em estoque'), { target: { value: '30' } });
+    fireEvent.click(botao('Salvar alterações'));
+
+    await waitFor(() => expect(mocks.updateProduct).toHaveBeenCalledTimes(1));
+    expect(mocks.updateProduct.mock.calls[0]![2]).toMatchObject({ stock: 30 });
+  });
+
+  it('apagar o campo tira o controle de estoque', async () => {
+    mocks.updateProduct.mockResolvedValue({ ...NO_AR, stock: null });
+    renderizar({ ...NO_AR, stock: 12 });
+
+    fireEvent.change(screen.getByLabelText('Unidades em estoque'), { target: { value: '' } });
+    fireEvent.click(botao('Salvar alterações'));
+
+    await waitFor(() => expect(mocks.updateProduct).toHaveBeenCalledTimes(1));
+    expect(mocks.updateProduct.mock.calls[0]![2]).toMatchObject({ stock: null });
+  });
+
+  it('com tamanhos, avisa que eles dividem o mesmo estoque', () => {
+    renderizar({
+      ...NO_AR,
+      price: null,
+      sizes: [
+        { id: '66666666-6666-4666-8666-666666666661', name: 'Grande', price: 30, available: true },
+      ],
+    });
+
+    expect(screen.getByText(/Os tamanhos dividem o mesmo estoque/)).toBeInTheDocument();
+  });
+
+  it('um estoque que não é número impede salvar, com o motivo na tela', () => {
+    renderizar(NO_AR);
+
+    fireEvent.change(screen.getByLabelText('Unidades em estoque'), { target: { value: 'muitas' } });
+    fireEvent.click(botao('Salvar alterações'));
+
+    expect(screen.getByText(/Estoque: "muitas" não é um número inteiro/)).toBeInTheDocument();
+    expect(mocks.updateProduct).not.toHaveBeenCalled();
   });
 });

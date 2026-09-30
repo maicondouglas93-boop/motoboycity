@@ -15,6 +15,12 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { situacaoDaLoja } from '@/lib/loja-horario';
 import { horariosDaModalidade, modalidadesAtivas, textoDoTempo } from '@/lib/loja-operacao';
 import { useOperacao } from '@/lib/loja-demo';
+import {
+  avisoDeEstoque,
+  rotuloDeRestam,
+  unidadesNaSacola,
+  unidadesQueAindaCabem,
+} from '@/lib/loja-estoque';
 import { ofertaNaVitrine, precificarSacola } from '@/lib/loja-promocoes';
 import { useAgora } from '@/lib/relogio';
 import { destaquesDaVitrine } from '@motoboycity/validation';
@@ -190,7 +196,8 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
     () =>
       destaquesDaVitrine(
         cardapio.destaques,
-        new Set(vendaveisPorId.keys()),
+        // O esgotado não entra no destaque: promover o que não se pode pedir é pior do que não promover.
+        new Set([...vendaveisPorId.values()].filter((p) => !p.esgotado).map((p) => p.id)),
         hidratado ? new Date(instante) : null,
       ),
     [cardapio.destaques, vendaveisPorId, hidratado, instante],
@@ -250,6 +257,15 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
   }
 
   function ajustar(indice: number, passo: number) {
+    // Mais uma unidade só se o estoque curto deixa; o servidor confere de qualquer jeito.
+    const doItem = carrinho[indice];
+    if (
+      passo > 0 &&
+      doItem &&
+      unidadesQueAindaCabem(vendaveisPorId.get(doItem.produtoId), carrinho, doItem.produtoId) === 0
+    ) {
+      return;
+    }
     const esvazia = carrinho.length === 1 && (carrinho[0]?.quantidade ?? 0) + passo <= 0;
     setCarrinho((atual) => ajustarQuantidade(atual, indice, passo));
     // Tirou o último item: a folha fecha junto, em vez de ficar aberta
@@ -461,6 +477,8 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                     style={
                       {
                         borderColor: paleta.linha,
+                        // Esgotado: dá para ver, mas a linha some um pouco — o cliente entende antes de tocar.
+                        opacity: produto.esgotado ? 0.6 : 1,
                         '--ordem': Math.min(ordem.get(produto.id) ?? 0, TETO_DA_CASCATA),
                       } as CSSProperties
                     }
@@ -477,46 +495,68 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                           {produto.descricao}
                         </span>
                       )}
-                      <span className="mt-1.5 block text-[15px] font-semibold">
-                        {produto.tamanhos.length > 0 ? (
-                          <>
-                            <span
-                              className="text-[13px] font-normal"
-                              style={{ color: paleta.suave }}
-                            >
-                              a partir de{' '}
-                            </span>
-                            {oferta?.por != null && oferta.de != null && (
-                              <s
-                                className="mr-1.5 text-[13px] font-normal"
-                                style={{ color: paleta.suave }}
-                              >
-                                {moeda(oferta.de)}
-                              </s>
+                      {produto.esgotado ? (
+                        <span
+                          className="mt-1.5 block text-[15px] font-semibold"
+                          style={{ color: paleta.suave }}
+                        >
+                          Esgotado
+                        </span>
+                      ) : (
+                        <>
+                          <span className="mt-1.5 block text-[15px] font-semibold">
+                            {produto.tamanhos.length > 0 ? (
+                              <>
+                                <span
+                                  className="text-[13px] font-normal"
+                                  style={{ color: paleta.suave }}
+                                >
+                                  a partir de{' '}
+                                </span>
+                                {oferta?.por != null && oferta.de != null && (
+                                  <s
+                                    className="mr-1.5 text-[13px] font-normal"
+                                    style={{ color: paleta.suave }}
+                                  >
+                                    {moeda(oferta.de)}
+                                  </s>
+                                )}
+                                {moeda(
+                                  oferta?.por ?? Math.min(...produto.tamanhos.map((t) => t.preco)),
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                {oferta?.por != null && oferta.de != null && (
+                                  <s
+                                    className="mr-1.5 text-[13px] font-normal"
+                                    style={{ color: paleta.suave }}
+                                  >
+                                    {moeda(oferta.de)}
+                                  </s>
+                                )}
+                                {moeda(oferta?.por ?? produto.precoUnico ?? 0)}
+                              </>
                             )}
-                            {moeda(
-                              oferta?.por ?? Math.min(...produto.tamanhos.map((t) => t.preco)),
+                            {oferta && (
+                              <span className="ml-2 align-middle">
+                                <SeloDePromocao
+                                  rotulo={oferta.rotulo}
+                                  corDeAcao={marca.corDeAcao}
+                                />
+                              </span>
                             )}
-                          </>
-                        ) : (
-                          <>
-                            {oferta?.por != null && oferta.de != null && (
-                              <s
-                                className="mr-1.5 text-[13px] font-normal"
-                                style={{ color: paleta.suave }}
-                              >
-                                {moeda(oferta.de)}
-                              </s>
-                            )}
-                            {moeda(oferta?.por ?? produto.precoUnico ?? 0)}
-                          </>
-                        )}
-                        {oferta && (
-                          <span className="ml-2 align-middle">
-                            <SeloDePromocao rotulo={oferta.rotulo} corDeAcao={marca.corDeAcao} />
                           </span>
-                        )}
-                      </span>
+                          {produto.restam != null && (
+                            <span
+                              className="mt-0.5 block text-[13px] font-medium"
+                              style={{ color: marca.corDaMarca }}
+                            >
+                              {rotuloDeRestam(produto.restam)}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </span>
 
                     <span className="relative shrink-0">
@@ -602,6 +642,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
             rotuloFechada={vitrine ? 'Pedidos em breve' : undefined}
             promocoes={cardapio.promocoes}
             instante={horaDaOferta}
+            jaNaSacola={unidadesNaSacola(carrinho, aberto.id)}
             onFechar={() => setAberto(null)}
             onAdicionar={adicionar}
           />
@@ -614,6 +655,20 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
             key="sacola"
             itens={carrinho}
             linhas={sacola.linhas}
+            podeAumentar={carrinho.map(
+              (item) =>
+                unidadesQueAindaCabem(
+                  vendaveisPorId.get(item.produtoId),
+                  carrinho,
+                  item.produtoId,
+                ) !== 0,
+            )}
+            avisos={carrinho.map((item) =>
+              avisoDeEstoque(
+                vendaveisPorId.get(item.produtoId),
+                unidadesNaSacola(carrinho, item.produtoId),
+              ),
+            )}
             total={total}
             slug={slug}
             paleta={paleta}

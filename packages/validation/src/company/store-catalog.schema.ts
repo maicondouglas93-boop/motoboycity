@@ -98,6 +98,17 @@ export const upsertStoreProductSchema = z
     /** Com tamanhos, é ignorado: o preço vem de cada tamanho. */
     price: precoSchema.nullable(),
     status: storeProductStatusSchema,
+    /**
+     * Quantas unidades a loja tem, ou `null` para não controlar. Ausente, o servidor não
+     * mexe no que está gravado: quem edita sem falar de estoque não o apaga.
+     */
+    stock: z
+      .number({ error: 'Informe o estoque como um número.' })
+      .int('O estoque é um número inteiro.')
+      .min(0, 'O estoque não pode ser negativo.')
+      .max(999_999, 'Use no máximo 999.999 no estoque.')
+      .nullable()
+      .optional(),
     sizes: z.array(storeProductSizeInputSchema).max(20),
     optionGroups: z.array(storeOptionGroupInputSchema).max(20),
   })

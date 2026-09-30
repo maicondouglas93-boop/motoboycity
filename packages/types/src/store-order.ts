@@ -117,6 +117,12 @@ export interface ItemDoPedido {
   totalOriginal?: number;
   /** A promoção que baixou a linha, como estava na hora da compra. */
   promocao?: { id: string; nome: string; desconto: number; rotulo: string };
+  /**
+   * O pedido baixou o estoque deste produto (ele tinha controle na hora da compra). É por
+   * este sinal que o cancelamento devolve as unidades: o produto que passou a ter estoque
+   * depois do pedido não ganha unidades de um pedido que nunca o baixou.
+   */
+  baixouEstoque?: boolean;
 }
 
 /**

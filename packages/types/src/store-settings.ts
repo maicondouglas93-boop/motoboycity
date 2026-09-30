@@ -34,8 +34,17 @@ export interface StoreSettings {
   recebePedidos: boolean;
 }
 
-/** O produto como o cliente vê: só o publicado aparece, e a data de edição não interessa. */
-export type PublicStoreProduct = Omit<StoreProduct, 'status' | 'updatedAt'>;
+/**
+ * O produto como o cliente vê: só o publicado aparece, e a data de edição não interessa. O
+ * estoque exato é da loja e NÃO vai: o cliente recebe só se esgotou e, quando são poucas
+ * unidades, quantas restam (`estoqueNaVitrine`, em `@motoboycity/validation`).
+ */
+export type PublicStoreProduct = Omit<StoreProduct, 'status' | 'updatedAt' | 'stock'> & {
+  /** O estoque chegou a zero: dá para ver, não dá para pedir. */
+  esgotado: boolean;
+  /** Restam poucas: quantas. `null`: sem controle, ou ainda há bastante. */
+  restam: number | null;
+};
 
 export interface PublicStore {
   slug: string;

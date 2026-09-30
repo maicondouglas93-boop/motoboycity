@@ -295,6 +295,12 @@ export interface ProdutoDeExemplo {
   /** Usado quando o produto não tem tamanhos; com tamanhos, o preço vem deles. */
   precoUnico: number | null;
   situacao: SituacaoDoProduto;
+  /**
+   * O estoque, como a página o sabe (`estoqueNaVitrine`): esgotou, e — só com poucas unidades
+   * — quantas restam. Ausente: sem controle de estoque, ou a demonstração.
+   */
+  esgotado?: boolean;
+  restam?: number | null;
   tamanhos: TamanhoDeExemplo[];
   grupos: GrupoDeExemplo[];
 }

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
 import type { PromocaoPublica } from '@motoboycity/types';
 import type { GrupoDeExemplo, ProdutoDeExemplo, TamanhoDeExemplo } from '@/lib/loja-mock';
+import { rotuloDeRestam } from '@/lib/loja-estoque';
 import { precificarSacola } from '@/lib/loja-promocoes';
 import { FolhaDeBaixo } from './folha-de-baixo';
 import { moeda, textoSobre, type Paleta } from './paleta';
@@ -57,6 +58,7 @@ export function FolhaDoProduto({
   rotuloFechada = 'Loja fechada',
   promocoes = [],
   instante = null,
+  jaNaSacola = 0,
   onFechar,
   onAdicionar,
 }: {
@@ -64,6 +66,8 @@ export function FolhaDoProduto({
   /** As promoções ligadas da loja, e a hora da tela (`null` antes de hidratar). */
   promocoes?: PromocaoPublica[];
   instante?: number | null;
+  /** Quantas unidades deste produto já estão na sacola: descontam do que cabe, com estoque curto. */
+  jaNaSacola?: number;
   paleta: Paleta;
   corDeAcao: string;
   /** Loja fechada: dá para olhar o cardápio, não dá para pedir. */
@@ -82,6 +86,17 @@ export function FolhaDoProduto({
   const [tamanhoId, setTamanhoId] = useState<string | null>(disponiveis[0]?.id ?? null);
   const [marcadas, setMarcadas] = useState<Record<string, string[]>>({});
   const [quantidade, setQuantidade] = useState(1);
+
+  /*
+   * O estoque, como a página o sabe: esgotado não se pede; com poucas unidades, cabe só o que
+   * sobra depois do que já está na sacola. O servidor confere de qualquer jeito, no pedido.
+   */
+  const cabem = produto.esgotado
+    ? 0
+    : produto.restam == null
+      ? null
+      : Math.max(produto.restam - jaNaSacola, 0);
+  const semUnidades = cabem === 0;
 
   const tamanho: TamanhoDeExemplo | undefined = produto.tamanhos.find(
     (item) => item.id === tamanhoId,
@@ -157,6 +172,17 @@ export function FolhaDoProduto({
                 <SeloDePromocao rotulo={promocao.rotulo} corDeAcao={corDeAcao} />
               </p>
             )}
+            {produto.esgotado ? (
+              <p className="mt-1 text-sm font-semibold" style={{ color: paleta.suave }}>
+                Esgotado
+              </p>
+            ) : (
+              produto.restam != null && (
+                <p className="mt-1 text-sm font-medium" style={{ color: corDeAcao }}>
+                  {rotuloDeRestam(produto.restam)}
+                </p>
+              )
+            )}
             {produto.descricao && (
               <p className="mt-1 text-sm" style={{ color: paleta.suave }}>
                 {produto.descricao}
@@ -200,7 +226,10 @@ export function FolhaDoProduto({
               <button
                 type="button"
                 aria-label="Mais um"
-                onClick={() => setQuantidade((q) => q + 1)}
+                disabled={cabem !== null && quantidade >= cabem}
+                onClick={() =>
+                  setQuantidade((q) => (cabem === null ? q + 1 : Math.min(q + 1, cabem)))
+                }
                 className="rounded-full p-2"
               >
                 <Plus className="size-4" />
@@ -209,7 +238,7 @@ export function FolhaDoProduto({
 
             <button
               type="button"
-              disabled={!aberta || faltando.length > 0}
+              disabled={!aberta || faltando.length > 0 || semUnidades}
               onClick={(evento) =>
                 onAdicionar(
                   {
@@ -228,7 +257,15 @@ export function FolhaDoProduto({
               className="flex h-12 flex-1 items-center justify-between rounded-xl px-4 text-sm font-semibold disabled:opacity-40"
               style={{ backgroundColor: corDeAcao, color: textoSobre(corDeAcao) }}
             >
-              <span>{aberta ? 'Adicionar' : rotuloFechada}</span>
+              <span>
+                {!aberta
+                  ? rotuloFechada
+                  : produto.esgotado
+                    ? 'Esgotado'
+                    : semUnidades
+                      ? 'Todas as unidades já estão na sacola'
+                      : 'Adicionar'}
+              </span>
               <span>
                 {promocao && (
                   <s className="mr-1.5 text-xs font-normal opacity-70">

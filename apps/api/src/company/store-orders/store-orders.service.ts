@@ -102,6 +102,28 @@ function recusa(message: string, code: string, extra: Record<string, unknown> = 
 
 type ItemPedido = StoreCheckoutPayload['itens'][number];
 
+/** Falta estoque: diz de qual produto e quantas unidades restam, e o que o cliente faz. */
+function semEstoque(nome: string, restam: number, produtoId: string): ConflictException {
+  return new ConflictException({
+    message:
+      restam <= 0
+        ? `${nome} esgotou. Tire da sacola e peça de novo.`
+        : `Só ${restam === 1 ? 'resta 1 unidade' : `restam ${restam} unidades`} de ${nome}. Diminua a quantidade na sacola.`,
+    code: 'STORE_ORDER_OUT_OF_STOCK',
+    produtoId,
+    restam: Math.max(restam, 0),
+  });
+}
+
+/** Quantas unidades de cada produto o pedido leva, somando as linhas (tamanhos diferentes dividem o estoque). */
+function demandaDeEstoque(itens: ItemDoPedido[]): Map<string, number> {
+  const demanda = new Map<string, number>();
+  for (const item of itens) {
+    demanda.set(item.produtoId, (demanda.get(item.produtoId) ?? 0) + item.quantidade);
+  }
+  return demanda;
+}
+
 /**
  * O cupom não vale para ESTA sacola (o que o cupom em si permite, o
  * `StoreCouponsService` já conferiu): a frase é a mesma que a página mostra.
@@ -563,6 +585,11 @@ export class StoreOrdersService {
       agora,
     );
 
+    // O estoque, antes de qualquer cobrança ou cupom: quem pede o que não tem ouve isso primeiro.
+    // Esta leitura só dá a recusa clara; a baixa de verdade é atômica, na transação do pedido.
+    const estoqueDoPedido = demandaDeEstoque(itens);
+    await this.conferirEstoque(companyId, estoqueDoPedido);
+
     const minimo = pedidoMinimoDa(operacao, pedido.modalidade);
     if (minimo !== null && subtotal < centavos(minimo)) {
       throw recusa(
@@ -741,6 +768,7 @@ export class StoreOrdersService {
         pixDoNumero,
         promovidas.usadas,
         doCupom?.cupom ?? null,
+        estoqueDoPedido,
       );
     } catch (erro) {
       // Sem pedido, a cobrança não pode ficar no Asaas esperando pagamento.
@@ -852,6 +880,24 @@ export class StoreOrdersService {
     // O que o cliente paga pelos itens, já com as promoções.
     const subtotal = itens.reduce((soma, item) => soma + centavos(item.total), 0);
     return { itens, promovidas, subtotal };
+  }
+
+  /**
+   * Cada produto do pedido com estoque controlado precisa ter as unidades pedidas. Só a
+   * recusa clara: quem decide é a baixa atômica, na transação do pedido — entre esta leitura
+   * e ela, outro pedido pode ter levado as unidades.
+   */
+  private async conferirEstoque(companyId: string, demanda: Map<string, number>): Promise<void> {
+    const produtos = await this.prisma.storeProduct.findMany({
+      where: { companyId, id: { in: [...demanda.keys()] } },
+      select: { id: true, name: true, stock: true },
+    });
+    for (const produto of produtos) {
+      const pedidas = demanda.get(produto.id) ?? 0;
+      if (produto.stock !== null && produto.stock < pedidas) {
+        throw semEstoque(produto.name, produto.stock, produto.id);
+      }
+    }
   }
 
   /**
@@ -1781,6 +1827,7 @@ export class StoreOrdersService {
         if (depois.etapa === 'CANCELADO') {
           await this.devolverUsosDePromocao(linha);
           await this.devolverUsoDoCupom(linha);
+          await this.devolverEstoque(linha);
         }
         // Pago online e cancelado — pela loja, pelo prazo do aceite —: o
         // dinheiro volta inteiro, sozinho (decisão 18).
@@ -1819,6 +1866,34 @@ export class StoreOrdersService {
     } catch (erro) {
       this.logger.warn(
         `Não deu para devolver o uso das promoções do pedido ${linha.id}: ${erro instanceof Error ? erro.message : String(erro)}`,
+      );
+    }
+  }
+
+  /**
+   * O pedido cancelado devolve as unidades que baixou do estoque, uma vez: só as linhas que
+   * carregam `baixouEstoque` (o produto tinha controle na hora da compra) e só se o produto
+   * ainda tem controle. Quem cancela é o vencedor da disputa em `mudar`, então dois
+   * cancelamentos não devolvem duas vezes. Não derruba o cancelamento.
+   */
+  private async devolverEstoque(linha: StoreOrder): Promise<void> {
+    const devolver = new Map<string, number>();
+    for (const item of linha.items as unknown as ItemDoPedido[]) {
+      if (item.baixouEstoque) {
+        devolver.set(item.produtoId, (devolver.get(item.produtoId) ?? 0) + item.quantidade);
+      }
+    }
+    if (devolver.size === 0) return;
+    try {
+      for (const [produtoId, quantidade] of devolver) {
+        await this.prisma.storeProduct.updateMany({
+          where: { id: produtoId, companyId: linha.companyId, stock: { not: null } },
+          data: { stock: { increment: quantidade } },
+        });
+      }
+    } catch (erro) {
+      this.logger.warn(
+        `Não deu para devolver o estoque do pedido ${linha.id}: ${erro instanceof Error ? erro.message : String(erro)}`,
       );
     }
   }
@@ -1886,6 +1961,7 @@ export class StoreOrdersService {
     doNumero?: (numero: number) => { pixPayload: string },
     promocoesUsadas: string[] = [],
     cupomUsado: CupomDoServidor | null = null,
+    estoque: Map<string, number> = new Map(),
   ): Promise<StoreOrder> {
     for (let tentativa = 1; ; tentativa += 1) {
       try {
@@ -1941,6 +2017,43 @@ export class StoreOrdersService {
               }
             }
           }
+          /*
+           * O estoque, pelo mesmo caminho: baixa só se ainda há as unidades, num UPDATE que
+           * trava a linha do produto até o fim da transação — dois pedidos do último item não
+           * passam os dois. O produto sem controle (`stock` nulo) passa sem mexer; o que
+           * voltou com número foi baixado, e leva o sinal `baixouEstoque` para o cancelamento
+           * saber devolver. Em ordem de id, para pedidos com os mesmos produtos não se
+           * travarem um ao outro.
+           */
+          const baixados = new Set<string>();
+          for (const [produtoId, quantidade] of [...estoque].sort(([a], [b]) =>
+            a.localeCompare(b),
+          )) {
+            const linhas = await tx.$queryRaw<Array<{ stock: number | null }>>`
+              UPDATE "store_products"
+              SET "stock" = "stock" - ${quantidade}::int
+              WHERE "id" = ${produtoId}
+                AND "companyId" = ${companyId}
+                AND ("stock" IS NULL OR "stock" >= ${quantidade}::int)
+              RETURNING "stock"`;
+            if (linhas.length === 0) {
+              const atual = await tx.storeProduct.findFirst({
+                where: { id: produtoId, companyId },
+                select: { name: true, stock: true },
+              });
+              throw semEstoque(atual?.name ?? 'Um item do pedido', atual?.stock ?? 0, produtoId);
+            }
+            if (linhas[0]!.stock !== null) baixados.add(produtoId);
+          }
+          const comBaixa =
+            baixados.size === 0
+              ? {}
+              : {
+                  items: (dados.items as unknown as ItemDoPedido[]).map((item) =>
+                    baixados.has(item.produtoId) ? { ...item, baixouEstoque: true } : item,
+                  ) as unknown as Prisma.InputJsonValue,
+                };
+
           const ultimo = await tx.storeOrder.aggregate({
             where: { companyId },
             _max: { number: true },
@@ -1950,7 +2063,13 @@ export class StoreOrdersService {
             // O que depende do número (o identificador do Pix direto) é montado
             // aqui, na tentativa que de fato o usa: uma repetição por número
             // ocupado refaz o código com o número novo.
-            data: { ...dados, ...(doNumero?.(numero) ?? {}), companyId, number: numero },
+            data: {
+              ...dados,
+              ...comBaixa,
+              ...(doNumero?.(numero) ?? {}),
+              companyId,
+              number: numero,
+            },
           });
           if (cupomUsado) {
             await tx.storeCouponRedemption.create({

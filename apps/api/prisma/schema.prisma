@@ -1984,6 +1984,11 @@ model StoreProduct {
   imageExternalFileId String?            @db.VarChar(100)
   price               Decimal?           @db.Decimal(10, 2)
   status              StoreProductStatus @default(DRAFT)
+  /// Quantas unidades a loja tem, do produto todo (os tamanhos dividem o mesmo estoque).
+  /// Nulo: sem controle de estoque, que é como todo produto nasce. Com número, cada pedido
+  /// baixa a quantidade pedida, o pedido cancelado devolve, e em zero o produto fica
+  /// "esgotado" na página — sem mudar o `status`, que é escolha da loja.
+  stock               Int?
   /// Ordem dentro da seção — ou entre os produtos sem seção.
   position            Int
 

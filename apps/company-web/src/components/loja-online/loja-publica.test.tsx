@@ -440,3 +440,148 @@ describe('Loja pública — destaques no alto do cardápio', () => {
     expect(screen.getByRole('button', { name: /Pedidos em breve/ })).toBeInTheDocument();
   });
 });
+
+describe('Loja pública — estoque', () => {
+  const comEstoque = (
+    estoque: { esgotado?: boolean; restam?: number | null },
+    mudancas: Partial<CardapioDaPagina> = {},
+  ): CardapioDaPagina => ({
+    ...VITRINE,
+    produtos: VITRINE.produtos.map((produto) => ({ ...produto, ...estoque })),
+    ...mudancas,
+  });
+
+  it('o produto esgotado continua no cardápio, com "Esgotado" no lugar do preço', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comEstoque({ esgotado: true })} />);
+
+    expect(screen.getByText('X-Burger')).toBeInTheDocument();
+    expect(screen.getByText('Esgotado')).toBeInTheDocument();
+    expect(screen.queryByText('R$ 22,00')).not.toBeInTheDocument();
+  });
+
+  it('com poucas unidades, a linha diz quantas restam, e o preço segue à mostra', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comEstoque({ restam: 3 })} />);
+
+    expect(screen.getByText('R$ 22,00')).toBeInTheDocument();
+    expect(screen.getByText('Restam 3 unidades')).toBeInTheDocument();
+    expect(screen.queryByText('Esgotado')).not.toBeInTheDocument();
+  });
+
+  it('uma unidade só usa o singular', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comEstoque({ restam: 1 })} />);
+
+    expect(screen.getByText('Resta 1 unidade')).toBeInTheDocument();
+  });
+
+  it('sem controle de estoque, a linha é a de sempre', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comEstoque({})} />);
+
+    expect(screen.queryByText('Esgotado')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Restam?\s/)).not.toBeInTheDocument();
+  });
+
+  it('a folha do produto esgotado mostra "Esgotado" e não deixa adicionar', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comEstoque({ esgotado: true }, { vitrine: false })}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: /X-Burger/ })[0]!);
+
+    const adicionar = screen.getByRole('button', { name: /^Esgotado/ });
+    expect(adicionar).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^Adicionar/ })).not.toBeInTheDocument();
+  });
+
+  it('a folha do produto com poucas unidades não deixa passar do que resta', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica slug="lanches-do-ze" cardapio={comEstoque({ restam: 2 }, { vitrine: false })} />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: /X-Burger/ })[0]!);
+    expect(screen.getAllByText('Restam 2 unidades').length).toBeGreaterThan(0);
+
+    const mais = screen.getByRole('button', { name: 'Mais um' });
+    fireEvent.click(mais);
+    // Dois é tudo o que há: o botão trava, e a quantidade não passa.
+    expect(mais).toBeDisabled();
+    expect(screen.getByText('2', { selector: 'span.w-5' })).toBeInTheDocument();
+    fireEvent.click(mais);
+    expect(screen.getByText('2', { selector: 'span.w-5' })).toBeInTheDocument();
+  });
+
+  it('depois de pôr tudo o que resta na sacola, o produto não aceita mais, na folha nem na sacola', () => {
+    window.localStorage.clear();
+    naQuarta('12:00');
+    render(
+      <LojaPublica slug="lanches-do-ze" cardapio={comEstoque({ restam: 2 }, { vitrine: false })} />,
+    );
+
+    // Põe as duas unidades.
+    fireEvent.click(screen.getAllByRole('button', { name: /X-Burger/ })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Mais um' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Adicionar/ }));
+
+    // Abre o produto de novo: já está tudo na sacola.
+    fireEvent.click(screen.getAllByRole('button', { name: /X-Burger/ })[0]!);
+    expect(
+      screen.getByRole('button', { name: /Todas as unidades já estão na sacola/ }),
+    ).toBeDisabled();
+
+    // E na folha da sacola o "mais" travou.
+    fireEvent.click(screen.getByRole('button', { name: /Ver sacola/ }));
+    expect(screen.getByRole('button', { name: 'Mais um X-Burger' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Menos um X-Burger' })).toBeEnabled();
+  });
+
+  it('o produto esgotado não é promovido no destaque', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comEstoque(
+          { esgotado: true },
+          {
+            destaques: [
+              { id: 'd1', titulo: 'Mais pedidos', produtoIds: ['p1'], inicio: null, fim: null },
+            ],
+          },
+        )}
+      />,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Mais pedidos' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Destaques' })).not.toBeInTheDocument();
+    // Mas continua na lista, como esgotado.
+    expect(screen.getByText('Esgotado')).toBeInTheDocument();
+  });
+
+  it('o destaque com produto de poucas unidades mostra quantas restam no cartão', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comEstoque(
+          { restam: 4 },
+          {
+            destaques: [
+              { id: 'd1', titulo: 'Mais pedidos', produtoIds: ['p1'], inicio: null, fim: null },
+            ],
+          },
+        )}
+      />,
+    );
+
+    // No cartão do destaque (curto) e na linha da lista.
+    expect(screen.getByText('Restam 4')).toBeInTheDocument();
+    expect(screen.getByText('Restam 4 unidades')).toBeInTheDocument();
+  });
+});

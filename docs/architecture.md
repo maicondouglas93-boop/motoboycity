@@ -294,6 +294,44 @@ fileira de cartões que rola de lado por destaque, e o chip "Destaques" na barra
 As gravações de ordem correm uma de cada vez (`scope` da mutação): quem sobe três vezes seguidas
 manda três listas, e a última vence.
 
+### Estoque da loja online
+
+`store_products.stock` (`INTEGER`, nulo): nulo é sem controle, um número (inclusive 0) é
+controle. Migration aditiva `20260930090000_produto_com_estoque`, uma coluna sem valor padrão
+(os produtos que já existiam ficam sem controle; validada em banco descartável: aplica, fica
+igual ao schema, desfaz e reaplica).
+
+O que a página sabe do estoque é decidido em `packages/validation`, no
+`store-stock.rules.ts`: `estoqueNaVitrine` (`{ esgotado, restam }`, com `restam` só de 1 a
+`LIMITE_DO_AVISO_DE_ESTOQUE`, que é 5) e `unidadesQueCabem`. O catálogo do painel
+(`StoreProduct.stock`) traz o número; o público (`PublicStoreProduct`) **não tem `stock`**:
+`publicCatalog` o troca por `esgotado`/`restam`, e há teste que garante que a chave não vaza.
+`upsertStoreProductSchema.stock` aceita inteiro de 0 a 999.999; `null` tira o controle e
+**ausente deixa como está** (editar o produto sem tocar no campo não desfaz as vendas).
+
+No pedido (`StoreOrdersService.checkout`): depois de `precificarSacola` e antes do cupom e da
+cobrança Pix, `conferirEstoque` lê os produtos e recusa com 409 `STORE_ORDER_OUT_OF_STOCK`
+(`produtoId`, `restam`) — é só a recusa clara. Quem decide é `gravarComNumero`, na mesma
+transação que registra o uso de promoção e de cupom: `UPDATE store_products SET stock = stock -
+n WHERE id AND companyId AND (stock IS NULL OR stock >= n) RETURNING stock`, produto a
+produto **em ordem de id** (pedidos com os mesmos produtos não se travam num deadlock). Zero
+linhas dá o mesmo 409 e desfaz a transação inteira (uso de promoção e de cupom, baixas
+anteriores); a cobrança Pix já criada é apagada, como em qualquer falha ao gravar. Linhas de
+tamanhos diferentes do mesmo produto somam (`demandaDeEstoque`). As linhas de `items` cujo
+produto voltou com número ganham `baixouEstoque: true` (`ItemDoPedido`, campo opcional no JSON
+do pedido, sem migration): é o que diz ao cancelamento o que devolver.
+
+Cancelamento: `mudar` é o único lugar que grava `CANCELADO` (com CAS em `updatedAt`), e o
+vencedor chama `devolverEstoque`, junto da devolução de promoções e de cupom: `updateMany` com
+`increment`, só das linhas com `baixouEstoque` e só do produto que ainda tem controle. A falha
+é registrada no log e não derruba o cancelamento.
+
+No `company-web`: o cartão "Estoque (opcional)" em `formulario-de-produto.tsx` e, em
+`produto-no-formulario.ts`, o par `estoque`/`estoqueOriginal` (o `stock` só vai no payload se o
+texto mudou); resumo e selos em `loja/produtos/page.tsx`. Na loja, `lib/loja-estoque.ts`
+(`unidadesQueAindaCabem`, `rotuloDeRestam`, `avisoDeEstoque`) alimenta `folha-do-produto.tsx`,
+`folha-da-sacola.tsx`, `loja-publica.tsx` e a `sacola.tsx` do checkout.
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { StoreCatalog, StoreProduct, StoreProductStatus } from '@motoboycity/types';
-import { storeProductIssues } from '@motoboycity/validation';
+import { LIMITE_DO_AVISO_DE_ESTOQUE, storeProductIssues } from '@motoboycity/validation';
 import { AlertTriangle, ArrowUpDown, ImageOff, Pencil, Plus, Search } from 'lucide-react';
 import {
   CHAVE_DO_CATALOGO,
@@ -34,6 +34,12 @@ function resumoDeOpcoes(produto: StoreProduct): string | null {
     partes.push(`${escolhas} ${escolhas === 1 ? 'escolha' : 'escolhas'}`);
   }
   return partes.length > 0 ? partes.join(' · ') : null;
+}
+
+/** "Estoque: 12", ou `null` quando o produto não controla estoque. */
+function resumoDoEstoque(produto: StoreProduct): string | null {
+  if (produto.stock === null) return null;
+  return produto.stock === 0 ? 'Estoque zerado' : `Estoque: ${produto.stock}`;
 }
 
 export default function LojaProdutosPage() {
@@ -323,11 +329,32 @@ export default function LojaProdutosPage() {
                       <Badge className={rotulo.classe} variant="secondary">
                         {rotulo.texto}
                       </Badge>
+                      {/* Sem estoque, o cliente vê "Esgotado" — mesmo com o produto no ar. */}
+                      {produto.stock === 0 && (
+                        <Badge
+                          className="bg-destructive-soft text-destructive-text"
+                          variant="secondary"
+                        >
+                          Esgotado
+                        </Badge>
+                      )}
+                      {produto.stock !== null &&
+                        produto.stock > 0 &&
+                        produto.stock <= LIMITE_DO_AVISO_DE_ESTOQUE && (
+                          <Badge
+                            className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                            variant="secondary"
+                          >
+                            Estoque baixo
+                          </Badge>
+                        )}
                     </div>
                     {/* A seção e as opções numa linha só: cada uma como etiqueta
                           própria pesava mais do que o nome do produto. */}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {[nomeDaCategoria ?? 'Sem categoria', opcoes].filter(Boolean).join(' · ')}
+                      {[nomeDaCategoria ?? 'Sem categoria', opcoes, resumoDoEstoque(produto)]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </p>
                     {produto.description && (
                       <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">

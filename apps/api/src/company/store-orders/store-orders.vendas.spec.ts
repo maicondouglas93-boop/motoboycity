@@ -123,6 +123,7 @@ describe('StoreOrdersService — Vendas', () => {
     companyAddress: { findFirst: jest.Mock };
     storePromotion: { updateMany: jest.Mock };
     storeCoupon: { updateMany: jest.Mock };
+    storeProduct: { updateMany: jest.Mock };
     storeCouponRedemption: { findUnique: jest.Mock; deleteMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -179,6 +180,7 @@ describe('StoreOrdersService — Vendas', () => {
       },
       storePromotion: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       storeCoupon: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      storeProduct: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       storeCouponRedemption: {
         findUnique: jest.fn().mockResolvedValue(null),
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -585,6 +587,89 @@ describe('StoreOrdersService — Vendas', () => {
       await service.cancelar(membro, 'pedido-1', 'de novo').catch(() => undefined);
 
       expect(prisma.storePromotion.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('o estoque no cancelamento', () => {
+    const item = (mudancas: object = {}) => ({
+      produtoId: 'p1',
+      nome: 'Açaí',
+      tamanho: '500ml',
+      escolhas: [],
+      quantidade: 2,
+      unitario: 20,
+      total: 40,
+      baixouEstoque: true,
+      ...mudancas,
+    });
+
+    it('o pedido cancelado devolve as unidades que baixou, somando as linhas do mesmo produto', async () => {
+      banco.pedido = linha({
+        items: [item(), item({ quantidade: 3 }), item({ produtoId: 'p2', quantidade: 1 })],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledTimes(2);
+      // Só o produto que ainda tem controle recebe (`stock: { not: null }`), e da empresa do pedido.
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p1', companyId: EMPRESA, stock: { not: null } },
+        data: { stock: { increment: 5 } },
+      });
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p2', companyId: EMPRESA, stock: { not: null } },
+        data: { stock: { increment: 1 } },
+      });
+    });
+
+    it('a linha que não baixou o estoque (o produto não tinha controle na compra) não devolve nada', async () => {
+      banco.pedido = linha({
+        items: [
+          item({ baixouEstoque: undefined }),
+          item({ produtoId: 'p2', baixouEstoque: false }),
+        ],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeProduct.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('se devolver o estoque falha, o cancelamento vale do mesmo jeito', async () => {
+      banco.pedido = linha({ items: [item()] });
+      prisma.storeProduct.updateMany.mockRejectedValue(new Error('banco fora'));
+
+      const cancelado = await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(cancelado.etapa).toBe('CANCELADO');
+    });
+
+    it('cancelar um pedido que já caiu não devolve de novo', async () => {
+      banco.pedido = linha({
+        stage: 'CANCELADO',
+        cancelReason: 'Item em falta',
+        cancelledBy: 'LOJA',
+        items: [item()],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'de novo').catch(() => undefined);
+
+      expect(prisma.storeProduct.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('o pedido que caiu pelo prazo do aceite também devolve', async () => {
+      banco.pedido = linha({
+        stage: 'NOVO',
+        acceptDeadline: new Date(AGORA.getTime() - 60_000),
+        items: [item()],
+      });
+
+      await service.vendas(membro);
+
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p1', companyId: EMPRESA, stock: { not: null } },
+        data: { stock: { increment: 2 } },
+      });
     });
   });
 

@@ -811,6 +811,30 @@ organização em `architecture.md` ("Cupons da loja online").
 - **Não conferido:** nada em produção; o checkout logado com cupom de ponta a ponta no
   navegador (não há login de cliente local), e o painel de cupons no celular real.
 
+### Estoque opcional da loja online — 2026-09-30
+
+Pedido do usuário: "um campo opcional para informar estoque". Regras em `business-rules.md`
+("Loja online: estoque") e a organização em `architecture.md` ("Estoque da loja online").
+
+- **Onde está a decisão:** o que a página sabe do estoque, em
+  `packages/validation/src/company/store-stock.rules.ts` (com `store-stock.rules.spec.ts`); a
+  baixa que vale, em `gravarComNumero` (`store-orders.service.ts`); a devolução, em `mudar` →
+  `devolverEstoque`. A leitura de `conferirEstoque` só dá a recusa clara.
+- **Precisa de migration no deploy:** `20260930090000_produto_com_estoque` (a Render aplica ao
+  publicar). É aditiva: uma coluna, `store_products.stock`. O SQL que desfaz é
+  `ALTER TABLE "store_products" DROP COLUMN "stock";` (perde só os números de estoque).
+- **Cuidado com a API:** `stock` ausente no corpo do produto **deixa como está**; só `null` tira
+  o controle. O painel só manda o campo quando o texto mudou. Quem chamar a API direto precisa
+  saber disso, ou desfaz vendas sem querer.
+- **O número exato nunca vai à página pública** (`esgotado` e `restam` até 5). Se mexer em
+  `PublicStoreProduct`, mantenha assim.
+- **O que ficou de fora de propósito:** estoque por tamanho ou por opção do grupo; reserva
+  enquanto o pagamento está pendente; histórico de movimentação; pausar o produto sozinho
+  quando zera (ele fica "Esgotado" na página e o status não muda).
+- **Não conferido:** nada em produção; o checkout logado com estoque curto de ponta a ponta no
+  navegador (não há login de cliente local: o caminho foi coberto por E2E e por testes com a
+  API simulada); o painel no modo escuro e com toque de verdade no celular.
+
 ### Avisos com a página fechada (Web Push) — 2026-09-26
 
 Módulo `apps/api/src/web-push/` (envio com a biblioteca `web-push`, chaves

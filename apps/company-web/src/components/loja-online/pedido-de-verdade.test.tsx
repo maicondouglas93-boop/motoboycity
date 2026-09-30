@@ -485,6 +485,73 @@ describe('A área "Cupons" do checkout', () => {
   });
 });
 
+describe('Estoque na sacola', () => {
+  /** O açaí da sacola de teste (p1, tamanho t1), como a página sabe do estoque. */
+  const acai = (estoque: { esgotado?: boolean; restam?: number | null }) => ({
+    id: 'p1',
+    nome: 'Açaí',
+    descricao: '',
+    categoriaId: 'c1',
+    imagemUrl: null,
+    precoUnico: null,
+    situacao: 'publicado' as const,
+    tamanhos: [{ id: 't1', nome: '500ml', preco: 18, disponivel: true }],
+    grupos: [],
+    ...estoque,
+  });
+  const abrir = (estoque: { esgotado?: boolean; restam?: number | null }) =>
+    render(<Sacola slug={SLUG} cardapio={cardapio({ produtos: [acai(estoque)] })} />);
+
+  it('o produto que esgotou depois de entrar na sacola avisa, e não deixa aumentar', async () => {
+    abrir({ esgotado: true });
+
+    expect(
+      await screen.findByText('Açaí esgotou. Tire da sacola para continuar.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mais um Açaí' })).toBeDisabled();
+  });
+
+  it('a sacola com mais do que resta avisa quantas restam', async () => {
+    // A sacola de teste tem 2 unidades; restam 1.
+    abrir({ restam: 1 });
+
+    expect(
+      await screen.findByText('Só resta 1 unidade de Açaí. Diminua a quantidade.'),
+    ).toBeInTheDocument();
+  });
+
+  it('no limite do que resta, o "mais" trava, mas não há aviso: a sacola cabe', async () => {
+    abrir({ restam: 2 });
+
+    const mais = await screen.findByRole('button', { name: 'Mais um Açaí' });
+    expect(mais).toBeDisabled();
+    expect(screen.queryByText(/Só restam?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/esgotou/)).not.toBeInTheDocument();
+  });
+
+  it('sem controle de estoque, nada muda: dá para aumentar, e não há aviso', async () => {
+    abrir({});
+
+    expect(await screen.findByRole('button', { name: 'Mais um Açaí' })).toBeEnabled();
+    expect(screen.queryByText(/esgotou|Só restam?/)).not.toBeInTheDocument();
+  });
+
+  it('o servidor recusa o pedido por falta de estoque: a frase dele aparece', async () => {
+    mocks.checkout.mockRejectedValue(
+      new ApiError(409, {
+        message: 'Só restam 1 unidades de Açaí. Diminua a quantidade na sacola.',
+        code: 'STORE_ORDER_OUT_OF_STOCK',
+      }),
+    );
+    abrir({});
+
+    fireEvent.click(await screen.findByRole('button', { name: /Fazer pedido/ }));
+
+    expect(await screen.findByText(/Diminua a quantidade na sacola/)).toBeInTheDocument();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+});
+
 describe('Sacola da loja de verdade', () => {
   it('manda o pedido à API com os ids e o total visto, e abre "Meus pedidos"', async () => {
     mocks.checkout.mockResolvedValue({ numero: 7 } as PedidoDaLoja);

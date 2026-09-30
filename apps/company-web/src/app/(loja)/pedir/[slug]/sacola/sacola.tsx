@@ -39,10 +39,12 @@ import { publicStoreOrdersApi } from '@/lib/api-client';
 import { tokenDoCliente } from '@/lib/firebase-da-loja';
 import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { acertarRelogio, useAgora } from '@/lib/relogio';
+import { avisoDeEstoque, unidadesNaSacola, unidadesQueAindaCabem } from '@/lib/loja-estoque';
 import { cupomNaSacola, precificarSacola } from '@/lib/loja-promocoes';
 import { EsqueletoDoCheckout } from '@/components/loja-online/esqueleto-do-checkout';
 import { moeda, paletaDoTema, textoSobre } from '@/components/loja-online/paleta';
 import { SeloDePromocao } from '@/components/loja-online/selo-de-promocao';
+import type { ItemEscolhido } from '@/components/loja-online/folha-do-produto';
 import { CupomDoCheckout } from '@/components/loja-online/cupom-do-checkout';
 import {
   ajustarQuantidade,
@@ -446,6 +448,12 @@ function Conteudo({
     setItens((atual) => ajustarQuantidade(atual, indice, passo));
   }
 
+  // O estoque curto: o produto que a página sabe que tem poucas unidades não passa do que resta,
+  // e o que esgotou depois de entrar na sacola avisa. O servidor confere de qualquer jeito.
+  const produtoPorId = new Map(cardapio.produtos.map((produto) => [produto.id, produto]));
+  const podeAumentar = (item: ItemEscolhido) =>
+    unidadesQueAindaCabem(produtoPorId.get(item.produtoId), itens, item.produtoId) !== 0;
+
   function confirmar() {
     if (usuarioId === null) return;
 
@@ -684,6 +692,17 @@ function Conteudo({
                         {item.escolhas.join(', ')}
                       </p>
                     )}
+                    {avisoDeEstoque(
+                      produtoPorId.get(item.produtoId),
+                      unidadesNaSacola(itens, item.produtoId),
+                    ) && (
+                      <p className="mt-1 text-sm font-medium" style={{ color: paleta.erro }}>
+                        {avisoDeEstoque(
+                          produtoPorId.get(item.produtoId),
+                          unidadesNaSacola(itens, item.produtoId),
+                        )}
+                      </p>
+                    )}
                     <p className="mt-1 text-base font-semibold tabular-nums">
                       {sacola.linhas[indice]?.promocao && (
                         <s className="mr-1.5 text-sm font-normal" style={{ color: paleta.suave }}>
@@ -724,8 +743,9 @@ function Conteudo({
                     <button
                       type="button"
                       aria-label={`Mais um ${item.nome}`}
+                      disabled={!podeAumentar(item)}
                       onClick={() => alterarQuantidade(indice, 1)}
-                      className={`${estilos['foco']} flex size-10 items-center justify-center rounded-lg`}
+                      className={`${estilos['foco']} flex size-10 items-center justify-center rounded-lg disabled:opacity-40`}
                     >
                       <Plus className="size-4" />
                     </button>

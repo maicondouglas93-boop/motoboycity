@@ -20,6 +20,7 @@ function produto(id: string, categoryId: string | null, extra: Partial<StoreProd
     imageUrl: null,
     price: 10,
     status: 'DRAFT',
+    stock: null,
     sizes: [],
     optionGroups: [],
     updatedAt: '2026-09-25T12:00:00.000Z',
