@@ -75,6 +75,8 @@ export function precificarSacola(
       quantidade: item.quantidade,
       baseCentavos: base,
       adicionaisCentavos: unitario - base,
+      // O preço do combo já é o especial: promoção nenhuma age sobre ele (nem o cupom acumula).
+      combo: Boolean(produto?.combo),
     };
   });
 
@@ -152,6 +154,8 @@ export interface OfertaNaVitrine {
 /** O que a vitrine precisa do produto: o painel também a usa, na prévia da promoção. */
 export type ProdutoNaVitrine = Pick<ProdutoDeExemplo, 'id' | 'categoriaId' | 'precoUnico'> & {
   tamanhos: Array<{ preco: number }>;
+  /** O combo não tem oferta: o preço dele já é o especial. */
+  combo?: unknown;
 };
 
 /** O "De / Por" de um produto na lista do cardápio; `null` quando não há oferta. */
@@ -160,13 +164,18 @@ export function ofertaNaVitrine(
   promocoes: PromocaoPublica[],
   agora: number | null,
 ): OfertaNaVitrine | null {
-  if (agora === null || promocoes.length === 0) return null;
+  if (agora === null || promocoes.length === 0 || produto.combo) return null;
   const menorPreco =
     produto.tamanhos.length > 0
       ? Math.min(...produto.tamanhos.map((tamanho) => tamanho.preco))
       : (produto.precoUnico ?? 0);
   const base = emCentavos(menorPreco);
-  const oferta = ofertaDoProduto(produto, base, promocoes, new Date(agora));
+  const oferta = ofertaDoProduto(
+    { id: produto.id, categoriaId: produto.categoriaId },
+    base,
+    promocoes,
+    new Date(agora),
+  );
   if (!oferta) return null;
   const desconto = oferta.descontoPorUnidade(base);
   if (desconto <= 0) return { rotulo: oferta.rotulo, de: null, por: null };

@@ -657,6 +657,61 @@ describe('StoreOrdersService — Vendas', () => {
       expect(prisma.storeProduct.updateMany).not.toHaveBeenCalled();
     });
 
+    it('o combo cancelado devolve cada produto que levava, vezes os combos pedidos', async () => {
+      banco.pedido = linha({
+        items: [
+          item({
+            produtoId: 'cb1',
+            nome: 'Combo Açaí + Suco',
+            quantidade: 3,
+            baixouEstoque: undefined,
+            combo: [
+              {
+                produtoId: 'p1',
+                nome: 'Açaí',
+                tamanho: '500ml',
+                quantidade: 1,
+                baixouEstoque: true,
+              },
+              { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2, baixouEstoque: true },
+            ],
+          }),
+        ],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledTimes(2);
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p1', companyId: EMPRESA, stock: { not: null } },
+        data: { stock: { increment: 3 } },
+      });
+      expect(prisma.storeProduct.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p2', companyId: EMPRESA, stock: { not: null } },
+        data: { stock: { increment: 6 } },
+      });
+    });
+
+    it('do combo, só o produto que tinha controle na compra volta', async () => {
+      banco.pedido = linha({
+        items: [
+          item({
+            produtoId: 'cb1',
+            baixouEstoque: undefined,
+            combo: [
+              { produtoId: 'p1', nome: 'Açaí', tamanho: null, quantidade: 1, baixouEstoque: true },
+              { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2 },
+            ],
+          }),
+        ],
+      });
+
+      await service.cancelar(membro, 'pedido-1', 'Item em falta');
+
+      const devolvidos = prisma.storeProduct.updateMany.mock.calls.map(([arg]) => arg.where.id);
+      expect(devolvidos).toEqual(['p1']);
+    });
+
     it('o pedido que caiu pelo prazo do aceite também devolve', async () => {
       banco.pedido = linha({
         stage: 'NOVO',

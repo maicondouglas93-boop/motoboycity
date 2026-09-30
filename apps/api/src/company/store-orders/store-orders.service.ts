@@ -115,11 +115,51 @@ function semEstoque(nome: string, restam: number, produtoId: string): ConflictEx
   });
 }
 
-/** Quantas unidades de cada produto o pedido leva, somando as linhas (tamanhos diferentes dividem o estoque). */
+/**
+ * Falta estoque de um produto do pedido, dito do jeito que o cliente entende: se o produto está
+ * na sacola por um combo, é o combo que esgotou ou não cabe na quantidade pedida — o cliente não
+ * vê "Batata M" na sacola, vê "Combo X-Burger". O `produtoId` do erro é o da linha da sacola.
+ */
+function semEstoqueNoPedido(
+  itens: ItemDoPedido[],
+  produtoId: string,
+  nome: string,
+  restam: number,
+): ConflictException {
+  for (const item of itens) {
+    const doCombo = item.combo?.find((componente) => componente.produtoId === produtoId);
+    if (!doCombo) continue;
+    const cabem = Math.max(Math.floor(restam / doCombo.quantidade), 0);
+    return new ConflictException({
+      message:
+        cabem <= 0
+          ? `${item.nome} esgotou: ${nome} acabou. Tire da sacola e peça de novo.`
+          : `Só ${cabem === 1 ? 'dá para levar 1 unidade' : `dá para levar ${cabem} unidades`} de ${item.nome}, por causa do estoque de ${nome}. Diminua a quantidade na sacola.`,
+      code: 'STORE_ORDER_OUT_OF_STOCK',
+      produtoId: item.produtoId,
+      restam: cabem,
+    });
+  }
+  return semEstoque(nome, restam, produtoId);
+}
+
+/**
+ * Quantas unidades de cada produto o pedido leva, somando as linhas (tamanhos diferentes dividem
+ * o estoque). A linha de um combo leva os produtos dele: cada um, vezes os combos pedidos — o
+ * combo em si não tem estoque.
+ */
 function demandaDeEstoque(itens: ItemDoPedido[]): Map<string, number> {
   const demanda = new Map<string, number>();
+  const somar = (produtoId: string, quantidade: number) =>
+    demanda.set(produtoId, (demanda.get(produtoId) ?? 0) + quantidade);
   for (const item of itens) {
-    demanda.set(item.produtoId, (demanda.get(item.produtoId) ?? 0) + item.quantidade);
+    if (item.combo) {
+      for (const componente of item.combo) {
+        somar(componente.produtoId, componente.quantidade * item.quantidade);
+      }
+    } else {
+      somar(item.produtoId, item.quantidade);
+    }
   }
   return demanda;
 }
@@ -234,6 +274,19 @@ function precificar(item: ItemPedido, produto: PublicStoreProduct | undefined): 
       tamanho,
       escolhas: nomes,
       grupos,
+      // O combo leva o que levava na hora da compra: mudar o combo depois não muda este pedido.
+      ...(produto.combo
+        ? {
+            combo: produto.combo.itens.map(
+              ({ produtoId, nome, tamanho: doTamanho, quantidade }) => ({
+                produtoId,
+                nome,
+                tamanho: doTamanho,
+                quantidade,
+              }),
+            ),
+          }
+        : {}),
       quantidade: item.quantidade,
       unitario: reais(unitario),
       total: reais(unitario * item.quantidade),
@@ -588,7 +641,7 @@ export class StoreOrdersService {
     // O estoque, antes de qualquer cobrança ou cupom: quem pede o que não tem ouve isso primeiro.
     // Esta leitura só dá a recusa clara; a baixa de verdade é atômica, na transação do pedido.
     const estoqueDoPedido = demandaDeEstoque(itens);
-    await this.conferirEstoque(companyId, estoqueDoPedido);
+    await this.conferirEstoque(companyId, estoqueDoPedido, itens);
 
     const minimo = pedidoMinimoDa(operacao, pedido.modalidade);
     if (minimo !== null && subtotal < centavos(minimo)) {
@@ -857,6 +910,8 @@ export class StoreOrdersService {
         quantidade: linha.item.quantidade,
         baseCentavos: linha.baseCentavos,
         adicionaisCentavos: linha.adicionaisCentavos,
+        // O preço do combo já é o especial: nenhuma promoção age sobre ele.
+        combo: linha.item.combo !== undefined,
       })),
       promocoes,
       agora,
@@ -887,7 +942,11 @@ export class StoreOrdersService {
    * recusa clara: quem decide é a baixa atômica, na transação do pedido — entre esta leitura
    * e ela, outro pedido pode ter levado as unidades.
    */
-  private async conferirEstoque(companyId: string, demanda: Map<string, number>): Promise<void> {
+  private async conferirEstoque(
+    companyId: string,
+    demanda: Map<string, number>,
+    itens: ItemDoPedido[],
+  ): Promise<void> {
     const produtos = await this.prisma.storeProduct.findMany({
       where: { companyId, id: { in: [...demanda.keys()] } },
       select: { id: true, name: true, stock: true },
@@ -895,7 +954,7 @@ export class StoreOrdersService {
     for (const produto of produtos) {
       const pedidas = demanda.get(produto.id) ?? 0;
       if (produto.stock !== null && produto.stock < pedidas) {
-        throw semEstoque(produto.name, produto.stock, produto.id);
+        throw semEstoqueNoPedido(itens, produto.id, produto.name, produto.stock);
       }
     }
   }
@@ -1878,9 +1937,14 @@ export class StoreOrdersService {
    */
   private async devolverEstoque(linha: StoreOrder): Promise<void> {
     const devolver = new Map<string, number>();
+    const somar = (produtoId: string, quantidade: number) =>
+      devolver.set(produtoId, (devolver.get(produtoId) ?? 0) + quantidade);
     for (const item of linha.items as unknown as ItemDoPedido[]) {
-      if (item.baixouEstoque) {
-        devolver.set(item.produtoId, (devolver.get(item.produtoId) ?? 0) + item.quantidade);
+      if (item.baixouEstoque) somar(item.produtoId, item.quantidade);
+      // No combo, cada produto que ele levava tem o seu sinal: o que não tinha controle não devolve.
+      for (const componente of item.combo ?? []) {
+        if (componente.baixouEstoque)
+          somar(componente.produtoId, componente.quantidade * item.quantidade);
       }
     }
     if (devolver.size === 0) return;
@@ -2041,7 +2105,12 @@ export class StoreOrdersService {
                 where: { id: produtoId, companyId },
                 select: { name: true, stock: true },
               });
-              throw semEstoque(atual?.name ?? 'Um item do pedido', atual?.stock ?? 0, produtoId);
+              throw semEstoqueNoPedido(
+                dados.items as unknown as ItemDoPedido[],
+                produtoId,
+                atual?.name ?? 'Um item do pedido',
+                atual?.stock ?? 0,
+              );
             }
             if (linhas[0]!.stock !== null) baixados.add(produtoId);
           }
@@ -2050,7 +2119,18 @@ export class StoreOrdersService {
               ? {}
               : {
                   items: (dados.items as unknown as ItemDoPedido[]).map((item) =>
-                    baixados.has(item.produtoId) ? { ...item, baixouEstoque: true } : item,
+                    item.combo
+                      ? {
+                          ...item,
+                          combo: item.combo.map((componente) =>
+                            baixados.has(componente.produtoId)
+                              ? { ...componente, baixouEstoque: true }
+                              : componente,
+                          ),
+                        }
+                      : baixados.has(item.produtoId)
+                        ? { ...item, baixouEstoque: true }
+                        : item,
                   ) as unknown as Prisma.InputJsonValue,
                 };
 

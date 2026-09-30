@@ -21,6 +21,8 @@ const ACAI: PublicStoreProduct = {
   price: null,
   esgotado: false,
   restam: null,
+  kind: 'PRODUCT',
+  combo: null,
   sizes: [{ id: 't1', name: '500ml', price: 18.5, available: true }],
   optionGroups: [
     {
@@ -154,5 +156,36 @@ describe('a loja pelo link', () => {
         },
       ],
     });
+  });
+});
+
+describe('produtoDaVitrine — combo', () => {
+  const COMBO_DA_API: PublicStoreProduct = {
+    ...ACAI,
+    id: 'cb1',
+    kind: 'COMBO',
+    name: 'Combo Açaí',
+    price: 30,
+    sizes: [],
+    optionGroups: [],
+    combo: {
+      itens: [{ produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 2 }],
+      valorSeparado: 37,
+    },
+  };
+
+  it('o combo leva o que ele inclui e o valor dos itens separados para a página', () => {
+    expect(produtoDaVitrine(COMBO_DA_API)).toMatchObject({
+      id: 'cb1',
+      precoUnico: 30,
+      combo: {
+        itens: [{ produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 2 }],
+        valorSeparado: 37,
+      },
+    });
+  });
+
+  it('o produto comum continua sem `combo`', () => {
+    expect(produtoDaVitrine(ACAI)).not.toHaveProperty('combo');
   });
 });

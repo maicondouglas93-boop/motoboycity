@@ -103,6 +103,7 @@ export function produtoDaVitrine(produto: PublicStoreProduct): ProdutoDeExemplo 
     situacao: 'publicado',
     esgotado: produto.esgotado,
     restam: produto.restam,
+    ...(produto.combo ? { combo: produto.combo } : {}),
     tamanhos: produto.sizes.map((tamanho) => ({
       id: tamanho.id,
       nome: tamanho.name,

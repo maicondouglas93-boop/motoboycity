@@ -31,6 +31,8 @@ function produto(id: string, categoryId: string | null): StoreProduct {
     price: 10,
     status: 'PUBLISHED',
     stock: null,
+    kind: 'PRODUCT',
+    comboItems: [],
     sizes: [],
     optionGroups: [],
     updatedAt: '2026-09-25T12:00:00.000Z',

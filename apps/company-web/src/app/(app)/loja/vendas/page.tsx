@@ -32,6 +32,7 @@ import { companyStoreSettingsApi } from '@/lib/api-client';
 import { useSomLiberado } from '@/lib/avisos-do-navegador';
 import { CONTA_DISPONIVEL } from '@/lib/conta-da-loja';
 import { hora, momentoNaLoja, rotuloDoDia } from '@/lib/loja-horario';
+import { descricaoDoCombo } from '@/lib/loja-combo';
 import { enderecoEmLinha } from '@/lib/loja-mock';
 import { session } from '@/lib/session';
 import {
@@ -888,6 +889,11 @@ function CartaoDaVenda({
                       {item.quantidade}× {item.nome}
                       {item.tamanho && ` — ${item.tamanho}`}
                     </span>
+                    {item.combo && item.combo.length > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        Leva: {descricaoDoCombo(item.combo)}
+                      </span>
+                    )}
                     {item.escolhas.length > 0 && (
                       <span className="block text-xs text-muted-foreground">
                         {item.escolhas.join(' · ')}

@@ -250,3 +250,89 @@ describe('cupomNaSacola', () => {
     expect(cupomNaSacola(semHora, cupom()).desconto).toBe(4.22);
   });
 });
+
+describe('o combo na sacola e na vitrine', () => {
+  const COMBO: ProdutoDeExemplo = {
+    ...SUCO,
+    id: 'cb1',
+    nome: 'Combo Açaí + Suco',
+    categoriaId: 'c1',
+    precoUnico: 30,
+    combo: {
+      itens: [
+        { produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 1 },
+        { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 1 },
+      ],
+      valorSeparado: 28,
+    },
+  };
+  const combo = (quantidade: number): ItemEscolhido => ({
+    produtoId: 'cb1',
+    nome: 'Combo Açaí + Suco',
+    tamanho: null,
+    escolhas: [],
+    quantidade,
+    unitario: 30,
+  });
+  const deSecao = promocao({
+    alvo: 'CATEGORIA',
+    produtoId: null,
+    categoriaId: 'c1',
+    percentual: 50,
+  });
+
+  it('a promoção da seção baixa o açaí e deixa o combo da mesma seção pelo preço dele', () => {
+    const sacola = precificarSacola([acai(1), combo(1)], [ACAI, COMBO], [deSecao], AGORA);
+
+    // O açaí (18 + 3,10) cai pela metade só no preço do produto; o combo fica em 30,00.
+    expect(sacola.linhas[0]?.promocao).not.toBeNull();
+    expect(sacola.linhas[1]).toEqual({ original: 30, total: 30, promocao: null });
+    expect(sacola.subtotal).toBe(12.1 + 30);
+  });
+
+  it('o cupom comum não desconta o combo, mas desconta o produto avulso', () => {
+    const cupom: CupomPublico = {
+      codigo: 'BEMVINDO10',
+      tipo: 'PERCENTUAL',
+      percentual: 10,
+      valor: null,
+      pedidoMinimo: null,
+      descontoMaximo: null,
+      valeEmPromocao: false,
+      produtoIds: [],
+      categoriaIds: [],
+    };
+
+    const soCombo = cupomNaSacola(precificarSacola([combo(1)], [COMBO], [], AGORA), cupom);
+    expect(soCombo.desconto).toBe(0);
+    expect(soCombo.recusa).toContain('já estão em promoção');
+
+    const comSuco = cupomNaSacola(
+      precificarSacola(
+        [
+          combo(1),
+          {
+            ...acai(1),
+            produtoId: 'p2',
+            nome: 'Suco',
+            tamanho: null,
+            tamanhoId: null,
+            escolhas: [],
+            unitario: 10,
+          },
+        ],
+        [COMBO, SUCO],
+        [],
+        AGORA,
+      ),
+      cupom,
+    );
+    // 10% só do suco (10,00): o combo de 30,00 fica de fora.
+    expect(comSuco.desconto).toBe(1);
+  });
+
+  it('o combo não tem "De / Por" na vitrine, ainda que a seção dele esteja em promoção', () => {
+    expect(ofertaNaVitrine(ACAI, [deSecao], AGORA)).not.toBeNull();
+    expect(ofertaNaVitrine(COMBO, [deSecao], AGORA)).toBeNull();
+  });
+});

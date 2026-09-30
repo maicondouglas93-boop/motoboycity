@@ -23,6 +23,8 @@ const ACAI: StoreProduct = {
   price: null,
   status: 'PUBLISHED',
   stock: null,
+  kind: 'PRODUCT',
+  comboItems: [],
   sizes: [
     { id: '33333333-3333-4333-8333-333333333331', name: '300ml', price: 12, available: true },
     { id: '33333333-3333-4333-8333-333333333332', name: '500ml', price: 18.5, available: false },
@@ -344,5 +346,188 @@ describe('saidasDoFormulario', () => {
         erros: ['Estoque: o valor passa do máximo, 999.999.'],
       });
     });
+  });
+});
+
+describe('combo no formulário', () => {
+  const BURGER: StoreProduct = {
+    ...ACAI,
+    id: '66666666-6666-4666-8666-666666666661',
+    name: 'X-Burger',
+    price: 22,
+    sizes: [],
+    optionGroups: [],
+  };
+  // O açaí do teste tem dois tamanhos: o primeiro disponível, o segundo não.
+  const [TAMANHO_A] = ACAI.sizes;
+  const CATALOGO = [BURGER, ACAI];
+
+  const combo = (mudancas: Partial<ProdutoNoFormulario> = {}): ProdutoNoFormulario => ({
+    ...produtoParaFormulario(undefined, 'COMBO'),
+    nome: 'Combo X',
+    precoUnico: '30,00',
+    itensDoCombo: [
+      { chave: 'a', produtoId: BURGER.id, tamanhoId: '', quantidade: '1' },
+      { chave: 'b', produtoId: ACAI.id, tamanhoId: TAMANHO_A!.id, quantidade: '2' },
+    ],
+    ...mudancas,
+  });
+
+  it('o combo novo nasce do tipo escolhido, sem itens', () => {
+    expect(produtoParaFormulario(undefined, 'COMBO')).toMatchObject({
+      tipo: 'COMBO',
+      itensDoCombo: [],
+    });
+    expect(produtoParaFormulario()).toMatchObject({ tipo: 'PRODUCT', itensDoCombo: [] });
+  });
+
+  it('o combo salvo volta para o formulário com o que leva; o tipo é o do produto', () => {
+    const salvo: StoreProduct = {
+      ...BURGER,
+      id: '77777777-7777-4777-8777-777777777777',
+      kind: 'COMBO',
+      comboItems: [{ productId: ACAI.id, sizeId: TAMANHO_A!.id, quantity: 2 }],
+    };
+
+    expect(produtoParaFormulario(salvo)).toMatchObject({
+      tipo: 'COMBO',
+      itensDoCombo: [{ produtoId: ACAI.id, tamanhoId: TAMANHO_A!.id, quantidade: '2' }],
+    });
+    // Quem edita não escolhe o tipo: vale o do produto.
+    expect(produtoParaFormulario(salvo, 'PRODUCT').tipo).toBe('COMBO');
+  });
+
+  it('monta o combo para a API: tipo, itens na ordem, preço do combo, sem tamanhos e sem estoque', () => {
+    const montagem = montarPayload(combo(), 'PUBLISHED', CATALOGO);
+
+    expect(montagem).toEqual({
+      ok: true,
+      payload: {
+        kind: 'COMBO',
+        comboItems: [
+          { productId: BURGER.id, sizeId: null, quantity: 1 },
+          { productId: ACAI.id, sizeId: TAMANHO_A!.id, quantity: 2 },
+        ],
+        categoryId: null,
+        name: 'Combo X',
+        description: '',
+        price: 30,
+        status: 'PUBLISHED',
+        sizes: [],
+        optionGroups: [],
+      },
+    });
+    // E é o que a API aceita.
+    if (montagem.ok)
+      expect(upsertStoreProductSchema.safeParse(montagem.payload).success).toBe(true);
+  });
+
+  it('tamanhos e estoque digitados antes de virar combo não vão junto', () => {
+    const suja = combo({
+      estoque: '40',
+      tamanhos: [{ chave: 't', nome: 'G', preco: '10,00', disponivel: true }],
+    });
+
+    const montagem = montarPayload(suja, 'DRAFT', CATALOGO);
+
+    expect(montagem.ok).toBe(true);
+    if (montagem.ok) {
+      expect(montagem.payload).not.toHaveProperty('stock');
+      expect(montagem.payload.sizes).toEqual([]);
+      expect(montagem.payload.price).toBe(30);
+    }
+  });
+
+  it('a linha sem produto, a que se clicou em "adicionar" e não preencheu, não vai', () => {
+    const montagem = montarPayload(
+      combo({
+        itensDoCombo: [
+          { chave: 'a', produtoId: BURGER.id, tamanhoId: '', quantidade: '1' },
+          { chave: 'b', produtoId: '', tamanhoId: '', quantidade: '1' },
+        ],
+      }),
+      'DRAFT',
+      CATALOGO,
+    );
+
+    expect(montagem.ok && montagem.payload.comboItems).toEqual([
+      { productId: BURGER.id, sizeId: null, quantity: 1 },
+    ]);
+  });
+
+  it('o que impede de salvar: quantidade que não é inteiro de 1 a 20, tamanho faltando, produto que sumiu', () => {
+    const quantidade = (texto: string) =>
+      montarPayload(
+        combo({
+          itensDoCombo: [{ chave: 'a', produtoId: BURGER.id, tamanhoId: '', quantidade: texto }],
+        }),
+        'DRAFT',
+        CATALOGO,
+      );
+    for (const invalida of ['', '0', 'dois', '2,5', '21']) {
+      const montagem = quantidade(invalida);
+      expect(montagem.ok).toBe(false);
+      if (!montagem.ok) {
+        expect(montagem.erros[0]).toContain(
+          'a quantidade de X-Burger é um número inteiro de 1 a 20',
+        );
+      }
+    }
+
+    const semTamanho = montarPayload(
+      combo({ itensDoCombo: [{ chave: 'a', produtoId: ACAI.id, tamanhoId: '', quantidade: '1' }] }),
+      'DRAFT',
+      CATALOGO,
+    );
+    expect(semTamanho).toMatchObject({ ok: false, erros: ['Escolha o tamanho de Açaí no combo.'] });
+
+    const sumiu = montarPayload(combo(), 'DRAFT', [BURGER]);
+    expect(sumiu).toMatchObject({
+      ok: false,
+      erros: ['Um produto do combo não está mais no cardápio. Tire-o da lista.'],
+    });
+  });
+
+  it('o combo pede nome e preço com a linguagem dele', () => {
+    const montagem = montarPayload(combo({ nome: ' ', precoUnico: 'muito' }), 'DRAFT', CATALOGO);
+
+    expect(montagem.ok).toBe(false);
+    if (!montagem.ok) {
+      expect(montagem.erros).toContain('Dê um nome ao combo.');
+      expect(montagem.erros[1]).toContain('Preço do combo: "muito" não é um valor');
+    }
+  });
+
+  it('rascunho sem itens se guarda: a pendência é de publicar, não de salvar', () => {
+    const montagem = montarPayload(combo({ itensDoCombo: [] }), 'DRAFT', CATALOGO);
+
+    expect(montagem.ok && montagem.payload.comboItems).toEqual([]);
+  });
+
+  it('as pendências do combo: sem itens, e item fora do ar', () => {
+    expect(
+      pendenciasDoFormulario(combo({ itensDoCombo: [] }), CATALOGO).filter((p) => p.blocking),
+    ).toContainEqual({
+      text: 'sem itens — o combo precisa levar pelo menos um produto',
+      blocking: true,
+    });
+
+    const pausado = [{ ...BURGER, status: 'PAUSED' as const }, ACAI];
+    expect(
+      pendenciasDoFormulario(combo(), pausado)
+        .filter((p) => p.blocking)
+        .map((p) => p.text),
+    ).toContain('"X-Burger" está pausado — o combo sai do ar enquanto isso');
+  });
+
+  it('com tudo à venda e categoria, o combo não tem o que impedir', () => {
+    const pronto = combo({ categoriaId: CATEGORIA });
+
+    expect(pendenciasDoFormulario(pronto, CATALOGO).filter((p) => p.blocking)).toEqual([]);
+  });
+
+  it('o botão de publicar diz "combo"', () => {
+    expect(saidasDoFormulario(undefined, false, 'combo')[0]?.texto).toBe('Publicar combo');
+    expect(saidasDoFormulario(undefined, false)[0]?.texto).toBe('Publicar produto');
   });
 });

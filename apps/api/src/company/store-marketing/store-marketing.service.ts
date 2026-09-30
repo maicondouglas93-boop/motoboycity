@@ -213,12 +213,19 @@ export class StoreMarketingService {
     }
     const produto = await this.prisma.storeProduct.findFirst({
       where: { id: payload.produtoId ?? '', companyId },
-      select: { price: true, sizes: { select: { id: true }, take: 1 } },
+      select: { kind: true, price: true, sizes: { select: { id: true }, take: 1 } },
     });
     if (!produto) {
       throw new ConflictException({
         message: 'Esse produto não existe mais. Escolha outro.',
         code: 'STORE_PROMOTION_TARGET_NOT_FOUND',
+      });
+    }
+    // O preço do combo já é o especial: promoção nele seria letra morta (o pedido a ignora).
+    if (produto.kind === 'COMBO') {
+      throw new ConflictException({
+        message: 'O combo já tem um preço especial e não entra em promoção. Escolha um produto.',
+        code: 'STORE_PROMOTION_TARGET_IS_COMBO',
       });
     }
     if (payload.tipo !== 'PRECO') return;

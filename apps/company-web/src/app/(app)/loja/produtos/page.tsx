@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { StoreCatalog, StoreProduct, StoreProductStatus } from '@motoboycity/types';
 import { LIMITE_DO_AVISO_DE_ESTOQUE, storeProductIssues } from '@motoboycity/validation';
 import { AlertTriangle, ArrowUpDown, ImageOff, Pencil, Plus, Search } from 'lucide-react';
+import { estoqueNaLista, produtoPorId, resumoDoCombo } from '@/components/loja/combo';
 import {
   CHAVE_DO_CATALOGO,
   SITUACOES,
@@ -36,10 +37,11 @@ function resumoDeOpcoes(produto: StoreProduct): string | null {
   return partes.length > 0 ? partes.join(' · ') : null;
 }
 
-/** "Estoque: 12", ou `null` quando o produto não controla estoque. */
-function resumoDoEstoque(produto: StoreProduct): string | null {
-  if (produto.stock === null) return null;
-  return produto.stock === 0 ? 'Estoque zerado' : `Estoque: ${produto.stock}`;
+/** "Estoque: 12", ou `null` quando o produto não controla estoque. No combo: quantos dá para montar. */
+function resumoDoEstoque(estoque: number | null, combo: boolean): string | null {
+  if (estoque === null) return null;
+  if (combo) return estoque === 0 ? 'Não dá para montar' : `Dá para montar ${estoque}`;
+  return estoque === 0 ? 'Estoque zerado' : `Estoque: ${estoque}`;
 }
 
 export default function LojaProdutosPage() {
@@ -77,18 +79,19 @@ export default function LojaProdutosPage() {
   const produtos = useMemo(() => catalogo.data?.products ?? [], [catalogo.data]);
   const categorias = useMemo(() => catalogo.data?.categories ?? [], [catalogo.data]);
 
-  const comPendencias = useMemo(
-    () =>
-      produtos.map((produto) => {
-        const pendencias = storeProductIssues(produto);
-        return {
-          produto,
-          bloqueiam: pendencias.filter((item) => item.blocking),
-          leves: pendencias.filter((item) => !item.blocking),
-        };
-      }),
-    [produtos],
-  );
+  const comPendencias = useMemo(() => {
+    // O combo é conferido pelo que leva: o produto pausado ou excluído o tira do ar.
+    const porId = produtoPorId(produtos);
+    return produtos.map((produto) => {
+      const pendencias = storeProductIssues(produto, porId);
+      return {
+        produto,
+        bloqueiam: pendencias.filter((item) => item.blocking),
+        leves: pendencias.filter((item) => !item.blocking),
+      };
+    });
+  }, [produtos]);
+  const porId = useMemo(() => produtoPorId(produtos), [produtos]);
 
   /**
    * O alarme conta só os PUBLICADOS que travam a venda.
@@ -142,13 +145,20 @@ export default function LojaProdutosPage() {
         <div>
           <h1>Produtos</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            O que sua loja vende. Um produto por item do cardápio — os tamanhos ficam dentro dele.
-            Os publicados aparecem na página da loja.
+            O que sua loja vende. Um produto por item do cardápio — os tamanhos ficam dentro dele —,
+            e combos, que juntam vários produtos por um preço só. Os publicados aparecem na página
+            da loja.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/loja/produtos/organizar" className={buttonVariants({ variant: 'outline' })}>
             <ArrowUpDown className="size-4" /> Organizar
+          </Link>
+          <Link
+            href="/loja/produtos/novo?tipo=combo"
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            <Plus className="size-4" /> Cadastrar combo
           </Link>
           <Link href="/loja/produtos/novo" className={buttonVariants()}>
             <Plus className="size-4" /> Cadastrar produto
@@ -300,6 +310,7 @@ export default function LojaProdutosPage() {
               const nomeDaCategoria =
                 categorias.find((item) => item.id === produto.categoryId)?.name ?? null;
               const mudando = situacao.isPending && situacao.variables?.id === produto.id;
+              const estoque = estoqueNaLista(produto, porId);
 
               return (
                 <div
@@ -329,8 +340,16 @@ export default function LojaProdutosPage() {
                       <Badge className={rotulo.classe} variant="secondary">
                         {rotulo.texto}
                       </Badge>
+                      {produto.kind === 'COMBO' && (
+                        <Badge
+                          className="bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200"
+                          variant="secondary"
+                        >
+                          Combo
+                        </Badge>
+                      )}
                       {/* Sem estoque, o cliente vê "Esgotado" — mesmo com o produto no ar. */}
-                      {produto.stock === 0 && (
+                      {estoque === 0 && (
                         <Badge
                           className="bg-destructive-soft text-destructive-text"
                           variant="secondary"
@@ -338,24 +357,31 @@ export default function LojaProdutosPage() {
                           Esgotado
                         </Badge>
                       )}
-                      {produto.stock !== null &&
-                        produto.stock > 0 &&
-                        produto.stock <= LIMITE_DO_AVISO_DE_ESTOQUE && (
-                          <Badge
-                            className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
-                            variant="secondary"
-                          >
-                            Estoque baixo
-                          </Badge>
-                        )}
+                      {estoque !== null && estoque > 0 && estoque <= LIMITE_DO_AVISO_DE_ESTOQUE && (
+                        <Badge
+                          className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                          variant="secondary"
+                        >
+                          Estoque baixo
+                        </Badge>
+                      )}
                     </div>
                     {/* A seção e as opções numa linha só: cada uma como etiqueta
                           própria pesava mais do que o nome do produto. */}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {[nomeDaCategoria ?? 'Sem categoria', opcoes, resumoDoEstoque(produto)]
+                      {[
+                        nomeDaCategoria ?? 'Sem categoria',
+                        opcoes,
+                        resumoDoEstoque(estoque, produto.kind === 'COMBO'),
+                      ]
                         .filter(Boolean)
                         .join(' · ')}
                     </p>
+                    {produto.kind === 'COMBO' && produto.comboItems.length > 0 && (
+                      <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">
+                        Leva: {resumoDoCombo(produto, porId)}
+                      </p>
+                    )}
                     {produto.description && (
                       <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
                         {produto.description}

@@ -21,6 +21,8 @@ function produto(extra: Partial<StoreProduct> & Pick<StoreProduct, 'id'>): Store
     price: 22,
     status: 'PUBLISHED',
     stock: null,
+    kind: 'PRODUCT',
+    comboItems: [],
     sizes: [],
     optionGroups: [],
     updatedAt: '2026-09-25T12:00:00.000Z',
@@ -133,5 +135,79 @@ describe('Produtos — estoque', () => {
     expect(await screen.findByText('Estoque baixo')).toBeInTheDocument();
     expect(screen.getAllByText('Estoque baixo')).toHaveLength(1);
     expect(screen.queryByText('Esgotado')).not.toBeInTheDocument();
+  });
+});
+
+describe('Produtos — combos', () => {
+  const BURGER = produto({ id: 'b1', name: 'X-Burger', stock: 6 });
+  const SUCO = produto({ id: 's1', name: 'Suco', price: 8, stock: 20 });
+  const combo = (mudancas: Partial<StoreProduct> = {}): StoreProduct =>
+    produto({
+      id: 'c1',
+      name: 'Combo Casal',
+      kind: 'COMBO',
+      price: 30,
+      comboItems: [
+        { productId: 'b1', sizeId: null, quantity: 2 },
+        { productId: 's1', sizeId: null, quantity: 1 },
+      ],
+      ...mudancas,
+    });
+
+  beforeEach(() => {
+    window.localStorage.setItem('motoboycity.accessToken', 'token');
+    mocks.catalog.mockReset();
+    mocks.updateProductStatus.mockReset();
+  });
+
+  it('o combo aparece com o selo, o preço dele e o que leva; e há atalho para cadastrar outro', async () => {
+    renderizar({ categories: [LANCHES], products: [BURGER, SUCO, combo()] });
+
+    expect(await screen.findByText('Combo Casal')).toBeInTheDocument();
+    expect(screen.getByText('Combo')).toBeInTheDocument();
+    expect(screen.getByText('Leva: 2× X-Burger, 1× Suco')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Cadastrar combo/ })).toHaveAttribute(
+      'href',
+      '/loja/produtos/novo?tipo=combo',
+    );
+    expect(screen.getByRole('link', { name: /Cadastrar produto/ })).toHaveAttribute(
+      'href',
+      '/loja/produtos/novo',
+    );
+  });
+
+  it('o estoque do combo é quantos dá para montar com o dos produtos que ele leva', async () => {
+    // 6 hambúrgueres, 2 por combo, dão 3 combos — e o suco (20) não limita.
+    renderizar({ categories: [LANCHES], products: [BURGER, SUCO, combo()] });
+
+    expect(await screen.findByText(/Dá para montar 3/)).toBeInTheDocument();
+    expect(screen.getByText('Estoque baixo')).toBeInTheDocument();
+  });
+
+  it('sem o que montar, o combo aparece como esgotado', async () => {
+    renderizar({
+      categories: [LANCHES],
+      products: [{ ...BURGER, stock: 1 }, SUCO, combo()],
+    });
+
+    expect(await screen.findByText(/Não dá para montar/)).toBeInTheDocument();
+    expect(screen.getAllByText('Esgotado')).toHaveLength(1);
+  });
+
+  it('item pausado tira o combo do ar: a lista diz qual, e conta como produto que não pode ser comprado', async () => {
+    renderizar({
+      categories: [LANCHES],
+      products: [{ ...BURGER, status: 'PAUSED' }, SUCO, combo({ status: 'PUBLISHED' })],
+    });
+
+    expect(await screen.findByText(/"X-Burger" está pausado/)).toBeInTheDocument();
+    expect(screen.getByText(/1 produto está no ar e não pode ser comprado/)).toBeInTheDocument();
+  });
+
+  it('o combo cujo item some do cardápio também aparece com o problema, e não quebra a lista', async () => {
+    renderizar({ categories: [LANCHES], products: [SUCO, combo({ status: 'PUBLISHED' })] });
+
+    expect(await screen.findByText('Leva: 2× (removido), 1× Suco')).toBeInTheDocument();
+    expect(screen.getByText(/foi removido do cardápio/)).toBeInTheDocument();
   });
 });

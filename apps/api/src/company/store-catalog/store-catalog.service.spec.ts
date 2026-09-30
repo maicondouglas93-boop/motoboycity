@@ -33,6 +33,8 @@ function produtoGravado(mudancas: Record<string, unknown> = {}) {
     price: null,
     status: 'DRAFT',
     stock: null,
+    kind: 'PRODUCT',
+    comboItems: [],
     position: 0,
     createdAt: new Date('2026-09-25T09:00:00Z'),
     updatedAt: new Date('2026-09-25T10:00:00Z'),

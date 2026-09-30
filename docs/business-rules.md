@@ -776,6 +776,50 @@ Pedido do usuário em 2026-09-30: "um campo opcional para informar estoque".
   pagamento está pendente (a baixa acontece quando o pedido é gravado, e o cancelamento a
   devolve); histórico de movimentação; pausar o produto sozinho quando zera.
 
+## Loja online: combos
+
+Pedido do usuário em 2026-09-30 ("faz o combo"), o último item da ordem que ele escolheu
+(promoções, cupons, destaques, combos).
+
+- um combo é um **produto que junta outros produtos da loja por um preço só** ("X-Burger +
+  batata + refri por R$ 38"). Cadastra-se em Produtos → "Cadastrar combo", aparece no cardápio
+  como um item comum, na seção que a loja escolher, e o cliente o pede pelo preço do combo;
+- o combo **leva produtos que já existem** no cardápio, de 1 a 12, cada um com uma quantidade
+  (de 1 a 20). O produto que tem tamanhos entra num **tamanho fixo**, escolhido no combo
+  ("Batata Grande"). **Não entram**: outro combo, e o produto que exige escolhas do cliente (o
+  ponto da carne, a fruta do açaí) — o cliente escolheria por cima, e o preço do combo não sabe
+  disso. O mesmo produto no mesmo tamanho não se repete: aumenta-se a quantidade;
+- o **preço é o do combo**, e a loja o define. O painel mostra quanto os itens custariam
+  separados e quanto o cliente economiza; a página mostra "Inclui: …", "Economize R$ X" (só se
+  o combo é mais barato que os itens separados) e a lista completa na folha do combo. O combo
+  não tem tamanhos;
+- o combo pode ter **grupos de escolhas próprios** ("o sabor do refrigerante"), como qualquer
+  produto: as escolhas somam ao preço do combo e **não mexem no estoque**;
+- **o estoque é o dos produtos que ele leva.** O combo não tem estoque próprio: cada combo
+  pedido baixa, de cada produto, a quantidade dele vezes os combos pedidos, e o cancelamento
+  devolve, uma vez (a mesma regra do estoque). Na página o combo fica **"Esgotado"** quando
+  falta algum item para montar um combo inteiro, e diz "Restam N" quando dá para montar poucos
+  (5 ou menos): o item que mais limita manda. O combo e o produto avulso do mesmo pedido
+  dividem o estoque do mesmo produto;
+- **sai do ar sozinho**: se um produto do combo for pausado, voltar a rascunho ou for
+  excluído, ou se o tamanho fixo acabar ou for removido, o combo **some da página** (o cliente
+  pediria um combo que a loja não consegue montar) e o painel diz qual item falta, na lista e no
+  formulário. Quando o produto volta, o combo volta sozinho. Excluir um produto que está em
+  combos avisa quais saem do ar. Publicar um combo (ou voltar a vendê-lo) com item fora do ar
+  é recusado;
+- **preço fechado: sem promoção, e o cupom não se soma.** Nenhuma promoção age no combo (nem a
+  da seção dele), e criar uma promoção sobre um combo é recusado. O cupom trata o combo como
+  item já em promoção: só desconta nele se a loja marcou o cupom para valer em promoção;
+- o **pedido guarda o que o combo levava** na hora da compra: mudar o combo depois não muda o
+  pedido. A comanda e Vendas listam o que cada combo leva ("Cada combo leva: …") e Meus
+  pedidos e a sacola mostram "Inclui: …";
+- o tipo **não muda depois de criado**: combo não vira produto, nem produto vira combo — cria-se
+  outro;
+- **fora de propósito:** o cliente montar o combo escolhendo entre produtos ("escolha 1 entre
+  3 lanches"); combo com tamanhos; desconto do combo em % (o preço é fixo); combo dentro de
+  combo; combo com horário ou validade próprios (ele vale enquanto está no ar: pausa-se quando
+  não valer).
+
 ## Loja online: avisos com a página fechada
 
 Desde 2026-09-26, pelo Web Push, em cada aparelho que ligar os avisos (o painel

@@ -552,7 +552,7 @@ Não quebra nada, mas quem marcar urgente aí vai achar que não funcionou.
 ## Loja online — telas dentro do painel
 
 O `company-web` tem a área `/loja`, com as telas Vendas, Produtos (mais
-Organizar, Cadastrar e Editar), Marketing (Promoções, Cupons e Destaques), Horários, Tipos de pedido, Notificações e
+Organizar, Cadastrar e Editar — produtos e combos), Marketing (Promoções, Cupons e Destaques), Horários, Tipos de pedido, Notificações e
 Configurações, e o status da loja no alto da barra lateral.
 
 **A aparência segue `docs/design-system.md`** (2026-09-29): cartão só com borda,
@@ -751,9 +751,9 @@ Quem mexer aqui precisa saber:
 
 ### Promoções da loja online — 2026-09-29
 
-Primeira parte do módulo Marketing (a segunda, Cupons, está logo abaixo; combos e
-destaques, na ordem que o usuário escolheu, ainda não existem). Regras em `business-rules.md` ("Loja online:
-promoções") e a organização em `architecture.md` ("Promoções da loja online").
+Primeira parte do módulo Marketing (Cupons e Destaques estão logo abaixo; os combos, na
+ordem que o usuário escolheu, vêm por último, em Produtos). Regras em `business-rules.md`
+("Loja online: promoções") e a organização em `architecture.md` ("Promoções da loja online").
 
 - **Onde está a conta:** `packages/validation/src/company/store-pricing.rules.ts`, e só
   ali. Nenhuma tela faz conta de desconto: `apps/company-web/src/lib/loja-promocoes.ts`
@@ -834,6 +834,37 @@ Pedido do usuário: "um campo opcional para informar estoque". Regras em `busine
 - **Não conferido:** nada em produção; o checkout logado com estoque curto de ponta a ponta no
   navegador (não há login de cliente local: o caminho foi coberto por E2E e por testes com a
   API simulada); o painel no modo escuro e com toque de verdade no celular.
+
+### Combos da loja online — 2026-09-30
+
+Pedido do usuário: "faz o combo". Regras em `business-rules.md` ("Loja online: combos") e a
+organização em `architecture.md` ("Combos da loja online").
+
+- **Onde está a decisão:** o que impede o combo de ir ao ar, em
+  `packages/validation/src/company/store-catalog.schema.ts` (`storeComboItemIssues`); as contas
+  (valor separado, economia, capacidade de estoque), em `store-combo.rules.ts`; o combo fora das
+  promoções e dos cupons, em `LinhaParaPrecificar.combo`. Testes em `store-combo.rules.spec.ts`,
+  `store-catalog.combo.spec.ts` e `test/store-combo.e2e-spec.ts`.
+- **Precisa de migration no deploy:** `20260930130000_combos` (a Render aplica ao publicar).
+  É aditiva: um enum, uma coluna com padrão (`kind`, `PRODUCT`) e uma tabela. O SQL que
+  desfaz apaga a FK, a coluna, a tabela e o enum — perde só os combos.
+- **`productId`/`sizeId` dos itens não têm FK:** um produto apagado ou pausado tira o combo da
+  página, e não o apaga. Se um dia se quiser bloquear a exclusão do produto que está em combo, é
+  aqui que se muda (e o painel já sabe quais combos levam o produto: `combosQueLevam`).
+- **O tipo não muda:** `kind` diferente do gravado é 409. O painel sempre manda o `kind` do
+  produto que edita — quem chamar a API direto e mandar um combo sem `kind: 'COMBO'` leva 409.
+- **O estoque do combo não existe:** `stock` de combo é sempre nulo; quem precisa do estoque dele
+  usa `estoqueDoCombo` sobre os produtos que ele leva. O pedido baixa cada produto (não o combo)
+  e o cancelamento devolve pelo sinal `combo[].baixouEstoque`.
+- **`ItemEscolhido.inclui`** é texto pronto, guardado com a sacola no aparelho do cliente: o
+  combo que mudou depois continua mostrando o texto de quando foi posto na sacola (o servidor
+  confere o preço e o estoque de qualquer jeito, e o pedido guarda o que o combo levava).
+- **O que ficou de fora de propósito:** o cliente escolher entre produtos dentro do combo; combo
+  com tamanhos ou desconto em %; combo dentro de combo; horário ou validade próprios do combo;
+  bloquear a exclusão do produto que está em combo.
+- **Não conferido:** nada em produção; o checkout logado com combo de ponta a ponta no navegador
+  (não há login de cliente local: coberto por E2E e por testes com a API simulada); o painel no
+  modo escuro; a comanda de combo impressa em papel.
 
 ### Avisos com a página fechada (Web Push) — 2026-09-26
 

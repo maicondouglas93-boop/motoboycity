@@ -1947,6 +1947,13 @@ enum StoreProductStatus {
   PAUSED
 }
 
+/// O que o item do cardápio é: um produto, ou um combo — vários produtos da loja por um preço
+/// só ("X-Burger + batata + refri"). Quem cria escolhe uma vez, e não muda depois.
+enum StoreProductKind {
+  PRODUCT
+  COMBO
+}
+
 /// Seção do cardápio: "Açaí", "Lanches", "Bebidas".
 model StoreCategory {
   id        String @id @default(uuid())
@@ -1989,6 +1996,9 @@ model StoreProduct {
   /// baixa a quantidade pedida, o pedido cancelado devolve, e em zero o produto fica
   /// "esgotado" na página — sem mudar o `status`, que é escolha da loja.
   stock               Int?
+  /// `COMBO`: o preço é o do combo, não tem tamanhos nem estoque próprio (o que ele tem é o
+  /// dos produtos que o compõem, em `comboItems`), e não recebe promoção.
+  kind                StoreProductKind   @default(PRODUCT)
   /// Ordem dentro da seção — ou entre os produtos sem seção.
   position            Int
 
@@ -1997,6 +2007,8 @@ model StoreProduct {
   sizes        StoreProductSize[]
   optionGroups StoreOptionGroup[]
   promotions   StorePromotion[]
+  /// Só no combo: os produtos que ele leva, na ordem.
+  comboItems   StoreComboItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2004,6 +2016,26 @@ model StoreProduct {
   @@index([companyId, categoryId, position])
   @@index([companyId, status])
   @@map("store_products")
+}
+
+/// Um produto que o combo leva, e quantas unidades. `productId` e `sizeId` NÃO têm chave
+/// estrangeira, de propósito (como os produtos dos destaques): apagar o produto não apaga o
+/// combo, que sai do ar até a loja consertar — e o painel diz qual item falta. Quem grava
+/// confere que o produto é da mesma empresa e que o tamanho é dele.
+model StoreComboItem {
+  id        String  @id @default(uuid())
+  comboId   String
+  productId String
+  /// O tamanho fixo do produto que tem tamanhos. Nulo no produto de um preço só.
+  sizeId    String?
+  quantity  Int
+  position  Int
+
+  combo StoreProduct @relation(fields: [comboId], references: [id], onDelete: Cascade)
+
+  @@index([comboId, position])
+  @@index([productId])
+  @@map("store_combo_items")
 }
 
 /// Tamanho do produto, com o preço CHEIO naquele tamanho — e não o acréscimo

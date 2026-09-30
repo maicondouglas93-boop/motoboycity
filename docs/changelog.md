@@ -17342,3 +17342,74 @@ simulada); o painel no modo escuro. Limites conhecidos: com mais de 5 unidades a
 sabe o número, então a sacola pode passar do estoque e o cliente só ouve isso ao pedir; e o
 estoque devolvido no cancelamento soma ao número atual, sem olhar se o lojista o repôs à mão no
 meio.
+
+## 2026-09-30 — Loja online: combos
+
+**Pedido do usuário:** "faz o combo" (o último item da ordem que ele escolheu: promoções, cupons,
+destaques, combos). O usuário também pediu, na mesma hora, o commit e o deploy.
+
+**Decisão:** o combo é um **produto do tipo `COMBO`** que junta outros produtos da loja por um preço
+só. Ele reaproveita o que o produto já tem (seção, foto, status, ordem, destaques, grupos de
+escolhas) em vez de virar uma segunda coisa a cadastrar, ordenar e publicar.
+
+- **O que leva:** de 1 a 12 produtos que já existem, com quantidade de 1 a 20; o produto com
+  tamanhos entra num tamanho fixo. Não entram outro combo nem produto que exige escolhas do
+  cliente (não há como fixá-las). Sem tamanhos e sem estoque próprio; o preço é o do combo.
+- **O estoque é o dos produtos que ele leva:** cada combo pedido baixa a quantidade de cada
+  produto vezes os combos pedidos (a mesma baixa atômica do estoque, em ordem de id), e o
+  cancelamento devolve pelo sinal `combo[].baixouEstoque`, uma vez. Na página o combo fica
+  "Esgotado" quando falta item para montar um combo inteiro, e diz "Restam N" (até 5) pelo item
+  que mais limita. A recusa fala em nome do combo, não do produto que o cliente não vê na sacola.
+- **Sai do ar sozinho:** produto pausado, em rascunho, apagado, ou tamanho fixo que acabou tira o
+  combo da página, e o painel diz qual item falta (lista e formulário). Publicar com item fora
+  do ar é recusado. Não há chave estrangeira nos itens, de propósito: apagar o produto não
+  apaga o combo.
+- **Preço fechado:** nenhuma promoção age no combo (nem a da seção dele), promoção sobre combo é
+  recusada, e o cupom o trata como item em promoção (só desconta se o cupom vale em promoção).
+- **O pedido guarda o que o combo levava** (`ItemDoPedido.combo`); a comanda, Vendas, a sacola e
+  Meus pedidos mostram a composição.
+- **O tipo não muda** depois de criado (409 `STORE_PRODUCT_KIND_LOCKED`).
+- **Painel:** "Cadastrar combo" em Produtos (`/loja/produtos/novo?tipo=combo`), cartão "O que vem
+  no combo" com o valor dos itens separados e a economia do cliente, selo "Combo" na lista com
+  "Leva: …" e "Dá para montar N", e aviso ao excluir um produto que está em combos.
+- **Página:** "Inclui: …", selo "Economize R$ X" (só se o combo é mais barato que os itens
+  separados) e a folha "O combo inclui".
+
+**Migration:** `20260930130000_combos`, aditiva (enum `StoreProductKind`, coluna
+`store_products.kind` `NOT NULL DEFAULT 'PRODUCT'`, tabela `store_combo_items`). Validada em banco
+descartável: aplica junto das outras, o banco fica igual ao schema, o SQL de desfazer (apaga a FK,
+a coluna, a tabela e o enum) volta ao schema anterior, e reaplica. **A Render aplica ao publicar.**
+
+**Arquivos:** `packages/types` (`store-catalog.ts`, `store-settings.ts`, `store-order.ts`),
+`packages/validation` (`store-combo.rules.ts` novo, `store-catalog.schema.ts`,
+`store-pricing.rules.ts`, `store-coupon.rules.ts`, `index.ts`), `apps/api`
+(`prisma/schema.prisma`, a migration, `store-catalog.service.ts`, `store-orders.service.ts`,
+`store-marketing.service.ts`, os specs, `store-combo.rules.spec.ts`,
+`store-catalog.combo.spec.ts` e `test/store-combo.e2e-spec.ts` novos), `apps/company-web`
+(`components/loja/combo.ts` e `itens-do-combo.tsx` novos, `produto-no-formulario.ts`,
+`formulario-de-produto.tsx`, `formulario-de-promocao.tsx`, `loja/produtos/page.tsx` e as páginas
+novo/editar, `vendas/page.tsx`, `comanda-da-venda.tsx`, `vendas.ts`, `lib/loja-combo.ts` novo,
+`lib/loja-mock.ts`, `lib/loja-publica.ts`, `lib/loja-promocoes.ts`, `loja-publica.tsx`,
+`folha-do-produto.tsx`, `folha-da-sacola.tsx`, `sacola.tsx`, `meus-pedidos.tsx`) e os testes de
+cada um. Docs: `business-rules.md`, `architecture.md` e `agent-handoff.md`.
+
+**Como foi validado:** `pnpm typecheck` do monorepo (8 pacotes); `pnpm lint` (sem erro; um aviso
+antigo em `driver-app/apiClient.ts`); `validation`, `types` e `api-client` também com
+`--typeRoots` isolado, como o deploy; Jest da API (119 suítes, 1767 passaram, 1 pulado); vitest do
+painel (65 arquivos, 642); builds do painel, do ADM e da API; E2E inteiro no banco descartável
+(32 suítes, 283 testes), com um arquivo novo que confere pelo HTTP: o combo cadastrado e o que a
+página recebe (sem `stock` nem `comboItems`), o que a API recusa (tamanhos, estoque, item
+repetido, produto inexistente, combo dentro de combo, escolhas obrigatórias, mudança de tipo), o
+combo que sai e volta da página com o produto pausado e a recusa de publicar com item fora do ar,
+o pedido pelo preço do combo com baixa em cada produto e devolução única no cancelamento, o total
+que não bate, dois pedidos ao mesmo tempo pelo último combo (um passa, o estoque não fica
+negativo) e a promoção da seção que não age no combo. A loja (linha, folha), a lista de produtos
+e o formulário do combo foram vistos no navegador, a 375px, numa rota temporária já removida.
+
+**Não conferido:** nada em produção; o checkout logado com combo de ponta a ponta no navegador
+(não há login de cliente local: o caminho foi coberto por E2E e por testes com a API simulada); o
+painel no modo escuro; a comanda de combo impressa em papel. Limites conhecidos: a página não
+soma o estoque de um produto que está na sacola avulso e também dentro de um combo (o servidor
+confere no pedido e diz qual item falta); a sacola guarda o texto "Inclui" da hora em que o combo
+foi posto nela; e o produto que está em combos pode ser excluído (o combo sai do ar e o painel
+avisa antes, mas não bloqueia).

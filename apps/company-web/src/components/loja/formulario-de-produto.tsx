@@ -8,6 +8,7 @@ import type {
   StoreCatalog,
   StoreCategory,
   StoreProduct,
+  StoreProductKind,
   StoreProductStatus,
 } from '@motoboycity/types';
 import type { UpsertStoreProductPayload } from '@motoboycity/validation';
@@ -19,6 +20,8 @@ import {
   mensagemDoErro,
   semProduto,
 } from '@/components/loja/catalogo';
+import { combosQueLevam, produtoPorId } from '@/components/loja/combo';
+import { ItensDoCombo } from '@/components/loja/itens-do-combo';
 import {
   LIMITES_DO_PRODUTO,
   montarPayload,
@@ -30,6 +33,7 @@ import {
   type GrupoNoFormulario,
   type LinhaDeEscolha,
   type LinhaDeTamanho,
+  type LinhaDoCombo,
   type ProdutoNoFormulario,
 } from '@/components/loja/produto-no-formulario';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -85,7 +89,10 @@ function descreverGrupo(grupo: GrupoNoFormulario): string {
   return `Obrigatório, de ${min} a ${max}`;
 }
 
-function textoSemPendencia(atual: StoreProductStatus | undefined): string {
+function textoSemPendencia(
+  atual: StoreProductStatus | undefined,
+  substantivo: 'produto' | 'combo',
+): string {
   switch (atual) {
     case undefined:
       return 'Pronto para publicar. Publicado, ele entra no cardápio da loja.';
@@ -94,24 +101,35 @@ function textoSemPendencia(atual: StoreProductStatus | undefined): string {
     case 'DRAFT':
       return 'Pronto para publicar.';
     case 'PAUSED':
-      return 'Pausado: salvar mantém o produto fora da loja até você voltar a vender.';
+      return `Pausado: salvar mantém o ${substantivo} fora da loja até você voltar a vender.`;
   }
 }
 
 export function FormularioDeProduto({
   produto,
   categorias,
+  produtos = [],
+  tipo = 'PRODUCT',
   avisoDaFoto = null,
 }: {
   produto?: StoreProduct;
   categorias: StoreCategory[];
+  /** O catálogo todo: o combo escolhe o que leva entre eles, e o produto sabe em quais combos está. */
+  produtos?: StoreProduct[];
+  /** O que se está cadastrando. Quem edita tem o tipo do produto. */
+  tipo?: StoreProductKind;
   /** O cadastro salvou o produto, mas a foto não subiu: a edição avisa. */
   avisoDaFoto?: string | null;
 }) {
   const token = session.getToken();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [estado, setEstado] = useState<ProdutoNoFormulario>(() => produtoParaFormulario(produto));
+  const [estado, setEstado] = useState<ProdutoNoFormulario>(() =>
+    produtoParaFormulario(produto, tipo),
+  );
+  const combo = estado.tipo === 'COMBO';
+  const substantivo = combo ? 'combo' : 'produto';
+  const porId = produtoPorId(produtos);
   const [erros, setErros] = useState<string[]>([]);
   const [erroDaFoto, setErroDaFoto] = useState<string | null>(avisoDaFoto);
   /**
@@ -130,6 +148,8 @@ export function FormularioDeProduto({
   /** `null`: o campo de nova categoria está fechado. */
   const [novaCategoria, setNovaCategoria] = useState<string | null>(null);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  /** Os combos que levam este produto: excluí-lo os tira do ar, e a loja precisa saber disso antes. */
+  const emCombos = produto ? combosQueLevam(produto.id, produtos) : [];
 
   const salvar = useMutation({
     mutationFn: (payload: UpsertStoreProductPayload) =>
@@ -244,25 +264,25 @@ export function FormularioDeProduto({
    * 300ml", "Açaí 500ml" e "Açaí 700ml" como três produtos. Aqui o açaí é um
    * produto só, e o tamanho é uma escolha dentro dele.
    */
-  const usaTamanhos = estado.tamanhos.length > 0;
+  const usaTamanhos = !combo && estado.tamanhos.length > 0;
 
   /**
    * O que impede PUBLICAR — e não o que impede salvar. Rascunho aceita tudo
    * pela metade, que é para isso que ele serve. É a mesma regra do servidor:
    * o que a tela libera para publicar, a API aceita.
    */
-  const pendencias = pendenciasDoFormulario(estado);
+  const pendencias = pendenciasDoFormulario(estado, produtos);
   const bloqueios = pendencias.filter((item) => item.blocking);
   const recomendacoes = pendencias.filter((item) => !item.blocking);
 
   const atual = produto?.status;
-  const saidas = saidasDoFormulario(atual, bloqueios.length > 0);
+  const saidas = saidasDoFormulario(atual, bloqueios.length > 0, substantivo);
   const saiDoAr = atual === 'PUBLISHED' && bloqueios.length > 0;
   const ocupado =
     salvar.isPending || salvar.isSuccess || excluir.isPending || excluir.isSuccess || mexendoNaFoto;
 
   function salvarComo(status: StoreProductStatus) {
-    const montagem = montarPayload(estado, status);
+    const montagem = montarPayload(estado, status, produtos);
     if (!montagem.ok) {
       setErros(montagem.erros);
       return;
@@ -275,6 +295,45 @@ export function FormularioDeProduto({
     const nome = novaCategoria?.trim() ?? '';
     if (nome === '' || criarCategoria.isPending) return;
     criarCategoria.mutate(nome);
+  }
+
+  /** O primeiro tamanho disponível é o padrão: a linha nasce completa, e o preço já conta. */
+  function tamanhoPadrao(produtoId: string): string {
+    const doProduto = porId.get(produtoId);
+    return (
+      doProduto?.sizes.find((tamanho) => tamanho.available)?.id ?? doProduto?.sizes[0]?.id ?? ''
+    );
+  }
+
+  function acrescentarItemDoCombo() {
+    const chave = novaChave();
+    setEstado((antes) => ({
+      ...antes,
+      itensDoCombo: [
+        ...antes.itensDoCombo,
+        { chave, produtoId: '', tamanhoId: '', quantidade: '1' },
+      ],
+    }));
+  }
+
+  function alterarItemDoCombo(chave: string, mudanca: Partial<LinhaDoCombo>) {
+    setEstado((antes) => ({
+      ...antes,
+      itensDoCombo: antes.itensDoCombo.map((linha) =>
+        linha.chave === chave ? { ...linha, ...mudanca } : linha,
+      ),
+    }));
+  }
+
+  function escolherProdutoDoCombo(chave: string, produtoId: string) {
+    alterarItemDoCombo(chave, { produtoId, tamanhoId: tamanhoPadrao(produtoId) });
+  }
+
+  function removerItemDoCombo(chave: string) {
+    setEstado((antes) => ({
+      ...antes,
+      itensDoCombo: antes.itensDoCombo.filter((linha) => linha.chave !== chave),
+    }));
   }
 
   function acrescentarTamanho() {
@@ -384,7 +443,7 @@ export function FormularioDeProduto({
   }
 
   return (
-    <MolduraDoProduto titulo={produto ? 'Editar produto' : 'Cadastrar produto'}>
+    <MolduraDoProduto titulo={`${produto ? 'Editar' : 'Cadastrar'} ${substantivo}`}>
       {/* Enter num campo não publica nada: cada saída é um botão, clicado. */}
       <form className="space-y-5" onSubmit={(event) => event.preventDefault()} noValidate>
         <Card>
@@ -400,10 +459,12 @@ export function FormularioDeProduto({
                 value={estado.nome}
                 maxLength={LIMITES_DO_PRODUTO.nome}
                 onChange={(event) => setEstado((antes) => ({ ...antes, nome: event.target.value }))}
-                placeholder="Açaí"
+                placeholder={combo ? 'Combo X-Burger' : 'Açaí'}
               />
               <p className="text-xs text-muted-foreground">
-                O nome do item, sem o tamanho. Os tamanhos entram abaixo.
+                {combo
+                  ? 'O nome que o cliente vê no cardápio, como "Combo X-Burger + batata + refri".'
+                  : 'O nome do item, sem o tamanho. Os tamanhos entram abaixo.'}
               </p>
             </div>
 
@@ -565,14 +626,26 @@ export function FormularioDeProduto({
           </CardContent>
         </Card>
 
+        {combo && (
+          <ItensDoCombo
+            estado={estado}
+            produtos={produtos}
+            porId={porId}
+            aoAcrescentar={acrescentarItemDoCombo}
+            aoAlterar={alterarItemDoCombo}
+            aoEscolherProduto={escolherProdutoDoCombo}
+            aoRemover={removerItemDoCombo}
+          />
+        )}
+
         <Card>
           <CardHeader>
-            <CardTitle>Preço</CardTitle>
+            <CardTitle>{combo ? 'Preço do combo' : 'Preço'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {!usaTamanhos && (
               <div className="max-w-40 space-y-2">
-                <Label htmlFor="preco">Preço único</Label>
+                <Label htmlFor="preco">{combo ? 'Preço do combo' : 'Preço único'}</Label>
                 <Input
                   id="preco"
                   inputMode="decimal"
@@ -642,51 +715,57 @@ export function FormularioDeProduto({
               </div>
             )}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={acrescentarTamanho}
-              disabled={estado.tamanhos.length >= LIMITES_DO_PRODUTO.tamanhos}
-            >
-              <Plus className="size-4" /> Adicionar tamanho
-            </Button>
+            {!combo && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={acrescentarTamanho}
+                  disabled={estado.tamanhos.length >= LIMITES_DO_PRODUTO.tamanhos}
+                >
+                  <Plus className="size-4" /> Adicionar tamanho
+                </Button>
 
-            {!usaTamanhos && (
-              <p className="text-xs text-muted-foreground">
-                Vende em mais de um tamanho? Adicione os tamanhos em vez de cadastrar um produto
-                para cada — o preço passa a ser por tamanho.
-              </p>
+                {!usaTamanhos && (
+                  <p className="text-xs text-muted-foreground">
+                    Vende em mais de um tamanho? Adicione os tamanhos em vez de cadastrar um produto
+                    para cada — o preço passa a ser por tamanho.
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Estoque (opcional)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="max-w-40 space-y-2">
-              <Label htmlFor="estoque">Unidades em estoque</Label>
-              <Input
-                id="estoque"
-                inputMode="numeric"
-                placeholder="Sem controle"
-                value={estado.estoque}
-                onChange={(event) =>
-                  setEstado((antes) => ({ ...antes, estoque: event.target.value }))
-                }
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Deixe vazio para não controlar: o produto vende sem limite, como sempre. Com um
-              número, cada pedido baixa as unidades e o produto fica &ldquo;Esgotado&rdquo; na
-              página quando chega a zero — o pedido cancelado devolve.{' '}
-              {usaTamanhos ? 'Os tamanhos dividem o mesmo estoque. ' : ''}
-              Para repor, é só trocar o número.
-            </p>
-          </CardContent>
-        </Card>
+        {!combo && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Estoque (opcional)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="max-w-40 space-y-2">
+                <Label htmlFor="estoque">Unidades em estoque</Label>
+                <Input
+                  id="estoque"
+                  inputMode="numeric"
+                  placeholder="Sem controle"
+                  value={estado.estoque}
+                  onChange={(event) =>
+                    setEstado((antes) => ({ ...antes, estoque: event.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Deixe vazio para não controlar: o produto vende sem limite, como sempre. Com um
+                número, cada pedido baixa as unidades e o produto fica &ldquo;Esgotado&rdquo; na
+                página quando chega a zero — o pedido cancelado devolve.{' '}
+                {usaTamanhos ? 'Os tamanhos dividem o mesmo estoque. ' : ''}
+                Para repor, é só trocar o número.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -695,8 +774,9 @@ export function FormularioDeProduto({
           <CardContent className="space-y-4">
             {estado.grupos.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Nenhum grupo. Use para o que o cliente escolhe por cima — adicionais do açaí, ponto
-                da carne, borda da pizza, cobertura do sorvete.
+                {combo
+                  ? 'Nenhum grupo. Use para o cliente escolher dentro do combo — o sabor do refrigerante, o molho. As escolhas não mexem no estoque.'
+                  : 'Nenhum grupo. Use para o que o cliente escolhe por cima — adicionais do açaí, ponto da carne, borda da pizza, cobertura do sorvete.'}
               </p>
             )}
 
@@ -861,13 +941,13 @@ export function FormularioDeProduto({
             {bloqueios.length === 0 ? (
               <p className="flex items-start gap-2 text-sm text-success">
                 <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                {textoSemPendencia(atual)}
+                {textoSemPendencia(atual, substantivo)}
               </p>
             ) : (
               <div className="space-y-2">
                 <p className="text-sm font-medium">
                   {saiDoAr
-                    ? 'Estas alterações tiram o produto do ar:'
+                    ? `Estas alterações tiram o ${substantivo} do ar:`
                     : 'Falta para poder publicar:'}
                 </p>
                 <ul className="space-y-1">
@@ -888,9 +968,9 @@ export function FormularioDeProduto({
                 </ul>
                 <p className="text-xs text-muted-foreground">
                   {saiDoAr
-                    ? 'O produto está à venda agora. Salvar assim guarda o trabalho e o volta para rascunho, fora da loja — você o publica de novo quando resolver o que está acima.'
+                    ? `${combo ? 'O combo' : 'O produto'} está à venda agora. Salvar assim guarda o trabalho e o volta para rascunho, fora da loja — você o publica de novo quando resolver o que está acima.`
                     : atual === 'PAUSED'
-                      ? 'Nada disso impede salvar — o produto continua pausado, fora da loja.'
+                      ? `Nada disso impede salvar — o ${substantivo} continua pausado, fora da loja.`
                       : 'Nada disso impede salvar como rascunho — o cadastro fica guardado e não vai para a loja.'}
                 </p>
               </div>
@@ -960,6 +1040,15 @@ export function FormularioDeProduto({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="flex-1">
                   Excluir <strong>{produto.name}</strong> de vez? Não dá para desfazer.
+                  {emCombos.length > 0 && (
+                    <>
+                      {' '}
+                      {emCombos.length === 1 ? 'Ele está no combo' : 'Ele está nos combos'}{' '}
+                      <strong>{emCombos.map((item) => item.name).join(', ')}</strong>
+                      {emCombos.length === 1 ? ', que sai do ar' : ', que saem do ar'} até você
+                      trocar o item.
+                    </>
+                  )}
                 </span>
                 <Button
                   type="button"
@@ -993,7 +1082,7 @@ export function FormularioDeProduto({
                   disabled={ocupado}
                   onClick={() => setConfirmandoExclusao(true)}
                 >
-                  <Trash2 className="size-4" /> Excluir produto
+                  <Trash2 className="size-4" /> Excluir {substantivo}
                 </Button>
               </div>
             )}

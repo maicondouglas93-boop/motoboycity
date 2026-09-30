@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
 import type { PromocaoPublica } from '@motoboycity/types';
 import type { GrupoDeExemplo, ProdutoDeExemplo, TamanhoDeExemplo } from '@/lib/loja-mock';
+import { descricaoDoCombo, economiaDoComboNaPagina } from '@/lib/loja-combo';
 import { rotuloDeRestam } from '@/lib/loja-estoque';
 import { precificarSacola } from '@/lib/loja-promocoes';
 import { FolhaDeBaixo } from './folha-de-baixo';
@@ -35,6 +36,8 @@ export interface ItemEscolhido {
   quantidade: number;
   /** Preço unitário já com tamanho e escolhas somados. */
   unitario: number;
+  /** Só no combo: o que ele leva, em texto ("1× X-Burger, 1× Batata"). A sacola e o pedido o mostram. */
+  inclui?: string;
 }
 
 /** A regra do grupo na língua do cliente, e não em mínimo/máximo. */
@@ -188,6 +191,27 @@ export function FolhaDoProduto({
                 {produto.descricao}
               </p>
             )}
+            {produto.combo && (
+              <div
+                className="mt-2 rounded-lg px-3 py-2 text-sm"
+                style={{ backgroundColor: paleta.superficie }}
+              >
+                <p className="font-medium">O combo inclui</p>
+                <ul className="mt-1 space-y-0.5" style={{ color: paleta.suave }}>
+                  {produto.combo.itens.map((item) => (
+                    <li key={`${item.produtoId}-${item.tamanho ?? ''}`}>
+                      {item.quantidade}× {item.nome}
+                      {item.tamanho && ` (${item.tamanho})`}
+                    </li>
+                  ))}
+                </ul>
+                {economiaDoComboNaPagina(produto) > 0 && (
+                  <p className="mt-1.5 font-medium" style={{ color: corDeAcao }}>
+                    Você economiza {moeda(economiaDoComboNaPagina(produto))}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -250,6 +274,7 @@ export function FolhaDoProduto({
                     escolhaIds: escolhidas.map((escolha) => escolha.id),
                     quantidade,
                     unitario,
+                    ...(produto.combo ? { inclui: descricaoDoCombo(produto.combo.itens) } : {}),
                   },
                   evento.currentTarget.getBoundingClientRect(),
                 )

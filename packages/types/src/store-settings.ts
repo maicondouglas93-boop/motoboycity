@@ -34,16 +34,43 @@ export interface StoreSettings {
   recebePedidos: boolean;
 }
 
+/** Um produto que o combo leva, como o cliente lê: pelo nome, e com o tamanho já escolhido. */
+export interface ItemDoComboPublico {
+  produtoId: string;
+  nome: string;
+  /** O tamanho fixo do combo; `null` no produto de um preço só. */
+  tamanho: string | null;
+  quantidade: number;
+}
+
+/** O que o combo leva, para a página mostrar e o pedido guardar. */
+export interface ComboPublico {
+  itens: ItemDoComboPublico[];
+  /**
+   * O que os itens custariam comprados separados, no preço de hoje (sem promoção). O cliente
+   * economiza a diferença para o preço do combo; se não sobra nada, a página não fala em economia.
+   */
+  valorSeparado: number;
+}
+
 /**
  * O produto como o cliente vê: só o publicado aparece, e a data de edição não interessa. O
  * estoque exato é da loja e NÃO vai: o cliente recebe só se esgotou e, quando são poucas
  * unidades, quantas restam (`estoqueNaVitrine`, em `@motoboycity/validation`).
+ *
+ * O combo vai com o que leva (`combo`), pelo nome: os ids dos produtos que o compõem são da loja.
+ * `esgotado` e `restam` dele saem do estoque dos produtos que ele leva.
  */
-export type PublicStoreProduct = Omit<StoreProduct, 'status' | 'updatedAt' | 'stock'> & {
+export type PublicStoreProduct = Omit<
+  StoreProduct,
+  'status' | 'updatedAt' | 'stock' | 'comboItems'
+> & {
   /** O estoque chegou a zero: dá para ver, não dá para pedir. */
   esgotado: boolean;
   /** Restam poucas: quantas. `null`: sem controle, ou ainda há bastante. */
   restam: number | null;
+  /** Só no combo. `null` no produto. */
+  combo: ComboPublico | null;
 };
 
 export interface PublicStore {

@@ -30,6 +30,8 @@ const MEIO_DIA = new Date('2026-09-23T12:00:00-03:00');
 const ACAI: PublicStoreProduct = {
   esgotado: false,
   restam: null,
+  kind: 'PRODUCT',
+  combo: null,
   id: 'p1',
   categoryId: 'c1',
   name: 'Açaí',
@@ -68,6 +70,22 @@ const SUCO: PublicStoreProduct = {
   price: 7.2,
   sizes: [],
   optionGroups: [],
+};
+
+/** 1 açaí 500ml + 2 sucos por 30,00 (separados: 18 + 2 x 7,20 = 32,40). */
+const COMBO: PublicStoreProduct = {
+  ...SUCO,
+  kind: 'COMBO',
+  id: 'cb1',
+  name: 'Combo Açaí + Suco',
+  price: 30,
+  combo: {
+    itens: [
+      { produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 1 },
+      { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2 },
+    ],
+    valorSeparado: 32.4,
+  },
 };
 
 function operacao(mudancas: Partial<OperacaoPublica> = {}): OperacaoPublica {
@@ -984,6 +1002,218 @@ describe('StoreOrdersService', () => {
         service.checkout('acai', CLIENTE, pedido({ cupom: 'BEMVINDO10', totalVisto: 1 })),
       ).rejects.toMatchObject({ response: { code: 'STORE_ORDER_OUT_OF_STOCK' } });
       expect(cupons.paraOPedido).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('combos', () => {
+    const pedirCombo = (quantidade: number, totalVisto: number, mudancas = {}) =>
+      service.checkout(
+        'acai',
+        CLIENTE,
+        pedido({
+          itens: [{ produtoId: 'cb1', tamanhoId: null, escolhas: [], quantidade }],
+          totalVisto,
+          ...mudancas,
+        }),
+      );
+    /** Os produtos com estoque controlado que o combo leva. */
+    const comEstoque = (acai: number | null, suco: number | null) =>
+      prisma.storeProduct.findMany.mockResolvedValue([
+        { id: 'p1', name: 'Açaí', stock: acai },
+        { id: 'p2', name: 'Suco', stock: suco },
+      ]);
+
+    beforeEach(() => {
+      catalogo.publicCatalog.mockResolvedValue({ categories: [], products: [ACAI, SUCO, COMBO] });
+    });
+
+    it('vende pelo preço do combo, e a linha guarda o que ele levava na hora da compra', async () => {
+      const feito = await pedirCombo(1, 36);
+
+      // 30,00 do combo + 6,00 de entrega.
+      expect(feito).toMatchObject({ subtotal: 30, taxaDeEntrega: 6, total: 36 });
+      expect(feito.itens[0]).toMatchObject({
+        produtoId: 'cb1',
+        nome: 'Combo Açaí + Suco',
+        unitario: 30,
+        total: 30,
+        combo: [
+          { produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 1 },
+          { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2 },
+        ],
+      });
+      const { data } = prisma.storeOrder.create.mock.calls[0][0];
+      expect((data.items as Array<{ combo?: unknown[] }>)[0]?.combo).toHaveLength(2);
+    });
+
+    it('o produto comum não leva `combo` na linha', async () => {
+      const feito = await service.checkout('acai', CLIENTE, pedido());
+
+      expect(feito.itens[0]).not.toHaveProperty('combo');
+    });
+
+    it('promoção não age no combo, nem a da seção dele: o preço é o do combo', async () => {
+      marketing.promocoesDoPedido.mockResolvedValue([
+        {
+          id: 'promo-1',
+          nome: 'Tudo 50%',
+          tipo: 'PERCENTUAL',
+          alvo: 'CATEGORIA',
+          produtoId: null,
+          categoriaId: 'c1',
+          percentual: 50,
+          precoPromocional: null,
+          leve: null,
+          pague: null,
+          inicio: null,
+          fim: null,
+          horaInicio: null,
+          horaFim: null,
+          diasDaSemana: [],
+          usos: 0,
+          limiteDeUsos: null,
+        },
+      ]);
+
+      const feito = await pedirCombo(2, 66);
+
+      expect(feito.itens[0]).toMatchObject({ total: 60 });
+      expect(feito.itens[0]).not.toHaveProperty('promocao');
+      // Nenhuma promoção gastou uso.
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('o preço que o cliente viu tem de ser o do combo: outro total é recusado', async () => {
+      await expect(pedirCombo(1, 38.4)).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_TOTAL_CHANGED' },
+      });
+    });
+
+    it('o combo baixa o estoque de cada produto que leva: a quantidade do item vezes os combos pedidos', async () => {
+      comEstoque(10, 10);
+      prisma.$queryRaw.mockResolvedValueOnce([{ stock: 8 }]).mockResolvedValueOnce([{ stock: 6 }]);
+
+      // 2 combos: 2 açaís e 4 sucos.
+      await pedirCombo(2, 66);
+
+      const baixas = prisma.$queryRaw.mock.calls.map(([, unidades, produtoId]) => [
+        produtoId,
+        unidades,
+      ]);
+      expect(baixas).toEqual([
+        ['p1', 2],
+        ['p2', 4],
+      ]);
+    });
+
+    it('cada produto do combo leva o próprio sinal de baixa, e só o que tinha controle', async () => {
+      comEstoque(10, null);
+      // O açaí tem controle (sobra 9); o suco não (`null`).
+      prisma.$queryRaw
+        .mockResolvedValueOnce([{ stock: 9 }])
+        .mockResolvedValueOnce([{ stock: null }]);
+
+      const feito = await pedirCombo(1, 36);
+
+      expect(feito.itens[0]?.combo).toEqual([
+        { produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 1, baixouEstoque: true },
+        { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2 },
+      ]);
+      // O combo em si não tem estoque: não é ele que baixa.
+      expect(feito.itens[0]).not.toHaveProperty('baixouEstoque');
+    });
+
+    it('o combo e o produto avulso do mesmo pedido dividem o estoque', async () => {
+      comEstoque(2, null);
+      const comAvulso = pedido({
+        itens: [
+          { produtoId: 'cb1', tamanhoId: null, escolhas: [], quantidade: 1 },
+          { produtoId: 'p1', tamanhoId: 't1', escolhas: ['c1'], quantidade: 2 },
+        ],
+        totalVisto: 0,
+      });
+
+      // O combo leva 1 açaí e o avulso, 2: são 3, e só há 2.
+      await expect(service.checkout('acai', CLIENTE, comAvulso)).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_OUT_OF_STOCK' },
+      });
+    });
+
+    it('falta de um produto do combo: recusa em nome do combo, com quantos dá para levar', async () => {
+      // 3 sucos, e o combo leva 2 por unidade: dá para 1 combo, e o cliente pediu 2.
+      comEstoque(10, 3);
+
+      await expect(pedirCombo(2, 66)).rejects.toMatchObject({
+        response: {
+          code: 'STORE_ORDER_OUT_OF_STOCK',
+          message:
+            'Só dá para levar 1 unidade de Combo Açaí + Suco, por causa do estoque de Suco. Diminua a quantidade na sacola.',
+          produtoId: 'cb1',
+          restam: 1,
+        },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('produto do combo esgotado: o combo esgotou, e o erro diz qual item acabou', async () => {
+      comEstoque(0, 10);
+
+      await expect(pedirCombo(1, 36)).rejects.toMatchObject({
+        response: {
+          code: 'STORE_ORDER_OUT_OF_STOCK',
+          message: 'Combo Açaí + Suco esgotou: Açaí acabou. Tire da sacola e peça de novo.',
+          produtoId: 'cb1',
+          restam: 0,
+        },
+      });
+    });
+
+    it('outro pedido levou o último suco entre a leitura e a gravação: recusa, e nada é gravado', async () => {
+      comEstoque(10, 10);
+      prisma.$queryRaw.mockResolvedValueOnce([{ stock: 9 }]).mockResolvedValueOnce([]);
+      prisma.storeProduct.findFirst.mockResolvedValue({ name: 'Suco', stock: 1 });
+
+      await expect(pedirCombo(1, 36)).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_OUT_OF_STOCK', produtoId: 'cb1', restam: 0 },
+      });
+      expect(prisma.storeOrder.create).not.toHaveBeenCalled();
+    });
+
+    it('o combo que saiu do cardápio (um item pausado) não se pede', async () => {
+      catalogo.publicCatalog.mockResolvedValue({ categories: [], products: [ACAI, SUCO] });
+
+      await expect(pedirCombo(1, 36)).rejects.toMatchObject({
+        response: { code: 'STORE_ORDER_ITEM_UNAVAILABLE' },
+      });
+    });
+
+    it('o combo com escolhas próprias soma o adicional ao preço do combo', async () => {
+      const comSabor: PublicStoreProduct = {
+        ...COMBO,
+        optionGroups: [
+          {
+            id: 'gs',
+            name: 'Sabor do suco',
+            minChoices: 1,
+            maxChoices: 1,
+            options: [
+              { id: 'es1', name: 'Laranja', price: 0, available: true },
+              { id: 'es2', name: 'Uva', price: 2, available: true },
+            ],
+          },
+        ],
+      };
+      catalogo.publicCatalog.mockResolvedValue({
+        categories: [],
+        products: [ACAI, SUCO, comSabor],
+      });
+
+      const feito = await pedirCombo(1, 38, {
+        itens: [{ produtoId: 'cb1', tamanhoId: null, escolhas: ['es2'], quantidade: 1 }],
+      });
+
+      expect(feito.itens[0]).toMatchObject({ unitario: 32, total: 32, escolhas: ['Uva'] });
     });
   });
 

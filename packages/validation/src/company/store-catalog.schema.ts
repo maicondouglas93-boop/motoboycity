@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LIMITES_DO_COMBO } from './store-combo.rules';
 
 /**
  * Catálogo da loja online: o que a empresa cadastra no painel.
@@ -8,6 +9,9 @@ import { z } from 'zod';
  */
 
 export const storeProductStatusSchema = z.enum(['PUBLISHED', 'DRAFT', 'PAUSED']);
+
+/** Produto, ou combo: vários produtos por um preço só. Escolhido ao criar, não muda depois. */
+export const storeProductKindSchema = z.enum(['PRODUCT', 'COMBO']);
 
 const idSchema = z.string().uuid('Identificador inválido.');
 
@@ -87,8 +91,28 @@ export const storeOptionGroupInputSchema = z
     path: ['maxChoices'],
   });
 
+/** Um produto do combo: qual, o tamanho fixo (se ele tem tamanhos) e quantas unidades. */
+export const storeComboItemInputSchema = z.object({
+  productId: idSchema,
+  sizeId: idSchema.nullable(),
+  quantity: z
+    .number({ error: 'Informe a quantidade.' })
+    .int('A quantidade é um número inteiro.')
+    .min(1, 'A quantidade mínima é 1.')
+    .max(
+      LIMITES_DO_COMBO.quantidade,
+      `Use no máximo ${LIMITES_DO_COMBO.quantidade} unidades de um item.`,
+    ),
+});
+
 export const upsertStoreProductSchema = z
   .object({
+    /**
+     * Ausente é produto. Na edição tem de ser o mesmo tipo do que está gravado: o combo não vira
+     * produto, nem o produto vira combo — outro tipo tem outras regras, e trocar apagaria o que a
+     * loja montou.
+     */
+    kind: storeProductKindSchema.optional(),
     categoryId: idSchema.nullable(),
     name: nomeSchema(120),
     description: z.string().trim().max(500, 'Use no máximo 500 caracteres.'),
@@ -109,10 +133,43 @@ export const upsertStoreProductSchema = z
       .max(999_999, 'Use no máximo 999.999 no estoque.')
       .nullable()
       .optional(),
+    /** Só no combo: os produtos que ele leva, na ordem. O preço (`price`) é o do combo todo. */
+    comboItems: z.array(storeComboItemInputSchema).max(LIMITES_DO_COMBO.itens).optional(),
     sizes: z.array(storeProductSizeInputSchema).max(20),
     optionGroups: z.array(storeOptionGroupInputSchema).max(20),
   })
   .superRefine((produto, ctx) => {
+    const itensDoCombo = produto.comboItems ?? [];
+    if (produto.kind === 'COMBO') {
+      if (produto.comboItems === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Informe o que o combo leva.',
+          path: ['comboItems'],
+        });
+      }
+      if (produto.sizes.length > 0) {
+        ctx.addIssue({ code: 'custom', message: 'O combo não tem tamanhos.', path: ['sizes'] });
+      }
+      if (produto.stock !== undefined && produto.stock !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'O combo não tem estoque próprio: vale o dos produtos que ele leva.',
+          path: ['stock'],
+        });
+      }
+      const pares = itensDoCombo.map((item) => `${item.productId}|${item.sizeId ?? ''}`);
+      if (!semRepetidos(pares)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'O mesmo produto aparece duas vezes no combo. Aumente a quantidade.',
+          path: ['comboItems'],
+        });
+      }
+    } else if (itensDoCombo.length > 0) {
+      ctx.addIssue({ code: 'custom', message: 'Só o combo leva itens.', path: ['comboItems'] });
+    }
+
     const ids = [
       ...produto.sizes.map((tamanho) => tamanho.id),
       ...produto.optionGroups.map((grupo) => grupo.id),
@@ -126,6 +183,8 @@ export const upsertStoreProductSchema = z
 export const updateStoreProductStatusSchema = z.object({ status: storeProductStatusSchema });
 
 export type StoreProductStatusValue = z.infer<typeof storeProductStatusSchema>;
+export type StoreProductKindValue = z.infer<typeof storeProductKindSchema>;
+export type StoreComboItemInput = z.infer<typeof storeComboItemInputSchema>;
 export type StoreCategoryNamePayload = z.infer<typeof storeCategoryNameSchema>;
 export type ReorderStoreCategoriesPayload = z.infer<typeof reorderStoreCategoriesSchema>;
 export type ReorderStoreProductsPayload = z.infer<typeof reorderStoreProductsSchema>;
@@ -137,6 +196,10 @@ export type UpdateStoreProductStatusPayload = z.infer<typeof updateStoreProductS
 
 /** O que `storeProductIssues` precisa saber do produto — sirva o payload ou o gravado. */
 export interface StoreProductForIssues {
+  /** Ausente: produto. */
+  kind?: StoreProductKindValue;
+  /** Só no combo. */
+  comboItems?: ReadonlyArray<{ productId: string; sizeId: string | null; quantity: number }>;
   categoryId: string | null;
   name: string;
   description: string;
@@ -156,6 +219,65 @@ export interface StoreProductIssueResult {
   blocking: boolean;
 }
 
+/** Um produto que o combo leva, como `storeProductIssues` precisa vê-lo para conferir o combo. */
+export interface ComponenteParaCombo extends Omit<StoreProductForIssues, 'sizes'> {
+  id: string;
+  status: StoreProductStatusValue;
+  sizes: ReadonlyArray<{ id: string; name: string; price: number; available: boolean }>;
+}
+
+/**
+ * O que impede o combo de ir à venda por causa dos produtos que ele leva: o produto sumiu, está
+ * pausado ou em rascunho, tem pendência que trava a compra, o tamanho fixo acabou ou foi
+ * removido, ou passou a exigir escolhas (que um combo não tem como fixar). Tudo bloqueia: o
+ * cliente pediria um combo que a loja não consegue montar.
+ */
+export function storeComboItemIssues(
+  itens: NonNullable<StoreProductForIssues['comboItems']>,
+  produtoPorId: ReadonlyMap<string, ComponenteParaCombo>,
+): StoreProductIssueResult[] {
+  const lista: StoreProductIssueResult[] = [];
+  const bloqueia = (text: string) => lista.push({ text, blocking: true });
+
+  for (const item of itens) {
+    const produto = produtoPorId.get(item.productId);
+    if (!produto) {
+      bloqueia('um produto do combo foi removido do cardápio');
+      continue;
+    }
+    const nome = `"${produto.name}"`;
+    if (produto.kind === 'COMBO') {
+      bloqueia(`${nome} é um combo, e um combo não leva outro combo`);
+      continue;
+    }
+    if (produto.status !== 'PUBLISHED') {
+      bloqueia(
+        `${nome} ${produto.status === 'PAUSED' ? 'está pausado' : 'está em rascunho'} — o combo sai do ar enquanto isso`,
+      );
+      continue;
+    }
+    const pendencias = storeProductIssues(produto).filter((pendencia) => pendencia.blocking);
+    if (pendencias.length > 0) {
+      bloqueia(
+        `${nome} tem pendência (${pendencias.map((pendencia) => pendencia.text).join('; ')})`,
+      );
+      continue;
+    }
+    if (produto.optionGroups.some((grupo) => grupo.minChoices >= 1)) {
+      bloqueia(`${nome} exige escolhas do cliente, e um combo não tem como fixá-las`);
+      continue;
+    }
+    if (produto.sizes.length > 0) {
+      const tamanho = produto.sizes.find((candidato) => candidato.id === item.sizeId);
+      if (!tamanho) bloqueia(`o tamanho escolhido de ${nome} foi removido`);
+      else if (!tamanho.available) bloqueia(`o tamanho ${tamanho.name} de ${nome} acabou`);
+    } else if (item.sizeId !== null) {
+      bloqueia(`${nome} não tem mais tamanhos`);
+    }
+  }
+  return lista;
+}
+
 /**
  * O que falta no cadastro do produto — a mesma lista que o painel mostra e que
  * o servidor usa para recusar publicar um produto que ninguém consegue comprar.
@@ -163,10 +285,29 @@ export interface StoreProductIssueResult {
  * Um lugar só para as duas pontas: com uma lista em cada, o painel deixaria
  * publicar o que o servidor recusa, ou o contrário.
  */
-export function storeProductIssues(produto: StoreProductForIssues): StoreProductIssueResult[] {
+export function storeProductIssues(
+  produto: StoreProductForIssues,
+  /**
+   * Os produtos da loja, por id: só o combo precisa, para conferir o que ele leva. Sem este
+   * mapa, o combo é conferido só pelo que traz consigo (tem itens, tem preço).
+   */
+  produtoPorId?: ReadonlyMap<string, ComponenteParaCombo>,
+): StoreProductIssueResult[] {
   const lista: StoreProductIssueResult[] = [];
 
   if (produto.name.trim() === '') lista.push({ text: 'sem nome', blocking: true });
+
+  if (produto.kind === 'COMBO') {
+    const itens = produto.comboItems ?? [];
+    if (itens.length === 0) {
+      lista.push({
+        text: 'sem itens — o combo precisa levar pelo menos um produto',
+        blocking: true,
+      });
+    } else if (produtoPorId) {
+      lista.push(...storeComboItemIssues(itens, produtoPorId));
+    }
+  }
 
   if (produto.sizes.length === 0) {
     if (produto.price === null || produto.price <= 0) {

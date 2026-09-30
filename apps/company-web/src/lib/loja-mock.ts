@@ -301,6 +301,14 @@ export interface ProdutoDeExemplo {
    */
   esgotado?: boolean;
   restam?: number | null;
+  /**
+   * Só no combo: o que ele leva e quanto os itens custariam separados (`valorSeparado`). O preço
+   * do combo é `precoUnico`. Ausente: é um produto.
+   */
+  combo?: {
+    itens: Array<{ produtoId: string; nome: string; tamanho: string | null; quantidade: number }>;
+    valorSeparado: number;
+  } | null;
   tamanhos: TamanhoDeExemplo[];
   grupos: GrupoDeExemplo[];
 }
@@ -314,6 +322,8 @@ export interface ItemDeVenda {
   escolhas: string[];
   /** As mesmas escolhas, agrupadas como no cardápio. Ausente em venda antiga e na demonstração. */
   grupos?: EscolhasDoGrupo[];
+  /** Só na linha de um combo: o que ele levava (por unidade do combo). */
+  combo?: Array<{ nome: string; tamanho: string | null; quantidade: number }>;
   /** O que a linha custa, já com a promoção: é o que o cliente paga. */
   total: number;
   /** A promoção que baixou a linha, como estava na compra. Ausente: sem desconto. */

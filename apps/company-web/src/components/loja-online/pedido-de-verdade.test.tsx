@@ -1054,3 +1054,86 @@ describe('Sacola da loja de verdade', () => {
     expect(screen.queryByRole('button', { name: /Fazer pedido/ })).not.toBeInTheDocument();
   });
 });
+
+describe('Combo na sacola', () => {
+  const COMBO_NA_SACOLA = {
+    produtoId: 'cb1',
+    nome: 'Combo Açaí + Suco',
+    tamanho: null,
+    escolhas: [],
+    tamanhoId: null,
+    escolhaIds: [],
+    quantidade: 2,
+    unitario: 30,
+    inclui: '1× Açaí (500ml), 2× Suco',
+  };
+  const doCardapio = {
+    id: 'cb1',
+    nome: 'Combo Açaí + Suco',
+    descricao: '',
+    categoriaId: 'c1',
+    imagemUrl: null,
+    precoUnico: 30,
+    situacao: 'publicado' as const,
+    tamanhos: [],
+    grupos: [],
+    combo: {
+      itens: [
+        { produtoId: 'p1', nome: 'Açaí', tamanho: '500ml', quantidade: 1 },
+        { produtoId: 'p2', nome: 'Suco', tamanho: null, quantidade: 2 },
+      ],
+      valorSeparado: 32.4,
+    },
+  };
+  const comCombo = () => {
+    window.localStorage.setItem(`loja:${SLUG}:sacola`, JSON.stringify([COMBO_NA_SACOLA]));
+    return render(<Sacola slug={SLUG} cardapio={cardapio({ produtos: [doCardapio] })} />);
+  };
+
+  it('o checkout diz o que o combo leva, e o pedido vai como qualquer item: o combo pelo id, sem tamanho', async () => {
+    mocks.checkout.mockResolvedValue({ numero: 30 } as PedidoDaLoja);
+    comCombo();
+
+    expect(await screen.findByText('Inclui: 1× Açaí (500ml), 2× Suco')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Fazer pedido/ }));
+
+    // 2 x 30,00 + 5,00 de entrega, sem promoção nenhuma: o preço do combo é o que vale.
+    await waitFor(() =>
+      expect(mocks.checkout).toHaveBeenCalledWith(
+        SLUG,
+        'token-do-google',
+        expect.objectContaining({
+          totalVisto: 65,
+          itens: [{ produtoId: 'cb1', tamanhoId: null, escolhas: [], quantidade: 2 }],
+        }),
+      ),
+    );
+  });
+
+  it('a recusa por falta de estoque de um produto do combo aparece com a frase do servidor', async () => {
+    mocks.checkout.mockRejectedValue(
+      new ApiError(409, {
+        message: 'Combo Açaí + Suco esgotou: Suco acabou. Tire da sacola e peça de novo.',
+        code: 'STORE_ORDER_OUT_OF_STOCK',
+      }),
+    );
+    comCombo();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Fazer pedido/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Combo Açaí + Suco esgotou: Suco acabou. Tire da sacola e peça de novo.',
+    );
+  });
+
+  it('o combo esgotado na página avisa na sacola, como qualquer produto', async () => {
+    window.localStorage.setItem(`loja:${SLUG}:sacola`, JSON.stringify([COMBO_NA_SACOLA]));
+    render(
+      <Sacola slug={SLUG} cardapio={cardapio({ produtos: [{ ...doCardapio, esgotado: true }] })} />,
+    );
+
+    expect(
+      await screen.findByText('Combo Açaí + Suco esgotou. Tire da sacola para continuar.'),
+    ).toBeInTheDocument();
+  });
+});

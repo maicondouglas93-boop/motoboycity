@@ -1,5 +1,6 @@
-import type { StoreProduct, StoreProductStatus } from '@motoboycity/types';
+import type { StoreProduct, StoreProductKind, StoreProductStatus } from '@motoboycity/types';
 import {
+  LIMITES_DO_COMBO,
   storeProductIssues,
   type StoreProductForIssues,
   type StoreProductIssueResult,
@@ -44,7 +45,18 @@ export interface GrupoNoFormulario {
   escolhas: LinhaDeEscolha[];
 }
 
+/** Um produto que o combo leva. `tamanhoId` vazio: o produto não tem tamanhos. */
+export interface LinhaDoCombo {
+  chave: string;
+  /** Vazio: a linha ainda não tem produto e não vai para a API. */
+  produtoId: string;
+  tamanhoId: string;
+  quantidade: string;
+}
+
 export interface ProdutoNoFormulario {
+  /** Combo ou produto: a loja escolhe ao criar, e não muda depois. */
+  tipo: StoreProductKind;
   nome: string;
   descricao: string;
   /** Vazio: sem categoria. */
@@ -65,6 +77,8 @@ export interface ProdutoNoFormulario {
   estoqueOriginal: string;
   tamanhos: LinhaDeTamanho[];
   grupos: GrupoNoFormulario[];
+  /** Só no combo: o que ele leva. */
+  itensDoCombo: LinhaDoCombo[];
 }
 
 /** Os mesmos limites de `upsertStoreProductSchema`: a tela para antes de a API recusar. */
@@ -79,6 +93,8 @@ export const LIMITES_DO_PRODUTO = {
   escolhasPorGrupo: 50,
   preco: 99999.99,
   estoque: 999_999,
+  itensDoCombo: LIMITES_DO_COMBO.itens,
+  quantidadeNoCombo: LIMITES_DO_COMBO.quantidade,
 } as const;
 
 /** O mesmo que a API aceita: ela confere de novo, pelos bytes. */
@@ -124,8 +140,20 @@ export function textoParaPreco(texto: string): number | null {
   return Number(limpo);
 }
 
-export function produtoParaFormulario(produto?: StoreProduct): ProdutoNoFormulario {
+export function produtoParaFormulario(
+  produto?: StoreProduct,
+  /** O tipo de quem está sendo cadastrado. Quem edita tem o do produto. */
+  tipo: StoreProductKind = 'PRODUCT',
+): ProdutoNoFormulario {
   return {
+    tipo: produto?.kind ?? tipo,
+    itensDoCombo:
+      produto?.comboItems.map((item, indice) => ({
+        chave: `${item.productId}-${indice}`,
+        produtoId: item.productId,
+        tamanhoId: item.sizeId ?? '',
+        quantidade: String(item.quantity),
+      })) ?? [],
     nome: produto?.name ?? '',
     descricao: produto?.description ?? '',
     categoriaId: produto?.categoryId ?? '',
@@ -203,16 +231,27 @@ export type Montagem =
  * Com a tabela de tamanhos aberta, o preço único não vai, mesmo que as linhas
  * estejam em branco: é o que a tela mostra, e o que se vê é o que se salva.
  */
-export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductStatus): Montagem {
+export function montarPayload(
+  estado: ProdutoNoFormulario,
+  status: StoreProductStatus,
+  /** O catálogo: o combo confere, por ele, se o produto pede tamanho. */
+  produtos: readonly StoreProduct[] = [],
+): Montagem {
   const erros: string[] = [];
+  const combo = estado.tipo === 'COMBO';
   const nome = estado.nome.trim();
-  if (nome === '') erros.push('Dê um nome ao produto.');
+  if (nome === '') erros.push(combo ? 'Dê um nome ao combo.' : 'Dê um nome ao produto.');
 
-  const usaTamanhos = estado.tamanhos.length > 0;
-  const price = usaTamanhos ? null : lerPreco(estado.precoUnico, 'Preço', erros);
+  // O combo tem um preço só — o dele —, sem tamanhos e sem estoque próprio.
+  const usaTamanhos = !combo && estado.tamanhos.length > 0;
+  const price = usaTamanhos
+    ? null
+    : lerPreco(estado.precoUnico, combo ? 'Preço do combo' : 'Preço', erros);
+
+  const comboItems = combo ? lerItensDoCombo(estado.itensDoCombo, produtos, erros) : [];
 
   // O estoque só vai se a lojista o mudou: ver `estoqueOriginal`.
-  const estoqueMudou = estado.estoque.trim() !== estado.estoqueOriginal.trim();
+  const estoqueMudou = !combo && estado.estoque.trim() !== estado.estoqueOriginal.trim();
   let stock: number | null = null;
   if (estoqueMudou) {
     const valor = inteiro(estado.estoque);
@@ -227,7 +266,7 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
     }
   }
 
-  const sizes = estado.tamanhos
+  const sizes = (combo ? [] : estado.tamanhos)
     .filter((linha) => !emBranco(linha))
     .map((linha) => {
       if (linha.nome.trim() === '') erros.push('Um tamanho tem preço, mas está sem nome.');
@@ -291,6 +330,7 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
   return {
     ok: true,
     payload: {
+      ...(combo ? { kind: 'COMBO' as const, comboItems } : {}),
       categoryId: estado.categoriaId === '' ? null : estado.categoriaId,
       name: nome,
       description: estado.descricao.trim(),
@@ -304,23 +344,78 @@ export function montarPayload(estado: ProdutoNoFormulario, status: StoreProductS
 }
 
 /**
+ * As linhas do combo como a API as recebe. A linha sem produto é a que se clicou em "adicionar"
+ * e não preencheu: não vai. Produto com tamanhos precisa do tamanho; quantidade é inteiro de 1 até
+ * o limite.
+ */
+function lerItensDoCombo(
+  linhas: readonly LinhaDoCombo[],
+  produtos: readonly StoreProduct[],
+  erros: string[],
+): Array<{ productId: string; sizeId: string | null; quantity: number }> {
+  return linhas
+    .filter((linha) => linha.produtoId !== '')
+    .map((linha) => {
+      const produto = produtos.find((candidato) => candidato.id === linha.produtoId);
+      const nome = produto?.name ?? 'um produto';
+      if (!produto) erros.push('Um produto do combo não está mais no cardápio. Tire-o da lista.');
+      const quantidade = inteiro(linha.quantidade);
+      if (
+        quantidade === null ||
+        Number.isNaN(quantidade) ||
+        quantidade < 1 ||
+        quantidade > LIMITES_DO_PRODUTO.quantidadeNoCombo
+      ) {
+        erros.push(
+          `Combo: a quantidade de ${nome} é um número inteiro de 1 a ${LIMITES_DO_PRODUTO.quantidadeNoCombo}.`,
+        );
+      }
+      const comTamanhos = (produto?.sizes.length ?? 0) > 0;
+      if (comTamanhos && linha.tamanhoId === '')
+        erros.push(`Escolha o tamanho de ${nome} no combo.`);
+      return {
+        productId: linha.produtoId,
+        sizeId: comTamanhos ? linha.tamanhoId : null,
+        quantity: quantidade !== null && !Number.isNaN(quantidade) ? quantidade : 1,
+      };
+    });
+}
+
+/**
  * O que impede PUBLICAR, pela mesma regra do servidor (`storeProductIssues`).
  *
  * Tolerante de propósito: é chamada a cada tecla, com o formulário pela metade.
  * O que não é número conta como sem preço — que é exatamente a pendência.
  */
-export function pendenciasDoFormulario(estado: ProdutoNoFormulario): StoreProductIssueResult[] {
+export function pendenciasDoFormulario(
+  estado: ProdutoNoFormulario,
+  /** O catálogo: o combo é conferido pelo que leva (à venda, com o tamanho disponível). */
+  produtos: readonly StoreProduct[] = [],
+): StoreProductIssueResult[] {
   const comoPreco = (texto: string) => {
     const valor = textoParaPreco(texto);
     return valor === null || Number.isNaN(valor) ? null : valor;
   };
+  const combo = estado.tipo === 'COMBO';
   const produto: StoreProductForIssues = {
+    ...(combo
+      ? {
+          kind: 'COMBO' as const,
+          comboItems: estado.itensDoCombo
+            .filter((linha) => linha.produtoId !== '')
+            .map((linha) => ({
+              productId: linha.produtoId,
+              sizeId: linha.tamanhoId === '' ? null : linha.tamanhoId,
+              quantity: Math.max(1, Number(linha.quantidade) || 1),
+            })),
+        }
+      : {}),
     categoryId: estado.categoriaId === '' ? null : estado.categoriaId,
     name: estado.nome,
     description: estado.descricao,
     imageUrl: estado.imagemUrl,
-    price: estado.tamanhos.length > 0 ? null : comoPreco(estado.precoUnico),
-    sizes: estado.tamanhos
+    price: !combo && estado.tamanhos.length > 0 ? null : comoPreco(estado.precoUnico),
+    sizes: (combo ? [] : estado.tamanhos)
       .filter((linha) => !emBranco(linha))
       .map((linha) => ({
         name: linha.nome,
@@ -337,7 +432,10 @@ export function pendenciasDoFormulario(estado: ProdutoNoFormulario): StoreProduc
           .map((escolha) => ({ name: escolha.nome, available: escolha.disponivel })),
       })),
   };
-  return storeProductIssues(produto);
+  return storeProductIssues(
+    produto,
+    combo ? new Map(produtos.map((item) => [item.id, item])) : undefined,
+  );
 }
 
 export interface SaidaDoFormulario {
@@ -363,13 +461,15 @@ export interface SaidaDoFormulario {
 export function saidasDoFormulario(
   atual: StoreProductStatus | undefined,
   bloqueado: boolean,
+  /** "produto" ou "combo": é o que o botão de publicar diz. */
+  substantivo: 'produto' | 'combo' = 'produto',
 ): SaidaDoFormulario[] {
   switch (atual) {
     case undefined:
       return [
         {
           status: 'PUBLISHED',
-          texto: 'Publicar produto',
+          texto: `Publicar ${substantivo}`,
           variante: 'default',
           desativada: bloqueado,
         },

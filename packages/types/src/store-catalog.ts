@@ -13,6 +13,12 @@
  */
 export type StoreProductStatus = 'PUBLISHED' | 'DRAFT' | 'PAUSED';
 
+/**
+ * O que o item do cardápio é. `COMBO`: vários produtos da loja por um preço só; a loja escolhe
+ * ao criar, e não muda depois.
+ */
+export type StoreProductKind = 'PRODUCT' | 'COMBO';
+
 export interface StoreCategory {
   id: string;
   name: string;
@@ -44,14 +50,28 @@ export interface StoreOptionGroup {
   options: StoreOption[];
 }
 
+/**
+ * Um produto que o combo leva. `sizeId` é o tamanho fixo do produto que tem tamanhos; `null` no
+ * produto de um preço só.
+ */
+export interface StoreComboItem {
+  productId: string;
+  sizeId: string | null;
+  quantity: number;
+}
+
 export interface StoreProduct {
   id: string;
+  kind: StoreProductKind;
   /** `null`: sem seção — o produto não aparece na loja enquanto não tiver uma. */
   categoryId: string | null;
   name: string;
   description: string;
   imageUrl: string | null;
-  /** Sem tamanhos, o preço. Com tamanhos, `null`: o preço vem de cada um. */
+  /**
+   * Sem tamanhos, o preço. Com tamanhos, `null`: o preço vem de cada um. No combo, o preço do
+   * combo todo — o que o cliente paga, e não a soma dos itens.
+   */
   price: number | null;
   status: StoreProductStatus;
   /**
@@ -61,6 +81,11 @@ export interface StoreProduct {
    * página — sem mudar o `status`, que é escolha da loja.
    */
   stock: number | null;
+  /**
+   * Só no combo: o que ele leva, na ordem. Vazio no produto. O combo não tem estoque próprio —
+   * o que ele tem é o dos produtos daqui —, nem tamanhos.
+   */
+  comboItems: StoreComboItem[];
   sizes: StoreProductSize[];
   optionGroups: StoreOptionGroup[];
   updatedAt: string;

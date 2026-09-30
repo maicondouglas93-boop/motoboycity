@@ -332,6 +332,47 @@ texto mudou); resumo e selos em `loja/produtos/page.tsx`. Na loja, `lib/loja-est
 (`unidadesQueAindaCabem`, `rotuloDeRestam`, `avisoDeEstoque`) alimenta `folha-do-produto.tsx`,
 `folha-da-sacola.tsx`, `loja-publica.tsx` e a `sacola.tsx` do checkout.
 
+### Combos da loja online
+
+Um combo é um `store_products` com `kind = COMBO` (enum `StoreProductKind`, padrão `PRODUCT`)
+mais linhas em `store_combo_items` (`comboId` com cascade, `productId`, `sizeId`, `quantity`,
+`position`). `productId` e `sizeId` **não têm chave estrangeira**, de propósito (como os
+produtos dos destaques): apagar um produto não apaga o combo, que sai do ar até a loja
+consertar. Migration aditiva `20260930130000_combos` (validada em banco descartável: aplica,
+fica igual ao schema, desfaz e reaplica). O combo reaproveita tudo do produto — categoria, foto,
+status, ordem (Organizar), destaques, grupos de escolhas —, não tem tamanhos nem estoque próprio
+(`stock` nulo), e o preço do combo é o `price`.
+
+Contratos: `StoreProduct.kind` e `comboItems` (o painel vê os ids); `PublicStoreProduct` perde
+`comboItems` e ganha `combo: { itens: [{ produtoId, nome, tamanho, quantidade }],
+valorSeparado } | null` — o cliente lê pelo nome, com o tamanho já resolvido. `ItemDoPedido.combo`
+guarda o que o combo levava na compra, com `baixouEstoque` por produto.
+
+Regras no pacote compartilhado (`packages/validation`): `store-combo.rules.ts`
+(`valorSeparadoDoCombo`, `economiaDoCombo`, `capacidadeDoCombo`, `estoqueDoCombo`,
+`LIMITES_DO_COMBO`); `storeComboItemIssues` e `storeProductIssues(produto, produtoPorId)`, em
+`store-catalog.schema.ts` — o que impede o combo de ir ao ar é a mesma lista no painel e no
+servidor; `upsertStoreProductSchema.kind`/`comboItems`; e `LinhaParaPrecificar.combo`, que as
+promoções pulam e o cupom conta como item em promoção.
+
+Servidor: `StoreCatalogService` grava (`conferirItensDoCombo`: produtos da empresa, sem combo,
+tamanho fixo, sem escolhas obrigatórias, senão 400 `STORE_COMBO_ITEM_INVALID`; `kind` diferente
+do gravado, 409 `STORE_PRODUCT_KIND_LOCKED`; editar troca a lista inteira de itens, na mesma
+transação) e publica (`publicCatalog` só devolve o combo com todos os produtos dele à venda, com
+`esgotado`/`restam` da menor capacidade). Promoção sobre combo: 409
+`STORE_PROMOTION_TARGET_IS_COMBO` (`StoreMarketingService.conferirAlvo`).
+
+Pedido: `precificar` copia `combo` para a linha; `demandaDeEstoque` expande o combo nos produtos
+dele; `conferirEstoque` e a baixa atômica de `gravarComNumero` agem sobre eles;
+`semEstoqueNoPedido` fala em nome do combo (o `produtoId` do erro é o da linha da sacola);
+`devolverEstoque` lê `combo[].baixouEstoque`.
+
+No `company-web`: `components/loja/combo.ts`, `itens-do-combo.tsx` (o cartão "O que vem no
+combo"), `produto-no-formulario.ts` (`tipo`, `itensDoCombo`, `montarPayload(estado, status,
+produtos)`), `formulario-de-produto.tsx` e `produtos/page.tsx`; o cadastro abre em
+`/loja/produtos/novo?tipo=combo`. Na loja, `lib/loja-combo.ts`, `ProdutoDeExemplo.combo` e
+`ItemEscolhido.inclui` (o texto que a sacola, o checkout e Meus pedidos mostram).
+
 ## 2. A cadeia de contratos
 
 Toda mudança de contrato percorre a mesma sequência, e o compilador cobra cada

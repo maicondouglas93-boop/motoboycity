@@ -158,7 +158,10 @@ export function FormularioDePromocao({ promocao }: { promocao?: PromocaoDaLoja }
 
   // O preço promocional só vale para produto de preço único: com tamanhos, cada
   // um tem o seu preço, e o desconto em % é o que faz sentido.
-  const produtosDoTipo = r.tipo === 'PRECO' ? produtos.filter((p) => p.price !== null) : produtos;
+  // O combo já tem preço especial e não entra em promoção: nem na lista, nem na conta da seção.
+  const soProdutos = produtos.filter((p) => p.kind !== 'COMBO');
+  const produtosDoTipo =
+    r.tipo === 'PRECO' ? soProdutos.filter((p) => p.price !== null) : soProdutos;
   const produtoEscolhido = produtos.find((p) => p.id === r.produtoId) ?? null;
 
   const conferido = storePromotionSchema.safeParse(paraOPayload(r, true));
@@ -168,7 +171,9 @@ export function FormularioDePromocao({ promocao }: { promocao?: PromocaoDaLoja }
     if (!conferido.success) return null;
     const dados = conferido.data;
     if (dados.alvo === 'CATEGORIA') {
-      const quantos = produtos.filter((p) => p.categoryId === dados.categoriaId).length;
+      const quantos = produtos.filter(
+        (p) => p.kind !== 'COMBO' && p.categoryId === dados.categoriaId,
+      ).length;
       return {
         texto: `Vale para os ${quantos} ${quantos === 1 ? 'produto' : 'produtos'} desta seção.`,
       };

@@ -40,6 +40,8 @@ const NO_AR: StoreProduct = {
   price: 22,
   status: 'PUBLISHED',
   stock: null,
+  kind: 'PRODUCT',
+  comboItems: [],
   sizes: [],
   optionGroups: [
     {
@@ -390,5 +392,223 @@ describe('Formulário de produto — estoque opcional', () => {
 
     expect(screen.getByText(/Estoque: "muitas" não é um número inteiro/)).toBeInTheDocument();
     expect(mocks.updateProduct).not.toHaveBeenCalled();
+  });
+});
+
+describe('Formulário de combo', () => {
+  const HAMBURGUER: StoreProduct = {
+    ...NO_AR,
+    id: '88888888-8888-4888-8888-888888888881',
+    name: 'X-Burger',
+    price: 22,
+    optionGroups: [],
+  };
+  const BATATA: StoreProduct = {
+    ...HAMBURGUER,
+    id: '88888888-8888-4888-8888-888888888882',
+    name: 'Batata',
+    price: null,
+    sizes: [
+      { id: '99999999-9999-4999-8999-999999999991', name: 'Média', price: 12, available: true },
+      { id: '99999999-9999-4999-8999-999999999992', name: 'Grande', price: 16, available: true },
+    ],
+  };
+  const COM_ESCOLHAS = { ...NO_AR, id: '88888888-8888-4888-8888-888888888883', name: 'Pizza' };
+  const COMBO_SALVO: StoreProduct = {
+    ...HAMBURGUER,
+    id: '88888888-8888-4888-8888-888888888890',
+    kind: 'COMBO',
+    name: 'Combo Clássico',
+    price: 30,
+    comboItems: [
+      { productId: HAMBURGUER.id, sizeId: null, quantity: 1 },
+      { productId: BATATA.id, sizeId: BATATA.sizes[1]!.id, quantity: 2 },
+    ],
+  };
+
+  function renderizarCombo(
+    produto?: StoreProduct,
+    produtos: StoreProduct[] = [HAMBURGUER, BATATA],
+  ) {
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    queryClient.setQueryData<StoreCatalog>(CHAVE_DO_CATALOGO, {
+      categories: [LANCHES],
+      products: produto ? [...produtos, produto] : produtos,
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FormularioDeProduto
+          produto={produto}
+          categorias={[LANCHES]}
+          produtos={produto ? [...produtos, produto] : produtos}
+          tipo="COMBO"
+        />
+      </QueryClientProvider>,
+    );
+  }
+  const linhaDoCombo = (indice: number) => ({
+    produto: screen.getAllByLabelText('Produto do combo')[indice]!,
+    quantidade: screen.getAllByLabelText('Quantidade no combo')[indice]!,
+  });
+
+  beforeEach(() => {
+    window.localStorage.setItem('motoboycity.accessToken', 'token');
+    for (const mock of Object.values(mocks)) mock.mockReset();
+  });
+
+  it('o cadastro de combo tem a composição e o preço do combo, e não tem tamanhos nem estoque', () => {
+    renderizarCombo();
+
+    expect(screen.getByRole('heading', { name: 'Cadastrar combo' })).toBeInTheDocument();
+    expect(screen.getByText('O que vem no combo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Preço do combo')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Unidades em estoque')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Adicionar tamanho/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Preço único')).not.toBeInTheDocument();
+    expect(botao('Publicar combo')).toBeDisabled();
+    expect(screen.getByText(/sem itens/)).toBeInTheDocument();
+  });
+
+  it('monta e publica o combo: os itens, a economia à vista, e o que a API recebe', async () => {
+    mocks.createProduct.mockResolvedValue(COMBO_SALVO);
+    renderizarCombo();
+
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Combo Clássico' } });
+    fireEvent.change(screen.getByLabelText('Categoria'), { target: { value: LANCHES.id } });
+    fireEvent.click(botao('Adicionar produto'));
+    fireEvent.change(linhaDoCombo(0).produto, { target: { value: HAMBURGUER.id } });
+    fireEvent.click(botao('Adicionar produto'));
+    fireEvent.change(linhaDoCombo(1).produto, { target: { value: BATATA.id } });
+    fireEvent.change(linhaDoCombo(1).quantidade, { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Preço do combo'), { target: { value: '30,00' } });
+
+    // A batata nasce no primeiro tamanho (Média, R$ 12,00): 22 + 2 x 12 = 46.
+    expect(screen.getByLabelText('Tamanho no combo')).toHaveValue(BATATA.sizes[0]!.id);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Comprados separados, os itens custam R$ 46,00.',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'O cliente economiza R$ 16,00 (35%) no combo.',
+    );
+
+    fireEvent.click(botao('Publicar combo'));
+    await waitFor(() => expect(mocks.createProduct).toHaveBeenCalledTimes(1));
+    expect(mocks.createProduct.mock.calls[0]![1]).toEqual({
+      kind: 'COMBO',
+      comboItems: [
+        { productId: HAMBURGUER.id, sizeId: null, quantity: 1 },
+        { productId: BATATA.id, sizeId: BATATA.sizes[0]!.id, quantity: 2 },
+      ],
+      categoryId: LANCHES.id,
+      name: 'Combo Clássico',
+      description: '',
+      price: 30,
+      status: 'PUBLISHED',
+      sizes: [],
+      optionGroups: [],
+    });
+  });
+
+  it('trocar o tamanho muda a conta; preço igual ou acima dos itens separados avisa que não há vantagem', () => {
+    renderizarCombo();
+    fireEvent.click(botao('Adicionar produto'));
+    fireEvent.change(linhaDoCombo(0).produto, { target: { value: BATATA.id } });
+    fireEvent.change(screen.getByLabelText('Tamanho no combo'), {
+      target: { value: BATATA.sizes[1]!.id },
+    });
+    fireEvent.change(screen.getByLabelText('Preço do combo'), { target: { value: '16,00' } });
+
+    expect(screen.getByRole('status')).toHaveTextContent('os itens custam R$ 16,00');
+    expect(screen.getByRole('status')).toHaveTextContent('não vê vantagem');
+    expect(screen.getByRole('status')).not.toHaveTextContent('economiza');
+  });
+
+  it('o combo e o produto que exige escolhas não podem ser escolhidos, e o produto pausado avisa', () => {
+    const pausado = {
+      ...HAMBURGUER,
+      id: '88888888-8888-4888-8888-888888888884',
+      name: 'Sanduíche',
+      status: 'PAUSED' as const,
+    };
+    renderizarCombo(COMBO_SALVO, [HAMBURGUER, BATATA, COM_ESCOLHAS, pausado]);
+    fireEvent.click(botao('Adicionar produto'));
+    const opcoes = Array.from(linhaDoCombo(2).produto.querySelectorAll('option'));
+    const texto = (nome: string) => opcoes.find((opcao) => opcao.textContent?.startsWith(nome));
+
+    expect(texto('Pizza')).toHaveTextContent('Pizza — exige escolhas');
+    expect(texto('Pizza')).toBeDisabled();
+    expect(texto('Sanduíche')).toHaveTextContent('Sanduíche (pausado)');
+    expect(texto('Sanduíche')).toBeEnabled();
+    // O próprio combo não é oferecido como item.
+    expect(opcoes.some((opcao) => opcao.textContent?.includes('Combo Clássico'))).toBe(false);
+  });
+
+  it('o combo salvo abre com os itens, e salvar sem mexer manda os mesmos itens', async () => {
+    mocks.updateProduct.mockResolvedValue(COMBO_SALVO);
+    renderizarCombo(COMBO_SALVO);
+
+    expect(screen.getByRole('heading', { name: 'Editar combo' })).toBeInTheDocument();
+    expect(linhaDoCombo(0).produto).toHaveValue(HAMBURGUER.id);
+    expect(linhaDoCombo(1).produto).toHaveValue(BATATA.id);
+    expect(linhaDoCombo(1).quantidade).toHaveValue('2');
+    expect(screen.getByLabelText('Tamanho no combo')).toHaveValue(BATATA.sizes[1]!.id);
+
+    fireEvent.click(botao('Salvar alterações'));
+    await waitFor(() => expect(mocks.updateProduct).toHaveBeenCalledTimes(1));
+    expect(mocks.updateProduct.mock.calls[0]![2]).toMatchObject({
+      kind: 'COMBO',
+      comboItems: [
+        { productId: HAMBURGUER.id, sizeId: null, quantity: 1 },
+        { productId: BATATA.id, sizeId: BATATA.sizes[1]!.id, quantity: 2 },
+      ],
+    });
+  });
+
+  it('um item pausado tira o combo do ar: o formulário diz qual, e o botão vira "Salvar e tirar do ar"', () => {
+    renderizarCombo(COMBO_SALVO, [{ ...HAMBURGUER, status: 'PAUSED' }, BATATA]);
+
+    expect(screen.getByText('Estas alterações tiram o combo do ar:')).toBeInTheDocument();
+    expect(screen.getByText(/"X-Burger" está pausado/)).toBeInTheDocument();
+    expect(botao('Salvar e tirar do ar')).toBeEnabled();
+  });
+
+  it('tirar um item da lista tira da conta', () => {
+    renderizarCombo(COMBO_SALVO);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tirar X-Burger do combo' }));
+
+    expect(screen.getAllByLabelText('Produto do combo')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('os itens custam R$ 32,00');
+  });
+
+  it('excluir um produto que está em combos avisa quais saem do ar', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData<StoreCatalog>(CHAVE_DO_CATALOGO, {
+      categories: [LANCHES],
+      products: [HAMBURGUER, BATATA, COMBO_SALVO],
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FormularioDeProduto
+          produto={HAMBURGUER}
+          categorias={[LANCHES]}
+          produtos={[HAMBURGUER, BATATA, COMBO_SALVO]}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(botao('Excluir produto'));
+
+    expect(screen.getByText(/Ele está no combo/)).toHaveTextContent(
+      'Ele está no combo Combo Clássico, que sai do ar até você trocar o item.',
+    );
+  });
+
+  it('o produto comum segue sem nada de combo', () => {
+    renderizar(NO_AR);
+
+    expect(screen.queryByText('O que vem no combo')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Preço único')).toBeInTheDocument();
+    expect(screen.getByLabelText('Unidades em estoque')).toBeInTheDocument();
   });
 });

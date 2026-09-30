@@ -61,6 +61,15 @@ export function paraVenda(pedido: PedidoDaLoja): VendaNoPainel {
       tamanho: item.tamanho,
       escolhas: item.escolhas,
       ...(item.grupos ? { grupos: item.grupos } : {}),
+      ...(item.combo
+        ? {
+            combo: item.combo.map(({ nome, tamanho, quantidade }) => ({
+              nome,
+              tamanho,
+              quantidade,
+            })),
+          }
+        : {}),
       total: item.total,
       ...(item.promocao
         ? { promocao: { rotulo: item.promocao.rotulo, desconto: item.promocao.desconto } }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Bell, BellRing, ChevronLeft, Clock, MapPin, Store } from 'lucide-react';
 import type { AndamentoDoPedido, PedidoDaLoja } from '@motoboycity/types';
+import { descricaoDoCombo } from '@/lib/loja-combo';
 import { LOJA_DE_EXEMPLO, rotuloDoPagamento } from '@/lib/loja-mock';
 import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { useOperacao, useVendas } from '@/lib/loja-demo';
@@ -89,6 +90,7 @@ function comoGuardado(pedido: PedidoDaLoja): PedidoGuardado {
       nome: item.nome,
       tamanho: item.tamanho,
       escolhas: item.escolhas,
+      ...(item.combo ? { inclui: descricaoDoCombo(item.combo) } : {}),
       quantidade: item.quantidade,
       unitario: item.unitario,
     })),
@@ -301,6 +303,11 @@ function Conteudo({ slug, cardapio }: { slug: string; cardapio: CardapioDaPagina
                     <span>
                       {item.quantidade}× {item.nome}
                       {item.tamanho && ` · ${item.tamanho}`}
+                      {item.inclui && (
+                        <span className="block text-xs" style={{ color: paleta.suave }}>
+                          Inclui: {item.inclui}
+                        </span>
+                      )}
                       {item.escolhas.length > 0 && (
                         <span className="block text-xs" style={{ color: paleta.suave }}>
                           {item.escolhas.join(', ')}

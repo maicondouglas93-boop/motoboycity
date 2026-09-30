@@ -90,6 +90,22 @@ export interface EscolhasDoGrupo {
 }
 
 /**
+ * Um produto que o combo levou, como estava na hora da compra. `quantidade` é a de UMA unidade do
+ * combo; a linha do pedido multiplica.
+ */
+export interface ItemDeComboDoPedido {
+  produtoId: string;
+  nome: string;
+  tamanho: string | null;
+  quantidade: number;
+  /**
+   * O pedido baixou o estoque deste produto (ele tinha controle na hora da compra): é o sinal
+   * pelo qual o cancelamento devolve, como em `ItemDoPedido.baixouEstoque`.
+   */
+  baixouEstoque?: boolean;
+}
+
+/**
  * Uma linha do pedido como foi vendida: nomes e preços da hora da compra. Mudar
  * o cardápio depois não muda o que o cliente comprou.
  */
@@ -99,6 +115,11 @@ export interface ItemDoPedido {
   tamanho: string | null;
   /** Todas as escolhas, numa lista só. */
   escolhas: string[];
+  /**
+   * Só na linha de um combo: o que ele levava. Ausente no produto — e nos pedidos feitos antes
+   * de o combo existir.
+   */
+  combo?: ItemDeComboDoPedido[];
   /**
    * As mesmas escolhas, agrupadas como no cardápio e na ordem dele; só os
    * grupos em que o cliente marcou algo. Falta nos pedidos feitos antes de o

@@ -134,6 +134,11 @@ export function FolhaDaSacola({
                     {item.nome}
                     {item.tamanho && ` · ${item.tamanho}`}
                   </p>
+                  {item.inclui && (
+                    <p className="mt-0.5 text-[13px]" style={{ color: paleta.suave }}>
+                      Inclui: {item.inclui}
+                    </p>
+                  )}
                   {item.escolhas.length > 0 && (
                     <p className="mt-0.5 text-[13px]" style={{ color: paleta.suave }}>
                       {item.escolhas.join(', ')}

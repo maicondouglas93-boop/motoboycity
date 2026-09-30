@@ -88,9 +88,10 @@ export default function EditarProdutoPage({
       key={produto.id}
       produto={produto}
       categorias={catalogo.data.categories}
+      produtos={catalogo.data.products}
       avisoDaFoto={
         foto === 'falhou'
-          ? 'O produto foi salvo, mas a foto não subiu. Tente de novo por aqui.'
+          ? `${produto.kind === 'COMBO' ? 'O combo' : 'O produto'} foi salvo, mas a foto não subiu. Tente de novo por aqui.`
           : null
       }
     />

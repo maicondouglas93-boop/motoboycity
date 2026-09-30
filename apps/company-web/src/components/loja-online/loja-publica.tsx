@@ -15,6 +15,7 @@ import type { CardapioDaPagina } from '@/lib/loja-publica';
 import { situacaoDaLoja } from '@/lib/loja-horario';
 import { horariosDaModalidade, modalidadesAtivas, textoDoTempo } from '@/lib/loja-operacao';
 import { useOperacao } from '@/lib/loja-demo';
+import { descricaoDoCombo, economiaDoComboNaPagina, rotuloDeEconomia } from '@/lib/loja-combo';
 import {
   avisoDeEstoque,
   rotuloDeRestam,
@@ -468,6 +469,7 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
               {produtos.map((produto) => {
                 const quantidade = naSacola.get(produto.id) ?? 0;
                 const oferta = ofertaNaVitrine(produto, cardapio.promocoes, horaDaOferta);
+                const economia = economiaDoComboNaPagina(produto);
                 return (
                   <button
                     key={produto.id}
@@ -493,6 +495,14 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                           style={{ color: paleta.suave }}
                         >
                           {produto.descricao}
+                        </span>
+                      )}
+                      {produto.combo && (
+                        <span
+                          className="mt-0.5 line-clamp-2 block text-[13px] leading-snug"
+                          style={{ color: paleta.suave }}
+                        >
+                          Inclui: {descricaoDoCombo(produto.combo.itens)}
                         </span>
                       )}
                       {produto.esgotado ? (
@@ -542,6 +552,14 @@ export function LojaPublica({ slug, cardapio }: { slug: string; cardapio: Cardap
                               <span className="ml-2 align-middle">
                                 <SeloDePromocao
                                   rotulo={oferta.rotulo}
+                                  corDeAcao={marca.corDeAcao}
+                                />
+                              </span>
+                            )}
+                            {economia > 0 && (
+                              <span className="ml-2 align-middle">
+                                <SeloDePromocao
+                                  rotulo={rotuloDeEconomia(economia)}
                                   corDeAcao={marca.corDeAcao}
                                 />
                               </span>

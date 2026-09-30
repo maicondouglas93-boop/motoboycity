@@ -241,3 +241,56 @@ describe('Comanda da venda', () => {
     });
   });
 });
+
+describe('a comanda de um pedido com combo', () => {
+  const COM_COMBO: VendaDaLoja = {
+    ...VENDA,
+    itens: [
+      {
+        nome: 'Combo Açaí + Suco',
+        quantidade: 2,
+        tamanho: null,
+        escolhas: [],
+        combo: [
+          { nome: 'Açaí', tamanho: '500ml', quantidade: 1 },
+          { nome: 'Suco', tamanho: null, quantidade: 2 },
+        ],
+        total: 60,
+      },
+      { nome: 'X-Burger', quantidade: 1, tamanho: null, escolhas: [], total: 22 },
+    ],
+  };
+
+  it('lista o que cada combo leva, para a cozinha montar', () => {
+    render(
+      <ComandaDaVenda
+        venda={COM_COMBO}
+        loja="Lanches do Zé"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    const comanda = texto();
+    expect(comanda).toContain('Combo Açaí + Suco');
+    expect(comanda).toContain('Cada combo leva:');
+    expect(comanda).toContain('1× Açaí — 500ml');
+    expect(comanda).toContain('2× Suco');
+  });
+
+  it('um combo só diz "Combo leva:", e o produto comum não ganha lista nenhuma', () => {
+    render(
+      <ComandaDaVenda
+        venda={{
+          ...COM_COMBO,
+          itens: [{ ...COM_COMBO.itens[0]!, quantidade: 1 }, COM_COMBO.itens[1]!],
+        }}
+        loja="Lanches do Zé"
+        impressoEm="2026-09-25T22:15:00.000Z"
+      />,
+    );
+
+    expect(texto()).toContain('Combo leva:');
+    expect(texto()).not.toContain('Cada combo leva:');
+    expect(screen.getAllByText(/leva:/)).toHaveLength(1);
+  });
+});

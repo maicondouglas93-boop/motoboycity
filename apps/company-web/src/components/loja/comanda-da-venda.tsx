@@ -114,6 +114,21 @@ export function ComandaDaVenda({
                   PROMOÇÃO {item.promocao.rotulo} (− {moeda(item.promocao.desconto)})
                 </p>
               )}
+              {item.combo && item.combo.length > 0 && (
+                <div className={estilos['grupo']}>
+                  <p className={estilos['grupoNome']}>
+                    {item.quantidade > 1 ? 'Cada combo leva:' : 'Combo leva:'}
+                  </p>
+                  <ul className={estilos['opcoes']}>
+                    {item.combo.map((componente, posicao) => (
+                      <li key={`${posicao}-${componente.nome}`}>
+                        {componente.quantidade}× {componente.nome}
+                        {componente.tamanho && ` — ${componente.tamanho}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {item.grupos && item.grupos.length > 0 ? (
                 <div className={estilos['grupos']}>
                   {item.grupos.map(({ grupo, opcoes }) => (

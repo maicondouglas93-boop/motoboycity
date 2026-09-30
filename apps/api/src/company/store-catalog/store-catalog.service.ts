@@ -13,8 +13,11 @@ import type {
   StoreProduct,
 } from '@motoboycity/types';
 import {
+  estoqueDoCombo,
   estoqueNaVitrine,
   storeProductIssues,
+  valorSeparadoDoCombo,
+  type ComponenteParaCombo,
   type ReorderStoreCategoriesPayload,
   type ReorderStoreProductsPayload,
   type StoreCategoryNamePayload,
@@ -41,6 +44,7 @@ import { PrismaService } from '../../prisma/prisma.service';
  */
 
 const PRODUTO_COMPLETO = {
+  comboItems: { orderBy: { position: 'asc' } },
   sizes: { orderBy: { position: 'asc' } },
   optionGroups: {
     orderBy: { position: 'asc' },
@@ -58,6 +62,7 @@ const ORDEM: Prisma.StoreCategoryOrderByWithRelationInput[] = [
 function paraProduto(linha: ProdutoGravado): StoreProduct {
   return {
     id: linha.id,
+    kind: linha.kind,
     categoryId: linha.categoryId,
     name: linha.name,
     description: linha.description,
@@ -65,6 +70,11 @@ function paraProduto(linha: ProdutoGravado): StoreProduct {
     price: linha.price === null ? null : Number(linha.price),
     status: linha.status,
     stock: linha.stock,
+    comboItems: linha.comboItems.map((item) => ({
+      productId: item.productId,
+      sizeId: item.sizeId,
+      quantity: item.quantity,
+    })),
     sizes: linha.sizes.map((tamanho) => ({
       id: tamanho.id,
       name: tamanho.name,
@@ -176,9 +186,14 @@ export class StoreCatalogService {
     ]);
 
     const ordemDaCategoria = new Map(categorias.map((categoria, indice) => [categoria.id, indice]));
-    const vendaveis = produtos
-      .map(paraProduto)
-      .filter((produto) => !storeProductIssues(produto).some((pendencia) => pendencia.blocking))
+    const publicados = produtos.map(paraProduto);
+    // O combo só sai quando tudo o que ele leva está à venda: este mapa é o do que está no ar.
+    const doCardapio = new Map(publicados.map((produto) => [produto.id, produto]));
+    const vendaveis = publicados
+      .filter(
+        (produto) =>
+          !storeProductIssues(produto, doCardapio).some((pendencia) => pendencia.blocking),
+      )
       .sort(
         (a, b) =>
           (ordemDaCategoria.get(a.categoryId ?? '') ?? categorias.length) -
@@ -191,10 +206,37 @@ export class StoreCatalogService {
         .filter((categoria) => comProduto.has(categoria.id))
         .map(({ id, name }) => ({ id, name })),
       // O estoque exato é da loja: a página recebe só se esgotou e, com poucas unidades, quantas restam.
-      products: vendaveis.map(({ status: _status, updatedAt: _editado, stock, ...publico }) => ({
-        ...publico,
-        ...estoqueNaVitrine(stock),
-      })),
+      products: vendaveis.map(
+        ({ status: _status, updatedAt: _editado, stock, comboItems, ...publico }) => {
+          if (publico.kind !== 'COMBO')
+            return { ...publico, ...estoqueNaVitrine(stock), combo: null };
+          // O combo não tem estoque: tem o dos produtos que leva. E vai com o que leva, pelo nome.
+          const itens = comboItems.map((item) => {
+            const produto = doCardapio.get(item.productId);
+            return {
+              produtoId: item.productId,
+              nome: produto?.name ?? '',
+              tamanho: produto?.sizes.find((tamanho) => tamanho.id === item.sizeId)?.name ?? null,
+              quantidade: item.quantity,
+              stock: produto?.stock ?? null,
+            };
+          });
+          return {
+            ...publico,
+            ...estoqueDoCombo(
+              itens.map(({ stock: unidades, quantidade }) => ({
+                stock: unidades,
+                quantity: quantidade,
+              })),
+            ),
+            combo: {
+              itens: itens.map(({ stock: _unidades, ...doItem }) => doItem),
+              valorSeparado:
+                valorSeparadoDoCombo(comboItems, (id) => doCardapio.get(id)) ?? publico.price ?? 0,
+            },
+          };
+        },
+      ),
     };
   }
 
@@ -289,16 +331,18 @@ export class StoreCatalogService {
   async createProduct(user: User, payload: UpsertStoreProductPayload): Promise<StoreProduct> {
     const companyId = await this.resolveCompanyId(user);
     await this.assertCategoria(companyId, payload.categoryId);
-    this.assertPublicavel(payload.status, {
-      ...payload,
-      imageUrl: null,
-      price: precoUnico(payload),
-    });
+    const componentes = await this.conferirItensDoCombo(companyId, payload);
+    this.assertPublicavel(
+      payload.status,
+      { ...payload, imageUrl: null, price: precoUnico(payload) },
+      componentes,
+    );
     const position = await this.proximaPosicao(companyId, payload.categoryId);
 
     const criado = await this.prisma.storeProduct.create({
       data: {
         companyId,
+        kind: payload.kind ?? 'PRODUCT',
         categoryId: payload.categoryId,
         name: payload.name,
         description: payload.description,
@@ -306,6 +350,14 @@ export class StoreCatalogService {
         status: payload.status,
         stock: payload.stock ?? null,
         position,
+        comboItems: {
+          create: (payload.comboItems ?? []).map((item, indice) => ({
+            productId: item.productId,
+            sizeId: item.sizeId,
+            quantity: item.quantity,
+            position: indice,
+          })),
+        },
         sizes: {
           create: payload.sizes.map((tamanho, indice) => ({
             name: tamanho.name,
@@ -353,12 +405,22 @@ export class StoreCatalogService {
   ): Promise<StoreProduct> {
     const companyId = await this.resolveCompanyId(user);
     const atual = await this.produtoDaEmpresa(companyId, id);
+    if ((payload.kind ?? 'PRODUCT') !== atual.kind) {
+      throw new ConflictException({
+        message:
+          atual.kind === 'COMBO'
+            ? 'Um combo não vira produto. Crie o produto à parte.'
+            : 'Um produto não vira combo. Crie o combo à parte.',
+        code: 'STORE_PRODUCT_KIND_LOCKED',
+      });
+    }
     await this.assertCategoria(companyId, payload.categoryId);
-    this.assertPublicavel(payload.status, {
-      ...payload,
-      imageUrl: atual.imageUrl,
-      price: precoUnico(payload),
-    });
+    const componentes = await this.conferirItensDoCombo(companyId, payload);
+    this.assertPublicavel(
+      payload.status,
+      { ...payload, imageUrl: atual.imageUrl, price: precoUnico(payload) },
+      componentes,
+    );
     this.assertItensDoProduto(atual, payload);
 
     const position =
@@ -368,6 +430,20 @@ export class StoreCatalogService {
 
     const salvo = await this.prisma.$transaction(
       async (tx) => {
+        if (atual.kind === 'COMBO') {
+          // O combo guarda a lista inteira de uma vez: sem ids, sem mistura entre edições.
+          await tx.storeComboItem.deleteMany({ where: { comboId: id } });
+          await tx.storeComboItem.createMany({
+            data: (payload.comboItems ?? []).map((item, indice) => ({
+              comboId: id,
+              productId: item.productId,
+              sizeId: item.sizeId,
+              quantity: item.quantity,
+              position: indice,
+            })),
+          });
+        }
+
         const manterTamanhos = payload.sizes.flatMap((tamanho) => (tamanho.id ? [tamanho.id] : []));
         await tx.storeProductSize.deleteMany({
           where: { productId: id, id: { notIn: manterTamanhos } },
@@ -455,7 +531,17 @@ export class StoreCatalogService {
   ): Promise<StoreProduct> {
     const companyId = await this.resolveCompanyId(user);
     const atual = await this.produtoDaEmpresa(companyId, id);
-    this.assertPublicavel(status, paraProduto(atual));
+    const gravado = paraProduto(atual);
+    this.assertPublicavel(
+      status,
+      gravado,
+      status === 'PUBLISHED' && atual.kind === 'COMBO'
+        ? await this.produtosDoCombo(
+            companyId,
+            gravado.comboItems.map((item) => item.productId),
+          )
+        : undefined,
+    );
     const salvo = await this.prisma.storeProduct.update({
       where: { id },
       data: { status },
@@ -623,15 +709,80 @@ export class StoreCatalogService {
    * mostra (`storeProductIssues`), e por isso a tela e o servidor nunca
    * discordam sobre o que dá para publicar.
    */
-  private assertPublicavel(status: StoreProductStatusValue, produto: StoreProductForIssues): void {
+  private assertPublicavel(
+    status: StoreProductStatusValue,
+    produto: StoreProductForIssues,
+    componentes?: ReadonlyMap<string, ComponenteParaCombo>,
+  ): void {
     if (status !== 'PUBLISHED') return;
-    const bloqueios = storeProductIssues(produto).filter((pendencia) => pendencia.blocking);
+    const bloqueios = storeProductIssues(produto, componentes).filter(
+      (pendencia) => pendencia.blocking,
+    );
     if (bloqueios.length === 0) return;
     throw new BadRequestException({
       message: `Não dá para publicar: ${bloqueios.map((pendencia) => pendencia.text).join('; ')}.`,
       code: 'STORE_PRODUCT_NOT_PUBLISHABLE',
       issues: bloqueios.map((pendencia) => ({ path: 'status', message: pendencia.text })),
     });
+  }
+
+  /** Os produtos da empresa com estes ids, do jeito que o combo os confere. */
+  private async produtosDoCombo(
+    companyId: string,
+    ids: readonly string[],
+  ): Promise<Map<string, ComponenteParaCombo>> {
+    if (ids.length === 0) return new Map();
+    const achados = await this.prisma.storeProduct.findMany({
+      where: { companyId, id: { in: [...ids] } },
+      include: PRODUTO_COMPLETO,
+    });
+    return new Map(achados.map((linha) => [linha.id, paraProduto(linha)]));
+  }
+
+  /**
+   * O que o combo leva tem de existir e caber num combo — ao GRAVAR, esteja ele no ar ou não: o
+   * produto é desta empresa (id de outra responde como se não existisse), não é outro combo,
+   * tem o tamanho fixo quando tem tamanhos (e só então) e não exige escolhas do cliente. O que
+   * está à venda ou não é conferido só para publicar (`assertPublicavel`). Devolve os produtos
+   * lidos, para a conferência de publicar não os ler de novo. Vazio para quem não é combo.
+   */
+  private async conferirItensDoCombo(
+    companyId: string,
+    payload: UpsertStoreProductPayload,
+  ): Promise<Map<string, ComponenteParaCombo> | undefined> {
+    if (payload.kind !== 'COMBO') return undefined;
+    const itens = payload.comboItems ?? [];
+    const produtos = await this.produtosDoCombo(
+      companyId,
+      itens.map((item) => item.productId),
+    );
+
+    const recusa = (message: string) =>
+      new BadRequestException({
+        message,
+        code: 'STORE_COMBO_ITEM_INVALID',
+        issues: [{ path: 'comboItems', message }],
+      });
+    for (const item of itens) {
+      const produto = produtos.get(item.productId);
+      if (!produto) {
+        throw recusa('Um produto do combo não existe mais. Recarregue a página e monte de novo.');
+      }
+      if (produto.kind === 'COMBO') throw recusa('Um combo não leva outro combo.');
+      if (produto.sizes.length > 0) {
+        if (!produto.sizes.some((tamanho) => tamanho.id === item.sizeId)) {
+          throw recusa(`Escolha o tamanho de ${produto.name} que vai no combo.`);
+        }
+      } else if (item.sizeId !== null) {
+        throw recusa(`${produto.name} não tem tamanhos.`);
+      }
+      if (produto.optionGroups.some((grupo) => grupo.minChoices >= 1)) {
+        throw recusa(
+          `${produto.name} exige escolhas do cliente, e um combo não tem como fixá-las. Deixe-o de fora.`,
+        );
+      }
+    }
+    return produtos;
   }
 
   private assertItensDoProduto(atual: ProdutoGravado, payload: UpsertStoreProductPayload): void {

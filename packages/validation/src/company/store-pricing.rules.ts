@@ -21,6 +21,9 @@ import { diaDaSemana, emMinutos, momentoNaLoja, somarDias } from './store-schedu
  * 4. **Arredondamento em centavos, por unidade.** O desconto de cada unidade é
  *    arredondado uma vez, e a linha soma unidades iguais: o "por R$ 16,00" da
  *    vitrine é exatamente o que o carrinho cobra.
+ * 5. **Combo não recebe promoção.** O preço do combo já é o preço especial que a loja
+ *    escolheu; uma promoção por cima (por seção, por exemplo) o baixaria de novo sem que
+ *    ela tenha decidido isso.
  */
 
 /** Reais para centavos, sem o erro de 0,1 + 0,2. */
@@ -138,6 +141,8 @@ export interface LinhaParaPrecificar {
   baseCentavos: number;
   /** A soma dos adicionais de UMA unidade. A promoção não os toca. */
   adicionaisCentavos: number;
+  /** A linha é de um combo: o preço já é o especial, e nenhuma promoção age sobre ele. */
+  combo?: boolean;
 }
 
 export interface LinhaPrecificada extends LinhaParaPrecificar {
@@ -196,6 +201,7 @@ export function aplicarPromocoes(
 
   const grupos = new Map<string, number[]>();
   linhas.forEach((linha, indice) => {
+    if (linha.combo) return;
     const chave = `${linha.produtoId}|${linha.tamanhoId ?? ''}`;
     grupos.set(chave, [...(grupos.get(chave) ?? []), indice]);
   });
@@ -254,6 +260,8 @@ export function aplicarPromocoes(
 export interface ProdutoParaOferta {
   id: string;
   categoriaId: string | null;
+  /** O combo não tem oferta: o preço dele já é o especial. */
+  combo?: boolean;
 }
 
 export interface OfertaDoProduto {
@@ -279,6 +287,7 @@ export function ofertaDoProduto(
   promocoes: PromocaoPublica[],
   agora: Date,
 ): OfertaDoProduto | null {
+  if (produto.combo) return null;
   let melhor: { promocao: PromocaoPublica; desconto: number } | null = null;
   let deQuantidade: PromocaoPublica | null = null;
   for (const promocao of promocoes) {

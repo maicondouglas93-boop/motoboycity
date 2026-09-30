@@ -585,3 +585,139 @@ describe('Loja pública — estoque', () => {
     expect(screen.getByText('Restam 4 unidades')).toBeInTheDocument();
   });
 });
+
+describe('Loja pública — combos', () => {
+  const COMBO: CardapioDaPagina['produtos'][number] = {
+    id: 'cb1',
+    nome: 'Combo X-Burger',
+    descricao: 'O clássico da casa',
+    categoriaId: 'c1',
+    imagemUrl: null,
+    precoUnico: 30,
+    situacao: 'publicado',
+    tamanhos: [],
+    grupos: [],
+    combo: {
+      itens: [
+        { produtoId: 'p1', nome: 'X-Burger', tamanho: null, quantidade: 1 },
+        { produtoId: 'p3', nome: 'Batata', tamanho: 'Média', quantidade: 1 },
+        { produtoId: 'p4', nome: 'Refrigerante', tamanho: null, quantidade: 1 },
+      ],
+      // Separados: 22 + 12 + 7 = 41.
+      valorSeparado: 41,
+    },
+  };
+  const comCombo = (
+    combo: Partial<typeof COMBO> = {},
+    mudancas: Partial<CardapioDaPagina> = {},
+  ): CardapioDaPagina => ({
+    ...VITRINE,
+    vitrine: false,
+    produtos: [...VITRINE.produtos, { ...COMBO, ...combo }],
+    ...mudancas,
+  });
+  const INCLUI = '1× X-Burger, 1× Batata (Média), 1× Refrigerante';
+
+  it('a linha do combo diz o que ele leva e quanto o cliente economiza, com o preço do combo', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comCombo()} />);
+
+    expect(screen.getByText(`Inclui: ${INCLUI}`)).toBeInTheDocument();
+    expect(screen.getByText('Economize R$ 11,00')).toBeInTheDocument();
+    expect(screen.getByText('R$ 30,00')).toBeInTheDocument();
+    // O produto comum da mesma lista continua sem nada disso.
+    expect(screen.getAllByText(/Inclui:/)).toHaveLength(1);
+  });
+
+  it('sem economia — o combo no mesmo preço dos itens separados —, a linha não fala em economia', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comCombo({ combo: { ...COMBO.combo!, valorSeparado: 30 } })}
+      />,
+    );
+
+    expect(screen.getByText(`Inclui: ${INCLUI}`)).toBeInTheDocument();
+    expect(screen.queryByText(/Economize/)).not.toBeInTheDocument();
+  });
+
+  it('a folha do combo lista os itens e a economia', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comCombo()} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Combo X-Burger/ })[0]!);
+
+    expect(screen.getByText('O combo inclui')).toBeInTheDocument();
+    expect(screen.getByText('1× Batata (Média)')).toBeInTheDocument();
+    expect(screen.getByText('1× Refrigerante')).toBeInTheDocument();
+    expect(screen.getByText('Você economiza R$ 11,00')).toBeInTheDocument();
+  });
+
+  it('o combo vai para a sacola pelo preço dele, e a sacola diz o que ele leva', () => {
+    window.localStorage.clear();
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comCombo()} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Combo X-Burger/ })[0]!);
+    fireEvent.click(screen.getByRole('button', { name: /^Adicionar/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Ver sacola/ }));
+
+    // Uma vez na linha do cardápio, atrás, e outra na sacola.
+    expect(screen.getAllByText(`Inclui: ${INCLUI}`)).toHaveLength(2);
+    expect(screen.getAllByText('R$ 30,00').length).toBeGreaterThan(0);
+  });
+
+  it('o combo esgotado — falta um produto dele — dá para ver e não dá para pedir', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comCombo({ esgotado: true })} />);
+
+    expect(screen.getByText('Esgotado')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /Combo X-Burger/ })[0]!);
+    expect(screen.getByRole('button', { name: /^Esgotado/ })).toBeDisabled();
+  });
+
+  it('com poucas unidades, o combo diz quantos restam', () => {
+    naQuarta('12:00');
+    render(<LojaPublica slug="lanches-do-ze" cardapio={comCombo({ restam: 2 })} />);
+
+    expect(screen.getByText('Restam 2 unidades')).toBeInTheDocument();
+  });
+
+  it('a promoção da seção baixa o produto, mas o combo da mesma seção fica pelo preço dele', () => {
+    naQuarta('12:00');
+    render(
+      <LojaPublica
+        slug="lanches-do-ze"
+        cardapio={comCombo(
+          {},
+          {
+            promocoes: [
+              {
+                id: 'promo-1',
+                nome: 'Lanches 50%',
+                tipo: 'PERCENTUAL',
+                alvo: 'CATEGORIA',
+                produtoId: null,
+                categoriaId: 'c1',
+                percentual: 50,
+                precoPromocional: null,
+                leve: null,
+                pague: null,
+                inicio: null,
+                fim: null,
+                horaInicio: null,
+                horaFim: null,
+                diasDaSemana: [],
+              },
+            ],
+          },
+        )}
+      />,
+    );
+
+    // Só o X-Burger leva o selo e o "De / Por"; o combo mantém o preço.
+    expect(screen.getAllByText('50% OFF')).toHaveLength(1);
+    expect(screen.getByText('R$ 30,00')).toBeInTheDocument();
+  });
+});

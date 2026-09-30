@@ -15,7 +15,8 @@ import { momentoNaLoja } from './store-schedule.rules';
  * 1. **O cupom não se soma à promoção do mesmo item.** Ele só age em item sem
  *    promoção automática — a menos que o cupom ligue `valeEmPromocao`, o que a
  *    loja escolhe cupom a cupom. Desconto empilhado come a margem sem que a loja
- *    tenha escolhido isso.
+ *    tenha escolhido isso. O combo conta como item em promoção: o preço dele já é
+ *    o especial.
  * 2. **O desconto é sobre o que o item custa** (o total da linha, com os
  *    adicionais): "10% OFF" é 10% do que o cliente pagaria por aqueles itens.
  * 3. **O desconto nunca passa do que os itens alcançados custam**, nem do teto
@@ -86,9 +87,9 @@ function noAlcance(cupom: CupomPublico, linha: LinhaPrecificada): boolean {
   );
 }
 
-/** A linha já recebeu desconto de promoção automática. */
+/** A linha já recebeu desconto de promoção automática — ou é um combo, que já é preço especial. */
 function emPromocao(linha: LinhaPrecificada): boolean {
-  return linha.promocaoId !== null && linha.descontoCentavos > 0;
+  return linha.combo === true || (linha.promocaoId !== null && linha.descontoCentavos > 0);
 }
 
 /**
