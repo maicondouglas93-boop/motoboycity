@@ -66,6 +66,7 @@ import {
   LocationError,
   type LocationFix,
 } from '../lib/location';
+import { callPhone, openWhatsApp } from '../lib/recipientContact';
 import { useMostraValores } from '../lib/remuneracao';
 import { session } from '../lib/session';
 import type { RootStackParamList } from '../navigation/types';
@@ -1039,16 +1040,6 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     }
   }
 
-  async function callRecipient() {
-    const phone = currentDelivery.recipientPhone?.replace(/[^+\d]/g, '');
-    if (!phone) return;
-    try {
-      await Linking.openURL(`tel:${phone}`);
-    } catch {
-      Alert.alert('Ligação indisponível', 'Não foi possível abrir o telefone neste aparelho.');
-    }
-  }
-
   function handlePrimaryAction() {
     if (!action || primaryBusy) return;
     // Tentar o GPS de novo captura outra posicao — e outra posicao pode ser
@@ -1263,12 +1254,15 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
             {delivery.recipientPhone ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Ligar para ${delivery.recipientName || 'o cliente'}`}
-                onPress={() => callRecipient().catch(() => undefined)}
+                accessibilityLabel={`Abrir WhatsApp de ${delivery.recipientName || 'o cliente'}`}
+                accessibilityHint="Toque longo para ligar"
+                onPress={() => openWhatsApp(delivery.recipientPhone ?? '').catch(() => undefined)}
+                onLongPress={() => callPhone(delivery.recipientPhone ?? '').catch(() => undefined)}
                 style={({ pressed }) => [styles.phoneRow, pressed && styles.pressed]}
               >
                 <Icon name="phone" size={21} color={colors.link} />
                 <Text style={styles.phoneText}>{delivery.recipientPhone}</Text>
+                <Text style={styles.whatsappTag}>WhatsApp</Text>
               </Pressable>
             ) : null}
             {delivery.externalOrderNumber ? (
@@ -1884,6 +1878,16 @@ const styles = StyleSheet.create({
   clientName: { flex: 1, color: colors.ink, fontSize: 17, fontWeight: '700' },
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 31 },
   phoneText: { color: colors.link, fontSize: 16, fontWeight: '700' },
+  whatsappTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+    color: colors.success,
+    backgroundColor: colors.successSoft,
+    fontSize: 11,
+    fontWeight: '800',
+  },
   metadata: { color: colors.inkSoft, fontSize: 13, marginLeft: 31 },
   driverNote: {
     color: colors.ink,

@@ -1045,7 +1045,15 @@ registradas no `changelog.md` de 2026-09-23.
    conferir oferta, Início, Disponíveis, Histórico, detalhe, confirmação e o
    menu sem carteira. Nos outros, conferir que o valor do entregador continua
    em todas essas telas. O teste do item 2 vale para o `pilot.28`.
-10. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
+10. **Calendário no Histórico e telefone do cliente pelo WhatsApp** (recorte de
+   03/10/2026, só no código: **nenhum APK tem ainda, nem o `pilot.28`**). Vai
+   no próximo APK. No aparelho: tocar em "A partir de" e "Até" abre o
+   calendário, sem teclado, e não deixa escolher dia futuro nem início depois
+   do fim; tocar no telefone do cliente (detalhe do pedido e tela da entrega)
+   abre a conversa no WhatsApp, toque longo liga, e num aparelho sem WhatsApp
+   aparece a opção de ligar. Telefone da **empresa** o motoboy não vê em
+   tela nenhuma — o cadastro da empresa nem tem esse campo; aguarda decisão.
+11. **Cópia do keystore fora desta máquina.** É o único risco irreversível do
    projeto: existem duas cópias (`I:\MOTOboyCity\signing\` e
    `D:\MOTOboyCity-Backup\signing\`), mas as duas no mesmo computador. Um
    incêndio, um furto ou um ransomware levam as duas — e sem o keystore o

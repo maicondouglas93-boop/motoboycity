@@ -54,8 +54,8 @@ export const HISTORY_DEFAULT_DAYS = 30;
  * de tela cheia ate a lista inteira chegar pelo 4G. Quanto mais tempo de casa,
  * pior ficava, e o que ele quase sempre quer ver e o dinheiro recente.
  *
- * Nao esconde nada: os campos de data continuam na tela, e digitar uma data
- * mais antiga busca o periodo que ele pedir.
+ * Nao esconde nada: os campos de data continuam na tela, e escolher no
+ * calendario uma data mais antiga busca o periodo que ele pedir.
  */
 export function defaultHistoryPeriod(now: Date = new Date()): HistoryPeriod {
   const inicio = new Date(now.getTime() - HISTORY_DEFAULT_DAYS * 24 * 60 * 60 * 1000);

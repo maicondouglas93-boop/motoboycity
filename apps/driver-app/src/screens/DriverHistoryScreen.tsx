@@ -6,17 +6,18 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ApiError } from '@motoboycity/api-client';
 import type { DeliveryListItem } from '@motoboycity/types';
+import { DatePickerModal } from '../components/DatePickerModal';
 import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { deliveriesApi } from '../lib/apiClient';
+import { todayInSaoPaulo } from '../lib/calendar';
 import { formatarDinheiro, formatarDistancia } from '../lib/format';
 import {
   defaultHistoryPeriod,
@@ -68,9 +69,11 @@ export function DriverHistoryScreen({ navigation }: Props) {
   // Salario fixo: o historico conta entregas, sem ganhos.
   const mostraValores = useMostraValores();
   const [deliveries, setDeliveries] = useState<DeliveryListItem[]>([]);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [appliedPeriod, setAppliedPeriod] = useState<HistoryPeriod>(defaultHistoryPeriod);
+  // Datas `AAAA-MM-DD`, ja com o periodo padrao: o calendario abre nele.
+  const [from, setFrom] = useState(() => appliedPeriod.from ?? '');
+  const [to, setTo] = useState(() => appliedPeriod.to ?? '');
+  const [picking, setPicking] = useState<'from' | 'to' | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,9 +110,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
   function applyPeriod() {
     const normalizedPeriod = normalizeHistoryPeriod(from, to);
     if (!normalizedPeriod) {
-      setError(
-        'Informe datas válidas no formato DD/MM/AAAA; a data inicial não pode ser posterior à final.',
-      );
+      setError('A data inicial não pode ser depois da data final.');
       return;
     }
     setAppliedPeriod(normalizedPeriod);
@@ -121,6 +122,7 @@ export function DriverHistoryScreen({ navigation }: Props) {
     setAppliedPeriod({});
   }
 
+  const hoje = todayInSaoPaulo();
   const totalEarnings = deliveries.reduce((sum, delivery) => sum + (delivery.driverValue ?? 0), 0);
   const groups = useMemo(() => groupByCompletionDay(deliveries), [deliveries]);
   const periodLabel =
@@ -171,29 +173,35 @@ export function DriverHistoryScreen({ navigation }: Props) {
             <View style={styles.periodInputs}>
               <View style={styles.dateField}>
                 <Text style={styles.dateLabel}>A partir de</Text>
-                <TextInput
-                  accessibilityLabel="Data inicial do histórico"
-                  placeholder="DD/MM/AAAA"
-                  placeholderTextColor={colors.inkMuted}
-                  value={from}
-                  onChangeText={setFrom}
-                  autoCapitalize="none"
-                  keyboardType="numbers-and-punctuation"
-                  style={styles.dateInput}
-                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Data inicial do histórico: ${
+                    from ? formatHistoryDate(from) : 'início'
+                  }. Tocar para escolher no calendário`}
+                  onPress={() => setPicking('from')}
+                  style={({ pressed }) => [styles.dateInput, pressed && styles.dateInputPressed]}
+                >
+                  <Text style={from ? styles.dateValue : styles.datePlaceholder}>
+                    {from ? formatHistoryDate(from) : 'Início'}
+                  </Text>
+                  <Icon name="calendar" size={16} color={colors.inkMuted} />
+                </Pressable>
               </View>
               <View style={styles.dateField}>
                 <Text style={styles.dateLabel}>Até</Text>
-                <TextInput
-                  accessibilityLabel="Data final do histórico"
-                  placeholder="DD/MM/AAAA"
-                  placeholderTextColor={colors.inkMuted}
-                  value={to}
-                  onChangeText={setTo}
-                  autoCapitalize="none"
-                  keyboardType="numbers-and-punctuation"
-                  style={styles.dateInput}
-                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Data final do histórico: ${
+                    to ? formatHistoryDate(to) : 'hoje'
+                  }. Tocar para escolher no calendário`}
+                  onPress={() => setPicking('to')}
+                  style={({ pressed }) => [styles.dateInput, pressed && styles.dateInputPressed]}
+                >
+                  <Text style={to ? styles.dateValue : styles.datePlaceholder}>
+                    {to ? formatHistoryDate(to) : 'Hoje'}
+                  </Text>
+                  <Icon name="calendar" size={16} color={colors.inkMuted} />
+                </Pressable>
               </View>
             </View>
             <View style={styles.periodActions}>
@@ -300,6 +308,21 @@ export function DriverHistoryScreen({ navigation }: Props) {
           )}
         </ScrollView>
       )}
+
+      <DatePickerModal
+        visible={picking !== null}
+        title={picking === 'to' ? 'Até que dia?' : 'A partir de que dia?'}
+        value={picking === 'to' ? to : from}
+        // Os limites impedem o periodo invertido: o inicio nao passa do fim, nem o fim de hoje.
+        minDate={picking === 'to' && from ? from : undefined}
+        maxDate={picking === 'to' ? hoje : to || hoje}
+        onSelect={(date) => {
+          if (picking === 'to') setTo(date);
+          else setFrom(date);
+          setPicking(null);
+        }}
+        onClose={() => setPicking(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -325,15 +348,20 @@ const styles = StyleSheet.create({
   dateLabel: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   dateInput: {
     minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
     paddingHorizontal: 11,
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: colors.divider,
     borderRadius: 10,
-    color: colors.ink,
     backgroundColor: colors.surface,
-    fontSize: 13,
   },
+  dateInputPressed: { backgroundColor: colors.track },
+  dateValue: { color: colors.ink, fontSize: 13, fontWeight: '700' },
+  datePlaceholder: { color: colors.inkMuted, fontSize: 13 },
   periodActions: { flexDirection: 'row', gap: 9 },
   applyButton: {
     flex: 1,

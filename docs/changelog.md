@@ -17413,3 +17413,73 @@ soma o estoque de um produto que está na sacola avulso e também dentro de um c
 confere no pedido e diz qual item falta); a sacola guarda o texto "Inclui" da hora em que o combo
 foi posto nela; e o produto que está em combos pode ser excluído (o combo sai do ar e o painel
 avisa antes, mas não bloqueia).
+
+## 2026-10-03 — Driver App: calendário no Histórico e telefone do cliente pelo WhatsApp
+
+Dois pedidos do cliente, os dois só no aplicativo do motoboy. Nada de API,
+contrato ou banco mudou.
+
+### 1. Datas do Histórico escolhidas num calendário
+
+**Decisão:** os campos "A partir de" e "Até" do Histórico deixaram de ser texto
+digitado (`DD/MM/AAAA`) e viraram botões que abrem um calendário de um mês, com
+setas para os meses vizinhos. **Motivo:** o motoboy tinha de digitar a data
+inteira, com barra, no teclado do celular.
+
+- O calendário é **escrito no próprio app** (`DatePickerModal`), sem biblioteca.
+  O seletor nativo do Android exigiria dependência nativa nova, com rebuild do
+  Gradle e risco de versão a cada atualização do React Native — o mesmo motivo
+  de os ícones saírem de `Icon.tsx`.
+- Os limites impedem o período errado em vez de reclamar dele depois: dia
+  futuro não pode ser tocado, o início não passa do fim e o fim não fica antes
+  do início. "Hoje" é o dia de São Paulo, não o de Greenwich.
+- Os campos já abrem preenchidos com o período padrão de 30 dias, que antes só
+  aparecia no subtítulo; o calendário abre no mês da data marcada. "Limpar"
+  continua levando a todo o histórico, e "Aplicar período" continua sendo o que
+  busca.
+- O que vai para a API não mudou: as mesmas datas `AAAA-MM-DD`, pela mesma
+  `normalizeHistoryPeriod`.
+
+### 2. Telefone do cliente abre o WhatsApp
+
+**Decisão:** tocar no telefone do cliente, no detalhe do pedido e na tela da
+entrega, abre a conversa no WhatsApp em vez do discador. Toque longo continua
+ligando. Uma etiqueta "WhatsApp" ao lado do número avisa o que o toque faz.
+
+- O número sai do texto livre que a loja digitou: tira a formatação e o zero de
+  operadora, põe o 55 na frente de quem tem DDD, não duplica o 55 de quem já
+  mandou com DDI, trata o DDD 55 (RS) como DDD e respeita número estrangeiro
+  escrito com `+`.
+- Abre pelo esquema `whatsapp://`, que vai direto ao aplicativo — o `wa.me` pode
+  parar no navegador. Conferido no código do React Native 0.86 que o
+  `Linking.openURL` do Android só dispara a intent, sem consultar o
+  `PackageManager`, então não precisa declarar `<queries>` no manifesto. Sem
+  WhatsApp no aparelho, ou com número sem DDD, aparece a opção de ligar.
+
+**Não feito: telefone da empresa.** O pedido falava do telefone "da empresa e do
+cliente", mas o aplicativo só mostra o do cliente — e a empresa não tem campo de
+telefone no cadastro (o modelo `Company` não tem; só os usuários da equipe).
+Mostrar um exigiria escolher de onde ele vem, mudar o contrato do pedido e a
+API. Ficou para decisão do responsável.
+
+### Arquivos
+
+- `apps/driver-app/src/lib/calendar.ts` (novo), `components/DatePickerModal.tsx`
+  (novo), `screens/DriverHistoryScreen.tsx`, `lib/historyPeriod.ts` (só
+  comentário);
+- `apps/driver-app/src/lib/recipientContact.ts` (novo),
+  `screens/DriverOrderDetailScreen.tsx`, `screens/DeliveryOperationScreen.tsx`;
+- testes novos: `__tests__/calendar.test.ts`, `__tests__/DatePickerModal.test.tsx`,
+  `__tests__/recipientContact.test.ts`.
+
+### Validações
+
+| Verificação | Resultado |
+| --- | --- |
+| `tsc --noEmit` (driver-app) | aprovado |
+| `eslint .` (driver-app) | aprovado, 0 erros; 1 aviso pré-existente em `apiClient.ts` |
+| `jest` (driver-app) | 29 suítes, **234** testes (antes 26 suítes e 210 no registro de 23/09) |
+| Prettier nos arquivos tocados | aprovado, exceto `historyPeriod.ts`, que já estava fora do padrão no `HEAD` e recebeu só uma linha de comentário |
+
+Não verificado: nada em aparelho. Nenhum APK foi gerado — **o `pilot.28`
+compilado em 27/09 não tem estas mudanças**; elas vão no próximo.
