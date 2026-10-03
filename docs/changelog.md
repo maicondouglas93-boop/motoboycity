@@ -17483,3 +17483,36 @@ API. Ficou para decisão do responsável.
 
 Não verificado: nada em aparelho. Nenhum APK foi gerado — **o `pilot.28`
 compilado em 27/09 não tem estas mudanças**; elas vão no próximo.
+
+## 2026-10-03 — Publicação do calendário/WhatsApp e APK `pilot.29`
+
+Publicação autorizada ("commit e push e apk"). `dbf946a` (calendário no
+Histórico e telefone do cliente pelo WhatsApp, com este changelog e o handoff)
+e o bump `66874be` enviados para `main`. Só o aplicativo do motoboy mudou; a
+API seguiu respondendo `/health/ready` 200 depois do push.
+
+APK compilado de `66874be` em worktree curta `C:\m29`, JDK 21, mesma receita do
+`pilot.27`, senhas lidas dos arquivos DPAPI. **BUILD SUCCESSFUL em 9m08**, 427
+tarefas. Artefato: `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.29-vc29.apk`,
+**75.336.113 bytes**, SHA-256
+`A53F47ACE335ED1C1224539437F7E000070E0A0BECC38CE38BE5ABE2F227A5D4`, conferido
+igual entre origem e cópia. `apksigner`: v2 válida com o certificado oficial
+`BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`. `aapt`:
+pacote `com.motoboycity.driverapp`, versionCode 29, versionName
+`0.1.0-pilot.29`, minSdk 24, targetSdk 36, quatro ABIs. No bundle, nos bytes:
+API oficial, versão JS `0.1.0-pilot.29`, `A partir de que dia?`,
+`whatsapp://send?phone=` e `Calculando o valor...` em UTF-8; `Até que dia?`,
+`Fechar calendário`, `WhatsApp não encontrado` e `Número sem DDD` em UTF-16;
+`localhost:3333`, `127.0.0.1`, `10.0.2.2` e `0.1.0-pilot.28` ausentes.
+
+O `pilot.29` substitui o `pilot.28` como o APK a enviar: leva tudo do `.27` e
+do `.28`, nenhum dos dois distribuído.
+
+**Worktree `C:\m29` não removida.** O `rmdir /s /q` foi bloqueado pela regra de
+permissões da sessão do agente, e o agente não contornou o bloqueio. A pasta
+tem uma cópia do `android/local.properties` — que inclui duas linhas de senha
+em texto puro — e deve ser apagada pelo responsável, seguida de
+`git worktree prune`.
+
+Pendente de ação humana: apagar `C:\m29`, enviar o `pilot.29` e fazer em
+aparelho os testes do item 9 e do item 10 das pendências do handoff.
