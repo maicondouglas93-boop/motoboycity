@@ -181,7 +181,7 @@ manual da migration em produção nem alteração de suas variáveis. Ver
 | API | Render, deploy automático no push, `prisma migrate deploy` no build |
 | Painéis | Vercel, mesmo monorepo, deploy no push |
 | Banco | PostgreSQL gerenciado; 63 migrations no repositório, incluindo as da loja online (catálogo, foto, link, operação, configurações, pedido, corrida do pedido, avisos). A API nova no ar indica o `migrate deploy` do build concluído, e o readiness PostgreSQL está ok; sem inspeção SQL direta do schema de produção |
-| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O `pilot.27` (23/09) e o `pilot.28` (27/09) nunca foram enviados; o `pilot.29` (03/10), que inclui os dois, está compilado e **ainda não foi enviado**. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
+| APK nos aparelhos | O **`pilot.26`** foi enviado aos motoboys em 21/09/2026 pelo responsável, no mesmo dia do `pilot.25`. O **`pilot.29`** foi enviado aos motoboys em 03/10/2026 pelo responsável; ele inclui o `pilot.27` (23/09) e o `pilot.28` (27/09), que nunca foram enviados. Envio não é instalação: confira a versão de cada um pelo heartbeat no painel (veja abaixo) — alguns podem ter parado no `.26` ou no `.25`, ou no `pilot.19` de 02/09, que era o último instalado confirmado antes de 21/09 |
 
 **Não confie nesta tabela para saber a versão do aplicativo.** Esta linha é
 escrita à mão e já esteve errada: dizia `pilot.12` enquanto os aparelhos rodavam
@@ -198,9 +198,10 @@ coisas correm em paralelo.
 varre a fila. Não duplica entre reinícios nem entre instâncias; se sumir do Redis,
 volta no próximo boot da API.
 
-### APK pronto para distribuição
+### APK distribuído
 
-`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.29-vc29.apk` (03/10/2026)
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.29-vc29.apk` (03/10/2026,
+enviado aos motoboys no mesmo dia)
 SHA-256 `A53F47ACE335ED1C1224539437F7E000070E0A0BECC38CE38BE5ABE2F227A5D4`,
 75.336.113 bytes, `versionCode` 29, minSdk 24, targetSdk 36, assinatura v2,
 ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado oficial
@@ -1040,8 +1041,9 @@ registradas no `changelog.md` de 2026-09-23.
    Asaas, cadastra uma chave Pix, gera a chave da API (Integrações → Chaves de
    API) e cola em Configurações → Recebimento online pelo Asaas. Testar antes
    com uma conta **sandbox**.
-9. **Instalar o `pilot.29`** (compilado em 03/10/2026, ainda não enviado; ele
-   leva tudo do `pilot.28`, que nunca foi enviado). É
+9. **Conferir o `pilot.29` em campo** (enviado aos motoboys em 03/10/2026, sem
+   ensaio prévio em aparelho; ele leva tudo do `pilot.28`, que nunca foi
+   enviado). Confirmar pelo heartbeat quem já está nele. É
    ele que esconde os valores do motoboy de salário fixo — o `pilot.27` e
    anteriores ainda os mostram — e que tira o "Valor total" do detalhe do
    pedido para todos. No aparelho do assalariado, antes de ele começar:
@@ -1049,7 +1051,7 @@ registradas no `changelog.md` de 2026-09-23.
    menu sem carteira. Nos outros, conferir que o valor do entregador continua
    em todas essas telas. O teste do item 2 vale para o `pilot.29`.
 10. **Calendário no Histórico e telefone do cliente pelo WhatsApp** (recorte de
-   03/10/2026, `dbf946a`, empacotado no `pilot.29`; ainda não testado em
+   03/10/2026, `dbf946a`, no `pilot.29` já enviado; ainda não testado em
    aparelho). No aparelho: tocar em "A partir de" e "Até" abre o
    calendário, sem teclado, e não deixa escolher dia futuro nem início depois
    do fim; tocar no telefone do cliente (detalhe do pedido e tela da entrega)

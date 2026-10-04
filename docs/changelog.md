@@ -17516,3 +17516,24 @@ em texto puro — e deve ser apagada pelo responsável, seguida de
 
 Pendente de ação humana: apagar `C:\m29`, enviar o `pilot.29` e fazer em
 aparelho os testes do item 9 e do item 10 das pendências do handoff.
+
+## 2026-10-03 — `pilot.29` distribuído
+
+O responsável enviou o `pilot.29` aos motoboys no mesmo dia em que foi
+compilado, sem ensaio prévio em aparelho. Como o `pilot.27` e o `pilot.28`
+nunca saíram, chegam ao campo de uma vez, para quem estava no `pilot.26`:
+
+- o valor mostrado antes de confirmar a entrega sem endereço, com o confirmar
+  esperando o valor por até 8 s;
+- o motoboy de salário fixo sem valores no aplicativo, e o detalhe do pedido
+  sem "Valor total" para todos;
+- o calendário no Histórico e o telefone do cliente abrindo o WhatsApp.
+
+O que mais provavelmente vira pergunta: **o confirmar que espera alguns
+segundos** no pedido sem endereço (antes liberava na hora) e **o telefone que
+abre o WhatsApp em vez de ligar** (toque longo liga).
+
+Envio não é instalação: a versão de cada aparelho aparece no heartbeat. Não há
+volta por APK — o Android recusa versionCode menor por cima, e desinstalar
+apagaria a fila local de finalizações pendentes; correção, se precisar, é para
+a frente num `pilot.30`.
