@@ -17639,3 +17639,27 @@ nenhum) e nenhum fluxo no navegador — o painel exige login na API, e não subi
 API com banco para isso. Os fluxos de tela estão cobertos pelos testes de
 componente. Publicar exige o `migrate deploy` do build do Render, como nas
 migrations anteriores.
+
+## 2026-10-05 — Proteção de páginas publicada (`969fa19`)
+
+Publicação autorizada ("commit e push"). `969fa19` enviado para `main`. A API
+nova subiu no Render cerca de 3 minutos depois — conferido pela rota nova
+`GET /company/page-protection/recovery/question`, que respondia 404 e passou a
+401 sem token; `POST /company/page-protection/FINANCEIRO/reset` também
+responde 401 sem token. `/health/ready` com PostgreSQL e Redis ok. A API nova no
+ar indica o `migrate deploy` da tabela `company_page_protection_recoveries`
+concluído; não houve inspeção SQL direta. Vercel do company e do admin em
+"Deployment has completed".
+
+**CI vermelho, por teste instável alheio a este recorte.** O job de e2e falhou
+em `test/store-stock.e2e-spec.ts` (1 de 283), assim como no push anterior
+(`7d849be`, só documentação): o teste confere que o JSON do produto não contém
+"50", e o `categoryId` aleatório trazia "50" (`e1450f37-…`; no anterior,
+`…-450b-…`). No CI passaram a aplicação das migrations no banco isolado — a
+nova inclusive, o primeiro teste dela contra PostgreSQL de verdade —, typecheck,
+lint, unitários da API e testes do app; os três builds foram **pulados** por
+virem depois do e2e (os builds locais passaram, e Render e Vercel compilaram).
+Correção do teste deixada como tarefa separada; ele vem de `a3b4f8c`.
+
+Não verificado: o fluxo no navegador com login real (redefinir, desativar com
+senha, cadastrar a pergunta).
