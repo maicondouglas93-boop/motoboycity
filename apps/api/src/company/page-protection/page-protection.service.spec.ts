@@ -1,10 +1,16 @@
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcryptjs';
-import type { User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PageProtectionService } from './page-protection.service';
+import { PageProtectionService, normalizeSecretAnswer } from './page-protection.service';
 import { PAGE_UNLOCK_TOKEN_TYPE } from './page-protection.constants';
 
 const companyUser = { id: 'user-1', type: 'COMPANY_MEMBER' } as User;
@@ -20,6 +26,8 @@ describe('PageProtectionService', () => {
       upsert: jest.Mock;
       update: jest.Mock;
     };
+    companyPageProtectionRecovery: { findUnique: jest.Mock; upsert: jest.Mock };
+    user: { findUnique: jest.Mock };
   };
   let jwtService: {
     signAsync: jest.Mock;
@@ -35,6 +43,8 @@ describe('PageProtectionService', () => {
         upsert: jest.fn(),
         update: jest.fn(),
       },
+      companyPageProtectionRecovery: { findUnique: jest.fn(), upsert: jest.fn() },
+      user: { findUnique: jest.fn() },
     };
 
     jwtService = {
@@ -235,6 +245,286 @@ describe('PageProtectionService', () => {
 
       const unlocked = await service.isUnlocked('comp-1', 'FINANCEIRO', 'valid-token');
       expect(unlocked).toBe(true);
+    });
+  });
+
+  describe('desativar e trocar a senha pedem a senha atual', () => {
+    let protecaoAtiva: {
+      id: string;
+      companyId: string;
+      routeKey: string;
+      passwordHash: string;
+      enabled: boolean;
+      version: number;
+    };
+
+    beforeEach(async () => {
+      prisma.companyTeamMember.findFirst.mockResolvedValue({ companyId: 'comp-1', role: 'OWNER' });
+      protecaoAtiva = {
+        id: 'prot-1',
+        companyId: 'comp-1',
+        routeKey: 'FINANCEIRO',
+        passwordHash: await bcrypt.hash('senha-certa', 4),
+        enabled: true,
+        version: 2,
+      };
+      prisma.companyPageProtection.findUnique.mockResolvedValue(protecaoAtiva);
+      prisma.companyPageProtection.update.mockImplementation(async ({ data }) => ({
+        ...protecaoAtiva,
+        enabled: data.enabled ?? true,
+        updatedAt: new Date('2026-10-05T10:00:00Z'),
+      }));
+    });
+
+    it('não desativa sem a senha atual', async () => {
+      await expect(
+        service.updateProtection(companyUser, 'FINANCEIRO', { enabled: false }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.companyPageProtection.update).not.toHaveBeenCalled();
+    });
+
+    it('não desativa nem troca com a senha atual errada', async () => {
+      await expect(
+        service.updateProtection(companyUser, 'FINANCEIRO', {
+          enabled: false,
+          currentPassword: 'chute',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.updateProtection(companyUser, 'FINANCEIRO', {
+          password: 'nova-senha',
+          currentPassword: 'chute',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.companyPageProtection.update).not.toHaveBeenCalled();
+    });
+
+    it('desativa com a senha certa, só se ela ainda for a gravada', async () => {
+      const result = await service.updateProtection(companyUser, 'FINANCEIRO', {
+        enabled: false,
+        currentPassword: 'senha-certa',
+      });
+
+      expect(result.enabled).toBe(false);
+      expect(prisma.companyPageProtection.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'prot-1', passwordHash: protecaoAtiva.passwordHash },
+          data: { enabled: false },
+        }),
+      );
+    });
+
+    it('troca feita por outra sessão no meio vira conflito, não sucesso', async () => {
+      prisma.companyPageProtection.update.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Record not found', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(
+        service.updateProtection(companyUser, 'FINANCEIRO', {
+          password: 'nova-senha',
+          currentPassword: 'senha-certa',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('proteção desligada reativa e troca a senha sem pedir a antiga', async () => {
+      protecaoAtiva.enabled = false;
+
+      await service.updateProtection(companyUser, 'FINANCEIRO', { enabled: true });
+      await service.updateProtection(companyUser, 'FINANCEIRO', {
+        password: 'nova-senha',
+        enabled: true,
+      });
+
+      expect(prisma.companyPageProtection.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('não cria proteção por cima de uma ativa, que trocaria a senha sem a atual', async () => {
+      await expect(
+        service.setProtection(companyUser, { routeKey: 'FINANCEIRO', password: 'outra-senha' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.companyPageProtection.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('redefinir a senha esquecida', () => {
+    beforeEach(async () => {
+      prisma.companyTeamMember.findFirst.mockResolvedValue({ companyId: 'comp-1', role: 'OWNER' });
+      prisma.companyPageProtection.findUnique.mockResolvedValue({ id: 'prot-1' });
+      prisma.companyPageProtection.update.mockImplementation(async ({ data }) => ({
+        id: 'prot-1',
+        enabled: data.enabled,
+        updatedAt: new Date('2026-10-05T10:00:00Z'),
+      }));
+      prisma.user.findUnique.mockResolvedValue({
+        passwordHash: await bcrypt.hash('senha-do-login', 4),
+      });
+      prisma.companyPageProtectionRecovery.findUnique.mockResolvedValue({
+        answerHash: await bcrypt.hash(normalizeSecretAnswer('Rex'), 4),
+      });
+    });
+
+    it('pela senha de login: grava a nova senha, reativa e derruba as autorizações antigas', async () => {
+      const result = await service.resetPassword(companyUser, 'FINANCEIRO', {
+        method: 'ACCOUNT_PASSWORD',
+        accountPassword: 'senha-do-login',
+        newPassword: 'senha-nova',
+      });
+
+      expect(result.enabled).toBe(true);
+      const { data } = prisma.companyPageProtection.update.mock.calls[0][0];
+      expect(data.enabled).toBe(true);
+      expect(data.version).toEqual({ increment: 1 });
+      expect(await bcrypt.compare('senha-nova', data.passwordHash)).toBe(true);
+    });
+
+    it('senha de login errada não redefine', async () => {
+      await expect(
+        service.resetPassword(companyUser, 'FINANCEIRO', {
+          method: 'ACCOUNT_PASSWORD',
+          accountPassword: 'chute',
+          newPassword: 'senha-nova',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.companyPageProtection.update).not.toHaveBeenCalled();
+    });
+
+    it('pela pergunta secreta, sem ligar para acento, maiúscula ou espaço', async () => {
+      await service.resetPassword(companyUser, 'FINANCEIRO', {
+        method: 'SECRET_ANSWER',
+        secretAnswer: '  RÉX ',
+        newPassword: 'senha-nova',
+      });
+
+      expect(prisma.companyPageProtection.update).toHaveBeenCalled();
+    });
+
+    it('resposta errada não redefine', async () => {
+      await expect(
+        service.resetPassword(companyUser, 'FINANCEIRO', {
+          method: 'SECRET_ANSWER',
+          secretAnswer: 'Totó',
+          newPassword: 'senha-nova',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.companyPageProtection.update).not.toHaveBeenCalled();
+    });
+
+    it('sem pergunta cadastrada, o caminho da resposta não existe', async () => {
+      prisma.companyPageProtectionRecovery.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword(companyUser, 'FINANCEIRO', {
+          method: 'SECRET_ANSWER',
+          secretAnswer: 'Rex',
+          newPassword: 'senha-nova',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('página sem senha não tem o que redefinir', async () => {
+      prisma.companyPageProtection.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword(companyUser, 'FINANCEIRO', {
+          method: 'ACCOUNT_PASSWORD',
+          accountPassword: 'senha-do-login',
+          newPassword: 'senha-nova',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('operador não redefine, nem com a própria senha de login certa', async () => {
+      prisma.companyTeamMember.findFirst.mockResolvedValue({
+        companyId: 'comp-1',
+        role: 'OPERATOR',
+      });
+
+      await expect(
+        service.resetPassword(companyUser, 'FINANCEIRO', {
+          method: 'ACCOUNT_PASSWORD',
+          accountPassword: 'senha-do-login',
+          newPassword: 'senha-nova',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.companyPageProtection.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pergunta secreta', () => {
+    beforeEach(async () => {
+      prisma.companyTeamMember.findFirst.mockResolvedValue({ companyId: 'comp-1', role: 'OWNER' });
+      prisma.user.findUnique.mockResolvedValue({
+        passwordHash: await bcrypt.hash('senha-do-login', 4),
+      });
+      prisma.companyPageProtectionRecovery.upsert.mockImplementation(async ({ create }) => ({
+        ...create,
+        updatedAt: new Date('2026-10-05T10:00:00Z'),
+      }));
+    });
+
+    it('cadastrar exige a senha de login do dono', async () => {
+      await expect(
+        service.setRecovery(companyUser, {
+          accountPassword: 'chute',
+          question: 'Nome do primeiro cachorro?',
+          answer: 'Rex',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.companyPageProtectionRecovery.upsert).not.toHaveBeenCalled();
+    });
+
+    it('operador não cadastra a pergunta', async () => {
+      prisma.companyTeamMember.findFirst.mockResolvedValue({
+        companyId: 'comp-1',
+        role: 'OPERATOR',
+      });
+
+      await expect(
+        service.setRecovery(companyUser, {
+          accountPassword: 'senha-do-login',
+          question: 'Nome do primeiro cachorro?',
+          answer: 'Rex',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('guarda a pergunta e só o hash da resposta normalizada', async () => {
+      const status = await service.setRecovery(companyUser, {
+        accountPassword: 'senha-do-login',
+        question: '  Nome do primeiro cachorro?  ',
+        answer: 'Rêx',
+      });
+
+      const { create } = prisma.companyPageProtectionRecovery.upsert.mock.calls[0][0];
+      expect(create.question).toBe('Nome do primeiro cachorro?');
+      expect(create.answerHash).not.toContain('Rêx');
+      expect(await bcrypt.compare('rex', create.answerHash)).toBe(true);
+      expect(status).toEqual({
+        configured: true,
+        question: 'Nome do primeiro cachorro?',
+        updatedAt: '2026-10-05T10:00:00.000Z',
+      });
+    });
+
+    it('a consulta mostra a pergunta e nunca a resposta', async () => {
+      prisma.companyPageProtectionRecovery.findUnique.mockResolvedValue({
+        question: 'Nome do primeiro cachorro?',
+        answerHash: 'hash-que-nao-pode-sair',
+        updatedAt: new Date('2026-10-05T10:00:00Z'),
+      });
+
+      const status = await service.getRecovery(companyUser);
+
+      expect(JSON.stringify(status)).not.toContain('hash-que-nao-pode-sair');
+      expect(status.question).toBe('Nome do primeiro cachorro?');
+    });
+
+    it('normaliza a resposta: acento, maiúscula e espaços não contam', () => {
+      expect(normalizeSecretAnswer('  São   PAULO ')).toBe('sao paulo');
     });
   });
 });

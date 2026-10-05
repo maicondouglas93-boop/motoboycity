@@ -494,6 +494,7 @@ model Company {
   driverBlocks         DriverCompanyBlock[]
   asaasCustomers       AsaasCustomer[]
   pageProtections      CompanyPageProtection[]
+  protectionRecovery   CompanyPageProtectionRecovery?
   storeCategories      StoreCategory[]
   storeProducts        StoreProduct[]
   storePromotions      StorePromotion[]
@@ -608,6 +609,22 @@ model CompanyPageProtection {
   @@unique([companyId, routeKey], name: "company_page_protection_unique")
   @@index([companyId])
   @@map("company_page_protections")
+}
+
+/// Pergunta secreta do dono para redefinir a senha de uma pagina protegida
+/// sem a senha de login. Uma por empresa, cadastrada so pelo OWNER com a senha
+/// de login; a resposta fica so em hash (bcrypt), normalizada antes.
+model CompanyPageProtectionRecovery {
+  id         String   @id @default(uuid())
+  companyId  String   @unique @map("company_id")
+  question   String   @db.VarChar(200)
+  answerHash String   @map("answer_hash") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_page_protection_recoveries")
 }
 
 /// Enderecos reutilizaveis de um cliente. O endereco principal continua

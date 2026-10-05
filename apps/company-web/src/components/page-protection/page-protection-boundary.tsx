@@ -12,8 +12,10 @@ import { Label } from '@/components/ui/label';
 import { companyPageProtectionApi } from '@/lib/api-client';
 import { pageProtectionSession } from '@/lib/page-protection-session';
 import { session } from '@/lib/session';
+import { pageProtectionListQueryKey } from './page-protection-queries';
+import { ResetPagePasswordDialog } from './reset-page-password-dialog';
 
-export const pageProtectionListQueryKey = ['company', 'page-protection', 'list'] as const;
+export { pageProtectionListQueryKey };
 
 interface PageProtectionBoundaryProps {
   routeKey: ProtectablePageRoute;
@@ -30,6 +32,8 @@ export function PageProtectionBoundary({
   const [showPassword, setShowPassword] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
   const [unlockedState, setUnlockedState] = useState(() =>
     pageProtectionSession.isUnlocked(routeKey),
   );
@@ -207,9 +211,36 @@ export function PageProtectionBoundary({
                 </>
               )}
             </Button>
+
+            {resetNotice && (
+              <p role="status" className="text-center text-xs font-medium text-emerald-700">
+                {resetNotice}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => setResetOpen(true)}
+            >
+              Esqueci a senha
+            </Button>
           </form>
         </CardContent>
       </Card>
+
+      <ResetPagePasswordDialog
+        page={{ routeKey, label: protection?.label ?? 'esta página' }}
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        onReset={() => {
+          setPassword('');
+          setErrorMessage(null);
+          setResetNotice('Senha redefinida. Digite a nova senha para entrar.');
+        }}
+      />
     </div>
   );
 }

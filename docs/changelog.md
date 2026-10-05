@@ -17537,3 +17537,105 @@ Envio não é instalação: a versão de cada aparelho aparece no heartbeat. Nã
 volta por APK — o Android recusa versionCode menor por cima, e desinstalar
 apagaria a fila local de finalizações pendentes; correção, se precisar, é para
 a frente num `pilot.30`.
+
+## 2026-10-05 — Proteção de páginas: senha para desativar, e redefinição da senha esquecida
+
+Pedido do cliente, em duas mensagens: pedir a senha também para desativar a
+proteção, ter como redefinir a senha esquecida e, como segunda opção de
+redefinição, uma pergunta secreta que só o dono saiba responder.
+
+### O furo que vinha junto
+
+Antes, qualquer pessoa com o painel aberto desfazia a proteção sem saber a
+senha, por três caminhos: **Desativar**, **Alterar senha** (trocava sem pedir a
+atual) e um `POST /company/page-protection` direto, que regravava a senha por
+cima (`upsert`). Travar só o "Desativar", como o pedido dizia, deixaria os
+outros dois abertos — o funcionário trocaria a senha e entraria. Os três foram
+fechados juntos.
+
+### Decisões
+
+- **Desativar e trocar a senha de uma proteção ativa pedem a senha atual da
+  página.** Errada: 403. A gravação confere que o hash ainda é o lido (`update`
+  com `passwordHash` no `where`); se outra sessão trocou no meio, 409.
+- **Proteção desligada** reativa e troca de senha sem a antiga: a página já
+  está aberta, não há o que proteger, e o dono que esqueceu a senha de uma
+  proteção desligada não fica preso.
+- **"Proteger" por cima de proteção ativa** responde 409, apontando "Alterar
+  senha".
+- **Redefinição** (`POST /company/page-protection/:routeKey/reset`) por senha
+  de login do painel **ou** resposta da pergunta secreta. Só o `OWNER`: um
+  operador com login próprio provaria quem ele é, não quem é o dono. Reativa a
+  proteção e sobe a `version`, derrubando toda autorização aberta com a senha
+  antiga.
+- **Senha de login como primeiro caminho** porque não existe envio de e-mail no
+  sistema, e quem esquece também a senha de login já tem saída: o ADM redefine
+  a senha de acesso do responsável.
+- **Pergunta secreta**: uma por empresa, cadastrada ou trocada só pelo `OWNER`
+  **com a senha de login** — sem isso, quem tem o painel aberto trocaria a
+  pergunta e redefiniria qualquer senha com a resposta que ele mesmo escolheu.
+  A resposta é guardada só em bcrypt, depois de normalizada (sem acento, sem
+  maiúscula, espaços colapsados); a pergunta pode ser lida por qualquer membro,
+  porque aparece na redefinição. A resposta nunca sai da API.
+- **Limites de tentativa**: 5/min no `PUT :routeKey` e no cadastro da pergunta,
+  5 a cada 10 min na redefinição — a resposta costuma ser curta e adivinhável.
+- Senha errada nas rotas novas responde **403**, não 401: no `api-client` o 401
+  é reservado para sessão vencida.
+
+### Banco
+
+Tabela nova `company_page_protection_recoveries` (`company_id` único, FK com
+`ON DELETE CASCADE`), migration `20261005120000_pergunta_secreta_protecao_paginas`
+com só `CREATE TABLE`, índice único e FK. Nenhum dado existente muda. O SQL
+foi gerado offline com `prisma migrate diff` entre o schema do `HEAD` e o novo
+— nenhum banco foi tocado. Volta, se precisar:
+`DROP TABLE "company_page_protection_recoveries";` (perde só as perguntas
+cadastradas). O campo de relação na `Company` se chama `protectionRecovery`
+para não realinhar o bloco inteiro do model no `prisma format`.
+
+### Painel da empresa
+
+- Diálogos de **Alterar senha** e **Desativar** ganharam "Senha atual da
+  página" e o link **"Esqueci a senha"**, que abre a redefinição da mesma
+  página.
+- Diálogo novo de redefinição (`ResetPagePasswordDialog`), com a escolha entre
+  "Senha de login" e "Pergunta secreta"; usado também na **tela de bloqueio**
+  da página, que ganhou o mesmo link.
+- Seção **Pergunta secreta** no cartão de Proteção de páginas, com cadastrar e
+  trocar.
+- As chaves de cache foram para `page-protection-queries.ts`, para a tela de
+  bloqueio e o diálogo não se importarem em círculo; a tela de bloqueio
+  continua exportando `pageProtectionListQueryKey`.
+
+### Arquivos
+
+- `apps/api/prisma/schema.prisma`, migration nova;
+- `packages/validation/src/company/page-protection.schema.ts`,
+  `packages/types/src/page-protection.ts`,
+  `packages/api-client/src/company-page-protection.ts`;
+- `apps/api/src/company/page-protection/page-protection.service.ts`,
+  `page-protection.controller.ts`, `page-protection.service.spec.ts`;
+- `apps/company-web/src/components/page-protection/`:
+  `manage-page-protections-card.tsx`, `page-protection-boundary.tsx`,
+  `reset-page-password-dialog.tsx` (novo), `page-protection-queries.ts` (novo),
+  `page-protection-reset.test.tsx` (novo);
+- `docs/business-rules.md` (seção nova), `docs/agent-handoff.md`.
+
+### Validações
+
+| Verificação | Resultado |
+| --- | --- |
+| `prisma validate` e `prisma format --check` | aprovados |
+| `pnpm typecheck` (8 workspaces) | aprovado |
+| `pnpm lint` | aprovado, 0 erros; 1 aviso pré-existente no driver-app |
+| `apps/api` — `jest` | 119 suítes, **1785** testes, 1 suíte pulada (já pulada antes) |
+| proteção de páginas — `jest` | 33 testes, 18 novos |
+| teste com a exigência da senha atual desligada de propósito | 3 falharam, como esperado |
+| `apps/company-web` — `vitest` | 66 arquivos, **650** testes, 8 novos |
+| build da API e do company-web | aprovados |
+
+Não verificado: nada contra banco real (a migration não foi aplicada em lugar
+nenhum) e nenhum fluxo no navegador — o painel exige login na API, e não subi
+API com banco para isso. Os fluxos de tela estão cobertos pelos testes de
+componente. Publicar exige o `migrate deploy` do build do Render, como nas
+migrations anteriores.

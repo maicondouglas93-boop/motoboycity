@@ -510,6 +510,32 @@ agendamento e começa a buscar motoboy imediatamente
   marcada sai da fila e, se sobrar por falha de limpeza, vira no-op sozinho;
 - não vale para lote: lote não pode ser agendado nesta versão.
 
+## Proteção de páginas: desativar, trocar e esquecer a senha
+
+Decisão de 2026-10-05, a pedido do cliente. A senha de página protege
+Financeiro, Relatórios, Pedidos e Clientes de quem usa o painel aberto da loja.
+Por isso nada que desfaça a proteção pode sair sem a senha:
+
+- **desativar** ou **trocar a senha** de uma proteção ativa exige a **senha
+  atual da página**. Proteção já desligada reativa ou troca de senha sem a
+  antiga — a página já está aberta, não há o que proteger;
+- "Proteger" não regrava uma página que já tem proteção ativa; para trocar, é
+  "Alterar senha";
+- **senha esquecida** se redefine por um de dois caminhos: a **senha de login
+  do painel** ou a **resposta da pergunta secreta**. Os dois só para o
+  **responsável principal** da empresa (`OWNER`) — um operador com login
+  próprio não abre o que o dono fechou. A redefinição reativa a proteção e
+  derruba toda autorização aberta com a senha antiga;
+- a **pergunta secreta** é uma por empresa e vale para todas as páginas. Só o
+  dono cadastra ou troca, **confirmando a senha de login** — senão quem tem o
+  painel aberto trocaria a pergunta e, com a própria resposta, redefiniria
+  qualquer senha. A resposta é guardada só em hash; na comparação, acento,
+  maiúscula e espaço sobrando não contam;
+- tentativas são limitadas: 5 por minuto para senha atual e cadastro da
+  pergunta, 5 a cada 10 minutos para redefinir (a resposta costuma ser curta);
+- quem esqueceu também a senha de login pede à administração, que já redefine
+  a senha de acesso do responsável.
+
 ## Loja online: entregar pelo MOTOboyCity é opcional
 
 Decisão de 2026-09-25, do usuário. Há empresas que vão usar a loja online com

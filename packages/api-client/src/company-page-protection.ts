@@ -1,6 +1,9 @@
 import type {
+  PageProtectionRecoveryStatus,
   PageProtectionStatusItem,
+  ResetPageProtectionPayload,
   SetPageProtectionPayload,
+  SetPageProtectionRecoveryPayload,
   UpdatePageProtectionPayload,
   VerifyPagePasswordPayload,
   VerifyPagePasswordResult,
@@ -60,6 +63,38 @@ export function createCompanyPageProtectionApi({ baseUrl }: CompanyPageProtectio
         body: JSON.stringify(payload),
       });
       return parseJsonOrThrow<VerifyPagePasswordResult>(response);
+    },
+
+    async resetPassword(
+      accessToken: string,
+      routeKey: string,
+      payload: ResetPageProtectionPayload,
+    ): Promise<PageProtectionStatusItem> {
+      const response = await apiFetch(`${baseUrl}/company/page-protection/${routeKey}/reset`, {
+        method: 'POST',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<PageProtectionStatusItem>(response);
+    },
+
+    async getRecovery(accessToken: string): Promise<PageProtectionRecoveryStatus> {
+      const response = await apiFetch(`${baseUrl}/company/page-protection/recovery/question`, {
+        headers: withAuth(accessToken),
+      });
+      return parseJsonOrThrow<PageProtectionRecoveryStatus>(response);
+    },
+
+    async setRecovery(
+      accessToken: string,
+      payload: SetPageProtectionRecoveryPayload,
+    ): Promise<PageProtectionRecoveryStatus> {
+      const response = await apiFetch(`${baseUrl}/company/page-protection/recovery/question`, {
+        method: 'PUT',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<PageProtectionRecoveryStatus>(response);
     },
   };
 }
