@@ -1,14 +1,15 @@
 import { ImageResponse } from 'next/og';
 import { textoSobre } from '@/lib/contraste';
+import { logoQuadradoEmPng } from '@/lib/loja-icone';
 import { identidadeDoLink } from '@/lib/loja-publica';
 
 /**
- * O ícone da loja na tela inicial do celular, gerado com a inicial e a cor da
- * marca.
+ * O ícone da loja na aba do navegador e na tela inicial do celular.
  *
- * Gerado, e não um arquivo: a maioria das lojas não vai ter um ícone quadrado
- * pronto no tamanho que o Android e o iPhone pedem. Quando houver logo enviado
- * na Configurações, é ele que entra aqui.
+ * Com logo enviado na Configurações, é o logo, recortado em quadrado pelo
+ * ImageKit (ver `loja-icone.ts`). Sem logo — ou se o ImageKit não responder —,
+ * é gerado com a inicial e a cor da marca: a maioria das lojas não tem um
+ * ícone quadrado pronto no tamanho que o Android e o iPhone pedem.
  *
  * Só os três tamanhos que o manifest e o iPhone pedem. Aceitar qualquer número
  * faria este endereço gerar imagens de tamanho arbitrário para quem pedisse.
@@ -27,6 +28,13 @@ export async function GET(
 
   const loja = await identidadeDoLink(slug);
   if (!loja) return new Response('Loja não encontrada', { status: 404 });
+
+  const logo = loja.logoUrl ? await logoQuadradoEmPng(loja.logoUrl, lado) : null;
+  if (logo) {
+    return new Response(logo, {
+      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' },
+    });
+  }
 
   return new ImageResponse(
     <div

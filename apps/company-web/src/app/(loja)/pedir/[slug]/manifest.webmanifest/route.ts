@@ -1,4 +1,5 @@
 import { fundoDoTema } from '@/lib/contraste';
+import { versaoDoIcone } from '@/lib/loja-icone';
 import { identidadeDoLink } from '@/lib/loja-publica';
 
 /**
@@ -19,6 +20,7 @@ export async function GET(_pedido: Request, { params }: { params: Promise<{ slug
   const loja = await identidadeDoLink(slug);
   if (!loja) return new Response('Loja não encontrada', { status: 404 });
   const base = `/pedir/${slug}`;
+  const v = versaoDoIcone(loja);
 
   const manifest = {
     id: base,
@@ -34,11 +36,22 @@ export async function GET(_pedido: Request, { params }: { params: Promise<{ slug
     theme_color: loja.corDaMarca,
     background_color: fundoDoTema(loja.tema),
     icons: [
-      { src: `${base}/icone/192`, sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: `${base}/icone/512`, sizes: '512x512', type: 'image/png', purpose: 'any' },
-      // O mesmo desenho serve como "maskable": a letra ocupa o miolo, dentro da
-      // área que os lançadores do Android nunca recortam.
-      { src: `${base}/icone/512`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: `${base}/icone/192?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `${base}/icone/512?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      // A inicial serve também como "maskable": ela ocupa o miolo, dentro da
+      // área que os lançadores do Android nunca recortam. O logo não — ele vai
+      // até a borda, e o recorte em círculo comeria as beiradas dele.
+      // Sem "maskable", o Android mostra o logo inteiro dentro do formato dele.
+      ...(loja.logoUrl
+        ? []
+        : [
+            {
+              src: `${base}/icone/512?v=${v}`,
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+          ]),
     ],
   };
 

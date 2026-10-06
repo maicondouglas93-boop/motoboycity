@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { AvisosDoCliente } from '@/components/loja-online/avisos-do-cliente';
 import { RegistroDoApp } from '@/components/loja-online/registro-do-app';
+import { versaoDoIcone } from '@/lib/loja-icone';
 import { LOJA_DE_EXEMPLO } from '@/lib/loja-mock';
 import { identidadeDoLink } from '@/lib/loja-publica';
 
@@ -34,17 +35,19 @@ export async function generateMetadata({ params }: Parametros): Promise<Metadata
   if (loja === undefined) return { title: 'Loja' };
   if (!loja) return { title: 'Loja não encontrada' };
   const base = `/pedir/${slug}`;
+  // A versão troca o endereço quando o logo, a cor ou a inicial mudam.
+  const versao = versaoDoIcone(loja);
 
   return {
     title: loja.nome,
     description: `Peça na ${loja.nome}.`,
-    manifest: `${base}/manifest.webmanifest`,
+    manifest: `${base}/manifest.webmanifest?v=${versao}`,
     // O iPhone ignora o manifest para ícone e nome na tela inicial: precisa
     // destas marcas à parte.
     appleWebApp: { capable: true, title: loja.nome, statusBarStyle: 'default' },
     icons: {
-      icon: `${base}/icone/192`,
-      apple: `${base}/icone/180`,
+      icon: { url: `${base}/icone/192?v=${versao}`, type: 'image/png', sizes: '192x192' },
+      apple: `${base}/icone/180?v=${versao}`,
     },
   };
 }

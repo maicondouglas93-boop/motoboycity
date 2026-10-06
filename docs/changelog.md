@@ -17663,3 +17663,47 @@ Correção do teste deixada como tarefa separada; ele vem de `a3b4f8c`.
 
 Não verificado: o fluxo no navegador com login real (redefinir, desativar com
 senha, cadastrar a pergunta).
+
+## 2026-10-06 — Logo da loja como ícone da aba e do app instalado
+
+Pedido do cliente: usar o logo da loja (Rei do Frango) no lugar da inicial
+gerada, na aba do navegador e no ícone da página da loja online.
+
+**Decisão.** A rota `/pedir/:slug/icone/:tamanho` (180, 192 e 512) entrega o
+logo quando a loja tem um, e continua gerando a inicial na cor da marca quando
+não tem — ou quando o ImageKit não responde em 5 s. Quem recorta é o próprio
+ImageKit (`?tr=w-N,h-N,c-maintain_ratio,f-png`): o logo pode vir em WebP, que
+o gerador de imagem do Next não desenha, e em qualquer proporção. O recorte é
+o mesmo do cabeçalho da loja (miolo do logo preenchendo o quadrado). A rota só
+busca endereço `https://ik.imagekit.io`, para um valor gravado no banco não
+virar requisição do servidor para outro lugar.
+
+Testado o encaixe do logo inteiro (`cm-pad_resize` com fundo transparente) e
+comparado no tamanho real da aba: o recorte sai bem maior e mais legível; o
+custo, nesse logo 3:2, é a última letra de "FRANGO" encostar na borda. Trocar
+é uma linha em `urlDoLogoQuadrado`.
+
+- **Versão no endereço** (`?v=`, hash do logo, da cor e da inicial) no
+  `<link rel="icon">`, no `apple-touch-icon` e no manifest: o ícone fica um dia
+  em cache e a aba guarda o seu; sem isso, a loja que acabou de enviar o logo
+  continuaria vendo a inicial.
+- **Sem ícone "maskable" quando há logo**: o Android recorta o maskable em
+  círculo, o que comeria as beiradas do logo. Sem ele, o Android mostra o
+  ícone "any" inteiro. A inicial continua maskable.
+- As notificações da loja (`avisos-do-cliente.tsx`) usam a mesma rota e passam
+  a mostrar o logo também.
+
+Arquivos: `apps/company-web/src/lib/loja-icone.ts` (novo) e
+`loja-icone.test.ts` (novo), `src/app/(loja)/pedir/[slug]/icone/[tamanho]/route.tsx`,
+`.../layout.tsx`, `.../manifest.webmanifest/route.ts`.
+
+| Verificação | Resultado |
+| --- | --- |
+| `tsc --noEmit` e `eslint` (company-web) | aprovados |
+| `vitest` (company-web) | 67 arquivos, **658** testes, 8 novos |
+| build do company-web | aprovado |
+| painel local contra a API de produção, só leitura pública | página "Rei do Frango" com os links versionados; `icone/192` responde PNG 192×192 idêntico (hash) ao que o ImageKit gera; manifest só com ícones "any" |
+
+O painel local subiu por uma configuração temporária do `.claude/launch.json`,
+removida em seguida; o `.env.local` não foi lido nem alterado. Não verificado:
+o ícone na tela inicial de um celular de verdade.
