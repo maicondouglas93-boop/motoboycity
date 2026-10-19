@@ -8,7 +8,21 @@ import { buildRedisConnectionOptions } from '../common/redis-connection';
  * A configuração vem de `buildRedisConnectionOptions()`, a mesma usada por
  * `LiveDriverPresenceService`, para que fila e presença nunca apontem para
  * Redis diferentes nem divirjam em autenticação/TLS (portão P0.4).
+ *
+ * Retenção de jobs: sem ela o BullMQ guarda PARA SEMPRE todo job concluído ou
+ * falho. As varreduras de minuto em minuto (despacho, loja, presença) e uma
+ * expiração por oferta encheram os 256 MB do Redis de produção em dois meses;
+ * com a política `noeviction`, o Redis cheio recusa toda gravação, e nenhum
+ * motoboy conseguia ficar Ativo (503 em `PUT /driver/presence`, 19/10/2026).
+ * Vale também para os agendadores: `upsertJobScheduler` herda estas opções.
  */
+export const RETENCAO_DE_JOBS = {
+  /** Concluído só serve para depurar o dia: até 24 h, no máximo 1000 por fila. */
+  removeOnComplete: { age: 24 * 60 * 60, count: 1000 },
+  /** Falho fica mais, para dar tempo de investigar: até 7 dias, no máximo 5000. */
+  removeOnFail: { age: 7 * 24 * 60 * 60, count: 5000 },
+} as const;
+
 @Module({
   imports: [
     BullModule.forRootAsync({
@@ -17,6 +31,7 @@ import { buildRedisConnectionOptions } from '../common/redis-connection';
           ...buildRedisConnectionOptions(),
           maxRetriesPerRequest: null,
         },
+        defaultJobOptions: RETENCAO_DE_JOBS,
       }),
     }),
   ],
