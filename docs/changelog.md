@@ -17707,3 +17707,66 @@ Arquivos: `apps/company-web/src/lib/loja-icone.ts` (novo) e
 O painel local subiu por uma configuração temporária do `.claude/launch.json`,
 removida em seguida; o `.env.local` não foi lido nem alterado. Não verificado:
 o ícone na tela inicial de um celular de verdade.
+
+## 2026-10-19 — Redis de produção cheio: ninguém ficava Ativo
+
+Sintoma (print do app às 07:34): botão Ativo ligado e o aviso "Sem conexao
+para entrar na fila. O aplicativo continuara tentando automaticamente."
+
+**Causa.** O Redis de produção (`motoboycity-redis`, Render Key Value, Valkey
+8.1, 256 MB, política `noeviction`) estava com a memória em 100% desde 16–17/10,
+depois de subir em linha reta a semana inteira. O BullMQ guardava para sempre
+todo job concluído ou falho: nenhuma fila tinha `removeOnComplete` /
+`removeOnFail`, e há três varreduras de minuto em minuto (despacho, loja,
+presença), uma a cada 2 min (silêncio de localização) e uma expiração por
+oferta. Com `noeviction`, o Redis cheio recusa toda gravação. Ao ligar o Ativo,
+`DriverPresenceService.setAvailability` grava a posição no Redis; a gravação
+falhava, a API respondia **503** "Não foi possível iniciar o compartilhamento
+de localização" **sem log**, e o app trata 503 como queda de rede — daí o
+"Sem conexao". No Render: 370 respostas 503 em 12 h, constantes desde ~03:44,
+nenhum log da aplicação, CPU da API e do Redis entre 60% e 100% desde ~22:20
+de 18/10. O `/health/ready` dizia `redis: ok` o tempo todo, porque só faz
+`PING`, que o Redis cheio ainda responde.
+
+**Correção.**
+- Com autorização do responsável, o Redis passou de 256 MB (US$ 10/mês) para
+  **1 GB (US$ 20/mês)** no Render, pouco antes das 07:45, para voltar a aceitar
+  gravações sem apagar nada.
+- `713a752`: retenção padrão para todas as filas em `QueueModule`
+  (`defaultJobOptions`): concluído até 24 h e no máximo 1000 por fila; falho até
+  7 dias e no máximo 5000. Os agendadores herdam (`upsertJobScheduler` mescla
+  `jobsOpts` no BullMQ 5.81.3, conferido no código instalado). O único
+  `getJob` do código procura job agendado no futuro, nunca concluído.
+  Publicado sozinho: o worktree tinha outras mudanças ainda não publicadas, que não foram junto.
+  Deploy no ar às 07:49:35.
+
+**Efeito colateral da correção.** Às 07:49 o Redis respondeu `BUSY Valkey is
+busy running a script` por cerca de 30 s, e a API nova levou 77 s para subir. O
+corte por quantidade (`count`) do BullMQ **não tem limite por chamada**
+(`removeJobsByMaxCount` apaga todo o excedente num único script Lua); só o
+corte por idade apaga no máximo 1000 por vez. A primeira conclusão de cada fila
+apagou de uma vez o histórico de dois meses. Acontece uma vez por fila, mas a
+de falhos só corta na primeira falha de cada fila — pode repetir o BUSY mais
+tarde se alguma fila tiver muitos falhos guardados. Por isso o commit seguinte
+(publicado com este registro) trocou para retenção **só por idade**: concluído
+até 24 h e falho até 7 dias, sem `count`. Conferido no `moveToFinished` do
+BullMQ 5.81.3: sem `count` o corte sem limite é pulado, e o corte por idade
+apaga no máximo 1000 por conclusão (`keepJobs.limit`, padrão 1000).
+
+**Depois.** A partir de 07:49:59, sinais de vida dos motoboys (`POST
+/driver/presence/heartbeat`) com 201 e a fila (`GET /driver/presence/queue`)
+com 200, ainda em ~1 s por causa da CPU. Respostas 503 por janela de 4 min:
+≈43 (07:37), 23 (07:41), 13 (07:45), 1 (07:49, durante o BUSY) e nenhuma
+depois. Memória do Redis de ~280 MB para ~200 MB; CPU do Redis de 0,15–0,2
+contínuo para ~0,03.
+
+Arquivo: `apps/api/src/queue/queue.module.ts` (nos dois commits). `tsc --noEmit` e
+`eslint` do arquivo aprovados; não há teste de unidade para esta configuração. Docs: este registro e a linha
+"Redis" da tabela de produção em `agent-handoff.md`.
+
+Não verificado: um motoboy ligando o Ativo do zero com sucesso (só os sinais de
+vida e a fila, que já indicam gravação no Redis funcionando), e o que ocupa os
+~200 MB restantes — sem acesso externo ao Redis, a suspeita são jobs falhos
+guardados, que o corte por idade vai tirando aos poucos. O app não tenta de
+novo sozinho nesse estado: o motoboy precisa tocar no aviso vermelho ou
+reabrir o aplicativo.

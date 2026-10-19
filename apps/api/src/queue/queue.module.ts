@@ -15,12 +15,17 @@ import { buildRedisConnectionOptions } from '../common/redis-connection';
  * com a política `noeviction`, o Redis cheio recusa toda gravação, e nenhum
  * motoboy conseguia ficar Ativo (503 em `PUT /driver/presence`, 19/10/2026).
  * Vale também para os agendadores: `upsertJobScheduler` herda estas opções.
+ *
+ * Só por idade, nunca por quantidade: o corte por `count` do BullMQ apaga todo
+ * o excedente num único script Lua, sem limite. Com histórico acumulado, isso
+ * travou o Redis (`BUSY`) por ~30 s no deploy de 19/10. O corte por `age` apaga
+ * no máximo 1000 jobs por conclusão, e o resto sai aos poucos.
  */
 export const RETENCAO_DE_JOBS = {
-  /** Concluído só serve para depurar o dia: até 24 h, no máximo 1000 por fila. */
-  removeOnComplete: { age: 24 * 60 * 60, count: 1000 },
-  /** Falho fica mais, para dar tempo de investigar: até 7 dias, no máximo 5000. */
-  removeOnFail: { age: 7 * 24 * 60 * 60, count: 5000 },
+  /** Concluído só serve para depurar o dia: até 24 h. */
+  removeOnComplete: { age: 24 * 60 * 60 },
+  /** Falho fica mais, para dar tempo de investigar: até 7 dias. */
+  removeOnFail: { age: 7 * 24 * 60 * 60 },
 } as const;
 
 @Module({
