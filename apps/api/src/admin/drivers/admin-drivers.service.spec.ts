@@ -8,6 +8,7 @@ import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { ImageKitService } from '../../media/imagekit.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { DriverPunishmentService } from '../../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../../driver-schedule/driver-schedule.service';
 import { AdminDriversService } from './admin-drivers.service';
 
 describe('AdminDriversService', () => {
@@ -41,8 +42,21 @@ describe('AdminDriversService', () => {
     emitAdminActivity: jest.Mock;
     disconnectUser: jest.Mock;
   };
+  let schedule: {
+    statusOf: jest.Mock;
+    parse: jest.Mock;
+    replaceByAdmin: jest.Mock;
+    isOffShift: jest.Mock;
+  };
 
   beforeEach(async () => {
+    /** Padrao: motoboy sem escala. */
+    schedule = {
+      statusOf: jest.fn().mockReturnValue(null),
+      parse: jest.fn().mockReturnValue(null),
+      replaceByAdmin: jest.fn().mockResolvedValue(undefined),
+      isOffShift: jest.fn().mockResolvedValue(false),
+    };
     prisma = {
       driver: {
         findUnique: jest.fn(),
@@ -114,10 +128,64 @@ describe('AdminDriversService', () => {
           provide: DriverPunishmentService,
           useValue: { revoke: jest.fn(), listForDriver: jest.fn() },
         },
+        { provide: DriverScheduleService, useValue: schedule },
       ],
     }).compile();
 
     service = module.get(AdminDriversService);
+  });
+
+  describe('updateSchedule', () => {
+    const escala = {
+      days: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+        weekday,
+        shifts: weekday === 1 ? [{ start: '11:00', end: '15:00' }] : [],
+      })),
+    };
+
+    it('grava a escala e devolve a ficha atualizada', async () => {
+      const detalhe = { id: 'driver-1' };
+      jest.spyOn(service, 'detail').mockResolvedValue(detalhe as never);
+      schedule.isOffShift.mockResolvedValue(true);
+
+      await expect(
+        service.updateSchedule('driver-1', { schedule: escala }, 'admin-1'),
+      ).resolves.toBe(detalhe);
+
+      expect(schedule.replaceByAdmin).toHaveBeenCalledWith('driver-1', escala, 'admin-1');
+      // Fora do turno, nao ha o que empurrar para ele agora.
+      expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
+    });
+
+    it('varre a fila quando a escala nova o coloca no turno agora', async () => {
+      jest.spyOn(service, 'detail').mockResolvedValue({} as never);
+      schedule.isOffShift.mockResolvedValue(false);
+
+      await service.updateSchedule('driver-1', { schedule: escala }, 'admin-1');
+
+      expect(dispatchService.dispatchAvailableDeliveries).toHaveBeenCalled();
+    });
+
+    it('remover a escala libera o motoboy e também varre a fila', async () => {
+      jest.spyOn(service, 'detail').mockResolvedValue({} as never);
+      schedule.isOffShift.mockResolvedValue(false);
+
+      await service.updateSchedule('driver-1', { schedule: null }, 'admin-1');
+
+      expect(schedule.replaceByAdmin).toHaveBeenCalledWith('driver-1', null, 'admin-1');
+      expect(dispatchService.dispatchAvailableDeliveries).toHaveBeenCalled();
+    });
+
+    it('falha na varredura não desfaz a escala gravada nem vira erro para a central', async () => {
+      const detalhe = { id: 'driver-1' };
+      jest.spyOn(service, 'detail').mockResolvedValue(detalhe as never);
+      schedule.isOffShift.mockResolvedValue(false);
+      dispatchService.dispatchAvailableDeliveries.mockRejectedValueOnce(new Error('redis caiu'));
+
+      await expect(
+        service.updateSchedule('driver-1', { schedule: escala }, 'admin-1'),
+      ).resolves.toBe(detalhe);
+    });
   });
 
   describe('updateCompensation', () => {
@@ -358,6 +426,7 @@ describe('AdminDriversService', () => {
           reviewedAt: null,
           serviceTypes: [],
           returnsLast7Days: 0,
+          workScheduleStatus: null,
         },
         {
           id: 'driver-2',
@@ -377,6 +446,7 @@ describe('AdminDriversService', () => {
           reviewedAt: '2026-01-02T12:00:00.000Z',
           serviceTypes: [{ id: 'service-1', code: 'MOTO', name: 'Moto', isPrimary: true }],
           returnsLast7Days: 3,
+          workScheduleStatus: null,
         },
       ]);
     });

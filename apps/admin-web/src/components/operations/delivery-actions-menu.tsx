@@ -190,6 +190,14 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
       }),
     [action, driversQuery.data, order.driver?.id],
   );
+  const selectedOffShift =
+    availableDrivers.find(
+      (driver) =>
+        driver.id === driverId &&
+        driver.workScheduleStatus !== null &&
+        driver.workScheduleStatus !== undefined &&
+        !driver.workScheduleStatus.onShift,
+    ) ?? null;
 
   const closeDialog = () => {
     setAction(null);
@@ -386,9 +394,24 @@ export function DeliveryActionsMenu({ order }: { order: OperationalDeliveryItem 
                     {availableDrivers.map((driver) => (
                       <option key={driver.id} value={driver.id}>
                         {driver.name}
+                        {driver.workScheduleStatus && !driver.workScheduleStatus.onShift
+                          ? ' · fora da escala'
+                          : ''}
                       </option>
                     ))}
                   </select>
+                  {/*
+                    A central pode mandar o pedido a quem esta fora do turno —
+                    o bloqueio da escala vale para o despacho automatico. O aviso
+                    existe para isso ser uma escolha, e nao um descuido.
+                  */}
+                  {selectedOffShift && (
+                    <p className="text-sm text-alerta">
+                      {selectedOffShift.name} está fora da escala (
+                      {selectedOffShift.workScheduleStatus?.label.replace(/^Fora da escala · /, '')}
+                      ). A oferta vai mesmo assim.
+                    </p>
+                  )}
                 </div>
               ) : null}
 

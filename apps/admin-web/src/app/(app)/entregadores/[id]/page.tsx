@@ -21,6 +21,7 @@ import { DriverDocumentsManager, EditDriverDialog } from '@/components/drivers/d
 import { DriverPunishments } from '@/components/drivers/driver-punishments';
 import { DriverCompanyBlocks } from '@/components/drivers/driver-company-blocks';
 import { DriverCompensationCard } from '@/components/drivers/driver-compensation';
+import { DriverScheduleCard } from '@/components/drivers/driver-schedule';
 import { StatusChip, STATUS_OPTIONS, statusRailClass } from '@/components/orders/status-chip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -205,6 +206,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           <DriverPunishments driverId={driver.id} token={token} />
           <DriverCompanyBlocks driverId={driver.id} token={token} />
           <DriverCompensationCard driver={driver} token={token} />
+          <DriverScheduleCard driver={driver} token={token} />
 
           <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard

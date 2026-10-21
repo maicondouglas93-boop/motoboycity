@@ -30,6 +30,28 @@ novamente. O fechamento (`complete-return`) usa a confirmação do motoboy e,
 quando o ADM configurar o raio de retorno, também exige GPS válido e proximidade
 do endereço principal da empresa.
 
+### Dinheiro a devolver à loja (2026-10-19)
+
+Pedido do cliente, decisões confirmadas pelo responsável:
+
+- **Toda entrega com retorno** pede, ao marcar entregue, quanto o motoboy vai
+  devolver em dinheiro à loja. Ele digita o valor ou marca **"Não recebi
+  dinheiro"** (cartão, Pix ou já pago). Não depende de a loja ter preenchido a
+  forma de pagamento do cliente.
+- **Só o motoboy informa.** A loja não informa o valor a cobrar na criação, e
+  o sistema não compara valores.
+- **A loja vê e o app lembra.** O valor aparece para a loja no pedido e no card
+  do pedido voltando à loja, e no ADM. No app, "Devolva R$ X em dinheiro à
+  loja" fica no card da Home e na tela do pedido até ele concluir o retorno. O
+  fechamento do retorno continua como antes: a loja não confirma o
+  recebimento.
+- O valor fica no histórico do pedido ("Motoboy informou R$ X em dinheiro para
+  devolver à loja"). É dinheiro do cliente, não da corrida: não entra em
+  fatura, repasse nem carteira, e aparece também para o motoboy de salário
+  fixo.
+- Entrega marcada pelo aplicativo antigo ou pelo ADM fica **"não informado"**
+  (nulo), nunca zero.
+
 ## Comissão (motoboy/plataforma)
 
 Percentual, configurável pelo admin — não hardcoded, sem valor padrão fixo
@@ -1056,6 +1078,35 @@ Fechar o modal equivale a desativar. A escolha persiste por usuario neste
 navegador e pode ser alterada pelo icone de volume; o navegador ainda pode
 exigir um gesto para permitir audio depois de reabrir a pagina.
 Detalhes e limites de entrega do aviso em `pickup-arrival-alert.md`.
+
+---
+
+## Escala do motoboy (2026-10-14)
+
+Decisões confirmadas pelo responsável:
+
+- **Quem monta é a central**, no ADM (cartão "Escala" na ficha do
+  entregador). O motoboy só vê, na aba "Escala" do menu do aplicativo.
+- **Semana fixa**: cada dia da semana, de segunda a domingo, tem zero ou mais
+  turnos (até 4 por dia). Dia sem turno é folga. Não há datas especiais.
+- **Turno que termina antes de começar passa da meia-noite** e pertence ao dia
+  em que começa (sexta 18:00 às 02:00 vai até sábado 02:00). Turnos não podem
+  se sobrepor; encostados (15:00 e 15:00) podem. Horário de Brasília.
+- **Sem escala, ele trabalha livre** — é o padrão de todo motoboy. Remover a
+  escala devolve esse estado. Uma escala salva precisa ter pelo menos um turno.
+- **Fora da escala ele não consegue ficar Ativo** e não recebe pedido novo:
+  fica fora da oferta automática e a vitrine fica vazia para ele (assumir pela
+  vitrine também é recusado).
+- **Sem tolerância**: vale o horário exato do turno.
+- **Turno acaba com ele Ativo**: ele continua Ativo, mas para de receber
+  pedido novo; o que já aceitou ele termina normalmente. O aplicativo avisa
+  "Fora da escala".
+- **Oferta manual da central continua permitida** fora da escala; o ADM mostra
+  o aviso de que ele está fora da escala antes de enviar.
+
+A mudança de escala fica na auditoria administrativa
+(`DRIVER_SCHEDULE_CHANGED`). Ao salvar uma escala que coloca o motoboy no
+turno, o despacho roda de novo para pedidos que esperam motoboy.
 
 Decisões confirmadas diretamente com o responsável do produto em sessões
 anteriores. Se uma regra aqui parecer desatualizada em relação ao código,

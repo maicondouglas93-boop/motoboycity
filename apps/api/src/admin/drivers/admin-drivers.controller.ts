@@ -32,8 +32,10 @@ import {
   adminUpdateDriverSchema,
   adminDriverCompensationSchema,
   adminDriverDocumentSchema,
+  adminDriverScheduleSchema,
   adminReviewDriverDocumentSchema,
   type AdminDriverCompensationPayload,
+  type AdminDriverSchedulePayload,
   type AdminUpdateDriverPayload,
   type AdminDriverDocumentPayload,
   type AdminReviewDriverDocumentPayload,
@@ -164,6 +166,16 @@ export class AdminDriversController {
     @CurrentUser() admin: User,
   ) {
     return this.adminDriversService.updateCompensation(id, body, admin.id);
+  }
+
+  /** A escala do motoboy: grava a semana, ou remove com `schedule: null`. */
+  @Put(':id/schedule')
+  updateSchedule(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(adminDriverScheduleSchema)) body: AdminDriverSchedulePayload,
+    @CurrentUser() admin: User,
+  ) {
+    return this.adminDriversService.updateSchedule(id, body, admin.id);
   }
 
   @Post(':id/documents')

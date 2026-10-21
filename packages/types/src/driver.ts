@@ -20,6 +20,63 @@ export interface DriverPresenceItem {
    * quebrou — a chamada de suporte que a punicao silenciosa sempre gera.
    */
   punishment: DriverPunishmentStatus | null;
+  /**
+   * Onde o motoboy esta na escala agora, ou `null` se ele nao tem escala.
+   *
+   * Viaja junto pelo mesmo motivo da punicao: fora do turno o botao Ativo
+   * pode continuar ligado (ele termina o que ja pegou), mas pedido novo nao
+   * chega — e ele precisa ler isso na Home, e nao deduzir pelo silencio.
+   */
+  workSchedule: DriverWorkScheduleStatus | null;
+}
+
+/**
+ * Um turno da escala, em `HH:mm` no relogio de Brasilia.
+ *
+ * `end` antes de `start` quer dizer que o turno passa da meia-noite: sexta das
+ * 18:00 as 02:00 termina as duas da manha de sabado, e pertence a sexta — o dia
+ * em que comeca. E a mesma convencao do horario da loja online.
+ */
+export interface DriverWorkShift {
+  start: string;
+  end: string;
+}
+
+/** Um dia da semana na escala. Dia sem turno e folga. */
+export interface DriverWorkDay {
+  /** 0 = domingo, igual a `Date.getDay()`. */
+  weekday: number;
+  shifts: DriverWorkShift[];
+}
+
+/**
+ * A semana fixa do motoboy, montada pela central no ADM. Repete-se toda semana.
+ *
+ * Quem tem escala so fica Ativo e so recebe pedido dentro dos turnos. Quem nao
+ * tem (`null` nos campos que a carregam) trabalha livre, como antes da escala
+ * existir.
+ */
+export interface DriverWorkSchedule {
+  days: DriverWorkDay[];
+}
+
+/** Onde o motoboy esta na escala, num instante. */
+export interface DriverWorkScheduleStatus {
+  /** Dentro de um turno: pode ficar Ativo e recebe pedidos. */
+  onShift: boolean;
+  /**
+   * Quando isso muda: o fim do turno, se esta nele; o comeco do proximo, se
+   * nao esta. `null` quando nao ha previsao.
+   */
+  changesAt: string | null;
+  /** Frase pronta: "No turno até 15:00", "Fora da escala · próximo turno sexta às 11:00". */
+  label: string;
+}
+
+/** O que o motoboy ve na tela Escala do aplicativo. */
+export interface DriverScheduleView {
+  schedule: DriverWorkSchedule | null;
+  status: DriverWorkScheduleStatus | null;
 }
 
 export interface DriverDispatchQueueEntry {
@@ -91,6 +148,13 @@ export interface AdminDriverListItem {
    * de uma semana ruim — a decisao e de quem conhece as pessoas.
    */
   returnsLast7Days: number;
+  /**
+   * Onde o motoboy esta na escala agora, ou `null` se ele nao tem escala.
+   *
+   * Vai na lista para a oferta manual avisar a central: ela pode mandar o
+   * pedido a quem esta fora do turno, mas precisa saber que esta fazendo isso.
+   */
+  workScheduleStatus: DriverWorkScheduleStatus | null;
 }
 
 export type DriverDocumentType = 'SELFIE' | 'RG' | 'CNH_FRONT' | 'CNH_BACK' | 'PROOF_OF_ADDRESS';
@@ -114,6 +178,8 @@ export interface AdminDriverDetail extends AdminDriverListItem {
   pixKeyType: string;
   hasCnpj: boolean;
   documents: AdminDriverDocument[];
+  /** A semana fixa do motoboy, ou `null` se ele trabalha livre. */
+  workSchedule: DriverWorkSchedule | null;
 }
 
 export interface AdminDriverRegistrationOptions {

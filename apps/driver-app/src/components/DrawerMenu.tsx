@@ -30,6 +30,7 @@ type MenuItem = {
 const MENU_ITEMS: MenuItem[] = [
   { label: 'Pedidos disponíveis', icon: 'clock', screen: 'AvailableDeliveries' },
   { label: 'Histórico de pedidos', icon: 'pin', screen: 'History' },
+  { label: 'Escala', icon: 'calendar', screen: 'Schedule' },
   { label: 'Perfil', icon: 'person', screen: 'Profile' },
 ];
 

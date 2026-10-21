@@ -29,7 +29,9 @@ import { DriverQueueSheet } from '../components/DriverQueueSheet';
 import { DrawerMenu } from '../components/DrawerMenu';
 import { EmptyIconCircle, Icon } from '../components/Icon';
 import { MapBackdrop } from '../components/MapBackdrop';
+import { CashReminder } from '../components/CashReminder';
 import { PendingDeliveryCard } from '../components/PendingDeliveryCard';
+import { lembreteNaLista } from '../lib/cashToReturn';
 import type { RouteStop } from '../components/RouteTimeline';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { colors } from '../theme/colors';
@@ -265,6 +267,8 @@ export function HomeScreen({ navigation }: Props) {
   const setPresence = useDispatchStore((state) => state.setPresence);
   const punishment = useDispatchStore((state) => state.punishment);
   const setPunishment = useDispatchStore((state) => state.setPunishment);
+  const workSchedule = useDispatchStore((state) => state.workSchedule);
+  const setWorkSchedule = useDispatchStore((state) => state.setWorkSchedule);
   const setWantsToBeAvailable = useDispatchStore((state) => state.setWantsToBeAvailable);
   const setIncomingOffer = useDispatchStore((state) => state.setIncomingOffer);
   const setActiveDeliveries = useDispatchStore((state) => state.setActiveDeliveries);
@@ -352,6 +356,31 @@ export function HomeScreen({ navigation }: Props) {
     const timer = setInterval(() => setAgora(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, [esperandoEmSilencio]);
+
+  /**
+   * O turno vira sozinho, sem evento no socket: a Home rele a escala no
+   * instante em que o servidor disse que ela muda. Sem isto o aviso "fora da
+   * escala" ficava na tela depois de o turno comecar, e vice-versa.
+   *
+   * A espera tem teto de 30 minutos — timer longo no Android nao e confiavel —
+   * e cada leitura devolve um status novo, que agenda a proxima.
+   */
+  useEffect(() => {
+    const mudaEm = workSchedule?.changesAt ? Date.parse(workSchedule.changesAt) : Number.NaN;
+    if (!Number.isFinite(mudaEm)) return undefined;
+    const espera = Math.min(Math.max(mudaEm - Date.now() + 2_000, 2_000), 30 * 60_000);
+    const timer = setTimeout(() => {
+      session
+        .getToken()
+        .then(async (token) => {
+          if (!token) return;
+          const presence = await driverPresenceApi.get(token);
+          setWorkSchedule(presence.workSchedule ?? null);
+        })
+        .catch(() => undefined);
+    }, espera);
+    return () => clearTimeout(timer);
+  }, [workSchedule, setWorkSchedule]);
 
   const syncCompletionQueue = useCallback(
     async (
@@ -457,6 +486,8 @@ export function HomeScreen({ navigation }: Props) {
       // Ele fica sabendo do castigo ao abrir o aplicativo, e nao so depois de
       // ficar ativo e estranhar o silencio.
       setPunishment(presence.punishment);
+      // A API anterior a escala nao manda o campo: sem ele, ele trabalha livre.
+      setWorkSchedule(presence.workSchedule ?? null);
       setPresenceError(null);
       return presence;
     } catch {
@@ -496,9 +527,11 @@ export function HomeScreen({ navigation }: Props) {
           availability: 'UNAVAILABLE' as const,
           since: null,
           punishment: currentPresence?.punishment ?? null,
+          workSchedule: currentPresence?.workSchedule ?? null,
         };
         setPresence(unavailable.availability, unavailable.since);
         setPunishment(unavailable.punishment);
+        setWorkSchedule(unavailable.workSchedule);
         return unavailable;
       }
 
@@ -506,6 +539,7 @@ export function HomeScreen({ navigation }: Props) {
         currentPresence = await driverPresenceApi.get(token).catch(() => null);
         if (currentPresence) {
           setPresence(currentPresence.availability, currentPresence.since);
+          setWorkSchedule(currentPresence.workSchedule ?? null);
         }
       }
 
@@ -528,6 +562,7 @@ export function HomeScreen({ navigation }: Props) {
             }),
         });
         setPresence(restored.availability, restored.since);
+        setWorkSchedule(restored.workSchedule ?? null);
         setWantsToBeAvailable(true);
         setPresenceError(null);
         setTrackingError(null);
@@ -1338,6 +1373,19 @@ export function HomeScreen({ navigation }: Props) {
           onPress: () => carregarPendentes().catch(() => undefined),
         }
       : null,
+    workSchedule && !workSchedule.onShift
+      ? {
+          chave: 'escala',
+          titulo: workSchedule.label,
+          texto: isAvailable
+            ? 'Pedido novo não chega fora do turno; o que você já aceitou continua valendo.'
+            : 'Você só consegue ficar ativo dentro da sua escala. Toque para ver seus turnos.',
+          rotulo: 'Abrir sua escala',
+          estilo: styles.avisoAtencao,
+          estiloTitulo: styles.avisoAtencaoTexto,
+          onPress: () => navigation.navigate('Schedule'),
+        }
+      : null,
     punishment
       ? {
           chave: 'punicao',
@@ -1490,7 +1538,9 @@ export function HomeScreen({ navigation }: Props) {
                     onPress={() =>
                       navigation.navigate('DeliveryOperation', { deliveryId: delivery.id })
                     }
-                  />
+                  >
+                    <CashReminder texto={lembreteNaLista(delivery, completionQueue)} />
+                  </DeliveryCard>
                 ))
               ) : !listaAtivaCarregada ? (
                 <View style={styles.carregandoLista}>

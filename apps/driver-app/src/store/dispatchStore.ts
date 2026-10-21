@@ -3,6 +3,7 @@ import type {
   DeliveryOfferPayload,
   DriverAvailability,
   DriverPunishmentStatus,
+  DriverWorkScheduleStatus,
 } from '@motoboycity/types';
 import type { ActiveDeliveryItem } from '../lib/activeDeliveries';
 import { stableOfferDeadline } from '../lib/offerDeadline';
@@ -23,8 +24,15 @@ interface DispatchState {
    * e que o aplicativo quebrou.
    */
   punishment: DriverPunishmentStatus | null;
+  /**
+   * Escala do motoboy, quando ele tem uma. Fora do turno ele nao consegue
+   * ficar Ativo e nao recebe pedido novo — o mesmo silencio da punicao, que
+   * precisa ser explicado na tela pelo mesmo motivo.
+   */
+  workSchedule: DriverWorkScheduleStatus | null;
   setPresence: (availability: DriverAvailability, since: string | null) => void;
   setPunishment: (punishment: DriverPunishmentStatus | null) => void;
+  setWorkSchedule: (workSchedule: DriverWorkScheduleStatus | null) => void;
   setWantsToBeAvailable: (available: boolean) => void;
   setIncomingOffer: (offer: DeliveryOfferPayload | null) => void;
   setActiveDeliveries: (deliveries: ActiveDeliveryItem[]) => void;
@@ -46,8 +54,10 @@ export const useDispatchStore = create<DispatchState>((set) => ({
   activeDeliveries: [],
   socketConnected: false,
   punishment: null,
+  workSchedule: null,
   setPresence: (availability, since) => set({ availability, since }),
   setPunishment: (punishment) => set({ punishment }),
+  setWorkSchedule: (workSchedule) => set({ workSchedule }),
   setWantsToBeAvailable: (wantsToBeAvailable) => set({ wantsToBeAvailable }),
   setIncomingOffer: (incomingOffer) =>
     set((state) => {

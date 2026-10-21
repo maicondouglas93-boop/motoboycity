@@ -25,6 +25,7 @@ import {
   DriverPunishmentService,
   type RefusalKind,
 } from '../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../driver-schedule/driver-schedule.service';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const OFFER_EXPIRE_JOB = 'offer-expire';
@@ -93,6 +94,7 @@ export class DispatchService {
     @InjectQueue(DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
     private readonly integrationOutbox: IntegrationOutboxRecorder,
     private readonly punishmentService: DriverPunishmentService,
+    private readonly scheduleService: DriverScheduleService,
   ) {}
 
   /** Chamado antes de criar um pedido AWAITING_DRIVER — falha alto e claro
@@ -1774,6 +1776,12 @@ export class DispatchService {
      */
     if (await this.punishmentService.activeFor(driverId)) return [];
 
+    /**
+     * E some fora do turno da escala, pelo mesmo motivo: sem isto o fim do
+     * turno so pararia as ofertas, e ele continuaria pegando pedido na lista.
+     */
+    if (await this.scheduleService.isOffShift(driverId)) return [];
+
     const deliveries = await this.prisma.delivery.findMany({
       where: {
         status: 'AWAITING_DRIVER',
@@ -1871,6 +1879,13 @@ export class DispatchService {
       throw new ForbiddenException(
         'Você está fora do despacho por ter recusado ofertas. Aguarde o fim do período.',
       );
+    }
+
+    // A vitrine ja esconde os pedidos fora do turno; esta checagem fecha a
+    // porta para a tela que ficou aberta depois do fim do turno.
+    const foraDaEscala = await this.scheduleService.offShiftMessage(driverId);
+    if (foraDaEscala) {
+      throw new ForbiddenException(foraDaEscala);
     }
 
     const pendente = await this.prisma.deliveryOffer.findFirst({
@@ -2221,7 +2236,17 @@ export class DispatchService {
     // e porque a punicao nao pode tocar `eligibleDriverWhere`, cujas condicoes
     // descrevem quem PODE atender, e ele continua podendo.
     const punishedDriverIds = await this.punishmentService.punishedDriverIds();
-    const excluded = [...new Set([...excludeDriverIds, ...busyDriverIds, ...punishedDriverIds])];
+    /**
+     * Quem tem escala e esta fora do turno tambem nao e candidato. Entra pela
+     * mesma porta da punicao, e nao por `eligibleDriverWhere`, porque a
+     * pergunta e "ele pode receber AGORA?", e o relogio da escala nao cabe num
+     * `where`. A oferta manual do ADM nao passa por aqui de proposito: a
+     * central pode mandar pedido a quem esta fora do turno.
+     */
+    const offShiftDriverIds = await this.scheduleService.offShiftDriverIds();
+    const excluded = [
+      ...new Set([...excludeDriverIds, ...busyDriverIds, ...punishedDriverIds, ...offShiftDriverIds]),
+    ];
 
     const presences = await this.prisma.driverPresenceLog.findMany({
       where: {

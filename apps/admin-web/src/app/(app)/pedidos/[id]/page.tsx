@@ -7,6 +7,7 @@ import type { DeliveryAddressItem, DeliveryStatus } from '@motoboycity/types';
 import {
   AlertCircle,
   ArrowRight,
+  Banknote,
   Bike,
   Building2,
   CalendarClock,
@@ -33,6 +34,7 @@ import { AdminCompletedDeliveryActions } from '@/components/operations/admin-com
 import { EditDeliveryDialog } from '@/components/deliveries/edit-delivery-dialog';
 import { adminOperationsApi, deliveriesApi, trackingApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
+import { dinheiroADevolver } from '@/lib/dinheiro-a-devolver';
 import { useMoney } from '@/lib/money';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -261,6 +263,11 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             <DetailField label="Pagamento do cliente" icon={<WalletCards className="size-3" />}>
               {customerPaymentLabel(delivery.customerPaymentMethod)}
             </DetailField>
+            {dinheiroADevolver(delivery, money) && (
+              <DetailField label="Dinheiro a devolver" icon={<Banknote className="size-3" />}>
+                {dinheiroADevolver(delivery, money)}
+              </DetailField>
+            )}
             {delivery.driverNote && (
               <div className="rounded-xl border border-status-rota/20 bg-status-rota/10 p-3 text-sm sm:col-span-2">
                 <p className="text-[10px] font-semibold tracking-[0.1em] text-[#8a5200] uppercase">

@@ -9,6 +9,7 @@ import { LiveDriverPresenceService } from '../live-presence/live-driver-presence
 import { PushService } from '../push/push.service';
 import { IntegrationOutboxRecorder } from '../integrations/integration-outbox-recorder.service';
 import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../driver-schedule/driver-schedule.service';
 
 const offerPickupAddress = {
   type: 'PICKUP',
@@ -78,6 +79,11 @@ describe('DispatchService', () => {
     activeFor: jest.Mock;
     registerRefusal: jest.Mock;
     registerAcceptance: jest.Mock;
+  };
+  let schedule: {
+    offShiftDriverIds: jest.Mock;
+    isOffShift: jest.Mock;
+    offShiftMessage: jest.Mock;
   };
   let tx: {
     $queryRaw: jest.Mock;
@@ -177,6 +183,12 @@ describe('DispatchService', () => {
       registerRefusal: jest.fn().mockResolvedValue(null),
       registerAcceptance: jest.fn().mockResolvedValue(undefined),
     };
+    /** Padrao de producao antes de a central montar escalas: ninguem fora do turno. */
+    schedule = {
+      offShiftDriverIds: jest.fn().mockResolvedValue([]),
+      isOffShift: jest.fn().mockResolvedValue(false),
+      offShiftMessage: jest.fn().mockResolvedValue(null),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -189,6 +201,7 @@ describe('DispatchService', () => {
         { provide: getQueueToken(DISPATCH_QUEUE), useValue: queue },
         { provide: IntegrationOutboxRecorder, useValue: { record: jest.fn() } },
         { provide: DriverPunishmentService, useValue: punishment },
+        { provide: DriverScheduleService, useValue: schedule },
       ],
     }).compile();
 
@@ -2805,6 +2818,105 @@ describe('DispatchService', () => {
       await expect(
         service.claimDelivery('delivery-1', 'driver-1', 'user-1'),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  /**
+   * A escala do motoboy. Fora do turno ele termina o que ja aceitou, mas nao
+   * recebe pedido novo: nem oferta automatica, nem vitrine. A oferta manual do
+   * ADM fica de fora de proposito — a central decide.
+   */
+  describe('escala do motoboy', () => {
+    const pedidoBuscandoMotoboy = {
+      id: 'delivery-1',
+      status: 'AWAITING_DRIVER',
+      batchId: null,
+      serviceTypeId: 'service-1',
+      displayNumber: 5,
+      company: { regionId: 'region-1', tradeName: 'Loja' },
+      serviceType: { name: 'Padrão' },
+      addresses: [],
+    };
+
+    it('exclui da seleção automática quem está fora do turno', async () => {
+      schedule.offShiftDriverIds.mockResolvedValue(['driver-fora-do-turno']);
+      prisma.delivery.findUnique.mockResolvedValue(pedidoBuscandoMotoboy);
+      prisma.deliveryOffer.findFirst.mockResolvedValue(null);
+      prisma.deliveryOffer.findMany.mockResolvedValue([]);
+      prisma.driverPresenceLog.findMany.mockResolvedValue([]);
+
+      await service.dispatchDelivery('delivery-1');
+
+      expect(prisma.driverPresenceLog.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            driverId: { notIn: expect.arrayContaining(['driver-fora-do-turno']) },
+          }),
+        }),
+      );
+    });
+
+    it('esconde a vitrine fora do turno', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        regionId: 'region-1',
+        serviceTypes: [{ serviceTypeId: 'service-1' }],
+      });
+      schedule.isOffShift.mockResolvedValue(true);
+
+      await expect(service.listAvailableForDriver('driver-1')).resolves.toEqual([]);
+      expect(prisma.delivery.findMany).not.toHaveBeenCalled();
+    });
+
+    it('mantém a vitrine de quem está no turno ou sem escala', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        regionId: 'region-1',
+        serviceTypes: [{ serviceTypeId: 'service-1' }],
+      });
+      schedule.isOffShift.mockResolvedValue(false);
+      prisma.delivery.findMany.mockResolvedValue([]);
+
+      await service.listAvailableForDriver('driver-1');
+
+      expect(prisma.delivery.findMany).toHaveBeenCalled();
+    });
+
+    it('recusa assumir da vitrine fora do turno, dizendo quando ele volta', async () => {
+      prisma.delivery.findUnique.mockResolvedValue({
+        id: 'delivery-1',
+        status: 'AWAITING_DRIVER',
+        driverId: null,
+        displayNumber: 5,
+        batchId: null,
+        companyId: 'company-1',
+        company: { regionId: 'region-1', status: 'ACTIVE' },
+      });
+      prisma.driverCompanyBlock.findFirst.mockResolvedValue(null);
+      schedule.offShiftMessage.mockResolvedValue(
+        'Você está fora da sua escala. O próximo turno começa sexta às 11:00.',
+      );
+
+      await expect(service.claimDelivery('delivery-1', 'driver-1', 'user-1')).rejects.toThrow(
+        'O próximo turno começa sexta às 11:00.',
+      );
+    });
+
+    it('não consulta a escala na oferta manual do ADM', async () => {
+      // A reoferta manual nao passa pela escolha automatica: a central pode
+      // mandar pedido a quem esta fora do turno.
+      prisma.delivery.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.reofferDeliveryToDriver('delivery-1', 'driver-1', {
+          adminId: 'admin-1',
+          adminName: 'Admin',
+          reason: 'teste',
+        }),
+      ).rejects.toThrow();
+      expect(schedule.offShiftDriverIds).not.toHaveBeenCalled();
+      expect(schedule.isOffShift).not.toHaveBeenCalled();
+      expect(schedule.offShiftMessage).not.toHaveBeenCalled();
     });
   });
 });

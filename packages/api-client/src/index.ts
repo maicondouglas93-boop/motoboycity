@@ -28,6 +28,7 @@ export * from './service-types';
 export * from './web-push';
 export * from './company-store-asaas';
 export * from './driver-presence';
+export * from './driver-schedule';
 export * from './tracking';
 export * from './driver-wallet';
 export * from './delivery-offers';

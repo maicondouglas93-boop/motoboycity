@@ -410,7 +410,8 @@ e `api-error.ts`). Ali vivem duas decisões que não podem ser tomadas por tela:
   usa 15 s. O prazo é local: encerra a espera, não a requisição no servidor — só
   é seguro porque toda escrita já é idempotente na retentativa;
 - **401 tem uma única reação** em todo o aplicativo. **Somente 401**: nesta API o
-  403 é decisão de negócio — motoboy em punição, oferta de outra pessoa — e
+  403 é decisão de negócio — motoboy em punição ou fora da escala, oferta de
+  outra pessoa — e
   tratá-lo como sessão inválida deslogaria alguém no meio do expediente por uma
   regra funcionando como deveria.
 
@@ -571,6 +572,13 @@ As rotas operacionais e seus consumidores company/mobile permanecem inalterados.
 dele — nem em intervenção administrativa, onde o admin informa a *distância* e a
 tabela decide o *preço*.
 
+**`Delivery.cashToReturn` não é dinheiro da plataforma.** É o dinheiro do
+cliente que o motoboy declara, ao marcar entregue uma entrega com retorno, para
+devolver à loja (`cashToReturn` no `mark-delivered`, opcional por causa do APK
+antigo; ignorado sem retorno). Não passa por fatura, repasse nem carteira. No
+app ele viaja junto da entrega na fila offline, e os dois reparos de GPS da fila
+preservam o valor (`comPosicaoNova`).
+
 A invariante `driverValue + platformValue === totalValue` é garantida por
 construção em `pricing-calculator.ts`: `platformValue` é **derivado** de
 `totalValue - driverValue`, então nenhum arredondamento pode quebrá-la.
@@ -646,6 +654,18 @@ pedido. Quem já tem oferta pendente e quem está punido entram pela mesma porta
 de exclusão — `eligibleDriverWhere` descreve quem *pode* atender, enquanto a
 punição descreve quem está temporariamente fora.
 
+A escala do motoboy (`Driver.workSchedule`, JSON; `null` = trabalha livre)
+segue o mesmo desenho da punição, em `DriverScheduleService`: quem está fora do
+turno entra na lista de excluídos da oferta automática, recebe a vitrine vazia,
+tem o "assumir" recusado com 403 e não passa de offline a Ativo (reafirmar quem
+já está Ativo continua permitido, para o fim do turno não derrubar quem está
+entregando). A oferta manual do admin não consulta a escala, de propósito. As
+contas de turno são as do horário da loja online (`store-schedule.rules`), em
+`packages/validation/src/driver/driver-schedule.rules.ts`, e o servidor manda o
+status pronto (`workSchedule` na presença, `GET /driver/schedule`) porque o
+aplicativo não pode depender de `formatToParts` no Hermes. Quem volta ao turno
+entra na fila pela varredura de minuto em minuto.
+
 O bloqueio seletivo é uma relação persistente `(driverId, companyId)` com
 unicidade no banco. Ele é revalidado ao criar e aceitar oferta, ao assumir pela
 vitrine e ao reatribuir pelo admin; não depende de a tela estar atualizada. A
@@ -655,7 +675,7 @@ que já está em andamento.
 
 A vitrine (`claimDelivery`) é o único caminho de atribuição que não passa por
 oferta, então **repete as checagens por conta própria**: região, modalidade,
-punição, bloqueio por empresa e teto, estes últimos dentro da transação e sob o
+punição, escala, bloqueio por empresa e teto, estes últimos dentro da transação e sob o
 mesmo `FOR UPDATE` no motoboy. A listagem filtra, mas a listagem pode estar velha
 na tela.
 

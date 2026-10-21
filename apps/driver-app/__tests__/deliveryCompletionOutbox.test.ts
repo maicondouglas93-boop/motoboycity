@@ -470,6 +470,72 @@ describe('delivery completion outbox', () => {
     expect(await getPendingDeliveryCompletions('user-1')).toEqual([]);
   });
 
+  /**
+   * Os dois reparos de GPS montavam o pacote novo só com a coordenada. Com o
+   * dinheiro a devolver na entrega com retorno, isso apagaria o valor que ele
+   * informou — e a loja leria "não informado".
+   */
+  describe('dinheiro a devolver no reparo de GPS', () => {
+    const recusaDePrecisao = () =>
+      executor({
+        deliver: jest.fn().mockRejectedValue(
+          new ApiError(409, {
+            code: DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW,
+            message: 'A precisao do GPS agora e baixa demais para definir o destino desta entrega.',
+          }),
+        ),
+        detail: jest.fn().mockResolvedValue({
+          ...deliveredDetail(),
+          status: 'COLLECTED',
+          statusHistory: [],
+        }),
+      });
+
+    async function entregaRecusadaComDinheiro(): Promise<PendingDeliveryCompletion> {
+      await enqueueDeliveryCompletion({
+        ...deliveryInput,
+        payload: { lat: -20.15, lng: -41.62, accuracy: 208, cashToReturn: 85.5 },
+      });
+      await synchronizePendingDeliveryCompletions('token', 'user-1', recusaDePrecisao());
+      return (await getPendingDeliveryCompletions('user-1'))[0]!;
+    }
+
+    it('pela Home: troca a posição e mantém o valor', async () => {
+      const recusada = await entregaRecusadaComDinheiro();
+
+      const freshFix = { lat: -20.151, lng: -41.621, accuracy: 22 };
+      await retryDeliveryCompletionQueue('user-1', recusada.id, freshFix);
+      const api = executor();
+      await synchronizePendingDeliveryCompletions('token', 'user-1', api);
+
+      expect(api.deliver).toHaveBeenCalledWith('token', 'delivery-1', {
+        ...freshFix,
+        cashToReturn: 85.5,
+      });
+    });
+
+    it('pela tela, sem o valor no pacote novo: mantém o que ele já informou', async () => {
+      await entregaRecusadaComDinheiro();
+
+      const freshFix = { lat: -20.151, lng: -41.621, accuracy: 22 };
+      await enqueueDeliveryCompletion({ ...deliveryInput, payload: freshFix });
+
+      expect((await getPendingDeliveryCompletions('user-1'))[0]).toMatchObject({
+        state: 'PENDING',
+        payload: { ...freshFix, cashToReturn: 85.5 },
+      });
+    });
+
+    it('pela tela, com valor novo: vale o que ele acabou de confirmar', async () => {
+      await entregaRecusadaComDinheiro();
+
+      const freshFix = { lat: -20.151, lng: -41.621, accuracy: 22, cashToReturn: 90 };
+      await enqueueDeliveryCompletion({ ...deliveryInput, payload: freshFix });
+
+      expect((await getPendingDeliveryCompletions('user-1'))[0]?.payload).toEqual(freshFix);
+    });
+  });
+
   it('nao reenvia o mesmo GPS ruim quando a nova captura falha', async () => {
     const stored = {
       ...(await enqueueDeliveryCompletion({

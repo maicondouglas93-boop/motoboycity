@@ -4,6 +4,7 @@ import {
   createDeliveriesApi,
   createDeliveryOffersApi,
   createDriverPresenceApi,
+  createDriverScheduleApi,
   createDriverWalletApi,
   createPushTokensApi,
   createTrackingApi,
@@ -31,6 +32,7 @@ configureApiClient({
 
 export const authApi = createAuthApi({ baseUrl: API_BASE_URL });
 export const driverPresenceApi = createDriverPresenceApi({ baseUrl: API_BASE_URL });
+export const driverScheduleApi = createDriverScheduleApi({ baseUrl: API_BASE_URL });
 export const driverWalletApi = createDriverWalletApi({ baseUrl: API_BASE_URL });
 export const deliveryOffersApi = createDeliveryOffersApi({ baseUrl: API_BASE_URL });
 export const deliveriesApi = createDeliveriesApi({ baseUrl: API_BASE_URL });

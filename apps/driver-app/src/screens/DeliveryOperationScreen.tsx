@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +30,13 @@ import { RouteTimeline } from '../components/RouteTimeline';
 import { SheetHeader } from '../components/SheetHeader';
 import { deliveriesApi } from '../lib/apiClient';
 import { getActiveDeliveries, preliminaryDeliveryDetail } from '../lib/activeDeliveries';
+import {
+  DINHEIRO_EM_BRANCO,
+  conferirDinheiro,
+  dinheiroJaInformado,
+  lembreteDoDinheiro,
+  type DinheiroADevolver,
+} from '../lib/cashToReturn';
 import { clearExpiredDriverSession } from '../lib/clearExpiredDriverSession';
 import {
   completionClosesDeliveryLocally,
@@ -194,6 +202,8 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const [problemOpen, setProblemOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [deliverConfirmationOpen, setDeliverConfirmationOpen] = useState(false);
+  /** O que ele preencheu em "Dinheiro para devolver à loja", na entrega com retorno. */
+  const [dinheiro, setDinheiro] = useState<DinheiroADevolver>(DINHEIRO_EM_BRANCO);
   const [conferenciaDestino, setConferenciaDestino] = useState<ConferenciaDestino | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -815,12 +825,26 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         // No pedido sem endereco o fix ja foi congelado quando o modal abriu, e
         // e ELE que vai: foi essa rua que o motoboy leu e confirmou. Capturar de
         // novo aqui poderia gravar outra, alguns metros e uma esquina adiante.
-        const payload = posicaoParaEnvio(
+        const posicao = posicaoParaEnvio(
           fixConferido.current ??
             (await captureCompletionLocation({
               improveImpreciseFix: !delivery.destinationKnownAtCreation,
             })),
         );
+        // O dinheiro vai junto da entrega, e fica salvo com ela se a internet
+        // cair. Na nova tentativa de GPS, sem modal, vale o que ele já informou.
+        const conferido = conferirDinheiro(dinheiro);
+        const dinheiroInformado = !delivery.requiresReturn
+          ? undefined
+          : conferido.pronto
+            ? conferido.valor
+            : pendingCompletion?.action === 'DELIVER'
+              ? pendingCompletion.payload.cashToReturn
+              : undefined;
+        const payload: MarkDeliveredPayload =
+          dinheiroInformado === undefined
+            ? posicao
+            : { ...posicao, cashToReturn: dinheiroInformado };
         const queued = await queueAndSynchronizeCompletion(token, 'DELIVER', payload);
         if (queued === undefined) return;
         if (queued) {
@@ -1022,6 +1046,13 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
   const pickupDone = delivery.status !== 'ACCEPTED';
   const dropoffDone = delivery.status === 'DELIVERED' || delivery.status === 'COMPLETED';
   const valueLabel = formatDeliveryValue(delivery.driverValue);
+  // O que o servidor confirmou; sem internet, o que ficou salvo na fila do aparelho.
+  const lembreteDinheiro = lembreteDoDinheiro(
+    delivery.cashToReturn ??
+      (pendingCompletion?.action === 'DELIVER'
+        ? pendingCompletion.payload.cashToReturn
+        : undefined),
+  );
 
   async function openExternalNavigation() {
     if (!routeDestination) {
@@ -1052,6 +1083,13 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
     // Entregar fecha o pedido e o manda para o historico. Antes de perder essa
     // chance, o motoboy le a rua e o valor no modal e confirma ali.
     if (action === 'deliver') {
+      setDinheiro(
+        dinheiroJaInformado(
+          pendingCompletion?.action === 'DELIVER'
+            ? pendingCompletion.payload.cashToReturn
+            : undefined,
+        ),
+      );
       setDeliverConfirmationOpen(true);
       if (!currentDelivery.destinationKnownAtCreation) {
         conferirDestinoAtual(currentDelivery.id).catch(() => {
@@ -1276,9 +1314,14 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
           {delivery.requiresReturn ? (
             <View style={styles.returnNotice}>
               <Icon name="return" size={21} color={colors.warning} />
-              <Text style={styles.returnNoticeText}>
-                Esta entrega exige retorno ao local de coleta.
-              </Text>
+              <View style={styles.returnNoticeBody}>
+                <Text style={styles.returnNoticeText}>
+                  Esta entrega exige retorno ao local de coleta.
+                </Text>
+                {lembreteDinheiro ? (
+                  <Text style={styles.returnCashText}>{lembreteDinheiro}</Text>
+                ) : null}
+              </View>
             </View>
           ) : null}
 
@@ -1366,6 +1409,9 @@ export function DeliveryOperationScreen({ navigation, route }: Props) {
         summary={deliverConfirmationSummary(currentDelivery)}
         conferencia={conferenciaDestino}
         mostraValores={mostraValores}
+        pedeDinheiro={currentDelivery.requiresReturn}
+        dinheiro={dinheiro}
+        onDinheiroChange={setDinheiro}
         confirmLabel={
           conferenciaDestino?.estado === 'capturando'
             ? 'Buscando sua localização...'
@@ -1577,6 +1623,9 @@ function DeliverConfirmationModal({
   summary,
   conferencia,
   mostraValores,
+  pedeDinheiro,
+  dinheiro,
+  onDinheiroChange,
   confirmLabel,
   disabled,
   onRetry,
@@ -1589,12 +1638,21 @@ function DeliverConfirmationModal({
   conferencia: ConferenciaDestino | null;
   /** Salario fixo: a confirmacao fica so com o endereco. */
   mostraValores: boolean;
+  /**
+   * Entrega com retorno: ele informa o dinheiro que vai devolver a loja.
+   * Aparece ate no salario fixo — o dinheiro e do cliente, nao da corrida.
+   */
+  pedeDinheiro: boolean;
+  dinheiro: DinheiroADevolver;
+  onDinheiroChange: (dinheiro: DinheiroADevolver) => void;
   confirmLabel: string;
   disabled: boolean;
   onRetry: () => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const conferenciaDoDinheiro = conferirDinheiro(dinheiro);
+  const faltaDinheiro = pedeDinheiro && !conferenciaDoDinheiro.pronto;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
@@ -1697,6 +1755,47 @@ function DeliverConfirmationModal({
               );
             })()}
 
+            {pedeDinheiro ? (
+              <View style={styles.confirmBlock}>
+                <Text style={styles.confirmBlockLabel}>Dinheiro para devolver à loja</Text>
+                <View style={[styles.cashField, dinheiro.semDinheiro && styles.cashFieldOff]}>
+                  <Text style={styles.cashPrefix}>R$</Text>
+                  <TextInput
+                    style={styles.cashInput}
+                    value={dinheiro.semDinheiro ? '' : dinheiro.texto}
+                    editable={!dinheiro.semDinheiro}
+                    keyboardType="decimal-pad"
+                    placeholder="0,00"
+                    placeholderTextColor={colors.inkMuted}
+                    maxLength={12}
+                    accessibilityLabel="Dinheiro para devolver à loja, em reais"
+                    onChangeText={(texto) => onDinheiroChange({ texto, semDinheiro: false })}
+                  />
+                </View>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: dinheiro.semDinheiro }}
+                  hitSlop={6}
+                  style={styles.noCashRow}
+                  onPress={() =>
+                    onDinheiroChange({ texto: '', semDinheiro: !dinheiro.semDinheiro })
+                  }
+                >
+                  <View style={[styles.noCashBox, dinheiro.semDinheiro && styles.noCashBoxOn]}>
+                    {dinheiro.semDinheiro ? (
+                      <Icon name="check" size={14} color={colors.surface} />
+                    ) : null}
+                  </View>
+                  <Text style={styles.noCashText}>
+                    Não recebi dinheiro (cartão, Pix ou já pago)
+                  </Text>
+                </Pressable>
+                {!conferenciaDoDinheiro.pronto && conferenciaDoDinheiro.aviso ? (
+                  <Text style={styles.confirmFallback}>{conferenciaDoDinheiro.aviso}</Text>
+                ) : null}
+              </View>
+            ) : null}
+
             {/* O aviso fala "o endereço acima": so vale quando existe um. */}
             {summary.gpsNotice && conferencia?.estado === 'conferido' ? (
               <Text style={styles.confirmNotice}>{summary.gpsNotice}</Text>
@@ -1705,9 +1804,9 @@ function DeliverConfirmationModal({
 
           <View style={styles.modalActions}>
             <PrimaryButton
-              label={confirmLabel}
+              label={faltaDinheiro && !disabled ? 'Informe o dinheiro' : confirmLabel}
               style={styles.modalButton}
-              disabled={disabled}
+              disabled={disabled || faltaDinheiro}
               onPress={onConfirm}
             />
             <PrimaryButton
@@ -1905,7 +2004,9 @@ const styles = StyleSheet.create({
     padding: 13,
     backgroundColor: colors.warningSoft,
   },
+  returnNoticeBody: { flex: 1, gap: 4 },
   returnNoticeText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
+  returnCashText: { color: colors.ink, fontSize: 16, fontWeight: '800' },
   trackingNotice: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2060,6 +2161,32 @@ const styles = StyleSheet.create({
   confirmFallback: { flex: 1, color: colors.inkSoft, fontSize: 14, lineHeight: 20 },
   confirmValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   confirmValue: { color: colors.ink, fontSize: 18, fontWeight: '800' },
+  cashField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderColor: colors.actionSoft,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  cashFieldOff: { borderColor: colors.divider, backgroundColor: colors.track },
+  cashPrefix: { color: colors.inkSoft, fontSize: 18, fontWeight: '800' },
+  cashInput: { flex: 1, paddingVertical: 12, color: colors.ink, fontSize: 22, fontWeight: '800' },
+  noCashRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  noCashBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.actionSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noCashBoxOn: { backgroundColor: colors.actionSoft },
+  noCashText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600' },
   confirmNotice: {
     borderRadius: 12,
     padding: 12,

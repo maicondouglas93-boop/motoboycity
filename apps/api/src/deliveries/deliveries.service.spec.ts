@@ -92,6 +92,7 @@ function fullDeliveryRow(overrides: Partial<Record<string, unknown>> = {}) {
     platformValue: { toString: () => '2.50' },
     requiresReturn: false,
     returnValue: null,
+    cashToReturn: null,
     failedAt: null,
     failureReason: null,
     failureNote: null,
@@ -3496,6 +3497,81 @@ describe('DeliveriesService', () => {
         data: expect.objectContaining({ status: 'DELIVERED' }),
       });
       expect(tx.deliveryStatusHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * O dinheiro que o motoboy leva de volta à loja. Pedido do cliente em
+     * 19/10/2026: "pra segurança que ele vai lembrar de devolver o dinheiro".
+     */
+    describe('dinheiro a devolver à loja', () => {
+      function entregaColetada(requiresReturn: boolean) {
+        prisma.driver.findUnique.mockResolvedValue(driverRow);
+        prisma.delivery.findUnique.mockResolvedValue(
+          fullDeliveryRow({
+            driverId: 'driver-1',
+            status: 'COLLECTED',
+            destinationKnownAtCreation: true,
+            requiresReturn,
+          }),
+        );
+      }
+
+      function notaDaEntrega(): unknown {
+        const chamada = tx.deliveryStatusHistory.create.mock.calls.find(
+          ([argumento]: [{ data: { toStatus: string } }]) => argumento.data.toStatus === 'DELIVERED',
+        );
+        return chamada?.[0].data.note;
+      }
+
+      it('com retorno, grava o valor e registra no histórico', async () => {
+        entregaColetada(true);
+
+        await service.markDelivered(driverUser, 'delivery-1', { cashToReturn: 85.5 });
+
+        expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'DELIVERED', cashToReturn: 85.5 }),
+          }),
+        );
+        expect(notaDaEntrega()).toMatch(
+          /Motoboy informou R\$\s85,50 em dinheiro para devolver à loja\./,
+        );
+      });
+
+      it('com retorno e sem dinheiro, grava zero e registra que não recebeu', async () => {
+        entregaColetada(true);
+
+        await service.markDelivered(driverUser, 'delivery-1', { cashToReturn: 0 });
+
+        expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ cashToReturn: 0 }) }),
+        );
+        expect(notaDaEntrega()).toBe('Motoboy informou que não recebeu dinheiro do cliente.');
+      });
+
+      it('aplicativo antigo, que não pergunta, deixa "não informado" — e não zero', async () => {
+        entregaColetada(true);
+
+        await service.markDelivered(driverUser, 'delivery-1', {});
+
+        expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ cashToReturn: null }) }),
+        );
+        expect(notaDaEntrega()).toBeUndefined();
+      });
+
+      it('sem retorno, ignora o valor: ele não volta à loja para entregar dinheiro', async () => {
+        entregaColetada(false);
+
+        await service.markDelivered(driverUser, 'delivery-1', { cashToReturn: 50 });
+
+        expect(tx.delivery.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'COMPLETED', cashToReturn: null }),
+          }),
+        );
+        expect(notaDaEntrega()).toBeUndefined();
+      });
     });
 
     it('sem destino conhecido: exige lat/lng no corpo', async () => {

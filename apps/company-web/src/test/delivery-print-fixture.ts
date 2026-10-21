@@ -11,7 +11,7 @@ export const printDelivery: OperationalDeliveryItem = {
   serviceTypeId: 'print-service', serviceTypeName: 'Motoboy', batchId: null,
   status: 'AWAITING_DRIVER', destinationKnownAtCreation: true,
   distanceKm: 3, totalValue: 9, driverValue: 8, platformValue: 1,
-  requiresReturn: false, returnValue: null, paymentMethod: 'BILLED',
+  requiresReturn: false, returnValue: null, cashToReturn: null, paymentMethod: 'BILLED',
   recipientName: 'Cliente de exemplo', recipientPhone: '(33) 90000-0000',
   externalOrderNumber: 'LOJA-42', driverNote: 'Tocar a campainha.\nEntregar na portaria.',
   customerPaymentMethod: 'CASH', urgent: false, requiresDeliveryProof: false,

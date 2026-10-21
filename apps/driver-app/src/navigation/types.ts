@@ -11,6 +11,7 @@ export type RootStackParamList = {
   AvailableDeliveries: undefined;
   Settings: undefined;
   Profile: undefined;
+  Schedule: undefined;
 };
 
 /**

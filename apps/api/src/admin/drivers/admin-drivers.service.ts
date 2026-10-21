@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException } from '@nestj
 import type {
   AdminDriverCompensationPayload,
   AdminDriverDocumentPayload,
+  AdminDriverSchedulePayload,
   AdminReviewDriverDocumentPayload,
   AdminUpdateDriverPayload,
   CreateDriverCompanyBlockPayload,
@@ -32,6 +33,7 @@ import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { ImageKitService } from '../../media/imagekit.service';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { DriverPunishmentService } from '../../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../../driver-schedule/driver-schedule.service';
 
 export interface UploadedDriverDocumentFile {
   buffer: Buffer;
@@ -107,7 +109,29 @@ export class AdminDriversService {
     private readonly imageKit: ImageKitService,
     private readonly audit: AdminAuditService,
     private readonly punishmentService: DriverPunishmentService,
+    private readonly scheduleService: DriverScheduleService,
   ) {}
+
+  /**
+   * Grava a escala do motoboy, ou remove (`null`: ele volta a trabalhar livre).
+   *
+   * Quando a escala nova abre um turno agora, varre a fila: quem ja estava
+   * Ativo e acabou de entrar no turno nao deve esperar a varredura de minuto em
+   * minuto para receber o pedido que esta parado.
+   */
+  async updateSchedule(
+    driverId: string,
+    payload: AdminDriverSchedulePayload,
+    actorUserId: string,
+  ): Promise<AdminDriverDetail> {
+    await this.scheduleService.replaceByAdmin(driverId, payload.schedule, actorUserId);
+    if (!(await this.scheduleService.isOffShift(driverId))) {
+      await this.dispatchService.dispatchAvailableDeliveries().catch((error) =>
+        this.logger.warn(`Varredura depois de mudar a escala falhou: ${String(error)}`),
+      );
+    }
+    return this.detail(driverId);
+  }
 
   /**
    * Libera o motoboy da punicao antes do prazo e VARRE a fila em seguida.
@@ -254,6 +278,7 @@ export class AdminDriversService {
       pixKey: driver.pixKey,
       pixKeyType: driver.pixKeyType,
       hasCnpj: driver.hasCnpj,
+      workSchedule: this.scheduleService.parse(driver.workSchedule, driver.id),
       documents: driver.documents.map((document) => ({
         id: document.id,
         type: document.type,
@@ -611,6 +636,7 @@ export class AdminDriversService {
       accountStatus: DriverAccountStatus;
       availability: DriverAvailability;
       compensation: DriverCompensation;
+      workSchedule: Prisma.JsonValue | null;
       appVersion: string | null;
       lastSeenAt: Date | null;
       createdAt: Date;
@@ -637,6 +663,7 @@ export class AdminDriversService {
       accountStatus: driver.accountStatus,
       availability: driver.availability,
       compensation: driver.compensation,
+      workScheduleStatus: this.scheduleService.statusOf(driver.workSchedule, new Date(), driver.id),
       appVersion: driver.appVersion,
       lastSeenAt: driver.lastSeenAt?.toISOString() ?? null,
       createdAt: driver.createdAt.toISOString(),

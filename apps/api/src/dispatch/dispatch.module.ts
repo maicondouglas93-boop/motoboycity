@@ -9,6 +9,7 @@ import { DispatchProcessor } from './dispatch.processor';
 import { DispatchScheduler } from './dispatch.scheduler';
 import { IntegrationEventsModule } from '../integrations/integration-events.module';
 import { DriverPunishmentModule } from '../driver-punishment/driver-punishment.module';
+import { DriverScheduleModule } from '../driver-schedule/driver-schedule.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { DriverPunishmentModule } from '../driver-punishment/driver-punishment.m
     PushModule,
     IntegrationEventsModule,
     DriverPunishmentModule,
+    DriverScheduleModule,
   ],
   providers: [DispatchService, DispatchProcessor, DispatchScheduler],
   exports: [DispatchService],

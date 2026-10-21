@@ -41,6 +41,11 @@ export interface DeliveryListItem {
   platformValue: number | null;
   requiresReturn: boolean;
   returnValue: number | null;
+  /**
+   * Dinheiro que o motoboy declarou ao marcar a entrega com retorno, para
+   * devolver à loja. null = não informado; 0 = não recebeu dinheiro.
+   */
+  cashToReturn: number | null;
   paymentMethod: 'BILLED' | 'ONLINE';
   recipientName: string | null;
   recipientPhone: string | null;
@@ -261,6 +266,11 @@ export interface MarkDeliveredPayload {
    * posição errada.
    */
   occurredAt?: string;
+  /**
+   * Na entrega com retorno: dinheiro recebido do cliente que o motoboy vai
+   * devolver à loja; 0 = não recebeu dinheiro. Ignorado sem retorno.
+   */
+  cashToReturn?: number;
 }
 
 export interface MarkCollectedPayload {

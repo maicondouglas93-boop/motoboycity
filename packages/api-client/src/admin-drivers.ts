@@ -15,6 +15,7 @@ import type {
 } from '@motoboycity/types';
 import type {
   AdminDriverCompensationPayload,
+  AdminDriverSchedulePayload,
   AdminReviewDriverDocumentPayload,
   AdminUpdateDriverPayload,
   ChangeAdminPasswordPayload,
@@ -132,6 +133,23 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
     ): Promise<AdminDriverDetail> {
       const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/compensation`, {
         method: 'PATCH',
+        headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return parseJsonOrThrow<AdminDriverDetail>(response);
+    },
+
+    /**
+     * A escala do motoboy: grava a semana, ou remove com `schedule: null` — ele
+     * volta a trabalhar a qualquer hora.
+     */
+    async updateSchedule(
+      accessToken: string,
+      driverId: string,
+      payload: AdminDriverSchedulePayload,
+    ): Promise<AdminDriverDetail> {
+      const response = await apiFetch(`${baseUrl}/admin/drivers/${driverId}/schedule`, {
+        method: 'PUT',
         headers: { ...withAuth(accessToken), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

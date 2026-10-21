@@ -4,6 +4,7 @@ import type { User } from '@prisma/client';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../driver-schedule/driver-schedule.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LiveDriverPresenceService } from '../live-presence/live-driver-presence.service';
 import { DriverPresenceService } from './driver-presence.service';
@@ -47,8 +48,14 @@ describe('DriverPresenceService', () => {
     driver: { updateMany: jest.Mock };
     driverPresenceLog: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
   };
+  let schedule: { offShiftMessage: jest.Mock; statusForDriver: jest.Mock };
 
   beforeEach(async () => {
+    /** Padrao: motoboy sem escala — trabalha livre, como antes da escala existir. */
+    schedule = {
+      offShiftMessage: jest.fn().mockResolvedValue(null),
+      statusForDriver: jest.fn().mockResolvedValue(null),
+    };
     tx = {
       driver: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       driverPresenceLog: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
@@ -95,6 +102,7 @@ describe('DriverPresenceService', () => {
           provide: DriverPunishmentService,
           useValue: { activeFor: jest.fn().mockResolvedValue(null) },
         },
+        { provide: DriverScheduleService, useValue: schedule },
       ],
     }).compile();
 
@@ -117,7 +125,12 @@ describe('DriverPresenceService', () => {
 
       const result = await service.get(driverUser);
 
-      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
+      expect(result).toEqual({
+        availability: 'UNAVAILABLE',
+        since: null,
+        punishment: null,
+        workSchedule: null,
+      });
     });
 
     it('retorna o wentOnlineAt do presence log aberto quando AVAILABLE', async () => {
@@ -132,6 +145,7 @@ describe('DriverPresenceService', () => {
         availability: 'AVAILABLE',
         since: '2026-01-01T10:00:00.000Z',
         punishment: null,
+        workSchedule: null,
       });
     });
   });
@@ -237,6 +251,77 @@ describe('DriverPresenceService', () => {
       );
     });
 
+    it('não deixa ficar Ativo fora do turno e diz quando é o próximo', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'UNAVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      schedule.offShiftMessage.mockResolvedValue(
+        'Você está fora da sua escala. O próximo turno começa sexta às 11:00.',
+      );
+
+      await expect(service.setAvailability(driverUser, availablePayload)).rejects.toThrow(
+        new ForbiddenException(
+          'Você está fora da sua escala. O próximo turno começa sexta às 11:00.',
+        ),
+      );
+      // Barrado antes de qualquer efeito: nem posicao ao vivo, nem log, nem despacho.
+      expect(livePresence.upsert).not.toHaveBeenCalled();
+      expect(tx.driverPresenceLog.create).not.toHaveBeenCalled();
+      expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
+    });
+
+    it('deixa ficar Ativo dentro do turno ou sem escala', async () => {
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'UNAVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      tx.driverPresenceLog.findFirst.mockResolvedValue(null);
+      prisma.driverPresenceLog.findFirst.mockResolvedValue({ wentOnlineAt: new Date() });
+
+      const result = await service.setAvailability(driverUser, availablePayload);
+
+      expect(schedule.offShiftMessage).toHaveBeenCalledWith('driver-1');
+      expect(result.availability).toBe('AVAILABLE');
+    });
+
+    it('não derruba quem já está Ativo quando o app reafirma a presença depois do turno', async () => {
+      // Regra do fim do turno: ele termina o que ja aceitou. A reafirmacao do
+      // aplicativo (reconexao, volta ao primeiro plano) nao pode desliga-lo.
+      prisma.driver.findUnique.mockResolvedValue({
+        id: 'driver-1',
+        availability: 'AVAILABLE',
+        approvalStatus: 'APPROVED',
+        accountStatus: 'ACTIVE',
+      });
+      schedule.offShiftMessage.mockResolvedValue('Você está fora da sua escala.');
+      tx.driverPresenceLog.findFirst.mockResolvedValue({ id: 'log-1' });
+      prisma.driverPresenceLog.findFirst.mockResolvedValue({ wentOnlineAt: new Date() });
+
+      const result = await service.setAvailability(driverUser, availablePayload);
+
+      expect(schedule.offShiftMessage).not.toHaveBeenCalled();
+      expect(result.availability).toBe('AVAILABLE');
+    });
+
+    it('a presença leva onde ele está na escala, mesmo offline', async () => {
+      prisma.driver.findUnique.mockResolvedValue({ id: 'driver-1', availability: 'UNAVAILABLE' });
+      const foraDoTurno = {
+        onShift: false,
+        changesAt: '2026-10-16T14:00:00.000Z',
+        label: 'Fora da escala · próximo turno sexta às 11:00',
+      };
+      schedule.statusForDriver.mockResolvedValue(foraDoTurno);
+
+      const result = await service.get(driverUser);
+
+      expect(result.workSchedule).toEqual(foraDoTurno);
+    });
+
     it('renova a presença quando já está disponível', async () => {
       prisma.driver.findUnique.mockResolvedValue({
         id: 'driver-1',
@@ -324,7 +409,12 @@ describe('DriverPresenceService', () => {
         data: { wentOfflineAt: expect.any(Date) },
       });
       expect(dispatchService.dispatchAvailableDeliveries).not.toHaveBeenCalled();
-      expect(result).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
+      expect(result).toEqual({
+        availability: 'UNAVAILABLE',
+        since: null,
+        punishment: null,
+        workSchedule: null,
+      });
     });
   });
 
@@ -370,6 +460,7 @@ describe('DriverPresenceService', () => {
         availability: 'AVAILABLE',
         since: '2026-01-01T10:00:00.000Z',
         punishment: null,
+        workSchedule: null,
       });
     });
 

@@ -7,6 +7,7 @@ import { AdminDriversController } from './admin-drivers.controller';
 import { AdminDriversService } from './admin-drivers.service';
 import { ImageKitModule } from '../../media/imagekit.module';
 import { DriverPunishmentModule } from '../../driver-punishment/driver-punishment.module';
+import { DriverScheduleModule } from '../../driver-schedule/driver-schedule.module';
 
 // Bloquear/suspender precisa soltar as ofertas pendentes do motoboy (DispatchModule) e
 // avisar o aplicativo dele (RealtimeModule) — ver P1-03 no handoff.
@@ -18,6 +19,7 @@ import { DriverPunishmentModule } from '../../driver-punishment/driver-punishmen
     RealtimeModule,
     ImageKitModule,
     DriverPunishmentModule,
+    DriverScheduleModule,
   ],
   controllers: [AdminDriversController],
   providers: [AdminDriversService],

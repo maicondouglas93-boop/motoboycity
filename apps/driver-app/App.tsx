@@ -24,6 +24,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { DriverOrderDetailScreen } from './src/screens/DriverOrderDetailScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
+import { ScheduleScreen } from './src/screens/ScheduleScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { DriverWalletScreen } from './src/screens/DriverWalletScreen';
 import { WithdrawalScreen } from './src/screens/WithdrawalScreen';
@@ -116,6 +117,7 @@ function App() {
           <Stack.Screen name="DeliveryOperation" component={DeliveryOperationScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
+          <Stack.Screen name="Schedule" component={ScheduleScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

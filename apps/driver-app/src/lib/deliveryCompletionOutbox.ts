@@ -8,6 +8,7 @@ import type {
   MarkDeliveredPayload,
 } from '@motoboycity/types';
 import { deliveriesApi } from './apiClient';
+import { comPosicaoNova } from './cashToReturn';
 
 export const DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW: DeliveryCompletionErrorCode =
   'DEFERRED_DESTINATION_GPS_ACCURACY_TOO_LOW';
@@ -307,7 +308,7 @@ export async function enqueueDeliveryCompletion(
          */
         const repaired = {
           ...existing,
-          payload: input.payload,
+          payload: comPosicaoNova(existing.payload, input.payload),
           state: 'PENDING' as const,
           lastError: null,
           lastErrorCode: null,
@@ -769,7 +770,10 @@ export async function retryDeliveryCompletionQueue(
         return item;
       }
 
-      const repairedPayload = canRepairReturn || canRepairDelivery ? freshLocation : item.payload;
+      const repairedPayload =
+        (canRepairReturn || canRepairDelivery) && freshLocation
+          ? comPosicaoNova(item.payload, freshLocation)
+          : item.payload;
 
       return {
         ...item,

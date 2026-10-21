@@ -1,6 +1,7 @@
 import type { OperationalDeliveryItem } from '@motoboycity/types';
 import { StatusChip, statusRailClass } from '@/components/orders/status-chip';
 import { ElapsedTime } from '@/components/orders/elapsed-time';
+import { lembreteDoRetorno } from '@/lib/dinheiro-a-devolver';
 import { operationTime } from '@/lib/operation-clock';
 
 /**
@@ -20,6 +21,7 @@ export function OrderRow({
   onSelect: () => void;
 }) {
   const destination = order.addresses.find((address) => address.type === 'DROPOFF');
+  const dinheiro = lembreteDoRetorno(order);
 
   return (
     <button
@@ -59,6 +61,7 @@ export function OrderRow({
           : 'Destino por GPS'}
       </p>
       {order.driver && <p className="mt-1 truncate text-xs font-medium">{order.driver.name}</p>}
+      {dinheiro && <p className="mt-1 truncate text-xs font-semibold text-[#8a5200]">{dinheiro}</p>}
     </button>
   );
 }

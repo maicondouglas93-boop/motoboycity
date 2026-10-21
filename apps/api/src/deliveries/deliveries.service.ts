@@ -182,6 +182,19 @@ function assertAccuracyForCapturedDestination(
   });
 }
 
+/**
+ * O dinheiro que o motoboy declarou para devolver à loja, como fica no histórico.
+ *
+ * Nulo quando não há o que registrar: entrega sem retorno, ou aplicativo antigo
+ * que não pergunta — "não informado" não é "zero".
+ */
+function notaDoDinheiroADevolver(cashToReturn: number | null): string | null {
+  if (cashToReturn === null) return null;
+  if (cashToReturn === 0) return 'Motoboy informou que não recebeu dinheiro do cliente.';
+  const reais = cashToReturn.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return `Motoboy informou ${reais} em dinheiro para devolver à loja.`;
+}
+
 export interface DeliveryAddressItem {
   type: string;
   street: string | null;
@@ -211,6 +224,8 @@ export interface DeliveryListItem {
   platformValue: number | null;
   requiresReturn: boolean;
   returnValue: number | null;
+  /** Dinheiro declarado pelo motoboy para devolver à loja — ver schema.prisma. */
+  cashToReturn: number | null;
   paymentMethod: 'BILLED' | 'ONLINE';
   recipientName: string | null;
   recipientPhone: string | null;
@@ -3027,6 +3042,15 @@ export class DeliveriesService {
     }
 
     const autoComplete = !delivery.requiresReturn;
+    /**
+     * O dinheiro que ele leva de volta só existe na entrega com retorno: sem
+     * retorno ele não volta à loja, e um campo mandado por engano não pode virar
+     * uma dívida que ninguém vai cobrar. Arredonda no centavo, que é a coluna.
+     */
+    const cashToReturn =
+      delivery.requiresReturn && payload.cashToReturn !== undefined
+        ? Math.round(payload.cashToReturn * 100) / 100
+        : null;
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -3042,6 +3066,7 @@ export class DeliveriesService {
             surchargeLabel,
             surchargeValue,
             returnValue,
+            cashToReturn,
           },
         });
         if (updated.count !== 1) {
@@ -3060,7 +3085,12 @@ export class DeliveriesService {
             changedByUserId: user.id,
             ...(occurredAt && { occurredAt }),
             ...(() => {
-              const nota = [deliveryHistoryNote, notaDeDistanciaZero, notaDoValorConferido]
+              const nota = [
+                deliveryHistoryNote,
+                notaDeDistanciaZero,
+                notaDoValorConferido,
+                notaDoDinheiroADevolver(cashToReturn),
+              ]
                 .filter((parte): parte is string => Boolean(parte))
                 .join(' ');
               return nota ? { note: nota } : {};
@@ -3901,6 +3931,7 @@ export class DeliveriesService {
     platformValue: { toString(): string } | null;
     requiresReturn: boolean;
     returnValue: { toString(): string } | null;
+    cashToReturn: { toString(): string } | null;
     paymentMethod: 'BILLED' | 'ONLINE';
     recipientName: string | null;
     recipientPhone: string | null;
@@ -3938,6 +3969,7 @@ export class DeliveriesService {
       platformValue: delivery.platformValue === null ? null : Number(delivery.platformValue),
       requiresReturn: delivery.requiresReturn,
       returnValue: delivery.returnValue === null ? null : Number(delivery.returnValue),
+      cashToReturn: delivery.cashToReturn === null ? null : Number(delivery.cashToReturn),
       paymentMethod: delivery.paymentMethod,
       recipientName: delivery.recipientName,
       recipientPhone: delivery.recipientPhone,

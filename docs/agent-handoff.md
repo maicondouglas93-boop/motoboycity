@@ -8,7 +8,11 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-09-23**, liberar pedido agendado antes da hora
+> Última revisão: **2026-10-21**, release preparado com a escala do motoboy e
+> o registro de dinheiro a devolver na entrega com retorno. As duas migrations
+> são aditivas e aguardam o `migrate deploy` automático do Render. O Driver App
+> foi promovido para `pilot.30` / `versionCode` 30; o APK assinado ainda precisa
+> ser gerado e distribuído. Histórico anterior: liberar pedido agendado antes da hora
 > (empresa e ADM) e valor mostrado ao motoboy antes de confirmar a entrega sem
 > endereço, publicados em `378ca74` (Render e as duas Vercel em success) e
 > empacotados no APK `pilot.27`, compilado de `f2d1795` e ainda não enviado.
@@ -41,6 +45,26 @@ validação:
 
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
+
+## Pronto para publicação — escala do motoboy
+
+Feita em 14/10/2026 no worktree. Regras em
+`business-rules.md` ("Escala do motoboy"). Traz a migration aditiva
+`20261014120000_escala_do_motoboy` (`drivers.workSchedule JSONB`, nula), a 74ª
+do repositório: aplicada só no banco local de desenvolvimento (5434); a
+produção recebe-a no próximo deploy e o E2E não rodou. O bloqueio vale para
+qualquer APK assim que a API subir; a aba "Escala" e o aviso na Home chegam no
+`pilot.30`.
+
+## Pronto para publicação — dinheiro a devolver na entrega com retorno
+
+Feito em 19/10/2026, independente da escala.
+Regras em `business-rules.md` ("Dinheiro a devolver à loja"). Migration
+aditiva `20261019120000_dinheiro_a_devolver` (`deliveries.cashToReturn`,
+nula), aplicada só no banco local de desenvolvimento (5434). A API nova aceita
+o APK antigo, que só não pergunta o valor ("não informado"); o campo no app
+chega no `pilot.30`. O `schema.prisma` contém as duas mudanças, que serão
+publicadas juntas.
 
 ## Publicado — aviso de chegada para a empresa
 

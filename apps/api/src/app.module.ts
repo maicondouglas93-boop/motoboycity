@@ -30,6 +30,7 @@ import { FinanceModule } from './finance/finance.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { DriverPresenceModule } from './driver-presence/driver-presence.module';
+import { DriverScheduleModule } from './driver-schedule/driver-schedule.module';
 import { HealthModule } from './health/health.module';
 import { GoogleMapsModule } from './maps/google-maps.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -101,6 +102,7 @@ import { AiqfomeModule } from './integrations/aiqfome/aiqfome.module';
     StoreOrdersModule,
     DispatchModule,
     DriverPresenceModule,
+    DriverScheduleModule,
     DeliveriesModule,
     DeliveryOffersModule,
     FinanceModule,

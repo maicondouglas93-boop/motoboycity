@@ -17708,6 +17708,84 @@ O painel local subiu por uma configuração temporária do `.claude/launch.json`
 removida em seguida; o `.env.local` não foi lido nem alterado. Não verificado:
 o ícone na tela inicial de um celular de verdade.
 
+## 2026-10-14 — Escala do motoboy
+
+Pedido do responsável: a central marca os dias e horários em que cada motoboy
+pode trabalhar, e o motoboy vê a escala dele numa aba "Escala" do menu do
+aplicativo. Regras confirmadas em `business-rules.md` ("Escala do motoboy"):
+semana fixa de segunda a domingo, vários turnos por dia, sem escala trabalha
+livre, fora da escala não fica Ativo nem recebe pedido novo, sem tolerância, o
+turno que acaba com ele Ativo só corta pedido novo, e a oferta manual da
+central continua permitida, com aviso no ADM.
+
+**Decisão.** A escala é um JSON em `Driver.workSchedule` (`null` = livre): é
+uma semana fixa sem datas, lida e gravada inteira, sem consulta por turno. A
+escrita passa pelo schema Zod; na leitura, JSON inválido vira "sem escala" com
+log, para um dado ruim não barrar o motoboy. As contas de turno reaproveitam as
+do horário da loja online (`store-schedule.rules`: fuso de Brasília, turno que
+passa da meia-noite pertence ao dia em que começa, turnos encostados viram um
+só) em vez de um segundo cálculo.
+
+- **Bloqueio no servidor**, no desenho da punição (`DriverScheduleService`):
+  excluído da oferta automática, vitrine vazia, "assumir" recusado com 403 e a
+  passagem de offline a Ativo recusada com a mensagem do próximo turno. Quem já
+  está Ativo pode reafirmar a presença, para o fim do turno não derrubar quem
+  está entregando. `eligibleDriverWhere` e a oferta manual do admin intactos.
+- **API**: `PUT /admin/drivers/:id/schedule` (auditoria
+  `DRIVER_SCHEDULE_CHANGED`; se o motoboy fica no turno, roda o despacho) e
+  `GET /driver/schedule`. A presença e a lista/ficha do ADM passam a trazer o
+  status pronto (`workSchedule`, `workScheduleStatus`): o aplicativo não pode
+  depender de `formatToParts` no Hermes.
+- **ADM**: cartão "Escala" na ficha do entregador — montar, editar, "Repetir de
+  seg. a sex.", "Repetir em todos os dias", até 4 turnos por dia, sobreposição
+  conferida enquanto digita, remover com confirmação. O menu de oferta manual
+  marca "fora da escala" e avisa antes de enviar.
+- **App**: item "Escala" no menu, tela só de leitura (situação no topo, semana
+  de segunda a domingo, hoje destacado, folga), aviso "Fora da escala" na Home
+  que leva à tela, e releitura do status no instante em que o turno vira (timer
+  com teto de 30 min). O APK antigo já recebe o bloqueio e a mensagem do
+  servidor; a aba e o aviso só com APK novo.
+
+Migration aditiva `20261014120000_escala_do_motoboy`
+(`ALTER TABLE "drivers" ADD COLUMN "workSchedule" JSONB`), gerada com
+`prisma migrate diff` a partir do schema de `HEAD`. Aplicada com
+`prisma migrate deploy` somente no banco local de desenvolvimento (5434), que
+tinha 8 migrations commitadas pendentes (`20260929170000_loja_pix_direto` a
+`20261005120000_pergunta_secreta_protecao_paginas`) e as recebeu junto. Volta:
+`ALTER TABLE "drivers" DROP COLUMN "workSchedule";` — não ensaiada.
+
+Arquivos: `packages/types/src/driver.ts`;
+`packages/validation/src/driver/driver-schedule.rules.ts` (novo),
+`src/admin/driver-schedule.schema.ts` (novo), `src/index.ts`;
+`packages/api-client/src/admin-drivers.ts`, `src/driver-schedule.ts` (novo),
+`src/index.ts`; `apps/api/prisma/schema.prisma`, a migration,
+`src/driver-schedule/` (serviço, controller, módulo e spec, novos),
+`src/app.module.ts`, `src/dispatch/dispatch.{module,service,service.spec}.ts`,
+`src/driver-presence/driver-presence.{module,service,service.spec}.ts`,
+`src/admin/drivers/admin-drivers.{module,controller,service,service.spec}.ts`;
+`apps/admin-web/src/components/drivers/driver-schedule.tsx` (novo),
+`src/app/(app)/entregadores/[id]/page.tsx`,
+`src/components/operations/delivery-actions-menu.tsx`;
+`apps/driver-app/App.tsx`, `src/navigation/types.ts`,
+`src/components/DrawerMenu.tsx`, `src/lib/apiClient.ts`,
+`src/lib/workSchedule.ts` (novo), `src/screens/ScheduleScreen.tsx` (novo),
+`src/screens/HomeScreen.tsx`, `src/store/dispatchStore.ts`,
+`__tests__/ScheduleScreen.test.tsx` (novo), `__tests__/presencePersistence.test.ts`.
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 pacotes) | aprovado |
+| `pnpm lint` | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| jest da API, unitários | 120 suítes, 1812 testes aprovados, 1 pulado |
+| jest do driver-app | 30 suítes, 242 testes; `ScheduleScreen.test.tsx` novo com 8. Na primeira execução, com o cache de transformação frio, o primeiro teste de tela estourou os 5 s; passou nas seguintes |
+| build da API e do ADM | aprovados |
+| ADM local contra API local e banco de desenvolvimento | escala com 11:00–15:00 e 18:00–02:00 repetida em todos os dias; selo "No turno até 02:00" às 19h de quarta; remover volta a "Sem escala"; duas linhas `DRIVER_SCHEDULE_CHANGED` na auditoria; sem erro no console nem na API. A escala de teste foi removida |
+
+Não verificado: E2E (o banco `motoboycity_e2e_local` não tem a migration); o
+bloqueio de presença e da vitrine com um motoboy de verdade (coberto por
+unitários); o aviso de oferta manual na tela do ADM; a tela do app num
+aparelho (não há APK novo). Sem commit.
+
 ## 2026-10-19 — Redis de produção cheio: ninguém ficava Ativo
 
 Sintoma (print do app às 07:34): botão Ativo ligado e o aviso "Sem conexao
@@ -17770,3 +17848,67 @@ vida e a fila, que já indicam gravação no Redis funcionando), e o que ocupa o
 guardados, que o corte por idade vai tirando aos poucos. O app não tenta de
 novo sozinho nesse estado: o motoboy precisa tocar no aviso vermelho ou
 reabrir o aplicativo.
+
+## 2026-10-19 — Dinheiro a devolver na entrega com retorno
+
+Pedido do cliente: na entrega com retorno, ao marcar entregue, o motoboy informa
+o valor em dinheiro que vai devolver à loja, "pra segurança que ele vai lembrar
+de devolver o dinheiro". Decisões do responsável em `business-rules.md`
+("Dinheiro a devolver à loja"): toda entrega com retorno pergunta; só o
+motoboy informa; a loja vê e o app lembra; o fechamento do retorno não muda.
+
+**Decisão.** Coluna nova `Delivery.cashToReturn` (`DECIMAL(10,2)`, nula) e
+campo opcional `cashToReturn` no `mark-delivered`: nulo = não informado (APK
+antigo, ADM, pedido sem retorno), 0 = "não recebi dinheiro". O serviço grava o
+valor na mesma escrita condicional da entrega, só quando o pedido tem retorno, e
+registra no histórico ("Motoboy informou R$ 85,50 em dinheiro para devolver à
+loja"). Validação: de 0 a R$ 10.000 (acima é erro de digitação), em reais e
+centavos.
+
+- **App**: no modal "Confirme antes de entregar", bloco "Dinheiro para devolver
+  à loja" com o valor em R$ e a opção "Não recebi dinheiro (cartão, Pix ou já
+  pago)"; o botão vira "Informe o dinheiro" até ele responder (o "Fechar"
+  continua livre). Campo vazio não vale como zero. O valor vai junto da entrega
+  na fila offline. Os dois reparos de GPS da fila (pela tela e pela Home)
+  montavam o pacote novo só com a coordenada e apagariam o valor; agora
+  preservam (`comPosicaoNova`), e vale o novo se ele reconfirmou. Lembrete
+  "Devolva R$ X em dinheiro à loja" no card da Home e no aviso de retorno da
+  tela do pedido, também enquanto a entrega espera internet. Aparece para o
+  motoboy de salário fixo: o dinheiro é do cliente.
+- **Loja**: "Dinheiro a devolver" no detalhe do pedido e "Traz R$ X em
+  dinheiro" no card do pedido voltando à loja. "Não informado pelo motoboy" só
+  aparece enquanto o pedido está voltando, para não marcar todo pedido antigo.
+- **ADM**: "Dinheiro a devolver" no detalhe do pedido, pelo `useMoney()` — a
+  máscara de valores cobre o campo.
+
+Arquivos: `apps/api/prisma/schema.prisma`, migration
+`20261019120000_dinheiro_a_devolver` (nova), `src/deliveries/deliveries.service.ts`,
+`deliveries.service.spec.ts`, `mark-delivered-validation.spec.ts` (novo);
+`packages/validation/src/deliveries/mark-delivered.schema.ts`;
+`packages/types/src/delivery.ts`; `apps/driver-app/src/lib/cashToReturn.ts`
+(novo), `src/components/CashReminder.tsx` (novo),
+`src/lib/deliveryCompletionOutbox.ts`, `src/screens/DeliveryOperationScreen.tsx`,
+`src/screens/HomeScreen.tsx`, `__tests__/cashToReturn.test.ts` (novo),
+`__tests__/deliveryCompletionOutbox.test.ts`;
+`apps/company-web/src/lib/dinheiro-a-devolver.ts` e `.test.ts` (novos),
+`src/components/orders/order-row.tsx`, `src/app/(app)/pedidos/[id]/page.tsx`,
+`src/test/delivery-print-fixture.ts`; `apps/admin-web/src/lib/dinheiro-a-devolver.ts`
+(novo), `src/app/(app)/pedidos/[id]/page.tsx`.
+
+Migration gerada com `prisma migrate diff` contra o schema imediatamente
+anterior (para não levar junto a coluna da escala, ainda não publicada) e
+aplicada com `prisma migrate deploy` só no banco local de desenvolvimento (5434).
+Volta: `ALTER TABLE "deliveries" DROP COLUMN "cashToReturn";` — não ensaiada.
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 pacotes) | aprovado |
+| `pnpm lint` | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| jest da API, unitários | 121 suítes, 1823 testes aprovados, 1 pulado; 11 novos (4 do serviço, 7 da validação) |
+| jest do driver-app | 31 suítes, 261 testes; `cashToReturn.test.ts` novo e 3 casos novos na fila offline |
+| vitest do company-web | 68 arquivos, 664 testes; `dinheiro-a-devolver.test.ts` novo |
+| builds da API, do company-web e do ADM | aprovados |
+| ADM local contra API local | com 85,50 gravado num pedido local com retorno, o detalhe mostra "Dinheiro a devolver: R$ 85,50 em dinheiro", e "R$ •••• em dinheiro" com a máscara ligada; sem erro na API. O valor de teste foi desfeito |
+
+Não verificado: o modal e os lembretes no aparelho (não há APK novo); o painel
+da loja no navegador (o seed não tem login de loja); E2E. Sem commit.

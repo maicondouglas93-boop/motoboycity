@@ -708,6 +708,17 @@ model Driver {
   /// mais no caminho do ping, que é quente.
   locationSilenceAlertedAt DateTime?
 
+  /// A escala: a semana fixa em que o motoboy pode trabalhar, montada pela
+  /// central no ADM. JSON no formato `DriverWorkSchedule` de
+  /// `@motoboycity/types`, validado por `driverWorkScheduleSchema` na gravacao
+  /// e de novo na leitura.
+  ///
+  /// `null` e a ausencia de escala: o motoboy trabalha livre, a qualquer hora,
+  /// como antes de a escala existir. Com escala, fora dos turnos ele nao fica
+  /// Ativo e sai do despacho automatico e da vitrine — sem perder o que ja
+  /// aceitou.
+  workSchedule Json?
+
   user   User   @relation(fields: [userId], references: [id])
   region Region @relation(fields: [regionId], references: [id])
 
@@ -938,6 +949,13 @@ model Delivery {
   /// Não é um DeliveryStatus novo — fecha via complete-return.
   requiresReturn Boolean  @default(false)
   returnValue    Decimal? @db.Decimal(10, 2)
+
+  /// Dinheiro que o motoboy declarou ter recebido do cliente e vai devolver à
+  /// loja, informado ao marcar a entrega com retorno. É o dinheiro da compra,
+  /// não a corrida: não entra em fatura, repasse nem carteira. null = não
+  /// informado (pedido sem retorno, aplicativo antigo ou entrega marcada pelo
+  /// admin); 0 = ele declarou que não recebeu dinheiro (cartão, Pix, já pago).
+  cashToReturn   Decimal? @db.Decimal(10, 2)
 
   company         Company          @relation(fields: [companyId], references: [id])
   companyCustomer CompanyCustomer? @relation(fields: [companyCustomerId], references: [id], onDelete: SetNull)

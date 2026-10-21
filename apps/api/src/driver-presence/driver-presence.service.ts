@@ -10,6 +10,7 @@ import { LiveDriverPresenceService } from '../live-presence/live-driver-presence
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { DriverPunishmentService } from '../driver-punishment/driver-punishment.service';
+import { DriverScheduleService } from '../driver-schedule/driver-schedule.service';
 
 // O tipo vem de `@motoboycity/types`: a copia local que existia aqui foi o que
 // deixou o contrato compartilhado ficar para tras em outras telas.
@@ -23,6 +24,7 @@ export class DriverPresenceService {
     private readonly realtimeGateway: RealtimeGateway,
     private readonly livePresence: LiveDriverPresenceService,
     private readonly punishmentService: DriverPunishmentService,
+    private readonly scheduleService: DriverScheduleService,
   ) {}
 
   async get(user: User): Promise<DriverPresenceItem> {
@@ -134,6 +136,20 @@ export class DriverPresenceService {
         throw new ForbiddenException(
           'Motoboy precisa estar com a conta ativa para ficar disponível.',
         );
+      }
+      /**
+       * A escala barra so a ENTRADA: quem ja esta Ativo e o aplicativo so
+       * reafirma (reconexao, volta ao primeiro plano) nao e derrubado no fim do
+       * turno. Ele termina o que ja aceitou e apenas sai do despacho — a regra
+       * do fim do turno. Por isso a conferencia olha o estado gravado, e vem
+       * antes de qualquer efeito: nada de posicao ao vivo nem log de presenca
+       * para quem nao pode entrar.
+       */
+      if (driver.availability !== 'AVAILABLE') {
+        const foraDaEscala = await this.scheduleService.offShiftMessage(driver.id);
+        if (foraDaEscala) {
+          throw new ForbiddenException(foraDaEscala);
+        }
       }
       const now = new Date();
       try {
@@ -296,7 +312,11 @@ export class DriverPresenceService {
      * gera a ligacao para o suporte.
      */
     const punishment = await this.punishmentService.activeFor(driverId);
-    if (availability !== 'AVAILABLE') return { availability, since: null, punishment };
+    // A escala tambem viaja offline: e ela que diz quando ele pode entrar.
+    const workSchedule = await this.scheduleService.statusForDriver(driverId);
+    if (availability !== 'AVAILABLE') {
+      return { availability, since: null, punishment, workSchedule };
+    }
     const openLog = await this.prisma.driverPresenceLog.findFirst({
       where: { driverId, wentOfflineAt: null },
       orderBy: { wentOnlineAt: 'desc' },
@@ -305,6 +325,7 @@ export class DriverPresenceService {
       availability,
       since: openLog?.wentOnlineAt.toISOString() ?? null,
       punishment,
+      workSchedule,
     };
   }
 }

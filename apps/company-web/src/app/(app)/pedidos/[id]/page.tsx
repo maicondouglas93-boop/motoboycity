@@ -7,6 +7,7 @@ import type { DeliveryAddressItem } from '@motoboycity/types';
 import {
   AlertCircle,
   ArrowRight,
+  Banknote,
   Bike,
   Building2,
   CalendarClock,
@@ -32,6 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/stat-card';
 import { OrderDetailMap } from '@/components/operations/order-detail-map';
 import { deliveriesApi, trackingApi } from '@/lib/api-client';
+import { dinheiroADevolver } from '@/lib/dinheiro-a-devolver';
 import { session } from '@/lib/session';
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -292,6 +294,11 @@ export default function CompanyOrderDetailPage({ params }: { params: Promise<{ i
             <DetailField label="Pagamento do cliente" icon={<WalletCards className="size-3" />}>
               {customerPaymentLabel(delivery.customerPaymentMethod)}
             </DetailField>
+            {dinheiroADevolver(delivery) && (
+              <DetailField label="Dinheiro a devolver" icon={<Banknote className="size-3" />}>
+                {dinheiroADevolver(delivery)}
+              </DetailField>
+            )}
             {delivery.driverNote && (
               <div className="rounded-xl border border-status-rota/20 bg-status-rota/10 p-3 text-sm sm:col-span-2">
                 <p className="text-[10px] font-semibold tracking-[0.1em] text-[#8a5200] uppercase">
