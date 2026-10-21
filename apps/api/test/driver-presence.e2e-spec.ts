@@ -130,7 +130,12 @@ describe('DriverPresenceController (e2e)', () => {
       .set('Authorization', `Bearer ${approvedToken}`)
       .expect(200);
 
-    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
+    expect(response.body).toEqual({
+      availability: 'UNAVAILABLE',
+      since: null,
+      punishment: null,
+      workSchedule: null,
+    });
   });
 
   it('rejeita motoboy PENDING tentando ficar disponível (403)', async () => {
@@ -177,6 +182,11 @@ describe('DriverPresenceController (e2e)', () => {
       .send({ availability: 'UNAVAILABLE' })
       .expect(200);
 
-    expect(response.body).toEqual({ availability: 'UNAVAILABLE', since: null, punishment: null });
+    expect(response.body).toEqual({
+      availability: 'UNAVAILABLE',
+      since: null,
+      punishment: null,
+      workSchedule: null,
+    });
   });
 });
