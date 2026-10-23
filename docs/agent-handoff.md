@@ -46,6 +46,14 @@ validação:
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
 
+## Em preparação — retentativa do backup no Cloud Storage
+
+Em 22/10/2026 o `pg_dump` de produção foi gerado corretamente (17.357.018
+bytes), mas o envio ao Google Cloud Storage falhou por `ETIMEDOUT`. A rotina
+passa a usar o CLI oficial autenticado e tenta o upload até três vezes, com
+objetos imutáveis por tentativa. O arquivo só chama o check-in da API depois de
+um envio confirmado. Não houve alteração de banco, segredo ou backup existente.
+
 ## Pronto para publicação — escala do motoboy
 
 Feita em 14/10/2026 no worktree. Regras em

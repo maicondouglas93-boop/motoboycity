@@ -87,12 +87,42 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
-      - name: Enviar para o Cloud Storage
-        uses: google-github-actions/upload-cloud-storage@v3
-        with:
-          path: ${{ env.ARQUIVO }}
-          destination: ${{ secrets.GCS_BUCKET }}
-          process_gcloudignore: false
+      # O upload da action terminou em ETIMEDOUT depois de gerar um dump válido
+      # em 22/10/2026. O CLI oficial permite repetir a transferência. Cada
+      # tentativa usa outro objeto com precondição de criação: se a resposta
+      # final se perder após o GCS já ter salvo o arquivo, uma nova tentativa
+      # não sobrescreve o objeto nem pode apagar backups existentes.
+      - name: Preparar o Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Enviar para o Cloud Storage com retentativas
+        env:
+          BUCKET: ${{ secrets.GCS_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BUCKET:-}" ]; then
+            echo "GCS_BUCKET não configurado nos segredos do repositório." >&2
+            exit 1
+          fi
+
+          for TENTATIVA in 1 2 3; do
+            REMOTO="${ARQUIVO%.dump}-upload-${TENTATIVA}.dump"
+            if gcloud storage cp "${ARQUIVO}" "gs://${BUCKET}/${REMOTO}" \
+              --if-generation-match=0 --print-created-message
+            then
+              echo "REMOTE_ARQUIVO=${REMOTO}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+
+            if [ "${TENTATIVA}" -lt 3 ]; then
+              ESPERA=$((TENTATIVA * 15))
+              echo "::warning::Upload falhou na tentativa ${TENTATIVA}; tentando novamente em ${ESPERA}s."
+              sleep "${ESPERA}"
+            fi
+          done
+
+          echo "Não foi possível enviar o backup após três tentativas." >&2
+          exit 1
 
       # Só depois do envio: avisar antes seria mentir sobre um backup que ainda
       # pode ter falhado no upload.
@@ -117,9 +147,9 @@ jobs:
             -X POST "${API_URL%/}/ops/check-in/backup-banco" \
             -H "x-job-token: ${JOB_TOKEN}" \
             -H 'Content-Type: application/json' \
-            -d "{\"sizeBytes\":${TAMANHO},\"detail\":\"${ARQUIVO}\"}" \
+            -d "{\"sizeBytes\":${TAMANHO},\"detail\":\"${REMOTE_ARQUIVO}\"}" \
             -o /dev/null
           echo "Painel avisado."
 
       - name: Confirmar
-        run: echo "Backup salvo como ${ARQUIVO} em gs://${{ secrets.GCS_BUCKET }}"
+        run: echo "Backup salvo como ${REMOTE_ARQUIVO} em gs://${{ secrets.GCS_BUCKET }}"

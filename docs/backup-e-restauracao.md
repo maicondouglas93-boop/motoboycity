@@ -7,6 +7,12 @@
 O dump diário roda em `.github/workflows/backup-banco.yml`, às 03:10 de São
 Paulo, e vai para o Google Cloud Storage.
 
+O envio é feito pelo `gcloud storage`, após a autenticação da conta de serviço.
+São feitas até três tentativas com espera crescente. Cada tentativa cria um
+objeto de nome próprio e usa a precondição de criação, portanto um timeout de
+rede não sobrescreve nem apaga backup anterior. O aviso de vida do painel só
+recebe o nome da tentativa que confirmou o upload.
+
 ## O que este backup cobre, e o que não cobre
 
 **Cobre:** todo o conteúdo do PostgreSQL de produção — pedidos, histórico de
