@@ -46,13 +46,18 @@ validação:
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
 
-## Em preparação — retentativa do backup no Cloud Storage
+## Publicado — retentativa do backup compatível com `objectCreator`
 
-Em 22/10/2026 o `pg_dump` de produção foi gerado corretamente (17.357.018
-bytes), mas o envio ao Google Cloud Storage falhou por `ETIMEDOUT`. A rotina
-passa a usar o CLI oficial autenticado e tenta o upload até três vezes, com
-objetos imutáveis por tentativa. O arquivo só chama o check-in da API depois de
-um envio confirmado. Não houve alteração de banco, segredo ou backup existente.
+O ajuste de 23/10/2026 (`c934f2d`) trocou `google-github-actions/upload-cloud-storage@v3`
+por `gcloud storage cp --if-generation-match=0`, que consulta o objeto de destino
+com `storage.objects.get` antes de gravar e falhou com HTTP 403 em 24/10, 25/10,
+26/10 e 27/10 porque a conta `backup-motoboycity` tem propositalmente apenas
+`roles/storage.objectCreator` (`storage.objects.create`, sem leitura nem exclusão).
+Em 28/10/2026 o workflow `.github/workflows/backup-banco.yml` voltou a enviar via
+`google-github-actions/upload-cloud-storage@v3` com até três tentativas (15s e
+30s de espera e sufixos `-upload-2.dump` / `-upload-3.dump` nas retentativas),
+preservando o privilégio mínimo da conta de serviço e o check-in da API apenas
+após upload confirmado.
 
 ## Pronto para publicação — escala do motoboy
 

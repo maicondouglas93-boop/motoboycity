@@ -75,6 +75,7 @@ jobs:
           fi
 
           echo "ARQUIVO=${NOME}" >> "$GITHUB_ENV"
+          echo "REMOTE_ARQUIVO=${NOME}" >> "$GITHUB_ENV"
 
       # `v3` nas duas ações do Google porque a `v2` declara Node 20, que o
       # GitHub aposentou: hoje ele FORÇA a execução em Node 24 e emite aviso, e
@@ -87,42 +88,64 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
-      # O upload da action terminou em ETIMEDOUT depois de gerar um dump válido
-      # em 22/10/2026. O CLI oficial permite repetir a transferência. Cada
-      # tentativa usa outro objeto com precondição de criação: se a resposta
-      # final se perder após o GCS já ter salvo o arquivo, uma nova tentativa
-      # não sobrescreve o objeto nem pode apagar backups existentes.
-      - name: Preparar o Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v3
+      # `upload-cloud-storage@v3` — e NÃO `gcloud storage cp` — porque a conta
+      # `backup-motoboycity` tem propositalmente apenas `roles/storage.objectCreator`
+      # (`storage.objects.create`, sem `get` nem `delete`). O `gcloud storage cp`
+      # consulta o destino com `storage.objects.get` antes de enviar e falha com
+      # HTTP 403. Já a action usa `uploadType=resumable` direto com `create`.
+      #
+      # Até três tentativas absorvem timeouts transitórios de rede (como o
+      # `read ETIMEDOUT` de 22/10/2026). As tentativas 2 e 3 usam nomes próprios
+      # para nunca colidir caso a anterior tenha gravado o objeto antes de a
+      # resposta final se perder.
+      - name: Enviar para o Cloud Storage (tentativa 1)
+        id: upload_1
+        continue-on-error: true
+        uses: google-github-actions/upload-cloud-storage@v3
+        with:
+          path: ${{ env.ARQUIVO }}
+          destination: ${{ secrets.GCS_BUCKET }}
+          process_gcloudignore: false
 
-      - name: Enviar para o Cloud Storage com retentativas
-        env:
-          BUCKET: ${{ secrets.GCS_BUCKET }}
+      - name: Preparar tentativa 2 de upload
+        if: steps.upload_1.outcome != 'success'
         run: |
           set -euo pipefail
-          if [ -z "${BUCKET:-}" ]; then
-            echo "GCS_BUCKET não configurado nos segredos do repositório." >&2
-            exit 1
-          fi
+          echo "::warning::Upload falhou na tentativa 1; tentando novamente em 15s."
+          sleep 15
+          REMOTO="${ARQUIVO%.dump}-upload-2.dump"
+          ln -f "${ARQUIVO}" "${REMOTO}"
+          echo "ARQUIVO_TENTATIVA_2=${REMOTO}" >> "$GITHUB_ENV"
+          echo "REMOTE_ARQUIVO=${REMOTO}" >> "$GITHUB_ENV"
 
-          for TENTATIVA in 1 2 3; do
-            REMOTO="${ARQUIVO%.dump}-upload-${TENTATIVA}.dump"
-            if gcloud storage cp "${ARQUIVO}" "gs://${BUCKET}/${REMOTO}" \
-              --if-generation-match=0 --print-created-message
-            then
-              echo "REMOTE_ARQUIVO=${REMOTO}" >> "$GITHUB_ENV"
-              exit 0
-            fi
+      - name: Enviar para o Cloud Storage (tentativa 2)
+        id: upload_2
+        if: steps.upload_1.outcome != 'success'
+        continue-on-error: true
+        uses: google-github-actions/upload-cloud-storage@v3
+        with:
+          path: ${{ env.ARQUIVO_TENTATIVA_2 }}
+          destination: ${{ secrets.GCS_BUCKET }}
+          process_gcloudignore: false
 
-            if [ "${TENTATIVA}" -lt 3 ]; then
-              ESPERA=$((TENTATIVA * 15))
-              echo "::warning::Upload falhou na tentativa ${TENTATIVA}; tentando novamente em ${ESPERA}s."
-              sleep "${ESPERA}"
-            fi
-          done
+      - name: Preparar tentativa 3 de upload
+        if: steps.upload_1.outcome != 'success' && steps.upload_2.outcome != 'success'
+        run: |
+          set -euo pipefail
+          echo "::warning::Upload falhou na tentativa 2; tentando novamente em 30s."
+          sleep 30
+          REMOTO="${ARQUIVO%.dump}-upload-3.dump"
+          ln -f "${ARQUIVO}" "${REMOTO}"
+          echo "ARQUIVO_TENTATIVA_3=${REMOTO}" >> "$GITHUB_ENV"
+          echo "REMOTE_ARQUIVO=${REMOTO}" >> "$GITHUB_ENV"
 
-          echo "Não foi possível enviar o backup após três tentativas." >&2
-          exit 1
+      - name: Enviar para o Cloud Storage (tentativa 3)
+        if: steps.upload_1.outcome != 'success' && steps.upload_2.outcome != 'success'
+        uses: google-github-actions/upload-cloud-storage@v3
+        with:
+          path: ${{ env.ARQUIVO_TENTATIVA_3 }}
+          destination: ${{ secrets.GCS_BUCKET }}
+          process_gcloudignore: false
 
       # Só depois do envio: avisar antes seria mentir sobre um backup que ainda
       # pode ter falhado no upload.

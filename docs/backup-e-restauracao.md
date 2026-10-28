@@ -7,11 +7,14 @@
 O dump diário roda em `.github/workflows/backup-banco.yml`, às 03:10 de São
 Paulo, e vai para o Google Cloud Storage.
 
-O envio é feito pelo `gcloud storage`, após a autenticação da conta de serviço.
-São feitas até três tentativas com espera crescente. Cada tentativa cria um
-objeto de nome próprio e usa a precondição de criação, portanto um timeout de
-rede não sobrescreve nem apaga backup anterior. O aviso de vida do painel só
-recebe o nome da tentativa que confirmou o upload.
+O envio é feito pela action `google-github-actions/upload-cloud-storage@v3`
+(que usa apenas `storage.objects.create`, compatível com `roles/storage.objectCreator`
+— ao contrário de `gcloud storage cp`, que tenta `storage.objects.get` no
+destino e falha com HTTP 403). São feitas até três tentativas com espera
+crescente (15s e 30s). As tentativas 2 e 3 usam nomes próprios (`-upload-2.dump`
+e `-upload-3.dump`) para que um timeout de rede após gravação parcial ou já
+concluída nunca colida nem exija permissão de sobrescrita. O aviso de vida do
+painel só recebe o nome da tentativa que confirmou o upload.
 
 ## O que este backup cobre, e o que não cobre
 
