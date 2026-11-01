@@ -8,7 +8,9 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-11-01**, pergunta obrigatória sobre entrega com volta
+> Última revisão: **2026-11-01**, publicados em `1586f9a` e `0b14d3d` e empacotados
+> no APK assinado `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.31-vc31.apk`
+> (`versionCode 31`, `0.1.0-pilot.31`): pergunta obrigatória sobre entrega com volta
 > (`Este pedido tem volta?` / `Este lote tem volta?`) antes de finalizar a
 > criação de pedido no `company-web` (`OperationalOrderForm`, `CallDriverDialog`
 > e `CreateOrderForm`), confirmação antes de ficar offline no botão
@@ -16,18 +18,15 @@
 > reposicionado no rodapé da Home do painel da loja (`company-web`), separação de cadastros, operação e relatórios
 > por cidade no painel ADM (`RegionSelector` + `AdminRegionFilterProvider`) e
 > escolha de cidade ativa no autocadastro de empresas (`company-web`) e motoboys
-> (`driver-app`), somados ao controle manual de abertura e encerramento dos
-> atendimentos na Home do ADM (`PlatformSettings.acceptingOrders`), à escala do
-> motoboy e ao registro de dinheiro a devolver na entrega com retorno já no
-> worktree. As três migrations locais não publicadas
-> (`20261014120000_escala_do_motoboy`, `20261019120000_dinheiro_a_devolver` e
-> `20261031172500_controle_manual_atendimentos`) são aditivas e aguardam o
-> `migrate deploy` automático do Render quando autorizadas para publicação (a
-> separação por cidade usa `Region`/`regionId` já existentes e não exigiu nova
-> migration). O Driver App foi promovido para `pilot.30` / `versionCode` 30; o
-> APK assinado ainda precisa ser gerado e distribuído para exibir a confirmação ao
-> ficar offline e a escolha de cidade no app do motoboy (APKs anteriores como
-> `pilot.29` seguem compatíveis). Histórico anterior: liberar pedido agendado antes da hora
+> (`driver-app`), além do controle manual de abertura e encerramento dos
+> atendimentos na Home do ADM (`PlatformSettings.acceptingOrders`). A migration
+> aditiva `20261031172500_controle_manual_atendimentos` foi enviada para o
+> `migrate deploy` automático do Render no push de `1586f9a` (a separação por
+> cidade usa `Region`/`regionId` já existentes e não exigiu nova migration). O
+> APK `pilot.31` (`versionCode` 31) está compilado, assinado e verificado em
+> `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.31-vc31.apk`, pronto para
+> envio aos motoboys (APKs anteriores como `pilot.29` e `pilot.30` seguem
+> compatíveis). Histórico anterior: liberar pedido agendado antes da hora
 > (empresa e ADM) e valor mostrado ao motoboy antes de confirmar a entrega sem
 > endereço, publicados em `378ca74` (Render e as duas Vercel em success) e
 > empacotados no APK `pilot.27`, compilado de `f2d1795` e ainda não enviado.
@@ -292,7 +291,21 @@ coisas correm em paralelo.
 varre a fila. Não duplica entre reinícios nem entre instâncias; se sumir do Redis,
 volta no próximo boot da API.
 
-### APK distribuído
+### APK pronto para distribuição (`pilot.31`) e último enviado (`pilot.29`)
+
+`I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.31-vc31.apk` (01/11/2026,
+compilado de `0b14d3d`, pronto para envio aos motoboys)
+SHA-256 `0B1011DCCEC1FC502828375E5D4C860F06855CBF08091EE0F292589658099BBC`,
+75.368.153 bytes, `versionCode` 31, `versionName` `0.1.0-pilot.31`, minSdk 24,
+targetSdk 36, assinatura v2, ABIs arm64-v8a/armeabi-v7a/x86/x86_64, certificado
+oficial `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9` — o
+mesmo dos anteriores, então atualiza por cima do `pilot.30` (`cca582d`),
+`pilot.29` e versões anteriores assinadas com essa chave. Inclui a confirmação
+antes de ficar offline no botão `ActiveToggle` (`Ficar offline?`), o seletor de
+cidade de atuação no autocadastro (`RegisterScreen`), a escala do motoboy e o
+registro de dinheiro a devolver na entrega com retorno. O bundle carrega
+`motoboycity-api.onrender.com`, `0.1.0-pilot.31` e `Ficar offline?`, e **não**
+carrega `localhost:3333`, `127.0.0.1`, `10.0.2.2` nem `0.1.0-pilot.30`.
 
 `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.29-vc29.apk` (03/10/2026,
 enviado aos motoboys no mesmo dia)

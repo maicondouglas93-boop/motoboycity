@@ -18094,3 +18094,28 @@ Não verificado: geração e teste manual do APK `pilot.30` em aparelho físico 
 | `pnpm --filter @motoboycity/company-web run build` | aprovado (39 rotas geradas) |
 
 Não verificado: ensaio visual manual autenticado no navegador. Sem commit nem push.
+
+## 2026-11-01 — Publicação em produção e geração do APK assinado `0.1.0-pilot.31` (`versionCode 31`)
+
+- **Decisão e motivo:** a pedido do usuário (`colocar em producao` e `gerar o apk`), publicar todos os recortes pendentes na branch `main` (`1586f9a`), promover a versão do `driver-app` para `0.1.0-pilot.31` (`0b14d3d`, já que `motoboycity-0.1.0-pilot.30-vc30.apk` havia sido compilado em 21/10/2026 a partir de `cca582d`) e compilar, assinar e verificar o APK de produção em worktree curta `C:\m31`.
+- **Artefato gerado:**
+  - Caminho: `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.31-vc31.apk`
+  - Tamanho: `75.368.153` bytes
+  - SHA-256: `0B1011DCCEC1FC502828375E5D4C860F06855CBF08091EE0F292589658099BBC`
+  - Pacote (`aapt`): `com.motoboycity.driverapp`, `versionCode='31'`, `versionName='0.1.0-pilot.31'`, `sdkVersion:'24'`, `targetSdkVersion:'36'`, ABIs `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`
+  - Assinatura (`apksigner`): certificado oficial `CN=MOTOboyCity, OU=Mobile, O=MOTOboyCity, L=Lajinha, ST=Minas Gerais, C=BR`, SHA-256 `BD42D61D35819B86CB9D1FF784D3E64340C0CE153E21B0332AE97B4CF51D50B9`
+  - Inspeção do `assets/index.android.bundle`: contém `motoboycity-api.onrender.com`, `0.1.0-pilot.31` e `Ficar offline?`; **não** contém `localhost:3333`, `127.0.0.1`, `10.0.2.2` nem `0.1.0-pilot.30`.
+- **Arquivos:**
+  - `apps/driver-app/package.json`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` e `pnpm lint` (8 pacotes) | aprovados |
+| GitHub Actions CI (`0b14d3d`, run `41351694083`) | aprovado (`completed / success` em 4m11s) |
+| `gradlew.bat assembleRelease -Pmotoboycity.versionCode=31 --no-daemon` | aprovado (`BUILD SUCCESSFUL in 12m 25s`) |
+| `apksigner verify --print-certs` e `aapt dump badging` | aprovados |
+| Inspeção binária UTF-8/UTF-16 de `assets/index.android.bundle` | aprovada |
+| Limpeza da worktree temporária `C:\m31` e credenciais em memória | aprovada |
+
+Não verificado: instalação e ensaio manual do APK `pilot.31` em aparelho físico Android.
