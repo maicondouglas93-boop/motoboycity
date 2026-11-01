@@ -51,8 +51,14 @@ export function createTrackingApi({ baseUrl }: TrackingApiConfig) {
       return parseJsonOrThrow<DeliveryTrackingDetail>(response);
     },
 
-    async active(accessToken: string): Promise<ActiveDeliveryTrackingItem[]> {
-      const response = await apiFetch(`${baseUrl}/tracking/active`, {
+    async active(
+      accessToken: string,
+      filters?: { regionId?: string },
+    ): Promise<ActiveDeliveryTrackingItem[]> {
+      const params = new URLSearchParams();
+      if (filters?.regionId) params.set('regionId', filters.regionId);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiFetch(`${baseUrl}/tracking/active${query}`, {
         headers: withAuth(accessToken),
       });
       return parseJsonOrThrow<ActiveDeliveryTrackingItem[]>(response);

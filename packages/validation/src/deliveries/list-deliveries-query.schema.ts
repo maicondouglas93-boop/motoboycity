@@ -21,6 +21,7 @@ export const listDeliveriesQuerySchema = z
     status: z.enum(deliveryStatusValues).optional(),
     // Recorte operacional exclusivo do administrador. O service tambem valida
     // a permissao para impedir que empresa ou entregador amplie o proprio escopo.
+    regionId: z.string().uuid().optional(),
     driverId: z.string().uuid().optional(),
     companyId: z.string().uuid().optional(),
     from: dateOnlySchema.optional(),

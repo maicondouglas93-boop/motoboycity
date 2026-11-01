@@ -8,11 +8,26 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-10-21**, release preparado com a escala do motoboy e
-> o registro de dinheiro a devolver na entrega com retorno. As duas migrations
-> são aditivas e aguardam o `migrate deploy` automático do Render. O Driver App
-> foi promovido para `pilot.30` / `versionCode` 30; o APK assinado ainda precisa
-> ser gerado e distribuído. Histórico anterior: liberar pedido agendado antes da hora
+> Última revisão: **2026-11-01**, pergunta obrigatória sobre entrega com volta
+> (`Este pedido tem volta?` / `Este lote tem volta?`) antes de finalizar a
+> criação de pedido no `company-web` (`OperationalOrderForm`, `CallDriverDialog`
+> e `CreateOrderForm`), confirmação antes de ficar offline no botão
+> `ActiveToggle` do Driver App (`Ficar offline?`), anúncio da FM Software
+> reposicionado no rodapé da Home do painel da loja (`company-web`), separação de cadastros, operação e relatórios
+> por cidade no painel ADM (`RegionSelector` + `AdminRegionFilterProvider`) e
+> escolha de cidade ativa no autocadastro de empresas (`company-web`) e motoboys
+> (`driver-app`), somados ao controle manual de abertura e encerramento dos
+> atendimentos na Home do ADM (`PlatformSettings.acceptingOrders`), à escala do
+> motoboy e ao registro de dinheiro a devolver na entrega com retorno já no
+> worktree. As três migrations locais não publicadas
+> (`20261014120000_escala_do_motoboy`, `20261019120000_dinheiro_a_devolver` e
+> `20261031172500_controle_manual_atendimentos`) são aditivas e aguardam o
+> `migrate deploy` automático do Render quando autorizadas para publicação (a
+> separação por cidade usa `Region`/`regionId` já existentes e não exigiu nova
+> migration). O Driver App foi promovido para `pilot.30` / `versionCode` 30; o
+> APK assinado ainda precisa ser gerado e distribuído para exibir a confirmação ao
+> ficar offline e a escolha de cidade no app do motoboy (APKs anteriores como
+> `pilot.29` seguem compatíveis). Histórico anterior: liberar pedido agendado antes da hora
 > (empresa e ADM) e valor mostrado ao motoboy antes de confirmar a entrega sem
 > endereço, publicados em `378ca74` (Render e as duas Vercel em success) e
 > empacotados no APK `pilot.27`, compilado de `f2d1795` e ainda não enviado.
@@ -45,6 +60,47 @@ validação:
 
 Não marque item como concluído sem evidência de código e teste. Não registre
 secrets nem conteúdo de `.env` em nenhum dos três.
+
+## Pronto para publicação — separação de cadastros e operação por cidade no ADM e autocadastro
+
+Feito em 31/10/2026 no worktree. Regras em `business-rules.md` ("Regiões"). Não
+exigiu migration nova (`Region`, `Company.regionId` e `Driver.regionId` já
+existiam no schema).
+
+- **Autocadastro com escolha de cidade (`GET /auth/regions`):** empresas em
+  `company-web/src/app/register/page.tsx` e motoboys em
+  `driver-app/src/screens/RegisterScreen.tsx` escolhem a cidade de atuação entre
+  as cidades ativas. Os schemas de API (`registerCompanyApiSchema` e
+  `registerDriverApiSchema`) preservam `regionId` opcional para manter
+  retrocompatibilidade com APKs em campo (`pilot.29`) quando há apenas uma
+  região ativa; para exibir o seletor de cidade na tela do app dos motoboys em
+  operação com múltiplas cidades, é necessário gerar e distribuir um novo APK
+  (`pilot.30`).
+- **Seletor global de cidade no painel ADM (`RegionSelector` +
+  `AdminRegionFilterProvider`):** mantém o mesmo login de `ADMIN` e permite
+  alternar no topo do painel entre **Todas as cidades** e uma cidade específica
+  (persistido em `localStorage`, sincronizado entre abas e com fallback
+  automático para todas as cidades caso a região selecionada seja removida),
+  filtrando Clientes/Empresas, Entregadores (pré-selecionando a cidade ativa nos
+  modais de novo cadastro), Home operacional (mapa, filas, motoboys online,
+  motoboys sem posição, reordenação da fila preservando os slots das demais
+  cidades e feed de atividade), Pedidos/rastreamento ativo e relatórios
+  operacionais.
+
+## Pronto para publicação — controle manual de abertura e encerramento dos atendimentos
+
+Feito em 31/10/2026 no worktree. Regras em `business-rules.md` ("Controle manual
+de abertura e encerramento dos atendimentos"). Traz a migration aditiva
+`20261031172500_controle_manual_atendimentos` (`platform_settings.acceptingOrders
+BOOLEAN NOT NULL DEFAULT true`), aplicada só no banco local de desenvolvimento
+(5434). Na Home do ADM, o cabeçalho exibe **Finalizar atendimentos** / **Abrir
+atendimentos** com modal de confirmação e banner de operação encerrada; quando
+`acceptingOrders = false`, `DeliveriesService` bloqueia com HTTP 409 qualquer
+novo lançamento (imediato ou agendado, painel da loja avulso/lote, lançamento
+pelo ADM, loja online e integração aiqfome) e impede a loja de antecipar pedido
+agendado (`release-scheduled`), preservando pedidos já em andamento. O evento
+Socket.IO `service:status-changed` atualiza abas abertas do ADM e das lojas em
+tempo real. Não exige novo APK.
 
 ## Publicado — retentativa do backup compatível com `objectCreator`
 

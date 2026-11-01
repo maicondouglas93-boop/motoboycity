@@ -17935,3 +17935,162 @@ sem leitura nem exclusão de backups existentes).
 - Validação local: `git diff --check` aprovado; disparo manual (`workflow_dispatch`)
   em produção autorizado pelo usuário para confirmar upload ao Cloud Storage e
   check-in na API.
+
+## 2026-10-31 - Botão na Home do ADM para finalizar e abrir atendimentos
+
+Adicionado controle manual global na Home do painel administrativo para encerrar
+("Finalizar atendimentos") e reabrir ("Abrir atendimentos") o recebimento de
+novos pedidos em toda a plataforma, preservando as corridas já lançadas.
+
+- Decisões confirmadas com o responsável:
+  - Chave geral persistente `PlatformSettings.acceptingOrders` (`@default(true)`):
+    quando encerrada manualmente (`false`), permanece fechada (inclusive na
+    virada do dia ou dentro de faixa semanal configurada) até o ADM clicar em
+    **Abrir atendimentos**. Quando aberta (`true`), o horário semanal de
+    funcionamento continua valendo normalmente caso `businessHoursEnabled`
+    esteja ligado.
+  - Enquanto `acceptingOrders = false`, `DeliveriesService` recusa com HTTP 409
+    qualquer novo lançamento — imediato ou agendado, pelo painel da loja
+    (avulso ou em lote), pelo modal do ADM em nome da empresa, pela loja online
+    e pela integração aiqfome — além de impedir a loja de antecipar pedido
+    agendado (`release-scheduled`). Entregas já criadas antes do encerramento
+    seguem seu ciclo normal até a conclusão (incluindo edição pré-aceite e
+    gestão pelo ADM).
+  - Atualização em tempo real por Socket.IO (`service:status-changed` para as
+    salas `admin` e `companies`, além de registro no feed `admin:activity` e na
+    auditoria administrativa `PLATFORM_SETTINGS_UPDATED`) e retorno
+    `manuallyClosed: true` em `GET /company/business-hours` para exibir aviso
+    específico e desabilitar os botões de criação no painel da loja.
+- Migration aditiva `20261031172500_controle_manual_atendimentos`
+  (`ALTER TABLE "platform_settings" ADD COLUMN "acceptingOrders" BOOLEAN NOT NULL DEFAULT true;`),
+  gerada via `prisma migrate diff` contra `HEAD:apps/api/prisma/schema.prisma` e
+  aplicada com `prisma migrate deploy` apenas no banco local de desenvolvimento
+  (`localhost:5434`). Rollback reverso (`ALTER TABLE "platform_settings" DROP COLUMN "acceptingOrders";`)
+  não executado.
+- Arquivos:
+  - `apps/api/prisma/schema.prisma`
+  - `apps/api/prisma/migrations/20261031172500_controle_manual_atendimentos/migration.sql`
+  - `packages/validation/src/admin/update-platform-settings.schema.ts`
+  - `packages/types/src/pricing.ts`
+  - `apps/api/src/realtime/realtime.gateway.ts`, `apps/api/src/realtime/realtime.gateway.spec.ts`
+  - `apps/api/src/admin/platform-settings/admin-platform-settings.module.ts`
+  - `apps/api/src/admin/platform-settings/admin-platform-settings.service.ts`, `apps/api/src/admin/platform-settings/admin-platform-settings.service.spec.ts`
+  - `apps/api/test/admin-platform-settings.e2e-spec.ts`
+  - `apps/api/src/company/business-hours/company-business-hours.service.ts`, `apps/api/src/company/business-hours/company-business-hours.service.spec.ts`
+  - `apps/api/src/deliveries/deliveries.service.ts`, `apps/api/src/deliveries/deliveries.service.spec.ts`
+  - `apps/admin-web/src/components/operations/service-status-home-control.tsx`, `apps/admin-web/test/service-status-home-control.test.mjs`
+  - `apps/admin-web/src/app/(app)/page.tsx`, `apps/admin-web/src/app/(app)/configuracoes/horario/page.tsx`, `apps/admin-web/src/components/deliveries/create-company-delivery-dialog.tsx`
+  - `apps/company-web/src/components/operations/service-closed-notice.tsx`, `apps/company-web/src/components/operations/call-driver-dialog.test.tsx`, `apps/company-web/src/app/(app)/page.tsx`
+  - `docs/business-rules.md`, `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 pacotes) | aprovado |
+| `pnpm lint` (8 pacotes) | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 121 suítes aprovadas (1 pulada), 1829 testes aprovados (1 pulado) |
+| `pnpm --filter @motoboycity/admin-web test` | 61 testes aprovados (3 novos em `service-status-home-control.test.mjs`) |
+| `pnpm --filter @motoboycity/company-web test` | 68 arquivos, 665 testes aprovados |
+| builds de `@motoboycity/api`, `@motoboycity/admin-web` e `@motoboycity/company-web` | aprovados |
+
+Não verificado: suíte E2E da API e ensaio manual autenticado nos painéis no navegador. Sem commit nem push.
+
+## 2026-10-31 — Separação de cadastros, operação e relatórios por cidade no ADM e escolha de cidade no autocadastro
+
+- **Decisão e motivo:** atender à necessidade do responsável de separar empresas, entregadores e operação por cidade dentro da mesma plataforma e sob o mesmo login administrativo (`ADMIN`), permitindo também que empresas e motoboys escolham a cidade ativa no autocadastro, sem alterar tabelas de preço, taxas adicionais, horários de funcionamento nem o controle manual global de atendimentos.
+- **Implementação:**
+  - **Contratos compartilhados (`@motoboycity/types`, `@motoboycity/validation`, `@motoboycity/api-client`):** adicionado `PublicRegionItem` e `GET /auth/regions` (`authApi.listActiveRegions`); incluído `region: { id, name }` em `AdminCompanyListItem` e `regionId` opcional em `OperationalActivityEvent`, `SilentDriverItem`, schemas/rotas de listagem de empresas, entregadores, visão geral operacional, feed de atividade, motoboys sem posição, entregas (`list`, `operations`, `search`/`report`, `summary`, `stage-times`), rastreamento ativo (`GET /tracking/active`) e relatórios operacionais (`GET /admin/reports/operations`). `registerCompanySchema` e `registerDriverSchema` passam a exigir `regionId`, enquanto `registerCompanyApiSchema` e `registerDriverApiSchema` mantêm `regionId` opcional para retrocompatibilidade com APKs em campo (`pilot.29`).
+  - **API (`apps/api`):** rota pública `GET /auth/regions` com rate limit; resolução de `regionId` informado em `POST /auth/register/company` e `POST /auth/register/driver`; filtros por `regionId` nos serviços administrativos e de entregas (com `ForbiddenException` caso um perfil não-`ADMIN` envie `regionId` em rotas compartilhadas de entregas/rastreamento); e reordenação da fila de despacho preservando os slots relativos dos motoboys online de outras cidades quando o ADM reordena apenas os entregadores de uma cidade filtrada. Nenhuma migration Prisma foi necessária.
+  - **Autocadastro (`company-web` e `driver-app`):** seletor **Cidade de atuação** em `apps/company-web/src/app/register/page.tsx` e `apps/driver-app/src/screens/RegisterScreen.tsx` (com pré-seleção automática quando há uma única cidade ativa e opção de retentativa em erro de rede). Para que o seletor apareça no aplicativo dos motoboys, será necessário gerar e distribuir um novo APK (`pilot.30`).
+  - **Painel ADM (`apps/admin-web`):** criados `AdminRegionFilterProvider` (`src/lib/region-filter.tsx`, via `useSyncExternalStore` em `localStorage` com sincronização entre abas e fallback seguro quando uma cidade deixa de existir) e `RegionSelector` (`src/components/layout/region-selector.tsx`) na barra superior (`TopNav`), conectados ao feed `AdminActivityFeedProvider`, `Clientes` (`CreateCompanyDialog` pré-preenche a cidade ativa e cards exibem a cidade), `Entregadores` (`CreateDriverDialog` pré-preenche a cidade ativa e invalidações por prefixo corrigidas), `Home` (`SilentDrivers`, mapa, filas, resumo do dia), `Pedidos` (`useAdminActiveDeliveryTracking` e busca paginada) e relatórios operacionais (`geral`, `clientes`, `entregadores`, `financeiro`, `horarios-pico`, `modalidades`, `operacional`, `pedidos`, `historico` e `tempos-sla`).
+- **Arquivos:**
+  - `packages/types/src/region.ts`, `packages/types/src/company.ts`, `packages/types/src/operations.ts`
+  - `packages/validation/src/auth/register-company.schema.ts`, `packages/validation/src/auth/register-driver.schema.ts`
+  - `packages/validation/src/admin/list-companies-query.schema.ts`, `packages/validation/src/admin/list-drivers-query.schema.ts`, `packages/validation/src/admin/admin-operations-query.schema.ts`, `packages/validation/src/admin/operations-report-query.schema.ts`
+  - `packages/validation/src/deliveries/delivery-operations-query.schema.ts`, `packages/validation/src/deliveries/list-deliveries-query.schema.ts`, `packages/validation/src/deliveries/delivery-summary-query.schema.ts`, `packages/validation/src/deliveries/stage-times-query.schema.ts`
+  - `packages/validation/src/tracking/tracking.schema.ts`
+  - `packages/api-client/src/auth.ts`, `packages/api-client/src/admin-companies.ts`, `packages/api-client/src/admin-drivers.ts`, `packages/api-client/src/admin-operations.ts`, `packages/api-client/src/admin-reports.ts`, `packages/api-client/src/deliveries.ts`, `packages/api-client/src/tracking.ts`
+  - `apps/api/src/auth/auth.controller.ts`, `apps/api/src/auth/auth.service.ts`, `apps/api/src/auth/auth.service.spec.ts`
+  - `apps/api/src/admin/companies/admin-companies.controller.ts`, `apps/api/src/admin/companies/admin-companies.service.ts`, `apps/api/src/admin/companies/admin-companies.service.spec.ts`
+  - `apps/api/src/admin/drivers/admin-drivers.service.ts`
+  - `apps/api/src/admin/operations/admin-operations.controller.ts`, `apps/api/src/admin/operations/admin-operations.service.ts`, `apps/api/src/admin/operations/admin-operations.service.spec.ts`
+  - `apps/api/src/admin/reports/admin-reports.service.ts`
+  - `apps/api/src/deliveries/deliveries.service.ts`
+  - `apps/api/src/tracking/delivery-tracking.controller.ts`, `apps/api/src/tracking/delivery-tracking.service.ts`, `apps/api/src/tracking/delivery-tracking.service.spec.ts`, `apps/api/src/tracking/location-silence.service.ts`, `apps/api/src/tracking/location-silence.service.spec.ts`
+  - `apps/company-web/src/app/register/page.tsx`
+  - `apps/driver-app/src/screens/RegisterScreen.tsx`
+  - `apps/admin-web/src/lib/region-filter.tsx`, `apps/admin-web/src/components/layout/region-selector.tsx`, `apps/admin-web/test/region-selector.test.mjs`
+  - `apps/admin-web/src/app/(app)/layout.tsx`, `apps/admin-web/src/components/layout/top-nav.tsx`, `apps/admin-web/test/top-nav.test.mjs`
+  - `apps/admin-web/src/lib/use-admin-activity-feed.tsx`, `apps/admin-web/src/lib/use-active-delivery-tracking.ts`
+  - `apps/admin-web/src/app/(app)/page.tsx`, `apps/admin-web/src/components/operations/silent-drivers.tsx`
+  - `apps/admin-web/src/app/(app)/clientes/page.tsx`, `apps/admin-web/src/components/companies/create-company-dialog.tsx`, `apps/admin-web/src/components/companies/edit-company-dialog.tsx`
+  - `apps/admin-web/src/app/(app)/entregadores/page.tsx`, `apps/admin-web/src/components/drivers/create-driver-dialog.tsx`, `apps/admin-web/src/components/drivers/driver-maintenance.tsx`
+  - `apps/admin-web/src/app/(app)/pedidos/page.tsx`
+  - `apps/admin-web/src/app/(app)/relatorios/{geral,clientes,entregadores,financeiro,horarios-pico,modalidades,operacional,pedidos,historico,tempos-sla}/page.tsx`
+  - `docs/business-rules.md`, `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm typecheck` (8 pacotes) | aprovado |
+| `pnpm lint` (8 pacotes) | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| `pnpm --filter @motoboycity/api exec jest --runInBand` | 121 suítes aprovadas (1 pulada), 1835 testes aprovados (1 pulado) |
+| `pnpm --filter @motoboycity/admin-web test` | 64 testes aprovados (3 novos em `region-selector.test.mjs`) |
+| `pnpm --filter @motoboycity/company-web test` | 68 arquivos, 665 testes aprovados |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 31 suítes, 261 testes aprovados |
+| builds de `@motoboycity/validation`, `@motoboycity/api`, `@motoboycity/admin-web` e `@motoboycity/company-web` | aprovados |
+
+Não verificado: suíte E2E da API, ensaio manual autenticado nos painéis web e geração/ensaio do APK `pilot.30` em aparelho físico. Sem commit nem push.
+
+## 2026-10-31 — Propaganda da FM Software reposicionada no final da Home do Company Web
+
+- **Decisão e motivo:** a pedido do usuário, mover o banner `FmSoftwarePromo` do topo da Home do painel da empresa para o final da página, logo abaixo da grade operacional (formulário de novo pedido, mapa e listas de pedidos), removendo também o atributo `priority` da imagem por não estar mais na primeira dobra.
+- **Arquivos:**
+  - `apps/company-web/src/app/(app)/page.tsx`
+  - `apps/company-web/src/components/layout/fm-software-promo.tsx`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/company-web run typecheck` | aprovado |
+| `pnpm --filter @motoboycity/company-web run lint` | aprovado |
+| `pnpm --filter @motoboycity/company-web exec vitest run src/components/layout/fm-software-promo.test.tsx` | 1 teste aprovado |
+| `pnpm --filter @motoboycity/company-web run build` | aprovado |
+
+Não verificado: inspeção visual autenticada no navegador. Sem commit nem push.
+
+
+## 2026-10-31 — Confirmação antes de ficar offline no app do motoboy
+
+- **Decisão e motivo:** a pedido do usuário, exigir confirmação (`Alert.alert` com `Cancelar` e `Ficar offline`) quando o motoboy está ativo e toca no interruptor `ActiveToggle` para sair de linha, evitando desconexão acidental por esbarrão; o toque para ficar online (`Inativo` -> `Ativo`) continua imediato.
+- **Arquivos:**
+  - `apps/driver-app/src/components/ActiveToggle.tsx`
+  - `apps/driver-app/__tests__/ActiveToggle.test.tsx`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/driver-app run typecheck` | aprovado |
+| `pnpm --filter @motoboycity/driver-app run lint` | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| `pnpm --filter @motoboycity/driver-app exec jest --runInBand` | 32 suítes, 265 testes aprovados (4 novos em `ActiveToggle.test.tsx`) |
+
+Não verificado: geração e teste manual do APK `pilot.30` em aparelho físico Android. Sem commit nem push.
+
+## 2026-11-01 — Confirmação de entrega com volta antes de criar pedido no Company Web
+
+- **Decisão e motivo:** empresas estavam esquecendo de marcar a caixa de retorno ao criar pedidos; a pedido do usuário, antes de concluir a criação de pedido avulso ou lote no painel da loja (`OperationalOrderForm`, `CallDriverDialog` e `CreateOrderForm`), o sistema valida os campos e exibe a pergunta explícita **"Este pedido tem volta?"** / **"Este lote tem volta?"** com as ações **Não, sem volta**, **Sim, com volta** e **Voltar e revisar**, passando o `requiresReturn` escolhido diretamente para a mutação (sem leitura defasada de estado).
+- **Arquivos:**
+  - `apps/company-web/src/components/operations/return-confirmation-dialog.tsx`
+  - `apps/company-web/src/components/operations/operational-order-form.tsx`
+  - `apps/company-web/src/components/operations/operational-order-form.test.tsx`
+  - `apps/company-web/src/components/operations/call-driver-dialog.tsx`
+  - `apps/company-web/src/components/operations/call-driver-dialog.test.tsx`
+  - `apps/company-web/src/components/orders/create-order-form.tsx`
+  - `docs/business-rules.md`, `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/company-web run typecheck` | aprovado |
+| `pnpm --filter @motoboycity/company-web run lint` | aprovado (0 erros, 0 avisos) |
+| `pnpm --filter @motoboycity/company-web test` | 68 arquivos, 671 testes aprovados (6 novos cenários de confirmação de volta) |
+| `pnpm --filter @motoboycity/company-web run build` | aprovado (39 rotas geradas) |
+
+Não verificado: ensaio visual manual autenticado no navegador. Sem commit nem push.

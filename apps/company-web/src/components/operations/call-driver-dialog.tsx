@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -23,6 +24,7 @@ import { companyAddressApi, deliveriesApi, serviceTypesApi } from '@/lib/api-cli
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import { session } from '@/lib/session';
 import { DispatchTrackingPanel } from './dispatch-tracking-panel';
+import { ReturnConfirmationStep, returnConfirmationCopy } from './return-confirmation-dialog';
 import { ServiceClosedNotice, useServiceHours } from './service-closed-notice';
 
 /**
@@ -40,6 +42,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   const [quantity, setQuantity] = useState('1');
   const [serviceTypeId, setServiceTypeId] = useState('');
   const [requiresReturn, setRequiresReturn] = useState(false);
+  const [confirmingReturn, setConfirmingReturn] = useState(false);
   const [driverNote, setDriverNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const creationAttempt = useRef<IdempotencyAttempt | null>(null);
@@ -75,7 +78,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   const parsedQuantity = Number(quantity);
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (withReturn: boolean) => {
       /**
        * Destino sempre por GPS: este é o caminho curto, em que o entregador
        * confirma os locais no ato. Quem já sabe o endereço usa o formulário
@@ -84,7 +87,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
       const delivery: CreateDeliveryPayload = {
         serviceTypeId: selectedServiceTypeId,
         destinationKnownAtCreation: false,
-        requiresReturn,
+        requiresReturn: withReturn,
         ...(driverNote.trim() && { driverNote: driverNote.trim() }),
       };
 
@@ -136,7 +139,13 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     ) {
       return setError(`Informe de ${MIN_DELIVERIES} a ${MAX_DELIVERIES} entregas.`);
     }
-    mutation.mutate();
+    setConfirmingReturn(true);
+  }
+
+  function confirmAndCall(withReturn: boolean) {
+    setRequiresReturn(withReturn);
+    setConfirmingReturn(false);
+    mutation.mutate(withReturn);
   }
 
   function reset() {
@@ -145,6 +154,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
     setTrackedBatchId(null);
     setQuantity('1');
     setRequiresReturn(false);
+    setConfirmingReturn(false);
     setDriverNote('');
     setError(null);
   }
@@ -152,6 +162,7 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
   // A confirmacao da API pode levar alguns segundos. Entrar no acompanhamento
   // no mesmo clique evita deixar a empresa presa no formulario ate a resposta.
   const isTracking = mutation.isPending || trackedIds.length > 0;
+  const returnCopy = returnConfirmationCopy(parsedQuantity);
 
   return (
     <Dialog
@@ -166,7 +177,16 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
       <DialogTrigger render={children as React.ReactElement} />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isTracking ? 'Acompanhando' : 'Chamar entregador'}</DialogTitle>
+          <DialogTitle>
+            {isTracking
+              ? 'Acompanhando'
+              : confirmingReturn
+                ? returnCopy.title
+                : 'Chamar entregador'}
+          </DialogTitle>
+          {!isTracking && confirmingReturn && (
+            <DialogDescription>{returnCopy.description}</DialogDescription>
+          )}
         </DialogHeader>
 
         {isTracking ? (
@@ -199,6 +219,13 @@ export function CallDriverDialog({ children }: { children: React.ReactNode }) {
               </Button>
             </DialogFooter>
           </>
+        ) : confirmingReturn ? (
+          <ReturnConfirmationStep
+            defaultRequiresReturn={requiresReturn}
+            disabled={mutation.isPending || serviceHours.data?.accepting === false}
+            onConfirm={confirmAndCall}
+            onBack={() => setConfirmingReturn(false)}
+          />
         ) : (
           <form onSubmit={submit} className="contents">
             <DialogBody className="space-y-4">

@@ -37,6 +37,15 @@ export class CompanyBusinessHoursService {
     }
 
     const settings = await this.platformSettings.get();
+    if (settings.acceptingOrders === false) {
+      return {
+        accepting: false,
+        manuallyClosed: true,
+        nextOpeningLabel: null,
+        todayWindows: [],
+      };
+    }
+
     /**
      * Interruptor desligado significa aceitar sempre — a mesma primeira linha
      * de `assertWithinBusinessHours`. Se aqui fosse diferente, a loja veria

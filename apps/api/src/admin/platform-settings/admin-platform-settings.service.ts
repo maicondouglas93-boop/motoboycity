@@ -1,5 +1,5 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { DriverPunishmentTrigger, PlatformSettingsItem } from '@motoboycity/types';
 import type { UpdatePlatformSettingsPayload } from '@motoboycity/validation';
 import type { Queue } from 'bullmq';
@@ -8,6 +8,7 @@ import {
   RELEASE_DRIVER_REPASSES_JOB,
 } from '../../finance/financial-payout.constants';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AdminAuditService } from '../audit/admin-audit.service';
 
 const SETTINGS_ID = 'global';
@@ -25,6 +26,7 @@ export class AdminPlatformSettingsService {
     private readonly prisma: PrismaService,
     private readonly audit: AdminAuditService,
     @InjectQueue(FINANCE_QUEUE) private readonly financeQueue: Queue,
+    @Optional() private readonly realtimeGateway?: RealtimeGateway,
   ) {}
 
   async get(): Promise<PlatformSettingsItem> {
@@ -41,6 +43,7 @@ export class AdminPlatformSettingsService {
         pickupAssignmentTimeoutMinutes: null,
         collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
+        acceptingOrders: true,
         businessHoursEnabled: false,
         // Segunda-feira, que era o ciclo fixo antes de o dia virar configuravel.
         withdrawalWeekday: 1,
@@ -90,6 +93,9 @@ export class AdminPlatformSettingsService {
       }),
       ...(payload.returnProximityRadiusMeters !== undefined && {
         returnProximityRadiusMeters: payload.returnProximityRadiusMeters,
+      }),
+      ...(payload.acceptingOrders !== undefined && {
+        acceptingOrders: payload.acceptingOrders,
       }),
       ...(payload.businessHoursEnabled !== undefined && {
         businessHoursEnabled: payload.businessHoursEnabled,
@@ -192,6 +198,17 @@ export class AdminPlatformSettingsService {
       }
     }
 
+    if (payload.acceptingOrders !== undefined) {
+      this.realtimeGateway?.emitServiceStatusChanged?.({
+        acceptingOrders: settings.acceptingOrders,
+      });
+      this.realtimeGateway?.emitAdminActivity?.(
+        settings.acceptingOrders
+          ? 'Atendimentos abertos pela administração.'
+          : 'Atendimentos finalizados pela administração. Novos pedidos estão bloqueados.',
+      );
+    }
+
     return this.toItem(settings);
   }
 
@@ -202,6 +219,7 @@ export class AdminPlatformSettingsService {
     pickupAssignmentTimeoutMinutes: number | null;
     collectionProximityRadiusMeters: number | null;
     returnProximityRadiusMeters: number | null;
+    acceptingOrders: boolean;
     businessHoursEnabled: boolean;
     withdrawalWeekday: number | null;
     minMinutesBeforeCollect: number | null;
@@ -233,6 +251,7 @@ export class AdminPlatformSettingsService {
       pickupAssignmentTimeoutMinutes: settings.pickupAssignmentTimeoutMinutes,
       collectionProximityRadiusMeters: settings.collectionProximityRadiusMeters,
       returnProximityRadiusMeters: settings.returnProximityRadiusMeters,
+      acceptingOrders: settings.acceptingOrders,
       businessHoursEnabled: settings.businessHoursEnabled,
       withdrawalWeekday: settings.withdrawalWeekday,
       minMinutesBeforeCollect: settings.minMinutesBeforeCollect,

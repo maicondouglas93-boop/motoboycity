@@ -26,6 +26,7 @@ import {
 import { adminReportsApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { useMoney } from '@/lib/money';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 type SortKey = 'serviceTypeName' | 'createdCount' | 'completedCount' | 'completedTotalValue';
@@ -48,6 +49,7 @@ function csvNumber(value: number): string {
 export default function ServiceTypesReportPage() {
   const token = session.getToken();
   const money = useMoney();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
@@ -57,8 +59,12 @@ export default function ServiceTypesReportPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', 'service-types', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', 'service-types', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

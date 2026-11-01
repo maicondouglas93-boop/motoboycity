@@ -30,6 +30,12 @@ novamente. O fechamento (`complete-return`) usa a confirmação do motoboy e,
 quando o ADM configurar o raio de retorno, também exige GPS válido e proximidade
 do endereço principal da empresa.
 
+Para evitar que as lojas esqueçam de marcar o retorno (2026-11-01), antes de
+finalizar a criação de pedido ou lote no `company-web` (formulário operacional
+da Home e atalho **Chamar entregador**), o painel pergunta explicitamente se há
+volta (**Não, sem volta** / **Sim, com volta**) e só então envia a criação com o
+`requiresReturn` confirmado.
+
 ### Dinheiro a devolver à loja (2026-10-19)
 
 Pedido do cliente, decisões confirmadas pelo responsável:
@@ -392,10 +398,29 @@ ele for recusado, a empresa pode corrigir os dados e enviar outro.
 
 ## Regiões
 
-Cada empresa e entregador pertence a uma única região. A operação pode ter
-somente uma praça ativa hoje, mas o cadastro administrativo de entregador exige
-que o admin selecione explicitamente uma região ativa; não existe vínculo
-com várias regiões para o mesmo entregador.
+Cada empresa e entregador pertence a uma única região (cidade/praça operacional).
+Não existe vínculo simultâneo com várias regiões para a mesma empresa ou o mesmo
+entregador.
+
+Decisões confirmadas em 2026-10-31:
+
+- **Mesmo login de ADM com seletor de cidade no painel:** a administração mantém
+  um único login (`ADMIN`) e alterna no topo do painel entre **Todas as cidades**
+  e uma cidade específica para separar listagens e cadastros de empresas e
+  entregadores, visão operacional da Home (mapa, filas, motoboys online,
+  motoboys sem posição, reordenação da fila da cidade preservando os slots das
+  demais praças e feed de atividade), lista/rastreamento de pedidos e relatórios
+  operacionais.
+- **Escolha de cidade no autocadastro:** tanto o autocadastro da empresa no
+  painel web (`/register`) quanto o autocadastro do motoboy no aplicativo
+  (`RegisterScreen`) consultam as cidades ativas (`GET /auth/regions`) e exigem a
+  escolha da cidade de atuação. A API mantém fallback opcional para a única
+  região ativa apenas por retrocompatibilidade com APKs antigos ainda em campo.
+  O ADM continua podendo definir a cidade ao cadastrar pelo painel e transferir
+  empresa ou entregador de cidade na ficha de manutenção.
+- **Escopo preservado:** tabelas de preço já são regionais; taxas adicionais,
+  horários de funcionamento e o botão manual de **Abrir / Finalizar
+  atendimentos** permanecem globais nesta etapa.
 
 ## Cadastro de entregador pelo administrador
 
@@ -1107,6 +1132,32 @@ Decisões confirmadas pelo responsável:
 A mudança de escala fica na auditoria administrativa
 (`DRIVER_SCHEDULE_CHANGED`). Ao salvar uma escala que coloca o motoboy no
 turno, o despacho roda de novo para pedidos que esperam motoboy.
+
+---
+
+## Controle manual de abertura e encerramento dos atendimentos (2026-10-31)
+
+Decisões confirmadas pelo responsável:
+
+- **Botão na Home do ADM**: o cabeçalho da Home administrativa exibe **"Finalizar
+  atendimentos"** quando a operação está aberta e **"Abrir atendimentos"** (mais
+  aviso em destaque no topo da Home) quando encerrada, sempre com modal de
+  confirmação e registro na auditoria de `PlatformSettings`.
+- **Chave geral persistente (`acceptingOrders`)**: ao finalizar manualmente os
+  atendimentos, a operação permanece fechada — mesmo na virada do dia ou dentro
+  de uma faixa semanal configurada — até um administrador clicar em **"Abrir
+  atendimentos"**. Ao abrir, o horário semanal de funcionamento continua
+  valendo normalmente caso `businessHoursEnabled` esteja ligado.
+- **Bloqueio de qualquer novo lançamento**: enquanto os atendimentos estiverem
+  encerrados (`acceptingOrders = false`), ninguém consegue lançar um novo pedido
+  — nem pedidos imediatos nem agendados, seja pelo painel da loja (avulso ou em
+  lote), pelo modal do ADM em nome da empresa, pela loja online ou pela
+  integração aiqfome. A loja também não pode antecipar (`release-scheduled`) um
+  pedido agendado para a fila imediata enquanto os atendimentos estiverem
+  encerrados.
+- **Pedidos já lançados seguem normalmente**: entregas criadas antes do
+  encerramento continuam seu ciclo normal (aceite, coleta, entrega, retorno e
+  gestão administrativa) até a conclusão.
 
 Decisões confirmadas diretamente com o responsável do produto em sessões
 anteriores. Se uma regra aqui parecer desatualizada em relação ao código,

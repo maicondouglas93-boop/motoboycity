@@ -31,6 +31,7 @@ import {
 import { idempotencyAttemptFor, type IdempotencyAttempt } from '@/lib/idempotency';
 import type { CloneSeed } from './clone-delivery';
 import { DispatchTrackingDialog } from './dispatch-tracking-dialog';
+import { ReturnConfirmationDialog } from './return-confirmation-dialog';
 import { useServiceHours } from './service-closed-notice';
 import {
   GoogleAddressAutocomplete,
@@ -125,6 +126,7 @@ export function OperationalOrderForm({
    */
   const [clonedFrom, setClonedFrom] = useState<number | null>(clone?.displayNumber ?? null);
   const [cloneWarnings, setCloneWarnings] = useState<string[]>(clone?.seed.warnings ?? []);
+  const [confirmingReturn, setConfirmingReturn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const creationAttempt = useRef<IdempotencyAttempt | null>(null);
   /**
@@ -165,7 +167,7 @@ export function OperationalOrderForm({
     );
   }
 
-  function payloadFor(draft: DeliveryDraft): CreateDeliveryPayload {
+  function payloadFor(draft: DeliveryDraft, withReturn: boolean): CreateDeliveryPayload {
     return {
       serviceTypeId: selectedServiceTypeId,
       destinationKnownAtCreation: destinationKnown,
@@ -174,7 +176,7 @@ export function OperationalOrderForm({
       externalOrderNumber: draft.externalOrderNumber || undefined,
       customerPaymentMethod: draft.customerPaymentMethod || undefined,
       driverNote: draft.driverNote || undefined,
-      requiresReturn,
+      requiresReturn: withReturn,
       ...(destinationKnown && draft.address
         ? {
             dropoffAddress: {
@@ -218,11 +220,14 @@ export function OperationalOrderForm({
   const serviceHours = useServiceHours(token);
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (withReturn: boolean) => {
       const request =
         mode === 'batch'
-          ? { kind: 'batch' as const, deliveries: drafts.map(payloadFor) }
-          : { kind: 'single' as const, delivery: payloadFor(drafts[0]!) };
+          ? {
+              kind: 'batch' as const,
+              deliveries: drafts.map((draft) => payloadFor(draft, withReturn)),
+            }
+          : { kind: 'single' as const, delivery: payloadFor(drafts[0]!, withReturn) };
       const attempt = idempotencyAttemptFor(creationAttempt.current, request);
       creationAttempt.current = attempt;
 
@@ -245,6 +250,7 @@ export function OperationalOrderForm({
       );
       setTrackedBatchId('deliveries' in result ? result.batchId : null);
       setError(null);
+      setRequiresReturn(false);
       setDrafts(mode === 'batch' ? [emptyDraft(), emptyDraft()] : [emptyDraft()]);
       setClonedFrom(null);
       setCloneWarnings([]);
@@ -306,7 +312,13 @@ export function OperationalOrderForm({
           : 'Selecione no Google um endereço completo para cada destino.',
       );
     }
-    mutation.mutate();
+    setConfirmingReturn(true);
+  }
+
+  function confirmAndCreate(withReturn: boolean) {
+    setRequiresReturn(withReturn);
+    setConfirmingReturn(false);
+    mutation.mutate(withReturn);
   }
 
   return (
@@ -525,6 +537,14 @@ export function OperationalOrderForm({
         </Button>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
+      <ReturnConfirmationDialog
+        open={confirmingReturn}
+        onOpenChange={setConfirmingReturn}
+        deliveryCount={mode === 'batch' ? drafts.length : 1}
+        defaultRequiresReturn={requiresReturn}
+        disabled={mutation.isPending || serviceHours.data?.accepting === false}
+        onConfirm={confirmAndCreate}
+      />
       {/*
         A janela abre já no envio (`mutation.isPending`): esperar a resposta
         deixaria a tela parada de dois a cinco segundos exatamente no momento

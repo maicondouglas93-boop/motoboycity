@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { adminReportsApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { useMoney } from '@/lib/money';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 function csvNumber(value: number | null): string {
@@ -27,6 +28,7 @@ function csvNumber(value: number | null): string {
 export default function DriversReportPage() {
   const token = session.getToken();
   const money = useMoney();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
@@ -34,8 +36,12 @@ export default function DriversReportPage() {
   const [search, setSearch] = useState('');
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', 'drivers', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', 'drivers', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

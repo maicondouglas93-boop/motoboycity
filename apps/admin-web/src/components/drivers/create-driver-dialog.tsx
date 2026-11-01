@@ -100,6 +100,7 @@ function errorFieldFromPath(path: string): ErrorField {
 
 interface CreateDriverDialogProps {
   accessToken: string;
+  defaultRegionId?: string;
   serviceTypes: ServiceTypeItem[];
   serviceTypesLoading: boolean;
   serviceTypesError: boolean;
@@ -141,6 +142,7 @@ function SectionHeading({
 
 export function CreateDriverDialog({
   accessToken,
+  defaultRegionId,
   serviceTypes,
   serviceTypesLoading,
   serviceTypesError,
@@ -166,7 +168,8 @@ export function CreateDriverDialog({
   const createMutation = useMutation({
     mutationFn: (payload: CreateAdminDriverPayload) => adminDriversApi.create(accessToken, payload),
     onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
       onCreated(result);
       resetForm();
       setOpen(false);
@@ -202,7 +205,11 @@ export function CreateDriverDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && createMutation.isPending) return;
     setOpen(nextOpen);
-    if (!nextOpen) resetForm();
+    if (nextOpen) {
+      setForm({ ...initialForm, regionId: defaultRegionId ?? '' });
+    } else {
+      resetForm();
+    }
   }
 
   function updateField(field: FormField, value: string) {

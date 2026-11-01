@@ -34,8 +34,8 @@ export class LocationSilenceService {
    * O painel quer o ESTADO atual, nao o log de avisos: e este o numero que
    * responde a ligacao da loja perguntando por que o pedido nao anda.
    */
-  async listSilentDrivers(now: Date = new Date()): Promise<SilentDriverItem[]> {
-    const { threshold, drivers } = await this.collect(now);
+  async listSilentDrivers(now: Date = new Date(), regionId?: string): Promise<SilentDriverItem[]> {
+    const { threshold, drivers } = await this.collect(now, regionId);
     if (threshold === null) {
       return [];
     }
@@ -115,7 +115,10 @@ export class LocationSilenceService {
     return avisados;
   }
 
-  private async collect(now: Date): Promise<{
+  private async collect(
+    now: Date,
+    regionId?: string,
+  ): Promise<{
     threshold: number | null;
     drivers: (SilentDriverItem & { alertedAt: Date | null })[];
   }> {
@@ -126,14 +129,22 @@ export class LocationSilenceService {
     }
 
     const deliveries = await this.prisma.delivery.findMany({
-      where: { status: { in: ON_STREET_STATUSES }, driverId: { not: null } },
+      where: {
+        status: { in: ON_STREET_STATUSES },
+        driverId: { not: null },
+        ...(regionId && { company: { regionId } }),
+      },
       select: {
         id: true,
         displayNumber: true,
         driverId: true,
         statusChangedAt: true,
         driver: {
-          select: { locationSilenceAlertedAt: true, user: { select: { name: true } } },
+          select: {
+            regionId: true,
+            locationSilenceAlertedAt: true,
+            user: { select: { name: true } },
+          },
         },
       },
     });
@@ -184,6 +195,7 @@ export class LocationSilenceService {
       porMotoboy.set(driverId, {
         driverId,
         driverName: delivery.driver?.user.name ?? 'Motoboy',
+        ...(delivery.driver?.regionId ? { regionId: delivery.driver.regionId } : {}),
         activeDeliveryCount: 1,
         deliveryNumbers: [delivery.displayNumber],
         lastContactAt: contato.toISOString(),

@@ -3,7 +3,7 @@
 import { useState, type SubmitEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { registerCompanySchema } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
 import { Button } from '@/components/ui/button';
@@ -14,13 +14,25 @@ import { Wordmark } from '@/components/brand/wordmark';
 import { RouteDiagram } from '@/components/brand/route-diagram';
 import { authApi } from '@/lib/api-client';
 
+const initialFormState = {
+  regionId: '',
+  name: '',
+  email: '',
+  phone: '',
+  document: '',
+  legalName: '',
+  tradeName: '',
+  password: '',
+  confirmPassword: '',
+};
+
 /**
  * `wide` marca os campos que ocupam a linha inteira. Com oito campos, a grade
  * de duas colunas encurta o formulário o suficiente para o botão de enviar
  * caber na tela, em vez de virar uma coluna longa de rolagem.
  */
 const FIELDS: {
-  id: keyof typeof initialFormState;
+  id: Exclude<keyof typeof initialFormState, 'regionId'>;
   label: string;
   type?: string;
   autoComplete?: string;
@@ -41,22 +53,24 @@ const FIELDS: {
   },
 ];
 
-const initialFormState = {
-  name: '',
-  email: '',
-  phone: '',
-  document: '',
-  legalName: '',
-  tradeName: '',
-  password: '',
-  confirmPassword: '',
-};
-
 export default function RegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState(initialFormState);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+
+  const regionsQuery = useQuery({
+    queryKey: ['public', 'regions'],
+    queryFn: () => authApi.listActiveRegions(),
+  });
+  const regions = regionsQuery.data ?? [];
+  const effectiveRegionId = form.regionId || (regions.length === 1 ? regions[0]!.id : '');
+
+  const selectedRegionName =
+    regions.find((region) => region.id === effectiveRegionId)?.name ??
+    (regions.length > 0 && regions.length <= 3
+      ? regions.map((region) => region.name).join(' · ')
+      : 'MOTOboyCity');
 
   const mutation = useMutation({
     mutationFn: authApi.registerCompany,
@@ -76,7 +90,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setFormError(null);
 
-    const result = registerCompanySchema.safeParse(form);
+    const result = registerCompanySchema.safeParse({ ...form, regionId: effectiveRegionId });
     if (!result.success) {
       const errors: Record<string, string> = {};
       for (const issue of result.error.issues) {
@@ -88,6 +102,7 @@ export default function RegisterPage() {
 
     setFieldErrors({});
     mutation.mutate({
+      regionId: result.data.regionId,
       name: result.data.name,
       email: result.data.email,
       phone: result.data.phone,
@@ -116,7 +131,7 @@ export default function RegisterPage() {
         </div>
 
         <p className="font-mono text-[10px] tracking-wide whitespace-nowrap text-white/40 uppercase lg:text-[11px]">
-          Lajinha · MG
+          {selectedRegionName}
         </p>
       </aside>
 
@@ -131,6 +146,48 @@ export default function RegisterPage() {
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
             <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="regionId">Cidade de atuação</Label>
+                <select
+                  id="regionId"
+                  value={effectiveRegionId}
+                  onChange={(event) =>
+                    setForm((previous) => ({ ...previous, regionId: event.target.value }))
+                  }
+                  disabled={regionsQuery.isLoading || regions.length === 0}
+                  aria-invalid={Boolean(fieldErrors['regionId'])}
+                  className="h-9 w-full min-w-0 rounded-md border border-input bg-card px-3 py-1 text-base transition-[border-color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 pointer-coarse:h-11 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 md:text-sm"
+                >
+                  <option value="">
+                    {regionsQuery.isLoading
+                      ? 'Carregando cidades...'
+                      : regions.length === 0
+                        ? 'Nenhuma cidade disponível'
+                        : 'Selecione a cidade da empresa'}
+                  </option>
+                  {regions.map((region) => (
+                    <option key={region.id} value={region.id}>
+                      {region.name}
+                    </option>
+                  ))}
+                </select>
+                {regionsQuery.isError && (
+                  <p className="text-xs text-destructive">
+                    Não foi possível carregar as cidades.{' '}
+                    <button
+                      type="button"
+                      className="font-semibold underline"
+                      onClick={() => void regionsQuery.refetch()}
+                    >
+                      Tentar novamente
+                    </button>
+                  </p>
+                )}
+                {fieldErrors['regionId'] && (
+                  <p className="text-xs text-destructive">{fieldErrors['regionId']}</p>
+                )}
+              </div>
+
               {FIELDS.map((field) => (
                 <div key={field.id} className={`space-y-1.5 ${field.wide ? 'sm:col-span-2' : ''}`}>
                   <Label htmlFor={field.id}>{field.label}</Label>

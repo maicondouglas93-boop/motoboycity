@@ -67,10 +67,11 @@ export class AdminReportsService {
     const period = this.resolvePeriod(query);
     const agora = new Date();
     const anterior = previousComparableWindow(period);
+    const regionFilter = query.regionId ? { company: { regionId: query.regionId } } : {};
     const [createdDeliveries, completedDeliveries, driverDeliveries, driverOffers] =
       await Promise.all([
         this.prisma.delivery.findMany({
-          where: { createdAt: { gte: period.from, lte: period.to } },
+          where: { createdAt: { gte: period.from, lte: period.to }, ...regionFilter },
           select: {
             status: true,
             createdAt: true,
@@ -79,7 +80,11 @@ export class AdminReportsService {
           },
         }),
         this.prisma.delivery.findMany({
-          where: { status: 'COMPLETED', statusChangedAt: { gte: period.from, lte: period.to } },
+          where: {
+            status: 'COMPLETED',
+            statusChangedAt: { gte: period.from, lte: period.to },
+            ...regionFilter,
+          },
           select: {
             totalValue: true,
             driverValue: true,
@@ -98,6 +103,7 @@ export class AdminReportsService {
           where: {
             driverId: { not: null },
             statusChangedAt: { gte: period.from, lte: period.to },
+            ...regionFilter,
           },
           select: {
             driverId: true,
@@ -111,7 +117,10 @@ export class AdminReportsService {
           },
         }),
         this.prisma.deliveryOffer.findMany({
-          where: { offeredAt: { gte: period.from, lte: period.to } },
+          where: {
+            offeredAt: { gte: period.from, lte: period.to },
+            ...(query.regionId && { delivery: { company: { regionId: query.regionId } } }),
+          },
           select: {
             driverId: true,
             response: true,
@@ -130,12 +139,13 @@ export class AdminReportsService {
      */
     const [criadasAntes, concluidasAntes] = await Promise.all([
       this.prisma.delivery.count({
-        where: { createdAt: { gte: anterior.from, lte: anterior.to } },
+        where: { createdAt: { gte: anterior.from, lte: anterior.to }, ...regionFilter },
       }),
       this.prisma.delivery.aggregate({
         where: {
           status: 'COMPLETED',
           statusChangedAt: { gte: anterior.from, lte: anterior.to },
+          ...regionFilter,
         },
         _count: { _all: true },
         _sum: { totalValue: true },

@@ -94,6 +94,7 @@ export interface DriverServiceTypesResult {
 export interface ListDriversFilters {
   approvalStatus?: DriverApprovalStatus;
   accountStatus?: DriverAccountStatus;
+  regionId?: string;
 }
 
 @Injectable()
@@ -204,6 +205,7 @@ export class AdminDriversService {
       where: {
         ...(filters.approvalStatus && { approvalStatus: filters.approvalStatus }),
         ...(filters.accountStatus && { accountStatus: filters.accountStatus }),
+        ...(filters.regionId && { regionId: filters.regionId }),
       },
       orderBy: { createdAt: 'desc' },
       include: {

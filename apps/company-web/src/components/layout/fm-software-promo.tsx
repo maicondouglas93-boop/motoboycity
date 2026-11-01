@@ -7,14 +7,8 @@ const whatsappMessage = encodeURIComponent(
 const whatsappUrl = `https://wa.me/5519997050303?text=${whatsappMessage}`;
 
 /**
- * Anúncio de autoria do desenvolvedor, no alto do painel.
- *
- * Ficava no rodapé da tela, abaixo do mapa e das colunas de pedidos — ou seja,
- * só era visto por quem rolasse a página inteira, o que quase ninguém faz num
- * painel operacional. Subiu para logo abaixo do cabeçalho, onde aparece sem
- * rolagem, mas ainda **depois** dos avisos de operação fechada e de falha de
- * carga: propaganda não passa na frente do que muda o trabalho do lojista nos
- * próximos minutos.
+ * Anúncio de autoria do desenvolvedor, posicionado no rodapé da Home do painel
+ * da empresa, abaixo da grade operacional (formulário, mapa e colunas de pedidos).
  */
 export function FmSoftwarePromo() {
   return (
@@ -34,7 +28,6 @@ export function FmSoftwarePromo() {
           alt="FM Software"
           width={706}
           height={468}
-          priority
           className="h-14 w-auto shrink-0 mix-blend-multiply"
         />
 

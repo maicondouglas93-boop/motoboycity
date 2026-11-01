@@ -42,7 +42,7 @@ describe('AuthService', () => {
     driver: { findUnique: jest.Mock; create: jest.Mock };
     driverServiceType: { createMany: jest.Mock };
     serviceType: { findMany: jest.Mock };
-    region: { findFirst: jest.Mock };
+    region: { findFirst: jest.Mock; findMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let jwtService: { signAsync: jest.Mock };
@@ -60,7 +60,7 @@ describe('AuthService', () => {
       driver: { findUnique: jest.fn(), create: jest.fn() },
       driverServiceType: { createMany: jest.fn() },
       serviceType: { findMany: jest.fn() },
-      region: { findFirst: jest.fn() },
+      region: { findFirst: jest.fn(), findMany: jest.fn() },
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) =>
@@ -77,6 +77,25 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get(AuthService);
+  });
+
+  describe('listActiveRegions', () => {
+    it('lista apenas cidades ativas ordenadas por nome', async () => {
+      prisma.region.findMany.mockResolvedValue([
+        { id: 'region-1', name: 'Lajinha' },
+        { id: 'region-2', name: 'Mutum' },
+      ]);
+
+      await expect(service.listActiveRegions()).resolves.toEqual([
+        { id: 'region-1', name: 'Lajinha' },
+        { id: 'region-2', name: 'Mutum' },
+      ]);
+      expect(prisma.region.findMany).toHaveBeenCalledWith({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+    });
   });
 
   describe('me', () => {
@@ -168,6 +187,26 @@ describe('AuthService', () => {
       });
       expect(prisma.company.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ regionId: 'region-2' }) }),
+      );
+    });
+
+    it('cadastro público usa a cidade ativa enviada em payload.regionId', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.company.findUnique.mockResolvedValue(null);
+      prisma.region.findFirst.mockResolvedValue({ id: 'region-mutum' });
+      prisma.user.create.mockResolvedValue({ id: 'user-3' });
+      prisma.company.create.mockResolvedValue({
+        id: 'company-3',
+        status: 'PENDING_APPROVAL',
+      });
+
+      await service.registerCompany({ ...validPayload, regionId: 'region-mutum' });
+
+      expect(prisma.region.findFirst).toHaveBeenCalledWith({
+        where: { id: 'region-mutum', active: true },
+      });
+      expect(prisma.company.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ regionId: 'region-mutum' }) }),
       );
     });
 

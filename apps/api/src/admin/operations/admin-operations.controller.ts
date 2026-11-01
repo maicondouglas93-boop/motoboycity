@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   adminActivityQuerySchema,
+  adminSilentDriversQuerySchema,
   deliveryOperationsQuerySchema,
   reorderDispatchQueueSchema,
   reofferDeliverySchema,
   type AdminActivityQuery,
+  type AdminSilentDriversQuery,
   type DeliveryOperationsQuery,
   type ReorderDispatchQueuePayload,
   type ReofferDeliveryPayload,
@@ -52,8 +54,10 @@ export class AdminOperationsController {
    * aquele em que nao esta.
    */
   @Get('silent-drivers')
-  silentDrivers(): Promise<SilentDriverItem[]> {
-    return this.service.silentDrivers();
+  silentDrivers(
+    @Query(new ZodValidationPipe(adminSilentDriversQuerySchema)) query: AdminSilentDriversQuery,
+  ): Promise<SilentDriverItem[]> {
+    return this.service.silentDrivers(query);
   }
 
   @Patch('dispatch-queue')

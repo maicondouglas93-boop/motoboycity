@@ -5,6 +5,7 @@ import { MapPinOff } from 'lucide-react';
 import type { SilentDriverItem } from '@motoboycity/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { adminOperationsApi } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 /**
@@ -20,10 +21,14 @@ import { session } from '@/lib/session';
  */
 export function SilentDrivers() {
   const token = session.getToken();
+  const { regionId } = useAdminRegionFilter();
 
   const silentQuery = useQuery({
-    queryKey: ['admin', 'silent-drivers'],
-    queryFn: () => adminOperationsApi.silentDrivers(token as string),
+    queryKey: ['admin', 'silent-drivers', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminOperationsApi.silentDrivers(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
     // Mesma cadência do detector no servidor: atualizar mais rápido não traria
     // informação nova, só consulta.

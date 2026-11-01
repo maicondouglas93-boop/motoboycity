@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type {
   AdminActivityQuery,
+  AdminSilentDriversQuery,
   DeliveryOperationsQuery,
   ReorderDispatchQueuePayload,
   ReofferDeliveryPayload,
@@ -50,8 +51,8 @@ export class AdminOperationsService {
   }
 
   /** Delega: a regra de silencio vive junto do rastreamento, que e o dono do dado. */
-  silentDrivers(): Promise<SilentDriverItem[]> {
-    return this.locationSilenceService.listSilentDrivers();
+  silentDrivers(query?: AdminSilentDriversQuery): Promise<SilentDriverItem[]> {
+    return this.locationSilenceService.listSilentDrivers(undefined, query?.regionId);
   }
 
   async overview(user: User, filters: DeliveryOperationsQuery): Promise<AdminOperationsResult> {
@@ -73,6 +74,7 @@ export class AdminOperationsService {
         availability: 'AVAILABLE',
         approvalStatus: 'APPROVED',
         accountStatus: 'ACTIVE',
+        ...(filters.regionId && { regionId: filters.regionId }),
       },
       include: {
         user: { select: { name: true, phone: true, avatarUrl: true } },
@@ -172,10 +174,16 @@ export class AdminOperationsService {
     }
 
     const currentOrder = await this.livePresence.orderForDispatch(activeDriverIds);
-    const requestedDriverIds = new Set(payload.driverIds);
+    const uniqueRequested = [...new Set(payload.driverIds)];
+    const currentOrderSet = new Set(currentOrder);
+    const requestedDriverIds = new Set(uniqueRequested);
+    const replacementQueue = uniqueRequested.filter((driverId) => currentOrderSet.has(driverId));
+    let replacementIndex = 0;
     const finalOrder = [
-      ...payload.driverIds,
-      ...currentOrder.filter((driverId) => !requestedDriverIds.has(driverId)),
+      ...currentOrder.map((driverId) =>
+        requestedDriverIds.has(driverId) ? replacementQueue[replacementIndex++]! : driverId,
+      ),
+      ...uniqueRequested.filter((driverId) => !currentOrderSet.has(driverId)),
     ];
     await this.livePresence.replaceDispatchOrder(finalOrder);
 
@@ -193,7 +201,10 @@ export class AdminOperationsService {
     const take = query.limit;
     const [histories, offers, presences] = await Promise.all([
       this.prisma.deliveryStatusHistory.findMany({
-        where: { changedAt: { lt: before } },
+        where: {
+          changedAt: { lt: before },
+          ...(query.regionId && { delivery: { company: { regionId: query.regionId } } }),
+        },
         orderBy: { changedAt: 'desc' },
         take,
         include: {
@@ -210,7 +221,7 @@ export class AdminOperationsService {
               displayNumber: true,
               companyId: true,
               status: true,
-              company: { select: { tradeName: true } },
+              company: { select: { tradeName: true, regionId: true } },
               driver: {
                 select: {
                   id: true,
@@ -222,7 +233,10 @@ export class AdminOperationsService {
         },
       }),
       this.prisma.deliveryOffer.findMany({
-        where: { offeredAt: { lt: before } },
+        where: {
+          offeredAt: { lt: before },
+          ...(query.regionId && { delivery: { company: { regionId: query.regionId } } }),
+        },
         orderBy: { offeredAt: 'desc' },
         take,
         include: {
@@ -231,14 +245,17 @@ export class AdminOperationsService {
               id: true,
               displayNumber: true,
               companyId: true,
-              company: { select: { tradeName: true } },
+              company: { select: { tradeName: true, regionId: true } },
             },
           },
           driver: { include: { user: { select: { name: true } } } },
         },
       }),
       this.prisma.driverPresenceLog.findMany({
-        where: { wentOnlineAt: { lt: before } },
+        where: {
+          wentOnlineAt: { lt: before },
+          ...(query.regionId && { driver: { regionId: query.regionId } }),
+        },
         orderBy: { wentOnlineAt: 'desc' },
         take,
         include: { driver: { include: { user: { select: { name: true } } } } },
@@ -276,6 +293,9 @@ export class AdminOperationsService {
             driverName: driver?.name,
           }),
           at: history.changedAt.toISOString(),
+          ...(history.delivery.company.regionId
+            ? { regionId: history.delivery.company.regionId }
+            : {}),
           deliveryId: history.delivery.id,
           displayNumber: history.delivery.displayNumber,
           companyId: history.delivery.companyId,
@@ -294,6 +314,7 @@ export class AdminOperationsService {
           driverName: offer.driver.user.name,
         }),
         at: (offer.respondedAt ?? offer.offeredAt).toISOString(),
+        ...(offer.delivery.company.regionId ? { regionId: offer.delivery.company.regionId } : {}),
         deliveryId: offer.delivery.id,
         displayNumber: offer.delivery.displayNumber,
         companyId: offer.delivery.companyId,
@@ -307,6 +328,7 @@ export class AdminOperationsService {
           type: 'DRIVER_ONLINE' as const,
           message: `${presence.driver.user.name} ficou online.`,
           at: presence.wentOnlineAt.toISOString(),
+          ...(presence.driver.regionId ? { regionId: presence.driver.regionId } : {}),
           driverId: presence.driverId,
           driverName: presence.driver.user.name,
         },
@@ -317,6 +339,7 @@ export class AdminOperationsService {
                 type: 'DRIVER_OFFLINE' as const,
                 message: `${presence.driver.user.name} ficou offline.`,
                 at: presence.wentOfflineAt.toISOString(),
+                ...(presence.driver.regionId ? { regionId: presence.driver.regionId } : {}),
                 driverId: presence.driverId,
                 driverName: presence.driver.user.name,
               },

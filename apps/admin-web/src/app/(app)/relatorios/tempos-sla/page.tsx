@@ -29,6 +29,7 @@ import {
   adminPlatformSettingsApi,
   deliveriesApi,
 } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 const saoPauloDate = new Intl.DateTimeFormat('en-CA', {
@@ -187,6 +188,11 @@ function StageCard({
 }
 
 export default function StageTimesReportPage() {
+  const { regionId } = useAdminRegionFilter();
+  return <StageTimesReportContent key={regionId} regionId={regionId} />;
+}
+
+function StageTimesReportContent({ regionId }: { regionId: string }) {
   const token = session.getToken();
   const [from, setFrom] = useState(INITIAL_PERIOD.from);
   const [to, setTo] = useState(INITIAL_PERIOD.to);
@@ -203,13 +209,19 @@ export default function StageTimesReportPage() {
   }>({ ...INITIAL_PERIOD, excludeRetroactive: false });
 
   const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies'],
-    queryFn: () => adminCompaniesApi.list(token as string),
+    queryKey: ['admin', 'companies', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers'],
-    queryFn: () => adminDriversApi.list(token as string),
+    queryKey: ['admin', 'drivers', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminDriversApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const settingsQuery = useQuery({
@@ -218,8 +230,12 @@ export default function StageTimesReportPage() {
     enabled: Boolean(token),
   });
   const timesQuery = useQuery({
-    queryKey: ['admin', 'stage-times-report', appliedFilters],
-    queryFn: () => deliveriesApi.stageTimes(token as string, appliedFilters),
+    queryKey: ['admin', 'stage-times-report', regionId || undefined, appliedFilters],
+    queryFn: () =>
+      deliveriesApi.stageTimes(token as string, {
+        ...appliedFilters,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

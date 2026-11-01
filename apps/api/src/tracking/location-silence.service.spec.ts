@@ -236,5 +236,19 @@ describe('LocationSilenceService', () => {
 
       await expect(service.listSilentDrivers(agora)).resolves.toEqual([]);
     });
+
+    it('filtra apenas pedidos da cidade informada quando regionId é passado', async () => {
+      prisma.delivery.findMany.mockResolvedValue([]);
+
+      await expect(service.listSilentDrivers(agora, 'region-2')).resolves.toEqual([]);
+
+      expect(prisma.delivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            company: { regionId: 'region-2' },
+          }),
+        }),
+      );
+    });
   });
 });

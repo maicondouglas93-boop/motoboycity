@@ -1619,6 +1619,14 @@ model PlatformSettings {
   /// A distancia e calculada em linha reta (Haversine). Null = regra desligada.
   returnProximityRadiusMeters Int?
 
+  /// Chave geral manual da central ("Abrir atendimentos" / "Finalizar
+  /// atendimentos" na Home do ADM). Ligada por padrão para não fechar nenhuma
+  /// operação ao subir a migration. Quando `false`, nenhum novo pedido pode ser
+  /// lançado (loja, lote, agendado, ADM ou integração), permanecendo fechado até
+  /// reabertura manual; entregas já lançadas seguem normalmente até concluir.
+  /// Quando `true`, vale o horário semanal caso `businessHoursEnabled` esteja ligado.
+  acceptingOrders Boolean @default(true)
+
   /// Liga o bloqueio de pedido fora do horário de funcionamento. Desligado por
   /// padrão: uma operação que nunca configurou horário não pode acordar um dia
   /// recusando pedidos porque a tabela está vazia.

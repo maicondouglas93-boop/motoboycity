@@ -325,6 +325,16 @@ describe('RealtimeGateway', () => {
       });
     });
 
+    it('emite mudança de status dos atendimentos para admin e empresas', () => {
+      gateway.emitServiceStatusChanged({ acceptingOrders: false });
+
+      expect(serverTo).toHaveBeenCalledWith('admin');
+      expect(serverTo).toHaveBeenCalledWith('companies');
+      expect(serverEmit).toHaveBeenCalledWith('service:status-changed', {
+        acceptingOrders: false,
+      });
+    });
+
     it('emite localizacao publica sanitizada somente enquanto a entrega esta ativa', async () => {
       prisma.delivery.findUnique.mockResolvedValue({
         status: 'COLLECTED',

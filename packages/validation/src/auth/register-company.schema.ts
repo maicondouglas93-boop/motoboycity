@@ -20,9 +20,10 @@ const registerCompanyBaseSchema = z.object({
   password: z.string().min(8, 'A senha deve ter pelo menos 8 caracteres.'),
 });
 
-/** Usado pelo formulário (company-web) — inclui confirmação de senha. */
+/** Usado pelo formulário (company-web) — inclui cidade obrigatória e confirmação de senha. */
 export const registerCompanySchema = registerCompanyBaseSchema
   .extend({
+    regionId: z.string().uuid('Selecione a cidade de atuação.'),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -30,8 +31,10 @@ export const registerCompanySchema = registerCompanyBaseSchema
     path: ['confirmPassword'],
   });
 
-/** Usado pela API — o cliente já validou a confirmação, não é reenviada. */
-export const registerCompanyApiSchema = registerCompanyBaseSchema;
+/** Usado pela API — regionId é opcional por retrocompatibilidade; quando ausente, usa a primeira região ativa. */
+export const registerCompanyApiSchema = registerCompanyBaseSchema.extend({
+  regionId: z.string().uuid('Selecione uma cidade válida.').optional(),
+});
 
 export type RegisterCompanyInput = z.infer<typeof registerCompanySchema>;
 export type RegisterCompanyPayload = z.infer<typeof registerCompanyApiSchema>;

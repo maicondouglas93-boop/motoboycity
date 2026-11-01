@@ -33,6 +33,7 @@ import {
 import { adminCompaniesApi, adminDriversApi, adminDeliveriesApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { useMoney } from '@/lib/money';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 type OrderFilters = Partial<Omit<AdminOrderReportQuery, 'page' | 'pageSize'>>;
@@ -75,11 +76,24 @@ export default function OrdersReportPage() {
 
 function OrdersReportRoute() {
   const searchParams = useSearchParams();
+  const { regionId } = useAdminRegionFilter();
   const companyId = searchParams.get('empresa') ?? '';
-  return <OrdersReportContent key={companyId} initialCompanyId={companyId} />;
+  return (
+    <OrdersReportContent
+      key={`${regionId}:${companyId}`}
+      initialCompanyId={companyId}
+      regionId={regionId}
+    />
+  );
 }
 
-function OrdersReportContent({ initialCompanyId }: { initialCompanyId: string }) {
+function OrdersReportContent({
+  initialCompanyId,
+  regionId,
+}: {
+  initialCompanyId: string;
+  regionId: string;
+}) {
   const token = session.getToken();
   const money = useMoney();
   const [from, setFrom] = useState('');
@@ -101,19 +115,38 @@ function OrdersReportContent({ initialCompanyId }: { initialCompanyId: string })
   const [pageSize, setPageSize] = useState(25);
 
   const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies'],
-    queryFn: () => adminCompaniesApi.list(token as string),
+    queryKey: ['admin', 'companies', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers'],
-    queryFn: () => adminDriversApi.list(token as string),
+    queryKey: ['admin', 'drivers', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminDriversApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const ordersQuery = useQuery({
-    queryKey: ['admin', 'financial', 'orders-report', appliedFilters, page, pageSize],
+    queryKey: [
+      'admin',
+      'financial',
+      'orders-report',
+      regionId || undefined,
+      appliedFilters,
+      page,
+      pageSize,
+    ],
     queryFn: () =>
-      adminDeliveriesApi.report(token as string, { ...appliedFilters, page, pageSize }),
+      adminDeliveriesApi.report(token as string, {
+        ...appliedFilters,
+        ...(regionId && { regionId }),
+        page,
+        pageSize,
+      }),
     enabled: Boolean(token),
   });
 

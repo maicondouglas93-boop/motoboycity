@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table';
 import { adminReportsApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 const WEEKDAY_LONG = [
@@ -55,14 +56,19 @@ function csvNumber(value: number): string {
 
 export default function PeakHoursReportPage() {
   const token = session.getToken();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', 'peak-hours', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', 'peak-hours', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

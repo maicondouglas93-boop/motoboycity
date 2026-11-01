@@ -8,7 +8,7 @@ import {
   type RegisterCompanyPayload,
   type RegisterDriverPayload,
 } from '@motoboycity/validation';
-import type { AuthUser } from '@motoboycity/types';
+import type { AuthUser, PublicRegionItem } from '@motoboycity/types';
 import type { User } from '@prisma/client';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import {
@@ -21,10 +21,17 @@ import { CurrentUser } from './current-user.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
+const PUBLIC_REGIONS_THROTTLE = { default: { limit: 30, ttl: 60_000 } };
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Get('regions')
+  @Throttle(PUBLIC_REGIONS_THROTTLE)
+  regions(): Promise<PublicRegionItem[]> {
+    return this.authService.listActiveRegions();
+  }
 
   @Post('register/company')
   @HttpCode(HttpStatus.CREATED)

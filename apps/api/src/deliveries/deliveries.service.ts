@@ -896,7 +896,7 @@ export class DeliveriesService {
       throw new ConflictException('A empresa ainda não tem um endereço de coleta cadastrado.');
     }
 
-    await this.assertWithinBusinessHours(company.regionId, payload.scheduledAt);
+    await this.assertCanLaunchDelivery(company.regionId, payload.scheduledAt);
 
     const destinationKnownAtCreation = payload.destinationKnownAtCreation ?? true;
 
@@ -1119,7 +1119,7 @@ export class DeliveriesService {
 
     // O lote inteiro compartilha o mesmo agendamento, validado em Zod, entao
     // basta olhar o primeiro item.
-    await this.assertWithinBusinessHours(company.regionId, payload.deliveries[0]?.scheduledAt);
+    await this.assertCanLaunchDelivery(company.regionId, payload.deliveries[0]?.scheduledAt);
 
     await this.dispatchService.assertConfigured();
 
@@ -1291,13 +1291,14 @@ export class DeliveriesService {
     user: User,
     filters: {
       status?: DeliveryStatus;
+      regionId?: string;
       driverId?: string;
       companyId?: string;
       from?: string;
       to?: string;
     },
   ): Promise<DeliveryListItem[]> {
-    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+    if ((filters.driverId || filters.companyId || filters.regionId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
         'Os filtros por entregador ou empresa sao restritos a administradores.',
       );
@@ -1309,6 +1310,7 @@ export class DeliveriesService {
       where: {
         ...scope,
         ...(filters.status && { status: filters.status }),
+        ...(filters.regionId && { company: { regionId: filters.regionId } }),
         ...(filters.driverId && { driverId: filters.driverId }),
         ...(filters.companyId && { companyId: filters.companyId }),
         ...(filters.from || filters.to
@@ -1337,7 +1339,7 @@ export class DeliveriesService {
         'A central operacional é restrita a empresas e administradores.',
       );
     }
-    if ((filters.companyId || filters.driverId) && user.type !== 'ADMIN') {
+    if ((filters.companyId || filters.driverId || filters.regionId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
         'Os filtros por entregador ou empresa são restritos a administradores.',
       );
@@ -1395,7 +1397,7 @@ export class DeliveriesService {
   }
 
   async search(user: User, filters: SearchDeliveriesQuery): Promise<DeliverySearchResult> {
-    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+    if ((filters.driverId || filters.companyId || filters.regionId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
         'Os filtros por entregador ou empresa são restritos a administradores.',
       );
@@ -1499,7 +1501,7 @@ export class DeliveriesService {
   }
 
   async summary(user: User, filters: DeliverySummaryQuery): Promise<DeliverySummaryResult> {
-    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+    if ((filters.driverId || filters.companyId || filters.regionId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
         'Os filtros por entregador ou empresa sao restritos a administradores.',
       );
@@ -1832,13 +1834,14 @@ export class DeliveriesService {
     }
 
     /**
-     * A loja respeita o horário de funcionamento: liberar agora equivale a
-     * lançar agora, e fora do expediente não há operação para atender. A
-     * administração passa por cima de propósito, como nas outras intervenções
-     * dela — é quem decide abrir uma exceção.
+     * A loja respeita o horário de funcionamento e o controle manual de
+     * atendimentos: liberar agora equivale a lançar agora, e com atendimentos
+     * encerrados ou fora do expediente não há operação para atender. A
+     * administração passa por cima de propósito em pedidos já criados — é quem
+     * decide abrir uma exceção.
      */
     if (user.type === 'COMPANY_MEMBER') {
-      await this.assertWithinBusinessHours(delivery.company.regionId);
+      await this.assertCanLaunchDelivery(delivery.company.regionId);
     }
 
     const horaMarcada = delivery.scheduledAt
@@ -3332,7 +3335,7 @@ export class DeliveriesService {
     user: User,
     filters: DeliveryStageTimesQuery,
   ): Promise<DeliveryStageTimesResult> {
-    if ((filters.driverId || filters.companyId) && user.type !== 'ADMIN') {
+    if ((filters.driverId || filters.companyId || filters.regionId) && user.type !== 'ADMIN') {
       throw new ForbiddenException(
         'Os filtros por entregador ou empresa sao restritos a administradores.',
       );
@@ -3349,6 +3352,7 @@ export class DeliveriesService {
       const deliveries = await this.prisma.delivery.findMany({
         where: {
           ...scope,
+          ...(filters.regionId && { company: { regionId: filters.regionId } }),
           ...(filters.driverId && { driverId: filters.driverId }),
           ...(filters.companyId && { companyId: filters.companyId }),
           status: { not: 'CANCELLED' },
@@ -3732,6 +3736,7 @@ export class DeliveriesService {
       q?: string;
       status?: DeliveryStatus;
       statuses?: DeliveryStatus[];
+      regionId?: string;
       companyId?: string;
       driverId?: string;
       batchId?: string;
@@ -3789,6 +3794,7 @@ export class DeliveriesService {
       ...scope,
       ...(filters.status && { status: filters.status }),
       ...(filters.statuses?.length && { status: { in: filters.statuses } }),
+      ...(filters.regionId && { company: { regionId: filters.regionId } }),
       ...(filters.driverId && { driverId: filters.driverId }),
       ...(filters.companyId && { companyId: filters.companyId }),
       ...(filters.batchId && { batchId: filters.batchId }),
@@ -4144,8 +4150,27 @@ export class DeliveriesService {
     );
   }
 
+  private async assertCanLaunchDelivery(regionId: string, scheduledAt?: string): Promise<void> {
+    const settings = await this.platformSettingsService.get();
+    if (settings.acceptingOrders === false) {
+      throw new ConflictException(
+        'Os atendimentos estão encerrados no momento. Nenhum novo pedido pode ser lançado.',
+      );
+    }
+
+    await this.assertWithinBusinessHoursForSettings(settings, regionId, scheduledAt);
+  }
+
   private async assertWithinBusinessHours(regionId: string, scheduledAt?: string): Promise<void> {
     const settings = await this.platformSettingsService.get();
+    await this.assertWithinBusinessHoursForSettings(settings, regionId, scheduledAt);
+  }
+
+  private async assertWithinBusinessHoursForSettings(
+    settings: { businessHoursEnabled?: boolean },
+    regionId: string,
+    scheduledAt?: string,
+  ): Promise<void> {
     if (!settings.businessHoursEnabled) return;
 
     const windows = await this.prisma.businessHour.findMany({ where: { regionId } });

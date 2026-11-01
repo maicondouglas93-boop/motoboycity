@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { PublicRegionItem } from '@motoboycity/types';
 import { registerDriverSchema, pixKeyTypes, type PixKeyType } from '@motoboycity/validation';
 import { ApiError } from '@motoboycity/api-client';
 import { FormField } from '../components/FormField';
@@ -45,11 +46,35 @@ export function RegisterScreen({ navigation }: Props) {
   const text = isDark ? colors.textDark : colors.text;
 
   const [form, setForm] = useState(initialFormState);
+  const [regionId, setRegionId] = useState('');
+  const [regions, setRegions] = useState<PublicRegionItem[]>([]);
+  const [regionsLoading, setRegionsLoading] = useState(true);
+  const [regionsError, setRegionsError] = useState<string | null>(null);
   const [pixKeyType, setPixKeyType] = useState<PixKeyType>('EMAIL');
   const [hasCnpj, setHasCnpj] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
+
+  const loadRegions = useCallback(async () => {
+    setRegionsLoading(true);
+    setRegionsError(null);
+    try {
+      const activeRegions = await authApi.listActiveRegions();
+      setRegions(activeRegions);
+      if (activeRegions.length === 1) {
+        setRegionId((current) => current || activeRegions[0]!.id);
+      }
+    } catch {
+      setRegionsError('Não foi possível carregar as cidades disponíveis.');
+    } finally {
+      setRegionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRegions();
+  }, [loadRegions]);
 
   function updateField(field: keyof typeof initialFormState, value: string) {
     setForm((previous) => ({ ...previous, [field]: value }));
@@ -58,7 +83,7 @@ export function RegisterScreen({ navigation }: Props) {
   async function handleSubmit() {
     setFormError(null);
 
-    const result = registerDriverSchema.safeParse({ ...form, pixKeyType, hasCnpj });
+    const result = registerDriverSchema.safeParse({ ...form, regionId, pixKeyType, hasCnpj });
     if (!result.success) {
       const errors: Record<string, string> = {};
       for (const issue of result.error.issues) {
@@ -72,6 +97,7 @@ export function RegisterScreen({ navigation }: Props) {
     setStatus('submitting');
     try {
       await authApi.registerDriver({
+        regionId: result.data.regionId,
         name: result.data.name,
         email: result.data.email,
         phone: result.data.phone,
@@ -113,6 +139,61 @@ export function RegisterScreen({ navigation }: Props) {
     <SafeAreaView style={isDark ? styles.safeAreaDark : styles.safeAreaLight}>
       <ScreenHeader title="Cadastro de Motoboy" />
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: isDark ? colors.mutedDark : colors.muted }]}>
+            Cidade de atuação
+          </Text>
+          {regionsLoading ? (
+            <Text style={[styles.label, { color: isDark ? colors.mutedDark : colors.muted }]}>
+              Carregando cidades...
+            </Text>
+          ) : regionsError ? (
+            <Pressable onPress={() => {
+                loadRegions();
+              }}>
+              <Text style={styles.formError}>
+                {regionsError} Toque para tentar novamente.
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={styles.chipRow}>
+              {regions.map((region) => {
+                const selected = region.id === regionId;
+                return (
+                  <Pressable
+                    key={region.id}
+                    onPress={() => setRegionId(region.id)}
+                    style={[
+                      styles.chip,
+                      selected
+                        ? styles.chipSelected
+                        : isDark
+                          ? styles.chipUnselectedDark
+                          : styles.chipUnselectedLight,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipLabel,
+                        selected
+                          ? styles.chipLabelSelected
+                          : isDark
+                            ? styles.chipLabelDark
+                            : styles.chipLabelLight,
+                      ]}
+                    >
+                      {region.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+          {fieldErrors.regionId ? (
+            <Text style={styles.formError}>{fieldErrors.regionId}</Text>
+          ) : null}
+        </View>
+
         <FormField
           label="Nome completo"
           value={form.name}

@@ -103,7 +103,7 @@ export class AdminCompaniesController {
   list(
     @Query(new ZodValidationPipe(listCompaniesQuerySchema)) query: ListCompaniesQuery,
   ): Promise<AdminCompanyListItem[]> {
-    return this.adminCompaniesService.list(query.status);
+    return this.adminCompaniesService.list(query);
   }
 
   @Get(':id')

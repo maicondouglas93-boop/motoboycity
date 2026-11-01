@@ -12,6 +12,7 @@ export const deliveryOperationsQuerySchema = z.object({
     .transform((value) => value.split(',').filter(Boolean))
     .pipe(z.array(z.enum(deliveryStatusValues)).max(deliveryStatusValues.length))
     .optional(),
+  regionId: z.uuid().optional(),
   companyId: z.uuid().optional(),
   driverId: z.uuid().optional(),
   batchId: z.uuid().optional(),
@@ -22,6 +23,7 @@ export const searchDeliveriesQuerySchema = z
   .object({
     q: z.string().trim().max(100).optional(),
     status: z.enum(deliveryStatusValues).optional(),
+    regionId: z.uuid().optional(),
     companyId: z.uuid().optional(),
     driverId: z.uuid().optional(),
     from: dateOnlySchema.optional(),

@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ReturnConfirmationDialog } from '@/components/operations/return-confirmation-dialog';
 import { Separator } from '@/components/ui/separator';
 import { deliveriesApi } from '@/lib/api-client';
 
@@ -42,6 +43,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
   const [zip, setZip] = useState('');
 
   const [requiresReturn, setRequiresReturn] = useState(false);
+  const [confirmingReturn, setConfirmingReturn] = useState(false);
   const [urgent, setUrgent] = useState(false);
   const [pickupSurchargeChargedToDriver, setPickupSurchargeChargedToDriver] = useState(false);
   const [requiresCollectionRecipient, setRequiresCollectionRecipient] = useState(false);
@@ -51,7 +53,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (withReturn: boolean) =>
       deliveriesApi.create(token, {
         serviceTypeId,
         destinationKnownAtCreation,
@@ -68,7 +70,7 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
             zip,
           },
         }),
-        requiresReturn,
+        requiresReturn: withReturn,
         urgent,
         pickupSurchargeChargedToDriver,
         requiresCollectionRecipient,
@@ -113,7 +115,13 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
       return;
     }
 
-    mutation.mutate();
+    setConfirmingReturn(true);
+  }
+
+  function confirmAndCreate(withReturn: boolean) {
+    setRequiresReturn(withReturn);
+    setConfirmingReturn(false);
+    mutation.mutate(withReturn);
   }
 
   return (
@@ -285,6 +293,14 @@ export function CreateOrderForm({ token, pickupAddress, serviceTypes }: CreateOr
 
       {formError && <p className="text-sm text-destructive">{formError}</p>}
       {successMessage && <p className="text-sm text-status-entregue">{successMessage}</p>}
+
+      <ReturnConfirmationDialog
+        open={confirmingReturn}
+        onOpenChange={setConfirmingReturn}
+        defaultRequiresReturn={requiresReturn}
+        disabled={mutation.isPending}
+        onConfirm={confirmAndCreate}
+      />
 
       <Button className="w-full" type="submit" disabled={mutation.isPending}>
         {mutation.isPending ? 'Lançando pedido...' : 'Lançar Pedido'}

@@ -6,6 +6,7 @@ import type {
 import type {
   AuthUser,
   LoginResult,
+  PublicRegionItem,
   RegisterCompanyResult,
   RegisterDriverResult,
 } from '@motoboycity/types';
@@ -18,6 +19,11 @@ export interface AuthApiConfig {
 
 export function createAuthApi({ baseUrl }: AuthApiConfig) {
   return {
+    async listActiveRegions(): Promise<PublicRegionItem[]> {
+      const response = await apiFetch(`${baseUrl}/auth/regions`);
+      return parseJsonOrThrow<PublicRegionItem[]>(response);
+    },
+
     async registerCompany(payload: RegisterCompanyPayload): Promise<RegisterCompanyResult> {
       const response = await apiFetch(`${baseUrl}/auth/register/company`, {
         method: 'POST',

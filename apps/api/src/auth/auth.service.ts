@@ -12,6 +12,7 @@ import type {
   AdminPasswordChangeResult,
   AuthUser,
   OwnPasswordChangeResult,
+  PublicRegionItem,
   RegisterCompanyResult as SharedRegisterCompanyResult,
   RegisterDriverResult as SharedRegisterDriverResult,
 } from '@motoboycity/types';
@@ -85,6 +86,14 @@ export class AuthService {
     return driver ? { ...perfil, driverCompensation: driver.compensation } : perfil;
   }
 
+  async listActiveRegions(): Promise<PublicRegionItem[]> {
+    return this.prisma.region.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
+
   async registerCompany(
     payload: RegisterCompanyPayload,
     options: RegisterCompanyOptions = {},
@@ -103,16 +112,17 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(payload.password, PASSWORD_HASH_ROUNDS);
     const maxAttempts = 3;
+    const requestedRegionId = options.regionId ?? payload.regionId;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const company = await this.prisma.$transaction(
           async (tx) => {
             const region = await tx.region.findFirst({
-              where: options.regionId ? { id: options.regionId, active: true } : { active: true },
+              where: requestedRegionId ? { id: requestedRegionId, active: true } : { active: true },
             });
             if (!region) {
-              if (options.regionId) {
+              if (requestedRegionId) {
                 throw new ConflictException('A região selecionada não existe ou está inativa.');
               }
               throw new InternalServerErrorException(
@@ -247,16 +257,17 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(payload.password, PASSWORD_HASH_ROUNDS);
     const maxAttempts = 3;
+    const requestedRegionId = options.regionId ?? payload.regionId;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const driver = await this.prisma.$transaction(
           async (tx) => {
             const region = await tx.region.findFirst({
-              where: options.regionId ? { id: options.regionId, active: true } : { active: true },
+              where: requestedRegionId ? { id: requestedRegionId, active: true } : { active: true },
             });
             if (!region) {
-              if (options.regionId) {
+              if (requestedRegionId) {
                 throw new ConflictException('A região selecionada não existe ou está inativa.');
               }
               throw new InternalServerErrorException(

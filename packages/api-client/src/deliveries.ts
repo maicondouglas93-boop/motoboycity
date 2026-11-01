@@ -34,6 +34,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       filters?: {
         from?: string;
         to?: string;
+        regionId?: string;
         companyId?: string;
         driverId?: string;
         excludeRetroactive?: boolean;
@@ -42,6 +43,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       const params = new URLSearchParams();
       if (filters?.from) params.set('from', filters.from);
       if (filters?.to) params.set('to', filters.to);
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
       if (filters?.excludeRetroactive !== undefined) {
@@ -60,6 +62,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       filters?: {
         q?: string;
         statuses?: DeliveryStatus[];
+        regionId?: string;
         companyId?: string;
         driverId?: string;
         batchId?: string;
@@ -69,6 +72,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       const params = new URLSearchParams();
       if (filters?.q) params.set('q', filters.q);
       if (filters?.statuses?.length) params.set('statuses', filters.statuses.join(','));
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
       if (filters?.batchId) params.set('batchId', filters.batchId);
@@ -85,6 +89,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       filters?: {
         q?: string;
         status?: DeliveryStatus;
+        regionId?: string;
         driverId?: string;
         companyId?: string;
         from?: string;
@@ -96,6 +101,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       const params = new URLSearchParams();
       if (filters?.q) params.set('q', filters.q);
       if (filters?.status) params.set('status', filters.status);
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.from) params.set('from', filters.from);
@@ -112,6 +118,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     async summary(
       accessToken: string,
       filters?: {
+        regionId?: string;
         driverId?: string;
         companyId?: string;
         from?: string;
@@ -119,6 +126,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       },
     ): Promise<DeliverySummaryResult> {
       const params = new URLSearchParams();
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.from) params.set('from', filters.from);
@@ -134,6 +142,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
       accessToken: string,
       filters?: {
         status?: DeliveryStatus;
+        regionId?: string;
         driverId?: string;
         companyId?: string;
         from?: string;
@@ -142,6 +151,7 @@ export function createDeliveriesApi({ baseUrl }: DeliveriesApiConfig) {
     ): Promise<DeliveryListItem[]> {
       const params = new URLSearchParams();
       if (filters?.status) params.set('status', filters.status);
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       if (filters?.driverId) params.set('driverId', filters.driverId);
       if (filters?.companyId) params.set('companyId', filters.companyId);
       if (filters?.from) params.set('from', filters.from);

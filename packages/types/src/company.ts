@@ -36,6 +36,7 @@ export interface AdminCompanyListItem {
   tradeName: string;
   document: string;
   status: CompanyStatus;
+  region: { id: string; name: string };
   createdAt: string;
   owner: {
     name: string;
@@ -47,7 +48,6 @@ export interface AdminCompanyListItem {
 }
 
 export interface AdminCompanyDetail extends AdminCompanyListItem {
-  region: { id: string; name: string };
   billingSettings: AdminCompanyBillingSettings;
   addresses: Array<{
     id: string;

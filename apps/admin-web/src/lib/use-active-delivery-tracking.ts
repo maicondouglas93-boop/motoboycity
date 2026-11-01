@@ -9,12 +9,13 @@ import { session } from './session';
 
 type LocationEvent = DeliveryTrackingPoint & { deliveryId: string; driverId: string };
 
-export function useAdminActiveDeliveryTracking() {
+export function useAdminActiveDeliveryTracking(regionId?: string) {
   const token = session.getToken();
   const queryClient = useQueryClient();
+  const normalizedRegionId = regionId || undefined;
   const query = useQuery({
-    queryKey: ['admin', 'tracking', 'active'],
-    queryFn: () => trackingApi.active(token as string),
+    queryKey: ['admin', 'tracking', 'active', { regionId: normalizedRegionId }],
+    queryFn: () => trackingApi.active(token as string, { regionId: normalizedRegionId }),
     enabled: Boolean(token),
     refetchInterval: 60_000,
   });
@@ -23,8 +24,8 @@ export function useAdminActiveDeliveryTracking() {
     if (!token) return;
     const socket = io(baseUrl, { auth: { token } });
     socket.on('delivery:location', (point: LocationEvent) => {
-      queryClient.setQueryData<ActiveDeliveryTrackingItem[]>(
-        ['admin', 'tracking', 'active'],
+      queryClient.setQueriesData<ActiveDeliveryTrackingItem[]>(
+        { queryKey: ['admin', 'tracking', 'active'] },
         (items) =>
           items?.map((item) =>
             item.deliveryId === point.deliveryId ? { ...item, lastLocation: point } : item,

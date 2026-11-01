@@ -83,7 +83,7 @@ describe('AdminCompaniesService', () => {
   });
 
   describe('list', () => {
-    it('mapeia empresas para o formato de listagem, extraindo o dono (OWNER)', async () => {
+    it('mapeia empresas para o formato de listagem, extraindo o dono (OWNER) e a cidade', async () => {
       prisma.company.findMany.mockResolvedValue([
         {
           id: 'company-1',
@@ -91,6 +91,7 @@ describe('AdminCompaniesService', () => {
           tradeName: 'Empresa Um',
           document: '11122233344',
           status: 'PENDING_APPROVAL',
+          region: { id: 'region-1', name: 'Lajinha' },
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           teamMembers: [
             {
@@ -107,6 +108,7 @@ describe('AdminCompaniesService', () => {
           tradeName: 'Empresa Dois',
           document: '55566677788',
           status: 'ACTIVE',
+          region: { id: 'region-2', name: 'Mutum' },
           createdAt: new Date('2026-01-02T00:00:00.000Z'),
           teamMembers: [],
           approvedBy: { id: 'admin-1', name: 'Admin Um' },
@@ -123,6 +125,7 @@ describe('AdminCompaniesService', () => {
           tradeName: 'Empresa Um',
           document: '11122233344',
           status: 'PENDING_APPROVAL',
+          region: { id: 'region-1', name: 'Lajinha' },
           createdAt: '2026-01-01T00:00:00.000Z',
           owner: { name: 'Dono Um', email: 'dono1@example.com', phone: '33999990000' },
           approvedBy: null,
@@ -134,6 +137,7 @@ describe('AdminCompaniesService', () => {
           tradeName: 'Empresa Dois',
           document: '55566677788',
           status: 'ACTIVE',
+          region: { id: 'region-2', name: 'Mutum' },
           createdAt: '2026-01-02T00:00:00.000Z',
           owner: null,
           approvedBy: { id: 'admin-1', name: 'Admin Um' },
@@ -149,6 +153,16 @@ describe('AdminCompaniesService', () => {
 
       expect(prisma.company.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { status: 'PENDING_APPROVAL' } }),
+      );
+    });
+
+    it('repassa o filtro de cidade (regionId) para a query do Prisma', async () => {
+      prisma.company.findMany.mockResolvedValue([]);
+
+      await service.list({ regionId: 'region-2', status: 'ACTIVE' });
+
+      expect(prisma.company.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { regionId: 'region-2', status: 'ACTIVE' } }),
       );
     });
 

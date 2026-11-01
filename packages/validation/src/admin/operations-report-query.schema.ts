@@ -8,6 +8,7 @@ export const operationsReportQuerySchema = z
   .object({
     from: dateOnlySchema.optional(),
     to: dateOnlySchema.optional(),
+    regionId: z.string().uuid().optional(),
   })
   .refine((data) => !data.from || !data.to || data.from <= data.to, {
     message: 'A data inicial nao pode ser posterior a data final.',

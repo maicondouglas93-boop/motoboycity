@@ -168,8 +168,12 @@ function ConteudoHome() {
         updateDeliveryLocationInOperations(current, point),
       );
     };
+    const refreshServiceStatus = () => {
+      void queryClient.invalidateQueries({ queryKey: ['company', 'business-hours'] });
+    };
     socket.on('delivery:updated', refresh);
     socket.on('delivery:location', updateDeliveryLocation);
+    socket.on('service:status-changed', refreshServiceStatus);
     return () => {
       socket.disconnect();
     };
@@ -285,8 +289,6 @@ function ConteudoHome() {
           desatualizados.
         </p>
       )}
-
-      <FmSoftwarePromo />
 
       <section className="grid min-h-[720px] gap-5 xl:grid-cols-[360px_minmax(0,1fr)_340px]">
         <Card className="premium-panel max-h-[calc(100vh-150px)] overflow-hidden">
@@ -439,6 +441,8 @@ function ConteudoHome() {
           </Card>
         </div>
       </section>
+
+      <FmSoftwarePromo />
 
       <Dialog
         open={customerCandidates.length > 0}

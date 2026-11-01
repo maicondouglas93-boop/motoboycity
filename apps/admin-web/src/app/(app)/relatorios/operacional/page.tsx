@@ -34,6 +34,7 @@ import { DriverRanking } from '@/components/reports/driver-ranking';
 import { PeakHoursChart } from '@/components/reports/peak-hours-chart';
 import { StatCard } from '@/components/stat-card';
 import { adminReportsApi } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 
@@ -92,14 +93,19 @@ const reportSections = [
 export default function OperationalReportPage() {
   const money = useMoney();
   const token = session.getToken();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

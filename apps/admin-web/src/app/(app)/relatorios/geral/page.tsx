@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table';
 import { adminReportsApi } from '@/lib/api-client';
 import { useMoney } from '@/lib/money';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 function formatChange(value: number | null): string {
@@ -36,14 +37,19 @@ function formatChange(value: number | null): string {
 export default function GeneralReportPage() {
   const token = session.getToken();
   const money = useMoney();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', 'general', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', 'general', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

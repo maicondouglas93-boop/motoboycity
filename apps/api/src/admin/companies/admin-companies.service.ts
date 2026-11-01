@@ -34,6 +34,7 @@ export interface AdminCompanyListItem {
   tradeName: string;
   document: string;
   status: string;
+  region: { id: string; name: string };
   createdAt: string;
   owner: { name: string; email: string; phone: string } | null;
   approvedBy: { id: string; name: string } | null;
@@ -41,7 +42,6 @@ export interface AdminCompanyListItem {
 }
 
 export interface AdminCompanyDetail extends AdminCompanyListItem {
-  region: { id: string; name: string };
   billingSettings: {
     invoiceClosingMode: 'AUTOMATIC' | 'MANUAL';
     invoiceClosingFrequency: 'WEEKLY' | 'MONTHLY' | null;
@@ -116,11 +116,20 @@ export class AdminCompaniesService {
     });
   }
 
-  async list(status?: CompanyStatus): Promise<AdminCompanyListItem[]> {
+  async list(
+    statusOrFilters?: CompanyStatus | { status?: CompanyStatus; regionId?: string },
+  ): Promise<AdminCompanyListItem[]> {
+    const filters =
+      typeof statusOrFilters === 'string' ? { status: statusOrFilters } : statusOrFilters;
+    const where: Prisma.CompanyWhereInput = {
+      ...(filters?.status && { status: filters.status }),
+      ...(filters?.regionId && { regionId: filters.regionId }),
+    };
     const companies = await this.prisma.company.findMany({
-      where: status ? { status } : undefined,
+      where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
+        region: { select: { id: true, name: true } },
         teamMembers: {
           where: { role: 'OWNER' },
           include: { user: true },
@@ -810,6 +819,7 @@ export class AdminCompaniesService {
     tradeName: string;
     document: string;
     status: string;
+    region: { id: string; name: string };
     createdAt: Date;
     teamMembers: { role: string; user: { name: string; email: string; phone: string } }[];
     approvedBy: { id: string; name: string } | null;
@@ -822,6 +832,7 @@ export class AdminCompaniesService {
       tradeName: company.tradeName,
       document: company.document,
       status: company.status,
+      region: { id: company.region.id, name: company.region.name },
       createdAt: company.createdAt.toISOString(),
       owner: owner ? { name: owner.name, email: owner.email, phone: owner.phone } : null,
       approvedBy: company.approvedBy

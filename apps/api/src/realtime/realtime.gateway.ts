@@ -121,9 +121,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.disconnectClient(client);
         return;
       }
-      await Promise.all(
-        memberships.map((membership) => client.join(this.companyRoom(membership.companyId))),
-      );
+      await Promise.all([
+        client.join('companies'),
+        ...memberships.map((membership) => client.join(this.companyRoom(membership.companyId))),
+      ]);
       this.logger.debug(`Membro de empresa conectado: ${client.id}`);
     }
   }
@@ -216,6 +217,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitPickupArrival(companyId: string, payload: PickupArrivalEvent): void {
     this.server.to(this.companyRoom(companyId)).emit('delivery:pickup-arrival', payload);
+  }
+
+  emitServiceStatusChanged(payload: { acceptingOrders: boolean }): void {
+    this.server.to('admin').emit('service:status-changed', payload);
+    this.server.to('companies').emit('service:status-changed', payload);
   }
 
   async emitPublicDeliveryLocation(

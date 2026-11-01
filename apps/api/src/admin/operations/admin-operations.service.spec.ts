@@ -237,6 +237,33 @@ describe('AdminOperationsService', () => {
       expect(realtimeGateway.emitDispatchQueueUpdated).toHaveBeenCalled();
     });
 
+    it('preserva as posicoes de outras cidades ao reordenar apenas a fila filtrada por cidade', async () => {
+      livePresenceService.listActive.mockResolvedValue([
+        { driverId: 'cityB-1' },
+        { driverId: 'cityA-1' },
+        { driverId: 'cityB-2' },
+        { driverId: 'cityA-2' },
+      ]);
+      livePresenceService.orderForDispatch.mockResolvedValue([
+        'cityB-1',
+        'cityA-1',
+        'cityB-2',
+        'cityA-2',
+      ]);
+
+      const result = await service.reorderDispatchQueue(admin, {
+        driverIds: ['cityA-2', 'cityA-1'],
+      });
+
+      expect(livePresenceService.replaceDispatchOrder).toHaveBeenCalledWith([
+        'cityB-1',
+        'cityA-2',
+        'cityB-2',
+        'cityA-1',
+      ]);
+      expect(result.driverIds).toEqual(['cityB-1', 'cityA-2', 'cityB-2', 'cityA-1']);
+    });
+
     it('recusa uma edicao baseada em motoboy que ja ficou offline', async () => {
       livePresenceService.listActive.mockResolvedValue([{ driverId: 'driver-1' }]);
 

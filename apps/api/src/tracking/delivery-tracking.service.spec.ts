@@ -288,6 +288,26 @@ describe('DeliveryTrackingService', () => {
     );
   });
 
+  it('permite ao admin filtrar entregas ativas por cidade e bloqueia não-admin', async () => {
+    prisma.delivery.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.active({ id: 'admin-1', type: 'ADMIN' } as User, { regionId: 'region-2' }),
+    ).resolves.toEqual([]);
+
+    expect(prisma.delivery.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ company: { regionId: 'region-2' } }),
+      }),
+    );
+
+    await expect(
+      service.active({ id: 'company-user', type: 'COMPANY_MEMBER' } as User, {
+        regionId: 'region-2',
+      }),
+    ).rejects.toThrow('O filtro por região é restrito a administradores.');
+  });
+
   it('remove somente pontos anteriores à janela de retenção de 30 dias', async () => {
     prisma.deliveryLocationPoint.deleteMany.mockResolvedValue({ count: 3 });
     const now = new Date('2026-08-31T15:00:00.000Z');

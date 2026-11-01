@@ -104,6 +104,26 @@ describe('CallDriverDialog', () => {
     );
   });
 
+  it('trava o envio e informa quando os atendimentos foram encerrados manualmente pela central', async () => {
+    mocks.businessHours.mockResolvedValue({
+      accepting: false,
+      manuallyClosed: true,
+      nextOpeningLabel: null,
+      todayWindows: [],
+    });
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+    await screen.findByText('Atendimentos encerrados no momento.');
+
+    expect(
+      screen.getByText('Novos pedidos estão bloqueados até a central reabrir os atendimentos.'),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Chamar entregador' })).toBeDisabled(),
+    );
+  });
+
   /**
    * Se a consulta do horário falhar, quem decide continua sendo a API: um
    * botão travado por uma consulta secundária que caiu impediria a loja de
@@ -127,7 +147,15 @@ describe('CallDriverDialog', () => {
     await screen.findByText('Moto');
     fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
 
+    expect(await screen.findByRole('heading', { name: 'Este pedido tem volta?' })).toBeVisible();
+    expect(mocks.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Não, sem volta' }));
+
     await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+    expect(mocks.create).toHaveBeenCalledWith(
+      'token',
+      expect.objectContaining({ requiresReturn: false }),
+    );
     expect(screen.getByRole('heading', { name: 'Acompanhando' })).toBeVisible();
     expect(
       screen.getByText('Enviando o pedido e iniciando a busca por um entregador...'),
@@ -138,5 +166,45 @@ describe('CallDriverDialog', () => {
      * justamente no trecho em que a pessoa está olhando para ela.
      */
     expect(screen.getByRole('img', { name: 'Procurando um entregador disponível' })).toBeVisible();
+  });
+
+  it('pergunta sobre a volta antes de chamar e envia requiresReturn=true ao escolher "Sim, com volta"', async () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+    await screen.findByText('Moto');
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+
+    expect(await screen.findByRole('heading', { name: 'Este pedido tem volta?' })).toBeVisible();
+    expect(mocks.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sim, com volta' }));
+
+    await waitFor(() =>
+      expect(mocks.create).toHaveBeenCalledWith(
+        'token',
+        expect.objectContaining({
+          serviceTypeId: 'service-1',
+          requiresReturn: true,
+        }),
+      ),
+    );
+  });
+
+  it('permite voltar para revisar o formulario sem disparar a chamada', async () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+    await screen.findByText('Moto');
+    fireEvent.change(screen.getByLabelText('Observação'), {
+      target: { value: 'Trazer maquininha' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Voltar e revisar' }));
+
+    expect(screen.getByRole('heading', { name: 'Chamar entregador' })).toBeVisible();
+    expect(screen.getByLabelText('Observação')).toHaveValue('Trazer maquininha');
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 });

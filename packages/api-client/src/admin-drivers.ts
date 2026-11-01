@@ -57,11 +57,16 @@ export function createAdminDriversApi({ baseUrl }: AdminDriversApiConfig) {
 
     async list(
       accessToken: string,
-      filters?: { approvalStatus?: DriverApprovalStatus; accountStatus?: DriverAccountStatus },
+      filters?: {
+        approvalStatus?: DriverApprovalStatus;
+        accountStatus?: DriverAccountStatus;
+        regionId?: string;
+      },
     ): Promise<AdminDriverListItem[]> {
       const params = new URLSearchParams();
       if (filters?.approvalStatus) params.set('approvalStatus', filters.approvalStatus);
       if (filters?.accountStatus) params.set('accountStatus', filters.accountStatus);
+      if (filters?.regionId) params.set('regionId', filters.regionId);
       const query = params.toString() ? `?${params.toString()}` : '';
 
       const response = await apiFetch(`${baseUrl}/admin/drivers${query}`, {

@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AdminOperationsResult,
   DeliveryStatus,
   OperationalDeliveryItem,
+  PlatformSettingsItem,
 } from '@motoboycity/types';
 import { io } from 'socket.io-client';
 import {
@@ -57,6 +58,7 @@ import {
   baseUrl,
 } from '@/lib/api-client';
 import { formatRelativeTime } from '@/lib/format';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 import { isDriverPresenceActivity, useAdminActivityFeed } from '@/lib/use-admin-activity-feed';
@@ -66,6 +68,10 @@ import { CompanyQueues } from '@/components/operations/company-queues';
 import { DeliveryActionsMenu } from '@/components/operations/delivery-actions-menu';
 import { SilentDrivers } from '@/components/operations/silent-drivers';
 import { RainHomeNotice } from '@/components/operations/rain-home-notice';
+import {
+  ServiceClosedHomeNotice,
+  ServiceStatusHeaderAction,
+} from '@/components/operations/service-status-home-control';
 import { DispatchQueue } from '@/components/operations/dispatch-queue';
 import { slaAlertMinutesFor } from '@/lib/sla';
 
@@ -287,6 +293,7 @@ export default function AdminDashboardPage() {
   const [queueMode, setQueueMode] = useState<QueueMode>('status');
   const [activityMode, setActivityMode] = useState<ActivityMode>('operations');
   const queryClient = useQueryClient();
+  const { regionId, selectedRegion } = useAdminRegionFilter();
   const { events, connected: activityConnected } = useAdminActivityFeed();
   const [query, setQuery] = useState('');
   const [companyId, setCompanyId] = useState('');
@@ -299,13 +306,51 @@ export default function AdminDashboardPage() {
     Partial<Record<DeliveryStatus, boolean>>
   >({});
 
+  const companiesQuery = useQuery({
+    queryKey: ['admin', 'companies', 'operations-filter', regionId || undefined],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
+    enabled: Boolean(token),
+  });
+  const driversQuery = useQuery({
+    queryKey: ['admin', 'drivers', 'operations-filter', regionId || undefined],
+    queryFn: () =>
+      adminDriversApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
+    enabled: Boolean(token),
+  });
+
+  const effectiveCompanyId =
+    companyId &&
+    (!companiesQuery.data || companiesQuery.data.some((company) => company.id === companyId))
+      ? companyId
+      : '';
+  const effectiveDriverId =
+    driverId && (!driversQuery.data || driversQuery.data.some((driver) => driver.id === driverId))
+      ? driverId
+      : '';
+
   const operationsQuery = useQuery({
-    queryKey: ['admin', 'operations', { query, companyId, driverId, statuses }],
+    queryKey: [
+      'admin',
+      'operations',
+      {
+        regionId: regionId || undefined,
+        query,
+        companyId: effectiveCompanyId,
+        driverId: effectiveDriverId,
+        statuses,
+      },
+    ],
     queryFn: () =>
       adminOperationsApi.overview(token as string, {
         q: query || undefined,
-        companyId: companyId || undefined,
-        driverId: driverId || undefined,
+        regionId: regionId || undefined,
+        companyId: effectiveCompanyId || undefined,
+        driverId: effectiveDriverId || undefined,
         statuses: statuses.length ? statuses : undefined,
       }),
     enabled: Boolean(token),
@@ -321,9 +366,18 @@ export default function AdminDashboardPage() {
     queryKey: ['admin', 'platform-settings'],
     queryFn: () => adminPlatformSettingsApi.get(token as string),
     enabled: Boolean(token),
-    staleTime: 5 * 60_000,
+    staleTime: 30_000,
   });
   const slaSettings = settingsQuery.data ?? null;
+  const toggleServiceMutation = useMutation({
+    mutationFn: (acceptingOrders: boolean) =>
+      adminPlatformSettingsApi.update(token as string, { acceptingOrders }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<PlatformSettingsItem>(['admin', 'platform-settings'], updated);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'business-hours'] });
+    },
+  });
 
   const operationDate = operationsQuery.data?.generatedAt
     ? new Date(operationsQuery.data.generatedAt).toLocaleDateString('en-CA', {
@@ -331,25 +385,15 @@ export default function AdminDashboardPage() {
       })
     : null;
   const todayReportQuery = useQuery({
-    queryKey: ['admin', 'reports', 'operations', 'today', operationDate],
+    queryKey: ['admin', 'reports', 'operations', 'today', operationDate, regionId || undefined],
     queryFn: () =>
       adminReportsApi.operations(token as string, {
         from: operationDate as string,
         to: operationDate as string,
+        regionId: regionId || undefined,
       }),
     enabled: Boolean(token && operationDate),
     refetchInterval: 60_000,
-  });
-
-  const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies', 'operations-filter'],
-    queryFn: () => adminCompaniesApi.list(token as string),
-    enabled: Boolean(token),
-  });
-  const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers', 'operations-filter'],
-    queryFn: () => adminDriversApi.list(token as string),
-    enabled: Boolean(token),
   });
 
   useEffect(() => {
@@ -359,6 +403,8 @@ export default function AdminDashboardPage() {
     socket.on('disconnect', () => setConnected(false));
     const refreshOperation = () =>
       void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
+    const refreshSettings = () =>
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'platform-settings'] });
     const refreshDelivery = () => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] });
       void queryClient.invalidateQueries({
@@ -405,6 +451,7 @@ export default function AdminDashboardPage() {
     socket.on('driver:location', updateDriverLocation);
     socket.on('driver:presence', refreshOperation);
     socket.on('dispatch:queue-updated', refreshOperation);
+    socket.on('service:status-changed', refreshSettings);
     return () => {
       socket.disconnect();
     };
@@ -415,8 +462,16 @@ export default function AdminDashboardPage() {
     [],
   );
   const mapViewportKey = useMemo(
-    () => [mode, query.trim(), companyId, driverId, [...statuses].sort().join(',')].join('|'),
-    [companyId, driverId, mode, query, statuses],
+    () =>
+      [
+        regionId,
+        mode,
+        query.trim(),
+        effectiveCompanyId,
+        effectiveDriverId,
+        [...statuses].sort().join(','),
+      ].join('|'),
+    [effectiveCompanyId, effectiveDriverId, mode, query, regionId, statuses],
   );
   const data = operationsQuery.data;
   const allOrders = useMemo(() => [...(data?.active ?? []), ...(data?.recent ?? [])], [data]);
@@ -525,19 +580,34 @@ export default function AdminDashboardPage() {
       <AdminPageHeader
         icon={RadioTower}
         eyebrow="Central operacional"
-        title="Operação global"
+        title={selectedRegion ? `Operação · ${selectedRegion.name}` : 'Operação global'}
         description="Pedidos ativos, filas de atendimento e motoboys com heartbeat válido."
         tone="operation"
         actions={
-          <div className="flex items-center gap-2 rounded-full border border-primary/15 bg-card/85 px-3 py-1.5 text-xs shadow-sm ring-1 ring-white/70 backdrop-blur">
-            {connected && activityConnected ? (
-              <Wifi className="size-3.5 text-status-entregue" aria-hidden="true" />
-            ) : (
-              <WifiOff className="size-3.5 text-status-cancelado" aria-hidden="true" />
-            )}
-            {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
-          </div>
+          <>
+            <ServiceStatusHeaderAction
+              settings={slaSettings}
+              pending={toggleServiceMutation.isPending}
+              onToggle={(nextAcceptingOrders) =>
+                toggleServiceMutation.mutateAsync(nextAcceptingOrders)
+              }
+            />
+            <div className="flex items-center gap-2 rounded-full border border-primary/15 bg-card/85 px-3 py-1.5 text-xs shadow-sm ring-1 ring-white/70 backdrop-blur">
+              {connected && activityConnected ? (
+                <Wifi className="size-3.5 text-status-entregue" aria-hidden="true" />
+              ) : (
+                <WifiOff className="size-3.5 text-status-cancelado" aria-hidden="true" />
+              )}
+              {connected && activityConnected ? 'Tempo real conectado' : 'Reconectando'}
+            </div>
+          </>
         }
+      />
+
+      <ServiceClosedHomeNotice
+        settings={slaSettings}
+        pending={toggleServiceMutation.isPending}
+        onReopen={() => toggleServiceMutation.mutateAsync(true)}
       />
 
       {/*
@@ -740,7 +810,7 @@ export default function AdminDashboardPage() {
               </div>
               <select
                 className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
-                value={companyId}
+                value={effectiveCompanyId}
                 onChange={(event) => setCompanyId(event.target.value)}
               >
                 <option value="">Todas as empresas</option>
@@ -752,7 +822,7 @@ export default function AdminDashboardPage() {
               </select>
               <select
                 className="h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm"
-                value={driverId}
+                value={effectiveDriverId}
                 onChange={(event) => setDriverId(event.target.value)}
               >
                 <option value="">Todos os motoboys</option>

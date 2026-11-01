@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/table';
 import { adminCompaniesApi, adminDriversApi, deliveriesApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 import { useMoney } from '@/lib/money';
 
@@ -47,6 +48,11 @@ function csvNumber(value: number | null): string {
 }
 
 export default function DeliveryHistoryPage() {
+  const { regionId } = useAdminRegionFilter();
+  return <DeliveryHistoryContent key={regionId} regionId={regionId} />;
+}
+
+function DeliveryHistoryContent({ regionId }: { regionId: string }) {
   const money = useMoney();
   const token = session.getToken();
 
@@ -65,18 +71,28 @@ export default function DeliveryHistoryPage() {
   const [periodError, setPeriodError] = useState<string | null>(null);
 
   const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies'],
-    queryFn: () => adminCompaniesApi.list(token as string),
+    queryKey: ['admin', 'companies', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers'],
-    queryFn: () => adminDriversApi.list(token as string),
+    queryKey: ['admin', 'drivers', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminDriversApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
   const deliveriesQuery = useQuery({
-    queryKey: ['admin', 'delivery-history', applied],
-    queryFn: () => deliveriesApi.list(token as string, applied),
+    queryKey: ['admin', 'delivery-history', regionId || undefined, applied],
+    queryFn: () =>
+      deliveriesApi.list(token as string, {
+        ...applied,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

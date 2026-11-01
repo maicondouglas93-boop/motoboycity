@@ -50,8 +50,16 @@ export function createAdminCompaniesApi({ baseUrl }: AdminCompaniesApiConfig) {
       return parseJsonOrThrow<RegisterCompanyResult>(response);
     },
 
-    async list(accessToken: string, status?: CompanyStatus): Promise<AdminCompanyListItem[]> {
-      const query = status ? `?status=${status}` : '';
+    async list(
+      accessToken: string,
+      statusOrFilters?: CompanyStatus | { status?: CompanyStatus; regionId?: string },
+    ): Promise<AdminCompanyListItem[]> {
+      const filters =
+        typeof statusOrFilters === 'string' ? { status: statusOrFilters } : statusOrFilters;
+      const params = new URLSearchParams();
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.regionId) params.set('regionId', filters.regionId);
+      const query = params.toString() ? `?${params.toString()}` : '';
       const response = await apiFetch(`${baseUrl}/admin/companies${query}`, {
         headers: withAuth(accessToken),
       });

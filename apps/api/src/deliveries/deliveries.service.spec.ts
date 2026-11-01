@@ -4087,4 +4087,109 @@ describe('DeliveriesService', () => {
       ]);
     });
   });
+
+  describe('controle manual de abertura e encerramento dos atendimentos', () => {
+    const basePayload = {
+      serviceTypeId: 'st-1',
+      destinationKnownAtCreation: true,
+      dropoffAddress: dropoffPayload,
+      requiresReturn: false,
+      urgent: false,
+      requiresDeliveryProof: false,
+      requiresCollectionRecipient: false,
+      pickupSurchargeChargedToDriver: false,
+    };
+
+    beforeEach(() => {
+      platformSettingsService.get.mockResolvedValue({
+        acceptingOrders: false,
+        businessHoursEnabled: false,
+      });
+      mockCompanyMembership(companyUser.id, 'company-1');
+      prisma.company.findUnique.mockResolvedValue({
+        id: 'company-1',
+        status: 'ACTIVE',
+        regionId: 'region-1',
+      });
+      prisma.companyAddress.findFirst.mockResolvedValue(pickupAddress);
+    });
+
+    it('bloqueia novo pedido avulso imediato e agendado pela loja quando os atendimentos estão encerrados', async () => {
+      await expect(service.create(companyUser, basePayload)).rejects.toThrow(
+        'Os atendimentos estão encerrados no momento. Nenhum novo pedido pode ser lançado.',
+      );
+      await expect(
+        service.create(companyUser, {
+          ...basePayload,
+          scheduledAt: '2026-11-01T14:00:00.000Z',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia lançamento em lote, lançamento pelo ADM, loja online e integração aiqfome quando encerrado', async () => {
+      await expect(
+        service.createBatch(companyUser, { deliveries: [basePayload, basePayload] }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      await expect(
+        service.createForCompany(adminUser, 'company-1', basePayload),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      prisma.companyTeamMember.findFirst.mockResolvedValue({ user: companyUser });
+      await expect(
+        service.createFromIntegration('company-1', 'int-1', 'ext-1', basePayload),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      await expect(
+        service.createFromStoreOrder('company-1', 'store-1:0', basePayload, 'Pedido #1.'),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(tx.delivery.create).not.toHaveBeenCalled();
+    });
+
+    it('impede a loja de antecipar pedido agendado quando encerrado, mas mantém gestão do ADM e edição de pedidos já lançados', async () => {
+      const scheduledRow = fullDeliveryRow({
+        status: 'SCHEDULED',
+        scheduledAt: new Date('2026-11-01T14:00:00.000Z'),
+        company: { tradeName: 'Loja Teste', regionId: 'region-1', status: 'ACTIVE' },
+      });
+      prisma.delivery.findUnique.mockResolvedValue(scheduledRow);
+
+      await expect(service.releaseScheduled(companyUser, 'delivery-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(dispatchService.releaseScheduledNow).not.toHaveBeenCalled();
+
+      await service.releaseScheduled(adminUser, 'delivery-1');
+      expect(dispatchService.releaseScheduledNow).toHaveBeenCalledTimes(1);
+
+      prisma.delivery.findUnique
+        .mockResolvedValueOnce({
+          id: 'delivery-1',
+          batchId: null,
+          status: 'AWAITING_DRIVER',
+          destinationKnownAtCreation: true,
+          company: { id: 'company-1', status: 'ACTIVE', regionId: 'region-1' },
+          addresses: [{ ...pickupAddress, type: 'PICKUP' }],
+          offers: [],
+        })
+        .mockResolvedValueOnce(fullDeliveryRow());
+      googleMapsService.getDistance.mockResolvedValue({ distanceKm: 5, durationMinutes: 20 });
+      pricingService.quote.mockResolvedValue({
+        distanceFee: 7.5,
+        subtotal: 12.5,
+        returnValue: 0,
+        totalValue: 12.5,
+        driverValue: 10,
+        platformValue: 2.5,
+        surchargeLabel: null,
+        surchargeValue: 0,
+      });
+
+      await expect(
+        service.updateBeforeAcceptance(adminUser, 'delivery-1', basePayload),
+      ).resolves.toMatchObject({ id: 'delivery-1' });
+    });
+  });
 });

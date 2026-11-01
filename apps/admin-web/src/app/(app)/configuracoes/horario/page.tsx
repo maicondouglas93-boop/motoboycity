@@ -153,16 +153,18 @@ export default function BusinessHoursPage() {
         situacao={
           !data
             ? null
-            : !data.enabled
-              ? { estado: 'desligado', texto: 'Sem bloqueio de horário' }
-              : data.openNow
-                ? { estado: 'definido', texto: 'Aberto agora' }
-                : {
-                    estado: 'definido',
-                    texto: data.nextOpeningLabel
-                      ? `Fechado · abre ${data.nextOpeningLabel}`
-                      : 'Fechado agora',
-                  }
+            : settingsQuery.data?.acceptingOrders === false
+              ? { estado: 'desligado', texto: 'Atendimentos finalizados na Home' }
+              : !data.enabled
+                ? { estado: 'desligado', texto: 'Sem bloqueio de horário' }
+                : data.openNow
+                  ? { estado: 'definido', texto: 'Aberto agora' }
+                  : {
+                      estado: 'definido',
+                      texto: data.nextOpeningLabel
+                        ? `Fechado · abre ${data.nextOpeningLabel}`
+                        : 'Fechado agora',
+                    }
         }
       />
 

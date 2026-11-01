@@ -172,12 +172,17 @@ describe('OperationalOrderForm com clientes', () => {
     expect(screen.getByPlaceholderText(/Destinat/)).toHaveValue('Maria Oliveira');
     expect(screen.getByPlaceholderText('Telefone')).toHaveValue('33999999991');
     fireEvent.click(screen.getByRole('button', { name: 'Criar pedido' }));
+    expect(await screen.findByRole('heading', { name: 'Este pedido tem volta?' })).toBeVisible();
+    expect(mocks.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Não, sem volta' }));
 
     await waitFor(() => {
       expect(mocks.create).toHaveBeenCalledWith(
         'token',
         expect.objectContaining({
           serviceTypeId: 'service-1',
+          requiresReturn: false,
           recipientName: 'Maria Oliveira',
           recipientPhone: '33999999991',
           dropoffAddress: expect.objectContaining({ street: 'Rua Um', number: '10' }),
@@ -199,6 +204,7 @@ describe('OperationalOrderForm com clientes', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Escolher endereco manual' }));
     fireEvent.click(screen.getByRole('button', { name: 'Criar pedido' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Não, sem volta' }));
 
     await waitFor(() => {
       expect(mocks.match).toHaveBeenCalledWith('token', { phone: '33999999992' });
@@ -207,5 +213,85 @@ describe('OperationalOrderForm com clientes', () => {
       ]);
     });
     expect(mocks.create).toHaveBeenCalledOnce();
+  });
+
+  it('envia requiresReturn=true ao escolher "Sim, com volta" mesmo sem marcar a caixa antes', async () => {
+    renderForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher endereco manual' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Criar pedido' }));
+
+    expect(await screen.findByRole('heading', { name: 'Este pedido tem volta?' })).toBeVisible();
+    expect(mocks.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sim, com volta' }));
+
+    await waitFor(() => {
+      expect(mocks.create).toHaveBeenCalledWith(
+        'token',
+        expect.objectContaining({
+          serviceTypeId: 'service-1',
+          requiresReturn: true,
+        }),
+      );
+    });
+  });
+
+  it('permite voltar e revisar o formulario sem enviar o pedido', async () => {
+    renderForm();
+    fireEvent.change(screen.getByPlaceholderText(/Destinat/), {
+      target: { value: 'João Revisão' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher endereco manual' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Criar pedido' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Voltar e revisar' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Este pedido tem volta?' })).toBeNull();
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText(/Destinat/)).toHaveValue('João Revisão');
+  });
+
+  it('nao abre a confirmacao de volta quando falta endereco obrigatorio', () => {
+    renderForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Criar pedido' }));
+
+    expect(
+      screen.getByText('Selecione no Google um endereço completo para cada destino.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Este pedido tem volta?' })).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('pergunta sobre a volta tambem na criacao em lote e aplica a escolha a todas as entregas', async () => {
+    mocks.createBatch.mockResolvedValue({
+      batchId: 'batch-1',
+      deliveries: [{ id: 'delivery-1' }, { id: 'delivery-2' }],
+    });
+    renderForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Lote' }));
+    for (const chooseAddress of screen.getAllByRole('button', { name: 'Escolher endereco manual' })) {
+      fireEvent.click(chooseAddress);
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Criar lote (2)' }));
+
+    expect(await screen.findByRole('heading', { name: 'Este lote tem volta?' })).toBeVisible();
+    expect(mocks.createBatch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sim, com volta' }));
+
+    await waitFor(() => {
+      expect(mocks.createBatch).toHaveBeenCalledWith(
+        'token',
+        expect.objectContaining({
+          deliveries: [
+            expect.objectContaining({ requiresReturn: true }),
+            expect.objectContaining({ requiresReturn: true }),
+          ],
+        }),
+      );
+    });
   });
 });

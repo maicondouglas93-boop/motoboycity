@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import {
+  activeDeliveryTrackingQuerySchema,
   listDeliveryTrackingQuerySchema,
   reportDeliveryLocationSchema,
+  type ActiveDeliveryTrackingQuery,
   type ListDeliveryTrackingQuery,
   type ReportDeliveryLocationPayload,
 } from '@motoboycity/validation';
@@ -44,8 +46,12 @@ export class DeliveryTrackingController {
   }
 
   @Get('active')
-  active(@CurrentUser() user: User): Promise<ActiveDeliveryTrackingItem[]> {
-    return this.deliveryTrackingService.active(user);
+  active(
+    @CurrentUser() user: User,
+    @Query(new ZodValidationPipe(activeDeliveryTrackingQuerySchema))
+    query: ActiveDeliveryTrackingQuery,
+  ): Promise<ActiveDeliveryTrackingItem[]> {
+    return this.deliveryTrackingService.active(user, query);
   }
 
   @Post('deliveries/:deliveryId/public-link')

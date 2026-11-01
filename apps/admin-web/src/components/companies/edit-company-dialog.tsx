@@ -127,6 +127,7 @@ export function EditCompanyDialog({
   function acceptUpdatedCompany(updated: AdminCompanyDetail, message: string) {
     queryClient.setQueryData(['admin', 'company', company.id], updated);
     void queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
     setSuccess(message);
   }
 

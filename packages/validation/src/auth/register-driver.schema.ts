@@ -39,16 +39,18 @@ const registerDriverSharedFields = {
  */
 export const registerDriverApiSchema = z.object({
   ...registerDriverSharedFields,
+  regionId: z.string().uuid('Selecione uma cidade válida.').optional(),
   birthDate: z
     .string()
     .regex(ISO_DATE_FORMAT, 'Data de nascimento inválida.')
     .refine(isPastDate, 'Data de nascimento inválida.'),
 });
 
-/** Usado pelo formulário (driver-app) — aceita DD/MM/AAAA e inclui confirmação de senha. */
+/** Usado pelo formulário (driver-app) — aceita DD/MM/AAAA, exige cidade e inclui confirmação de senha. */
 export const registerDriverSchema = z
   .object({
     ...registerDriverSharedFields,
+    regionId: z.string().uuid('Selecione a cidade de atuação.'),
     birthDate: z
       .string()
       .regex(BR_DATE_FORMAT, 'Use o formato DD/MM/AAAA.')

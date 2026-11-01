@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme/colors';
 
 /**
@@ -10,23 +10,51 @@ import { colors } from '../theme/colors';
  * do sistema — e este e o controle mais importante do aplicativo: e ele que
  * decide se o motoboy recebe pedido ou nao. Ele precisa ser grande, obvio, e
  * igual em qualquer celular.
+ *
+ * Desligar pede confirmacao para evitar que um toque esbarrado tire o motoboy
+ * da fila sem ele perceber; ligar continua imediato.
  */
 export function ActiveToggle({
   value,
   onChange,
   disabled = false,
+  confirmBeforeDeactivate = true,
 }: {
   value: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
+  confirmBeforeDeactivate?: boolean;
 }) {
+  function handlePress() {
+    if (disabled) return;
+
+    if (!value || !confirmBeforeDeactivate) {
+      onChange(!value);
+      return;
+    }
+
+    Alert.alert(
+      'Ficar offline?',
+      'Tem certeza que deseja ficar offline? Você deixará de receber novas ofertas de entrega.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Ficar offline',
+          style: 'destructive',
+          onPress: () => onChange(false),
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
   return (
     <Pressable
       accessibilityRole="switch"
       accessibilityState={{ checked: value, disabled }}
       accessibilityLabel={value ? 'Ativo, tocar para ficar offline' : 'Inativo, tocar para ficar online'}
       style={[styles.area, disabled && styles.desabilitado]}
-      onPress={() => !disabled && onChange(!value)}
+      onPress={handlePress}
       hitSlop={8}
     >
       <View style={[styles.pilula, value ? styles.pilulaLigada : styles.pilulaDesligada]}>

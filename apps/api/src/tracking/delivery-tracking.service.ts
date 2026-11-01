@@ -12,6 +12,7 @@ import type {
   ReportDeliveryLocationResult,
 } from '@motoboycity/types';
 import type {
+  ActiveDeliveryTrackingQuery,
   ListDeliveryTrackingQuery,
   ReportDeliveryLocationPayload,
 } from '@motoboycity/validation';
@@ -305,8 +306,14 @@ export class DeliveryTrackingService {
     };
   }
 
-  async active(user: User): Promise<ActiveDeliveryTrackingItem[]> {
-    const where = await this.activeDeliveryScope(user);
+  async active(
+    user: User,
+    query?: ActiveDeliveryTrackingQuery,
+  ): Promise<ActiveDeliveryTrackingItem[]> {
+    if (query?.regionId && user.type !== 'ADMIN') {
+      throw new ForbiddenException('O filtro por região é restrito a administradores.');
+    }
+    const where = await this.activeDeliveryScope(user, query?.regionId);
     const cutoff = this.retentionCutoff();
     const deliveries = await this.prisma.delivery.findMany({
       where,
@@ -351,9 +358,9 @@ export class DeliveryTrackingService {
     return deleted.count;
   }
 
-  private async activeDeliveryScope(user: User) {
+  private async activeDeliveryScope(user: User, regionId?: string) {
     const status = { in: ACTIVE_TRACKING_STATUSES };
-    if (user.type === 'ADMIN') return { status };
+    if (user.type === 'ADMIN') return { status, ...(regionId && { company: { regionId } }) };
     if (user.type === 'DRIVER') {
       const driver = await this.prisma.driver.findUnique({
         where: { userId: user.id },

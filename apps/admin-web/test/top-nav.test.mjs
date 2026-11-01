@@ -31,6 +31,7 @@ new Function('require', 'module', 'exports', compiled)((dependency) => {
   if (dependency === '@/components/ui/avatar') return { Avatar: passthrough, AvatarFallback: passthrough };
   if (dependency === '@/components/brand/wordmark') return { Wordmark: () => 'MOTOboyCity' };
   if (dependency === '@/components/layout/notification-bell') return { NotificationBell: () => null };
+  if (dependency === '@/components/layout/region-selector') return { RegionSelector: () => null };
   if (dependency === '@/lib/money') return { useMoneyVisibility: () => ({ hidden: false, toggle: () => calls.push('toggle-money') }) };
   if (dependency === '@/lib/api-client') return { notificationsApi: { forAdmin: () => {} } };
   if (dependency === '@/lib/session') return { session: { getToken: () => null, clearToken: () => calls.push('clear-token') } };

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminCompanyListItem, RegisterCompanyResult } from '@motoboycity/types';
 import { ApiError } from '@motoboycity/api-client';
-import { Building2, Check, Copy, PackagePlus, ReceiptText } from 'lucide-react';
+import { Building2, Check, Copy, MapPin, PackagePlus, ReceiptText } from 'lucide-react';
 import { CreateCompanyDialog } from '@/components/companies/create-company-dialog';
 import { CreateCompanyDeliveryDialog } from '@/components/deliveries/create-company-delivery-dialog';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { QueryState } from '@/components/ui/query-state';
 import { StatCard } from '@/components/stat-card';
 import { adminCompaniesApi } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 const statusLabel: Record<AdminCompanyListItem['status'], string> = {
@@ -48,12 +49,16 @@ export default function ClientsPage() {
   const [createdNotice, setCreatedNotice] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const queryClient = useQueryClient();
+  const { regionId, selectedRegion } = useAdminRegionFilter();
 
   const token = session.getToken();
 
   const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies'],
-    queryFn: () => adminCompaniesApi.list(token as string),
+    queryKey: ['admin', 'companies', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
 
@@ -79,7 +84,7 @@ export default function ClientsPage() {
   const companies = companiesQuery.data ?? [];
   const pendingCount = companies.filter((c) => c.status === 'PENDING_APPROVAL').length;
   const filteredCompanies = companies.filter((company) =>
-    `${company.legalName} ${company.tradeName} ${company.document}`
+    `${company.legalName} ${company.tradeName} ${company.document} ${company.region.name}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
@@ -105,7 +110,9 @@ export default function ClientsPage() {
     <div className="space-y-6">
       <AdminPageHeader
         icon={Building2}
-        eyebrow="Carteira de clientes"
+        eyebrow={
+          selectedRegion ? `Carteira de clientes · ${selectedRegion.name}` : 'Carteira de clientes'
+        }
         title="Empresas"
         description="Cadastre, aprove e acompanhe as empresas atendidas pela plataforma."
         tone="customers"
@@ -126,7 +133,11 @@ export default function ClientsPage() {
               {copyStatus === 'copied' ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copyStatus === 'copied' ? 'Link copiado' : 'Copiar link do painel'}
             </Button>
-            <CreateCompanyDialog accessToken={token} onCreated={handleCompanyCreated}>
+            <CreateCompanyDialog
+              accessToken={token}
+              defaultRegionId={selectedRegion?.active ? selectedRegion.id : undefined}
+              onCreated={handleCompanyCreated}
+            >
               <Button className="gap-2 shadow-lg shadow-primary/15">
                 <Building2 className="size-4" /> Cadastrar empresa
               </Button>
@@ -215,6 +226,10 @@ export default function ClientsPage() {
                         <p className="text-sm text-muted-foreground">{company.owner.phone}</p>
                       </>
                     )}
+                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <MapPin className="size-3 text-primary" aria-hidden="true" />
+                      {company.region.name}
+                    </p>
                   </div>
                   {company.status === 'PENDING_APPROVAL' && (
                     <ConfirmActionDialog

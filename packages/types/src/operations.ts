@@ -25,6 +25,7 @@ export interface OperationalActivityEvent {
   type: OperationalActivityType;
   message: string;
   at: string;
+  regionId?: string;
   deliveryId?: string;
   displayNumber?: number;
   companyId?: string;
@@ -85,6 +86,7 @@ export interface AdminDeliveryDispatchAudit {
 export interface SilentDriverItem {
   driverId: string;
   driverName: string;
+  regionId?: string;
   activeDeliveryCount: number;
   /** Números visíveis dos pedidos, para o admin achar na fila. */
   deliveryNumbers: number[];

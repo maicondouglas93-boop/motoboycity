@@ -21,6 +21,7 @@ import { StatusChip, statusRailClass, statusTone } from '@/components/orders/sta
 import { Card, CardContent } from '@/components/ui/card';
 import { QueryState } from '@/components/ui/query-state';
 import { adminCompaniesApi, deliveriesApi } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 import { useAdminActiveDeliveryTracking } from '@/lib/use-active-delivery-tracking';
 import { useMoney } from '@/lib/money';
@@ -79,6 +80,7 @@ export default function AdminOrdersPage() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { regionId, selectedRegion } = useAdminRegionFilter();
   const requestedStatus = searchParams.get('status');
   const statusFilter = STATUS_FILTER_VALUES.has(
     (requestedStatus ?? 'ALL') as DeliveryStatus | 'ALL',
@@ -88,15 +90,24 @@ export default function AdminOrdersPage() {
   const companyId = searchParams.get('empresa') ?? '';
   const requestedPage = Number(searchParams.get('pagina') ?? '1');
   const pagina = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const trackingQuery = useAdminActiveDeliveryTracking();
+  const trackingQuery = useAdminActiveDeliveryTracking(regionId);
 
   const token = session.getToken();
 
   const companiesQuery = useQuery({
-    queryKey: ['admin', 'companies'],
-    queryFn: () => adminCompaniesApi.list(token as string),
+    queryKey: ['admin', 'companies', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminCompaniesApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
+
+  const effectiveCompanyId =
+    companyId &&
+    (!companiesQuery.data || companiesQuery.data.some((company) => company.id === companyId))
+      ? companyId
+      : '';
 
   /**
    * PAGINADO no servidor.
@@ -108,11 +119,19 @@ export default function AdminOrdersPage() {
    * para preencher uma tabela de 25.
    */
   const deliveriesQuery = useQuery({
-    queryKey: ['admin', 'deliveries', statusFilter, companyId, pagina],
+    queryKey: [
+      'admin',
+      'deliveries',
+      regionId || undefined,
+      statusFilter,
+      effectiveCompanyId,
+      pagina,
+    ],
     queryFn: () =>
       deliveriesApi.search(token as string, {
+        ...(regionId && { regionId }),
         ...(statusFilter !== 'ALL' && { status: statusFilter }),
-        ...(companyId && { companyId }),
+        ...(effectiveCompanyId && { companyId: effectiveCompanyId }),
         page: pagina,
         pageSize: TAMANHO_DA_PAGINA,
       }),
@@ -133,7 +152,7 @@ export default function AdminOrdersPage() {
     ? Math.max(1, Math.ceil(resultado.total / resultado.pageSize))
     : 1;
   const activeTracking = (trackingQuery.data ?? []).filter(
-    (tracking) => !companyId || tracking.companyId === companyId,
+    (tracking) => !effectiveCompanyId || tracking.companyId === effectiveCompanyId,
   );
 
   function filterHref(
@@ -171,7 +190,9 @@ export default function AdminOrdersPage() {
             </span>
             <div>
               <p className="text-xs font-bold tracking-[0.16em] text-[#aee8e4] uppercase">
-                Central operacional
+                {selectedRegion
+                  ? `Central operacional · ${selectedRegion.name}`
+                  : 'Central operacional'}
               </p>
               <h1 className="mt-1" style={{ color: 'white' }}>
                 Pedidos
@@ -221,7 +242,7 @@ export default function AdminOrdersPage() {
               <select
                 id="orders-company-filter"
                 className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
-                value={companyId}
+                value={effectiveCompanyId}
                 onChange={(event) =>
                   router.replace(filterHref({ empresa: event.target.value, pagina: 1 }), {
                     scroll: false,
@@ -370,7 +391,9 @@ export default function AdminOrdersPage() {
             <div>
               <h2 className="font-semibold">Pedidos da operação</h2>
               <p className="text-sm text-muted-foreground">
-                {companyId ? 'Empresa e status combinados no resultado.' : 'Todas as empresas.'}
+                {effectiveCompanyId
+                  ? 'Empresa e status combinados no resultado.'
+                  : 'Todas as empresas.'}
               </p>
             </div>
             {deliveriesQuery.isFetching && !deliveriesQuery.isLoading && (

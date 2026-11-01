@@ -42,6 +42,8 @@ export interface PlatformSettingsItem {
   /** Raio para marcar coleta no endereco da empresa. `null` desliga a regra. */
   collectionProximityRadiusMeters: number | null;
   returnProximityRadiusMeters: number | null;
+  /** Chave geral manual da central: `false` encerra novos lançamentos de pedido. */
+  acceptingOrders: boolean;
   /** Liga o bloqueio de pedido fora do horário de funcionamento. */
   businessHoursEnabled: boolean;
   /**
@@ -108,6 +110,7 @@ export interface PlatformSettingsItem {
  */
 export interface UpdatePlatformSettingsInput {
   driverCommissionPercentage?: number;
+  acceptingOrders?: boolean;
   businessHoursEnabled?: boolean;
   /**
    * Dia da liberação e do saque (0 = domingo .. 6 = sábado). `null` é o ciclo
@@ -241,8 +244,10 @@ export interface CashPositionItem {
  * tomar um erro ao enviar o pedido.
  */
 export interface CompanyBusinessHoursStatus {
-  /** `false` quando o horário está fora do expediente e a API vai recusar. */
+  /** `false` quando o atendimento está fechado (manualmente ou fora do expediente) e a API vai recusar. */
   accepting: boolean;
+  /** `true` quando a central encerrou os atendimentos manualmente. */
+  manuallyClosed?: boolean;
   /** Ex.: "amanhã às 08:00". `null` quando não há abertura configurada à frente. */
   nextOpeningLabel: string | null;
   /** As faixas de hoje, para a loja conferir sem abrir outra tela. */

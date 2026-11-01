@@ -1,3 +1,8 @@
+export interface PublicRegionItem {
+  id: string;
+  name: string;
+}
+
 export interface AdminRegion {
   id: string;
   name: string;

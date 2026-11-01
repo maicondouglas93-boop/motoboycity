@@ -5,6 +5,7 @@ export const deliverySummaryQuerySchema = z
   .object({
     // O service repete a autorizacao: esses recortes explicitos sao apenas
     // administrativos, enquanto empresa e motoboy continuam no proprio escopo.
+    regionId: z.uuid().optional(),
     driverId: z.uuid().optional(),
     companyId: z.uuid().optional(),
     from: dateOnlySchema.optional(),

@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { QueryState } from '@/components/ui/query-state';
 import { StatCard } from '@/components/stat-card';
 import { adminDriversApi, adminServiceTypesApi } from '@/lib/api-client';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 const approvalStatusLabel: Record<AdminDriverListItem['approvalStatus'], string> = {
@@ -55,12 +56,16 @@ export default function DriversPage() {
   const [createdNotice, setCreatedNotice] = useState<string | null>(null);
   const [pendingServiceTypeIds, setPendingServiceTypeIds] = useState<Record<string, string[]>>({});
   const queryClient = useQueryClient();
+  const { regionId, selectedRegion } = useAdminRegionFilter();
 
   const token = session.getToken();
 
   const driversQuery = useQuery({
-    queryKey: ['admin', 'drivers'],
-    queryFn: () => adminDriversApi.list(token as string),
+    queryKey: ['admin', 'drivers', { regionId: regionId || undefined }],
+    queryFn: () =>
+      adminDriversApi.list(token as string, {
+        regionId: regionId || undefined,
+      }),
     enabled: Boolean(token),
   });
 
@@ -86,7 +91,7 @@ export default function DriversPage() {
       actionFn[action](token as string, driverId),
     onSuccess: () => {
       setActionError(null);
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
     },
     onError: (error) => {
       setActionError(
@@ -105,7 +110,7 @@ export default function DriversPage() {
         delete remaining[variables.driverId];
         return remaining;
       });
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
     },
     onError: (error) => {
       setActionError(
@@ -126,7 +131,9 @@ export default function DriversPage() {
   const pendingCount = drivers.filter((d) => d.approvalStatus === 'PENDING').length;
   const blockedCount = drivers.filter((d) => d.accountStatus !== 'ACTIVE').length;
   const filteredDrivers = drivers.filter((driver) =>
-    `${driver.name} ${driver.email} ${driver.cpf}`.toLowerCase().includes(search.toLowerCase()),
+    `${driver.name} ${driver.email} ${driver.cpf} ${driver.region?.name ?? ''}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   );
 
   function handleDriverCreated(result: RegisterDriverResult) {
@@ -163,13 +170,14 @@ export default function DriversPage() {
     <div className="space-y-6">
       <AdminPageHeader
         icon={UserPlus}
-        eyebrow="Equipe de campo"
+        eyebrow={selectedRegion ? `Equipe de campo · ${selectedRegion.name}` : 'Equipe de campo'}
         title="Entregadores"
         description="Cadastre, qualifique e acompanhe quem atende as entregas da plataforma."
         tone="operation"
         actions={
           <CreateDriverDialog
             accessToken={token}
+            defaultRegionId={selectedRegion?.active ? selectedRegion.id : undefined}
             serviceTypes={serviceTypesQuery.data ?? []}
             serviceTypesLoading={serviceTypesQuery.isLoading}
             serviceTypesError={serviceTypesQuery.isError}

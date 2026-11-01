@@ -30,7 +30,12 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { PendingButtonLabel } from '@/components/ui/pending-button-label';
-import { adminCompaniesApi, adminDeliveriesApi, adminServiceTypesApi } from '@/lib/api-client';
+import {
+  adminCompaniesApi,
+  adminDeliveriesApi,
+  adminPlatformSettingsApi,
+  adminServiceTypesApi,
+} from '@/lib/api-client';
 import { DispatchTrackingPanel } from '@/components/operations/dispatch-tracking-panel';
 
 interface Props {
@@ -98,6 +103,12 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
     queryFn: () => adminServiceTypesApi.list(accessToken, { active: true }),
     enabled: open,
   });
+  const settingsQuery = useQuery({
+    queryKey: ['admin', 'platform-settings'],
+    queryFn: () => adminPlatformSettingsApi.get(accessToken),
+    enabled: open,
+  });
+  const serviceClosed = settingsQuery.data?.acceptingOrders === false;
 
   const serviceTypes = serviceTypesQuery.data ?? [];
   const selectedServiceTypeId = serviceTypeId || serviceTypes[0]?.id || '';
@@ -492,6 +503,13 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
                 </>
               )}
 
+              {serviceClosed && (
+                <ActionFeedback tone="warning" title="Atendimentos finalizados">
+                  Nenhum novo pedido pode ser lançado enquanto os atendimentos estiverem encerrados.
+                  Reabra os atendimentos na Home para continuar.
+                </ActionFeedback>
+              )}
+
               {error && (
                 <ActionFeedback tone="error" title="Não foi possível lançar o pedido">
                   {error}
@@ -511,7 +529,11 @@ export function CreateCompanyDeliveryDialog({ accessToken, companies, children }
               <Button
                 type="submit"
                 disabled={
-                  !companyId || !pickupAddress || serviceTypesQuery.isLoading || mutation.isPending
+                  serviceClosed ||
+                  !companyId ||
+                  !pickupAddress ||
+                  serviceTypesQuery.isLoading ||
+                  mutation.isPending
                 }
               >
                 <PendingButtonLabel pending={mutation.isPending} pendingLabel="Lançando...">

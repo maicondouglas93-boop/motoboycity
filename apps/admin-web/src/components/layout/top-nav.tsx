@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useMoneyVisibility } from '@/lib/money';
 import { Wordmark } from '@/components/brand/wordmark';
 import { NotificationBell } from '@/components/layout/notification-bell';
+import { RegionSelector } from '@/components/layout/region-selector';
 import { notificationsApi } from '@/lib/api-client';
 import { session } from '@/lib/session';
 
@@ -144,6 +145,7 @@ export function TopNav() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <RegionSelector />
           <NotificationBell token={session.getToken()} fetchNotifications={notificationsApi.forAdmin} />
         </div>
 

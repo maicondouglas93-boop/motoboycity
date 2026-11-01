@@ -60,6 +60,7 @@ export const updatePlatformSettingsSchema = z
       .max(2000, 'O raio de retorno deve ser de no máximo 2000 metros.')
       .nullable()
       .optional(),
+    acceptingOrders: z.boolean().optional(),
     businessHoursEnabled: z.boolean().optional(),
     /**
      * Dia da liberação dos repasses e do saque. `null` é a escolha "todos os

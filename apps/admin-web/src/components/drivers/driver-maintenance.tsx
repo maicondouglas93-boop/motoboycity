@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/label';
 function publish(queryClient: ReturnType<typeof useQueryClient>, driver: AdminDriverDetail) {
   queryClient.setQueryData(['admin', 'driver', driver.id], driver);
   void queryClient.invalidateQueries({ queryKey: ['admin', 'drivers'] });
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
 }
 
 export function EditDriverDialog({ driver, token }: { driver: AdminDriverDetail; token: string }) {

@@ -26,6 +26,7 @@ import {
 import { adminFinancialApi, adminReportsApi } from '@/lib/api-client';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { useMoney } from '@/lib/money';
+import { useAdminRegionFilter } from '@/lib/region-filter';
 import { session } from '@/lib/session';
 
 function formatShare(value: number): string {
@@ -45,14 +46,19 @@ function csvNumber(value: number): string {
 export default function FinancialReportPage() {
   const token = session.getToken();
   const money = useMoney();
+  const { regionId } = useAdminRegionFilter();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [periodError, setPeriodError] = useState<string | null>(null);
   const [appliedPeriod, setAppliedPeriod] = useState<{ from?: string; to?: string }>({});
 
   const reportQuery = useQuery({
-    queryKey: ['admin', 'operations-report', 'financial', appliedPeriod],
-    queryFn: () => adminReportsApi.operations(token as string, appliedPeriod),
+    queryKey: ['admin', 'operations-report', 'financial', regionId || undefined, appliedPeriod],
+    queryFn: () =>
+      adminReportsApi.operations(token as string, {
+        ...appliedPeriod,
+        ...(regionId && { regionId }),
+      }),
     enabled: Boolean(token),
   });
 

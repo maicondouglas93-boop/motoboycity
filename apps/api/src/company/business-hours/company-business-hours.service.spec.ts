@@ -117,6 +117,22 @@ describe('horário de funcionamento visto pela loja', () => {
     );
   });
 
+  it('quando os atendimentos são finalizados manualmente no ADM, fecha mesmo dentro da faixa semanal', async () => {
+    platformSettings.get.mockResolvedValue({
+      acceptingOrders: false,
+      businessHoursEnabled: true,
+    });
+    const service = await montar();
+
+    await expect(service.status(companyUser)).resolves.toEqual({
+      accepting: false,
+      manuallyClosed: true,
+      nextOpeningLabel: null,
+      todayWindows: [],
+    });
+    expect(prisma.businessHour.findMany).not.toHaveBeenCalled();
+  });
+
   it('não responde a quem não está vinculado a uma empresa', async () => {
     prisma.companyTeamMember.findFirst.mockResolvedValue(null);
     const service = await montar();

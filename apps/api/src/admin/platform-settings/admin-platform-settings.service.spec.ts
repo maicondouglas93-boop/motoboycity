@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 import { updatePlatformSettingsSchema } from '@motoboycity/validation';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AdminAuditService } from '../audit/admin-audit.service';
 import { AdminPlatformSettingsService } from './admin-platform-settings.service';
 
@@ -13,6 +14,10 @@ describe('AdminPlatformSettingsService', () => {
   };
   let audit: { record: jest.Mock };
   let financeQueue: { add: jest.Mock };
+  let realtimeGateway: {
+    emitServiceStatusChanged: jest.Mock;
+    emitAdminActivity: jest.Mock;
+  };
 
   beforeEach(async () => {
     prisma = {
@@ -22,6 +27,10 @@ describe('AdminPlatformSettingsService', () => {
     prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
     audit = { record: jest.fn() };
     financeQueue = { add: jest.fn().mockResolvedValue(undefined) };
+    realtimeGateway = {
+      emitServiceStatusChanged: jest.fn(),
+      emitAdminActivity: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -29,6 +38,7 @@ describe('AdminPlatformSettingsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: AdminAuditService, useValue: audit },
         { provide: getQueueToken('finance'), useValue: financeQueue },
+        { provide: RealtimeGateway, useValue: realtimeGateway },
       ],
     }).compile();
 
@@ -74,6 +84,7 @@ describe('AdminPlatformSettingsService', () => {
         pickupAssignmentTimeoutMinutes: null,
         collectionProximityRadiusMeters: null,
         returnProximityRadiusMeters: null,
+        acceptingOrders: true,
         businessHoursEnabled: false,
         minMinutesBeforeCollect: null,
         minMinutesBeforeDeliver: null,
@@ -435,6 +446,48 @@ describe('AdminPlatformSettingsService', () => {
       expect(result.maxConcurrentDeliveriesPerDriver).toBe(3);
       expect(result.maxDeliveriesPerBatch).toBe(8);
       expect(result.deliveryProximityRadiusMeters).toBe(120);
+    });
+
+    it('finaliza e reabre os atendimentos notificando tempo real sem alterar demais parâmetros', async () => {
+      prisma.platformSettings.upsert.mockResolvedValueOnce({
+        acceptingOrders: false,
+        businessHoursEnabled: true,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-10-31T20:00:00.000Z'),
+      });
+
+      const closed = await service.update({ acceptingOrders: false }, 'admin-1');
+
+      expect(prisma.platformSettings.upsert).toHaveBeenCalledWith({
+        where: { id: 'global' },
+        update: { acceptingOrders: false, updatedByUserId: 'admin-1' },
+        create: { id: 'global', acceptingOrders: false, updatedByUserId: 'admin-1' },
+        include: { updatedBy: true },
+      });
+      expect(closed.acceptingOrders).toBe(false);
+      expect(realtimeGateway.emitServiceStatusChanged).toHaveBeenCalledWith({
+        acceptingOrders: false,
+      });
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenCalledWith(
+        'Atendimentos finalizados pela administração. Novos pedidos estão bloqueados.',
+      );
+
+      prisma.platformSettings.upsert.mockResolvedValueOnce({
+        acceptingOrders: true,
+        businessHoursEnabled: true,
+        updatedBy: { id: 'admin-1', name: 'Admin Um' },
+        updatedAt: new Date('2026-10-31T21:00:00.000Z'),
+      });
+
+      const reopened = await service.update({ acceptingOrders: true }, 'admin-1');
+
+      expect(reopened.acceptingOrders).toBe(true);
+      expect(realtimeGateway.emitServiceStatusChanged).toHaveBeenLastCalledWith({
+        acceptingOrders: true,
+      });
+      expect(realtimeGateway.emitAdminActivity).toHaveBeenLastCalledWith(
+        'Atendimentos abertos pela administração.',
+      );
     });
   });
 });

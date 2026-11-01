@@ -49,6 +49,7 @@ type FieldErrors = Partial<Record<FormField | 'form', string>>;
 
 interface CreateCompanyDialogProps {
   accessToken: string;
+  defaultRegionId?: string;
   children: ReactElement;
   onCreated: (result: RegisterCompanyResult) => void;
 }
@@ -65,6 +66,7 @@ function FieldError({ field, errors }: { field: FormField; errors: FieldErrors }
 
 export function CreateCompanyDialog({
   accessToken,
+  defaultRegionId,
   children,
   onCreated,
 }: CreateCompanyDialogProps) {
@@ -85,6 +87,7 @@ export function CreateCompanyDialog({
       adminCompaniesApi.create(accessToken, payload),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'regions'] });
       onCreated(result);
       setForm(initialForm);
       setErrors({});
@@ -117,7 +120,9 @@ export function CreateCompanyDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && createMutation.isPending) return;
     setOpen(nextOpen);
-    if (!nextOpen) {
+    if (nextOpen) {
+      setForm({ ...initialForm, regionId: defaultRegionId ?? '' });
+    } else {
       setForm(initialForm);
       setErrors({});
       setFormError(null);

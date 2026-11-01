@@ -15,6 +15,7 @@ export const deliveryStageTimesQuerySchema = z
   .object({
     // Recorte operacional exclusivo do administrador; o service tambem valida
     // a permissao para impedir que empresa ou entregador amplie o escopo.
+    regionId: z.string().uuid().optional(),
     driverId: z.string().uuid().optional(),
     companyId: z.string().uuid().optional(),
     from: dateOnlySchema.optional(),

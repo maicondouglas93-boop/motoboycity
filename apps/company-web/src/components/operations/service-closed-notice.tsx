@@ -56,13 +56,17 @@ export function ServiceClosedNotice({
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-portal/25 bg-portal-soft/70 px-4 py-3 text-sm text-portal-deep shadow-sm ${className ?? ''}`}
     >
       <MoonStar className="size-4 shrink-0" aria-hidden="true" />
-      <span className="font-semibold">Atendimento fechado agora.</span>
-      <span>
-        {data.nextOpeningLabel
-          ? `Reabre ${data.nextOpeningLabel}.`
-          : 'Nenhum horário de reabertura configurado.'}
+      <span className="font-semibold">
+        {data.manuallyClosed ? 'Atendimentos encerrados no momento.' : 'Atendimento fechado agora.'}
       </span>
-      {data.todayWindows.length > 0 && (
+      <span>
+        {data.manuallyClosed
+          ? 'Novos pedidos estão bloqueados até a central reabrir os atendimentos.'
+          : data.nextOpeningLabel
+            ? `Reabre ${data.nextOpeningLabel}.`
+            : 'Nenhum horário de reabertura configurado.'}
+      </span>
+      {!data.manuallyClosed && data.todayWindows.length > 0 && (
         <span className="inline-flex items-center gap-1.5 text-portal-deep/75">
           <Clock className="size-3.5" aria-hidden="true" />
           Hoje:{' '}
