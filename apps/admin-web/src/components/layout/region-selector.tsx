@@ -24,14 +24,26 @@ export function RegionSelector() {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`Cidade selecionada: ${currentLabel}`}
-        className={`inline-flex h-9 max-w-[11.5rem] shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none sm:max-w-[14rem] ${
+        title={`Cidade selecionada: ${currentLabel}`}
+        className={`inline-flex h-9 min-w-0 max-w-[7rem] shrink items-center gap-1 rounded-lg border px-2 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none sm:max-w-[14rem] sm:shrink-0 sm:gap-1.5 sm:px-2.5 ${
           selectedRegion
             ? 'border-[#9ce2de]/45 bg-primary/25 font-semibold text-white shadow-[0_0_0_1px_rgba(156,226,222,0.12)] hover:bg-primary/35'
             : 'border-white/12 bg-white/[0.06] font-medium text-white/85 hover:bg-white/10 hover:text-white'
         }`}
       >
         <MapPin className="size-3.5 shrink-0 text-[#9ce2de]" aria-hidden="true" />
-        <span className="truncate">{isLoading && regions.length === 0 ? 'Cidades...' : currentLabel}</span>
+        <span className="truncate">
+          {isLoading && regions.length === 0 ? (
+            'Cidades...'
+          ) : selectedRegion ? (
+            selectedRegion.name
+          ) : (
+            <>
+              <span className="sm:hidden">Cidades</span>
+              <span className="hidden sm:inline">Todas as cidades</span>
+            </>
+          )}
+        </span>
         <ChevronDown className="size-3.5 shrink-0 text-white/55" aria-hidden="true" />
       </DropdownMenuTrigger>
 

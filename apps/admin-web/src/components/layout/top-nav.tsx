@@ -111,14 +111,14 @@ export function TopNav() {
 
   return (
     <header className="admin-topbar sticky top-0 z-40 border-b border-white/10 text-white">
-      <div className="flex min-h-16 items-center gap-2 px-4 py-2.5 xl:h-16 xl:gap-3 xl:px-8 xl:py-0 2xl:gap-6">
+      <div className="flex min-h-16 items-center gap-1.5 px-3 py-2.5 sm:gap-2 sm:px-4 xl:h-16 xl:gap-3 xl:px-8 xl:py-0 2xl:gap-6">
         <Link
           href="/"
-          className="group flex shrink-0 items-center gap-2 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="group flex shrink-0 items-center gap-1.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary sm:gap-2"
           aria-label="MOTOboyCity — Administração"
         >
-          <Wordmark />
-          <span className="rounded-md border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-[#9ce2de] uppercase shadow-inner">
+          <Wordmark className="h-[22px] w-auto sm:h-[26px]" />
+          <span className="hidden rounded-md border border-primary/25 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] tracking-widest text-[#9ce2de] uppercase shadow-inner min-[400px]:inline">
             Admin
           </span>
         </Link>
@@ -144,13 +144,13 @@ export function TopNav() {
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-2">
           <RegionSelector />
           <NotificationBell token={session.getToken()} fetchNotifications={notificationsApi.forAdmin} />
         </div>
 
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none xl:hidden">
+          <DropdownMenuTrigger className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none sm:h-10 sm:px-3 xl:hidden">
             <Menu className="size-4 text-[#aee8e4]" aria-hidden="true" />
             <span className="hidden sm:inline">{currentItem?.label ?? 'Menu'}</span>
             <span className="sr-only sm:hidden">Abrir navegação</span>
@@ -203,7 +203,7 @@ export function TopNav() {
           onClick={toggleMoney}
           aria-pressed={moneyHidden}
           title={moneyHidden ? 'Mostrar valores' : 'Ocultar valores'}
-          className="flex shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 py-2 text-sm text-white/60 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+          className="flex shrink-0 items-center gap-2 rounded-xl border border-transparent px-2 py-2 text-sm text-white/60 transition-all hover:border-white/10 hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none sm:px-2.5"
         >
           {moneyHidden ? (
             <EyeOff className="size-4" aria-hidden="true" />

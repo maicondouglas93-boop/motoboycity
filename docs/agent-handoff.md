@@ -8,7 +8,10 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-11-01**, publicados em `1586f9a` e `0b14d3d` e empacotados
+> Última revisão: **2026-11-02**, ajuste responsivo do seletor de cidades
+> (`RegionSelector`) e do cabeçalho (`TopNav`) do `admin-web` para evitar
+> rolagem horizontal em telas mobile; em **2026-11-01**, publicados em `1586f9a`
+> e `0b14d3d` e empacotados
 > no APK assinado `I:\MOTOboyCity\releases\motoboycity-0.1.0-pilot.31-vc31.apk`
 > (`versionCode 31`, `0.1.0-pilot.31`): pergunta obrigatória sobre entrega com volta
 > (`Este pedido tem volta?` / `Este lote tem volta?`) antes de finalizar a

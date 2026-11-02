@@ -18119,3 +18119,20 @@ Não verificado: ensaio visual manual autenticado no navegador. Sem commit nem p
 | Limpeza da worktree temporária `C:\m31` e credenciais em memória | aprovada |
 
 Não verificado: instalação e ensaio manual do APK `pilot.31` em aparelho físico Android.
+
+## 2026-11-02 — Ajuste responsivo do seletor de cidades no header mobile do Admin Web
+
+- **Decisão e motivo:** em telas mobile estreitas (360–390px), o botão `RegionSelector` com o texto `Todas as cidades` (`shrink-0`) somado ao logo `Wordmark`, selo `Admin`, sino, menu, ocultar valores e avatar ultrapassava a largura da tela e gerava rolagem lateral. No mobile (`< sm`), o gatilho do `RegionSelector` passa a exibir o rótulo curto `Cidades` quando todas estão selecionadas, permite encolhimento com truncamento (`min-w-0 max-w-[7rem] shrink`) e o `TopNav` compacta os espaçamentos laterais e oculta o selo `Admin` abaixo de `400px`, eliminando o overflow horizontal sem alterar o layout desktop.
+- **Arquivos:**
+  - `apps/admin-web/src/components/layout/region-selector.tsx`
+  - `apps/admin-web/src/components/layout/top-nav.tsx`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/admin-web run typecheck` | aprovado |
+| `pnpm --filter @motoboycity/admin-web run lint` | aprovado (0 erros, 0 avisos) |
+| `pnpm --filter @motoboycity/admin-web test` | 64 testes aprovados |
+| `pnpm --filter @motoboycity/admin-web run build` | aprovado (38 páginas estáticas/dinâmicas) |
+
+Não verificado: inspeção visual autenticada em dispositivo físico mobile.
