@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Clock, MoonStar } from 'lucide-react';
+import { AlertTriangle, Clock, PowerOff } from 'lucide-react';
 import { companyBusinessHoursApi } from '@/lib/api-client';
 
 /**
@@ -53,21 +53,29 @@ export function ServiceClosedNotice({
   return (
     <div
       role="status"
-      className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-portal/25 bg-portal-soft/70 px-4 py-3 text-sm text-portal-deep shadow-sm ${className ?? ''}`}
+      className={`flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-xl border-2 border-destructive bg-destructive-soft px-4 py-3.5 text-sm text-destructive-text shadow-sm ${className ?? ''}`}
     >
-      <MoonStar className="size-4 shrink-0" aria-hidden="true" />
-      <span className="font-semibold">
-        {data.manuallyClosed ? 'Atendimentos encerrados no momento.' : 'Atendimento fechado agora.'}
+      <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-destructive text-white shadow-xs">
+        {data.manuallyClosed ? (
+          <PowerOff className="size-5" aria-hidden="true" />
+        ) : (
+          <AlertTriangle className="size-5" aria-hidden="true" />
+        )}
       </span>
-      <span>
-        {data.manuallyClosed
-          ? 'Novos pedidos estão bloqueados até a central reabrir os atendimentos.'
-          : data.nextOpeningLabel
-            ? `Reabre ${data.nextOpeningLabel}.`
-            : 'Nenhum horário de reabertura configurado.'}
-      </span>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <span className="block text-base font-bold tracking-tight text-destructive-text">
+          {data.manuallyClosed ? 'Atendimentos encerrados no momento.' : 'Atendimento fechado agora.'}
+        </span>
+        <span className="block text-sm font-medium text-destructive-text">
+          {data.manuallyClosed
+            ? 'Novos pedidos estão bloqueados até a central reabrir os atendimentos.'
+            : data.nextOpeningLabel
+              ? `Reabre ${data.nextOpeningLabel}.`
+              : 'Nenhum horário de reabertura configurado.'}
+        </span>
+      </div>
       {!data.manuallyClosed && data.todayWindows.length > 0 && (
-        <span className="inline-flex items-center gap-1.5 text-portal-deep/75">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-white/80 px-2.5 py-1 text-xs font-semibold text-destructive-text">
           <Clock className="size-3.5" aria-hidden="true" />
           Hoje:{' '}
           {data.todayWindows

@@ -8,7 +8,10 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-11-02**, ajuste responsivo do seletor de cidades
+> Última revisão: **2026-11-15**, destaque visual em vermelho no aviso de
+> atendimentos encerrados/fechados (`ServiceClosedNotice`) do `company-web`
+> (commit e push autorizados para `main`; conferir rollout automático da Vercel);
+> antes, em **2026-11-02**, ajuste responsivo do seletor de cidades
 > (`RegionSelector`) e do cabeçalho (`TopNav`) do `admin-web` para evitar
 > rolagem horizontal em telas mobile; em **2026-11-01**, publicados em `1586f9a`
 > e `0b14d3d` e empacotados

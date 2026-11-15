@@ -18136,3 +18136,21 @@ Não verificado: instalação e ensaio manual do APK `pilot.31` em aparelho fís
 | `pnpm --filter @motoboycity/admin-web run build` | aprovado (38 páginas estáticas/dinâmicas) |
 
 Não verificado: inspeção visual autenticada em dispositivo físico mobile.
+
+## 2026-11-15 — Destaque visual em vermelho no aviso de atendimentos encerrados do Company Web
+
+- **Decisão e motivo:** a pedido do usuário, tornar o aviso `ServiceClosedNotice` do painel da empresa (`company-web`) mais chamativo e em vermelho (`border-2 border-destructive bg-destructive-soft text-destructive-text`), com bloco sólido de ícone (`PowerOff` para encerramento manual pela central e `AlertTriangle` para fechamento por horário), título em destaque e chip contrastante de horários do dia, substituindo o estilo anterior em `portal-soft` que se misturava aos cartões informativos neutros da Central operacional e do modal `Chamar entregador`.
+- **Arquivos:**
+  - `apps/company-web/src/components/operations/service-closed-notice.tsx`
+  - `apps/company-web/src/components/operations/call-driver-dialog.test.tsx`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/company-web exec vitest run src/components/operations/call-driver-dialog.test.tsx` | 6 testes aprovados |
+| `pnpm --filter @motoboycity/company-web run typecheck` | aprovado |
+| `pnpm --filter @motoboycity/company-web run lint` | aprovado (0 erros, 0 avisos) |
+| `pnpm --filter @motoboycity/company-web test` | 68 arquivos, 671 testes aprovados |
+| `pnpm --filter @motoboycity/company-web run build` | aprovado (39 rotas geradas) |
+
+Não verificado: inspeção visual autenticada no navegador. Publicado em `main` a pedido do usuário.

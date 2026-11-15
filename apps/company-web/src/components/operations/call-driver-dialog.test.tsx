@@ -97,6 +97,8 @@ describe('CallDriverDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
     await screen.findByText('Atendimento fechado agora.');
 
+    const notice = screen.getByRole('status');
+    expect(notice).toHaveClass('bg-destructive-soft', 'border-destructive', 'text-destructive-text');
     expect(screen.getByText('Reabre amanhã às 08:00.')).toBeVisible();
     expect(screen.getByText('Hoje: 08:00–18:00')).toBeVisible();
     await waitFor(() =>
@@ -116,6 +118,8 @@ describe('CallDriverDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Chamar entregador' }));
     await screen.findByText('Atendimentos encerrados no momento.');
 
+    const notice = screen.getByRole('status');
+    expect(notice).toHaveClass('bg-destructive-soft', 'border-destructive', 'text-destructive-text');
     expect(
       screen.getByText('Novos pedidos estão bloqueados até a central reabrir os atendimentos.'),
     ).toBeVisible();
