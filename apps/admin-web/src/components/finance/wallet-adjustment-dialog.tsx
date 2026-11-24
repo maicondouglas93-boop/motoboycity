@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '@motoboycity/api-client';
 import { MinusCircle, PlusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -84,6 +85,10 @@ export function WalletAdjustmentDialog({
       setErro(null);
     },
     onError: (falha: unknown) => {
+      if (falha instanceof ApiError) {
+        setErro(falha.body?.issues?.[0]?.message ?? falha.message);
+        return;
+      }
       setErro(falha instanceof Error ? falha.message : 'Não foi possível lançar o ajuste.');
     },
   });

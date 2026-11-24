@@ -8,7 +8,13 @@
 > - decisões de negócio confirmadas → `business-rules.md`
 > - fluxo de trabalho e armadilhas → `ai-agent-guide.md`
 >
-> Última revisão: **2026-11-15**, destaque visual em vermelho no aviso de
+> Última revisão: **2026-11-24**, correção de ponto flutuante na validação de
+> centavos dos schemas financeiros (`adjustDriverWalletSchema`,
+> `requestWithdrawalSchema` e `createPaymentNoticeSchema`) e exibição de
+> `issues[0].message` no `WalletAdjustmentDialog` do `admin-web` (commit e push
+> autorizados para `main`; aguardar conclusão dos deploys automáticos no Render
+> e na Vercel); antes,
+> em **2026-11-15**, destaque visual em vermelho no aviso de
 > atendimentos encerrados/fechados (`ServiceClosedNotice`) do `company-web`
 > (commit e push autorizados para `main`; conferir rollout automático da Vercel);
 > antes, em **2026-11-02**, ajuste responsivo do seletor de cidades

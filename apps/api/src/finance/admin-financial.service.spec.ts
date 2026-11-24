@@ -1,5 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import {
+  adjustDriverWalletSchema,
+  createPaymentNoticeSchema,
+  requestWithdrawalSchema,
+} from '@motoboycity/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminFinancialService } from './admin-financial.service';
 import { FinancialClock } from './financial-clock.service';
@@ -972,6 +977,39 @@ describe('AdminFinancialService.adjustDriverWallet', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('Schemas financeiros — casas decimais em ponto flutuante', () => {
+  it.each([10.2, 114.1, 19.99, 23.1, 0.29, 1.1])(
+    'aceita %s com até duas casas decimais mesmo quando valor * 100 tem ruído IEEE-754',
+    (amount) => {
+      expect(
+        adjustDriverWalletSchema.safeParse({
+          type: 'DEBIT',
+          amount,
+          reason: 'Ajuste conferido no extrato',
+        }).success,
+      ).toBe(true);
+      expect(requestWithdrawalSchema.safeParse({ amount }).success).toBe(true);
+      expect(
+        createPaymentNoticeSchema.safeParse({ amount, paidAt: '2026-11-24' }).success,
+      ).toBe(true);
+    },
+  );
+
+  it.each([10.255, 10.001, 0.123])('recusa %s com mais de duas casas decimais', (amount) => {
+    expect(
+      adjustDriverWalletSchema.safeParse({
+        type: 'DEBIT',
+        amount,
+        reason: 'Ajuste conferido no extrato',
+      }).success,
+    ).toBe(false);
+    expect(requestWithdrawalSchema.safeParse({ amount }).success).toBe(false);
+    expect(
+      createPaymentNoticeSchema.safeParse({ amount, paidAt: '2026-11-24' }).success,
+    ).toBe(false);
   });
 });
 

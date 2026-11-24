@@ -37,7 +37,7 @@ export const createPaymentNoticeSchema = z.object({
     .number()
     .positive('Informe um valor maior que zero.')
     .max(999999.99, 'Valor acima do limite.')
-    .refine((value) => Number.isInteger(value * 100), {
+    .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6, {
       message: 'Informe o valor com no maximo duas casas decimais.',
     }),
   paidAt: dateOnlySchema,

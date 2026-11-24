@@ -10,7 +10,7 @@ const moneySchema = z
   .number()
   .positive('O valor do saque deve ser maior que zero.')
   .max(100_000, 'O valor do saque excede o limite permitido.')
-  .refine((value) => Number.isInteger(value * 100), {
+  .refine((value) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6, {
     message: 'Informe o valor com no máximo duas casas decimais.',
   });
 

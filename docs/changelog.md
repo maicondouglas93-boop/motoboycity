@@ -18154,3 +18154,25 @@ Não verificado: inspeção visual autenticada em dispositivo físico mobile.
 | `pnpm --filter @motoboycity/company-web run build` | aprovado (39 rotas geradas) |
 
 Não verificado: inspeção visual autenticada no navegador. Publicado em `main` a pedido do usuário.
+
+## 2026-11-24 — Correção de ponto flutuante na validação de centavos dos schemas financeiros e detalhe de erro no ajuste de carteira
+
+- **Decisão e motivo:** o ajuste manual de carteira do entregador recusava valores legítimos de até duas casas decimais como `10.2` (`10.2 * 100 = 1019.9999999999999` em IEEE-754) porque `adjustDriverWalletSchema` exigia `(valor * 100) % 1 === 0`, e a mesma condição frágil (`Number.isInteger(value * 100)`) existia em `requestWithdrawalSchema` e `createPaymentNoticeSchema`. Os três schemas passam a usar a tolerância padrão do repositório (`Math.abs(valor * 100 - Math.round(valor * 100)) < 1e-6`), e `WalletAdjustmentDialog` passa a exibir `falha.body?.issues?.[0]?.message` quando disponível em `ApiError`, evitando ocultar a causa real sob `"Dados inválidos."`.
+- **Arquivos:**
+  - `packages/validation/src/finance/admin-financial-query.schema.ts`
+  - `packages/validation/src/finance/withdrawal.schema.ts`
+  - `packages/validation/src/finance/payment-notice.schema.ts`
+  - `apps/admin-web/src/components/finance/wallet-adjustment-dialog.tsx`
+  - `apps/api/src/finance/admin-financial.service.spec.ts`
+  - `docs/agent-handoff.md`, `docs/changelog.md`
+
+| Verificação | Resultado |
+| --- | --- |
+| `pnpm --filter @motoboycity/validation build` e `tsc --noEmit --typeRoots ./sem-tipos` | aprovados |
+| `pnpm --filter @motoboycity/api exec jest src/finance/admin-financial.service.spec.ts --runInBand` | 44 testes aprovados (9 casos novos de ponto flutuante) |
+| `pnpm --filter @motoboycity/admin-web test` | 64 testes aprovados |
+| `pnpm typecheck` (8 pacotes) | aprovado |
+| `pnpm lint` (8 pacotes) | 0 erros; 1 aviso antigo (`no-void` em `driver-app/src/lib/apiClient.ts:29`) |
+| `pnpm --filter @motoboycity/admin-web run build` | aprovado |
+
+Não verificado: lançamento manual de ajuste em navegador autenticado após deploy da API e do Admin Web. Publicado em `main` a pedido do usuário.

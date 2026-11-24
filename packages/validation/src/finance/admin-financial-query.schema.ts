@@ -134,8 +134,9 @@ export const adjustDriverWalletSchema = z.object({
     .positive('O valor do ajuste deve ser maior que zero.')
     .max(100_000, 'Valor acima do limite permitido para ajuste manual.')
     // Dinheiro no banco e Decimal(10,2): mais de duas casas seria arredondado
-    // em silencio e o extrato nao fecharia com o que o admin digitou.
-    .refine((valor) => Number.isInteger(Math.round(valor * 100)) && (valor * 100) % 1 === 0, {
+    // em silencio e o extrato nao fecharia com o que o admin digitou. A folga
+    // de 1e-6 absorve o ponto flutuante binario (ex.: 10.2 * 100 = 1019.9999999999999).
+    .refine((valor) => Math.abs(valor * 100 - Math.round(valor * 100)) < 1e-6, {
       message: 'Use no máximo duas casas decimais.',
     }),
   reason: z
